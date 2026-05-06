@@ -95,10 +95,7 @@ pub fn link_binary(
             } else if let Some(fallback) = fallback.filter(|path| path.exists()) {
                 fallback
             } else {
-                return Err(CodegenError::link(format!(
-                    "corvid-runtime staticlib missing at `{}` and no release fallback was found. Build `corvid-runtime` for the active profile or run `cargo build -p corvid-runtime --release`.",
-                    primary.display()
-                )));
+                return Err(CodegenError::link(missing_staticlib_diagnostic(&primary)));
             }
         };
 
@@ -201,5 +198,65 @@ pub fn binary_path_for(out_dir: &Path, stem: &str) -> PathBuf {
         out_dir.join(stem)
     } else {
         out_dir.join(format!("{stem}.{ext}"))
+    }
+}
+
+/// Build the diagnostic message for the "corvid-runtime staticlib not
+/// found" path. Spells out two distinct recoveries because the two
+/// audiences hitting this path need different actions:
+///
+/// - Dev-tree users (with the source + cargo) build the staticlib.
+/// - Binary-install users (with no source tree) cannot run cargo and
+///   need the interpreter escape hatch — `--target=interpreter` skips
+///   the linker entirely.
+///
+/// Pulled out as a free function so the format string lives in one
+/// place and is unit-testable without exercising the entire link
+/// pipeline. (`env!("CORVID_STATICLIB_DIR")` resolves at compile time
+/// of `corvid-codegen-cl`, so the fallback-not-found branch can't be
+/// triggered from a runtime test environment — the message itself can.)
+pub(crate) fn missing_staticlib_diagnostic(primary: &Path) -> String {
+    format!(
+        "corvid-runtime staticlib missing at `{}`.\n\
+         \n\
+         To fix this, choose one of:\n\
+         \n  \
+         1. Run the program through the interpreter (no native linker required):\n  \
+              corvid run --target=interpreter <file>\n  \
+         \n  \
+         2. If you have the Corvid source tree, build the staticlib for the\n  \
+            active profile:\n  \
+              cargo build -p corvid-runtime --release\n  \
+            (or `cargo build -p corvid-runtime` for the debug profile).\n",
+        primary.display()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_staticlib_diagnostic;
+    use std::path::Path;
+
+    #[test]
+    fn diagnostic_names_both_recovery_paths() {
+        // Slice 20l-D regression: when the corvid-runtime staticlib
+        // isn't on disk in dev or binary-install environments, the
+        // error must spell out two recoveries — `--target=interpreter`
+        // for users without a source tree, and the cargo build line
+        // for users who do have one. Before this fix the diagnostic
+        // ran on one line and was easy to miss.
+        let msg = missing_staticlib_diagnostic(Path::new("/tmp/corvid_runtime.lib"));
+        assert!(
+            msg.contains("/tmp/corvid_runtime.lib"),
+            "diagnostic must surface the absolute lookup path; got:\n{msg}"
+        );
+        assert!(
+            msg.contains("corvid run --target=interpreter"),
+            "diagnostic must mention the interpreter escape hatch; got:\n{msg}"
+        );
+        assert!(
+            msg.contains("cargo build -p corvid-runtime --release"),
+            "diagnostic must mention the dev-tree build command; got:\n{msg}"
+        );
     }
 }
