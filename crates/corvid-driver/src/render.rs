@@ -5,21 +5,27 @@
 //! makes first impressions count.
 
 use crate::Diagnostic;
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use std::io::IsTerminal;
 use std::path::Path;
 
 /// Render a diagnostic to a string suitable for stderr.
 ///
 /// Uses `ariadne` to produce multi-line output with the offending span
 /// highlighted under the source code, plus the help hint as a footer.
+/// ANSI color is emitted only when `NO_COLOR` is unset *and* stderr is
+/// a real terminal — captured / piped / redirected output stays plain
+/// text so PowerShell conhost and CI logs render readably.
 pub fn render_pretty(diag: &Diagnostic, source_path: &Path, source: &str) -> String {
     let filename = source_path.display().to_string();
     let span = diag.span.start..diag.span.end.max(diag.span.start + 1);
 
     let code = detect_error_code(&diag.message);
+    let with_color = std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal();
     let kind = ReportKind::Custom("error", Color::Red);
 
     let mut builder = Report::build(kind, filename.as_str(), span.start)
+        .with_config(Config::default().with_color(with_color))
         .with_code(code)
         .with_message(short_headline(&diag.message))
         .with_label(
@@ -36,7 +42,41 @@ pub fn render_pretty(diag: &Diagnostic, source_path: &Path, source: &str) -> Str
     let _ = builder
         .finish()
         .write((filename.as_str(), Source::from(source)), &mut buf);
-    String::from_utf8_lossy(&buf).to_string()
+    let rendered = String::from_utf8_lossy(&buf).to_string();
+    if with_color {
+        rendered
+    } else {
+        // ariadne 0.4 mostly respects `Config::with_color(false)`, but
+        // the `ReportKind::Custom` colour and a few terminal-default
+        // codes (e.g. `\x1b[39m`) leak through. Strip every CSI
+        // sequence (`ESC '[' parameters letter`) so PowerShell conhost
+        // and CI logs render plain text the way piped output should.
+        strip_ansi(&rendered)
+    }
+}
+
+/// Strip ANSI CSI sequences (`ESC '[' parameters final-byte`) from `s`.
+///
+/// Used when the renderer has decided not to emit color but the
+/// underlying renderer leaks a few escapes anyway.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && matches!(chars.peek(), Some(&'[')) {
+            chars.next(); // consume '['
+            // Consume parameter bytes (digits and ';'), then one final
+            // byte (any letter, typically 'm', 'K', 'H', ...).
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Render every diagnostic in sequence, followed by a summary line.
@@ -150,7 +190,10 @@ fn label_for(msg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_error_code, label_for};
+    use super::{detect_error_code, label_for, render_pretty};
+    use crate::Diagnostic;
+    use corvid_ast::Span;
+    use std::path::Path;
 
     #[test]
     fn ungrounded_return_has_stable_code_and_label() {
@@ -177,5 +220,33 @@ mod tests {
         let msg = "cost analysis warning in agent `planner`: static iteration count unknown";
         assert_eq!(detect_error_code(msg), "W0251");
         assert_eq!(label_for(msg), "static cost bound could not be proven");
+    }
+
+    #[test]
+    fn strip_ansi_removes_csi_sequences_and_preserves_other_text() {
+        let input = "\x1b[31m[E0001] error:\x1b[0m unexpected character";
+        assert_eq!(super::strip_ansi(input), "[E0001] error: unexpected character");
+        // No-escape input is preserved exactly.
+        let plain = "no escapes here";
+        assert_eq!(super::strip_ansi(plain), plain);
+    }
+
+    #[test]
+    fn render_pretty_omits_ansi_when_stderr_is_not_a_terminal() {
+        // `cargo test` runs each test with stderr captured by libtest's
+        // harness, which is a pipe rather than a TTY. The renderer must
+        // therefore emit plain text — no `\x1b[` escape sequences — even
+        // though `Color::Red` is configured for the report kind.
+        let diag = Diagnostic {
+            span: Span::new(0, 5),
+            message: "type mismatch in agent `main`: Int vs String".to_string(),
+            hint: Some("rebind one operand to match the other".to_string()),
+        };
+        let source = "agent main() -> Int:\n    return 0\n";
+        let rendered = render_pretty(&diag, Path::new("main.cor"), source);
+        assert!(
+            !rendered.contains('\x1b'),
+            "expected plain output when stderr is not a TTY, got escape sequences:\n{rendered}"
+        );
     }
 }
