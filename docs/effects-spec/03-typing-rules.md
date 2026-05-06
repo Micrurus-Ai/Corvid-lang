@@ -202,6 +202,18 @@ Separate from dimensional composition, a dangerous tool call must be preceded by
 
 If no matching approve precedes the call, the checker emits `UnapprovedDangerousCall` with a hint showing the exact approve line to add. The label matches the tool's declared label (PascalCase of the tool name by default).
 
+### 6.1 approve identifier naming
+
+The identifier following `approve` must be the **PascalCase form of the dangerous tool's snake_case name**. There is no per-tool override — the mapping `snake_case -> PascalCase` is the contract. The compiler rejects every mismatch at typecheck time with diagnostic `E0101: dangerous tool 'X' called without a prior 'approve'`, and the help hint names the exact identifier the checker expects (`add 'approve PascalCase(arg1, arg2)' on the line before this call`).
+
+This is a deliberate naming contract, not a styling preference. Pinning the approve label to the tool name lets a reviewer audit every authorised call site for a given dangerous tool with a single grep:
+
+```sh
+grep -rn '^\s*approve TransferFunds\b' src/
+```
+
+…locates every place that authorises `transfer_funds` across a codebase, with no ambiguity about which approval guards which tool. A local rename of the approve label (e.g. `approve PageOnCall(...)` for tool `send_to_pagerduty`) would silently hide the call site from that grep — so the checker forbids it. The arity, the argument types, and the lexical block of the approve must also match the call (per §6 above).
+
 ## 7. Soundness
 
 **Theorem (soundness of dimensional composition).** *If a program P type-checks under environment Γ — in particular, every `@constraint(C)` on every agent satisfies `ρ_body ⊨ C` — then every execution of P at every tier (interpreter, native, replay) produces an observed effect profile ρ' with ρ' ⊨ C.*
