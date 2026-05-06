@@ -501,3 +501,101 @@ The recommended order (smallest blast radius first → larger):
 restore correctness for downstream tooling; E is a docs-only paragraph;
 D is a small dispatch error-message rewrite; B is the substantive
 codegen patch; F is optional polish.
+
+## Closing Audit Record
+
+Closed on 2026-05-06. Six required slices shipped (A through E plus
+the substantive B); 20l-F deferred for design-identity reasons.
+
+| Slice | Severity | Result | Commit | Lines (src/test) |
+|---|---|---|---|---:|
+| 20l-A `corvid check` import resolution | Critical | shipped | `bfe6232` | 4 / 51 |
+| 20l-B Python codegen forward-refs | High | shipped | `11230d4` | 43 / 76 |
+| 20l-C TTY auto-detect for diagnostics | Low-medium | shipped | `c822dd5` | 74 (incl. test) |
+| 20l-D staticlib-missing actionable | Low (re-diagnosed) | shipped | `e666e52` | 65 (incl. test) |
+| 20l-E `approve` PascalCase rule documented | Low (docs) | shipped | `68f8dca` | 14 |
+| 20l-F `\` line continuation | Low (optional) | **deferred** | — | — |
+
+Each shipped slice carries a regression test that fails on its
+predecessor commit and passes on its own commit. `cargo check
+--workspace` was clean at every commit; targeted lib/integration
+tests stayed green; `cargo run -q -p corvid-cli -- verify --corpus
+tests/corpus` matched the established Windows whoami linker baseline
+(exit 2) at every commit. No semantic regressions.
+
+### Mid-flight detours worth recording
+
+Three places where the reporter's draft diagnosis or proposed fix
+didn't match the actual codebase, caught before commit:
+
+- **20l-B `Type::Struct(name)` is actually `Type::Struct(DefId)`**.
+  Resolving the dataclass name required threading `&[IrType]`
+  through `python_type_hint_of`. Single call site change. The
+  unquoted forward-ref form was preferred over `"Inner"` strings
+  because the generated module already imports `from __future__
+  import annotations`.
+- **20l-D current diagnostic already named `cargo build -p
+  corvid-runtime --release`**. The reporter saw it run on one line
+  and missed it. Real fix was layout (multi-line + numbered
+  recoveries) plus the `--target=interpreter` escape hatch for
+  binary-install users who can't run cargo. Re-diagnosis worth
+  preserving for future sessions: don't trust the surface phrasing
+  of a gap report — verify the diagnostic site directly.
+- **20l-E first draft fabricated a `dangerous as Bar` opt-in syntax**.
+  Verified against the type checker's
+  `expected_approve_label: pascal_case(tool_name)` call sites in
+  `crates/corvid-types/src/{approval_reachability.rs,
+  checker/call.rs, checker/import_call.rs}` — no override path
+  exists. Removed before commit. Logged in the commit body so
+  future sessions don't re-add it. Per CLAUDE.md "no aspirational
+  vocabulary."
+
+### 20l-F deferral rationale
+
+`\` end-of-line continuation is an optional language-design choice,
+not a bug. Pythonic line continuation makes Corvid look more like
+Python; that erodes the AI-native language identity Corvid is
+positioned around. Triple-quoted strings and `+` concatenation
+remain documented and clean workarounds. If a future session
+revisits this, the open question is *not* "should we ship `\`
+continuation" but rather "what's our line-continuation story across
+the language" — the parser already handles continuations inside
+parens and brackets, which is the more idiomatic answer than a
+backslash escape.
+
+### Filed deferrals (out of 20l scope)
+
+- **L-3 native struct returns from prompts** — real codegen feature
+  work. Tracked as a Phase 17/Phase 20 follow-up. Honest "not yet
+  implemented" error already present at
+  `crates/corvid-codegen-cl/src/lowering/prompt.rs:371`.
+  Workaround: return a flat tuple of primitives or use
+  `--target=python`.
+- **L-4 WASM `String` parameters** — real codegen feature work.
+  Tracked as a Phase 23 follow-up. Honest "currently supports only"
+  error at `crates/corvid-codegen-wasm/src/lib.rs:157`. Workaround:
+  scalar parameters only in WASM-targeted agents until the String
+  ABI lands.
+
+### Recurring patterns the next external-reviewer test should watch
+
+Three shapes that produced this set of gaps:
+
+1. **Path-anchored API used in some commands but not others** —
+   the L-1 shape. Whenever a `cmd_*` takes a `Path` argument,
+   verify it threads through to the path-anchored driver entry,
+   not the path-less variant.
+2. **Codegen TODO comments shipping as `object`-shaped degradations** —
+   the L-2 shape. "Safe approximation until..." comments next to
+   type-emission code are first-impression failures waiting to
+   surface; they collapse type fidelity for end-users without
+   showing up as bugs in our test fixtures.
+3. **Diagnostic surface that didn't auto-detect environment** —
+   the L-6 shape. Color, verbosity, glyph choice — every renderer
+   surface should consult `is_terminal()` / `NO_COLOR` /
+   `--quiet` / equivalent before emitting. Captured/piped/log
+   destinations are not terminals.
+
+These patterns are recorded in
+`memory/project_phase_20l_closed.md` for the next reviewer / next
+session to scan against.

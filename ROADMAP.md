@@ -1253,7 +1253,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 
 ---
 
-### Phase 20l — First-impression gap repair
+### Phase 20l — First-impression gap repair ✅ closed
 
 **Goal.** Close the eight language-side gaps surfaced by an external reviewer building a non-trivial sample app (ticket-triage agent) against the workspace. Six are real bugs or polish gaps with small fixes; two are roadmap-territory feature work tracked as deferrals to their owning phases.
 
@@ -1274,12 +1274,12 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 **Slices** (~7–10 commits total):
 
-- [ ] 20l-A — `corvid check` resolves imports (L-1, **Critical**). 3-line change in `crates/corvid-cli/src/commands/misc.rs`: switch from `compile_with_config` to `compile_with_config_at_path` (already on disk, doc comment explicitly says path-less variant can't resolve imports). Regression test in `crates/corvid-cli/tests/check_validates_imports.rs` asserts a missing import is rejected.
-- [ ] 20l-B — Python codegen preserves struct + container types (L-2, **High**). ~10 lines in `crates/corvid-codegen-py/src/codegen.rs` `python_type_hint_of`: emit forward-ref string literals for `T::Struct` / `T::ImportedStruct`, recurse into `List(_)` → `list[T]` and `Option(inner)` → `inner | None`. Regression test asserts the nested-struct field round-trips its name. Restores type fidelity for `mypy` / `pyright` / IDE autocomplete on the Python target.
-- [ ] 20l-C — Diagnostic renderer auto-detects TTY (L-6, **Low-medium**). ~5 lines in `crates/corvid-driver/src/render.rs` using `std::io::IsTerminal` (Rust ≥1.70, no new dep). Snapshot test asserts no `\x1b[` escape sequences when stderr is piped. Already respects `NO_COLOR` env via ariadne; this adds the auto-detect path.
-- [ ] 20l-D — Native staticlib-missing diagnostic actionable (L-5 re-diagnosed). ~10 lines in `crates/corvid-driver/src/run.rs`: when the native path fails because `corvid_runtime.lib` isn't on disk in dev, name the recovery command (`cargo build -p corvid-runtime --release`) instead of the current "no release fallback was found" message. The reporter's framing "auto-dispatch picks native when interpreter would suffice" was wrong — the dispatch is intentional and tested. The actual gap is an unactionable error path on missing staticlib.
-- [ ] 20l-E — Document `approve` PascalCase rule (L-8, docs only). One paragraph added to `docs/effects-spec/03-typing-rules.md` (or wherever approve gates are specified) naming the rule: "the identifier following `approve` must be the PascalCase form of the dangerous tool's snake_case name; the compiler rejects mismatches at typecheck time (E0101); this makes approval sites greppable per-tool." Plus a one-line addition to the `corvid tour --topic approve-gates` blurb.
-- [ ] 20l-F — Lexer accepts `\` end-of-line continuation (L-7, **Low**, optional). ~10 lines in `crates/corvid-syntax/src/lexer.rs` to consume `\` followed by `\n` outside strings as whitespace. Optional — there are existing workarounds (`+` concatenation, triple-quoted strings). Ship only if the slice gate is clean and there's room.
+- [x] 20l-A — `corvid check` resolves imports (L-1, **Critical**). Landed in `bfe6232`: 3-line change in `crates/corvid-cli/src/commands/misc.rs` swapping `compile_with_config` for `compile_with_config_at_path`, plus regression test `crates/corvid-cli/tests/check_validates_imports.rs`.
+- [x] 20l-B — Python codegen preserves struct + container types (L-2, **High**). Landed in `11230d4`: `python_type_hint_of` now resolves `Type::Struct(DefId)` to its dataclass name, recurses through `List<T>` → `list[T]` and `Option<T>` → `T | None`, and uses `imported.name` for `ImportedStruct`. Three regression tests cover each shape.
+- [x] 20l-C — Diagnostic renderer auto-detects TTY (L-6, **Low-medium**). Landed in `c822dd5`: `is_terminal()` + `NO_COLOR` auto-detect threaded through `ariadne::Config::with_color`, plus a `strip_ansi` post-render scrub for the residual CSI sequences ariadne 0.4 leaks through `ReportKind::Custom`. Two unit tests cover the helper and the integration.
+- [x] 20l-D — Native staticlib-missing diagnostic actionable (L-5 re-diagnosed). Landed in `e666e52`: extracted `missing_staticlib_diagnostic` helper, reformatted as multi-line with `--target=interpreter` (binary-install audience) AND `cargo build -p corvid-runtime --release` (dev-tree audience). Unit test asserts both recovery paths appear.
+- [x] 20l-E — Document `approve` PascalCase rule (L-8, docs only). Landed in `68f8dca`: new §6.1 in `docs/effects-spec/03-typing-rules.md`, plus extended `corvid tour --topic approve-gates` blurb (mirrored to `docs/site/site.js`). Removed an aspirational `dangerous as Bar` opt-in syntax that doesn't actually exist before commit.
+- [ ] 20l-F — Lexer accepts `\` end-of-line continuation (L-7). **Deferred.** Corvid is positioned as AI-native, not Python-shaped; existing workarounds (`+` concatenation, triple-quoted strings) are clean. Adding `\` line continuation would set a precedent toward Python-mimicry that erodes the language's identity. Documented in `learnings.md`.
 
 **Filed as deferrals (not 20l slices):**
 

@@ -3724,3 +3724,58 @@ write requires approval, typed provenance must not be fabricated, and replay
 fixtures must stay deterministic and redacted. Anything beyond those classes
 belongs in evals, provider docs, or operator runbooks unless the compiler has a
 registered guarantee for it.
+
+## Phase 20l first-impression gap repair
+
+Responsibility-rubric clean (20j/20k) and first-impression clean are different
+gates. The 20j/20k passes can leave the workspace structurally sound while a
+stranger running `corvid check && corvid build && corvid run` on a non-trivial
+sample app still hits behavioural gaps the test fixtures didn't surface. Add a
+periodic external-reviewer test before any user-visible release; the cost is
+small, the leading-indicator value is large.
+
+Three recurring "first-impression failure" shapes worth scanning every release:
+path-anchored API used in some `cmd_*` paths but not others (the L-1 shape —
+`corvid check` was calling the path-less driver entry despite holding a
+`Path`); codegen TODO comments shipping as `object`-shaped type-fidelity
+regressions ("safe approximation until..." in `python_type_hint_of` collapsed
+nested struct, list, and option fields to `object` and defeated mypy/pyright);
+and renderer surfaces that didn't auto-detect terminal/no-color/verbosity
+context (the L-6 shape — ariadne emitted ANSI escapes into PowerShell conhost
+because nothing checked `is_terminal()`).
+
+Don't trust the surface phrasing of an external gap report. The reporter framed
+20l-D as "auto-dispatch picks native when interpreter would suffice"; the
+actual bug was an unactionable error message on the staticlib-missing path.
+The dispatch logic was intentional and tested. Verify the diagnostic site,
+the existing message, and the user-visible recovery path before drafting the
+fix — sometimes the report tells you "this hurts" but not "where the wound
+is."
+
+`from __future__ import annotations` in the generated Python module means
+unquoted forward references resolve at typecheck time. Prefer the unquoted
+form (`inner: Inner`) over string-quoted (`inner: "Inner"`) for readability.
+PEP 604 union syntax (`T | None`) likewise works on Python 3.10+ where the
+`__future__` import is present. Keep the codegen aligned with the Python
+version floor stated in the runtime preamble.
+
+ariadne 0.4 only mostly respects `Config::with_color(false)` —
+`ReportKind::Custom`'s embedded color and a residual `\x1b[39m` reset still
+slip through. Post-render ANSI-stripping is the smallest behaviour-preserving
+fix; switching to a built-in `ReportKind` would change the diagnostic kind
+text. Document the workaround in the helper so future ariadne upgrades can
+remove it once the upstream behaviour tightens.
+
+When verifying a docs-only fix, double-check claimed grammar against the
+parser before the spec ships. The first 20l-E draft documented a `dangerous as
+Bar` opt-in syntax for custom approve labels — verified against
+`expected_approve_label: pascal_case(tool_name)` in
+`crates/corvid-types/src/{approval_reachability.rs, checker/call.rs,
+checker/import_call.rs}`, no override path exists, removed before commit.
+Aspirational docs are how language-identity drift starts.
+
+`\` line continuation outside strings stays deferred. Corvid is positioned as
+AI-native, not Python-shaped; the existing workarounds (`+` concatenation,
+triple-quoted strings, paren-grouped continuation) are clean and stay
+documented. Rejecting Python-mimicry features when the language identity
+argument outweighs the ergonomic argument is itself a learning, not a TODO.
