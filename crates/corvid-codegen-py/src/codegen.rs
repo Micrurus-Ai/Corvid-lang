@@ -157,7 +157,7 @@ impl Codegen {
             } else {
                 for f in &t.fields {
                     self.out
-                        .writeln(&format!("{}: {}", f.name, python_type_hint_of(&f.ty)));
+                        .writeln(&format!("{}: {}", f.name, python_type_hint_of(&f.ty, types)));
                 }
             }
             self.out.dedent();
@@ -492,7 +492,15 @@ fn unary_op_str(op: UnaryOp) -> &'static str {
     }
 }
 
-fn python_type_hint_of(ty: &corvid_types::Type) -> String {
+/// Map a Corvid `Type` to the Python annotation that should appear in
+/// the generated module. The full module already imports
+/// `from __future__ import annotations`, so unquoted forward references
+/// to dataclasses defined later in the same file are valid.
+///
+/// `types` is the slice of `IrType` decls in the file, used to resolve
+/// `Type::Struct(DefId)` to the dataclass name without requiring the
+/// caller to thread a separate symbol table.
+fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
     use corvid_types::Type as T;
     match ty {
         T::Int => "int".into(),
@@ -500,22 +508,31 @@ fn python_type_hint_of(ty: &corvid_types::Type) -> String {
         T::String => "str".into(),
         T::Bool => "bool".into(),
         T::Nothing => "None".into(),
-        T::Struct(_)
-        | T::ImportedStruct(_)
-        | T::Function { .. }
-        | T::List(_)
+        T::Struct(def_id) => types
+            .iter()
+            .find(|decl| decl.id == *def_id)
+            .map(|decl| decl.name.clone())
+            // If the DefId doesn't resolve to one of the declared
+            // dataclasses (shouldn't happen for a well-formed module
+            // but handle it without crashing codegen) fall back to
+            // `object` so the annotation stays valid Python.
+            .unwrap_or_else(|| "object".into()),
+        T::ImportedStruct(imported) => imported.name.clone(),
+        T::List(inner) => format!("list[{}]", python_type_hint_of(inner, types)),
+        T::Option(inner) => format!("{} | None", python_type_hint_of(inner, types)),
+        T::Function { .. }
         | T::Stream(_)
         | T::Partial(_)
         | T::ResumeToken(_)
         | T::RouteParams(_)
         | T::Unknown => "object".into(),
-        // Emitting "object" here is a safe approximation until the
-        // Python backend decides on its representation
-        // (wrapper classes vs typing.Optional[T] vs plain T-or-Exception
-        // patterns). Result types likely render as `object` (union
-        // type) in Python 3.10+ or `typing.Union[...]` for older.
-        T::Result(_, _) | T::Option(_) | T::Weak(_, _) => "object".into(),
-        T::Grounded(inner) => python_type_hint_of(inner),
+        // `Result<T, E>` and `Weak<T, ...>` stay `object` until the
+        // Python backend picks a concrete representation (wrapper
+        // classes vs `typing.Union[T, E]` vs `T | None`-ish shapes).
+        // Promoting these to richer annotations is its own slice and
+        // out of 20l-B scope.
+        T::Result(_, _) | T::Weak(_, _) => "object".into(),
+        T::Grounded(inner) => python_type_hint_of(inner, types),
         T::TraceId => "str".into(),
     }
 }

@@ -231,6 +231,82 @@ agent calc(x: Int) -> Int:
     }
 
     #[test]
+    fn nested_struct_field_emits_class_name_not_object() {
+        // 20l-B: before this slice the Python codegen mapped every
+        // composite field type to `object`, defeating mypy / pyright /
+        // IDE autocomplete on the documented Python target. A nested
+        // struct field must carry its dataclass name through to the
+        // annotation. `from __future__ import annotations` is in the
+        // generated preamble so the forward reference doesn't need to
+        // be string-quoted.
+        let src = "\
+type Inner:
+    x: Int
+
+type Outer:
+    inner: Inner
+    label: String
+
+agent describe(o: Outer) -> String:
+    return o.label
+";
+        let py = src_to_py(src);
+        assert!(
+            py.contains("inner: Inner"),
+            "expected nested struct field to carry its class name; got:\n{py}"
+        );
+        assert!(
+            !py.contains("inner: object"),
+            "nested struct field must not collapse to `object`; got:\n{py}"
+        );
+    }
+
+    #[test]
+    fn list_field_emits_typed_list_annotation() {
+        // 20l-B: `List<T>` was rendered as `object`. The Python target
+        // is `list[T]` with the inner element type recursed through
+        // python_type_hint_of so nested element types resolve too.
+        let src = "\
+type Item:
+    sku: String
+
+type Cart:
+    items: List<Item>
+
+agent enumerate(c: Cart) -> Int:
+    return 0
+";
+        let py = src_to_py(src);
+        assert!(
+            py.contains("items: list[Item]"),
+            "expected typed list annotation; got:\n{py}"
+        );
+    }
+
+    #[test]
+    fn option_field_emits_union_with_none() {
+        // 20l-B: `Option<T>` was rendered as `object`. The Python
+        // target is `T | None` (PEP 604, valid under
+        // `from __future__ import annotations`).
+        let src = "\
+type Profile:
+    email: String
+
+type User:
+    profile: Option<Profile>
+    handle: String
+
+agent who(u: User) -> String:
+    return u.handle
+";
+        let py = src_to_py(src);
+        assert!(
+            py.contains("profile: Profile | None"),
+            "expected `Profile | None` for Option<Profile>; got:\n{py}"
+        );
+    }
+
+    #[test]
     fn emits_full_refund_bot() {
         let src = r#"
 import python "anthropic" as anthropic effects: network
