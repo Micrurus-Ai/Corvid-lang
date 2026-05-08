@@ -15,6 +15,31 @@ use std::path::PathBuf;
 
 use super::{read_lineage_input, select_run, source_descriptor};
 
+/// Public Corvid guarantee id this eval-promotion module enforces:
+/// `eval.promotion_signed_lineage`.
+///
+/// `corvid eval-from-feedback` synthesises a typed eval fixture
+/// from a "wrong answer" feedback record, redacting the matching
+/// lineage trace via the production redaction policy before writing
+/// the fixture. The fixture's `sources` field lists every redacted
+/// event so downstream consumers can reconstruct evidence without
+/// seeing raw identifiers. Tagged at module level so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+///
+/// `#[allow(dead_code)]`: `corvid-cli` is a binary-only crate so
+/// `pub` doesn't surface this constant externally. It is
+/// deliberately preserved as an in-binary anchor for the
+/// inverse-coverage sentinel.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_PROMOTION_SIGNED_LINEAGE: &str = "eval.promotion_signed_lineage";
+
+/// Stable id of the public Corvid guarantee this module enforces.
+#[allow(dead_code)]
+pub const fn promotion_signed_lineage_guarantee_id() -> &'static str {
+    GUARANTEE_ID_PROMOTION_SIGNED_LINEAGE
+}
+
 #[derive(Debug, Clone)]
 pub struct EvalFromFeedbackArgs {
     pub trace_dir: PathBuf,

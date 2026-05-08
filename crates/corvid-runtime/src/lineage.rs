@@ -11,6 +11,19 @@ use std::collections::BTreeSet;
 
 pub const LINEAGE_SCHEMA: &str = "corvid.trace.lineage.v1";
 
+/// Public Corvid guarantee id this lineage model enforces:
+/// `observability.lineage_completeness`.
+///
+/// Every lineage event carries a (trace_id, span_id) pair plus
+/// parent linkage when a parent exists, so a SQL JOIN against the
+/// local trace store reconstructs the route -> job -> agent ->
+/// prompt -> tool -> approval -> DB tree. Validated on every event
+/// via `validate_lineage` (see `LineageValidation` below). Tagged
+/// at module level so the `corvid-guarantees` inverse-coverage
+/// sentinel can confirm the enforcement site is wired to the
+/// registry row.
+pub const GUARANTEE_ID_LINEAGE_COMPLETENESS: &str = "observability.lineage_completeness";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LineageKind {

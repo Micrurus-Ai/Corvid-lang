@@ -4,6 +4,18 @@ use crate::lineage::{LineageEvent, LineageStatus, LINEAGE_SCHEMA};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Public Corvid guarantee id this grouping module enforces:
+/// `observability.contract_aware_grouping`.
+///
+/// `corvid observe show` groups incidents by `guarantee_id`,
+/// `effect`, `budget`, `provenance`, and `approval` rule rather
+/// than by `service.name` — so an analyst's first pivot lands on
+/// the contract that broke. Implemented by
+/// `group_lineage_incidents` below. Tagged at module level so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_CONTRACT_AWARE_GROUPING: &str = "observability.contract_aware_grouping";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LineageIncidentGroupKind {

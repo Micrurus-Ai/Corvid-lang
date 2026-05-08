@@ -8,6 +8,18 @@ use crate::lineage::LineageEvent;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Public Corvid guarantee id this redaction module enforces:
+/// `observability.redaction_determinism`.
+///
+/// Redacting the same lineage event twice with the same
+/// `LineageRedactionPolicy` yields byte-identical output; trace
+/// topology (trace_id, span_id, parent linkage) is preserved across
+/// redaction so observe / eval / OTel keep correlating after
+/// sensitive values are removed. Tagged at module level so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_REDACTION_DETERMINISM: &str = "observability.redaction_determinism";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineageRedactionPolicy {
     pub name: String,

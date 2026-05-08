@@ -31,6 +31,18 @@
 //!     feature so we don't run two reqwest stacks in the same
 //!     process.
 
+/// Public Corvid guarantee id this OTel exporter enforces:
+/// `observability.otel_conformance`.
+///
+/// Lineage events flow through the standard `opentelemetry` +
+/// `opentelemetry-otlp` SDK and emit OTLP/HTTP spans whose
+/// attributes carry `corvid.guarantee_id`, `corvid.cost_usd`,
+/// `corvid.approval_id`, `corvid.replay_key`. The attribute set is
+/// constructed by `corvid_span_attributes` below. Tagged at module
+/// level so the `corvid-guarantees` inverse-coverage sentinel can
+/// confirm the enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_OTEL_CONFORMANCE: &str = "observability.otel_conformance";
+
 use crate::lineage::{LineageEvent, LineageKind, LineageStatus};
 use opentelemetry::trace::{
     SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,

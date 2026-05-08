@@ -16,6 +16,34 @@ use std::path::PathBuf;
 
 use super::{read_lineage_input, source_descriptor};
 
+/// Public Corvid guarantee id this drift-attribution module
+/// enforces: `eval.drift_attribution`.
+///
+/// `corvid eval-drift --explain` decomposes the drift between two
+/// trace runs into the four named dimensions (`model_id`,
+/// `prompt_hash`, `retrieval_index_hash`, `input_fingerprint`)
+/// plus a residual percentage for unattributable changes. The
+/// output's `sources` array carries the `trace_id` + `span_id` of
+/// every event the analysis consulted. Tagged at module level so
+/// the `corvid-guarantees` inverse-coverage sentinel can confirm
+/// the enforcement site is wired to the registry row.
+///
+/// `#[allow(dead_code)]`: `corvid-cli` is a binary-only crate, so
+/// `pub` doesn't surface this constant externally. It is
+/// deliberately preserved as an in-binary anchor that the
+/// inverse-coverage sentinel in `corvid-guarantees` finds by
+/// grepping non-test workspace source for the literal id.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_DRIFT_ATTRIBUTION: &str = "eval.drift_attribution";
+
+/// Stable id of the public Corvid guarantee this module enforces.
+/// Mirrors the `JwtVerifier::guarantee_id` pattern so future
+/// callers can query the linkage programmatically.
+#[allow(dead_code)]
+pub const fn drift_attribution_guarantee_id() -> &'static str {
+    GUARANTEE_ID_DRIFT_ATTRIBUTION
+}
+
 #[derive(Debug, Clone)]
 pub struct EvalDriftExplainArgs {
     pub baseline: PathBuf,
