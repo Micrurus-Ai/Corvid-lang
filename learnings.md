@@ -3830,3 +3830,118 @@ because both are pinned by the link.rs unit tests; if either upstream
 wording changes, the link.rs test fails before this matcher silently
 mismatches. The inverse rule: never string-match on third-party error
 messages that you don't own.
+
+## Phase 20n open-gap implementation
+
+### Slice 20n-A — backslash line continuation (L-7)
+
+Prior-decision reversals get explicit reversal markers, not silent
+absorption. The 20l-F learnings entry deferred `\` line continuation on
+language-identity grounds — "Rejecting Python-mimicry features when the
+language identity argument outweighs the ergonomic argument is itself a
+learning, not a TODO." The 2026-05-08 directive overrode that with
+"implement the feature end-to-end." The 20l-F entry stays as record of
+the original rationale; this 20n-A entry stands alongside it as the
+explicit reversal record. Both are preserved so future sessions can see
+*decision* (the override is documented) versus *drift* (someone forgot
+the prior decision and reimplemented). When a deferral is reversed, the
+phase doc and the learnings file both carry the reversal note before
+any code lands.
+
+The lexer-level continuation rewrite happens at two sites — top-level
+between tokens and inside `"..."` strings — but uses one shared helper.
+The peek-and-consume logic is identical: `\` immediately followed by
+`\n` (or CRLF `\r\n`) plus any leading whitespace on the next physical
+line. Triple-quoted strings already span lines naturally, so they are
+intentionally not rewritten — special-casing them in the helper would
+have been a "fix" for a non-problem. Preserving `had_content_on_line`
+across the join is what keeps `Indent` / `Dedent` emission sane; without
+it, the join would have looked like an outdent to the indent tracker.
+
+### Slice 20n-B — WASM String ABI (L-4)
+
+Real allocator over bump allocator, even at v1. The 1000-iteration
+churn integration test in `crates/corvid-codegen-wasm/tests/allocator.rs`
+pins the design choice: page count must stay at 1 across alloc/free
+cycles. A bump allocator could not have passed that test. Hand-rolling
+the free-list in `wasm_encoder` Instructions kept the WASM module self-
+contained — the alternative (linking a pre-built C allocator) would
+have introduced a build-system dependency that obscured what the module
+actually contains. The two-pass coalescing (forward sweep merges
+block-after-self; backward sweep merges block-before-self) is the
+minimum that lets repeated alloc/free of equal-sized blocks reuse the
+same memory.
+
+Multi-value WASM returns over sentinels or out-pointers. The `String`
+return shape is `(result i32 i32)` rather than a length-prefixed in-
+memory sentinel or an out-pointer parameter. Multi-value is in
+WebAssembly's stage-4 spec, supported by every modern engine, and
+exposed by `wasmtime`'s `TypedFunc<(i32, i32), (i32, i32)>` and JS's
+`WebAssembly.Function` destructuring without feature flags. Sentinel
+designs would have aliased the input span against the return span,
+breaking the ownership story. Out-pointer designs would have required
+every caller to pre-allocate the result buffer at a size they couldn't
+predict for runtime-computed strings. Multi-value sidestepped both
+problems and matched the bare-ABI ergonomics goal.
+
+`Br` label discipline in nested WASM blocks is unforgiving. The
+allocator's pass-2 backward-coalesce inside an `If` inside a `Loop`
+inside a `Block` has three branchable scopes: label 0 = the `If`,
+label 1 = the `Loop`, label 2 = the outer `Block`. The first cut used
+`Br(2)` to "skip self," intending to continue the sweep — but `Br(2)`
+exits the outer Block entirely and terminates the walk. Caught by the
+`forward_coalesce_lets_a_larger_alloc_fit_into_two_freed_blocks`
+integration test, where alloc(28) returned the bump address (52)
+instead of reusing the 36-byte coalesced block. Fixed by switching to
+`Br(1)`, which jumps back to the Loop start. The defensive comment
+explaining the label nesting now stays in `allocator.rs` — the next
+person who edits the inner branch shouldn't have to re-derive the
+nesting from scratch.
+
+Uniform manifest `kind` discriminator on every parameter and return,
+not just the new type. The temptation when adding a new ABI shape
+("string") is to add a `kind: "string"` field only to the String
+entries and leave the existing scalar entries human-readable. Resisted:
+every entry now carries `kind` — `"i64"` for Int, `"f64"` for Float,
+`"i32"` for Bool, `"void"` for Nothing, `"string"` for String.
+Downstream tooling (registry consumers, alternative loaders, analysis
+tools) switches on `kind` for ABI shape rather than parsing the
+human-readable `ty` field. The `ty` field stays for human readers; the
+`kind` field is the parseable discriminator. This is the pattern to
+reach for whenever a manifest gains a new shape — make the
+discriminator uniform across the existing shapes too, even if the
+existing shapes were unambiguous before.
+
+JS frees inputs only; agent returns may alias. The v1 ownership
+convention sidesteps the "did the agent return an input span, a
+literal, or a fresh allocation?" question by **not requiring the host
+to know**. The host allocates inputs via `corvid_alloc`, decodes the
+return into a host-owned string copy *before* freeing inputs, and
+frees only the inputs it allocated. Agent returns are not freed by
+the host. The generated JS loader's `finally` block guarantees the
+input free runs even when the agent throws mid-call. Distinguishing
+the three return cases would have required a third return field (an
+ownership tag) and is deferred to a later slice if it ever becomes
+necessary. For now, the cost of one extra TextDecoder copy is cheaper
+than the cost of an ownership-tag-carrying ABI.
+
+Compile-time string-literal pool deduplication via content-keyed
+interning. `StringPool` is a `HashMap<String, u32>` keyed by the
+literal's UTF-8 bytes; identical literals across multiple agents
+collapse to a single pool entry. The pool is emitted as a single
+active `DataSection` segment at memory offset `HEAP_BASE = 8` (right
+after the 8-byte null-pointer sentinel), and the runtime heap starts
+immediately past the pool at `8 + pool_size`. Literal addresses and
+runtime allocations never alias because of the offset; the literal
+space and the heap space are physically disjoint by construction.
+Deduplication isn't an optimisation — it's the property that makes
+"two agents both return `\"hello\"`" a single pool entry, which keeps
+the bundle small even when many agents share boilerplate strings.
+
+Per-slice learnings discipline: 20n-A's learnings landed at the 20n-B
+closer rather than at the 20n-A close. That's a one-slice slip on the
+"doc-and-feature land together" rule. The fix is procedural: every
+slice closer commit must touch `learnings.md` even if the entry is
+short. The 20n-A entry above was added retroactively here; the
+prevention is to put a learnings-touch line in the per-slice closer
+checklist, not to skip the entry.

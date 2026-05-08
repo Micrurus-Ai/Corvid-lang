@@ -215,3 +215,155 @@ The recommended order: **A → B → C**. A is small and self-
 contained. B is medium scope but bounded to the WASM crate +
 loader. C is the largest because it spans codegen + runtime
 serialization and may grow during step-0 audit.
+
+## Closing audit — 20n-A (2026-05-08)
+
+**Shipped.** Decision A from the L-7 open-gap prompt: the lexer
+implements `\` + newline line continuation rather than documenting
+its absence.
+
+**Commit list.**
+
+| SHA | Subject |
+|---|---|
+| `eb4a962` | `feat(syntax): implement backslash line continuation (L-7)` |
+
+**What landed.** Top-level `b'\\'` arm in `lex_token` now calls
+`lex_backslash_continuation`, which together with
+`is_line_continuation_at` and `consume_line_continuation` consumes
+`\` + LF or CRLF + leading whitespace silently outside strings.
+Inside `"..."` single-quoted strings the same helper joins the
+two physical lines into one logical string. Triple-quoted blocks
+are intentionally not rewritten — they already span lines
+naturally. A `\` not at end-of-line still produces
+`LexErrorKind::UnexpectedChar('\')` (E0003) at the top level.
+Five regression tests under `lexer::backslash_continuation_tests`
+cover outside-string, inside-`"..."`, stray-backslash error,
+triple-quoted-untouched, and CRLF.
+
+**Design override recorded.** The 20l-F learnings entry on
+language-identity vs Pythonic-ergonomics stays in `learnings.md`
+as the *original* rationale; the 20n design override note here
+and in `learnings.md` stands alongside it as the *reversal*
+record. Both rationales are preserved so future sessions can see
+drift vs decision.
+
+**Doc surface.** `docs/syntax.md` (new) gained a "Continuation
+rules" section covering bracket-grouped, backslash, and triple-
+quoted forms with guidance on when to reach for each.
+
+## Closing audit — 20n-B (2026-05-08)
+
+**Shipped.** L-4 from the open-gap prompt: `String` parameters
+and returns cross the WASM boundary as UTF-8 byte spans in linear
+memory, addressed by `(ptr, len)` pairs.
+
+**Commit list.**
+
+| # | SHA | Subject |
+|---|---|---|
+| 1 | `9e00719` | `feat(codegen-wasm): emit corvid_alloc/corvid_free with free-list + coalescing` |
+| 2a | `bf7d55f` | `feat(codegen-wasm): lower String agent params and returns to (i32, i32)` |
+| 2b | `6bfc7ae` | `feat(codegen-wasm): lower String literals via DataSection` |
+| 3 | `8da006e` | `feat(codegen-wasm): String-aware JS loader and uniform manifest kind discriminator` |
+| 4 | `231c88c` | `test(codegen-wasm): wasmtime UTF-8 round-trip integration coverage` |
+| 5 | `14ffb07` | `docs(wasm): document String ABI in wasm-target.md` |
+
+**Design decisions captured.**
+
+- **Real allocator, not bump.** Free-list with two-pass coalescing
+  (forward sweep merges block-after-self; backward sweep merges
+  block-before-self). 1000-iteration churn proves the page count
+  stays at 1 page across alloc/free cycles. Hand-rolled in
+  `wasm_encoder` Instructions because the alternative — a pre-
+  built C allocator linked in — would have introduced a build-
+  system dependency that obscures the WASM module's self-
+  contained nature.
+- **Multi-value returns over sentinels or out-pointers.**
+  WebAssembly stage-4 multi-value lets `(result i32 i32)` return
+  the `(ptr, len)` pair atomically. Wasmtime's `TypedFunc<(i32,
+  i32), (i32, i32)>` and the JS `WebAssembly.Function`
+  destructuring both support it without feature flags. Sentinel
+  bytes (length-prefixed in memory) and out-pointer conventions
+  were both rejected as shortcuts that would have aliased input
+  spans against return spans, breaking the ownership story.
+- **Uniform `kind` discriminator on all params.** Manifest entries
+  carry a `kind` field ("i64" / "f64" / "i32" / "void" / "string")
+  on **every** parameter and return, not just String. Downstream
+  tooling switches on `kind` for ABI shape rather than parsing the
+  human-readable `ty` field, which is for humans, not parsers.
+- **JS frees inputs only.** Agent returns may alias inputs or
+  point into the const-memory literal pool. The host can't tell
+  the cases apart without an extra return field, so the v1
+  ownership convention is: host allocates inputs via
+  `corvid_alloc`, decodes the agent's return immediately into a
+  host-owned copy, then `corvid_free`s only the inputs it
+  allocated. The generated JS loader's `finally` block guarantees
+  the input free runs even when the agent throws.
+- **Literal pool at memory offset HEAP_BASE = 8.** A single active
+  `DataSection` segment places the per-module string pool starting
+  at byte 8 (after the null-pointer sentinel). The runtime heap
+  starts immediately past the pool at offset `8 + pool_size`, so
+  literal addresses and runtime allocations never alias. Repeated
+  identical literals across multiple agents de-duplicate to a
+  single pool entry via content-keyed interning.
+
+**Test coverage shipped.**
+
+- 8 allocator integration tests in
+  `crates/corvid-codegen-wasm/tests/allocator.rs` (alloc returns
+  non-zero; alloc(0) rounds up; write/read round-trip; free-then-
+  alloc reuses the slot; forward coalesce; backward coalesce;
+  1000-iteration churn stays at 1 page; memory grows beyond
+  initial page when needed).
+- 4 wasmtime end-to-end String tests in
+  `crates/corvid-codegen-wasm/tests/string_abi_round_trip.rs`
+  (ASCII pass-through; multi-byte UTF-8 pass-through with `é` and
+  `🦀`; string-literal return; 200-iteration churn pins page count).
+- 16+ inline lib tests in `crates/corvid-codegen-wasm/src/lib.rs`
+  covering pass-through agents, mixed String + Int parameter
+  ordering, DataSection literal lowering, deduplication, multi-
+  byte literals, JS loader emission for String params, scalar
+  agent JS loader unchanged, and uniform manifest `kind`
+  discriminator across all five types.
+
+**Bug caught + fixed pre-merge.** First version of the allocator's
+pass-2 backward-coalesce branch used `Br(2)` (exiting the outer
+Block) instead of `Br(1)` (returning to the Loop start), which
+caused the sweep to abort after coalescing one pair. Caught by
+`forward_coalesce_lets_a_larger_alloc_fit_into_two_freed_blocks`,
+which observed alloc(28) returning the bump address (52) instead
+of reusing the 36-byte coalesced block. Fixed by switching to
+`Br(1)` with a defensive comment explaining the WASM block label
+nesting (label 0 = If, 1 = Loop, 2 = outer Block).
+
+**Toolchain compatibility note.** wasmparser 0.244 changed the
+`ImportSection` reader to wrap entries in a compact `Imports`
+enum. The first-cut traversal `for import in reader { ... }` no
+longer compiles because the iterator yields the enum, not a
+flat `Import`. Fixed by calling `reader.into_imports()` which
+flattens the enum back to `Result<Import>`. Logged in commit 2a
+so future toolchain bumps know what to look for.
+
+**Out-of-scope deferrals (filed for later slices).**
+
+- `String` parameters or returns on `corvid:host` imports. Tools,
+  prompts, and approvals stay scalar in v1.
+- Struct ABI on the WASM boundary. Phase 20n-C ships the native-
+  target struct returns; the WASM struct ABI is a separate
+  follow-up.
+- `Stream<String>` and other streaming String surfaces.
+- Multi-string return tuples (single-`String` returns are
+  sufficient for v1).
+- WebAssembly Component Model adapters (the bare `(ptr, len)`
+  ABI is the v1 choice; Component Model can layer on top later
+  without changing the underlying convention).
+
+**Pre-existing baseline observation.** The corpus verifier exits
+`2` on `branch_same_effect.cor` with an unresolved `__imp_GetUserNameExW`
+linker symbol from the bundled `whoami` static lib (secur32.lib
+isn't being passed to `link.exe`). Reproduces both with and
+without 20n-B's edits applied, so it's not a regression. The
+auto-fallback from `3fb577e` only triggers when the staticlib is
+missing; here the staticlib is present and the link itself fails.
+Filed as a small linker-args fix for after Phase 20n closes.
