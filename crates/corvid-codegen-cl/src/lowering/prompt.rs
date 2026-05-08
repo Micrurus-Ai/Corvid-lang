@@ -233,6 +233,15 @@ fn emit_grounded_prompt_attestation(
             Type::Bool => runtime.grounded_attest_bool,
             Type::Float => runtime.grounded_attest_float,
             Type::String => runtime.grounded_attest_string,
+            // `Grounded<Struct>` reuses the heap-pointer-keyed
+            // `pointer_attestations` map at runtime — same storage
+            // path as `Grounded<String>`, just keyed on the raw
+            // struct pointer rather than a CorvidString descriptor.
+            // The decoder from commit 4 produces the struct
+            // pointer; the bridge from commit 3 hands it back; this
+            // attestation arm pins the source + confidence onto it
+            // before the value reaches the agent body.
+            Type::Struct(_) => runtime.grounded_attest_struct,
             other => {
                 return Err(CodegenError::not_supported(
                     format!(

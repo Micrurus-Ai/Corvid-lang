@@ -499,6 +499,22 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             )
         })?;
 
+    // `corvid_grounded_attest_struct(value: i64, source: CorvidString,
+    // confidence: f64) -> i64` — same shape as the string variant.
+    let grounded_attest_struct_sig = make_grounded_attest_sig(module, I64);
+    let grounded_attest_struct_id = module
+        .declare_function(
+            GROUNDED_ATTEST_STRUCT_SYMBOL,
+            Linkage::Import,
+            &grounded_attest_struct_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(
+                format!("declare grounded_attest_struct: {e}"),
+                Span::new(0, 0),
+            )
+        })?;
+
     let mut sleep_ms_sig = module.make_signature();
     sleep_ms_sig.params.push(AbiParam::new(I64));
     let sleep_ms_id = module
@@ -1148,6 +1164,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         grounded_attest_bool: grounded_attest_bool_id,
         grounded_attest_float: grounded_attest_float_id,
         grounded_attest_string: grounded_attest_string_id,
+        grounded_attest_struct: grounded_attest_struct_id,
         string_from_int: string_from_int_id,
         string_from_bool: string_from_bool_id,
         string_from_float: string_from_float_id,

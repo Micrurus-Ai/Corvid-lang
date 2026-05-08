@@ -183,5 +183,10 @@ pub(in crate::lowering) const GROUNDED_ATTEST_INT_SYMBOL: &str = "corvid_grounde
 pub(in crate::lowering) const GROUNDED_ATTEST_BOOL_SYMBOL: &str = "corvid_grounded_attest_bool";
 pub(in crate::lowering) const GROUNDED_ATTEST_FLOAT_SYMBOL: &str = "corvid_grounded_attest_float";
 pub(in crate::lowering) const GROUNDED_ATTEST_STRING_SYMBOL: &str = "corvid_grounded_attest_string";
+/// Attach a `Grounded<Struct>` attestation by the struct's heap
+/// pointer. Same `pointer_attestations` map the string variant
+/// uses, just keyed by the raw struct pointer rather than a
+/// CorvidString descriptor pointer.
+pub(in crate::lowering) const GROUNDED_ATTEST_STRUCT_SYMBOL: &str = "corvid_grounded_attest_struct";
 
 pub(in crate::lowering) const OVERFLOW_HANDLER_SYMBOL: &str = "corvid_runtime_overflow";

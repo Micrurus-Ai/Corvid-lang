@@ -77,6 +77,11 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub grounded_attest_bool: FuncId,
     pub grounded_attest_float: FuncId,
     pub grounded_attest_string: FuncId,
+    /// Attach a `Grounded<Struct>` attestation. Mirror of
+    /// `grounded_attest_string` — same `pointer_attestations` map
+    /// underneath, just keyed by the raw struct pointer rather
+    /// than a CorvidString descriptor.
+    pub grounded_attest_struct: FuncId,
     // Scalar->String helpers for prompt-template interpolation.
     pub string_from_int: FuncId,
     pub string_from_bool: FuncId,

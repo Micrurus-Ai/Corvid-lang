@@ -228,6 +228,71 @@ agent run(amount: Int) -> Decision:
 }
 
 #[test]
+fn native_grounded_struct_prompt_return_attaches_attestation_then_unwraps() {
+    // Phase 20n-C commit 6: `Grounded<Struct>` returns from prompts
+    // wire the new `corvid_grounded_attest_struct` runtime bridge,
+    // which keys the attestation by the struct's heap pointer in
+    // the same `pointer_attestations` map used for
+    // `Grounded<String>`. The agent's `unwrap g` is a codegen no-op
+    // (the value is already the struct ptr), so the test asserts
+    // the unwrapped value's field is observable end-to-end.
+    let _ = test_tools_lib_path();
+
+    let grounded_struct_src = r#"
+type Decision:
+    code: Int
+    confidence: Float
+    approved: Bool
+    reason: String
+
+prompt classify(amount: Int) -> Grounded<Decision>:
+    """Classify amount {amount}"""
+
+agent run(amount: Int) -> Int:
+    g = classify(amount)
+    d = g.unwrap_discarding_sources()
+    return d.code
+"#;
+    let ir = ir_of(grounded_struct_src);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bin_path = tmp.path().join("grounded_struct_return");
+    let produced = build_native_to_disk(
+        &ir,
+        "grounded_struct_return",
+        &bin_path,
+        &[test_tools_lib_path().as_path()],
+    )
+    .expect("compile native binary");
+
+    let mock_reply = r#"{"code":42,"confidence":0.9,"approved":true,"reason":"verified"}"#;
+    let mock_replies_json = serde_json::json!({ "classify": [mock_reply] }).to_string();
+
+    let output = Command::new(&produced)
+        .arg("100")
+        .env("CORVID_TEST_MOCK_LLM", "1")
+        .env("CORVID_TEST_MOCK_LLM_REPLIES", mock_replies_json)
+        .env("CORVID_MODEL", "mock-1")
+        .output()
+        .expect("run native binary");
+
+    assert!(
+        output.status.success(),
+        "native run failed: status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_trimmed = stdout.trim();
+    assert_eq!(
+        stdout_trimmed, "42",
+        "agent should unwrap the Grounded<Decision> and return d.code = 42; got: {stdout_trimmed:?}",
+    );
+}
+
+#[test]
 fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     let _ = test_tools_lib_path();
 

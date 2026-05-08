@@ -38,17 +38,27 @@ impl Default for GroundedHandleStore {
     fn default() -> Self {
         Self {
             handles: AttestationStore::new("grounded handle store"),
-            string_attestations: HashMap::new(),
+            pointer_attestations: HashMap::new(),
         }
     }
 }
 
-pub fn attach_string_attestation(string_ptr: usize, attestation: Arc<GroundedAttestation>) {
-    if string_ptr == 0 {
+/// Attach a `GroundedAttestation` keyed by a heap-object pointer.
+///
+/// The map is heap-pointer-keyed and works for any refcounted heap
+/// object the language can attest: `String` descriptors, `Struct`
+/// allocations, future `List` allocations. The earlier name
+/// (`attach_string_attestation`) reflected the first caller, not
+/// the storage's actual semantics. The pointer is whatever stable
+/// identifier the calling C-ABI bridge derives from the value
+/// (`CorvidString::descriptor_key()` for strings, the raw heap
+/// pointer for structs).
+pub fn attach_pointer_attestation(ptr: usize, attestation: Arc<GroundedAttestation>) {
+    if ptr == 0 {
         return;
     }
     let mut store = store().lock().unwrap();
-    store.string_attestations.insert(string_ptr, attestation);
+    store.pointer_attestations.insert(ptr, attestation);
 }
 
 pub fn set_last_scalar_attestation(attestation: Arc<GroundedAttestation>) {
@@ -57,12 +67,17 @@ pub fn set_last_scalar_attestation(attestation: Arc<GroundedAttestation>) {
     });
 }
 
-pub fn register_handle_for_string_ptr(string_ptr: usize) -> u64 {
-    if string_ptr == 0 {
+/// Move a previously-attached pointer-keyed attestation into the
+/// numeric-handle store and return its handle. Removes the entry
+/// from the pointer-keyed map; subsequent lookups return the null
+/// handle. Works for any heap-pointer key — `String` descriptors,
+/// `Struct` allocations, and future heap shapes.
+pub fn register_handle_for_pointer(ptr: usize) -> u64 {
+    if ptr == 0 {
         return NULL_GROUNDED_HANDLE;
     }
     let mut store = store().lock().unwrap();
-    let Some(attestation) = store.string_attestations.remove(&string_ptr) else {
+    let Some(attestation) = store.pointer_attestations.remove(&ptr) else {
         return NULL_GROUNDED_HANDLE;
     };
     store.handles.insert(attestation)
@@ -111,7 +126,11 @@ pub fn emit_debug_leak_warning() {
 }
 struct GroundedHandleStore {
     handles: AttestationStore<GroundedAttestation>,
-    string_attestations: HashMap<usize, Arc<GroundedAttestation>>,
+    /// Heap-pointer-keyed attestations awaiting promotion to a
+    /// numeric handle via `register_handle_for_pointer`. Works for
+    /// any refcounted heap object: `String` descriptors, `Struct`
+    /// allocations, future heap shapes.
+    pointer_attestations: HashMap<usize, Arc<GroundedAttestation>>,
 }
 
 static STORE: OnceLock<Mutex<GroundedHandleStore>> = OnceLock::new();
@@ -151,10 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn string_attestation_roundtrips_through_handle() {
+    fn pointer_attestation_roundtrips_through_handle_for_string_descriptor() {
         let attestation = make_attestation(ProvenanceChain::with_retrieval("lookup", 1), 0.75);
-        attach_string_attestation(42, attestation);
-        let handle = register_handle_for_string_ptr(42);
+        attach_pointer_attestation(42, attestation);
+        let handle = register_handle_for_pointer(42);
         assert_ne!(handle, NULL_GROUNDED_HANDLE);
         assert_eq!(sources_for_handle(handle).unwrap(), vec!["lookup".to_string()]);
         assert!((confidence_for_handle(handle).unwrap() - 0.75).abs() < 1e-9);
@@ -162,10 +181,27 @@ mod tests {
     }
 
     #[test]
+    fn pointer_attestation_roundtrips_for_struct_pointer() {
+        // A struct heap pointer is just a `usize` key like any other
+        // heap allocation; the same map and the same pair of helpers
+        // serve struct attestations without a parallel storage path.
+        let attestation =
+            make_attestation(ProvenanceChain::with_retrieval("classify", 5), 0.9);
+        attach_pointer_attestation(0xdead_beef_usize, attestation);
+        let handle = register_handle_for_pointer(0xdead_beef_usize);
+        assert_ne!(handle, NULL_GROUNDED_HANDLE);
+        assert_eq!(
+            sources_for_handle(handle).unwrap(),
+            vec!["classify".to_string()]
+        );
+        assert!(release_handle(handle));
+    }
+
+    #[test]
     fn stale_handle_fails_after_release() {
         let attestation = make_attestation(ProvenanceChain::with_retrieval("lookup", 1), 1.0);
-        attach_string_attestation(7, attestation);
-        let handle = register_handle_for_string_ptr(7);
+        attach_pointer_attestation(7, attestation);
+        let handle = register_handle_for_pointer(7);
         assert!(release_handle(handle));
         assert!(!release_handle(handle));
     }

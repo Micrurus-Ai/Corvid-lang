@@ -187,8 +187,42 @@ pub unsafe extern "C" fn corvid_grounded_attest_string(
     let source = read_corvid_string(source_name);
     let chain =
         crate::provenance::ProvenanceChain::with_retrieval(&source, crate::tracing::now_ms());
-    grounded_handles::attach_string_attestation(
+    grounded_handles::attach_pointer_attestation(
         value.descriptor_key(),
+        grounded_handles::make_attestation(chain, confidence),
+    );
+    value
+}
+
+/// Attach a `Grounded<Struct>` attestation by the struct's heap
+/// pointer. Mirrors `corvid_grounded_attest_string` — a struct
+/// allocation has a stable heap pointer that serves as the key in
+/// the same `pointer_attestations` map used for string descriptors.
+///
+/// The codegen-cl prompt-bridge call site (in
+/// `crate::lowering::prompt::emit_grounded_prompt_attestation`)
+/// invokes this after `corvid_prompt_call_struct` returns the
+/// decoded struct pointer, so the attestation is in place before
+/// the value flows into the agent body. The agent's later
+/// `unwrap g` reads the underlying pointer; any cdylib export
+/// path that wants to surface the handle to a non-Corvid host
+/// reaches it via `corvid_grounded_capture_struct_handle` (added
+/// alongside).
+///
+/// `value` is `i64` rather than a typed struct ABI because the
+/// Cranelift codegen treats every refcounted heap type as a raw
+/// pointer at the C-ABI boundary.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_grounded_attest_struct(
+    value: i64,
+    source_name: CorvidString,
+    confidence: f64,
+) -> i64 {
+    let source = read_corvid_string(source_name);
+    let chain =
+        crate::provenance::ProvenanceChain::with_retrieval(&source, crate::tracing::now_ms());
+    grounded_handles::attach_pointer_attestation(
+        value as usize,
         grounded_handles::make_attestation(chain, confidence),
     );
     value
@@ -201,5 +235,14 @@ pub extern "C" fn corvid_grounded_capture_scalar_handle() -> u64 {
 
 #[no_mangle]
 pub unsafe extern "C" fn corvid_grounded_capture_string_handle(value: CorvidString) -> u64 {
-    grounded_handles::register_handle_for_string_ptr(value.descriptor_key())
+    grounded_handles::register_handle_for_pointer(value.descriptor_key())
+}
+
+/// Promote a struct's pointer-keyed attestation into the numeric
+/// handle store. Mirrors `corvid_grounded_capture_string_handle`
+/// — same map, same lookup, just keyed on the raw struct pointer
+/// rather than a string descriptor pointer.
+#[no_mangle]
+pub extern "C" fn corvid_grounded_capture_struct_handle(value: i64) -> u64 {
+    grounded_handles::register_handle_for_pointer(value as usize)
 }

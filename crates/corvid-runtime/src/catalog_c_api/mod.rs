@@ -20,7 +20,8 @@ pub use catalog_exports::{
 pub use grounded_bridge::{
     corvid_begin_direct_observation, corvid_finish_direct_observation, corvid_grounded_attest_bool,
     corvid_grounded_attest_float, corvid_grounded_attest_int, corvid_grounded_attest_string,
-    corvid_grounded_capture_scalar_handle, corvid_grounded_capture_string_handle,
+    corvid_grounded_attest_struct, corvid_grounded_capture_scalar_handle,
+    corvid_grounded_capture_string_handle, corvid_grounded_capture_struct_handle,
     corvid_grounded_confidence, corvid_grounded_release, corvid_grounded_sources,
     corvid_observation_cost_usd, corvid_observation_exceeded_bound, corvid_observation_latency_ms,
     corvid_observation_release, corvid_observation_tokens_in, corvid_observation_tokens_out,
