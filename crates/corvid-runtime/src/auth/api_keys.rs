@@ -33,6 +33,17 @@ use super::{
     SessionAuthRuntime,
 };
 
+/// Public Corvid guarantee id this module enforces:
+/// `auth.api_key_at_rest_hashed`.
+///
+/// API keys are stored only as Argon2id hashes; the plaintext
+/// leaves Corvid memory exactly once at issuance and is never
+/// logged. Verified by the `hash_api_key_secret` /
+/// `verify_api_key_secret` path below. Tagged at module level so
+/// the `corvid-guarantees` inverse-coverage sentinel can confirm
+/// the enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_API_KEY_AT_REST_HASHED: &str = "auth.api_key_at_rest_hashed";
+
 pub fn hash_api_key_secret(raw_key: &str) -> Result<String, RuntimeError> {
     validate_non_empty("api key secret", raw_key)?;
     let salt = SaltString::generate(&mut OsRng);

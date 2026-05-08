@@ -21,6 +21,19 @@ use sha2::{Digest, Sha256};
 use crate::errors::RuntimeError;
 use crate::tracing::now_ms;
 
+/// Public Corvid guarantee id this module enforces:
+/// `auth.oauth_pkce_required`.
+///
+/// OAuth callback state requires PKCE for public clients; the state
+/// record carries the code-verifier hash and is single-use,
+/// tenant-scoped, and expiry-bound. Single-use semantics enforced
+/// by the `update ... where id = ?1 and used_ms is null`
+/// conditional UPDATE plus the audit-then-error pattern in
+/// `resolve_oauth_callback`. Tagged at module level so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_OAUTH_PKCE_REQUIRED: &str = "auth.oauth_pkce_required";
+
 use super::{
     validate_non_empty, AuthTraceContext, OAuthCallbackResolution, OAuthStateCreate,
     OAuthStateRecord, SessionAuthRuntime,

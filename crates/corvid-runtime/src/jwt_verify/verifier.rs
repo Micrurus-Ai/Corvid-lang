@@ -14,6 +14,20 @@ use crate::auth::JwtVerificationContract;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use std::sync::Arc;
 
+/// Public Corvid guarantee id this verifier enforces:
+/// `auth.jwt_kid_rotation`.
+///
+/// JWT verification fetches the JWKS, picks the key by `kid`,
+/// verifies the signature with `jsonwebtoken`, and rejects tokens
+/// whose `kid` is missing from the current JWKS, whose `alg` does
+/// not match the contract, whose signature fails to verify, whose
+/// `exp` / `iss` / `aud` do not align with the contract, or whose
+/// required `subject` / `tenant` claim is missing. Tagged at module
+/// level (and queryable through `JwtVerifier::guarantee_id`) so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_JWT_KID_ROTATION: &str = "auth.jwt_kid_rotation";
+
 /// Real JWT verifier. Wraps a `JwksFetcher` so production uses
 /// reqwest + cache and tests inject canned keys.
 pub struct JwtVerifier {
@@ -21,6 +35,10 @@ pub struct JwtVerifier {
 }
 
 impl JwtVerifier {
+    pub const fn guarantee_id() -> &'static str {
+        GUARANTEE_ID_JWT_KID_ROTATION
+    }
+
     pub fn new(fetcher: Arc<dyn JwksFetcher>) -> Self {
         Self { fetcher }
     }
