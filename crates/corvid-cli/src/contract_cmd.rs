@@ -257,6 +257,39 @@ mod tests {
         assert_eq!(payload.guarantees.len(), GUARANTEE_REGISTRY.len());
     }
 
+    /// Phase 35V-T1-C sentinel. The serialised JSON payload contains
+    /// every registry id as a literal string. Stronger than the size
+    /// match: a `JsonGuarantee` field rename or a serde
+    /// `#[serde(rename = ...)]` attribute drift would still pass
+    /// `json_payload_matches_registry_size` (count is preserved) but
+    /// would silently change the JSON shape downstream consumers
+    /// parse. This sentinel pins the byte-level surface: every id
+    /// must round-trip into the JSON string.
+    #[test]
+    fn json_payload_contains_every_registry_id() {
+        let rows: Vec<&'static Guarantee> = GUARANTEE_REGISTRY.iter().collect();
+        let json = serde_json::to_string(&JsonPayload {
+            schema_version: 1,
+            count: rows.len(),
+            guarantees: rows.iter().map(|g| JsonGuarantee::from(*g)).collect(),
+        })
+        .expect("serialise");
+        let mut missing: Vec<&'static str> = Vec::new();
+        for g in GUARANTEE_REGISTRY {
+            if !json.contains(g.id) {
+                missing.push(g.id);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "phase 35V-T1-C: registry rows whose id does not appear \
+             in the `corvid contract list --json` payload:\n  - {}\n\n\
+             A JsonGuarantee field-rename or serde-rename drift would \
+             surface here.",
+            missing.join("\n  - ")
+        );
+    }
+
     #[test]
     fn json_payload_emits_out_of_scope_reason_only_for_out_of_scope() {
         let json = serde_json::to_string(&JsonPayload {
