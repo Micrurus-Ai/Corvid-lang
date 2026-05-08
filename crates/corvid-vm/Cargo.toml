@@ -12,6 +12,7 @@ corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-runtime = { workspace = true }
 corvid-trace-schema = { workspace = true }
+corvid-prompt-format = { workspace = true }
 serde_json = { workspace = true }
 async-recursion = "1"
 async-trait = "0.1"

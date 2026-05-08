@@ -845,6 +845,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-prompt-format"
+version = "0.0.1"
+dependencies = [
+ "corvid-ast",
+ "corvid-ir",
+ "corvid-resolve",
+ "corvid-types",
+ "serde_json",
+]
+
+[[package]]
 name = "corvid-repl"
 version = "0.0.1"
 dependencies = [
@@ -992,6 +1003,7 @@ dependencies = [
  "async-trait",
  "corvid-ast",
  "corvid-ir",
+ "corvid-prompt-format",
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",

@@ -11,6 +11,7 @@ members = [
     "crates/corvid-abi",
     "crates/corvid-abi-verify",
     "crates/corvid-ir",
+    "crates/corvid-prompt-format",
     "crates/corvid-vm",
     "crates/corvid-repl",
     "crates/corvid-codegen-py",
@@ -81,6 +82,7 @@ corvid-abi      = { path = "crates/corvid-abi" }
 corvid-abi-verify = { path = "crates/corvid-abi-verify" }
 
 corvid-ir       = { path = "crates/corvid-ir" }
+corvid-prompt-format = { path = "crates/corvid-prompt-format" }
 corvid-vm       = { path = "crates/corvid-vm" }
 corvid-repl     = { path = "crates/corvid-repl" }
 corvid-codegen-py = { path = "crates/corvid-codegen-py" }
