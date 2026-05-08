@@ -1988,6 +1988,81 @@ Maintainers paste the filled-in checklist into the dev-log entry that documents 
 
 A slice that fails any box rolls back to `[ ]`. The `[x]` is a contract, not a wish.
 
+### Phase 35V — Pre-launch verification round
+
+**Goal.** Comprehensive reconciliation of every `[x]` slice in the approaching-launch surface (Phase 35, Phase 36, plus the 38/39/41 audit-correction tracks filed by the 2026-04-29 audit). Every phase-done claim is re-verified by an independent pass that treats the optimistic `[x]` as a *claim to disprove*, not a fact to trust.
+
+**Why this phase exists.** Phase 35 is the v1.0 launch gate; every public claim Corvid will make at launch traces through its 14 slices. None has had an independent verification pass. The 2026-04-29 audit found four phase-done bullets in Phases 38–41 structurally absent — that audit only happened because one was overdue. Phase 35V exists so the next audit doesn't happen *during* launch.
+
+**Detailed plan:** [docs/phase-35V-pre-launch-audit.md](./docs/phase-35V-pre-launch-audit.md) — three-track structure, per-slice verification methodology, drift-found-vs-clean-signal handling, sequencing rules.
+
+**The verifier-correction pattern, applied to the launch surface.** Same shape as Phase 20m's reconciliation of Phase 20l, applied to a wider surface. Each verification slice produces either (a) a *clean-signal sentinel test* that pins the verified property going forward, or (b) a *drift-correction commit* that closes the gap and adds the same sentinel. Phase 35 itself does not reopen; drift is corrected within Phase 35V.
+
+**Sequencing rules:**
+
+- Three tracks run **strictly sequential**, not parallel — discoveries in earlier tracks may shift later work.
+- One slice = one feature, one commit. Validation gate between every commit (`cargo check --workspace` + targeted tests + corpus baseline). Push before next slice.
+- Track 1's clean-signal slices may chain quietly. Any slice that finds drift triggers a pre-phase chat on the corrective approach before code lands.
+- No autonomous chaining across tracks. End of Track 1 → pre-phase chat on Track 2 scope; end of Track 2 → pre-phase chat on Track 3 closer ceremony.
+
+**Slices:**
+
+Track 1 — Phase 35 verification (the launch gate):
+
+- [ ] 35V-T1-A — Verify 35-A registry coverage. Walk every `GUARANTEE_REGISTRY` row; each test ref resolves to a real `fn`.
+- [ ] 35V-T1-B — Verify 35-B diagnostic tagging. Every contract-enforcing diagnostic carries a `guarantee_id`; build-time lint catches an untagged one (verify by mutation).
+- [ ] 35V-T1-C — Verify 35-C `corvid contract list`. JSON output equals registry programmatically; human-readable renders for every kind/class.
+- [ ] 35V-T1-D — Verify 35-D spec generation. Regenerate `docs/core-semantics.md`; bit-compare against committed; mutate registry, verify CI fails.
+- [ ] 35V-T1-E — Verify 35-E test cross-refs. Every `Static` guarantee has ≥1 positive + ≥1 adversarial test ref resolving to real fns.
+- [ ] 35V-T1-F — Verify 35-F ABI fuzz corpus. ≥100 mutants per gate; each rejected with documented exit code; benign mutations round-trip.
+- [ ] 35V-T1-G — Verify 35-G source fuzz corpus. AST mutators cover all four documented attack classes; each fails typecheck with the right `guarantee_id`.
+- [ ] 35V-T1-H — Verify 35-H bilateral verifier independence. `corvid-abi-verify`'s dep tree does NOT transitively include the main pipeline's typechecker; disagreement triggers build rejection.
+- [ ] 35V-T1-I — Verify 35-I `claim --explain` stability. Output stable byte-for-byte across re-runs; references registry rows that exist.
+- [ ] 35V-T1-J — Verify 35-J sign-refusal. Adversarial: declare an unregistered contract; `corvid build --sign` rejects with the right diagnostic id.
+- [ ] 35V-T1-K — Verify 35-K security model. `docs/security-model.md` exists; TCB diagram references real components; threat model maps to registry rows or non-goals; no over-claims.
+- [ ] 35V-T1-L — Verify 35-L README alignment. Every README launch claim has a runnable command; no aspirational wording.
+- [ ] 35V-T1-M — Verify 35-M CI gate. `.github/workflows/*.yml` actually runs fuzz + bilateral verifier + spec drift on every push.
+- [ ] 35V-T1-N — Verify 35-N claim coverage extension. All promoted rows present; `validate_signed_claim_coverage` walks `Decl::Schedule` and `Decl::Server`; adversarial test exists.
+
+Track 2 — Audit-correction completeness (36/38/39/41):
+
+- [ ] 35V-T2-A — Verify 36-K real HTTP runtime. Hand-rolled parser gone; production runtime handles HTTP/1.1 edge cases.
+- [ ] 35V-T2-B — Verify 36-L middleware pipeline. Auth/rate-limit/tracing/CORS/compression/logging/policy run in declared order.
+- [ ] 35V-T2-C — Verify 36-M shutdown/timeout tests. Graceful shutdown + timeout + body-limit + handler-isolation deterministically covered.
+- [ ] 35V-T2-D — Verify 38-K multi-worker job runner. ≥2 workers consume from queue; lease-stealing on worker death exercised.
+- [ ] 35V-T2-E — Verify 38-K SIGKILL crash-recovery. Real `SIGKILL` mid-step; byte-exact resume; no double-spend.
+- [ ] 35V-T2-F — Verify 38-K idempotency under concurrency. 4-concurrent-worker test; same job-key never duplicates side-effects.
+- [ ] 35V-T2-G — Verify 38-M DST-aware cron. Spring-forward + fall-back tested; deterministic firing across DST boundaries.
+- [ ] 35V-T2-H — Verify 39-K real JWT verification. Real JWKS fetch + `kid` resolution + signature verification; rejects forged JWTs.
+- [ ] 35V-T2-I — Verify 39-L `corvid auth` / `corvid approvals` CLI. Top-level subcommands wired; tenant-scoped queue exists.
+- [ ] 35V-T2-J — Verify 41-K connector real-mode CLI. `corvid connectors` exists; real-mode flow is not a stub.
+- [ ] 35V-T2-K — Verify 41-L connector contract drift. Mock ≡ replay ≡ real shared typed surface; mutations break across modes.
+- [ ] 35V-T2-L — Verify 41-M connector approval bypass. Approval requirements survive when called through connector wrapper.
+
+Track 3 — Closer commits:
+
+- [ ] 35V-T3-A — Phase 35 closer. Write `docs/phase-35-defensible-core.md` if absent. `✅ closed` marker. Closing audit. Learnings entries. `memory/project_phase_35_closed.md`. MEMORY.md pointer.
+- [ ] 35V-T3-B — Phase 36 closer. Mirror of T3-A for Phase 36. Includes audit-correction work Track 2 verified.
+- [ ] 35V-T3-C — Phase 38/39/41 audit-correction re-confirmation. Update each phase's audit-correction note in ROADMAP with re-verification status.
+- [ ] 35V-T3-D — Phase 35V closer. `✅ closed` marker. Closing audit. Learnings rollup of cross-slice patterns. `memory/project_phase_35V_closed.md`. MEMORY.md pointer.
+
+**Out-of-scope deferrals:**
+
+- Forward engineering on Phases 37+ stays paused until Phase 35V closes.
+- Phase 33 launch polish (33J/33L/33M) waits for the launch claim to be verified clean.
+- The whoami `__imp_GetUserNameExW` linker fix from Phase 20n stays filed as a separate one-commit slice after Phase 35V closes.
+- Reopening Phase 35 itself — drift is corrected within Phase 35V, not by reopening.
+
+**Phase-done criteria:**
+
+- [ ] Every Track 1 slice (T1-A through T1-N) lands with either a clean-signal sentinel test OR a drift-correction commit.
+- [ ] Every Track 2 slice (T2-A through T2-L) lands with the same shape.
+- [ ] Track 3 closers land for Phase 35 and Phase 36; phase docs written if absent; `learnings.md` updated; memory records written; ROADMAP `✅ closed` markers; MEMORY.md pointers.
+- [ ] Closing audit recorded in `docs/phase-35V-pre-launch-audit.md` with per-slice status (verified-clean / drift-found-and-closed).
+- [ ] Memory record `project_phase_35V_closed.md` summarises every drift found and the verification methodology for future audit rounds.
+
+---
+
 ### Phase 36 — Production backend core (~8-10 weeks)
 
 **Goal.** Corvid can build an always-on HTTP backend without a host framework. A developer should be able to write routes, JSON APIs, middleware, health checks, configuration, secrets, structured logs, graceful shutdown, and deployment-ready binaries in Corvid itself.
