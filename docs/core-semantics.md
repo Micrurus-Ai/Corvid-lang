@@ -21,10 +21,10 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `approval.dangerous_marker_preserved` | approval | out_of_scope | typecheck |
 | `approval.reachable_entrypoints_require_contract` | approval | static | typecheck |
 | `effect_row.body_completeness` | effect_row | static | typecheck |
-| `effect_row.caller_propagation` | effect_row | static | typecheck |
+| `effect_row.caller_propagation` | effect_row | out_of_scope | typecheck |
 | `effect_row.import_boundary` | effect_row | static | resolve |
 | `grounded.provenance_required` | grounded | static | typecheck |
-| `grounded.propagation_across_calls` | grounded | static | typecheck |
+| `grounded.propagation_across_calls` | grounded | out_of_scope | typecheck |
 | `budget.compile_time_ceiling` | budget | static | typecheck |
 | `budget.runtime_termination` | budget | out_of_scope | runtime |
 | `confidence.min_threshold` | confidence | static | typecheck |
@@ -148,18 +148,12 @@ A function's declared effect row must cover every effect actually produced by it
 - `crates/corvid-types/src/tests.rs::mutation_multiple_effects_on_one_tool_compose_cost_and_trust`
 
 #### `effect_row.caller_propagation`
-- **class**: static
+- **class**: out_of_scope
 - **phase**: typecheck
 
 Callers inherit the union of their callees' effects unless they declare a wider row; callers cannot silently shrink the effect surface.
 
-**Positive tests:**
-
-- `crates/corvid-types/src/tests.rs::sub_agent_costs_propagate_into_outer_agent`
-
-**Adversarial tests:**
-
-- `crates/corvid-types/src/tests.rs::mutation_inner_agent_effects_propagate_to_outer_agent`
+> **Why out of scope:** Subsumed by `effect_row.body_completeness` at the diagnostic level. The shipped `analyze_effects` analysis composes effects across calls (`collect_body_effects` walks the body and unions every called tool/prompt/agent's effect row into the composed profile) and fires a single `EffectConstraintViolation` per dimension when the declared row doesn't cover the composed result. The violation message says "dimension X: constraint requires Y, but composed value is Z" without distinguishing whether the offending contribution came from a direct body call or from a transitive callee — the unified analysis treats them identically. The user's mitigation is the same in both cases: widen the declared effect row to cover the composed value. Phase 35V-T1-B (2026-05-08) downgraded this row from `Static` to `OutOfScope` because the analyzer's `ConstraintViolation` struct does not carry a body-vs-callee source field, so there is no discriminable diagnostic site to tag with this id; the property is documentary, the enforcement is via the parent's unified diagnostic. A future slice that extends `ConstraintViolation` with a `source` field plus per-violation discrimination at the firing site would promote this row back to `Static`.
 
 #### `effect_row.import_boundary`
 - **class**: static
@@ -192,19 +186,12 @@ Constructing a `Grounded<T>` value requires citing a source; unsourced `Grounded
 - `crates/corvid-types/src/tests.rs::mutation_grounded_return_without_retrieval_errors`
 
 #### `grounded.propagation_across_calls`
-- **class**: static
+- **class**: out_of_scope
 - **phase**: typecheck
 
 Provenance is preserved across function boundaries — a `Grounded<T>` returned from a callee retains its citation chain into the caller without separate annotation.
 
-**Positive tests:**
-
-- `crates/corvid-types/src/tests.rs::mutation_intermediate_local_preserves_grounded_provenance`
-- `crates/corvid-types/src/tests.rs::mutation_cross_agent_grounded_provenance_flows`
-
-**Adversarial tests:**
-
-- `crates/corvid-types/src/tests.rs::mutation_ungrounded_prompt_inputs_do_not_create_grounded_output`
+> **Why out of scope:** Subsumed by `grounded.provenance_required` at the diagnostic level. The shipped grounded-return analysis fires a single `UngroundedReturn` diagnostic when a function declares a `Grounded<T>` return type but the returned expression's provenance chain is empty. The check is unified: it does not distinguish whether the missing provenance came from a directly-constructed value (parent's framing: provenance must be cited at construction) or from a value flowed across a callee boundary (this row's framing: provenance must be preserved across calls). The user's mitigation is the same in both cases: ensure the returned value carries a non-empty provenance chain. Phase 35V-T1-B (2026-05-08) downgraded this row from `Static` to `OutOfScope` because the analyzer fires one diagnostic for both perspectives; there is no discriminable site to tag separately. The property is documentary; the enforcement is via the parent's unified diagnostic. A future slice that splits the analyzer to distinguish construction-site failures from call-boundary propagation failures would promote this row back to `Static`.
 
 ### Budgets
 

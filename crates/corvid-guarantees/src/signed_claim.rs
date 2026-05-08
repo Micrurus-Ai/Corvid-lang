@@ -38,10 +38,21 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     // test_refs verify.
     "approval.reachable_entrypoints_require_contract",
     "effect_row.body_completeness",
-    "effect_row.caller_propagation",
+    // `effect_row.caller_propagation` removed 2026-05-08 by Phase
+    // 35V-T1-B — downgraded to OutOfScope because the analyzer's
+    // unified `ConstraintViolation` doesn't distinguish
+    // body-internal from callee-contributed violations; the parent
+    // `effect_row.body_completeness` (above) fires a single
+    // diagnostic that enforces both perspectives.
     "effect_row.import_boundary",
     "grounded.provenance_required",
-    "grounded.propagation_across_calls",
+    // `grounded.propagation_across_calls` removed 2026-05-08 by
+    // Phase 35V-T1-B — downgraded to OutOfScope because the
+    // grounded-return analysis fires a single `UngroundedReturn`
+    // diagnostic regardless of whether the missing provenance
+    // came from direct construction or from a callee boundary;
+    // the parent `grounded.provenance_required` (above) covers
+    // both perspectives.
     "budget.compile_time_ceiling",
     "confidence.min_threshold",
     "replay.deterministic_pure_path",
