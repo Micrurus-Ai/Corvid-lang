@@ -4,6 +4,7 @@ use super::llm_dispatch::{
     trace_mock_llm_attempt, using_env_mock_llm,
 };
 use super::*;
+use crate::ffi_bridge::strings::string_from_rust;
 use crate::llm::mock::{bench_mock_dispatch_ns, bench_prompt_wait_ns, env_mock_string_reply_sync};
 use std::time::Instant;
 
@@ -435,4 +436,172 @@ pub unsafe extern "C" fn corvid_prompt_call_string(
         }
         Err(e) => panic!("corvid prompt `{prompt_name}` (model `{model}`): adapter failed: {e}"),
     }
+}
+
+/// Typed prompt-dispatch bridge for `Struct` returns.
+///
+/// Differs from the four scalar bridges in two structural ways:
+///
+/// 1. The "format instruction" is dynamic: the codegen-built JSON
+///    Schema for the struct's shape, passed in as `schema_json`.
+///    Replaces the static `format_instruction_int()` / `_bool()` /
+///    `_float()` strings.
+/// 2. The "parse" step is delegated to a codegen-emitted decoder
+///    function pointer. The decoder takes the LLM's raw response
+///    (a `CorvidString`) and returns a heap-allocated struct
+///    pointer (`i64`) on success, or `0` on parse failure. The
+///    runtime never learns the struct's field layout — that
+///    knowledge lives entirely in the codegen-emitted decoder.
+///
+/// `0` is unambiguously "decoder rejected" because the heap allocator
+/// reserves the null-pointer sentinel and never returns address 0.
+///
+/// Retry semantics match the scalar bridges: up to
+/// `CORVID_PROMPT_MAX_RETRIES` (default 3) attempts, with each retry's
+/// system prompt enriched by the previous failed response. After max
+/// retries with no successful decode, panics with a clear message
+/// including the last LLM response.
+///
+/// # Safety
+///
+/// All `CorvidString` arguments must be valid per the Corvid ABI.
+/// `decoder` must be a valid C function pointer that accepts a
+/// `CorvidString` (read-only borrow, +0 ABI) and returns either `0`
+/// or a valid heap-allocated struct pointer that the caller (the
+/// codegen-emitted agent body) takes ownership of.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_prompt_call_struct(
+    prompt_name: CorvidString,
+    signature: CorvidString,
+    rendered: CorvidString,
+    model: CorvidString,
+    arg_types: CorvidString,
+    argc: i64,
+    args_ptr: i64,
+    schema_json: CorvidString,
+    decoder: extern "C" fn(CorvidString) -> i64,
+) -> i64 {
+    let bridge_start = Instant::now();
+    let prompt_wait_before = bench_prompt_wait_ns();
+    let mock_dispatch_before = bench_mock_dispatch_ns();
+    let prompt_name_ref = unsafe { borrow_corvid_string(&prompt_name) };
+    let rendered_ref = unsafe { borrow_corvid_string(&rendered) };
+    let model_ref = unsafe { borrow_corvid_string(&model) };
+    let arg_tags = unsafe { borrow_corvid_string(&arg_types) };
+    let llm_args = unsafe { crate::native_trace::decode_trace_values(arg_tags, argc, args_ptr) };
+
+    if using_env_mock_llm() {
+        let state = bridge();
+        let max_retries = prompt_max_retries();
+        let mut last_response: Option<String> = None;
+        for _attempt in 0..=max_retries {
+            match env_mock_string_reply_sync(prompt_name_ref) {
+                Some(reply) => {
+                    let reply_text = unsafe { borrow_corvid_string(&reply) }.to_owned();
+                    let ptr = decoder(reply);
+                    if ptr != 0 {
+                        trace_mock_llm_attempt(
+                            state,
+                            prompt_name_ref,
+                            model_ref,
+                            rendered_ref,
+                            &llm_args,
+                            serde_json::Value::String(reply_text),
+                        );
+                        // The decoder borrowed `reply` (+0 ABI) and the
+                        // bridge still owns the +1 refcount minted by
+                        // `env_mock_string_reply_sync`. Release it now
+                        // that the decoder has produced its result.
+                        unsafe { release_string(reply) };
+                        record_json_bridge_ns(
+                            bridge_start,
+                            prompt_wait_before,
+                            mock_dispatch_before,
+                        );
+                        return ptr;
+                    }
+                    trace_mock_llm_attempt(
+                        state,
+                        prompt_name_ref,
+                        model_ref,
+                        rendered_ref,
+                        &llm_args,
+                        serde_json::Value::String(reply_text.clone()),
+                    );
+                    unsafe { release_string(reply) };
+                    last_response = Some(reply_text);
+                }
+                None => break,
+            }
+        }
+        if last_response.is_some() {
+            record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
+            panic!(
+                "corvid prompt `{prompt_name_ref}`: could not decode Struct from env-mock response after {} attempts. Last: {:?}",
+                max_retries + 1,
+                last_response.as_deref().unwrap_or("(none)")
+            );
+        }
+    }
+
+    let state = bridge();
+    let prompt_name = prompt_name_ref.to_owned();
+    let signature = unsafe { read_corvid_string(signature) };
+    let rendered = unsafe { read_corvid_string(rendered) };
+    let model = unsafe { read_corvid_string(model) };
+    let schema = unsafe { read_corvid_string(schema_json) };
+
+    // Dynamic format instruction built once per call. The schema
+    // text fully describes the expected JSON shape; the surrounding
+    // wording matches the scalar bridges' "no Markdown, no code
+    // fence, no explanation" framing so the LLM's behaviour stays
+    // uniform across return types.
+    let format_instr = format!(
+        "Output only a single JSON object matching this JSON Schema. No Markdown, no code fences, no surrounding text or explanation — just the raw JSON object.\n\nSchema:\n{schema}"
+    );
+
+    let max_retries = prompt_max_retries();
+    let mut last_response: Option<String> = None;
+    for attempt in 0..=max_retries {
+        let sys = build_system_prompt(
+            &signature,
+            &format_instr,
+            attempt,
+            last_response.as_deref(),
+        );
+        match call_llm_once(state, &prompt_name, &model, &rendered, &llm_args, &sys) {
+            Err(e) => {
+                if attempt == max_retries {
+                    record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
+                    panic!(
+                        "corvid prompt `{prompt_name}`: adapter failed after {} attempts: {e}",
+                        attempt + 1
+                    );
+                }
+                continue;
+            }
+            Ok(text) => {
+                // Wrap the response in a Corvid String at refcount 1
+                // so the decoder can borrow it via the +0 ABI.
+                let cs_text = string_from_rust(text.clone());
+                let ptr = decoder(cs_text);
+                unsafe { release_string(cs_text) };
+                if ptr != 0 {
+                    record_json_bridge_ns(
+                        bridge_start,
+                        prompt_wait_before,
+                        mock_dispatch_before,
+                    );
+                    return ptr;
+                }
+                last_response = Some(text);
+            }
+        }
+    }
+    record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
+    panic!(
+        "corvid prompt `{prompt_name}`: could not decode Struct from LLM response after {} attempts. Last: {:?}",
+        max_retries + 1,
+        last_response.as_deref().unwrap_or("(none)")
+    );
 }

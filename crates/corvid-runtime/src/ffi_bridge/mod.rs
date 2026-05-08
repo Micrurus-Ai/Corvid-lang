@@ -63,7 +63,7 @@ pub use json_exports::{
 };
 pub use prompt_exports::{
     corvid_prompt_call_bool, corvid_prompt_call_float, corvid_prompt_call_int,
-    corvid_prompt_call_string,
+    corvid_prompt_call_string, corvid_prompt_call_struct,
 };
 pub use replay_exports::{
     corvid_replay_tool_call_bool, corvid_replay_tool_call_float, corvid_replay_tool_call_int,
