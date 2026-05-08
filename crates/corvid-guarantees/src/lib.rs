@@ -339,4 +339,72 @@ mod tests {
             missing.join("\n  - ")
         );
     }
+
+    // ----------------------------------------------------------------
+    // Phase 35V-T1-A clean-signal sentinels.
+    //
+    // The 35V-T1-A verification (2026-05-08) re-checked Phase 35-A's
+    // narrow claim — that the registry is internally well-formed,
+    // every row has the required fields, and every test_ref resolves
+    // to a real fn — and found it clean. The existing tests above
+    // already pin most of that surface. The two sentinels below add
+    // the property gaps the verification surfaced as still-unpinned:
+    // exhaustive class-axis partitioning of the registry (mirror of
+    // `by_kind_partitions_registry`) and a row-count regression
+    // canary against the 2026-05-08 baseline.
+    //
+    // Note: a separate inverse-coverage finding (every Static /
+    // RuntimeChecked id should appear in non-test workspace source)
+    // surfaced 18 unwired ids during the 35V-T1-A run. That belongs
+    // to slice 35V-T1-Drift / 35V-T1-B (35-B's "no anonymous
+    // contract enforcement" claim), not to 35V-T1-A — the registry
+    // itself is well-formed; the gap is downstream tagging. See
+    // `docs/phase-35V-pre-launch-audit.md` for the slice plan.
+    // ----------------------------------------------------------------
+
+    /// Phase 35V-T1-A: every registry row belongs to exactly one
+    /// `GuaranteeClass`. Mirror of `by_kind_partitions_registry`
+    /// for the orthogonal class axis. Catches bugs where a future
+    /// row's class is read incorrectly by `by_class` (filter
+    /// regression) or where an entire class slot drops out of the
+    /// public iter helpers (registry-API regression).
+    #[test]
+    fn by_class_partitions_registry() {
+        let total: usize = GuaranteeClass::ALL
+            .iter()
+            .map(|c| by_class(*c).count())
+            .sum();
+        assert_eq!(
+            total,
+            GUARANTEE_REGISTRY.len(),
+            "every registry row must belong to exactly one class; \
+             by_class partition sum {total} != registry len {}",
+            GUARANTEE_REGISTRY.len()
+        );
+    }
+
+    /// Phase 35V-T1-A row-count canary. Pins the registry size at
+    /// or above the verified-clean baseline so an accidental
+    /// `git rebase` drop or a refactor that elides rows can't
+    /// silently shrink the public guarantee surface. Promotion to
+    /// a higher floor is welcome as the registry grows; the
+    /// floor is monotonically increasing, so this canary doesn't
+    /// fight legitimate adds.
+    ///
+    /// 2026-05-08 baseline: 56 rows (39 Static/RuntimeChecked + 17
+    /// OutOfScope) verified clean for 35-A's internal honesty
+    /// claims by slice 35V-T1-A.
+    #[test]
+    fn registry_row_count_at_or_above_phase_35V_t1_a_baseline() {
+        const BASELINE: usize = 56;
+        assert!(
+            GUARANTEE_REGISTRY.len() >= BASELINE,
+            "registry has {} rows; phase 35V-T1-A 2026-05-08 baseline \
+             is {BASELINE}. Rows being removed unintentionally is the \
+             drift mode this canary catches; if a row is being removed \
+             intentionally (downgrade to private, deprecation), bump the \
+             BASELINE constant in the same commit.",
+            GUARANTEE_REGISTRY.len()
+        );
+    }
 }
