@@ -87,6 +87,24 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub prompt_call_bool: FuncId,
     pub prompt_call_float: FuncId,
     pub prompt_call_string: FuncId,
+    /// Typed prompt-dispatch bridge for `Struct` returns. Takes 9
+    /// args (the standard 7 plus `schema_json: CorvidString` and
+    /// `decoder: extern "C" fn(CorvidString) -> i64`); returns
+    /// `i64` (the heap struct pointer). Codegen emits one decoder
+    /// function per `Type::Struct(def_id)` referenced as a prompt
+    /// return and threads its address through this bridge.
+    pub prompt_call_struct: FuncId,
+    /// Generic JSON parse / build primitives. Used inside codegen-
+    /// emitted per-struct decoder and encoder functions. Runtime
+    /// stays type-agnostic; the language-aware decoding logic lives
+    /// in codegen.
+    pub json_parse: FuncId,
+    pub json_release: FuncId,
+    pub json_field_present: FuncId,
+    pub json_get_field_int: FuncId,
+    pub json_get_field_bool: FuncId,
+    pub json_get_field_float: FuncId,
+    pub json_get_field_str: FuncId,
     pub citation_verify_or_panic: FuncId,
     pub trace_run_started: FuncId,
     pub trace_run_completed_int: FuncId,
@@ -122,6 +140,14 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// refcounted struct allocation references its block via
     /// `corvid_alloc_typed(size, &typeinfo)`.
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
+    /// Per-struct-type JSON-decoder functions. Emitted lazily on
+    /// first reference (a prompt with `Type::Struct(def_id)` return)
+    /// and cached so subsequent prompts returning the same struct
+    /// re-use one decoder. `RefCell` because emission paths hold
+    /// `&RuntimeFuncs` immutably; same pattern as `tool_wrapper_ids`.
+    /// Each decoder has the C-ABI signature `(CorvidString) -> i64`
+    /// (returns the heap struct pointer or `0` on parse failure).
+    pub struct_decoders: std::cell::RefCell<HashMap<DefId, FuncId>>,
     /// Per-concrete-list-type typeinfo data symbols,
     /// keyed by the element `Type` (so `List<Int>` maps on `Type::Int`,
     /// `List<List<String>>` maps on `Type::List(Box::new(Type::String))`).

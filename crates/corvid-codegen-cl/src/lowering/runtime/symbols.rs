@@ -110,6 +110,26 @@ pub(in crate::lowering) const PROMPT_CALL_INT_SYMBOL: &str = "corvid_prompt_call
 pub(in crate::lowering) const PROMPT_CALL_BOOL_SYMBOL: &str = "corvid_prompt_call_bool";
 pub(in crate::lowering) const PROMPT_CALL_FLOAT_SYMBOL: &str = "corvid_prompt_call_float";
 pub(in crate::lowering) const PROMPT_CALL_STRING_SYMBOL: &str = "corvid_prompt_call_string";
+/// Typed prompt-dispatch bridge for `Struct` returns. Two extra
+/// args versus the scalar bridges:
+///   8: schema_json (CorvidString) — the codegen-built JSON Schema
+///      describing the expected response shape.
+///   9: decoder (function pointer) — `extern "C" fn(CorvidString) -> i64`
+///      generated per struct type by `lowering::struct_decode`.
+/// Returns the heap-allocated struct pointer (i64) on success;
+/// the bridge panics on max-retries-exhausted.
+pub(in crate::lowering) const PROMPT_CALL_STRUCT_SYMBOL: &str = "corvid_prompt_call_struct";
+
+// Generic JSON parse / build primitives used by codegen-emitted
+// per-struct decoders and encoders. Type-agnostic at the C ABI
+// boundary — runtime never learns the language's `Type::Struct`.
+pub(in crate::lowering) const JSON_PARSE_SYMBOL: &str = "corvid_json_parse";
+pub(in crate::lowering) const JSON_RELEASE_SYMBOL: &str = "corvid_json_release";
+pub(in crate::lowering) const JSON_FIELD_PRESENT_SYMBOL: &str = "corvid_json_field_present";
+pub(in crate::lowering) const JSON_GET_FIELD_INT_SYMBOL: &str = "corvid_json_get_field_int";
+pub(in crate::lowering) const JSON_GET_FIELD_BOOL_SYMBOL: &str = "corvid_json_get_field_bool";
+pub(in crate::lowering) const JSON_GET_FIELD_FLOAT_SYMBOL: &str = "corvid_json_get_field_float";
+pub(in crate::lowering) const JSON_GET_FIELD_STR_SYMBOL: &str = "corvid_json_get_field_str";
 pub(in crate::lowering) const CITATION_VERIFY_OR_PANIC_SYMBOL: &str =
     "corvid_citation_verify_or_panic";
 pub(in crate::lowering) const APPROVE_SYNC_SYMBOL: &str = "corvid_approve_sync";

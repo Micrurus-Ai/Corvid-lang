@@ -17,6 +17,7 @@ corvid-abi      = { workspace = true }
 # Rlib side effect on this crate is ignorable; codegen-cl doesn't use
 # corvid-runtime's Rust surface, only its staticlib artifact.
 corvid-runtime  = { workspace = true }
+corvid-prompt-format = { workspace = true }
 
 cranelift-codegen  = "0.116"
 cranelift-frontend = "0.116"
@@ -27,6 +28,12 @@ target-lexicon     = "0.13"
 cc = "1"
 anyhow = { workspace = true }
 tempfile = "3"
+# Schema serialisation for prompt struct returns. The codegen calls
+# `corvid_prompt_format::schema_for` to build a `serde_json::Value`,
+# then `serde_json::to_string` to embed the compact-JSON schema in
+# the binary. corvid-runtime pulls serde_json in transitively but
+# we depend on it explicitly so the lowering path can reach it.
+serde_json    = { workspace = true }
 
 [dev-dependencies]
 corvid-syntax = { workspace = true }
@@ -35,10 +42,6 @@ tokio         = { workspace = true }
 criterion     = "0.5"
 corvid-c-header = { workspace = true }
 libloading = "0.8"
-# Used by the native tool-call parity fixtures to construct mock-tool return values
-# (`serde_json::json!`). corvid-runtime already pulls it in transitively
-# but we depend on it explicitly so the `json!` macro is reachable.
-serde_json    = { workspace = true }
 corvid-trace-schema = { workspace = true }
 
 [[bench]]

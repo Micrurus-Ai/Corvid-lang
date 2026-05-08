@@ -41,6 +41,8 @@ mod stmt;
 use stmt::*;
 mod prompt;
 use prompt::*;
+mod struct_decode;
+use struct_decode::*;
 mod agent;
 use agent::*;
 mod entry;

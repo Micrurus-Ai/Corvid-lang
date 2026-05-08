@@ -679,6 +679,7 @@ dependencies = [
  "corvid-ast",
  "corvid-c-header",
  "corvid-ir",
+ "corvid-prompt-format",
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",

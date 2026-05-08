@@ -715,6 +715,111 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare prompt_call_string: {e}"), Span::new(0, 0))
         })?;
 
+    // Struct prompt bridge: 9 params (the standard 7 + schema_json + decoder),
+    // returns i64 (the heap struct pointer).
+    let mut prompt_struct_sig = module.make_signature();
+    for _ in 0..9 {
+        prompt_struct_sig.params.push(AbiParam::new(I64));
+    }
+    prompt_struct_sig.returns.push(AbiParam::new(I64));
+    let prompt_call_struct_id = module
+        .declare_function(
+            PROMPT_CALL_STRUCT_SYMBOL,
+            Linkage::Import,
+            &prompt_struct_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare prompt_call_struct: {e}"), Span::new(0, 0))
+        })?;
+
+    // Generic JSON parse / build primitives. All take CorvidString
+    // descriptors as i64 pointers; field-name accessors take
+    // (handle: i64, name: i64) and return the field's typed value.
+    let mut json_parse_sig = module.make_signature();
+    json_parse_sig.params.push(AbiParam::new(I64));
+    json_parse_sig.returns.push(AbiParam::new(I64));
+    let json_parse_id = module
+        .declare_function(JSON_PARSE_SYMBOL, Linkage::Import, &json_parse_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_parse: {e}"), Span::new(0, 0)))?;
+
+    let mut json_release_sig = module.make_signature();
+    json_release_sig.params.push(AbiParam::new(I64));
+    let json_release_id = module
+        .declare_function(JSON_RELEASE_SYMBOL, Linkage::Import, &json_release_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_release: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_field_present_sig = module.make_signature();
+    json_field_present_sig.params.push(AbiParam::new(I64));
+    json_field_present_sig.params.push(AbiParam::new(I64));
+    json_field_present_sig.returns.push(AbiParam::new(I32));
+    let json_field_present_id = module
+        .declare_function(
+            JSON_FIELD_PRESENT_SYMBOL,
+            Linkage::Import,
+            &json_field_present_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_field_present: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_get_int_sig = module.make_signature();
+    json_get_int_sig.params.push(AbiParam::new(I64));
+    json_get_int_sig.params.push(AbiParam::new(I64));
+    json_get_int_sig.returns.push(AbiParam::new(I64));
+    let json_get_field_int_id = module
+        .declare_function(
+            JSON_GET_FIELD_INT_SYMBOL,
+            Linkage::Import,
+            &json_get_int_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_get_field_int: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_get_bool_sig = module.make_signature();
+    json_get_bool_sig.params.push(AbiParam::new(I64));
+    json_get_bool_sig.params.push(AbiParam::new(I64));
+    json_get_bool_sig.returns.push(AbiParam::new(I32));
+    let json_get_field_bool_id = module
+        .declare_function(
+            JSON_GET_FIELD_BOOL_SYMBOL,
+            Linkage::Import,
+            &json_get_bool_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_get_field_bool: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_get_float_sig = module.make_signature();
+    json_get_float_sig.params.push(AbiParam::new(I64));
+    json_get_float_sig.params.push(AbiParam::new(I64));
+    json_get_float_sig.returns.push(AbiParam::new(F64));
+    let json_get_field_float_id = module
+        .declare_function(
+            JSON_GET_FIELD_FLOAT_SYMBOL,
+            Linkage::Import,
+            &json_get_float_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_get_field_float: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_get_str_sig = module.make_signature();
+    json_get_str_sig.params.push(AbiParam::new(I64));
+    json_get_str_sig.params.push(AbiParam::new(I64));
+    json_get_str_sig.returns.push(AbiParam::new(I64));
+    let json_get_field_str_id = module
+        .declare_function(
+            JSON_GET_FIELD_STR_SYMBOL,
+            Linkage::Import,
+            &json_get_str_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_get_field_str: {e}"), Span::new(0, 0))
+        })?;
+
     let mut citation_verify_sig = module.make_signature();
     citation_verify_sig.params.push(AbiParam::new(I64));
     citation_verify_sig.params.push(AbiParam::new(I64));
@@ -970,6 +1075,14 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         prompt_call_bool: prompt_call_bool_id,
         prompt_call_float: prompt_call_float_id,
         prompt_call_string: prompt_call_string_id,
+        prompt_call_struct: prompt_call_struct_id,
+        json_parse: json_parse_id,
+        json_release: json_release_id,
+        json_field_present: json_field_present_id,
+        json_get_field_int: json_get_field_int_id,
+        json_get_field_bool: json_get_field_bool_id,
+        json_get_field_float: json_get_field_float_id,
+        json_get_field_str: json_get_field_str_id,
         citation_verify_or_panic: citation_verify_or_panic_id,
         trace_run_started: trace_run_started_id,
         trace_run_completed_int: trace_run_completed_int_id,
@@ -999,6 +1112,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         struct_destructors: HashMap::new(),
         struct_traces: HashMap::new(),
         struct_typeinfos: HashMap::new(),
+        struct_decoders: std::cell::RefCell::new(HashMap::new()),
         list_typeinfos: HashMap::new(),
         result_destructors: HashMap::new(),
         result_traces: HashMap::new(),

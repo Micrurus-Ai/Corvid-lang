@@ -360,36 +360,97 @@ pub(super) fn lower_prompt_call(
         Type::Grounded(inner) => inner.as_ref(),
         other => other,
     };
-    let bridge_id = match bridge_return_ty {
-        Type::Int => runtime.prompt_call_int,
-        Type::Bool => runtime.prompt_call_bool,
-        Type::Float => runtime.prompt_call_float,
-        Type::String => runtime.prompt_call_string,
+    // Build the call. Scalar returns use the four typed bridges with
+    // 7 args. Struct returns use `corvid_prompt_call_struct` with 9
+    // args (the standard 7 plus `schema_json` and a per-struct
+    // decoder function pointer); the language-aware decoding logic
+    // lives in `crate::lowering::struct_decode`, runtime stays
+    // type-agnostic.
+    let call = match bridge_return_ty {
+        Type::Int | Type::Bool | Type::Float | Type::String => {
+            let bridge_id = match bridge_return_ty {
+                Type::Int => runtime.prompt_call_int,
+                Type::Bool => runtime.prompt_call_bool,
+                Type::Float => runtime.prompt_call_float,
+                Type::String => runtime.prompt_call_string,
+                _ => unreachable!("guarded by outer match arm"),
+            };
+            let fref = module.declare_func_in_func(bridge_id, builder.func);
+            builder.ins().call(
+                fref,
+                &[
+                    prompt_name_val,
+                    signature_val,
+                    rendered,
+                    model_val,
+                    trace_payload.type_tags,
+                    trace_payload.count,
+                    trace_payload.values_ptr,
+                ],
+            )
+        }
+        Type::Struct(def_id) => {
+            // Build the JSON Schema for the struct's shape. The
+            // schema generator from `corvid-prompt-format` walks
+            // `Type::Struct` recursively, inlining nested struct
+            // schemas. We embed the schema as a compact JSON
+            // string in the call site's `.rodata` so the runtime
+            // bridge can splice it into the system prompt.
+            let types_by_id: std::collections::HashMap<DefId, &corvid_ir::IrType> =
+                runtime.ir_types.iter().map(|(k, v)| (*k, v)).collect();
+            let schema_value =
+                corvid_prompt_format::schema_for(bridge_return_ty, &types_by_id);
+            let schema_text = serde_json::to_string(&schema_value).map_err(|e| {
+                CodegenError::cranelift(
+                    format!(
+                        "failed to serialise schema for prompt `{callee_name}` return: {e}"
+                    ),
+                    span,
+                )
+            })?;
+            let schema_val = emit_string_const(builder, module, runtime, &schema_text, span)?;
+
+            // Look up or emit the per-struct JSON decoder. Cached
+            // by `DefId` so repeated prompt returns of the same
+            // struct re-use one decoder.
+            let decoder_fid =
+                lookup_or_emit_struct_decoder(module, runtime, *def_id, span)?;
+            let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
+            let decoder_addr = builder.ins().func_addr(I64, decoder_ref);
+
+            let bridge_ref =
+                module.declare_func_in_func(runtime.prompt_call_struct, builder.func);
+            let result = builder.ins().call(
+                bridge_ref,
+                &[
+                    prompt_name_val,
+                    signature_val,
+                    rendered,
+                    model_val,
+                    trace_payload.type_tags,
+                    trace_payload.count,
+                    trace_payload.values_ptr,
+                    schema_val,
+                    decoder_addr,
+                ],
+            );
+            // The schema literal is `.rodata` (immortal refcount
+            // sentinel — `release_string` is a no-op for it), so
+            // we don't need to track it for an explicit release
+            // here. Same convention all four scalar bridges use
+            // for their static format-instruction strings.
+            result
+        }
         other => {
             return Err(CodegenError::not_supported(
                 format!(
-                    "prompt `{callee_name}` returns `{}` — the native prompt bridge currently supports only Int / Bool / Float / String returns; structured prompt returns are not implemented yet",
+                    "prompt `{callee_name}` returns `{}` — the native prompt bridge supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `ImportedStruct` requires the cross-file native layout work tracked separately, and `List` / `Result` / `Option` / `Stream` returns each need their own decoder primitives",
                     other.display_name()
                 ),
                 span,
             ));
         }
     };
-    let fref = module.declare_func_in_func(bridge_id, builder.func);
-    let call = builder
-        .ins()
-        .call(
-            fref,
-            &[
-                prompt_name_val,
-                signature_val,
-                rendered,
-                model_val,
-                trace_payload.type_tags,
-                trace_payload.count,
-                trace_payload.values_ptr,
-            ],
-        );
     let result_vals: Vec<ClValue> =
         builder.inst_results(call).iter().copied().collect();
 
