@@ -45,6 +45,7 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod approval_exports;
+mod json_exports;
 mod llm_dispatch;
 mod prompt_exports;
 mod replay_exports;
@@ -53,6 +54,13 @@ mod strings;
 mod tokio_handle;
 mod tool_iter;
 pub use approval_exports::{corvid_approve_sync, corvid_citation_verify_or_panic};
+pub use json_exports::{
+    corvid_json_field_present, corvid_json_get_field_bool, corvid_json_get_field_float,
+    corvid_json_get_field_int, corvid_json_get_field_str, corvid_json_object_finish,
+    corvid_json_object_new, corvid_json_object_set_bool, corvid_json_object_set_float,
+    corvid_json_object_set_int, corvid_json_object_set_str, corvid_json_parse,
+    corvid_json_release,
+};
 pub use prompt_exports::{
     corvid_prompt_call_bool, corvid_prompt_call_float, corvid_prompt_call_int,
     corvid_prompt_call_string,
