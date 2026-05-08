@@ -7,6 +7,21 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// Public Corvid guarantee id this runtime enforces:
+/// `connector.replay_quarantine`.
+///
+/// A connector running in replay mode must not perform provider
+/// writes. The runtime returns
+/// `ConnectorRuntimeError::ReplayWriteQuarantined` for any scope
+/// whose effects include a `*.write` or `send_*` effect when the
+/// active mode is `Replay`, regardless of whether a real client is
+/// bound. Read-shaped operations still complete from the recorded
+/// cassette so deterministic replay continues to work. Tagged at
+/// module level so the `corvid-guarantees` inverse-coverage
+/// sentinel can confirm the enforcement site is wired to the
+/// registry row.
+pub const GUARANTEE_ID_REPLAY_QUARANTINE: &str = "connector.replay_quarantine";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectorRuntimeMode {
     Mock,

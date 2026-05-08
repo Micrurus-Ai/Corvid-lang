@@ -24,6 +24,23 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 
+/// Public Corvid guarantee id this webhook verifier enforces:
+/// `connector.webhook_signature_verified`.
+///
+/// Inbound webhook payloads from Slack, GitHub, and Linear are
+/// HMAC-SHA256 verified against the manifest's shared secret
+/// before any handler runs. Per-provider schemes are honored:
+/// GitHub uses `X-Hub-Signature-256: sha256=<hex>`, Slack uses
+/// `v0:<ts>:<body>` with a 5-minute replay window, and Linear
+/// uses a bare hex digest. Comparison is constant-time. A
+/// malformed header, mismatched digest, or stale Slack timestamp
+/// returns a categorical `WebhookVerificationOutcome` that the
+/// dispatcher must reject before any side effect. Tagged at
+/// module level so the `corvid-guarantees` inverse-coverage
+/// sentinel can confirm the enforcement site is wired to the
+/// registry row.
+pub const GUARANTEE_ID_WEBHOOK_SIGNATURE_VERIFIED: &str = "connector.webhook_signature_verified";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebhookProvider {
     GitHub,
