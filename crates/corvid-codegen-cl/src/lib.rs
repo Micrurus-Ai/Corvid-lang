@@ -116,13 +116,16 @@ pub fn build_native_to_disk(
             ));
         }
     }
-    if matches!(
-        &entry.return_ty,
-        corvid_types::Type::Struct(_) | corvid_types::Type::List(_)
-    ) {
+    // `Type::Struct(_)` is now accepted at the entry-return
+    // boundary as of Phase 20n-C commit 5; the codegen-emitted main
+    // calls a per-struct JSON encoder (`crate::lowering::struct_encode`)
+    // and prints the result via `print_string`. `Type::List(_)`
+    // returns still need their own encoder primitives and are filed
+    // as a follow-up slice.
+    if matches!(&entry.return_ty, corvid_types::Type::List(_)) {
         return Err(CodegenError::not_supported(
             format!(
-                "entry agent `{}` returns `{}` — the native command-line boundary currently supports only Int/Bool/Float/String returns; structured output needs a dedicated serialization layer",
+                "entry agent `{}` returns `{}` - the native command-line boundary supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `List` returns need their own dedicated encoder primitives and are tracked as a follow-up slice",
                 entry.name,
                 entry.return_ty.display_name()
             ),

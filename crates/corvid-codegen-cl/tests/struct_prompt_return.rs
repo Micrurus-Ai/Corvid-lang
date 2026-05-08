@@ -157,6 +157,77 @@ fn native_prompt_struct_return_decodes_all_scalar_fields() {
 }
 
 #[test]
+fn native_entry_struct_return_prints_full_json() {
+    // Phase 20n-C commit 5: the entry-boundary now accepts
+    // `Type::Struct(_)` returns. The agent declares its return as
+    // `Decision`, the binary's `main` calls the per-struct
+    // `corvid_<Name>__<DefId>_to_json` encoder on the agent's
+    // return value, and prints the resulting JSON via
+    // `print_string`. The encoder iterates fields in source order
+    // matching `IrType.fields`, so stdout should reflect the
+    // declaration order: code, confidence, approved, reason.
+    let _ = test_tools_lib_path();
+
+    // Re-declare the source with an entry agent that returns the
+    // struct directly, exercising the entry-boundary lift.
+    let entry_struct_src = r#"
+type Decision:
+    code: Int
+    confidence: Float
+    approved: Bool
+    reason: String
+
+prompt classify(amount: Int) -> Decision:
+    """Classify amount {amount}"""
+
+agent run(amount: Int) -> Decision:
+    return classify(amount)
+"#;
+    let ir = ir_of(entry_struct_src);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bin_path = tmp.path().join("entry_struct_return");
+    let produced = build_native_to_disk(
+        &ir,
+        "entry_struct_return",
+        &bin_path,
+        &[test_tools_lib_path().as_path()],
+    )
+    .expect("compile native binary");
+
+    let mock_reply =
+        r#"{"code":13,"confidence":0.42,"approved":false,"reason":"declined"}"#;
+    let mock_replies_json = serde_json::json!({ "classify": [mock_reply] }).to_string();
+
+    let output = Command::new(&produced)
+        .arg("100")
+        .env("CORVID_TEST_MOCK_LLM", "1")
+        .env("CORVID_TEST_MOCK_LLM_REPLIES", mock_replies_json)
+        .env("CORVID_MODEL", "mock-1")
+        .output()
+        .expect("run native binary");
+
+    assert!(
+        output.status.success(),
+        "native run failed: status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Stdout should be the JSON object built by the encoder, in
+    // source-declaration field order, plus print_string's trailing
+    // newline.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_trimmed = stdout.trim();
+    let expected = r#"{"code":13,"confidence":0.42,"approved":false,"reason":"declined"}"#;
+    assert_eq!(
+        stdout_trimmed, expected,
+        "entry struct print should match the source-order JSON encoding; got: {stdout_trimmed:?}",
+    );
+}
+
+#[test]
 fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     let _ = test_tools_lib_path();
 

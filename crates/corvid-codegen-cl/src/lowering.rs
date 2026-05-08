@@ -43,6 +43,8 @@ mod prompt;
 use prompt::*;
 mod struct_decode;
 use struct_decode::*;
+mod struct_encode;
+use struct_encode::*;
 mod agent;
 use agent::*;
 mod entry;

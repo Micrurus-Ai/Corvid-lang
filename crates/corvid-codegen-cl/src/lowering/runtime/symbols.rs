@@ -130,6 +130,17 @@ pub(in crate::lowering) const JSON_GET_FIELD_INT_SYMBOL: &str = "corvid_json_get
 pub(in crate::lowering) const JSON_GET_FIELD_BOOL_SYMBOL: &str = "corvid_json_get_field_bool";
 pub(in crate::lowering) const JSON_GET_FIELD_FLOAT_SYMBOL: &str = "corvid_json_get_field_float";
 pub(in crate::lowering) const JSON_GET_FIELD_STR_SYMBOL: &str = "corvid_json_get_field_str";
+
+// JSON-object build-side primitives. Codegen-emitted per-struct
+// `to_json` encoders use these to assemble a JSON object from a
+// heap-allocated struct's field bytes, preserving source-order
+// field iteration.
+pub(in crate::lowering) const JSON_OBJECT_NEW_SYMBOL: &str = "corvid_json_object_new";
+pub(in crate::lowering) const JSON_OBJECT_SET_INT_SYMBOL: &str = "corvid_json_object_set_int";
+pub(in crate::lowering) const JSON_OBJECT_SET_BOOL_SYMBOL: &str = "corvid_json_object_set_bool";
+pub(in crate::lowering) const JSON_OBJECT_SET_FLOAT_SYMBOL: &str = "corvid_json_object_set_float";
+pub(in crate::lowering) const JSON_OBJECT_SET_STR_SYMBOL: &str = "corvid_json_object_set_str";
+pub(in crate::lowering) const JSON_OBJECT_FINISH_SYMBOL: &str = "corvid_json_object_finish";
 pub(in crate::lowering) const CITATION_VERIFY_OR_PANIC_SYMBOL: &str =
     "corvid_citation_verify_or_panic";
 pub(in crate::lowering) const APPROVE_SYNC_SYMBOL: &str = "corvid_approve_sync";

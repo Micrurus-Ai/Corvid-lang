@@ -294,7 +294,8 @@ pub(super) fn emit_entry_main(
                 runtime,
                 &entry_agent.return_ty,
                 result_val,
-            );
+                entry_agent.span,
+            )?;
         }
         builder.ins().jump(bench_check_b, &[]);
         builder.seal_block(bench_body_b);
@@ -375,7 +376,8 @@ pub(super) fn emit_entry_main(
                 runtime,
                 &entry_agent.return_ty,
                 result_val,
-            );
+                entry_agent.span,
+            )?;
         }
         let zero = builder.ins().iconst(I32, 0);
         builder.ins().return_(&[zero]);
@@ -391,19 +393,29 @@ pub(super) fn emit_entry_main(
     Ok(())
 }
 
-/// Validate that a type is one of the four supported at the
-/// command-line / stdout boundary. Struct and List need a
-/// dedicated serialization layer; Nothing isn't a sensible
-/// CLI value either.
+/// Validate that a type is supported at the command-line / stdout
+/// boundary. `Int` / `Bool` / `Float` / `String` print directly via
+/// the typed scalar printers. `Struct` prints as JSON via a per-
+/// struct encoder emitted by `crate::lowering::struct_encode`. List,
+/// Result, Option, Weak, Stream, Partial, ResumeToken, RouteParams,
+/// and ImportedStruct each need their own dedicated serialization
+/// paths and are filed as later slices.
 fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), CodegenError> {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),
-        Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Nothing
-        | Type::Result(_, _) | Type::Option(_) | Type::Weak(_, _) | Type::Stream(_)
-        | Type::Partial(_) | Type::ResumeToken(_) | Type::RouteParams(_) => {
+        Type::Struct(_) => Ok(()),
+        Type::ImportedStruct(_) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - `ImportedStruct` requires the cross-file native layout work tracked separately as the lang-cor-imports-basic driver-integration slice; declare a file-local struct alias and convert internally for now",
+                ty.display_name()
+            ),
+            span,
+        )),
+        Type::List(_) | Type::Nothing | Type::Result(_, _) | Type::Option(_) | Type::Weak(_, _)
+        | Type::Stream(_) | Type::Partial(_) | Type::ResumeToken(_) | Type::RouteParams(_) => {
             Err(CodegenError::not_supported(
                 format!(
-                    "entry agent {role} of type `{}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the native command-line boundary currently supports only `Int` / `Bool` / `Float` / `String`; structured types (including Result, Option, and Weak) need a dedicated serialization layer (use a wrapper agent that converts internally)",
+                    "entry agent {role} of type `{}` - the native command-line boundary supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `List`, `Result`, `Option`, `Weak`, `Stream`, `Partial`, `ResumeToken`, and `RouteParams` each need their own dedicated serialization paths (use a wrapper agent that converts internally for now)",
                     ty.display_name()
                 ),
                 span,
@@ -429,7 +441,8 @@ fn emit_entry_result_print(
     runtime: &RuntimeFuncs,
     return_ty: &Type,
     result_val: ClValue,
-) {
+    span: Span,
+) -> Result<(), CodegenError> {
     match return_ty {
         Type::Int => {
             let r = module.declare_func_in_func(runtime.print_i64, builder.func);
@@ -450,9 +463,27 @@ fn emit_entry_result_print(
             builder.ins().call(r, &[result_val]);
             emit_release(builder, module, runtime, result_val);
         }
+        Type::Struct(def_id) => {
+            // Hand the struct pointer to the per-struct encoder
+            // (cached by `def_id`); print the resulting JSON string
+            // via the existing `print_string` path; release both
+            // the JSON string (refcount 1, fresh from
+            // `corvid_json_object_finish`) and the struct itself
+            // (the entry agent's owning return).
+            let to_json_fid = lookup_or_emit_struct_to_json(module, runtime, *def_id, span)?;
+            let to_json_ref = module.declare_func_in_func(to_json_fid, builder.func);
+            let call = builder.ins().call(to_json_ref, &[result_val]);
+            let json_str = builder.inst_results(call)[0];
+            builder.declare_value_needs_stack_map(json_str);
+            let print_ref = module.declare_func_in_func(runtime.print_string, builder.func);
+            builder.ins().call(print_ref, &[json_str]);
+            emit_release(builder, module, runtime, json_str);
+            emit_release(builder, module, runtime, result_val);
+        }
         Type::Grounded(inner) => {
-            emit_entry_result_print(builder, module, runtime, inner, result_val);
+            emit_entry_result_print(builder, module, runtime, inner, result_val, span)?;
         }
         _ => unreachable!("boundary check rejected non-printable returns"),
     }
+    Ok(())
 }

@@ -820,6 +820,87 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare json_get_field_str: {e}"), Span::new(0, 0))
         })?;
 
+    // JSON-object build-side primitives. Each `set_*` takes (handle,
+    // name, value); `_new` returns a fresh handle; `_finish` returns
+    // a CorvidString with refcount 1 and removes the builder from
+    // the runtime's store.
+    let mut json_object_new_sig = module.make_signature();
+    json_object_new_sig.returns.push(AbiParam::new(I64));
+    let json_object_new_id = module
+        .declare_function(JSON_OBJECT_NEW_SYMBOL, Linkage::Import, &json_object_new_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_new: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_object_set_int_sig = module.make_signature();
+    json_object_set_int_sig.params.push(AbiParam::new(I64));
+    json_object_set_int_sig.params.push(AbiParam::new(I64));
+    json_object_set_int_sig.params.push(AbiParam::new(I64));
+    let json_object_set_int_id = module
+        .declare_function(
+            JSON_OBJECT_SET_INT_SYMBOL,
+            Linkage::Import,
+            &json_object_set_int_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_set_int: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_object_set_bool_sig = module.make_signature();
+    json_object_set_bool_sig.params.push(AbiParam::new(I64));
+    json_object_set_bool_sig.params.push(AbiParam::new(I64));
+    json_object_set_bool_sig.params.push(AbiParam::new(I32));
+    let json_object_set_bool_id = module
+        .declare_function(
+            JSON_OBJECT_SET_BOOL_SYMBOL,
+            Linkage::Import,
+            &json_object_set_bool_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_set_bool: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_object_set_float_sig = module.make_signature();
+    json_object_set_float_sig.params.push(AbiParam::new(I64));
+    json_object_set_float_sig.params.push(AbiParam::new(I64));
+    json_object_set_float_sig.params.push(AbiParam::new(F64));
+    let json_object_set_float_id = module
+        .declare_function(
+            JSON_OBJECT_SET_FLOAT_SYMBOL,
+            Linkage::Import,
+            &json_object_set_float_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_set_float: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_object_set_str_sig = module.make_signature();
+    json_object_set_str_sig.params.push(AbiParam::new(I64));
+    json_object_set_str_sig.params.push(AbiParam::new(I64));
+    json_object_set_str_sig.params.push(AbiParam::new(I64));
+    let json_object_set_str_id = module
+        .declare_function(
+            JSON_OBJECT_SET_STR_SYMBOL,
+            Linkage::Import,
+            &json_object_set_str_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_set_str: {e}"), Span::new(0, 0))
+        })?;
+
+    let mut json_object_finish_sig = module.make_signature();
+    json_object_finish_sig.params.push(AbiParam::new(I64));
+    json_object_finish_sig.returns.push(AbiParam::new(I64));
+    let json_object_finish_id = module
+        .declare_function(
+            JSON_OBJECT_FINISH_SYMBOL,
+            Linkage::Import,
+            &json_object_finish_sig,
+        )
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare json_object_finish: {e}"), Span::new(0, 0))
+        })?;
+
     let mut citation_verify_sig = module.make_signature();
     citation_verify_sig.params.push(AbiParam::new(I64));
     citation_verify_sig.params.push(AbiParam::new(I64));
@@ -1083,6 +1164,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         json_get_field_bool: json_get_field_bool_id,
         json_get_field_float: json_get_field_float_id,
         json_get_field_str: json_get_field_str_id,
+        json_object_new: json_object_new_id,
+        json_object_set_int: json_object_set_int_id,
+        json_object_set_bool: json_object_set_bool_id,
+        json_object_set_float: json_object_set_float_id,
+        json_object_set_str: json_object_set_str_id,
+        json_object_finish: json_object_finish_id,
         citation_verify_or_panic: citation_verify_or_panic_id,
         trace_run_started: trace_run_started_id,
         trace_run_completed_int: trace_run_completed_int_id,
@@ -1113,6 +1200,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         struct_traces: HashMap::new(),
         struct_typeinfos: HashMap::new(),
         struct_decoders: std::cell::RefCell::new(HashMap::new()),
+        struct_to_json: std::cell::RefCell::new(HashMap::new()),
         list_typeinfos: HashMap::new(),
         result_destructors: HashMap::new(),
         result_traces: HashMap::new(),
