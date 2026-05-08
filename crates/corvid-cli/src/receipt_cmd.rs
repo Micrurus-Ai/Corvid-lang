@@ -19,6 +19,40 @@ use corvid_abi::{
     CORVID_ABI_ATTESTATION_PAYLOAD_TYPE, CORVID_ABI_ATTESTATION_SYMBOL,
 };
 
+/// Public Corvid guarantee ids this `corvid receipt` family
+/// enforces. Three contract surfaces all rooted in the same DSSE
+/// envelope verification path implemented below:
+///
+/// - `replay.trace_signature`: trace receipts produced with
+///   `--sign` carry a DSSE envelope whose signature
+///   `corvid receipt verify` checks against the supplied
+///   verifying key.
+/// - `provenance_trace.receipt_signature`: `corvid receipt verify`
+///   rejects any DSSE-wrapped receipt whose signature does not
+///   validate, with a non-zero exit and the documented
+///   `verification failed` message.
+/// - `abi_attestation.absent_reports_unsigned`: `corvid receipt
+///   verify-abi` on a cdylib lacking the
+///   `CORVID_ABI_ATTESTATION` symbol exits 2 with the documented
+///   `unsigned` message, leaving the host policy to decide
+///   whether to accept it.
+///
+/// `#[allow(dead_code)]`: corvid-cli is a binary-only crate, so
+/// `pub` doesn't surface these constants externally. They are
+/// deliberately preserved as in-binary anchors for the
+/// inverse-coverage sentinel in `corvid-guarantees` to find via
+/// grep on non-test workspace source.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_REPLAY_TRACE_SIGNATURE: &str = "replay.trace_signature";
+
+#[allow(dead_code)]
+pub const GUARANTEE_ID_PROVENANCE_RECEIPT_SIGNATURE: &str =
+    "provenance_trace.receipt_signature";
+
+#[allow(dead_code)]
+pub const GUARANTEE_ID_ATTESTATION_ABSENT_REPORTS_UNSIGNED: &str =
+    "abi_attestation.absent_reports_unsigned";
+
 /// `corvid receipt show <hash>` — resolve a receipt in the local
 /// cache by its SHA-256 hash (or a unique prefix of at least 8
 /// characters) and print the canonical JSON to stdout.
