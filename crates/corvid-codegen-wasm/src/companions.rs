@@ -66,6 +66,16 @@ fn ts_type(ty: &Type) -> Result<&'static str, WasmCodegenError> {
         Type::Float => Ok("number"),
         Type::Bool => Ok("boolean"),
         Type::Nothing => Ok("void"),
+        // Slice 20n-B-2a: surface a `String` agent param/return as
+        // `string` in the generated `.d.ts`. The JS loader still
+        // emits the legacy `<agent>(<scalar args>)` glue today —
+        // the loader's String-aware packing/unpacking is shipped
+        // by commit 3 of this slice. Until then, calling a String
+        // agent through the loader will see two raw `i32` arguments
+        // instead of a string. The `.d.ts` mapping is deliberately
+        // shipped early so the binary-shape regression tests in
+        // 2a have something to assert against.
+        Type::String => Ok("string"),
         _ => Err(WasmCodegenError::unsupported(format!(
             "unsupported TypeScript wasm surface type `{}`",
             ty.display_name()

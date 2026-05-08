@@ -127,11 +127,14 @@ pub fn emit_wasm_artifacts(
     }
 
     for agent in &scalar_agents {
-        let params = agent
-            .params
-            .iter()
-            .map(|param| wasm_val_type(&param.ty))
-            .collect::<Result<Vec<_>, _>>()?;
+        // Each param contributes one or more `ValType`s — `Int`,
+        // `Float`, `Bool` are single-slot; `String` expands to a
+        // `(ptr, len)` `i32` pair. Flatten across all params to get
+        // the function's param-list.
+        let mut params: Vec<ValType> = Vec::with_capacity(agent.params.len());
+        for param in &agent.params {
+            params.extend(wasm_param_value_types(&param.ty)?);
+        }
         let results = wasm_result_types(&agent.return_ty)?;
         let type_index = types.len();
         types.ty().function(params, results);
@@ -178,9 +181,9 @@ fn validate_agent(agent: &IrAgent) -> Result<&IrAgent, WasmCodegenError> {
         )));
     }
     for param in &agent.params {
-        wasm_val_type(&param.ty).map_err(|_| {
+        wasm_param_value_types(&param.ty).map_err(|_| {
             WasmCodegenError::unsupported(format!(
-                "wasm target currently supports only Int, Float, Bool, and Nothing scalar parameters; agent `{}` parameter `{}` has `{}`",
+                "wasm target supports Int, Float, Bool, Nothing, and String agent parameters; agent `{}` parameter `{}` has `{}`",
                 agent.name,
                 param.name,
                 param.ty.display_name()
@@ -189,7 +192,7 @@ fn validate_agent(agent: &IrAgent) -> Result<&IrAgent, WasmCodegenError> {
     }
     wasm_result_types(&agent.return_ty).map_err(|_| {
         WasmCodegenError::unsupported(format!(
-            "wasm target currently supports only Int, Float, Bool, and Nothing scalar returns; agent `{}` returns `{}`",
+            "wasm target supports Int, Float, Bool, Nothing, and String agent returns; agent `{}` returns `{}`",
             agent.name,
             agent.return_ty.display_name()
         ))
@@ -515,8 +518,22 @@ fn collect_block_locals(block: &IrBlock, locals: &mut LocalLayout) -> Result<(),
     Ok(())
 }
 
+/// Per-`LocalId` mapping into WASM's flat local index space. `String`
+/// locals occupy two consecutive WASM slots — one for the `(ptr,
+/// len)` pair's `ptr` and one for `len`. All other types take one
+/// slot. Storing the start-index plus a count is enough; consumers
+/// either need the single index (for scalar locals) or both indices
+/// (for the String pair).
+#[derive(Debug, Clone, Copy)]
+struct LocalSlot {
+    /// First WASM local index occupied by the slot.
+    start: u32,
+    /// Number of WASM locals (1 for scalar, 2 for String).
+    count: u32,
+}
+
 struct LocalLayout {
-    map: HashMap<LocalId, u32>,
+    map: HashMap<LocalId, LocalSlot>,
     locals: Vec<(String, ValType)>,
 }
 
@@ -526,8 +543,18 @@ impl LocalLayout {
             map: HashMap::new(),
             locals: Vec::new(),
         };
-        for (idx, param) in agent.params.iter().enumerate() {
-            layout.map.insert(param.local_id, idx as u32);
+        let mut next_index: u32 = 0;
+        for param in &agent.params {
+            let slot_types = wasm_param_value_types(&param.ty)?;
+            let count = slot_types.len() as u32;
+            layout.map.insert(
+                param.local_id,
+                LocalSlot {
+                    start: next_index,
+                    count,
+                },
+            );
+            next_index += count;
         }
         Ok(layout)
     }
@@ -541,15 +568,42 @@ impl LocalLayout {
         if self.map.contains_key(&local_id) {
             return Ok(());
         }
-        let wasm_ty = wasm_val_type(ty).map_err(|_| {
+        let slot_types = wasm_param_value_types(ty).map_err(|_| {
             WasmCodegenError::unsupported(format!(
                 "wasm target local `{name}` has unsupported type `{}`",
                 ty.display_name()
             ))
         })?;
-        let index = self.map.len() as u32;
-        self.map.insert(local_id, index);
-        self.locals.push((name.to_string(), wasm_ty));
+        let count = slot_types.len() as u32;
+        // Total occupied slots so far = sum of counts; equivalently
+        // the next free index is the highest-`start + count` across
+        // entries. We track this by walking the map; the param-count
+        // path of `from_agent` initialised entries densely so this
+        // works.
+        let next_index = self
+            .map
+            .values()
+            .map(|slot| slot.start + slot.count)
+            .max()
+            .unwrap_or(0)
+            .max(self.locals.len() as u32 + count_param_slots(&self.locals));
+        self.map.insert(
+            local_id,
+            LocalSlot {
+                start: next_index,
+                count,
+            },
+        );
+        for (offset, ty) in slot_types.into_iter().enumerate() {
+            let suffix = if count == 1 {
+                String::new()
+            } else if offset == 0 {
+                "_ptr".to_string()
+            } else {
+                "_len".to_string()
+            };
+            self.locals.push((format!("{name}{suffix}"), ty));
+        }
         Ok(())
     }
 
@@ -557,11 +611,31 @@ impl LocalLayout {
         self.locals.iter().map(|(_, ty)| (1, *ty)).collect()
     }
 
-    fn index(&self, local_id: LocalId, name: &str) -> Result<u32, WasmCodegenError> {
+    /// Look up the slot for a local. Returns the `LocalSlot` so the
+    /// caller can decide whether to emit a single `LocalGet`/`LocalSet`
+    /// or a pair (for `String`).
+    fn slot(&self, local_id: LocalId, name: &str) -> Result<LocalSlot, WasmCodegenError> {
         self.map.get(&local_id).copied().ok_or_else(|| {
             WasmCodegenError::unsupported(format!("wasm target could not resolve local `{name}`"))
         })
     }
+}
+
+/// Sum of slot counts across already-emitted locals. Used so
+/// `add_local`'s next-index computation stays consistent when a
+/// caller has added no locals yet (`max` of an empty iter is 0,
+/// but the param-side may already have consumed `N` slots).
+fn count_param_slots(_locals: &[(String, ValType)]) -> u32 {
+    // The locals vector tracks ONLY post-parameter locals (params
+    // are encoded in the function type, not in the locals section).
+    // The next-index computation in `add_local` must include the
+    // parameter slot count, but since `LocalLayout::map` already
+    // records every param's slot, the `map.values().max()` walk
+    // captures it. This helper exists to keep the math explicit
+    // even though the value is currently 0; when struct returns
+    // arrive in 20n-C and may add hidden parameter slots, this
+    // is the place to centralise the offset.
+    0
 }
 
 fn emit_block(
@@ -580,7 +654,19 @@ fn emit_block(
                 ..
             } => {
                 emit_expr(value, function, locals, agent_indices, host_plan)?;
-                function.instruction(&Instruction::LocalSet(locals.index(*local_id, name)?));
+                let slot = locals.slot(*local_id, name)?;
+                if slot.count == 1 {
+                    function.instruction(&Instruction::LocalSet(slot.start));
+                } else {
+                    // Multi-slot local (currently `String` only).
+                    // The expression pushed `(ptr, len)` in that
+                    // order, so `len` is on top of the WASM stack;
+                    // store it first into the second slot, then
+                    // `ptr` into the first.
+                    for offset in (0..slot.count).rev() {
+                        function.instruction(&Instruction::LocalSet(slot.start + offset));
+                    }
+                }
             }
             IrStmt::Return { value, .. } => {
                 if let Some(value) = value {
@@ -666,7 +752,14 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Nothing) => {}
         IrExprKind::Local { local_id, name } => {
-            function.instruction(&Instruction::LocalGet(locals.index(*local_id, name)?));
+            let slot = locals.slot(*local_id, name)?;
+            // Single-slot scalars push exactly one value; multi-
+            // slot `String` pushes `(ptr, len)` in that order so
+            // the result types match the function signature's
+            // multi-value return shape.
+            for offset in 0..slot.count {
+                function.instruction(&Instruction::LocalGet(slot.start + offset));
+            }
         }
         IrExprKind::Call {
             kind,
@@ -832,6 +925,9 @@ fn emit_unary(
     Ok(())
 }
 
+/// Single-value scalar mapping. Used by host-import params (which
+/// stay scalar in v1 — strings only cross at the agent boundary)
+/// and by single-slot local layout for non-String types.
 fn wasm_val_type(ty: &Type) -> Result<ValType, WasmCodegenError> {
     match ty {
         Type::Int => Ok(ValType::I64),
@@ -844,11 +940,29 @@ fn wasm_val_type(ty: &Type) -> Result<ValType, WasmCodegenError> {
     }
 }
 
+/// Multi-slot mapping for agent params and locals. `String`
+/// expands to a pair of `i32`s: `(ptr, len)`. Everything else is a
+/// single-value scalar matching `wasm_val_type`.
+///
+/// Phase 20n-B v1 string ABI: UTF-8 bytes in linear memory, addressed
+/// by `(ptr, len)` pairs. The convention is owned by the JS loader on
+/// the input side (it allocates via `corvid_alloc`, writes UTF-8
+/// bytes, passes the two `i32`s to the agent) and read-but-not-freed
+/// on the output side (the agent's returned `(ptr, len)` may alias
+/// the input or a const-memory literal — JS decodes the bytes via
+/// `TextDecoder` then frees only the inputs it allocated).
+fn wasm_param_value_types(ty: &Type) -> Result<Vec<ValType>, WasmCodegenError> {
+    match ty {
+        Type::String => Ok(vec![ValType::I32, ValType::I32]),
+        _ => Ok(vec![wasm_val_type(ty)?]),
+    }
+}
+
 fn wasm_result_types(ty: &Type) -> Result<Vec<ValType>, WasmCodegenError> {
-    if matches!(ty, Type::Nothing) {
-        Ok(Vec::new())
-    } else {
-        Ok(vec![wasm_val_type(ty)?])
+    match ty {
+        Type::Nothing => Ok(Vec::new()),
+        Type::String => Ok(vec![ValType::I32, ValType::I32]),
+        _ => Ok(vec![wasm_val_type(ty)?]),
     }
 }
 
@@ -914,6 +1028,162 @@ agent main() -> Int:
         assert!(artifacts.js_loader.contains("createIndexedDbStoreHost"));
         assert!(artifacts.ts_types.contains("CorvidWasmStoreHost"));
         assert!(artifacts.manifest_json.contains("\"kind\": \"prompt\""));
+    }
+
+    #[test]
+    fn lowers_string_pass_through_agent() {
+        // Slice 20n-B-2a regression: a String parameter and return
+        // must lower to (i32, i32) pairs so the JS loader can pass
+        // UTF-8 byte spans across the boundary. The reproduction
+        // from L-4: `agent shout(msg: String) -> String: return msg`.
+        let ir = lower_src(
+            r#"
+agent shout(msg: String) -> String:
+    return msg
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "shout").expect("wasm artifacts");
+        wasmparser::Validator::new()
+            .validate_all(&artifacts.wasm)
+            .expect("valid wasm");
+
+        let agent_type = find_agent_func_type(&artifacts.wasm, "shout");
+        assert_eq!(
+            agent_type.params,
+            vec![ValType::I32, ValType::I32],
+            "String param must lower to (i32, i32)"
+        );
+        assert_eq!(
+            agent_type.results,
+            vec![ValType::I32, ValType::I32],
+            "String return must lower to multi-value (i32, i32)"
+        );
+    }
+
+    #[test]
+    fn lowers_mixed_string_and_int_parameters_in_order() {
+        // Param flattening: `(msg: String, count: Int)` becomes
+        // `(i32, i32, i64)` in declaration order. Validates that
+        // String slots are inserted at the right spot when other
+        // scalar params surround them.
+        let ir = lower_src(
+            r#"
+agent count_repeats(msg: String, count: Int) -> Int:
+    return count
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "mixed").expect("wasm artifacts");
+        wasmparser::Validator::new()
+            .validate_all(&artifacts.wasm)
+            .expect("valid wasm");
+
+        let agent_type = find_agent_func_type(&artifacts.wasm, "count_repeats");
+        assert_eq!(
+            agent_type.params,
+            vec![ValType::I32, ValType::I32, ValType::I64],
+            "mixed (String, Int) params must lower to (i32, i32, i64)"
+        );
+        assert_eq!(
+            agent_type.results,
+            vec![ValType::I64],
+            "Int return must remain single i64"
+        );
+    }
+
+    /// Reflective helper: walk the wasm binary's type section + export
+    /// section to find the function signature for the named agent
+    /// export. Used by 2a regression tests to verify lowering shape
+    /// without having to instantiate the module under wasmtime.
+    fn find_agent_func_type(bytes: &[u8], agent_name: &str) -> AgentFuncType {
+        use wasmparser::{Parser, Payload, TypeRef};
+
+        let mut function_type_indices: Vec<u32> = Vec::new();
+        let mut imported_func_count: u32 = 0;
+        let mut function_types: Vec<(Vec<ValType>, Vec<ValType>)> = Vec::new();
+        let mut export_target: Option<u32> = None;
+
+        for payload in Parser::new(0).parse_all(bytes) {
+            let payload = payload.expect("parse payload");
+            match payload {
+                Payload::TypeSection(reader) => {
+                    for ty in reader.into_iter_err_on_gc_types() {
+                        let func = ty.expect("function type");
+                        let params = func
+                            .params()
+                            .iter()
+                            .map(|t| valtype_from_wasmparser(*t))
+                            .collect();
+                        let results = func
+                            .results()
+                            .iter()
+                            .map(|t| valtype_from_wasmparser(*t))
+                            .collect();
+                        function_types.push((params, results));
+                    }
+                }
+                Payload::ImportSection(reader) => {
+                    // wasmparser 0.244+ wraps each section entry in
+                    // an `Imports` enum to support the compact-imports
+                    // proposal — `into_imports()` flattens it back to
+                    // a flat iterator of `Import` items.
+                    for import in reader.into_imports() {
+                        let import = import.expect("import entry");
+                        if let TypeRef::Func(_) = import.ty {
+                            imported_func_count += 1;
+                        }
+                    }
+                }
+                Payload::FunctionSection(reader) => {
+                    for type_idx in reader {
+                        function_type_indices.push(type_idx.expect("function entry"));
+                    }
+                }
+                Payload::ExportSection(reader) => {
+                    for export in reader {
+                        let export = export.expect("export entry");
+                        if export.name == agent_name
+                            && matches!(export.kind, wasmparser::ExternalKind::Func)
+                        {
+                            export_target = Some(export.index);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let func_idx = export_target
+            .unwrap_or_else(|| panic!("no exported function named `{agent_name}`"));
+        // Imports occupy the lowest function-index slots; the
+        // `function_type_indices` vector is indexed by
+        // `func_idx - imported_func_count`.
+        let local_idx = func_idx
+            .checked_sub(imported_func_count)
+            .expect("agent func index below imported_func_count");
+        let type_idx = function_type_indices[local_idx as usize];
+        let (params, results) = function_types[type_idx as usize].clone();
+        AgentFuncType { params, results }
+    }
+
+    #[derive(Debug)]
+    struct AgentFuncType {
+        params: Vec<ValType>,
+        results: Vec<ValType>,
+    }
+
+    /// Convert a wasmparser `ValType` into the wasm-encoder
+    /// `ValType` we use throughout this crate. The two enums are
+    /// distinct types, but for the four core scalar variants we
+    /// care about (I32, I64, F32, F64) the variants are
+    /// straightforward to map.
+    fn valtype_from_wasmparser(t: wasmparser::ValType) -> ValType {
+        match t {
+            wasmparser::ValType::I32 => ValType::I32,
+            wasmparser::ValType::I64 => ValType::I64,
+            wasmparser::ValType::F32 => ValType::F32,
+            wasmparser::ValType::F64 => ValType::F64,
+            other => panic!("unexpected wasmparser ValType {other:?}"),
+        }
     }
 
     #[test]
