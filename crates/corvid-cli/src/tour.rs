@@ -17,7 +17,7 @@ pub const TOPICS: &[TourTopic] = &[
         name: "approve-gates",
         title: "Approve Before Dangerous",
         category: "Safety at compile time",
-        pitch: "Dangerous actions are not library conventions. The compiler requires an explicit approval boundary before irreversible tools run. The approve label is fixed: PascalCase of the tool's snake_case name (e.g. `approve IssueRefund` for tool `issue_refund`), so every authorised call site is greppable per-tool.",
+        pitch: "Dangerous actions are not library conventions. The compiler requires an explicit approval boundary before irreversible tools run. The approve label is the tool's name in either casing — `approve IssueRefund(id)` and `approve issue_refund(id)` both authorise tool `issue_refund`, since the checker normalises label and tool name to snake_case before comparing. Per-tool greppability is preserved: pick a casing convention and grep for it.",
         spec: "docs/effects-spec/03-typing-rules.md",
         roadmap: "Phase 20 safety wave",
         test: "crates/corvid-types/src/lib.rs approval checker tests",

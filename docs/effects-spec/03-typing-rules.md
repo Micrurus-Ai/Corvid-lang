@@ -200,19 +200,49 @@ Separate from dimensional composition, a dangerous tool call must be preceded by
   Γ ⊢ f(a₁, …, aₙ) is authorized
 ```
 
-If no matching approve precedes the call, the checker emits `UnapprovedDangerousCall` with a hint showing the exact approve line to add. The label matches the tool's declared label (PascalCase of the tool name by default).
+If no matching approve precedes the call, the checker emits `UnapprovedDangerousCall` with a hint showing the exact approve line to add. The label is the tool's name in any reasonable casing — see §6.1 for the comparison rule.
 
 ### 6.1 approve identifier naming
 
-The identifier following `approve` must be the **PascalCase form of the dangerous tool's snake_case name**. There is no per-tool override — the mapping `snake_case -> PascalCase` is the contract. The compiler rejects every mismatch at typecheck time with diagnostic `E0101: dangerous tool 'X' called without a prior 'approve'`, and the help hint names the exact identifier the checker expects (`add 'approve PascalCase(arg1, arg2)' on the line before this call`).
+The identifier following `approve` may be **either the PascalCase form or the snake_case form** of the dangerous tool's name. The checker normalises both the approve label and the tool name to snake_case before comparing them, so
 
-This is a deliberate naming contract, not a styling preference. Pinning the approve label to the tool name lets a reviewer audit every authorised call site for a given dangerous tool with a single grep:
+```corvid
+tool send_email(to: String) -> Nothing dangerous
 
-```sh
-grep -rn '^\s*approve TransferFunds\b' src/
+agent notify(to: String) -> Nothing:
+    approve SendEmail(to)        # accepted
+    return send_email(to)
 ```
 
-…locates every place that authorises `transfer_funds` across a codebase, with no ambiguity about which approval guards which tool. A local rename of the approve label (e.g. `approve PageOnCall(...)` for tool `send_to_pagerduty`) would silently hide the call site from that grep — so the checker forbids it. The arity, the argument types, and the lexical block of the approve must also match the call (per §6 above).
+and
+
+```corvid
+tool send_email(to: String) -> Nothing dangerous
+
+agent notify(to: String) -> Nothing:
+    approve send_email(to)       # also accepted
+    return send_email(to)
+```
+
+both typecheck. Mixed-case identifiers that don't roundtrip through `snake_case` (e.g. `Sendemail` without the underscore boundary) won't match — the comparison is `snake_case(label) == tool_name`, not a case-insensitive string equality.
+
+The compiler rejects every mismatch at typecheck time with diagnostic `E0101: dangerous tool 'X' called without a prior 'approve'`. The help hint suggests the PascalCase form by convention (`add 'approve PascalCase(arg1, arg2)' on the line before this call`) — that's the suggested form, not the only accepted form.
+
+The arity, the argument types, and the lexical block of the approve must also match the call (per §6 above).
+
+**Greppability.** The acceptance rule preserves per-tool grep-ability — the approve label is always *the tool's name*, just in either casing — so
+
+```sh
+grep -rn '^\s*approve \(send_email\|SendEmail\)\b' src/
+```
+
+(or simpler, since most teams pick one convention and stick with it)
+
+```sh
+grep -rn '^\s*approve send_email\b' src/
+```
+
+locates every authorised call site for `send_email` across a codebase that picked snake_case. Project conventions can pin one form via a lint or a code-review rule; the language deliberately accepts either to avoid forcing a casing choice when call-site context naturally favours one over the other.
 
 ## 7. Soundness
 
