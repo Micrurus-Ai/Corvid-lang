@@ -30,6 +30,19 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
+/// Public Corvid guarantee id this module enforces:
+/// `jobs.lease_exclusivity`.
+///
+/// A job lease prevents two workers from running the same job
+/// concurrently. The pool runs N tokio tasks each contesting
+/// `lease_next_at` on the durable queue; the SQLite UPDATE that
+/// flips `pending` -> `leased` is atomic, so exactly one worker
+/// wins each contention round. Tagged at module level (and queryable
+/// through `WorkerPool::guarantee_id`) so the inverse-coverage
+/// sentinel in `corvid-guarantees` can confirm this enforcement
+/// site is wired to the registry row.
+pub const GUARANTEE_ID_LEASE_EXCLUSIVITY: &str = "jobs.lease_exclusivity";
+
 /// Outcome the executor reports for a single leased job. The
 /// pool decides whether to call `complete_leased` (Success),
 /// `fail_leased` (Failure / RetryAfter), or release the lease
@@ -88,6 +101,15 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
+    /// Stable id of the public Corvid guarantee this type enforces.
+    /// Mirrors the `ReplayDivergence::guarantee_id` pattern so any
+    /// caller (logs, audits, observability dashboards) can
+    /// programmatically link the pool's lease-exclusivity behavior
+    /// back to the canonical registry row.
+    pub const fn guarantee_id() -> &'static str {
+        GUARANTEE_ID_LEASE_EXCLUSIVITY
+    }
+
     /// Construct a pool with `workers` async tasks contesting the
     /// queue. Default lease TTL = 60s; default idle poll = 100ms.
     pub fn new(queue: Arc<DurableQueueRuntime>, workers: usize) -> Self {

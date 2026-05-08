@@ -1,6 +1,26 @@
 use super::*;
 
+/// Public Corvid guarantee id this checkpoints path enforces:
+/// `jobs.durable_resume`.
+///
+/// A worker that drops uncleanly mid-step leaves behind durable
+/// checkpoint rows; a fresh worker that opens the same SQLite file
+/// after the lease TTL elapses can re-lease the job and resume from
+/// those checkpoints. SQLite WAL fsync makes the property
+/// structural — the checkpoint UPDATE is committed transactionally
+/// before any side-effect-bearing step proceeds. Tagged at module
+/// level so the `corvid-guarantees` inverse-coverage sentinel can
+/// confirm the enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_DURABLE_RESUME: &str = "jobs.durable_resume";
+
 impl DurableQueueRuntime {
+    /// Stable id of the public Corvid guarantee the checkpoint /
+    /// resume path enforces — see `GUARANTEE_ID_DURABLE_RESUME`
+    /// for the contract description.
+    pub const fn checkpoint_guarantee_id() -> &'static str {
+        GUARANTEE_ID_DURABLE_RESUME
+    }
+
     pub fn retry_job(&self, id: &str) -> Result<QueueJob, RuntimeError> {
         let job = self
             .get(id)?

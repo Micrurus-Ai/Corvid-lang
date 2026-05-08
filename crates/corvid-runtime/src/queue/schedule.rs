@@ -22,6 +22,19 @@ use std::str::FromStr;
 use super::model::QueueScheduleManifest;
 use crate::errors::RuntimeError;
 
+/// Public Corvid guarantee id this DST-aware cron path enforces:
+/// `jobs.cron_dst_correct`.
+///
+/// Cron schedules expressed in `America/New_York` (and other
+/// DST-observing timezones) produce monotonic UTC fire times across
+/// the spring-forward and fall-back transitions, with no duplicates
+/// and no fire at the non-existent local instant. `chrono-tz` is
+/// wired into the queue runtime; the cron-crate's `Schedule::after`
+/// iterator is timezone-aware. Tagged at module level so the
+/// `corvid-guarantees` inverse-coverage sentinel can confirm the
+/// enforcement site is wired to the registry row.
+pub const GUARANTEE_ID_CRON_DST_CORRECT: &str = "jobs.cron_dst_correct";
+
 pub(super) fn validate_schedule(cron: &str, zone: &str) -> Result<(), RuntimeError> {
     let expression = normalize_cron(cron)?;
     Schedule::from_str(&expression)

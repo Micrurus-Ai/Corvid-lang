@@ -1,5 +1,29 @@
 use super::*;
 
+/// Public Corvid guarantee id this enqueue path enforces:
+/// `jobs.idempotency_key_uniqueness`.
+///
+/// Across N concurrent workers, exactly one durable queue row
+/// exists for a given non-null idempotency key. Enforced by a
+/// partial UNIQUE INDEX on
+/// `queue_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL`
+/// in the SQLite schema (see `super::sqlite_init`), plus the
+/// `enqueue_typed_idempotent` collision-fallback path that returns
+/// the surviving row when the insert hits the UNIQUE constraint.
+/// Tagged at module level so the `corvid-guarantees` inverse-
+/// coverage sentinel can confirm the enforcement site is wired
+/// to the registry row.
+pub const GUARANTEE_ID_IDEMPOTENCY_KEY_UNIQUENESS: &str = "jobs.idempotency_key_uniqueness";
+
+impl DurableQueueRuntime {
+    /// Stable id of the public Corvid guarantee the enqueue path
+    /// enforces — see `GUARANTEE_ID_IDEMPOTENCY_KEY_UNIQUENESS`
+    /// for the contract description.
+    pub const fn enqueue_guarantee_id() -> &'static str {
+        GUARANTEE_ID_IDEMPOTENCY_KEY_UNIQUENESS
+    }
+}
+
 impl DurableQueueRuntime {
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, RuntimeError> {
         let conn = Connection::open(path.as_ref()).map_err(|err| {
