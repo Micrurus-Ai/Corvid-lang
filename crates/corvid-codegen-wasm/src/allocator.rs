@@ -111,9 +111,12 @@ pub(crate) const MIN_PAYLOAD: i32 = 4;
 pub(crate) const HEADER_SIZE: i32 = 4;
 
 /// Linear memory is reserved at offsets `[0 .. HEAP_BASE)` for
-/// internal sentinels — never returned to user code. The first heap
-/// allocation gets a header at `HEAP_BASE` and a payload at
-/// `HEAP_BASE + 4`.
+/// internal sentinels — never returned to user code. The string
+/// literal pool (if any) starts at `HEAP_BASE`; the first heap
+/// allocation gets a header at `HEAP_BASE + pool_size` and a
+/// payload at `HEAP_BASE + pool_size + 4`. Callers compute
+/// `pool_size` (zero for modules with no string literals) and
+/// pass it to `emit_allocator` via `heap_top_init`.
 pub(crate) const HEAP_BASE: i32 = 8;
 
 /// Initial WASM memory size, in 64-KiB pages. One page = 64 KiB.
@@ -166,6 +169,7 @@ pub(crate) fn emit_allocator(
     mem: &mut MemorySection,
     globals: &mut GlobalSection,
     host_import_count: u32,
+    heap_top_init: i32,
 ) -> AllocatorIndices {
     // ---------- memory ----------
     mem.memory(MemoryType {
@@ -178,15 +182,17 @@ pub(crate) fn emit_allocator(
     exports.export("memory", ExportKind::Memory, 0);
 
     // ---------- globals ----------
-    // $heap_top starts at HEAP_BASE — the first allocation's header
-    // lands here, payload at HEAP_BASE + HEADER_SIZE.
+    // $heap_top starts at `heap_top_init` — the caller's responsibility
+    // is to pass `HEAP_BASE + literal_pool_size` here so the heap
+    // begins immediately after any compile-time string-literal pool
+    // emitted by the data section.
     globals.global(
         GlobalType {
             val_type: ValType::I32,
             mutable: true,
             shared: false,
         },
-        &ConstExpr::i32_const(HEAP_BASE),
+        &ConstExpr::i32_const(heap_top_init),
     );
     // $free_head starts at 0 — empty free list.
     globals.global(

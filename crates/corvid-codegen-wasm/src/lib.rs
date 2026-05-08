@@ -6,6 +6,7 @@
 //! tools, approvals, replay recording, and provenance are follow-up
 //! slices because they need a real browser/edge host-capability ABI.
 
+use crate::string_pool::StringPool;
 use corvid_ast::{BinaryOp, UnaryOp};
 use corvid_ir::{
     IrAgent, IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrLiteral, IrPrompt, IrStmt, IrTool,
@@ -14,13 +15,15 @@ use corvid_resolve::{DefId, LocalId};
 use corvid_types::Type;
 use std::collections::HashMap;
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, GlobalSection,
-    ImportSection, Instruction, MemorySection, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalSection, ImportSection, Instruction, MemorySection, Module, TypeSection,
+    ValType,
 };
 
 mod allocator;
 mod companions;
 mod error;
+mod string_pool;
 
 pub use companions::WasmArtifacts;
 pub use error::WasmCodegenError;
@@ -79,6 +82,18 @@ pub fn emit_wasm_artifacts(
         .collect::<Result<Vec<_>, _>>()?;
     let host_plan = collect_host_imports(ir, &scalar_agents)?;
 
+    // Pre-codegen pass: walk every agent body and intern each
+    // `IrLiteral::String` into the compile-time string pool. The
+    // pool's bytes get emitted into a `DataSection` at offset
+    // `allocator::HEAP_BASE`; the allocator's `$heap_top` global is
+    // initialised to `HEAP_BASE + pool.total_bytes()` so user heap
+    // allocations begin immediately past the literal pool.
+    let mut string_pool = StringPool::new();
+    for agent in &scalar_agents {
+        intern_string_literals(&agent.body, &mut string_pool);
+    }
+    let heap_top_init = allocator::HEAP_BASE + string_pool.total_bytes() as i32;
+
     let mut types = TypeSection::new();
     let mut imports = ImportSection::new();
     let mut funcs = FunctionSection::new();
@@ -86,6 +101,7 @@ pub fn emit_wasm_artifacts(
     let mut code = CodeSection::new();
     let mut mem = MemorySection::new();
     let mut globals = GlobalSection::new();
+    let mut data = DataSection::new();
 
     for host_import in &host_plan.imports {
         let params = host_import
@@ -118,7 +134,18 @@ pub fn emit_wasm_artifacts(
         &mut mem,
         &mut globals,
         host_plan.imports.len() as u32,
+        heap_top_init,
     );
+
+    // Emit the literal-pool data segment when the pool is non-empty.
+    // Active segment at memory[0], offset = `HEAP_BASE`.
+    if string_pool.total_bytes() > 0 {
+        data.active(
+            0,
+            &ConstExpr::i32_const(allocator::HEAP_BASE),
+            string_pool.bytes().iter().copied(),
+        );
+    }
     let agent_index_base = host_plan.imports.len() as u32 + alloc_indices.func_count;
 
     let mut agent_indices = HashMap::new();
@@ -147,13 +174,13 @@ pub fn emit_wasm_artifacts(
             ExportKind::Func,
             agent_index_base + idx as u32,
         );
-        let function = compile_agent(agent, &agent_indices, &host_plan)?;
+        let function = compile_agent(agent, &agent_indices, &host_plan, &string_pool)?;
         code.function(&function);
     }
 
     // WASM core module section ordering is fixed:
-    //   type → import → function → memory → global → export → code
-    // (table, start, element, data sections omitted in v1).
+    //   type → import → function → memory → global → export → code → data
+    // (table, start, element sections omitted in v1).
     let mut module = Module::new();
     module.section(&types);
     if !host_plan.imports.is_empty() {
@@ -164,6 +191,9 @@ pub fn emit_wasm_artifacts(
     module.section(&globals);
     module.section(&exports);
     module.section(&code);
+    if string_pool.total_bytes() > 0 {
+        module.section(&data);
+    }
 
     companions::build_artifacts(
         module_name,
@@ -224,6 +254,83 @@ fn collect_host_imports(
         collect_block_imports(&agent.body, &tools, &prompts, &mut plan, &agent.name)?;
     }
     Ok(plan)
+}
+
+/// Pre-codegen walk: visit every `IrLiteral::String` inside `block`
+/// and intern it into `pool`. Mirrors `collect_block_imports`'s
+/// recursive visitor shape; only difference is the leaf action
+/// (intern vs. add to host-plan).
+fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
+    for stmt in &block.stmts {
+        match stmt {
+            IrStmt::Let { value, .. } | IrStmt::Expr { expr: value, .. } => {
+                intern_expr_literals(value, pool);
+            }
+            IrStmt::Return { value, .. } => {
+                if let Some(value) = value {
+                    intern_expr_literals(value, pool);
+                }
+            }
+            IrStmt::Yield { value, .. } => {
+                intern_expr_literals(value, pool);
+            }
+            IrStmt::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
+                intern_expr_literals(cond, pool);
+                intern_string_literals(then_block, pool);
+                if let Some(else_block) = else_block {
+                    intern_string_literals(else_block, pool);
+                }
+            }
+            IrStmt::For { iter, body, .. } => {
+                intern_expr_literals(iter, pool);
+                intern_string_literals(body, pool);
+            }
+            IrStmt::Approve { args, .. } => {
+                for arg in args {
+                    intern_expr_literals(arg, pool);
+                }
+            }
+            IrStmt::Break { .. }
+            | IrStmt::Continue { .. }
+            | IrStmt::Pass { .. }
+            | IrStmt::Dup { .. }
+            | IrStmt::Drop { .. } => {}
+        }
+    }
+}
+
+fn intern_expr_literals(expr: &IrExpr, pool: &mut StringPool) {
+    match &expr.kind {
+        IrExprKind::Literal(IrLiteral::String(value)) => {
+            pool.intern(value);
+        }
+        IrExprKind::Literal(_) | IrExprKind::Local { .. } => {}
+        IrExprKind::Call { args, .. } => {
+            for arg in args {
+                intern_expr_literals(arg, pool);
+            }
+        }
+        IrExprKind::BinOp { left, right, .. }
+        | IrExprKind::WrappingBinOp { left, right, .. } => {
+            intern_expr_literals(left, pool);
+            intern_expr_literals(right, pool);
+        }
+        IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
+            intern_expr_literals(operand, pool);
+        }
+        // The wasm target rejects field access / cast / partial /
+        // grounded / template / route / structconstructor / weak /
+        // result / option / stream surfaces in the same `emit_expr`
+        // pass that reaches them; if we don't reach them in `emit`
+        // we don't need to intern through them either. Treat the
+        // catch-all as "no nested string literals to discover."
+        _ => {}
+    }
 }
 
 fn collect_block_imports(
@@ -473,6 +580,7 @@ fn compile_agent(
     agent: &IrAgent,
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
+    string_pool: &StringPool,
 ) -> Result<Function, WasmCodegenError> {
     let mut locals = LocalLayout::from_agent(agent)?;
     collect_block_locals(&agent.body, &mut locals)?;
@@ -485,6 +593,7 @@ fn compile_agent(
         &locals,
         agent_indices,
         host_plan,
+        string_pool,
     )?;
     function.instruction(&Instruction::Unreachable);
     function.instruction(&Instruction::End);
@@ -644,6 +753,7 @@ fn emit_block(
     locals: &LocalLayout,
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
+    string_pool: &StringPool,
 ) -> Result<(), WasmCodegenError> {
     for stmt in &block.stmts {
         match stmt {
@@ -653,7 +763,7 @@ fn emit_block(
                 value,
                 ..
             } => {
-                emit_expr(value, function, locals, agent_indices, host_plan)?;
+                emit_expr(value, function, locals, agent_indices, host_plan, string_pool)?;
                 let slot = locals.slot(*local_id, name)?;
                 if slot.count == 1 {
                     function.instruction(&Instruction::LocalSet(slot.start));
@@ -670,12 +780,12 @@ fn emit_block(
             }
             IrStmt::Return { value, .. } => {
                 if let Some(value) = value {
-                    emit_expr(value, function, locals, agent_indices, host_plan)?;
+                    emit_expr(value, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 function.instruction(&Instruction::Return);
             }
             IrStmt::Expr { expr, .. } => {
-                emit_expr(expr, function, locals, agent_indices, host_plan)?;
+                emit_expr(expr, function, locals, agent_indices, host_plan, string_pool)?;
                 if !matches!(expr.ty, Type::Nothing) {
                     function.instruction(&Instruction::Drop);
                 }
@@ -686,18 +796,18 @@ fn emit_block(
                 else_block,
                 ..
             } => {
-                emit_expr(cond, function, locals, agent_indices, host_plan)?;
+                emit_expr(cond, function, locals, agent_indices, host_plan, string_pool)?;
                 function.instruction(&Instruction::If(BlockType::Empty));
-                emit_block(then_block, function, locals, agent_indices, host_plan)?;
+                emit_block(then_block, function, locals, agent_indices, host_plan, string_pool)?;
                 if let Some(else_block) = else_block {
                     function.instruction(&Instruction::Else);
-                    emit_block(else_block, function, locals, agent_indices, host_plan)?;
+                    emit_block(else_block, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 function.instruction(&Instruction::End);
             }
             IrStmt::Approve { label, args, .. } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 let index = host_plan
                     .approval_indices
@@ -734,6 +844,7 @@ fn emit_expr(
     locals: &LocalLayout,
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
+    string_pool: &StringPool,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
         IrExprKind::Literal(IrLiteral::Int(value)) => {
@@ -745,10 +856,18 @@ fn emit_expr(
         IrExprKind::Literal(IrLiteral::Bool(value)) => {
             function.instruction(&Instruction::I32Const(i32::from(*value)));
         }
-        IrExprKind::Literal(IrLiteral::String(_)) => {
-            return Err(WasmCodegenError::unsupported(
-                "wasm target needs the Phase 23 string ABI before lowering String literals",
-            ));
+        IrExprKind::Literal(IrLiteral::String(value)) => {
+            // Slice 20n-B-2b: lower a string literal as a `(ptr, len)`
+            // pair pointing into the compile-time literal pool. The
+            // pool was populated during `intern_string_literals`'s
+            // pre-codegen walk and lives at memory[HEAP_BASE ..
+            // HEAP_BASE + pool.total_bytes()] via the active
+            // `DataSection` segment. Both `ptr` and `len` are
+            // compile-time constants — no runtime allocation
+            // required for literal-only String returns.
+            let (offset, len) = string_pool.lookup(value);
+            function.instruction(&Instruction::I32Const(allocator::HEAP_BASE + offset as i32));
+            function.instruction(&Instruction::I32Const(len as i32));
         }
         IrExprKind::Literal(IrLiteral::Nothing) => {}
         IrExprKind::Local { local_id, name } => {
@@ -768,7 +887,7 @@ fn emit_expr(
         } => match kind {
             IrCallKind::Agent { def_id } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 let index = agent_indices.get(def_id).copied().ok_or_else(|| {
                     WasmCodegenError::unsupported(format!(
@@ -779,7 +898,7 @@ fn emit_expr(
             }
             IrCallKind::Tool { def_id, .. } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 let index = host_plan.tool_indices.get(def_id).copied().ok_or_else(|| {
                     WasmCodegenError::unsupported(format!(
@@ -790,7 +909,7 @@ fn emit_expr(
             }
             IrCallKind::Prompt { def_id } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
                 }
                 let index = host_plan
                     .prompt_indices
@@ -815,12 +934,12 @@ fn emit_expr(
             }
         },
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right } => {
-            emit_expr(left, function, locals, agent_indices, host_plan)?;
-            emit_expr(right, function, locals, agent_indices, host_plan)?;
+            emit_expr(left, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_expr(right, function, locals, agent_indices, host_plan, string_pool)?;
             emit_binary(*op, &left.ty, function)?;
         }
         IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } => {
-            emit_unary(*op, operand, function, locals, agent_indices, host_plan)?;
+            emit_unary(*op, operand, function, locals, agent_indices, host_plan, string_pool)?;
         }
         IrExprKind::Decl { .. }
         | IrExprKind::FieldAccess { .. }
@@ -900,19 +1019,20 @@ fn emit_unary(
     locals: &LocalLayout,
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
+    string_pool: &StringPool,
 ) -> Result<(), WasmCodegenError> {
     match (op, &operand.ty) {
         (UnaryOp::Neg, Type::Int) => {
             function.instruction(&Instruction::I64Const(0));
-            emit_expr(operand, function, locals, agent_indices, host_plan)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
             function.instruction(&Instruction::I64Sub);
         }
         (UnaryOp::Neg, Type::Float) => {
-            emit_expr(operand, function, locals, agent_indices, host_plan)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
             function.instruction(&Instruction::F64Neg);
         }
         (UnaryOp::Not, Type::Bool) => {
-            emit_expr(operand, function, locals, agent_indices, host_plan)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
             function.instruction(&Instruction::I32Eqz);
         }
         _ => {
@@ -1058,6 +1178,116 @@ agent shout(msg: String) -> String:
             vec![ValType::I32, ValType::I32],
             "String return must lower to multi-value (i32, i32)"
         );
+    }
+
+    #[test]
+    fn lowers_string_literal_via_data_section() {
+        // Slice 20n-B-2b regression: agents can now return a string
+        // literal. The literal is interned into the compile-time
+        // string pool, written into the module's DataSection at
+        // offset HEAP_BASE, and the agent body lowers
+        // `IrLiteral::String("hello")` into a constant `(ptr, len)`
+        // pair that JS reads from linear memory.
+        let ir = lower_src(
+            r#"
+agent greet() -> String:
+    return "hello"
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "greeting").expect("wasm artifacts");
+        wasmparser::Validator::new()
+            .validate_all(&artifacts.wasm)
+            .expect("valid wasm");
+
+        // The `.wasm` binary should contain a Data section whose
+        // active segment carries the literal bytes. Walking via
+        // `wasmparser` to confirm.
+        let pool_bytes = literal_pool_bytes(&artifacts.wasm);
+        assert!(
+            pool_bytes.windows(5).any(|w| w == b"hello"),
+            "literal pool must contain the bytes `hello`; got {pool_bytes:?}"
+        );
+
+        let agent_type = find_agent_func_type(&artifacts.wasm, "greet");
+        assert_eq!(
+            agent_type.results,
+            vec![ValType::I32, ValType::I32],
+            "String return must lower to multi-value (i32, i32)"
+        );
+    }
+
+    #[test]
+    fn deduplicates_repeated_string_literals() {
+        // Two literals with identical content should share storage in
+        // the pool — the interner is content-keyed.
+        let ir = lower_src(
+            r#"
+agent first() -> String:
+    return "shared"
+
+agent second() -> String:
+    return "shared"
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "shared").expect("wasm artifacts");
+        wasmparser::Validator::new()
+            .validate_all(&artifacts.wasm)
+            .expect("valid wasm");
+
+        let pool_bytes = literal_pool_bytes(&artifacts.wasm);
+        // Pool should be exactly 6 bytes (= "shared".len()), not 12.
+        assert_eq!(
+            pool_bytes,
+            b"shared",
+            "deduplication: pool should hold one copy of 'shared'"
+        );
+    }
+
+    #[test]
+    fn handles_multi_byte_utf8_literal() {
+        // Multi-byte UTF-8 literal: the literal pool stores raw bytes
+        // and the (ptr, len) pair counts bytes (not chars). The
+        // wasmtime end-to-end round-trip in commit 4 will confirm a
+        // round-trip through TextDecoder; here we verify the bytes
+        // land in the pool unchanged.
+        let ir = lower_src(
+            r#"
+agent crab() -> String:
+    return "héllo 🦀"
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "utf8").expect("wasm artifacts");
+        wasmparser::Validator::new()
+            .validate_all(&artifacts.wasm)
+            .expect("valid wasm");
+
+        let pool_bytes = literal_pool_bytes(&artifacts.wasm);
+        assert_eq!(
+            pool_bytes,
+            "héllo 🦀".as_bytes(),
+            "multi-byte UTF-8 literal must round-trip its raw bytes"
+        );
+    }
+
+    /// Decode the wasm module's data section and return the active-
+    /// segment bytes (concatenated if there are multiple segments;
+    /// in v1 we only emit one segment so this collapses to the
+    /// literal pool).
+    fn literal_pool_bytes(bytes: &[u8]) -> Vec<u8> {
+        use wasmparser::{DataKind, Parser, Payload};
+
+        let mut out = Vec::new();
+        for payload in Parser::new(0).parse_all(bytes) {
+            if let Payload::DataSection(reader) = payload.expect("parse payload") {
+                for entry in reader {
+                    let entry = entry.expect("data entry");
+                    if let DataKind::Active { .. } = entry.kind {
+                        out.extend_from_slice(entry.data);
+                    }
+                }
+            }
+        }
+        out
     }
 
     #[test]
