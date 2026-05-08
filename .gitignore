@@ -21,6 +21,16 @@
 # Benchmark generated files
 benches/corvid/generated/
 
+# Standalone bench-package lockfiles. These three sub-packages
+# (runner, stress_runner, tools) live outside the workspace and
+# aren't shipped as redistributables — their lockfiles change with
+# every local toolchain update without affecting any committed
+# behaviour. Keeping them ignored matches the repo convention of
+# not tracking lockfiles under `benches/`.
+benches/corvid/runner/Cargo.lock
+benches/corvid/stress_runner/Cargo.lock
+benches/corvid/tools/Cargo.lock
+
 # Snapshot test pending
 **/*.snap.new
 
