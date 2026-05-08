@@ -1337,6 +1337,40 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 ---
 
+### Phase 20n — Open-gap implementation
+
+**Goal.** Implement the three open language gaps L-3, L-4, and L-7 surfaced by the original external-reviewer report and revisited by the verification round. 20l-F deferred L-7 (lexer line continuation) on language-identity grounds and 20m closed-but-deferred L-3 / L-4 to their owning phase tracks (17/20 and 23). Phase 20n reverses that ordering: ship the three gaps end-to-end as their own phase rather than waiting for the owning phases to absorb them, because the cumulative usability win from closing all three exceeds the cost of doing them now.
+
+**Why this phase exists.** The verifier scorecard re-confirmed all three gaps are real. The 20l-F deferral on L-7 was specifically reversed by the language designer in a 2026-05-08 directive — *implement the feature end-to-end* — so 20n-A ships Decision A (implement) rather than Decision B (document the absence). The L-3 and L-4 deferrals stand only in the sense of "they're feature work, not bug fixes"; 20n adopts them as their own slices with full pre-phase chats per CLAUDE.md.
+
+**Detailed plan:** [docs/phase-20n-open-gap-implementation.md](./docs/phase-20n-open-gap-implementation.md) — per-slice plan, design-decision overrides, audit checklist, validation gate.
+
+**Sequencing rules** (per CLAUDE.md "When splitting"):
+
+- One slice = one feature, one or more commits.
+- Validation gate between every commit: `cargo check --workspace` + targeted `cargo test -p <crate>` + `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` (Windows whoami linker baseline tolerated).
+- Push before starting the next slice.
+- Pre-phase chat per slice; no autonomous chaining.
+- 20n-B and 20n-C each require a step-0 audit + a refined plan before implementation, since both are feature work bigger than typical fix slices.
+
+**Slices:**
+
+- [ ] 20n-A — L-7 lexer line continuation (Decision A, end-to-end implementation). Lexer changes in `crates/corvid-syntax/src/lexer.rs` to consume `\` + newline + leading whitespace as silent continuation outside strings and inside `"..."` literals. Triple-quoted blocks unchanged. Helpful diagnostic for `\` not at end-of-line. Tests + `docs/syntax.md` "Continuation rules" paragraph.
+- [ ] 20n-B — L-4 WASM String parameter and return support. Bare `(ptr, len)` UTF-8 ABI across `crates/corvid-codegen-wasm/`, JS loader, `.d.ts` emitter, manifest. `corvid_alloc` / `corvid_free` exports if absent. Multi-byte round-trip integration test. Step-0 audit: read the wasm crate end-to-end first.
+- [ ] 20n-C — L-3 native codegen struct returns. Two sites: prompt-bridge in `crates/corvid-codegen-cl/src/lowering/prompt.rs` and entry-agent boundary. Mirror the `Grounded<T>` heap-allocation pattern. Step-0 audit: verify whether the existing JSON encoder in `corvid-runtime` handles structs.
+
+**Out-of-scope deferrals:** the REPL hardcoded ANSI escape audit (filed in 20m as out-of-scope) stays out of 20n. So does any expansion to `Stream<Struct>`, WASM Component Model adapters, UTF-16, or cross-FFI struct passing for tools.
+
+**Phase-done criteria:**
+
+- [ ] 20n-A, 20n-B, 20n-C all land with regression tests.
+- [ ] Closing audit recorded in `docs/phase-20n-open-gap-implementation.md` with per-slice status + the design-override note for L-7.
+- [ ] `learnings.md` updated per slice.
+- [ ] ROADMAP.md Phase 20n entry checkboxes ticked, `✅ closed` marker added.
+- [ ] Memory record `project_phase_20n_closed.md` summarises the design-override pattern (when a deferral is reversed, record the directive explicitly so future sessions don't mistake it for drift) and the step-0 audit pattern (substantive feature slices need a read-and-plan step before code).
+
+---
+
 ### Phase 21 — Replay (~5–6 months, maximal-flagship scope) ✅ closed — **THE FLAGSHIP WOW**
 
 **Goal.** Every run replayable by construction — and beyond. Baseline record + replay in both tiers, plus nine inventive features that push past every existing observability tool. Replay becomes a language-level, compile-time-guaranteed, regression-oracle-producing primitive.
