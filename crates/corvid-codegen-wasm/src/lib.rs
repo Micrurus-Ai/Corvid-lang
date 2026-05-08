@@ -14,10 +14,11 @@ use corvid_resolve::{DefId, LocalId};
 use corvid_types::Type;
 use std::collections::HashMap;
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
-    Instruction, Module, TypeSection, ValType,
+    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, GlobalSection,
+    ImportSection, Instruction, MemorySection, Module, TypeSection, ValType,
 };
 
+mod allocator;
 mod companions;
 mod error;
 
@@ -78,16 +79,13 @@ pub fn emit_wasm_artifacts(
         .collect::<Result<Vec<_>, _>>()?;
     let host_plan = collect_host_imports(ir, &scalar_agents)?;
 
-    let mut agent_indices = HashMap::new();
-    for (idx, agent) in scalar_agents.iter().enumerate() {
-        agent_indices.insert(agent.id, host_plan.imports.len() as u32 + idx as u32);
-    }
-
     let mut types = TypeSection::new();
     let mut imports = ImportSection::new();
     let mut funcs = FunctionSection::new();
     let mut exports = ExportSection::new();
     let mut code = CodeSection::new();
+    let mut mem = MemorySection::new();
+    let mut globals = GlobalSection::new();
 
     for host_import in &host_plan.imports {
         let params = host_import
@@ -103,6 +101,29 @@ pub fn emit_wasm_artifacts(
             &host_import.import_name,
             wasm_encoder::EntityType::Function(type_index),
         );
+    }
+
+    // Emit the allocator immediately after host imports. Its
+    // function indices occupy slots `host_imports.len() ..
+    // host_imports.len() + alloc_indices.func_count`. Agent
+    // function indices shift accordingly. The allocator also owns
+    // the module's single linear memory and the two global slots
+    // (`$heap_top`, `$free_head`); no other code is allowed to
+    // populate `mem` / `globals` after this point.
+    let alloc_indices = allocator::emit_allocator(
+        &mut types,
+        &mut funcs,
+        &mut code,
+        &mut exports,
+        &mut mem,
+        &mut globals,
+        host_plan.imports.len() as u32,
+    );
+    let agent_index_base = host_plan.imports.len() as u32 + alloc_indices.func_count;
+
+    let mut agent_indices = HashMap::new();
+    for (idx, agent) in scalar_agents.iter().enumerate() {
+        agent_indices.insert(agent.id, agent_index_base + idx as u32);
     }
 
     for agent in &scalar_agents {
@@ -121,18 +142,23 @@ pub fn emit_wasm_artifacts(
         exports.export(
             &agent.name,
             ExportKind::Func,
-            host_plan.imports.len() as u32 + idx as u32,
+            agent_index_base + idx as u32,
         );
         let function = compile_agent(agent, &agent_indices, &host_plan)?;
         code.function(&function);
     }
 
+    // WASM core module section ordering is fixed:
+    //   type → import → function → memory → global → export → code
+    // (table, start, element, data sections omitted in v1).
     let mut module = Module::new();
     module.section(&types);
     if !host_plan.imports.is_empty() {
         module.section(&imports);
     }
     module.section(&funcs);
+    module.section(&mem);
+    module.section(&globals);
     module.section(&exports);
     module.section(&code);
 
