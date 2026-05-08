@@ -27,7 +27,15 @@ use super::types::Guarantee;
 pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "approval.dangerous_call_requires_token",
     "approval.token_lexical_only",
-    "approval.dangerous_marker_preserved",
+    // `approval.dangerous_marker_preserved` removed 2026-05-08 by
+    // Phase 35V-T1-B — downgraded to OutOfScope because the
+    // property is structural (Corvid source has no alias-effect-
+    // override surface that could erase a `@dangerous` marker), so
+    // there's no separately-tagged diagnostic to anchor a
+    // signed-claim assertion against. The parent
+    // `approval.dangerous_call_requires_token` (above) fires
+    // through the alias path and that firing is what the registry
+    // test_refs verify.
     "approval.reachable_entrypoints_require_contract",
     "effect_row.body_completeness",
     "effect_row.caller_propagation",

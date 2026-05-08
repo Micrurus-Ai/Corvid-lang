@@ -433,6 +433,24 @@ impl<'a> Checker<'a> {
                         .iter()
                         .any(|a| snake_case(&a.label) == name && a.arity == args.len());
                     if !authorized {
+                        // Mirror of `check_tool_call` in `call.rs`:
+                        // discriminate `approval.token_lexical_only`
+                        // (an approve exists in the agent body but
+                        // is out of lexical scope at this call site)
+                        // from `approval.dangerous_call_requires_token`
+                        // (no approve anywhere in the agent). The
+                        // distinction matters identically for
+                        // imported dangerous tools — the user's
+                        // mitigation differs by sub-property.
+                        let approve_exists_out_of_scope = self
+                            .approvals_seen_in_agent
+                            .iter()
+                            .any(|a| snake_case(&a.label) == name && a.arity == args.len());
+                        let guarantee_id = if approve_exists_out_of_scope {
+                            "approval.token_lexical_only"
+                        } else {
+                            "approval.dangerous_call_requires_token"
+                        };
                         self.errors.push(TypeError::with_guarantee(
                             TypeErrorKind::UnapprovedDangerousCall {
                                 tool: name.to_string(),
@@ -440,7 +458,7 @@ impl<'a> Checker<'a> {
                                 arity: args.len(),
                             },
                             span,
-                            "approval.dangerous_call_requires_token",
+                            guarantee_id,
                         ));
                     }
                 }

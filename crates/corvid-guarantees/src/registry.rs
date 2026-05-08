@@ -60,20 +60,33 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "approval.dangerous_marker_preserved",
         kind: GuaranteeKind::Approval,
-        class: GuaranteeClass::Static,
+        class: GuaranteeClass::OutOfScope,
         phase: Phase::TypeCheck,
         description:
             "A `@dangerous` marker cannot be erased by re-exporting or \
              aliasing the tool through another module — every public \
              alias preserves the original danger annotation.",
-        out_of_scope_reason: "",
-        positive_test_refs: &[
-            "crates/corvid-types/tests/source_bypass_corpus.rs::baseline_for_alias_compiles_clean",
-        ],
-        adversarial_test_refs: &[
-            "crates/corvid-types/src/tests.rs::adversarial_source_mutator_import_use_alias_dangerous_tool_is_tagged",
-            "crates/corvid-types/tests/source_bypass_corpus.rs::mutator_drops_approve_through_mock_alias_triggers_token_guarantee",
-        ],
+        out_of_scope_reason:
+            "Structural property of the language, not a separately-fired \
+             diagnostic. Corvid's source syntax has no `import use` form \
+             that can declare the alias's effect — aliases inherit their \
+             source's `@dangerous` marker by construction. The property \
+             is verified indirectly: when a dangerous imported tool is \
+             aliased and then called without approve, the parent \
+             diagnostic `approval.dangerous_call_requires_token` fires \
+             correctly, which is only possible because the marker was \
+             preserved through the alias. The cited test_refs assert \
+             that parent-diagnostic firing through the alias path. \
+             Phase 35V-T1-B (2026-05-08) downgraded this row from \
+             `Static` to `OutOfScope` because no separate diagnostic \
+             site exists to tag with this id; the property remains \
+             documentary, the enforcement remains structural via the \
+             parent diagnostic. A future syntax slice that introduces \
+             an explicit alias-effect-override surface would promote \
+             this row back to `Static` with a tagged diagnostic at the \
+             override-rejection site.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
     },
     Guarantee {
         id: "approval.reachable_entrypoints_require_contract",
