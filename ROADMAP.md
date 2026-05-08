@@ -1337,7 +1337,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 ---
 
-### Phase 20n — Open-gap implementation
+### Phase 20n — Open-gap implementation ✅ closed
 
 **Goal.** Implement the three open language gaps L-3, L-4, and L-7 surfaced by the original external-reviewer report and revisited by the verification round. 20l-F deferred L-7 (lexer line continuation) on language-identity grounds and 20m closed-but-deferred L-3 / L-4 to their owning phase tracks (17/20 and 23). Phase 20n reverses that ordering: ship the three gaps end-to-end as their own phase rather than waiting for the owning phases to absorb them, because the cumulative usability win from closing all three exceeds the cost of doing them now.
 
@@ -1357,17 +1357,17 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 - [x] 20n-A — L-7 lexer line continuation (Decision A, end-to-end implementation). Lexer changes in `crates/corvid-syntax/src/lexer.rs` to consume `\` + newline + leading whitespace as silent continuation outside strings and inside `"..."` literals. Triple-quoted blocks unchanged. Helpful diagnostic for `\` not at end-of-line. Tests + `docs/syntax.md` "Continuation rules" paragraph. Shipped `eb4a962` 2026-05-08.
 - [x] 20n-B — L-4 WASM String parameter and return support. Bare `(ptr, len)` UTF-8 ABI across `crates/corvid-codegen-wasm/`, JS loader, `.d.ts` emitter, manifest. `corvid_alloc` / `corvid_free` exports always present (real free-list with two-pass coalescing). Multi-value `(result i32 i32)` returns. Compile-time string-literal pool emitted as a single active `DataSection` segment with content-keyed deduplication. Multi-byte UTF-8 round-trip integration tests + 200-iteration churn test pinning page count. Uniform manifest `kind` discriminator on every param/return. Shipped across `9e00719` `bf7d55f` `6bfc7ae` `8da006e` `231c88c` `14ffb07` 2026-05-08.
-- [ ] 20n-C — L-3 native codegen struct returns. Two sites: prompt-bridge in `crates/corvid-codegen-cl/src/lowering/prompt.rs` and entry-agent boundary. Mirror the `Grounded<T>` heap-allocation pattern. Step-0 audit: verify whether the existing JSON encoder in `corvid-runtime` handles structs.
+- [x] 20n-C — L-3 native codegen struct returns. Two sites lifted: prompt-bridge in `crates/corvid-codegen-cl/src/lowering/prompt.rs` (commit 4) and entry-agent boundary in `crates/corvid-codegen-cl/src/lowering/entry.rs` + `lib.rs` (commit 5). Plus `Grounded<Struct>` attestation extension (commit 6). Step-0 audit corrected the original "mirror Grounded<T>" framing — Grounded<T> is a handle-store pattern for attestation metadata, not a heap-allocation pattern; the actual heap layout to mirror was `lower_struct_constructor`'s `corvid_alloc_typed(size, &typeinfo)` with 8-byte field slots. New crate `corvid-prompt-format` extracted from `corvid-vm/src/schema.rs` so codegen can reuse the JSON Schema generator without depending on the interpreter. Generic JSON parse/build primitives (12 C-ABI fns) added to runtime; codegen emits per-struct decoders + encoders (cached by `DefId`) that use them. New `corvid_prompt_call_struct` bridge takes a function-pointer decoder callback (the typed-bridge family extended without combinatorial explosion: same one bridge serves every struct type via the codegen-emitted decoder). Field-type coverage v1: `Int` / `Bool` / `Float` / `String` (mirrors the four scalar prompt bridges). Shipped across `10107cc` `1361a61` `9d8e19d` `cfb131d` `6f04db5` `5e1b864` 2026-05-08.
 
 **Out-of-scope deferrals:** the REPL hardcoded ANSI escape audit (filed in 20m as out-of-scope) stays out of 20n. So does any expansion to `Stream<Struct>`, WASM Component Model adapters, UTF-16, or cross-FFI struct passing for tools.
 
 **Phase-done criteria:**
 
-- [ ] 20n-A, 20n-B, 20n-C all land with regression tests.
-- [ ] Closing audit recorded in `docs/phase-20n-open-gap-implementation.md` with per-slice status + the design-override note for L-7.
-- [ ] `learnings.md` updated per slice.
-- [ ] ROADMAP.md Phase 20n entry checkboxes ticked, `✅ closed` marker added.
-- [ ] Memory record `project_phase_20n_closed.md` summarises the design-override pattern (when a deferral is reversed, record the directive explicitly so future sessions don't mistake it for drift) and the step-0 audit pattern (substantive feature slices need a read-and-plan step before code).
+- [x] 20n-A, 20n-B, 20n-C all land with regression tests.
+- [x] Closing audit recorded in `docs/phase-20n-open-gap-implementation.md` with per-slice status + the design-override note for L-7.
+- [x] `learnings.md` updated per slice.
+- [x] ROADMAP.md Phase 20n entry checkboxes ticked, `✅ closed` marker added.
+- [x] Memory record `project_phase_20n_closed.md` summarises the design-override pattern (when a deferral is reversed, record the directive explicitly so future sessions don't mistake it for drift), the step-0 audit pattern (substantive feature slices need a read-and-plan step before code), the codegen-emits-per-type pattern (per-struct decoders + encoders cached by `DefId` so runtime stays type-agnostic), and the rename-don't-duplicate principle (extending an existing storage map's semantics rather than introducing a parallel one).
 
 ---
 

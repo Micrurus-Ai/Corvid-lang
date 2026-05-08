@@ -367,3 +367,241 @@ without 20n-B's edits applied, so it's not a regression. The
 auto-fallback from `3fb577e` only triggers when the staticlib is
 missing; here the staticlib is present and the link itself fails.
 Filed as a small linker-args fix for after Phase 20n closes.
+
+## Closing audit — 20n-C (2026-05-08)
+
+**Shipped.** L-3 from the open-gap prompt: native prompts whose
+return type is `Type::Struct(_)` now compile and run end-to-end,
+returning a heap-allocated struct from the LLM call; native entry
+agents can declare `Type::Struct(_)` returns and the binary
+prints the struct as JSON to stdout in source-declaration field
+order; `Type::Grounded(Type::Struct(_))` attaches a source-and-
+confidence attestation to the struct's heap pointer.
+
+**Commit list.**
+
+| # | SHA | Subject |
+|---|---|---|
+| 1 | `10107cc` | `feat(prompt-format): extract schema_for into a shared crate` |
+| 2 | `1361a61` | `feat(runtime): expose generic JSON parse/build primitives` |
+| 3 | `9d8e19d` | `feat(runtime): typed prompt bridge for struct returns` |
+| 4 | `cfb131d` | `feat(codegen-cl): emit per-struct decoders for prompt struct returns` |
+| 5 | `6f04db5` | `feat(codegen-cl): emit per-struct JSON serializers for entry struct returns` |
+| 6 | `5e1b864` | `feat(codegen-cl): grounded attestation for struct prompt returns` |
+| 7 | _(this commit)_ | `docs(20n): close phase 20n with open-gap implementation complete` |
+
+**Step-0 audit corrected the original framing.** The phase doc
+said "mirror the `Grounded<T>` heap-allocation pattern." The audit
+found `Grounded<T>` is a *handle-store pattern for attestation
+metadata*, not a heap-allocation pattern for the value itself —
+the value crosses scalar and the handle indexes into a process-
+global slotmap. The actual heap layout to mirror was the existing
+`lower_struct_constructor` site's `corvid_alloc_typed(size,
+&typeinfo)` call with 8-byte field slots. The framing correction
+is recorded here so future struct-related work doesn't re-derive
+the wrong analogy.
+
+**Design decisions captured.**
+
+- **New shared crate `corvid-prompt-format`.** The schema
+  generator (`schema_for(&Type, &types_by_id) -> Value`) was
+  extracted from `corvid-vm/src/schema.rs` into its own crate
+  with deps on `corvid-types`, `corvid-ir`, `corvid-resolve`,
+  `serde_json`. Native codegen now reuses the same canonical
+  schema implementation as the interpreter without depending on
+  `corvid-vm`. The corvid-vm `schema.rs` becomes a thin re-export
+  shim preserving existing `corvid_vm::schema::schema_for` call
+  sites.
+- **Runtime stays type-agnostic via generic JSON primitives.** 13
+  new C-ABI functions (`corvid_json_parse`, `_release`,
+  `_field_present`, `_get_field_int/_bool/_float/_str`,
+  `_object_new`, `_object_set_int/_bool/_float/_str`,
+  `_object_finish`) sit in
+  `corvid-runtime/src/ffi_bridge/json_exports.rs`. Runtime never
+  learns about `Type::Struct` or `STRUCT_FIELD_SLOT_BYTES`;
+  codegen-emitted decoders/encoders carry the language-aware
+  shape knowledge.
+- **One typed bridge serves every struct via a decoder callback.**
+  `corvid_prompt_call_struct(...)` takes the standard 7 prompt-
+  bridge args plus `schema_json: CorvidString` and `decoder:
+  extern "C" fn(CorvidString) -> i64`. Codegen emits one decoder
+  per `Type::Struct(def_id)` (cached by `DefId` so multiple
+  prompts returning the same struct share one decoder) and
+  threads its `func_addr` through. Sentinels: decoder returning
+  `0` triggers retry; `0` is unambiguously "rejected" because
+  the heap allocator reserves the null-pointer sentinel and
+  never returns address 0. After max retries the bridge panics
+  with the canonical "could not decode Struct" message.
+- **Codegen emits per-struct decoders + encoders symmetrically.**
+  `lookup_or_emit_struct_decoder` (in `lowering/struct_decode.rs`)
+  produces `corvid_decode_<StructName>__<def_id>(json) -> i64`;
+  `lookup_or_emit_struct_to_json` (in `lowering/struct_encode.rs`)
+  produces `corvid_<StructName>__<def_id>_to_json(ptr) ->
+  CorvidString`. Both cached on `RuntimeFuncs` via `RefCell<
+  HashMap<DefId, FuncId>>` like the existing `tool_wrapper_ids`
+  pattern.
+- **Field order = source order.** Codegen iterates
+  `IrType.fields` in declaration order on both decode and encode
+  sides. Commit 2's `serialize_object_in_insertion_order` helper
+  (using `Vec<(String, Value)>` rather than `serde_json::Map`'s
+  default `BTreeMap`) preserves that order through the JSON
+  output without requiring the workspace-wide `preserve_order`
+  serde_json feature flag.
+- **Refcount discipline in encoders.** Each `String` field is
+  loaded as a borrowed descriptor pointer (struct still owns
+  it). The setter consumes a +1 via its `read_corvid_string`
+  move; encoder explicitly retains before each `set_str` so the
+  setter's consumption doesn't deplete the struct's own count
+  for its destructor.
+- **`Grounded<Struct>` reuses the same map as `Grounded<String>`.**
+  The runtime field `string_attestations` was renamed to
+  `pointer_attestations` along with the two helpers
+  (`attach_string_attestation` -> `attach_pointer_attestation`,
+  `register_handle_for_string_ptr` ->
+  `register_handle_for_pointer`). New C-ABI fn
+  `corvid_grounded_attest_struct` shares the same storage as the
+  string variant, just keyed by the raw struct pointer rather
+  than a CorvidString descriptor. The rename clarified the
+  storage's actual semantics; the alternative (parallel
+  `struct_attestations` map) would have introduced duplicate
+  state for no capability gain.
+
+**Test coverage shipped.**
+
+- 4 wasmtime-style end-to-end tests in
+  `crates/corvid-codegen-cl/tests/struct_prompt_return.rs`:
+  decode-all-scalar-fields, retry-on-decoder-failure-then-
+  succeeds, entry-struct-prints-full-JSON, Grounded<Struct>-
+  attestation-then-unwraps.
+- 1 integration test in
+  `crates/corvid-runtime/tests/struct_prompt_bridge.rs`
+  exercising the bridge's retry-loop semantics with a mock
+  decoder.
+- 11 inline unit tests in
+  `crates/corvid-runtime/src/ffi_bridge/json_exports.rs`
+  pinning the JSON primitives' sentinel discipline + insertion-
+  order preservation + lenient float/int decoding.
+- 6 inline tests in `crates/corvid-prompt-format/src/lib.rs`
+  (5 ported from `corvid-vm/src/schema.rs` plus 1 new
+  ImportedStruct fallback test).
+- 5 inline unit tests in
+  `crates/corvid-runtime/src/grounded_handles.rs` (renamed
+  pointer-keyed; new struct-pointer round-trip test).
+
+**Out-of-scope deferrals (filed for later slices).**
+
+- `Type::ImportedStruct` returns at any boundary. Native
+  cross-file struct layout requires the lang-cor-imports-basic
+  driver-integration slice that owns the broader work. For now
+  ImportedStruct produces a clear error message pointing at the
+  driver-integration track.
+- `Type::List` returns at the entry boundary. Lists need their
+  own encoder primitives (per-element-type list-to-JSON
+  emission). Filed as a follow-up slice.
+- Nested struct fields (a struct with a struct-typed field).
+  Would need recursive decoder emission + a `_get_field_object`
+  primitive. Filed.
+- `Type::Result(_, _)`, `Type::Option(_)`, `Type::Stream(_)`,
+  `Type::Partial(_)` returns at any boundary. Each needs its
+  own decoder/encoder primitives.
+- Grounded handle release at struct destruction. Currently the
+  attestation lives in `pointer_attestations` until the program
+  exits or the cdylib export path explicitly captures via
+  `corvid_grounded_capture_struct_handle`. Same lifecycle
+  semantics `Grounded<String>` uses today; broader cleanup
+  story is filed for a future slice.
+
+**`Grounded<Struct>` panic-on-decoder-exhaustion is structurally
+untestable through Rust unit tests.** All five
+`corvid_prompt_call_*` bridges use `extern "C"` for stable
+codegen ABI compatibility; a Rust panic crossing an `extern "C"`
+boundary aborts the process rather than unwinding.
+`std::panic::catch_unwind` cannot catch it. The end-to-end test
+infrastructure exercises the panic path naturally when a
+misconfigured mock causes the bridge to exhaust retries — the
+abort terminates the compiled binary with the canonical "could
+not decode Struct" message on stderr, which is exactly the
+behaviour users observe at runtime. Documented in commit 3's
+test file as the rationale for why scenario 3 from the original
+test plan is end-to-end-only.
+
+## Phase 20n closing — full phase audit (2026-05-08)
+
+**Three slices shipped, 13 commits + closer.** Phase 20n closed
+the three open language gaps surfaced by the original external-
+reviewer report and re-confirmed by the verification round.
+
+| Slice | Gap | Commits | Status |
+|---|---|---|---|
+| 20n-A | L-7 lexer line continuation | `eb4a962` | shipped |
+| 20n-B | L-4 WASM String parameter and return support | `9e00719` `bf7d55f` `6bfc7ae` `8da006e` `231c88c` `14ffb07` `a05fc2b` | shipped |
+| 20n-C | L-3 native codegen struct returns | `10107cc` `1361a61` `9d8e19d` `cfb131d` `6f04db5` `5e1b864` _(this closer)_ | shipped |
+
+**Cross-slice patterns recorded for future-me.**
+
+- **Design-reversal recording.** The 20l-F learnings entry
+  deferred L-7 on language-identity grounds. The 2026-05-08
+  directive reversed that decision. The reversal lives in this
+  phase doc, in `learnings.md`, and in the memory record — the
+  20l-F entry stays as the original-rationale record, and the
+  20n entries stand alongside as the explicit reversal record.
+  Both are preserved so future sessions can see *decision* (the
+  override is documented) versus *drift* (someone forgot the
+  prior decision and reimplemented).
+- **Step-0 audit before substantive feature slices.** Both 20n-B
+  and 20n-C began with a step-0 read-and-plan pass before any
+  code. For 20n-B the audit found existing infrastructure for
+  the WASM target and shaped the multi-value-return ABI choice.
+  For 20n-C the audit corrected the phase doc's framing of
+  "mirror Grounded<T>" — Grounded<T> is a handle-store pattern,
+  not a heap-allocation one. The actual analog was
+  `lower_struct_constructor`'s offset-based field layout. The
+  audit + framing-correction is the failure mode this pattern
+  prevents.
+- **Codegen emits per-type, runtime stays type-agnostic.** Both
+  20n-B (WASM struct decoder/encoder for the manifest `kind`
+  discriminator) and 20n-C (native struct decoder/encoder per
+  `DefId`) follow the same pattern: one bridge function in the
+  runtime that delegates to codegen-emitted per-type
+  functions. Adding a new prompt-return type (List, Optional,
+  Result) gains a new codegen-side emitter and reuses the
+  existing one bridge — no combinatorial explosion at the
+  runtime ABI surface. Generalises to: when the runtime's API
+  surface threatens to grow per-type, push the type-specific
+  work into codegen and keep the runtime's surface uniform.
+- **Rename-don't-duplicate when extending storage semantics.**
+  20n-C extended `string_attestations` to also serve struct
+  attestations. The shortcut option was a parallel
+  `struct_attestations` map; the no-shortcut option was
+  renaming the existing map to `pointer_attestations` so its
+  actual semantics (any heap-pointer-keyed attestation) became
+  visible in the code itself. The rename touched 4 helpers + 2
+  call sites + 3 tests but produced one canonical storage path
+  that future heap shapes (lists, future allocations) can use
+  without further rename churn.
+- **Multi-value/multi-arg ABI extension over typed-bridge
+  multiplication.** Both phases extended C-ABI surfaces. 20n-B
+  used WASM stage-4 multi-value `(result i32 i32)` returns
+  rather than sentinel bytes or out-pointer conventions. 20n-C
+  used a function-pointer callback parameter rather than a
+  typed-bridge-per-struct family. Both cases prefer the ABI
+  shape that doesn't require the caller to predict sizes,
+  distinguish ownership cases, or maintain a combinatorial
+  match-arm table.
+
+**Out-of-scope items filed across the phase (not regressions —
+they were never in scope).** REPL hardcoded ANSI escapes (filed
+20m), `Stream<Struct>`, WASM Component Model adapters, UTF-16
+strings, cross-FFI struct passing for tools, nested struct
+fields in prompt returns, `Type::ImportedStruct` returns,
+`Type::List` returns at the entry boundary, broader Grounded
+handle cleanup story.
+
+**Pre-existing baseline observation that survives Phase 20n.**
+`cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
+exits `2` due to the bundled `whoami` static lib's
+`__imp_GetUserNameExW` linker symbol on Windows. Reproduces with
+or without each Phase 20n commit applied. The auto-fallback from
+`3fb577e` covers the missing-staticlib case but not the
+staticlib-present-but-link-fails case. Filed as a small
+linker-args fix slice for after Phase 20n closes.

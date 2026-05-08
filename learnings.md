@@ -3945,3 +3945,173 @@ slice closer commit must touch `learnings.md` even if the entry is
 short. The 20n-A entry above was added retroactively here; the
 prevention is to put a learnings-touch line in the per-slice closer
 checklist, not to skip the entry.
+
+### Slice 20n-C — native struct prompt + entry returns (L-3)
+
+Step-0 audits correct phase-doc framing before they correct anything
+else. The 20n-C phase doc said "mirror the `Grounded<T>` heap-
+allocation pattern." The audit found `Grounded<T>` is a handle-store
+for attestation metadata, not a heap-allocation pattern for the
+value itself — the value crosses scalar and the handle indexes a
+process-global slotmap. The actual analog was
+`lower_struct_constructor`'s `corvid_alloc_typed(size, &typeinfo)`
+call with 8-byte field slots. Recording the framing correction
+(rather than silently doing the right thing) keeps the audit
+discipline visible: "the phase doc was wrong, here's the corrected
+framing, here's why" lets future sessions recognise the same
+analogy mistake elsewhere.
+
+Codegen-emits-per-type beats typed-bridge multiplication. The
+runtime gains exactly one new bridge (`corvid_prompt_call_struct`)
+plus generic JSON primitives. Codegen emits one decoder per
+`Type::Struct(def_id)` (cached by `DefId`), and the bridge calls
+into it via a C function-pointer callback. Adding a new prompt-
+return type later (List, Optional, Result, Stream) means a new
+codegen emitter and re-uses the existing one runtime API surface —
+no combinatorial explosion. The opposite path (a typed bridge per
+return-type-shape) would have produced
+`corvid_prompt_call_list_int`, `corvid_prompt_call_list_string`,
+`corvid_prompt_call_optional_int`, ad infinitum. Generalises to:
+when the runtime's API surface threatens to grow per-type, push the
+type-specific work into codegen and keep the runtime's surface
+uniform via a callback or descriptor parameter.
+
+Rename storage maps when their semantics outgrow their original
+caller. `string_attestations` was the original name because the
+first caller was the CorvidString descriptor pointer. The
+underlying map (`HashMap<usize, Arc<GroundedAttestation>>`) was
+always heap-pointer-keyed and worked for any refcounted heap object.
+Adding a parallel `struct_attestations` map for `Grounded<Struct>`
+would have introduced duplicate state for no capability gain. The
+no-shortcut answer was to rename to `pointer_attestations` (4
+helpers + 2 call sites + 3 tests touched) so the storage's actual
+semantics became visible in the code itself. Future heap shapes
+(lists, future allocations) reuse the same path without further
+rename churn. Generalises to: when extending a single-purpose
+storage's semantics to cover a second purpose, rename the storage
+to reflect both purposes rather than introducing a parallel one.
+
+Schema generation belongs in its own crate, not the interpreter.
+The JSON Schema generator (`schema_for(&Type, &types_by_id) ->
+Value`) lived in `corvid-vm/src/schema.rs` because the interpreter
+happened to need it first — a historical accident, not a layering
+decision. When the native code generator needed the same logic in
+20n-C, "import from corvid-vm" would have pulled the entire
+interpreter into the codegen-cl dep tree to reach a 200-line schema
+function. The fix was to extract `corvid-prompt-format` as a
+dedicated crate with deps on `corvid-types`, `corvid-ir`,
+`corvid-resolve`, `serde_json` — exactly the language-level types
+the schema needs and nothing else. Bonus: future LLM-provider
+schema dialects (Gemini's structured-output, future Anthropic
+revisions) have a discoverable home. Generalises to: when a
+language-level concern lives in a crate it doesn't belong in
+because of historical accident, the right move is to extract a
+shared crate with the minimal dep set, not to import the
+historical-host crate everywhere.
+
+Field order = source order, preserved end-to-end. The CTO design
+decision for struct-to-JSON encoding was "fields in `IrType.fields`
+declaration order matches what the interpreter does in
+`value_to_json`." The naive implementation
+(`serde_json::Map<String, Value>` + `serde_json::to_string`) would
+have alphabetised because Map is `BTreeMap`-backed. Flipping the
+workspace-wide `preserve_order` serde_json feature would have
+changed every existing JSON path. The right answer was a builder
+that uses `Vec<(String, Value)>` internally + a hand-rolled
+`serialize_object_in_insertion_order` helper that delegates each
+value's serialisation to `serde_json::to_string` while writing the
+outer object structure directly. No new deps, no workspace-wide
+feature flag flip, source-order preserved everywhere it matters.
+Generalises to: when a default behaviour conflicts with a contract
+you need (here: insertion-order field iteration), prefer a local
+override over a global feature flag, especially when the global
+flag has cross-cutting effects.
+
+Refcount discipline at FFI boundaries: retain-before-consume when
+a callee takes +1 ABI from a borrowed source. The struct encoder
+loads each `String` field as a borrowed descriptor pointer (the
+struct still owns it). The runtime's
+`corvid_json_object_set_str` consumes the string's +1 refcount via
+its `read_corvid_string` move; if the encoder didn't retain first,
+the struct's destructor would later release a stale pointer. Every
+boundary like this — borrowed-load + consuming-callee — needs an
+explicit `corvid_retain` between the load and the call. The
+inverse pattern (the prompt bridge wrapping the LLM response in a
+fresh `string_from_rust` and releasing after the decoder returns)
+keeps the bridge owner of the +1 even though the decoder borrows.
+The general rule: at every C-ABI handoff involving a refcounted
+value, name explicitly which side owns the +1 and emit the
+retain/release accordingly — uncommented "borrow" calls inside
+mixed +1 / +0 ABI surfaces are how use-after-free regressions
+land.
+
+Panics through `extern "C"` abort, they don't unwind. All five
+`corvid_prompt_call_*` bridges use `extern "C"` (not
+`extern "C-unwind"`) for stable codegen ABI compatibility. A Rust
+panic crossing such a boundary aborts the process rather than
+unwinding. `std::panic::catch_unwind` cannot catch it. Tests that
+need to validate panic-on-failure behaviour through a C-ABI bridge
+have to drive the bridge end-to-end (compile a binary, run it
+under a misconfigured mock, observe the abort + stderr) rather
+than asserting via `catch_unwind` in a Rust unit test. The 20n-C
+struct-bridge integration test made this scope-call explicitly
+(decoder-always-fails was dropped from the unit-test plan because
+of this constraint, with the rationale documented in the test
+file's comment block).
+
+### Phase 20n cross-slice patterns
+
+Three patterns survive their slice contexts and apply to future
+language-gap closure work:
+
+**Design-reversal recording.** When a deferral is reversed, the
+phase doc, the learnings file, and the memory record all carry
+the reversal note before any code lands. The original-decision
+entry stays as the original-rationale record; the new entry
+stands alongside it as the explicit reversal record. Both are
+preserved so future sessions can see decision (the override is
+documented) versus drift (someone forgot the prior decision and
+reimplemented). The 20l-F → 20n-A reversal on backslash line
+continuation is the worked example.
+
+**Step-0 audit before substantive feature slices.** Substantive
+feature slices (not bug fixes) need a read-and-plan pass before
+any code. The audit's job isn't just to confirm scope — it
+sometimes corrects the phase doc's framing. 20n-B's audit shaped
+the multi-value WASM ABI choice; 20n-C's audit corrected the
+"mirror Grounded<T>" framing into "mirror lower_struct_constructor."
+A refined plan goes back for pre-phase chat before code starts.
+The mid-implementation scope expansion is the failure mode this
+prevents.
+
+**Codegen emits per-type, runtime stays type-agnostic.** When a
+new language-level type shape (struct return, list return,
+optional return) needs runtime support, the right division of
+labour is: codegen emits one function per concrete type instance
+(cached by `DefId` or equivalent), runtime exposes generic
+primitives the codegen-emitted code uses. Runtime's API surface
+stays at one bridge per concept, not one bridge per type-shape
+combination. The pattern shipped in 20n-B (per-struct WASM
+manifest entries with uniform `kind` discriminator) and in 20n-C
+(per-struct decoders/encoders + JSON primitives).
+
+**Rename storage maps when their semantics outgrow their original
+caller.** A storage primitive named after its first caller often
+turns out to serve a broader set of callers later. Renaming
+upfront when the second caller arrives — instead of introducing a
+parallel storage path — produces one canonical storage and one
+canonical pair of helpers that future shapes can extend without
+further churn. 20n-C's `string_attestations` →
+`pointer_attestations` is the worked example.
+
+**Multi-value / callback parameter over typed-bridge
+multiplication.** When a C-ABI surface needs to carry information
+that varies per type (the schema for a struct prompt return, the
+decoder logic for a struct, the field count for an array return),
+the right shape is a single function with a multi-value return or
+a callback parameter. Combinatorial typed-bridge families
+(`prompt_call_list_int`, `prompt_call_list_string`,
+`prompt_call_optional_int`, ...) explode quadratically; one bridge
++ a callback or descriptor stays linear. 20n-B's multi-value WASM
+returns and 20n-C's function-pointer decoder callback both fit
+this pattern.
