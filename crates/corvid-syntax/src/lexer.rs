@@ -84,6 +84,7 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                     }
                 }
+                b'\\' => self.lex_backslash_continuation(),
                 b'0'..=b'9' => self.lex_number(),
                 b'"' => self.lex_string(),
                 c if is_ident_start(c) => self.lex_ident_or_kw(),
@@ -226,6 +227,74 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Handle a `\` encountered outside any string. When `\` is
+    /// immediately followed by a newline (optionally CRLF), the
+    /// backslash plus the newline plus any leading whitespace on
+    /// the next physical line are consumed silently — joining the
+    /// two physical lines into one logical line. No `Newline`,
+    /// `Indent`, or `Dedent` token is emitted, and `had_content_on_line`
+    /// is preserved across the boundary.
+    ///
+    /// `\` not at end-of-line keeps emitting `UnexpectedChar('\\')`
+    /// to preserve the existing E0003 diagnostic for stray backslashes.
+    ///
+    /// Triple-quoted strings already span lines, so this rewriting
+    /// only applies to top-level lexing and to single-quoted strings
+    /// (handled in `lex_single_string`).
+    fn lex_backslash_continuation(&mut self) {
+        let bs_start = self.pos;
+        if self.is_line_continuation_at(self.pos) {
+            self.consume_line_continuation();
+        } else {
+            self.errors.push(LexError {
+                kind: LexErrorKind::UnexpectedChar('\\'),
+                span: Span::new(bs_start, bs_start + 1),
+            });
+            self.pos += 1;
+        }
+    }
+
+    /// Returns true iff `pos` is on a `\` that is immediately
+    /// followed by a newline (optionally CRLF).
+    fn is_line_continuation_at(&self, pos: usize) -> bool {
+        if pos >= self.bytes.len() || self.bytes[pos] != b'\\' {
+            return false;
+        }
+        let mut probe = pos + 1;
+        if probe < self.bytes.len() && self.bytes[probe] == b'\r' {
+            probe += 1;
+        }
+        probe < self.bytes.len() && self.bytes[probe] == b'\n'
+    }
+
+    /// Consume `\` + optional `\r` + `\n` + any leading whitespace
+    /// on the next physical line. Caller must have verified that
+    /// `is_line_continuation_at(self.pos)` is true.
+    fn consume_line_continuation(&mut self) {
+        // Consume `\`.
+        self.pos += 1;
+        // Consume optional `\r` and the `\n` itself.
+        if self.pos < self.bytes.len() && self.bytes[self.pos] == b'\r' {
+            self.pos += 1;
+        }
+        debug_assert!(
+            self.pos < self.bytes.len() && self.bytes[self.pos] == b'\n',
+            "consume_line_continuation called without a trailing newline"
+        );
+        self.pos += 1;
+        // Consume leading whitespace on the joined-in line. The
+        // continuation merges both physical lines into one logical
+        // line, so the next line's indentation must NOT influence
+        // `process_line_start`'s Indent/Dedent emission. By eating
+        // the whitespace here we never reach `process_line_start`
+        // for the continuation line.
+        while self.pos < self.bytes.len()
+            && (self.bytes[self.pos] == b' ' || self.bytes[self.pos] == b'\t')
+        {
+            self.pos += 1;
+        }
+    }
+
     fn lex_single_string(&mut self) {
         let start = self.pos;
         self.pos += 1; // consume opening "
@@ -254,7 +323,14 @@ impl<'a> Lexer<'a> {
                     return;
                 }
                 b'\\' => {
-                    if let Some(ch) = self.consume_escape(start) {
+                    // Line continuation inside a single-quoted string:
+                    // `\` + newline (+ leading whitespace) is consumed
+                    // silently, treating the two physical lines as one
+                    // logical string. Triple-quoted strings already span
+                    // lines naturally and are not rewritten here.
+                    if self.is_line_continuation_at(self.pos) {
+                        self.consume_line_continuation();
+                    } else if let Some(ch) = self.consume_escape(start) {
                         contents.push(ch);
                     } else {
                         return;
@@ -463,4 +539,133 @@ fn is_ident_start(c: u8) -> bool {
 
 fn is_ident_continue(c: u8) -> bool {
     c == b'_' || c.is_ascii_alphanumeric()
+}
+
+#[cfg(test)]
+mod backslash_continuation_tests {
+    //! Regression tests for slice 20n-A: `\` end-of-line continuation.
+    //!
+    //! - Outside any string: `\` + newline + leading whitespace is
+    //!   silently consumed; the two physical lines lex as one logical
+    //!   line (no `Newline`/`Indent`/`Dedent` emitted at the join).
+    //! - Inside a `"..."` single-quoted string: same rewriting; the
+    //!   two physical lines join into one string contents value.
+    //! - `\` not followed by a newline at top level still produces
+    //!   `LexErrorKind::UnexpectedChar('\\')` (preserves E0003).
+    //! - Triple-quoted `"""..."""` strings are NOT rewritten (the
+    //!   feature only targets single-quoted strings + top-level).
+
+    use super::{lex, LexErrorKind, TokKind};
+
+    fn token_kinds(src: &str) -> Vec<TokKind> {
+        lex(src)
+            .expect("expected source to lex without errors")
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
+    }
+
+    #[test]
+    fn outside_string_continuation_suppresses_newline_and_indent() {
+        // The reproduction from the original gap report: a `\` at end
+        // of line outside any string lets the program continue onto
+        // the next line without inserting a structural `Newline` or
+        // `Indent` token.
+        let src = "agent main() -> Bool: \\\n    return true\n";
+        let kinds = token_kinds(src);
+        // No structural Newline immediately after the `:` — the
+        // `Return` token sits on the same logical line.
+        let colon_idx = kinds
+            .iter()
+            .position(|k| matches!(k, TokKind::Colon))
+            .expect("colon present");
+        let return_idx = kinds
+            .iter()
+            .position(|k| matches!(k, TokKind::KwReturn))
+            .expect("return present");
+        assert!(return_idx > colon_idx, "return must follow colon");
+        let between = &kinds[colon_idx + 1..return_idx];
+        for kind in between {
+            assert!(
+                !matches!(kind, TokKind::Newline | TokKind::Indent),
+                "no structural Newline / Indent allowed between `:` and `return` after a `\\` continuation; saw {kind:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn inside_single_quoted_string_continuation_joins_lines() {
+        // `"foo \<NL>    bar"` lexes as the string "foobar" — the
+        // backslash + newline + leading whitespace are silently
+        // consumed.
+        let src = "agent main() -> String:\n    return \"foo \\\n           bar\"\n";
+        let kinds = token_kinds(src);
+        let lit = kinds
+            .iter()
+            .find_map(|k| match k {
+                TokKind::StringLit(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .expect("a string literal must be lexed");
+        assert_eq!(
+            lit, "foo bar",
+            "single-quoted string with `\\<NL>` should drop the backslash, the newline, and the leading whitespace; got {lit:?}",
+        );
+    }
+
+    #[test]
+    fn backslash_not_at_eol_outside_string_still_errors() {
+        // `\` followed by a non-newline character at top level keeps
+        // emitting `UnexpectedChar('\\')` so existing E0003 callers
+        // see no behaviour change.
+        let src = "agent main() -> Bool: \\foo\n    return true\n";
+        let errs = lex(src).expect_err("must reject stray backslash");
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e.kind, LexErrorKind::UnexpectedChar('\\'))),
+            "expected UnexpectedChar('\\\\') in errors; got {errs:?}",
+        );
+    }
+
+    #[test]
+    fn triple_quoted_string_is_not_rewritten() {
+        // The feature deliberately does NOT touch triple-quoted
+        // strings (they already span lines naturally). Lexing a
+        // triple-quoted prompt template — the canonical use case —
+        // must continue to work unchanged.
+        let src = "prompt summarise(text: String) -> String:\n    \"\"\"Summarise {text} in one sentence.\"\"\"\n";
+        let kinds = token_kinds(src);
+        let lit = kinds
+            .iter()
+            .find_map(|k| match k {
+                TokKind::StringLit(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .expect("a string literal must be lexed");
+        assert_eq!(lit, "Summarise {text} in one sentence.");
+    }
+
+    #[test]
+    fn outside_string_continuation_works_with_crlf() {
+        // Windows-style line endings: `\` + `\r` + `\n` + leading
+        // whitespace must also be consumed silently. Real .cor files
+        // on Windows hosts can carry CRLF endings.
+        let src = "agent main() -> Bool: \\\r\n    return true\n";
+        let kinds = token_kinds(src);
+        let colon_idx = kinds
+            .iter()
+            .position(|k| matches!(k, TokKind::Colon))
+            .expect("colon present");
+        let return_idx = kinds
+            .iter()
+            .position(|k| matches!(k, TokKind::KwReturn))
+            .expect("return present");
+        let between = &kinds[colon_idx + 1..return_idx];
+        for kind in between {
+            assert!(
+                !matches!(kind, TokKind::Newline | TokKind::Indent),
+                "CRLF continuation must suppress Newline / Indent",
+            );
+        }
+    }
 }
