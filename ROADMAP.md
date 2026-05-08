@@ -1297,6 +1297,46 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 ---
 
+### Phase 20m — Verifier-driven corrections
+
+**Goal.** Close two real corrections surfaced by re-testing the Phase 20l fix set against the same external-reviewer methodology that originally produced the 8-gap report. The verifier scorecard confirmed 5 of 8 entries verbatim, found 2 with wrong details (L-6 and L-8), and 1 with right diagnosis but the wrong root-cause framing (L-5). Of those three corrections: L-6's actual fix already landed under 20l-C (the original report's "NO_COLOR works as workaround" claim was retroactively wrong, but my fix already covers both `is_terminal()` and `NO_COLOR`), so 20m only needs to address L-5 and L-8.
+
+**Why this phase exists.** Two reasons. First, the corrections themselves: the 20l-E docs claim "approve must be PascalCase" is overly strict (the checker normalises any casing via `snake_case(label) == tool_name` at `crates/corvid-types/src/checker/call.rs:127`); and 20l-D made the staticlib-missing diagnostic readable but didn't auto-fall-back to the interpreter, leaving users to copy-paste a recovery command when the runtime could just retry. Second, the verifier-correction pattern itself is reusable institutional memory worth capturing — the next external-reviewer round (and there will be one before 33M opens) will follow the same shape: report → first-round fixes → verification round → corrections. Documenting the pattern makes the next round cheaper.
+
+**Detailed plan:** [docs/phase-20m-verifier-corrections.md](./docs/phase-20m-verifier-corrections.md) — verified site for each correction, fix shape, regression test plan, and the meta-learning about `expected_*` diagnostic fields versus acceptance criteria.
+
+**Sequencing rules** (per CLAUDE.md "When splitting"):
+
+- One commit per fix.
+- Validation gate between every commit: `cargo check --workspace` + targeted `cargo test -p <crate>` + `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` (Windows whoami linker baseline tolerated).
+- Push before starting the next slice.
+- Pre-phase chat per slice; no autonomous chaining.
+- Zero unrelated changes during a fix commit.
+- Commit message: `<type>(<crate>): <imperative summary>` — body cites slice id (20m-A or 20m-B), reproduction, root cause, fix, validation commands run.
+
+**Slices** (~2–3 commits + closer):
+
+- [ ] 20m-A — Correct `approve` naming docs (L-8 v2). Tighten §6.1 of `docs/effects-spec/03-typing-rules.md` to state both PascalCase and snake_case forms are accepted, explain the snake_case-equivalence comparison, and preserve the greppability story (now phrased as "by tool name in any casing, normalised to snake_case"). Update the `corvid tour --topic approve-gates` blurb in `crates/corvid-cli/src/tour.rs` and its `docs/site/site.js` mirror to match. Docs only.
+- [ ] 20m-B — Auto-fall-back to interpreter on native link failure (L-5 v2). Wrap `run_via_native_tier` at `crates/corvid-driver/src/run.rs:163` so a missing-staticlib failure (the `missing_staticlib_diagnostic` path from 20l-D) emits `↻ running via interpreter: native staticlib unavailable` and proceeds with `run_via_interpreter_tier` instead of bailing. The 20l-D diagnostic stays as the explicit-`--target=native` error message for users who opted into native and need to recover by hand. Extend `run_with_target_auto_uses_native_for_pure_program` (or add a sibling test) to cover the staticlib-missing-but-falls-back path.
+
+**Filed as out-of-scope (not 20m slices):**
+
+- **REPL hardcoded ANSI escapes** — surfaced during the L-6 verification: `crates/corvid-repl/src/lib.rs` has 20+ raw `\x1b[1m...\x1b[0m` sequences with no `NO_COLOR` or `is_terminal()` check. Same shape as L-6 but in a different module the verifier didn't test (they used `corvid check / build / run`, not `corvid repl`). File as a follow-up to be picked up the next time someone touches the REPL renderer; not 20m scope because it's a separate emitter and the 20l/20m scope is verifier-confirmed gaps only.
+
+**Phase-done criteria:**
+
+- [ ] 20m-A and 20m-B land with regression tests.
+- [ ] Closing audit recorded in `docs/phase-20m-verifier-corrections.md` with per-correction status, the meta-lesson about `expected_*` diagnostic fields versus acceptance criteria, and the verifier-correction pattern documented for future external-reviewer rounds.
+- [ ] `learnings.md` updated with the meta-lesson and the "verify the *comparison site*, not the *suggestion field*" rule.
+- [ ] ROADMAP.md Phase 20m entry checkboxes ticked.
+- [ ] Memory record `project_phase_20m_closed.md` summarises:
+  (a) the verifier-correction pattern (gap-report → first-round fixes → verification round → corrections; cheaper each round if institutionalised);
+  (b) the `expected_*` diagnostic-suggestion vs acceptance-criterion confusion that produced the L-8 doc error;
+  (c) the auto-fallback UX preference (`↻ running via interpreter: …`) over actionable-error UX when the recovery path is mechanical.
+  Add a one-liner to MEMORY.md.
+
+---
+
 ### Phase 21 — Replay (~5–6 months, maximal-flagship scope) ✅ closed — **THE FLAGSHIP WOW**
 
 **Goal.** Every run replayable by construction — and beyond. Baseline record + replay in both tiers, plus nine inventive features that push past every existing observability tool. Replay becomes a language-level, compile-time-guaranteed, regression-oracle-producing primitive.
