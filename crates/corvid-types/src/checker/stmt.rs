@@ -184,10 +184,20 @@ impl<'a> Checker<'a> {
     pub(super) fn check_approve(&mut self, action: &Expr) {
         if let Expr::Call { callee, args, .. } = action {
             if let Expr::Ident { name, .. } = &**callee {
-                self.approvals.push(Approval {
+                let approval = Approval {
                     label: name.name.clone(),
                     arity: args.len(),
-                });
+                };
+                // `approvals` is the lexical-scope stack that gets
+                // truncated on block exit (see `check_block`).
+                // `approvals_seen_in_agent` is the body-wide audit
+                // log that lets the dangerous-call diagnostic
+                // discriminate "no approve at all" from "approve
+                // exists but out of lexical scope" — see
+                // `approval.token_lexical_only` in
+                // `corvid-guarantees::GUARANTEE_REGISTRY`.
+                self.approvals.push(approval.clone());
+                self.approvals_seen_in_agent.push(approval);
             }
             // Always typecheck the args themselves for binding validity.
             for arg in args {

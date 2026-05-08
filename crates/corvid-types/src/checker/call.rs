@@ -126,6 +126,27 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
             if !authorized {
+                // Discriminate between two registry rows:
+                //   - `approval.token_lexical_only`: an approve with the
+                //     right label+arity exists somewhere in this
+                //     agent's body but is out of lexical scope at this
+                //     call site (e.g. inside a sibling `if` branch).
+                //   - `approval.dangerous_call_requires_token`: no
+                //     matching approve exists anywhere in this agent.
+                // The two distinct guarantee_ids let users know whether
+                // their fix is "move the approve to the right scope"
+                // or "add an approve at all" — the launch claim
+                // promises both properties separately, so the
+                // diagnostic must too.
+                let approve_exists_out_of_scope = self
+                    .approvals_seen_in_agent
+                    .iter()
+                    .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                let guarantee_id = if approve_exists_out_of_scope {
+                    "approval.token_lexical_only"
+                } else {
+                    "approval.dangerous_call_requires_token"
+                };
                 self.errors.push(TypeError::with_guarantee(
                     TypeErrorKind::UnapprovedDangerousCall {
                         tool: tool_name.to_string(),
@@ -133,7 +154,7 @@ impl<'a> Checker<'a> {
                         arity: args.len(),
                     },
                     span,
-                    "approval.dangerous_call_requires_token",
+                    guarantee_id,
                 ));
             }
         }

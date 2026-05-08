@@ -336,6 +336,16 @@ struct Checker<'a> {
     /// is exited. This gives block-local effect scoping for free.
     approvals: Vec<Approval>,
 
+    /// Every approve token seen anywhere in the current agent's body,
+    /// including ones currently out of lexical scope. Used by the
+    /// dangerous-call check to discriminate between two registry
+    /// rows: `approval.dangerous_call_requires_token` (no approve at
+    /// all) vs `approval.token_lexical_only` (an approve with the
+    /// right label+arity exists somewhere in this agent but is out
+    /// of lexical scope at the call site). Reset at every agent
+    /// boundary via `check_agent`'s prev-swap pattern.
+    approvals_seen_in_agent: Vec<Approval>,
+
     /// Monotonic per-effect epochs used to prove `Weak::upgrade(...)`
     /// stays ahead of invalidating effects.
     effect_frontier: EffectFrontier,
@@ -516,6 +526,7 @@ impl<'a> Checker<'a> {
             in_test_body: false,
             saw_yield: false,
             approvals: Vec::new(),
+            approvals_seen_in_agent: Vec::new(),
             effect_frontier: EffectFrontier::default(),
             weak_refresh: HashMap::new(),
         }

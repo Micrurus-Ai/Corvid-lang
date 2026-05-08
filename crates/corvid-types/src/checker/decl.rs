@@ -31,6 +31,14 @@ impl<'a> Checker<'a> {
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret.clone()));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
         let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        // Reset the body-wide approve audit log; restore on exit.
+        // This is what lets the dangerous-call diagnostic
+        // discriminate `approval.token_lexical_only` (an approve
+        // exists in this agent's body but is out of lexical scope
+        // at the call site) from
+        // `approval.dangerous_call_requires_token` (no approve
+        // anywhere in the agent).
+        let prev_approvals_seen = std::mem::take(&mut self.approvals_seen_in_agent);
 
         self.check_block(&a.body);
 
@@ -70,6 +78,7 @@ impl<'a> Checker<'a> {
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
         self.saw_yield = prev_saw_yield;
+        self.approvals_seen_in_agent = prev_approvals_seen;
         // (Locals leak between agents in our single-scope model; harmless
         //  since each agent binds its params fresh at the start.)
     }
