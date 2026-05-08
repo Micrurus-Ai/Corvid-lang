@@ -394,7 +394,14 @@ mod tests {
     /// 2026-05-08 baseline: 56 rows (39 Static/RuntimeChecked + 17
     /// OutOfScope) verified clean for 35-A's internal honesty
     /// claims by slice 35V-T1-A.
+    ///
+    /// `#[allow(non_snake_case)]` because "35V" is the canonical
+    /// phase identifier (matches `ROADMAP.md` and
+    /// `docs/phase-35V-pre-launch-audit.md`); rendering it as
+    /// `35_v` would diverge from how the phase is referenced
+    /// everywhere else.
     #[test]
+    #[allow(non_snake_case)]
     fn registry_row_count_at_or_above_phase_35V_t1_a_baseline() {
         const BASELINE: usize = 56;
         assert!(
@@ -405,6 +412,136 @@ mod tests {
              intentionally (downgrade to private, deprecation), bump the \
              BASELINE constant in the same commit.",
             GUARANTEE_REGISTRY.len()
+        );
+    }
+
+    // ----------------------------------------------------------------
+    // Phase 35V-T1-Drift sentinel.
+    //
+    // Inverse-coverage check that 35V-T1-A's draft surfaced and
+    // 35V-T1-Drift's tagging commits (A through E) corrected:
+    // every Static / RuntimeChecked guarantee row's id must appear
+    // as a literal in at least one non-test, non-registry workspace
+    // source file. The forward direction (every diagnostic id is
+    // registered) is enforced by `TypeError::with_guarantee`'s
+    // debug_assert; this is the inverse — every registered
+    // enforced row is wired to at least one anchor in production
+    // code. A row failing this check is "claimed but not wired" —
+    // either the implementation is missing or the contract is
+    // anonymous in code. The 18-row finding from the draft sentinel
+    // surfaced "implementation exists, missing tag" drift; commits
+    // A-E added the tags. This permanent sentinel pins the
+    // property going forward so future regressions can't reopen
+    // the drift silently.
+    //
+    // `OutOfScope` rows are exempt: by definition they have no
+    // enforcement; their `out_of_scope_reason` is the proof.
+    // ----------------------------------------------------------------
+
+    /// Walk every `.rs` source file under `crates/` looking for a
+    /// literal occurrence of `needle`. Returns true if found in at
+    /// least one non-skip file; false otherwise.
+    ///
+    /// Skip list (a guarantee row's id only counts as "wired" when
+    /// it appears in real enforcement code, not in the registry
+    /// definition or test-reference paperwork):
+    ///
+    /// - The registry file itself (`crates/corvid-guarantees/src/registry.rs`),
+    ///   which by construction names every id.
+    /// - The signed-claim whitelist file (`crates/corvid-guarantees/src/signed_claim.rs`),
+    ///   which is itself a curated subset of registry ids.
+    /// - The render module (`crates/corvid-guarantees/src/render.rs`),
+    ///   which formats the registry into Markdown.
+    /// - Files whose path contains `/tests/` or ends in
+    ///   `tests.rs` — these are the test-reference targets the
+    ///   registry already names in `positive_test_refs` /
+    ///   `adversarial_test_refs`.
+    ///
+    /// Anywhere else the id appears (typechecker `with_guarantee`
+    /// calls, runtime const declarations, codegen diagnostic
+    /// emission, doc-comment anchors at enforcement sites) is
+    /// treated as evidence the guarantee is wired.
+    fn id_is_wired_in_workspace_source(needle: &str) -> bool {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root");
+        let crates_dir = workspace_root.join("crates");
+        let mut stack = vec![crates_dir];
+        while let Some(dir) = stack.pop() {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let path_str = path.to_string_lossy();
+                let path_lower = path_str.replace('\\', "/");
+                if path_lower.ends_with("crates/corvid-guarantees/src/registry.rs")
+                    || path_lower.ends_with("crates/corvid-guarantees/src/signed_claim.rs")
+                    || path_lower.ends_with("crates/corvid-guarantees/src/render.rs")
+                {
+                    continue;
+                }
+                if path_lower.ends_with("/tests.rs") || path_lower.contains("/tests/") {
+                    continue;
+                }
+                if let Ok(body) = std::fs::read_to_string(&path) {
+                    if body.contains(needle) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Phase 35V-T1-Drift permanent sentinel. Every `Static` /
+    /// `RuntimeChecked` registry row must have its `id` appear as
+    /// a literal in at least one non-test, non-registry source
+    /// file. A failing row is claimed-but-not-wired drift — either
+    /// the implementation is missing (downgrade to OutOfScope with
+    /// an explicit reason) or the enforcement site needs a literal
+    /// anchor (add `pub const GUARANTEE_ID_<NAME>: &str = "<id>"`
+    /// near the enforcement code, with a doc comment, mirroring
+    /// `ReplayDivergence::guarantee_id` in
+    /// `corvid-runtime/src/replay/diverge.rs`).
+    ///
+    /// Established 2026-05-08 by 35V-T1-Drift after the draft of
+    /// this test surfaced 18 unwired ids (commits A-E added their
+    /// anchors). The sentinel pins the property going forward so
+    /// future regressions can't reopen the drift silently.
+    #[test]
+    fn every_enforced_guarantee_id_is_wired_to_workspace_source() {
+        let mut unwired: Vec<&'static str> = Vec::new();
+        for g in GUARANTEE_REGISTRY {
+            if g.class == GuaranteeClass::OutOfScope {
+                continue;
+            }
+            if !id_is_wired_in_workspace_source(g.id) {
+                unwired.push(g.id);
+            }
+        }
+        assert!(
+            unwired.is_empty(),
+            "phase 35V-T1-Drift: registry rows enforced \
+             (Static/RuntimeChecked) but not anchored in any workspace \
+             source file:\n  - {}\n\nEither downgrade the row to \
+             OutOfScope with an explicit `out_of_scope_reason`, or add \
+             a literal anchor near the enforcement site \
+             (`pub const GUARANTEE_ID_<NAME>: &str = \"<id>\"` plus a \
+             doc comment naming the contract). See \
+             docs/phase-35V-pre-launch-audit.md for the corrective \
+             pattern.",
+            unwired.join("\n  - ")
         );
     }
 }
