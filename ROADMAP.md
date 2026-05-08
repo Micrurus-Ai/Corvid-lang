@@ -1297,7 +1297,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 ---
 
-### Phase 20m — Verifier-driven corrections
+### Phase 20m — Verifier-driven corrections ✅ closed
 
 **Goal.** Close two real corrections surfaced by re-testing the Phase 20l fix set against the same external-reviewer methodology that originally produced the 8-gap report. The verifier scorecard confirmed 5 of 8 entries verbatim, found 2 with wrong details (L-6 and L-8), and 1 with right diagnosis but the wrong root-cause framing (L-5). Of those three corrections: L-6's actual fix already landed under 20l-C (the original report's "NO_COLOR works as workaround" claim was retroactively wrong, but my fix already covers both `is_terminal()` and `NO_COLOR`), so 20m only needs to address L-5 and L-8.
 
@@ -1316,8 +1316,8 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 **Slices** (~2–3 commits + closer):
 
-- [ ] 20m-A — Correct `approve` naming docs (L-8 v2). Tighten §6.1 of `docs/effects-spec/03-typing-rules.md` to state both PascalCase and snake_case forms are accepted, explain the snake_case-equivalence comparison, and preserve the greppability story (now phrased as "by tool name in any casing, normalised to snake_case"). Update the `corvid tour --topic approve-gates` blurb in `crates/corvid-cli/src/tour.rs` and its `docs/site/site.js` mirror to match. Docs only.
-- [ ] 20m-B — Auto-fall-back to interpreter on native link failure (L-5 v2). Wrap `run_via_native_tier` at `crates/corvid-driver/src/run.rs:163` so a missing-staticlib failure (the `missing_staticlib_diagnostic` path from 20l-D) emits `↻ running via interpreter: native staticlib unavailable` and proceeds with `run_via_interpreter_tier` instead of bailing. The 20l-D diagnostic stays as the explicit-`--target=native` error message for users who opted into native and need to recover by hand. Extend `run_with_target_auto_uses_native_for_pure_program` (or add a sibling test) to cover the staticlib-missing-but-falls-back path.
+- [x] 20m-A — Correct `approve` naming docs (L-8 v2). Landed in `e1b1728`: rewrote §6.1 of the typing-rules spec to state both PascalCase and snake_case forms are accepted with code examples and the comparison rule, fixed the parenthetical at line 203, and softened the tour pitch + site mirror.
+- [x] 20m-B — Auto-fall-back to interpreter on native link failure (L-5 v2). Landed in `3fb577e`: extracted `try_native_then_interpret` + `is_missing_staticlib_error` matcher in `crates/corvid-driver/src/run.rs`, three helper unit tests covering canonical phrase, override-branch phrase, and unrelated-error rejection. Auto target now silently falls back; `--target=native` keeps the actionable diagnostic.
 
 **Filed as out-of-scope (not 20m slices):**
 

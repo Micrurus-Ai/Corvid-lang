@@ -267,3 +267,77 @@ Filed for a future REPL-touching slice rather than rolled into
 20m. The 20l/20m scope is verifier-confirmed gaps only — pulling
 in adjacent emitters under the same phase risks the kind of
 scope-creep the slice gate is designed to prevent.
+
+## Closing Audit Record
+
+Closed on 2026-05-08. Both required slices shipped; the verifier-
+correction pattern and the `expected_*` confusion are now captured
+in `learnings.md` and the memory record so future external-reviewer
+rounds can skip the discovery cost.
+
+| Slice | Commit | Stat | Status |
+|---|---|---|---|
+| 20m-A approve naming docs corrected | `e1b1728` | +37/−7 across 3 files | shipped |
+| 20m-B native staticlib auto-fallback | `3fb577e` | +103/−2 in run.rs | shipped |
+
+`cargo check --workspace` was clean at every commit. Targeted tests
+green (3 new helper unit tests on top of the existing 176 driver
+lib tests; 18 codegen-py tests still green). `cargo run -q -p
+corvid-cli -- verify --corpus tests/corpus` continued to match the
+established Windows whoami linker baseline (exit 2). The two
+pre-existing whoami-baseline driver tests
+(`run_with_target_auto_uses_native_for_pure_program`,
+`native_cache_hits_on_second_call`) were verified to still propagate
+the same way after 20m-B — the LNK2019 wording does not match
+either staticlib-missing matcher phrase, so the auto-fallback
+correctly does NOT mask those failures.
+
+### Meta-learning recorded across the workspace
+
+The 20l-E mistake — me logging a learning about "verify claimed
+grammar against the parser" and then immediately violating it —
+gets two pieces of permanent infrastructure in 20m:
+
+1. **In `learnings.md` under the Phase 20m section**: the rule
+   "*`expected_*` fields are diagnostic suggestions, not
+   acceptance criteria. To find acceptance, find the comparison
+   site*" is documented as a standalone learning, with the L-8
+   case as the worked example.
+
+2. **In `memory/project_phase_20m_closed.md`**: the verifier-
+   correction pattern itself (gap report → first-round fixes →
+   verification round → corrections; cheaper each round if
+   institutionalised) is recorded so the next external-reviewer
+   round automatically slots into the same shape rather than
+   re-discovering the workflow.
+
+The next external-reviewer test (recommended in the 20l memory
+record before 33M opens) should now follow this pattern by
+default: produce a report, run a first-round-fix phase, run a
+verification round, file a corrections phase if needed. Each
+round is a smaller phase than the last because the recurring
+shapes from 20l/20m are already known.
+
+### Verifier-correction pattern, formalised
+
+For future sessions hitting a similar workflow:
+
+1. **Original report**: external reviewer files N gaps with
+   reproductions and proposed fixes.
+2. **First-round fix phase** (e.g. 20l): triage each gap, verify
+   against the codebase, fix or defer with rationale, ship one
+   commit per gap. Document recurring shapes.
+3. **Verification round**: same reviewer (or different one) re-
+   tests against the post-fix HEAD, produces a scorecard
+   confirming verbatim entries, flagging wrong details, and
+   re-framing wrong root-cause framings.
+4. **Corrections phase** (e.g. 20m): address only the verifier-
+   confirmed corrections. Do NOT pull in adjacent emitters or
+   gold-plate; that's a different phase. Document the verifier-
+   correction pattern itself so step 4 is institutional memory
+   rather than ad-hoc.
+
+Steps 3 and 4 can iterate; in practice each pass shrinks the gap
+set sharply because the recurring shapes are already known. Two
+or three rounds usually suffice before the gap-report converges
+on "no actionable corrections."

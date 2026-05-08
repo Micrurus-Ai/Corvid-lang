@@ -3779,3 +3779,54 @@ AI-native, not Python-shaped; the existing workarounds (`+` concatenation,
 triple-quoted strings, paren-grouped continuation) are clean and stay
 documented. Rejecting Python-mimicry features when the language identity
 argument outweighs the ergonomic argument is itself a learning, not a TODO.
+
+## Phase 20m verifier-driven corrections
+
+`expected_*` fields are diagnostic suggestions, not acceptance criteria. To
+find what the checker actually accepts, find the comparison site, not the
+suggestion field. The L-8 docs error in 20l-E happened because I checked
+`expected_approve_label: pascal_case(tool_name)` in three call sites and
+concluded "labels are PascalCase." That field is the help-hint suggestion
+the checker prints when nothing matches; the acceptance check is at
+`crates/corvid-types/src/checker/call.rs:127` —
+`snake_case(&a.label) == tool_name`, which accepts any reasonable casing
+that round-trips through `snake_case`. I had logged this exact discipline
+in 20l-E's learnings entry and immediately violated it. The lesson now has
+its own line in this file so the next docs-only fix doesn't repeat the
+mistake.
+
+Verifier-correction pattern. After a first-round fix phase like 20l, the
+right next step is a verification round: same external reviewer (or a
+fresh one) re-tests against the post-fix HEAD and produces a scorecard
+confirming verbatim entries, flagging wrong details, re-framing wrong
+root-cause framings. The corrections phase that follows (20m here)
+addresses only verifier-confirmed corrections; adjacent gaps surfaced
+during verification (the REPL hardcoded ANSI escapes 20m-B verification
+turned up) are filed as separate follow-ups rather than rolled in. Two or
+three rounds usually suffice before the gap report converges on "no
+actionable corrections." The pattern is documented in
+`docs/phase-20m-verifier-corrections.md` and
+`memory/project_phase_20m_closed.md` so the next external-reviewer round
+slots in without re-deriving the workflow.
+
+UX preference: silent auto-fallback over actionable error when the
+recovery path is mechanical and the user wasn't asking for the failed
+mode specifically. 20l-D made the missing-staticlib diagnostic readable;
+20m-B observed that for `corvid run` (auto target) on a binary-install
+machine, the user wasn't asking for native — they were asking for "run
+this program." Silent fall-back via the existing `↻ running via
+interpreter:` UX prefix is the right move. Explicit `--target=native`
+keeps the actionable diagnostic; opting in earns the explicit error. Rule
+of thumb: when the dispatcher has multiple tiers and the user picked
+"auto," failures in any one tier should fall through to the next tier
+that can actually run the program before bailing.
+
+Narrow string-matching of stable diagnostic phrases is acceptable as a
+control-flow primitive when the phrase is workspace-owned and pinned by a
+unit test. `is_missing_staticlib_error` matches on the canonical
+`"corvid-runtime staticlib missing"` and
+`"CORVID_RUNTIME_STATICLIB_OVERRIDE points at non-existent path"`
+because both are pinned by the link.rs unit tests; if either upstream
+wording changes, the link.rs test fails before this matcher silently
+mismatches. The inverse rule: never string-match on third-party error
+messages that you don't own.
