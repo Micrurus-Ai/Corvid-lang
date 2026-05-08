@@ -161,8 +161,16 @@ agent notify(flag: Bool, to: String) -> Nothing:
 "#;
     let c = check(src);
     // The unconditional outer call has no approve in its lexical
-    // scope, even though the inner branch did.
-    assert_guarantee_violated(&c, "approval.dangerous_call_requires_token");
+    // scope, even though the inner branch did. Phase 35V-T1-B
+    // (2026-05-08) introduced discrimination at the call site:
+    // when an approve with the right label+arity exists somewhere
+    // in the agent's body but is out of lexical scope, the
+    // diagnostic carries `approval.token_lexical_only` (the more
+    // specific sub-property: lexical scoping is the failure, not
+    // "no approve at all"). This test exercises exactly that case
+    // — the approve exists inside the if-branch but doesn't reach
+    // the unconditional outer call.
+    assert_guarantee_violated(&c, "approval.token_lexical_only");
 }
 
 // --- effect_row.body_completeness --------------------------------
