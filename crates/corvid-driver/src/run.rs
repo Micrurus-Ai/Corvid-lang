@@ -160,9 +160,9 @@ pub fn run_with_target(
         },
         RunTarget::Interpreter => run_via_interpreter_tier(path, &ir),
         RunTarget::Auto => match &scan {
-            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib),
+            Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib),
             Err(reason) if tools_satisfy(reason) => {
-                run_via_native_tier(path, &source, &ir, tools_lib)
+                try_native_then_interpret(path, &source, &ir, tools_lib)
             }
             Err(reason) => {
                 eprintln!("↻ running via interpreter: {reason}");
@@ -170,6 +170,53 @@ pub fn run_with_target(
             }
         },
     }
+}
+
+/// Run the native tier; if it fails because the corvid-runtime
+/// staticlib isn't available on this host, fall back to the
+/// interpreter using the same `↻ running via interpreter:` UX prefix
+/// the eligibility-scan path emits. Any other native-build failure
+/// (linker errors unrelated to the staticlib, codegen rejections)
+/// keeps propagating — those are real bugs the user should see.
+///
+/// Used by the `RunTarget::Auto` arm only. `RunTarget::Native`
+/// continues to surface the actionable diagnostic from
+/// `missing_staticlib_diagnostic` so users who explicitly opted
+/// into native still see the recovery instructions instead of a
+/// silent fall-back they didn't ask for.
+fn try_native_then_interpret(
+    path: &Path,
+    source: &str,
+    ir: &IrFile,
+    tools_lib: Option<&Path>,
+) -> Result<u8, anyhow::Error> {
+    match run_via_native_tier(path, source, ir, tools_lib) {
+        Ok(code) => Ok(code),
+        Err(err) if is_missing_staticlib_error(&err) => {
+            eprintln!("↻ running via interpreter: native staticlib unavailable");
+            run_via_interpreter_tier(path, ir)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Detect the two error shapes that mean "the corvid-runtime
+/// staticlib couldn't be found on this host" — the missing-fallback
+/// path from `corvid-codegen-cl::link::missing_staticlib_diagnostic`
+/// and the `CORVID_RUNTIME_STATICLIB_OVERRIDE points at non-existent
+/// path` override-branch error from the same module. Both indicate
+/// the runtime staticlib is unavailable for linking on this host;
+/// neither indicates a real codegen bug.
+///
+/// String-matching the diagnostic phrase is acceptable here because
+/// the phrases are stable (link.rs has unit tests pinning both) and
+/// owned by the same workspace. If the upstream wording ever changes,
+/// the link.rs unit test fails first and forces this matcher to
+/// follow.
+fn is_missing_staticlib_error(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}");
+    msg.contains("corvid-runtime staticlib missing")
+        || msg.contains("CORVID_RUNTIME_STATICLIB_OVERRIDE points at non-existent path")
 }
 
 /// Interpreter tier: build a `Runtime` with stdin approver + env-driven
@@ -323,4 +370,58 @@ fn trace_dir_for(source_path: &Path) -> PathBuf {
     }
     let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
     parent.join("target").join("trace")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_missing_staticlib_error;
+
+    #[test]
+    fn detects_missing_staticlib_diagnostic_phrase() {
+        // 20m-B regression: the auto-fallback branch must recognise
+        // the canonical missing-fallback message produced by
+        // `corvid_codegen_cl::link::missing_staticlib_diagnostic`,
+        // wrapped by anyhow context as it bubbles up from
+        // `run_via_native_tier`.
+        let err = anyhow::anyhow!(
+            "build native binary: link failed: corvid-runtime staticlib missing at `/dev/null/corvid_runtime.lib`. To fix this, ..."
+        );
+        assert!(
+            is_missing_staticlib_error(&err),
+            "should match canonical missing-fallback phrase"
+        );
+    }
+
+    #[test]
+    fn detects_override_branch_phrase() {
+        // The `CORVID_RUNTIME_STATICLIB_OVERRIDE` override branch in
+        // `link.rs` returns a different error string when the override
+        // path doesn't exist. Same audience hits both paths
+        // (staticlib unavailable on this host), so the auto-fallback
+        // matcher must catch both.
+        let err = anyhow::anyhow!(
+            "CORVID_RUNTIME_STATICLIB_OVERRIDE points at non-existent path `/tmp/missing.lib`"
+        );
+        assert!(
+            is_missing_staticlib_error(&err),
+            "should match override-branch phrase"
+        );
+    }
+
+    #[test]
+    fn rejects_unrelated_codegen_errors() {
+        // Real codegen / link bugs (anything not staticlib-discovery)
+        // must NOT trigger silent fall-back — those are bugs the user
+        // should see.
+        let err = anyhow::anyhow!("link failed: undefined symbol __corvid_unknown_helper");
+        assert!(
+            !is_missing_staticlib_error(&err),
+            "non-staticlib link errors must propagate"
+        );
+        let err = anyhow::anyhow!("codegen failed: cranelift rejected basic block");
+        assert!(
+            !is_missing_staticlib_error(&err),
+            "codegen errors must propagate"
+        );
+    }
 }
