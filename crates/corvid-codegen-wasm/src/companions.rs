@@ -28,12 +28,28 @@ struct WasmExport {
     name: String,
     params: Vec<WasmParam>,
     return_type: String,
+    /// WASM-level kind discriminator for the return type:
+    /// `"i64"` (Int), `"f64"` (Float), `"i32"` (Bool), `"void"`
+    /// (Nothing), or `"string"` (multi-value `(ptr, len)`).
+    /// Downstream tooling reads this to dispatch on the boundary
+    /// shape without re-parsing `return_type`.
+    return_kind: &'static str,
 }
 
 #[derive(Debug, Serialize)]
 struct WasmParam {
     name: String,
+    /// Human-readable Corvid type name (e.g. `"Int"`, `"String"`).
+    /// Stable for display; downstream consumers should switch on
+    /// `kind` for ABI shape rather than parsing `ty`.
     ty: String,
+    /// WASM-level boundary kind. Slice 20n-B-3 added this uniformly
+    /// across all params (decision 3): callers can tell a String's
+    /// `(ptr, len)` pair from a scalar `i32`/`i64`/`f64` without
+    /// inspecting `ty`. Values: `"i64"`, `"f64"`, `"i32"`,
+    /// `"string"`. Host imports stay scalar in v1, so their params
+    /// never have `kind: "string"`.
+    kind: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,6 +60,10 @@ struct WasmImport {
     import_name: String,
     params: Vec<WasmParam>,
     return_type: String,
+    /// See `WasmExport::return_kind`. Always one of the scalar /
+    /// `void` kinds for v1 because host imports do not carry
+    /// String params or returns.
+    return_kind: &'static str,
 }
 
 pub(crate) fn build_artifacts(
@@ -58,6 +78,25 @@ pub(crate) fn build_artifacts(
         ts_types: emit_ts_types(agents, imports)?,
         manifest_json: emit_manifest(module_name, agents, imports)?,
     })
+}
+
+/// WASM-level boundary kind for a Corvid `Type`. Used by the
+/// manifest's `kind` discriminator so downstream tooling can
+/// dispatch on the boundary shape uniformly. See
+/// `WasmParam::kind` and `WasmExport::return_kind`.
+fn wasm_boundary_kind(ty: &Type) -> &'static str {
+    match ty {
+        Type::Int => "i64",
+        Type::Float => "f64",
+        Type::Bool => "i32",
+        Type::Nothing => "void",
+        Type::String => "string",
+        // Anything else is rejected at validate time before reaching
+        // the manifest emitter; surface it as an explicit unknown
+        // so a manifest containing this kind is recognisable as a
+        // reachability bug rather than silently mistyped.
+        _ => "unknown",
+    }
 }
 
 fn ts_type(ty: &Type) -> Result<&'static str, WasmCodegenError> {
@@ -259,69 +298,167 @@ fn emit_js_loader(
     out.push_str("  const exports = source.instance.exports;\n");
     out.push_str("  return {\n");
     for agent in agents {
-        let params = agent
-            .params
-            .iter()
-            .map(|param| param.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!("    {}({}) {{\n", agent.name, params));
-        let args_array = if params.is_empty() {
-            "[]".to_string()
-        } else {
-            format!("[{params}]")
-        };
-        out.push_str(&format!(
-            "      const runId = traceContext.beginRun('{}', {});\n",
-            agent.name, args_array
-        ));
-        match agent.return_ty {
-            Type::Nothing => {
-                out.push_str("      try {\n");
-                out.push_str(&format!("        exports.{}({});\n", agent.name, params));
-                out.push_str("        traceContext.completeRun(runId, true, undefined, null);\n");
-                out.push_str("        return undefined;\n");
-                out.push_str("      } catch (error) {\n");
-                out.push_str("        traceContext.completeRun(runId, false, undefined, String(error?.message ?? error));\n");
-                out.push_str("        throw error;\n");
-                out.push_str("      }\n");
-            }
-            Type::Bool => {
-                out.push_str("      try {\n");
-                out.push_str(&format!(
-                    "        const result = exports.{}({});\n",
-                    agent.name, params
-                ));
-                out.push_str("        const value = Boolean(result);\n");
-                out.push_str("        traceContext.completeRun(runId, true, value, null);\n");
-                out.push_str(&format!(
-                    "        return {};\n",
-                    js_return_expr("result", &agent.return_ty)
-                ));
-                out.push_str("      } catch (error) {\n");
-                out.push_str("        traceContext.completeRun(runId, false, undefined, String(error?.message ?? error));\n");
-                out.push_str("        throw error;\n");
-                out.push_str("      }\n");
-            }
-            _ => {
-                out.push_str("      try {\n");
-                out.push_str(&format!(
-                    "        const result = exports.{}({});\n",
-                    agent.name, params
-                ));
-                out.push_str("        traceContext.completeRun(runId, true, result, null);\n");
-                out.push_str("        return result;\n");
-                out.push_str("      } catch (error) {\n");
-                out.push_str("        traceContext.completeRun(runId, false, undefined, String(error?.message ?? error));\n");
-                out.push_str("        throw error;\n");
-                out.push_str("      }\n");
-            }
-        }
-        out.push_str("    },\n");
+        emit_js_agent_wrapper(&mut out, agent);
     }
     out.push_str("  };\n");
     out.push_str("}\n");
     Ok(out)
+}
+
+/// Emit the JS wrapper for a single agent inside the
+/// `instantiate()` return object. Handles four shapes:
+///
+/// 1. Scalar params + scalar/Nothing return — calls `exports.<agent>`
+///    directly with the JS args, returns the WASM result (with a
+///    Boolean coercion for Bool returns to keep the user-visible
+///    type from being i32).
+/// 2. String params + scalar return — encodes each String input
+///    via TextEncoder, allocates linear-memory space via
+///    `exports.corvid_alloc`, writes bytes, calls with `(ptr, len)`
+///    pairs in place of the original String args, returns the
+///    scalar result. Frees inputs in `finally`.
+/// 3. Scalar params + String return — calls with scalar args,
+///    destructures the multi-value `(ptr, len)` return, decodes via
+///    TextDecoder.
+/// 4. String params + String return — combines (2) and (3).
+///
+/// Per the v1 ownership convention (slice 20n-B), JS frees only
+/// the inputs it allocated. The agent's returned `(ptr, len)` may
+/// alias an input or a const-memory literal from the data section
+/// — the loader copies the bytes out via `TextDecoder` (which makes
+/// a JS-heap copy) before freeing inputs, so neither input nor
+/// return ever needs an explicit free on the return side.
+fn emit_js_agent_wrapper(out: &mut String, agent: &IrAgent) {
+    let js_params = agent
+        .params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let trace_args_array = if js_params.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{js_params}]")
+    };
+    let returns_string = matches!(agent.return_ty, Type::String);
+    let returns_nothing = matches!(agent.return_ty, Type::Nothing);
+    let returns_bool = matches!(agent.return_ty, Type::Bool);
+    let has_string_param = agent
+        .params
+        .iter()
+        .any(|param| matches!(param.ty, Type::String));
+
+    out.push_str(&format!("    {}({}) {{\n", agent.name, js_params));
+    out.push_str(&format!(
+        "      const runId = traceContext.beginRun('{}', {});\n",
+        agent.name, trace_args_array
+    ));
+
+    // Pre-amble: encode + allocate + write bytes for each String
+    // parameter. Locals named `<param>_bytes` and `<param>_ptr`
+    // survive into the `finally` block so the free runs even if the
+    // agent throws.
+    if has_string_param {
+        out.push_str("      const __corvid_enc = new TextEncoder();\n");
+        for param in &agent.params {
+            if matches!(param.ty, Type::String) {
+                out.push_str(&format!(
+                    "      const __corvid_{name}_bytes = __corvid_enc.encode({name});\n",
+                    name = param.name
+                ));
+                out.push_str(&format!(
+                    "      const __corvid_{name}_ptr = exports.corvid_alloc(__corvid_{name}_bytes.length);\n",
+                    name = param.name
+                ));
+                out.push_str(&format!(
+                    "      new Uint8Array(exports.memory.buffer, __corvid_{name}_ptr, __corvid_{name}_bytes.length).set(__corvid_{name}_bytes);\n",
+                    name = param.name
+                ));
+            }
+        }
+    }
+
+    // WASM-side argument list: scalar params pass straight through;
+    // String params expand to `<name>_ptr, <name>_bytes.length`.
+    let wasm_call_args = agent
+        .params
+        .iter()
+        .map(|param| {
+            if matches!(param.ty, Type::String) {
+                format!(
+                    "__corvid_{name}_ptr, __corvid_{name}_bytes.length",
+                    name = param.name
+                )
+            } else {
+                param.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    out.push_str("      try {\n");
+    if returns_nothing {
+        out.push_str(&format!(
+            "        exports.{}({});\n",
+            agent.name, wasm_call_args
+        ));
+        out.push_str("        traceContext.completeRun(runId, true, undefined, null);\n");
+        out.push_str("        return undefined;\n");
+    } else if returns_string {
+        // Destructure the multi-value `(ptr, len)` return into JS
+        // variables, then decode.
+        out.push_str(&format!(
+            "        const __corvid_result = exports.{}({});\n",
+            agent.name, wasm_call_args
+        ));
+        out.push_str("        const __corvid_dec = new TextDecoder();\n");
+        out.push_str("        const result = __corvid_dec.decode(\n");
+        out.push_str("          new Uint8Array(exports.memory.buffer, __corvid_result[0], __corvid_result[1]),\n");
+        out.push_str("        );\n");
+        out.push_str("        traceContext.completeRun(runId, true, result, null);\n");
+        out.push_str("        return result;\n");
+    } else if returns_bool {
+        out.push_str(&format!(
+            "        const result = exports.{}({});\n",
+            agent.name, wasm_call_args
+        ));
+        out.push_str("        const value = Boolean(result);\n");
+        out.push_str("        traceContext.completeRun(runId, true, value, null);\n");
+        out.push_str(&format!(
+            "        return {};\n",
+            js_return_expr("result", &agent.return_ty)
+        ));
+    } else {
+        out.push_str(&format!(
+            "        const result = exports.{}({});\n",
+            agent.name, wasm_call_args
+        ));
+        out.push_str("        traceContext.completeRun(runId, true, result, null);\n");
+        out.push_str("        return result;\n");
+    }
+    out.push_str("      } catch (error) {\n");
+    out.push_str("        traceContext.completeRun(runId, false, undefined, String(error?.message ?? error));\n");
+    out.push_str("        throw error;\n");
+    out.push_str("      }");
+
+    // Free the inputs. The agent's return may alias an input span
+    // (pass-through) — that's fine because the TextDecoder above
+    // already copied the bytes into a fresh JS string before we
+    // get here, so `corvid_free` reclaims the linear-memory space
+    // safely.
+    if has_string_param {
+        out.push_str(" finally {\n");
+        for param in &agent.params {
+            if matches!(param.ty, Type::String) {
+                out.push_str(&format!(
+                    "        exports.corvid_free(__corvid_{name}_ptr, __corvid_{name}_bytes.length);\n",
+                    name = param.name
+                ));
+            }
+        }
+        out.push_str("      }");
+    }
+    out.push_str("\n    },\n");
 }
 
 fn emit_ts_types(
@@ -419,12 +556,14 @@ fn emit_manifest(
                 .map(|param| WasmParam {
                     name: param.name.clone(),
                     ty: param.ty.display_name(),
+                    kind: wasm_boundary_kind(&param.ty),
                 })
                 .collect();
             WasmExport {
                 name: agent.name.clone(),
                 params,
                 return_type: agent.return_ty.display_name(),
+                return_kind: wasm_boundary_kind(&agent.return_ty),
             }
         })
         .collect();
@@ -441,9 +580,11 @@ fn emit_manifest(
                 .map(|(name, ty)| WasmParam {
                     name: name.clone(),
                     ty: ty.display_name(),
+                    kind: wasm_boundary_kind(ty),
                 })
                 .collect(),
             return_type: import.return_ty.display_name(),
+            return_kind: wasm_boundary_kind(&import.return_ty),
         })
         .collect();
     let manifest = WasmManifest {
@@ -452,9 +593,13 @@ fn emit_manifest(
         target: "wasm32-unknown-unknown",
         exports,
         imports,
-        host_capability_abi: "corvid:host scalar imports v1",
+        host_capability_abi: "corvid:host scalar imports v1; string ABI v1",
         non_scope: vec![
-            "string and struct ABI",
+            // Phase 20n-B v1 lifted the String parameter and return
+            // boundary at the agent surface. Host imports stay
+            // scalar in v1; the items below remain follow-up work.
+            "string ABI on host imports",
+            "struct ABI",
             "provenance handles",
             "streaming host callbacks",
         ],

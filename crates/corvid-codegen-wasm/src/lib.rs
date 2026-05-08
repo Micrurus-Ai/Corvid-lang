@@ -1181,6 +1181,116 @@ agent shout(msg: String) -> String:
     }
 
     #[test]
+    fn js_loader_emits_string_param_packing_and_return_decoding() {
+        // Slice 20n-B-3 regression: the JS loader for a String-
+        // pass-through agent must allocate input bytes via
+        // corvid_alloc, write the encoded bytes, destructure the
+        // multi-value (ptr, len) return, decode via TextDecoder,
+        // and free the input in `finally`.
+        let ir = lower_src(
+            r#"
+agent shout(msg: String) -> String:
+    return msg
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "shout").expect("wasm artifacts");
+        let js = &artifacts.js_loader;
+        // User-facing signature stays a single JS arg.
+        assert!(js.contains("shout(msg)"), "wrapper signature: {js}");
+        // TextEncoder packing.
+        assert!(
+            js.contains("__corvid_msg_bytes = __corvid_enc.encode(msg)"),
+            "packing pre-amble missing: {js}"
+        );
+        assert!(
+            js.contains("__corvid_msg_ptr = exports.corvid_alloc"),
+            "alloc call missing: {js}"
+        );
+        assert!(
+            js.contains(
+                "new Uint8Array(exports.memory.buffer, __corvid_msg_ptr, __corvid_msg_bytes.length).set(__corvid_msg_bytes)"
+            ),
+            "byte-write missing: {js}"
+        );
+        // WASM-side call passes (ptr, len) instead of `msg`.
+        assert!(
+            js.contains("exports.shout(__corvid_msg_ptr, __corvid_msg_bytes.length)"),
+            "wasm call site uses the wrong arg shape: {js}"
+        );
+        // Multi-value return destructure + TextDecoder decode.
+        assert!(
+            js.contains("__corvid_dec.decode(") && js.contains("__corvid_result[0]"),
+            "decode post-amble missing: {js}"
+        );
+        // Input free in finally.
+        assert!(
+            js.contains("finally {")
+                && js.contains("exports.corvid_free(__corvid_msg_ptr, __corvid_msg_bytes.length)"),
+            "free in finally missing: {js}"
+        );
+    }
+
+    #[test]
+    fn js_loader_keeps_scalar_agent_wrapper_unchanged() {
+        // Regression guard: scalar-only agents must still emit the
+        // pre-2a wrapper shape so existing consumers don't break.
+        let ir = lower_src(
+            r#"
+agent dbl(x: Int) -> Int:
+    return x + x
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "math").expect("wasm artifacts");
+        let js = &artifacts.js_loader;
+        assert!(js.contains("dbl(x)"), "wrapper signature: {js}");
+        // Scalar path: direct call, no String-only locals.
+        assert!(
+            js.contains("const result = exports.dbl(x);"),
+            "scalar agent must call exports.<name>(arg) directly: {js}"
+        );
+        assert!(
+            !js.contains("__corvid_x_ptr"),
+            "scalar arg must not be wrapped in alloc/free: {js}"
+        );
+    }
+
+    #[test]
+    fn manifest_carries_kind_discriminator_uniformly() {
+        // Slice 20n-B-3 regression for the design-decision-3
+        // manifest extension: `kind` populated for every agent
+        // param + return.
+        let ir = lower_src(
+            r#"
+agent shout(msg: String) -> String:
+    return msg
+
+agent dbl(x: Int) -> Int:
+    return x + x
+"#,
+        );
+        let artifacts = emit_wasm_artifacts(&ir, "kinds").expect("wasm artifacts");
+        let manifest = &artifacts.manifest_json;
+        // Every export's params should carry kind alongside ty.
+        assert!(
+            manifest.contains("\"name\": \"msg\"") && manifest.contains("\"kind\": \"string\""),
+            "string param kind missing: {manifest}"
+        );
+        assert!(
+            manifest.contains("\"name\": \"x\"") && manifest.contains("\"kind\": \"i64\""),
+            "Int param kind missing: {manifest}"
+        );
+        // Return-kind on each export.
+        assert!(
+            manifest.contains("\"return_kind\": \"string\""),
+            "shout's return kind missing: {manifest}"
+        );
+        assert!(
+            manifest.contains("\"return_kind\": \"i64\""),
+            "dbl's return kind missing: {manifest}"
+        );
+    }
+
+    #[test]
     fn lowers_string_literal_via_data_section() {
         // Slice 20n-B-2b regression: agents can now return a string
         // literal. The literal is interned into the compile-time
