@@ -146,3 +146,65 @@ fn claim_explain_reports_verified_signature_source_and_guarantees() {
         "{stdout}"
     );
 }
+
+/// Phase 35V-T1-I sentinel. `corvid claim --explain` is the
+/// quotable launch artifact (per Phase 35-I). Its output must be
+/// byte-deterministic for a given (cdylib, key, source) input
+/// triple — otherwise downstream tooling that diff-checks the
+/// committed claim against a re-emission would flag spurious
+/// drift, eroding the artifact's value as a stable provenance
+/// statement.
+///
+/// Stability properties this test pins:
+/// - Same inputs → same bytes across two consecutive process
+///   invocations.
+/// - The byte-for-byte requirement covers every line; signing
+///   key fingerprint, descriptor agreement status, and the
+///   per-id class lines all participate.
+///
+/// The Phase 35-D descriptor regeneration test
+/// (`rendered_markdown_matches_committed_doc`) pins doc-side
+/// determinism; this test pins claim-side determinism.
+#[test]
+fn claim_explain_output_is_byte_stable_across_re_runs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (sign_key, verify_key) = write_keys(dir.path());
+    let (source, cdylib) = build_signed_cdylib(dir.path(), &sign_key);
+
+    let args = vec![
+        "claim".to_string(),
+        "--explain".to_string(),
+        cdylib.to_string_lossy().into_owned(),
+        "--key".to_string(),
+        verify_key.to_string_lossy().into_owned(),
+        "--source".to_string(),
+        source.to_string_lossy().into_owned(),
+    ];
+
+    let first = run_corvid(&args, dir.path());
+    assert!(
+        first.status.success(),
+        "first claim --explain run failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = run_corvid(&args, dir.path());
+    assert!(
+        second.status.success(),
+        "second claim --explain run failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    assert_eq!(
+        first.stdout, second.stdout,
+        "phase 35V-T1-I: `corvid claim --explain` output drifted \
+         between two consecutive runs against the same inputs. \
+         The launch claim's quotability depends on byte-stable \
+         output; any non-determinism here erodes downstream \
+         diff-checking. Diff:\n--- first ---\n{}\n--- second ---\n{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&second.stdout),
+    );
+}
