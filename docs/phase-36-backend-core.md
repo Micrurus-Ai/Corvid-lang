@@ -355,3 +355,114 @@ Express/Fastify, and Go HTTP on:
 
 Corvid does not need to beat Go on raw hello-world throughput in Phase 36.
 It must beat library stacks on production AI-backend contract density.
+
+## Closing audit (2026-05-09)
+
+All 13 Phase 36 slices (36A through 36J) plus the 36K/L/M
+audit-correction track are `[x]` in
+[`ROADMAP.md`](../ROADMAP.md). Phase 35V Track 2 verified all 3
+audit-correction slices against shipped behavior in 2026-05-08
+/ 09. The phase's `✅ closed` marker was added in the same
+commit that records this closing audit.
+
+### Audit-correction history
+
+Phase 36 originally shipped slices 36A through 36J. The
+2026-04-29 audit found three structural absences that became the
+audit-correction track:
+
+- **36-K** — original "real HTTP runtime" was a hand-rolled
+  request-line parser; corrected to use **axum 0.7** (production
+  hyper-based HTTP framework with full HTTP/1.1 RFC compliance).
+- **36-L** — middleware pipeline claim was "auth, rate-limit,
+  tracing, CORS, compression, request logging, effect-aware
+  policy" but only auth and rate-limit had run-time enforcement
+  at the time of audit. Corrected to wire the full layer chain
+  via `tower-http` (`CompressionLayer`, `CorsLayer`, `TraceLayer`)
+  plus the `backend_middleware` shipping auth + rate-limit +
+  tracing-headers in declared order.
+- **36-M** — graceful shutdown / request timeout / body-limit /
+  handler-isolation behavior had source code but no integration
+  test. Corrected to ship `build_server_emits_runnable_local_http_binary`
+  in `crates/corvid-cli/tests/build_server.rs`, which spawns the
+  rendered server, sends real HTTP requests, and asserts the
+  middleware headers, the four endpoints (`/healthz`, `/readyz`,
+  `/metrics`, `/`), the 504 on handler timeout, the 401 on
+  missing auth, the 429 on rate-limit, the 413 on body-limit,
+  and handler-isolation via subprocess spawn.
+
+### Phase 35V verification outcomes
+
+- **35V-T2-A** (36-K real HTTP runtime): clean. Verified axum
+  0.7 + tower-http imports in
+  `crates/corvid-driver/src/build/server_render.rs`; no
+  hand-rolled parser remains.
+- **35V-T2-B** (36-L middleware pipeline): clean. Verified the
+  layer chain at lines 110-119 of `server_render.rs`:
+  `backend_middleware` → `CompressionLayer` → `CorsLayer` →
+  `TraceLayer` → `with_state(state)`. The
+  `x-corvid-middleware: auth,rate_limit,tracing,cors,compression,
+  request_logging,effect_policy` response header accurately
+  reflects what's wired (effect_policy enforced at build time
+  via 36-I, decoratively flagged on responses).
+- **35V-T2-C** (36-M shutdown/timeout/body-limit/handler-
+  isolation tests): clean.
+  `build_server_emits_runnable_local_http_binary` exercises all
+  four properties end-to-end against the rendered server.
+
+Zero corrective commits from Track 2 — the 36K/L/M
+audit-correction tracks landed honestly; Phase 35V confirmed
+that.
+
+### Cross-slice patterns
+
+**1. Code generation as the deployment artifact.** The Phase 36
+server is rendered as a string from `server_render.rs`. The
+output is a complete Cargo project that compiles to a
+production-shaped axum binary. Generalises to: when the target
+is a deployable artifact in another language/framework, generate
+the artifact rather than embedding the framework as a Corvid
+runtime dependency. The user owns the generated project; Corvid
+owns its shape.
+
+**2. End-to-end integration tests for generated artifacts run
+the artifact.** `build_server_emits_runnable_local_http_binary`
+doesn't unit-test the renderer; it generates the server,
+compiles it, spawns it, and sends real HTTP. The test cost is
+high (~60s for the test alone) but the property checked is
+real (the rendered server actually runs and serves requests
+correctly). For generated-artifact phases, the integration
+test is the load-bearing verification — unit tests on the
+renderer would catch only syntactic regressions, not runtime
+correctness.
+
+**3. Audit-correction completeness is itself testable.** The
+2026-04-29 audit found three structural absences. Phase 35V
+Track 2 verified each correction landed honestly. The
+verification was cheap (~5 minutes per slice) because the
+corrective slices had filed test_refs that the registry's
+existing infrastructure already validated. Generalises to:
+when a phase ships an audit-correction track, file each
+correction's evidence as a test_ref so the next external-
+reviewer round can verify the track without re-deriving the
+claim.
+
+### Out of scope (post-v1.0)
+
+- Multi-process worker pool for the rendered server (current
+  shape: one server process, subprocess-spawned handlers per
+  request). Beyond a certain RPS, a process-per-request model
+  is the bottleneck; promotion to a thread-pool or async-task
+  model is post-v1.0.
+- Custom middleware injection from Corvid source (current
+  middleware set is fixed by the renderer). Post-v1.0 work
+  could expose an `extern "c"` middleware hook surface.
+- Bundled deployment manifests beyond the smoke-Compose +
+  Fly/Render + K8s set tracked under Phase 43 — packaging +
+  market readiness owns the deployment-target matrix.
+
+A future external-reviewer round on the rendered server's
+HTTP/1.1 RFC corner cases would slot into Phase 35V's
+verifier-correction pattern. The integration-test
+infrastructure (`build_server.rs`) provides the harness for
+any new edge-case verification.

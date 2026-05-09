@@ -2063,7 +2063,7 @@ Track 3 — Closer commits:
 
 ---
 
-### Phase 36 — Production backend core (~8-10 weeks)
+### Phase 36 — Production backend core (~8-10 weeks) ✅ closed
 
 **Goal.** Corvid can build an always-on HTTP backend without a host framework. A developer should be able to write routes, JSON APIs, middleware, health checks, configuration, secrets, structured logs, graceful shutdown, and deployment-ready binaries in Corvid itself.
 
