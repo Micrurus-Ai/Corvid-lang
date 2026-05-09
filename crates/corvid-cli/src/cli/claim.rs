@@ -9,7 +9,7 @@ pub enum ClaimCommand {
         #[arg(
             long,
             value_name = "PATH",
-            default_value = "docs/launch-claim-audit.md"
+            default_value = "docs/meta/launch-claim-audit.md"
         )]
         inventory: PathBuf,
         /// Emit JSON report.

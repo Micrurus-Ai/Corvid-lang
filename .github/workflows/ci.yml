@@ -149,7 +149,7 @@ jobs:
         run: |
           cargo test -p corvid-guarantees
           cargo run -q -p corvid-cli -- contract regen-doc /tmp/corvid-core-semantics.md
-          diff -u docs/core-semantics.md /tmp/corvid-core-semantics.md
+          diff -u docs/reference/core-semantics.md /tmp/corvid-core-semantics.md
 
   effect-system-gates:
     # Every one of these gates enforces a Phase 20g invention. If
@@ -188,7 +188,7 @@ jobs:
         run: ./target/release/corvid test spec
 
       # Invention #10: every historical counter-example under
-      # docs/effects-spec/counterexamples/composition/ must still
+      # docs/internals/effect-spec/counterexamples/composition/ must still
       # distinguish its correct composition rule from the attacker's.
       - name: corvid test spec --meta
         run: ./target/release/corvid test spec --meta

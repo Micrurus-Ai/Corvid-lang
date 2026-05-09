@@ -4,7 +4,7 @@
 //! chaining contracts, and the prompt body template.
 //!
 //! This is the largest single method in the type checker. It
-//! enforces the invariants declared in docs/effects-spec/13 and
+//! enforces the invariants declared in docs/internals/effect-spec/13 and
 //! emits the phase 20h dispatch-family errors.
 //!
 //! Extracted from `checker.rs` as part of Phase 20i responsibility

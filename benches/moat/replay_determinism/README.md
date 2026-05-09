@@ -140,7 +140,7 @@ particular config), the published numbers update accordingly.
    information per run will trivially be more byte-stable; submissions
    that strip events to manufacture stability are rejected.
 3. **Adversarial review.** Submissions sit under
-   `docs/effects-spec/bounty.md` review for ≥7 days before publishing;
+   `docs/internals/effect-spec/bounty.md` review for ≥7 days before publishing;
    if a reviewer submits a config that improves a baseline's
    determinism rate, the rewrite replaces the published version and
    the score updates accordingly.

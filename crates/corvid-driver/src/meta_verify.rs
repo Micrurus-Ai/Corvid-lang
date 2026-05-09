@@ -1,7 +1,7 @@
 //! Meta-verification harness — self-verifying verification.
 //!
 //! The counterexample corpus under
-//! `docs/effects-spec/counterexamples/composition/` is only useful if
+//! `docs/internals/effect-spec/counterexamples/composition/` is only useful if
 //! two properties hold for every fixture:
 //!
 //!   * **Necessary.** Under the attacker's (wrong) composition rule,
@@ -21,7 +21,7 @@
 //! produces a distinguishable result) and the fixture needs to be
 //! regenerated — a regression.
 //!
-//! See `docs/effects-spec/02-composition-algebra.md` §11 and
+//! See `docs/internals/effect-spec/02-composition-algebra.md` §11 and
 //! ROADMAP Phase 20g invention #10.
 
 use std::fs;
@@ -36,7 +36,7 @@ use corvid_types::{analyze_effects, typecheck_with_config, EffectRegistry};
 /// A single counter-example the harness knows how to check.
 #[derive(Debug, Clone)]
 pub struct Counterexample {
-    /// Filename under `docs/effects-spec/counterexamples/composition/`.
+    /// Filename under `docs/internals/effect-spec/counterexamples/composition/`.
     pub filename: &'static str,
     /// The dimension whose composition the attacker is swapping.
     pub dimension: &'static str,

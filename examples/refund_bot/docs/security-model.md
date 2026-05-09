@@ -1,7 +1,7 @@
 # Refund Bot Security Model
 
 This document extends the canonical Corvid security model in
-[`docs/security-model.md`](../../../docs/security-model.md). It does not add
+[`docs/security/model.md`](../../../docs/security/model.md). It does not add
 new global guarantees; it maps the refund bot's app-specific threats to
 existing Corvid guarantees and local tests.
 

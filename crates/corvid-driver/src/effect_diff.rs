@@ -15,7 +15,7 @@
 //! every consequence. No other language has an analogous analysis
 //! because no other language has quantitative effects to diff.
 //!
-//! See `docs/effects-spec/02-composition-algebra.md` §9 for the spec.
+//! See `docs/internals/effect-spec/02-composition-algebra.md` §9 for the spec.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

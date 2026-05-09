@@ -63,7 +63,7 @@ runs/python/
 Open a PR with:
 
 1. The full sub-tree above.
-2. A note in `docs/effects-spec/bounty.md` linking the PR.
+2. A note in `docs/internals/effect-spec/bounty.md` linking the PR.
 3. The committed `runs/python/_summary.json` reflecting the
    submitter's local run.
 4. The orchestrator (`runner/run.py`) regenerated `RESULTS.md` and

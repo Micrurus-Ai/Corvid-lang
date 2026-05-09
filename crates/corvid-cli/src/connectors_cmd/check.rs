@@ -56,7 +56,7 @@ pub fn run_check(live: bool) -> Result<Vec<ConnectorCheckEntry>> {
     if live {
         return Err(anyhow!(
             "Live drift narration is implemented end-to-end in slice 41M \
-             (per `docs/effects-spec/bounty.md`). This slice ships \
+             (per `docs/internals/effect-spec/bounty.md`). This slice ships \
              manifest-only validation; rerun without `--live` for the \
              validation report."
         ));

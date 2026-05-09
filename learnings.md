@@ -2157,16 +2157,16 @@ scrolled past.
 ### The spec is a runnable program, not a document
 
 Phase 21's documentation slice follows the pattern already established for
-the effect system: every numbered `.md` file in `docs/effects-spec/` is a
+the effect system: every numbered `.md` file in `docs/internals/effect-spec/` is a
 program under disguise. Code blocks tagged `# expect: compile` are extracted
 by `corvid test spec` and re-compiled against the current toolchain on every
-build; a broken example fails CI. Writing [section 14](docs/effects-spec/14-replay.md)
+build; a broken example fails CI. Writing [section 14](docs/internals/effect-spec/14-replay.md)
 forced an honest audit of which Phase-21 surface is actually demonstrable
 *today* (the `replay` language primitive with only the constructs the parser
 accepts — no `.is_some()`, no `Int.to_string()`, no list `.push()`) vs. which
 parts I was tempted to illustrate with constructs the language doesn't have
 yet. Writing the spec as a runnable artefact is also what lets the v1.0
-launch demo at `docs/v1.0-demo-script.md` be a script of copy-pasteable
+launch demo at `docs/meta/v1.0-demo-script.md` be a script of copy-pasteable
 commands rather than a slide deck — every claim resolves to a command whose
 output proves it. The lesson is durable across phases: specification work
 that ships alongside a "does the compiler still agree with this?" harness
@@ -3805,7 +3805,7 @@ during verification (the REPL hardcoded ANSI escapes 20m-B verification
 turned up) are filed as separate follow-ups rather than rolled in. Two or
 three rounds usually suffice before the gap report converges on "no
 actionable corrections." The pattern is documented in
-`docs/phase-20m-verifier-corrections.md` and
+`docs/phases/phase-20m-verifier-corrections.md` and
 `memory/project_phase_20m_closed.md` so the next external-reviewer round
 slots in without re-deriving the workflow.
 
@@ -4120,7 +4120,7 @@ this pattern.
 
 Registry as single source of truth scales when every consumer
 derives, not duplicates. Phase 35-A's `GUARANTEE_REGISTRY` is
-read by `corvid contract list`, `docs/core-semantics.md`
+read by `corvid contract list`, `docs/reference/core-semantics.md`
 generation, the bilateral verifier, `corvid claim --explain`,
 and `corvid build --sign`. A drift-gate test
 (`rendered_markdown_matches_committed_doc`) catches divergence
@@ -4155,7 +4155,7 @@ when only the parent enforces is.
 
 Aspirational launch wording surfaces at verification, not at
 implementation. Phase 35V-T1-H found ROADMAP, README, and
-docs/security-model.md all carried "bilateral verifier" / "two
+docs/security/model.md all carried "bilateral verifier" / "two
 implementations" / "TCB shrinkage" claims that the implementation
 doesn't deliver. The shipped verifier IS useful (post-link
 descriptor tampering, build-cache drift) but not at the level
@@ -4236,7 +4236,7 @@ the phase closer commit hides which slices actually shipped from
 git history.
 
 Closing audits are a deliverable, not paperwork. The closing
-audit appended to `docs/phase-35V-pre-launch-audit.md` (per-
+audit appended to `docs/phases/phase-35V-pre-launch-audit.md` (per-
 slice outcome table, drift modes surfaced, verification
 methodology) is the artifact the next external-reviewer round
 reads first. A phase that closes without a closing audit
@@ -4255,3 +4255,55 @@ the orthogonal-sentinel discipline, and the launch-wording-audit
 class of drift. Memory records that document HOW Phase 35V was
 run let future audit rounds adopt the pattern without re-
 deriving it from commit archaeology.
+
+## Phase 33J prep — docs reorganization (Diataxis tree)
+
+Docs reorganization is its own slice. The first attempt at the
+website docs put 44 unrelated topics into one 4,660-line file
+called `docs/website-content.md`. That violated the project's
+file-responsibility rule (a "grab bag" with 44 internal sections
+that share no state) and coupled the source content to its
+intended consumer (the website) rather than to its content. The
+fix was to split into per-topic files under a Diataxis-style
+tree (`book/`, `guides/`, `recipes/`, `reference/`, `migration/`,
+`operations/`, `security/`, `internals/`, `help/`, `meta/`,
+`phases/`) and move existing user-facing docs into matching
+locations.
+
+The lesson generalises: **organise docs by content, not by
+consumer**. A docs file under `docs/` should be readable by
+anyone reading the repo directly, not coupled to the website
+build pipeline. The website build reads multiple files and
+composes them into a site — that's the website's job. The
+source files stay one-topic-per-file regardless.
+
+The Diataxis four-track structure (tutorials / how-to / reference
+/ explanation) is the same shape Rust, Go, TypeScript, Gleam,
+and Elixir all converge on. Researching peer languages first
+surfaced this as a settled convention rather than a design
+decision. Pre-phase chat with research before structure is the
+no-shortcut move.
+
+The reorg is a code-touching slice, not just a docs move. Phase
+35V's pattern-5 ("cross-component coupling discovered at
+verification time") applied here too: 67 source files
+(including `include_str!` paths in `corvid-guarantees/src/render.rs`
+and `PathBuf::from(...)` calls in `corvid-cli/src/commands/test.rs`)
+embedded literal `docs/...` paths that broke when the underlying
+files moved. A bulk find/replace plus a `cargo run -q -p
+corvid-cli -- contract regen-doc` to refresh the registry-
+derived spec doc closed the coupling. Future structural moves
+in `docs/` should expect to touch source code and the registry-
+derived doc together; treat the move + replace + regen as
+one slice, not three.
+
+`include_str!` failures are silent under `cargo build` — they
+only surface under `cargo test`. When moving a doc file
+referenced by `include_str!`, run `cargo test --no-run` to
+catch the path break before assuming a clean build.
+
+A drift-gate test that hardcodes a path is a coupling worth
+calling out at the test site. Phase 33J6 (grammar drift gate)
+should follow the same pattern: assert the rendered grammar
+matches the parser, and embed the parser-tests path explicitly
+so a future move surfaces immediately.

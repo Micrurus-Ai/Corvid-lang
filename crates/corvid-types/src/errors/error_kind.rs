@@ -159,7 +159,7 @@ pub enum TypeErrorKind {
     /// An agent marked `@replayable` calls a function that
     /// introduces nondeterminism the trace schema cannot capture.
     /// See `crate::determinism` for the catalog of nondeterministic
-    /// builtins and `docs/phase-21-determinism-sources.md` for
+    /// builtins and `docs/phases/phase-21-determinism-sources.md` for
     /// which trace events must capture each source.
     NonReplayableCall {
         agent: String,
@@ -756,7 +756,7 @@ impl TypeErrorKind {
                  `@replayable` if replay reproducibility is enough"
             )),
             Self::InvalidCustomDimension { .. } => Some(
-                "see docs/effects-spec/01-dimensional-syntax.md §4 for the supported \
+                "see docs/internals/effect-spec/01-dimensional-syntax.md §4 for the supported \
                  composition rules, value types, and default-value shapes"
                     .into(),
             ),

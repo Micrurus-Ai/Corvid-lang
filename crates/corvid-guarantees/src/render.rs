@@ -1,21 +1,21 @@
 //! Markdown rendering for [`crate::GUARANTEE_REGISTRY`].
 //!
 //! `render_core_semantics_markdown()` produces the canonical
-//! `docs/core-semantics.md` body. The committed file is checked into
+//! `docs/reference/core-semantics.md` body. The committed file is checked into
 //! the repo verbatim; CI fails on drift between the committed text
 //! and the live rendering, which keeps spec ≡ implementation.
 //!
 //! The rendered text is a fixed-format markdown document — no
 //! arbitrary timestamps or environment-dependent fields — so the
 //! comparison is byte-deterministic and the regen workflow is
-//! `corvid contract regen-doc docs/core-semantics.md` followed by
+//! `corvid contract regen-doc docs/reference/core-semantics.md` followed by
 //! a normal commit.
 
 use std::fmt::Write as _;
 
 use crate::{by_kind, GuaranteeClass, GuaranteeKind, GUARANTEE_REGISTRY};
 
-/// Render `docs/core-semantics.md` from the canonical registry.
+/// Render `docs/reference/core-semantics.md` from the canonical registry.
 ///
 /// The output structure:
 ///
@@ -36,7 +36,7 @@ pub fn render_core_semantics_markdown() -> String {
     out.push_str(
         "> Auto-generated from `corvid_guarantees::GUARANTEE_REGISTRY`. \
          **Do not hand-edit.** Update by running\n> \
-         `cargo run -q -p corvid-cli -- contract regen-doc docs/core-semantics.md` \
+         `cargo run -q -p corvid-cli -- contract regen-doc docs/reference/core-semantics.md` \
          and committing the result.\n\n",
     );
     out.push_str(
@@ -129,7 +129,7 @@ pub fn render_core_semantics_markdown() -> String {
          `crates/corvid-guarantees/src/lib.rs` and run:\n\n",
     );
     out.push_str("```\n");
-    out.push_str("cargo run -q -p corvid-cli -- contract regen-doc docs/core-semantics.md\n");
+    out.push_str("cargo run -q -p corvid-cli -- contract regen-doc docs/reference/core-semantics.md\n");
     out.push_str("```\n\n");
     out.push_str(
         "Then commit the regenerated file together with the registry \
@@ -164,23 +164,23 @@ fn kind_heading(kind: GuaranteeKind) -> &'static str {
 mod tests {
     use super::*;
 
-    /// Drift gate: the committed `docs/core-semantics.md` must
+    /// Drift gate: the committed `docs/reference/core-semantics.md` must
     /// equal the live render of [`GUARANTEE_REGISTRY`]. A mismatch
     /// means the registry evolved without re-running the regen
     /// command — fix by `cargo run -q -p corvid-cli -- contract \
-    /// regen-doc docs/core-semantics.md` and committing.
+    /// regen-doc docs/reference/core-semantics.md` and committing.
     #[test]
     fn rendered_markdown_matches_committed_doc() {
-        let committed = include_str!("../../../docs/core-semantics.md");
+        let committed = include_str!("../../../docs/reference/core-semantics.md");
         let rendered = render_core_semantics_markdown();
         // Tolerate trailing-newline differences but nothing else.
         let committed_norm = committed.trim_end_matches('\n');
         let rendered_norm = rendered.trim_end_matches('\n');
         assert_eq!(
             rendered_norm, committed_norm,
-            "docs/core-semantics.md drifted from the registry. \
+            "docs/reference/core-semantics.md drifted from the registry. \
              Re-run `cargo run -q -p corvid-cli -- contract regen-doc \
-             docs/core-semantics.md` and commit."
+             docs/reference/core-semantics.md` and commit."
         );
     }
 

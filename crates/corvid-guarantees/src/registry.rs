@@ -971,7 +971,7 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              `corvid_runtime::otel_sdk_export::corvid_span_attributes` \
              and the live wire path is exercised by the \
              docker-compose Jaeger harness in \
-             `docs/observability-conformance.md`.",
+             `docs/operations/observability-conformance.md`.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/otel_sdk_export.rs::span_attributes_include_corvid_named_keys",
@@ -1168,7 +1168,7 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              tooling (`corvid package publish`, `verify-registry`, \
              `verify-lock`) and `--url-base` accepts file:// and any \
              http endpoint a user runs themselves. A hosted public \
-             registry is post-v1.0 work; see `docs/package-manager-scope.md` \
+             registry is post-v1.0 work; see `docs/internals/package-manager-scope.md` \
              for the full boundary.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],

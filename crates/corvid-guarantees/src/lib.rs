@@ -5,7 +5,7 @@
 //! Every later Phase 35 artifact derives from this registry:
 //!
 //!   * `corvid contract list` prints the registry.
-//!   * `docs/core-semantics.md` is generated from it.
+//!   * `docs/reference/core-semantics.md` is generated from it.
 //!   * The bilateral verifier cross-checks against it.
 //!   * `corvid claim --explain` reports per-binary which entries
 //!     were enforced.
@@ -359,7 +359,7 @@ mod tests {
     // to slice 35V-T1-Drift / 35V-T1-B (35-B's "no anonymous
     // contract enforcement" claim), not to 35V-T1-A — the registry
     // itself is well-formed; the gap is downstream tagging. See
-    // `docs/phase-35V-pre-launch-audit.md` for the slice plan.
+    // `docs/phases/phase-35V-pre-launch-audit.md` for the slice plan.
     // ----------------------------------------------------------------
 
     /// Phase 35V-T1-A: every registry row belongs to exactly one
@@ -397,7 +397,7 @@ mod tests {
     ///
     /// `#[allow(non_snake_case)]` because "35V" is the canonical
     /// phase identifier (matches `ROADMAP.md` and
-    /// `docs/phase-35V-pre-launch-audit.md`); rendering it as
+    /// `docs/phases/phase-35V-pre-launch-audit.md`); rendering it as
     /// `35_v` would diverge from how the phase is referenced
     /// everywhere else.
     #[test]
@@ -539,7 +539,7 @@ mod tests {
              a literal anchor near the enforcement site \
              (`pub const GUARANTEE_ID_<NAME>: &str = \"<id>\"` plus a \
              doc comment naming the contract). See \
-             docs/phase-35V-pre-launch-audit.md for the corrective \
+             docs/phases/phase-35V-pre-launch-audit.md for the corrective \
              pattern.",
             unwired.join("\n  - ")
         );

@@ -584,7 +584,7 @@ Streaming in Corvid isn't just async iteration — streams are **first-class par
 
 The moat-closer. Most languages ship a spec. Some add a proptest suite. None do all five of what 20g ships. When 20g lands, the effect system's correctness is provably stronger than any existing language's type system has ever been.
 
-**The five verification inventions** (described below) ship alongside **five spec-layer inventions** — custom dimension authoring, proof-carrying dimensions, spec↔compiler sync, community dimension registry, self-verifying verification — documented in [docs/effects-spec/](../docs/effects-spec/) sections 01 and 02 and surfaced in the toolchain as `corvid test dimensions`, `corvid effect-diff`, and `corvid add-dimension`.
+**The five verification inventions** (described below) ship alongside **five spec-layer inventions** — custom dimension authoring, proof-carrying dimensions, spec↔compiler sync, community dimension registry, self-verifying verification — documented in [docs/internals/effect-spec/](../docs/internals/effect-spec/) sections 01 and 02 and surfaced in the toolchain as `corvid test dimensions`, `corvid effect-diff`, and `corvid add-dimension`.
 
 **The five verification inventions:**
 
@@ -647,11 +647,11 @@ The spec document isn't prose with code blocks. It's a **literate Corvid program
 
 The spec becomes a **living proof obligation**. Change the composition algebra → the spec examples either still compile (ship it) or they don't (spec fails CI).
 
-- [x] `docs/effects-spec/` as a literate spec — `.md` files with embedded runnable corvid blocks + `# expect:` directives (commits `3f80585` through `b628068`, 13 sections total)
+- [x] `docs/internals/effect-spec/` as a literate spec — `.md` files with embedded runnable corvid blocks + `# expect:` directives (commits `3f80585` through `b628068`, 13 sections total)
 - [x] Build pipeline: every code block compiles during spec publication — `corvid test spec` wired to CI (commit `4d4944b`). Current report: 5 compile / 38 skip / 0 fail across 43 blocks.
 - [x] Static site generator that renders the spec with "Run in REPL" buttons — `corvid test spec --site-out <DIR>` reads the verified literate spec and emits static HTML, CSS, JS, and runnable snippets
-- [x] Cross-links from spec rules to proptest + differential-verify tests — `docs/effects-spec/12-verification.md` now carries a rule-to-test map linking composition, budgets, grounding, approval, confidence, rewrites, and cross-tier profile agreement to their production modules, property tests, and corpus gates.
-- [x] Comparison appendix: Koka, Eff, Frank, Haskell algebraic effects, Rust `unsafe`, capability systems — [section 11 — related work](../docs/effects-spec/11-related-work.md) covers each dimension-by-dimension
+- [x] Cross-links from spec rules to proptest + differential-verify tests — `docs/internals/effect-spec/12-verification.md` now carries a rule-to-test map linking composition, budgets, grounding, approval, confidence, rewrites, and cross-tier profile agreement to their production modules, property tests, and corpus gates.
+- [x] Comparison appendix: Koka, Eff, Frank, Haskell algebraic effects, Rust `unsafe`, capability systems — [section 11 — related work](../docs/internals/effect-spec/11-related-work.md) covers each dimension-by-dimension
 
 ##### 4. Preserved-semantics fuzzing
 
@@ -678,10 +678,10 @@ Phase 20g ships with a **standing bounty surface**:
 
 Every accepted bypass becomes a permanent entry in the counterexample museum. Future Corvid versions must reject every historical bypass. The spec's credibility compounds over time — each release is tested against every historical attack.
 
-- [x] `docs/effects-spec/counterexamples/` directory with five composition-attack fixtures (commit `f4e802e`)
+- [x] `docs/internals/effect-spec/counterexamples/` directory with five composition-attack fixtures (commit `f4e802e`)
 - [x] Each counterexample has: the bypass program, the bug it exposed, the fix/proof mechanism, and contributor credit — seed corpus fixtures name the Corvid core team until the public bounty credit process exists.
 - [x] CI rejects any change that causes a historical counterexample to compile again — meta-verifier (commit `e368ebb`) runs on every push via `.github/workflows/ci.yml`
-- [x] Public bounty page with submission guidelines and disclosed fixes — `docs/effects-spec/bounty.md` plus `.github/ISSUE_TEMPLATE/effect-bypass.yml` define disclosure, triage, credit, and permanent-regression rules
+- [x] Public bounty page with submission guidelines and disclosed fixes — `docs/internals/effect-spec/bounty.md` plus `.github/ISSUE_TEMPLATE/effect-bypass.yml` define disclosure, triage, credit, and permanent-regression rules
 
 ##### 6. Custom dimension authoring
 
@@ -713,9 +713,9 @@ Every custom dimension must declare the archetype's algebraic laws — associati
 
 ##### 8. Spec↔compiler bidirectional sync
 
-Every `effect` declaration, `uses` clause, and constraint example in [docs/effects-spec/](../docs/effects-spec/) is parsed by the actual Corvid parser. Every composition rule table in the spec is evaluated by the actual type checker. The spec and the compiler cannot drift — every commit either ships matching spec+compiler or fails CI.
+Every `effect` declaration, `uses` clause, and constraint example in [docs/internals/effect-spec/](../docs/internals/effect-spec/) is parsed by the actual Corvid parser. Every composition rule table in the spec is evaluated by the actual type checker. The spec and the compiler cannot drift — every commit either ships matching spec+compiler or fails CI.
 
-- [x] Spec examples extracted from every `.md` file in `docs/effects-spec/` (commit `413b39e`) — examples stay inline under ```corvid fences with `# expect: compile|error|skip` directives rather than a separate `examples/` directory
+- [x] Spec examples extracted from every `.md` file in `docs/internals/effect-spec/` (commit `413b39e`) — examples stay inline under ```corvid fences with `# expect: compile|error|skip` directives rather than a separate `examples/` directory
 - [x] `corvid test spec` walks spec, compiles each block, compares outcome to the declared expectation
 - [x] Cross-links from spec rules → proptest files → differential-verify tests
 - [x] CI gate: any example whose behavior diverges from the spec fails the build — `.github/workflows/ci.yml` gates `corvid test spec`; preserved-semantics drift now also gates via `corvid test rewrites`.
@@ -732,7 +732,7 @@ Other languages have package registries for code. Corvid has one for effect *dim
 
 ##### 10. Self-verifying verification
 
-The spec documents its own verification mechanism, which in turn verifies the spec. `corvid test spec --meta` mutates the composition-algebra checker in known-broken ways and confirms each historical counter-example (in `docs/effects-spec/counterexamples/`) is still caught by at least one mutation. This proves the verifier is both necessary (every mutation breaks at least one property) and sufficient (all counterexamples caught on restoration) — the deepest soundness claim any effect-system specification has ever made.
+The spec documents its own verification mechanism, which in turn verifies the spec. `corvid test spec --meta` mutates the composition-algebra checker in known-broken ways and confirms each historical counter-example (in `docs/internals/effect-spec/counterexamples/`) is still caught by at least one mutation. This proves the verifier is both necessary (every mutation breaks at least one property) and sufficient (all counterexamples caught on restoration) — the deepest soundness claim any effect-system specification has ever made.
 
 - [x] Meta-verification harness: swap the dimension's composition rule, re-run `analyze_effects`, assert outcomes differ (commit `e368ebb`)
 - [x] Counter-example corpus: `sum_with_max.cor`, `max_with_min.cor`, `and_with_or.cor`, `union_with_intersection.cor`, `min_with_mean.cor` (commit `f4e802e`)
@@ -754,7 +754,7 @@ Alongside the ten inventions, the core written specification (20–40 pages, emb
 - [x] Section 10: Interactions with FFI, generics, async — Python/Rust FFI boundaries, Grounded<T> generic interactions, parallel-composition archetypes for a future spawn/join
 - [x] Section 11: Related work — Koka, Eff, Frank, Haskell MTL + polysemy + fused-effects, Rust `unsafe`, capability security, linear types, session types. Dimension-by-dimension summary table.
 - [x] Section 12: Verification methodology — seven techniques with status table, CI gates inventoried
-- [x] `docs/effects-spec/counterexamples/composition/` — five fixtures, one per rejected composition rule
+- [x] `docs/internals/effect-spec/counterexamples/composition/` — five fixtures, one per rejected composition rule
 
 **Why 4 weeks, not 2:** ten inventions. Differential verification requires infrastructure across four execution tiers. Adversarial generation requires prompt engineering + regression-corpus growth. Literate executable spec requires a static-site pipeline. Custom dimensions require a table-driven checker refactor. Proof-carrying dimensions require a proptest harness + optional Lean/Coq replay. Registry requires a signed artifact format + host. Meta-verification requires a checker mutator + counter-example harness. The prose alone is 2 weeks. The infrastructure is the other 2.
 
@@ -1167,7 +1167,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 - [x] 20i-3  `effects.rs` → 5 submodules, 2,175 → 488 lines (4 commits)
 - [x] 20i-4  `corvid-types/lib.rs` test extraction, 2,487 → 41 lines (`b41b952`)
 - [x] 20i-audit-driver  `corvid-driver/lib.rs` → 6 submodules, 1,935 → 1,224 lines (5 commits)
-- [x] 20i-audit-compiler  Rubric sweep recorded in `docs/phase-20i-audit-compiler.md` (`86f00f6`)
+- [x] 20i-audit-compiler  Rubric sweep recorded in `docs/phases/phase-20i-audit-compiler.md` (`86f00f6`)
 
 #### Dev B's lane (runtime + codegen crates)
 
@@ -1176,7 +1176,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 - [x] 20i-6  `corvid-vm/interp.rs` split, 2,399 → 779 lines (4 commits)
 - [x] 20i-8  `parity.rs` → 12 test-family submodules (12 commits)
 - [x] 20i-5  `lowering.rs` → 7 submodules, 6,405 → 282 lines (10 commits)
-- [x] 20i-audit-runtime  Rubric sweep recorded in `docs/phase-20i-audit-runtime.md` (`7117eec`)
+- [x] 20i-audit-runtime  Rubric sweep recorded in `docs/phases/phase-20i-audit-runtime.md` (`7117eec`)
 
 **Shipping trail:** ~60 commits across both lanes. See the two audit-record docs for per-file verdicts and decomposition layouts.
 
@@ -1188,7 +1188,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 
 **Goal.** A 2026-04-30 audit pass found 36 files in the workspace that fail the CLAUDE.md responsibility rubric — five named directly (`corvid-cli/main.rs`, `corvid-runtime/queue.rs`, `corvid-driver/build.rs`, `corvid-guarantees/lib.rs`, `corvid-runtime/auth.rs`) plus 31 surfaced by a workspace-wide rubric sweep. Most are post-20i regrowth (`corvid-runtime/runtime.rs` grew 5.8× from 445 → 2,590 lines; `corvid-vm/value.rs` grew 1.2×; `corvid-vm/interp/prompt.rs` grew 1.4×); some are net-new (`corvid-codegen-cl/lowering/runtime.rs` at 3,220 lines, `corvid-cli/auth_cmd|connectors_cmd|observe_helpers_cmd` shipped this session at land-time-failing sizes). Hygiene phase before any further audit-correction work so the rubric remains the floor, not a snapshot.
 
-**Detailed plan:** [docs/phase-20j-refactor.md](./docs/phase-20j-refactor.md) — every file's rubric criterion, mixed concerns, target decomposition, per-extraction commit list, and validation gate.
+**Detailed plan:** [docs/phases/phase-20j-refactor.md](./docs/phases/phase-20j-refactor.md) — every file's rubric criterion, mixed concerns, target decomposition, per-extraction commit list, and validation gate.
 
 **Sequencing rules** (per CLAUDE.md "When splitting"):
 
@@ -1209,7 +1209,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 **Phase-done criteria:**
 
 - Every `.rs` file ≥600 lines passes the rubric OR is documented as an integration-test exception (mirroring 20i).
-- Closing audit recorded in `docs/phase-20j-refactor.md` with per-file post-split line counts.
+- Closing audit recorded in `docs/phases/phase-20j-refactor.md` with per-file post-split line counts.
 - `learnings.md` updated per slice.
 - Memory record `project_phase_20j_closed.md` summarises regrowth vectors so future sessions don't repeat them.
 
@@ -1221,13 +1221,13 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 
 **Why this phase exists.** 20j closed with the original 37 mixed-domain failures decomposed, but several roots still hold two cohesive concepts (e.g. `auth/mod.rs` = records + actor surface + tests; `queue/mod.rs` = DurableQueueRuntime read-side + ~1,140-line cross-domain test cluster). Under the strict rule those become two responsibilities and need to split. Lifts the rubric floor without softening it.
 
-**Detailed plan:** [docs/phase-20k-refactor.md](./docs/phase-20k-refactor.md) — closing-audit-driven candidate list, per-file decomposition, validation gate.
+**Detailed plan:** [docs/phases/phase-20k-refactor.md](./docs/phases/phase-20k-refactor.md) — closing-audit-driven candidate list, per-file decomposition, validation gate.
 
 **Sequencing rules** (same as 20j): one commit per file extraction, push between, pre-phase chat per sub-slice, zero semantic changes during a refactor commit.
 
 **Slices** (15 violators, ~67 commits — audit closed 2026-05-03):
 
-- [x] 20k-audit — fresh workspace sweep against the strict rule. Findings recorded in [docs/phase-20k-refactor.md](./docs/phase-20k-refactor.md).
+- [x] 20k-audit — fresh workspace sweep against the strict rule. Findings recorded in [docs/phases/phase-20k-refactor.md](./docs/phases/phase-20k-refactor.md).
 - [x] 20k-A10c — `corvid-runtime/src/auth/mod.rs` (764 → ~150, 6 commits). Records + per-domain test relocation. Pattern reference for cross-domain test splits.
 - [x] 20k-A1b — `corvid-cli/src/cli/root.rs` (1,369 → ~150, 14 commits). 17 sibling subcommand enums per-group split. Largest single sub-slice.
 - [x] 20k-A1c — `corvid-cli/src/dispatch.rs` (1,192 → ~600, 3 commits).
@@ -1247,7 +1247,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 **Phase-done criteria:**
 
 - [x] Every `.rs` file in `crates/` passes the strict rubric OR is documented as an integration-test exception.
-- [x] Closing audit recorded in `docs/phase-20k-refactor.md` with per-file post-split line counts.
+- [x] Closing audit recorded in `docs/phases/phase-20k-refactor.md` with per-file post-split line counts.
 - [x] `learnings.md` updated per slice.
 - [x] Memory record `project_phase_20k_closed.md` summarises which concept-pairings tend to coexist (so future sessions know what to keep apart).
 
@@ -1261,7 +1261,7 @@ Users register local models (Ollama, vLLM, llama.cpp) with declared capabilities
 
 These aren't 20j/20k responsibility-rubric failures — the files are clean. They're behavioural gaps that only surface when a stranger uses the language. Pre-launch hygiene phase, mirroring 20j's role between 20i and Phase 21.
 
-**Detailed plan:** [docs/phase-20l-first-impression-gaps.md](./docs/phase-20l-first-impression-gaps.md) — every gap's verified site, fix shape, regression test, and acceptance criteria.
+**Detailed plan:** [docs/phases/phase-20l-first-impression-gaps.md](./docs/phases/phase-20l-first-impression-gaps.md) — every gap's verified site, fix shape, regression test, and acceptance criteria.
 
 **Sequencing rules** (per CLAUDE.md "When splitting"):
 
@@ -1278,7 +1278,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 - [x] 20l-B — Python codegen preserves struct + container types (L-2, **High**). Landed in `11230d4`: `python_type_hint_of` now resolves `Type::Struct(DefId)` to its dataclass name, recurses through `List<T>` → `list[T]` and `Option<T>` → `T | None`, and uses `imported.name` for `ImportedStruct`. Three regression tests cover each shape.
 - [x] 20l-C — Diagnostic renderer auto-detects TTY (L-6, **Low-medium**). Landed in `c822dd5`: `is_terminal()` + `NO_COLOR` auto-detect threaded through `ariadne::Config::with_color`, plus a `strip_ansi` post-render scrub for the residual CSI sequences ariadne 0.4 leaks through `ReportKind::Custom`. Two unit tests cover the helper and the integration.
 - [x] 20l-D — Native staticlib-missing diagnostic actionable (L-5 re-diagnosed). Landed in `e666e52`: extracted `missing_staticlib_diagnostic` helper, reformatted as multi-line with `--target=interpreter` (binary-install audience) AND `cargo build -p corvid-runtime --release` (dev-tree audience). Unit test asserts both recovery paths appear.
-- [x] 20l-E — Document `approve` PascalCase rule (L-8, docs only). Landed in `68f8dca`: new §6.1 in `docs/effects-spec/03-typing-rules.md`, plus extended `corvid tour --topic approve-gates` blurb (mirrored to `docs/site/site.js`). Removed an aspirational `dangerous as Bar` opt-in syntax that doesn't actually exist before commit.
+- [x] 20l-E — Document `approve` PascalCase rule (L-8, docs only). Landed in `68f8dca`: new §6.1 in `docs/internals/effect-spec/03-typing-rules.md`, plus extended `corvid tour --topic approve-gates` blurb (mirrored to `docs/site/site.js`). Removed an aspirational `dangerous as Bar` opt-in syntax that doesn't actually exist before commit.
 - [ ] 20l-F — Lexer accepts `\` end-of-line continuation (L-7). **Deferred.** Corvid is positioned as AI-native, not Python-shaped; existing workarounds (`+` concatenation, triple-quoted strings) are clean. Adding `\` line continuation would set a precedent toward Python-mimicry that erodes the language's identity. Documented in `learnings.md`.
 
 **Filed as deferrals (not 20l slices):**
@@ -1291,7 +1291,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 - [ ] L-1, L-2, L-6, L-5'-rediagnosed, L-8 land with regression tests.
 - [ ] L-7 lands OR is documented in `learnings.md` as "deferred — workarounds suffice."
 - [ ] L-3 and L-4 are filed against their owning phase docs (17/20 and 23 respectively) so they're not lost.
-- [ ] Closing audit recorded in `docs/phase-20l-first-impression-gaps.md` with per-gap status and shipped-line-counts.
+- [ ] Closing audit recorded in `docs/phases/phase-20l-first-impression-gaps.md` with per-gap status and shipped-line-counts.
 - [ ] `learnings.md` updated per slice.
 - [ ] Memory record `project_phase_20l_closed.md` summarises the recurring "first-impression gap" pattern (path-anchored API used in some commands but not others; codegen TODOs that ship as `object`-shaped degradations; diagnostic surface that didn't auto-detect environment) so future-session can spot similar regressions before they ship.
 
@@ -1303,7 +1303,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 **Why this phase exists.** Two reasons. First, the corrections themselves: the 20l-E docs claim "approve must be PascalCase" is overly strict (the checker normalises any casing via `snake_case(label) == tool_name` at `crates/corvid-types/src/checker/call.rs:127`); and 20l-D made the staticlib-missing diagnostic readable but didn't auto-fall-back to the interpreter, leaving users to copy-paste a recovery command when the runtime could just retry. Second, the verifier-correction pattern itself is reusable institutional memory worth capturing — the next external-reviewer round (and there will be one before 33M opens) will follow the same shape: report → first-round fixes → verification round → corrections. Documenting the pattern makes the next round cheaper.
 
-**Detailed plan:** [docs/phase-20m-verifier-corrections.md](./docs/phase-20m-verifier-corrections.md) — verified site for each correction, fix shape, regression test plan, and the meta-learning about `expected_*` diagnostic fields versus acceptance criteria.
+**Detailed plan:** [docs/phases/phase-20m-verifier-corrections.md](./docs/phases/phase-20m-verifier-corrections.md) — verified site for each correction, fix shape, regression test plan, and the meta-learning about `expected_*` diagnostic fields versus acceptance criteria.
 
 **Sequencing rules** (per CLAUDE.md "When splitting"):
 
@@ -1326,7 +1326,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 **Phase-done criteria:**
 
 - [ ] 20m-A and 20m-B land with regression tests.
-- [ ] Closing audit recorded in `docs/phase-20m-verifier-corrections.md` with per-correction status, the meta-lesson about `expected_*` diagnostic fields versus acceptance criteria, and the verifier-correction pattern documented for future external-reviewer rounds.
+- [ ] Closing audit recorded in `docs/phases/phase-20m-verifier-corrections.md` with per-correction status, the meta-lesson about `expected_*` diagnostic fields versus acceptance criteria, and the verifier-correction pattern documented for future external-reviewer rounds.
 - [ ] `learnings.md` updated with the meta-lesson and the "verify the *comparison site*, not the *suggestion field*" rule.
 - [ ] ROADMAP.md Phase 20m entry checkboxes ticked.
 - [ ] Memory record `project_phase_20m_closed.md` summarises:
@@ -1343,7 +1343,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 **Why this phase exists.** The verifier scorecard re-confirmed all three gaps are real. The 20l-F deferral on L-7 was specifically reversed by the language designer in a 2026-05-08 directive — *implement the feature end-to-end* — so 20n-A ships Decision A (implement) rather than Decision B (document the absence). The L-3 and L-4 deferrals stand only in the sense of "they're feature work, not bug fixes"; 20n adopts them as their own slices with full pre-phase chats per CLAUDE.md.
 
-**Detailed plan:** [docs/phase-20n-open-gap-implementation.md](./docs/phase-20n-open-gap-implementation.md) — per-slice plan, design-decision overrides, audit checklist, validation gate.
+**Detailed plan:** [docs/phases/phase-20n-open-gap-implementation.md](./docs/phases/phase-20n-open-gap-implementation.md) — per-slice plan, design-decision overrides, audit checklist, validation gate.
 
 **Sequencing rules** (per CLAUDE.md "When splitting"):
 
@@ -1355,7 +1355,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 
 **Slices:**
 
-- [x] 20n-A — L-7 lexer line continuation (Decision A, end-to-end implementation). Lexer changes in `crates/corvid-syntax/src/lexer.rs` to consume `\` + newline + leading whitespace as silent continuation outside strings and inside `"..."` literals. Triple-quoted blocks unchanged. Helpful diagnostic for `\` not at end-of-line. Tests + `docs/syntax.md` "Continuation rules" paragraph. Shipped `eb4a962` 2026-05-08.
+- [x] 20n-A — L-7 lexer line continuation (Decision A, end-to-end implementation). Lexer changes in `crates/corvid-syntax/src/lexer.rs` to consume `\` + newline + leading whitespace as silent continuation outside strings and inside `"..."` literals. Triple-quoted blocks unchanged. Helpful diagnostic for `\` not at end-of-line. Tests + `docs/reference/lexer-rules.md` "Continuation rules" paragraph. Shipped `eb4a962` 2026-05-08.
 - [x] 20n-B — L-4 WASM String parameter and return support. Bare `(ptr, len)` UTF-8 ABI across `crates/corvid-codegen-wasm/`, JS loader, `.d.ts` emitter, manifest. `corvid_alloc` / `corvid_free` exports always present (real free-list with two-pass coalescing). Multi-value `(result i32 i32)` returns. Compile-time string-literal pool emitted as a single active `DataSection` segment with content-keyed deduplication. Multi-byte UTF-8 round-trip integration tests + 200-iteration churn test pinning page count. Uniform manifest `kind` discriminator on every param/return. Shipped across `9e00719` `bf7d55f` `6bfc7ae` `8da006e` `231c88c` `14ffb07` 2026-05-08.
 - [x] 20n-C — L-3 native codegen struct returns. Two sites lifted: prompt-bridge in `crates/corvid-codegen-cl/src/lowering/prompt.rs` (commit 4) and entry-agent boundary in `crates/corvid-codegen-cl/src/lowering/entry.rs` + `lib.rs` (commit 5). Plus `Grounded<Struct>` attestation extension (commit 6). Step-0 audit corrected the original "mirror Grounded<T>" framing — Grounded<T> is a handle-store pattern for attestation metadata, not a heap-allocation pattern; the actual heap layout to mirror was `lower_struct_constructor`'s `corvid_alloc_typed(size, &typeinfo)` with 8-byte field slots. New crate `corvid-prompt-format` extracted from `corvid-vm/src/schema.rs` so codegen can reuse the JSON Schema generator without depending on the interpreter. Generic JSON parse/build primitives (12 C-ABI fns) added to runtime; codegen emits per-struct decoders + encoders (cached by `DefId`) that use them. New `corvid_prompt_call_struct` bridge takes a function-pointer decoder callback (the typed-bridge family extended without combinatorial explosion: same one bridge serves every struct type via the codegen-emitted decoder). Field-type coverage v1: `Int` / `Bool` / `Float` / `String` (mirrors the four scalar prompt bridges). Shipped across `10107cc` `1361a61` `9d8e19d` `cfb131d` `6f04db5` `5e1b864` 2026-05-08.
 
@@ -1364,7 +1364,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 **Phase-done criteria:**
 
 - [x] 20n-A, 20n-B, 20n-C all land with regression tests.
-- [x] Closing audit recorded in `docs/phase-20n-open-gap-implementation.md` with per-slice status + the design-override note for L-7.
+- [x] Closing audit recorded in `docs/phases/phase-20n-open-gap-implementation.md` with per-slice status + the design-override note for L-7.
 - [x] `learnings.md` updated per slice.
 - [x] ROADMAP.md Phase 20n entry checkboxes ticked, `✅ closed` marker added.
 - [x] Memory record `project_phase_20n_closed.md` summarises the design-override pattern (when a deferral is reversed, record the directive explicitly so future sessions don't mistake it for drift), the step-0 audit pattern (substantive feature slices need a read-and-plan step before code), the codegen-emits-per-type pattern (per-struct decoders + encoders cached by `DefId` so runtime stays type-agnostic), and the rename-don't-duplicate principle (extending an existing storage map's semantics rather than introducing a parallel one).
@@ -1460,11 +1460,11 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 - [x] lang-cor-imports-signed  Hash-pinned imports: `import "./path" hash:sha256:abc123... as p`. If the imported file's content drifts, compilation fails. Supply-chain integrity at the language level: pins are parsed into the AST/IR, verified over the exact imported source bytes before parsing/resolution, and mismatches fail closed with an actionable diagnostic. Pairs with `21-inv-H-5-signed` so a signed receipt's policy hash chain extends through the import graph.
 - [x] lang-cor-imports-remote  Remote imports: `import "https://.../policy.cor" hash:sha256:... as p`. HTTP(S) Corvid imports now require mandatory SHA-256 pinning at parse time, fetch through a distinct remote module target, verify exact response bytes before parsing, and typecheck/lower public exports through the same module pipeline as local imports. Enables federated policy baselines and cross-repo governance without a full package manager.
 - [x] lang-cor-imports-versioned ROLL-UP — versioned imports + package system: `import "corvid://@anthropic/safety-baseline/v2.3" as p`. Locked package resolution, registry semantic-version selection, and signed publish verification have landed as separate slices so the package-manager story is real rather than implied.
-- [x] lang-cor-imports-versioned-lock Locked package imports: `corvid://...` source imports now resolve only through `Corvid.lock`. The lockfile maps the semantic URI to an immutable HTTP(S) source URL and SHA-256 digest; missing lockfiles, missing entries, and hash drift all fail closed before parsing. Inline hashes on package imports are rejected because the lockfile is the reproducibility authority. See [docs/package-imports.md](docs/package-imports.md).
+- [x] lang-cor-imports-versioned-lock Locked package imports: `corvid://...` source imports now resolve only through `Corvid.lock`. The lockfile maps the semantic URI to an immutable HTTP(S) source URL and SHA-256 digest; missing lockfiles, missing entries, and hash drift all fail closed before parsing. Inline hashes on package imports are rejected because the lockfile is the reproducibility authority. See [docs/reference/package-imports.md](docs/reference/package-imports.md).
 - [x] lang-cor-imports-versioned-registry Registry semantic-version resolver: `corvid add @scope/name@2.3` queries a local or HTTP registry index, chooses the highest matching semantic version, verifies the selected source hash, computes the exported semantic summary, writes `Corvid.lock`, and refuses packages whose exported effects violate `[package-policy]` in `corvid.toml`.
 - [x] lang-cor-imports-versioned-signed-publish Signed publish workflow: `corvid package publish` copies source packages into a registry directory, computes SHA-256 and semantic summary, signs the canonical package subject with Ed25519, and updates `index.toml`. `corvid add` verifies signed entries and `[package-policy] require-package-signatures = true` rejects unsigned entries before lockfile mutation.
 
-- [x] 21-docs                Spec [section 14](docs/effects-spec/14-replay.md) (Phase 21 implementation reference) + v1.0 launch demo at [docs/v1.0-demo-script.md](docs/v1.0-demo-script.md) + ROADMAP closeout status below.
+- [x] 21-docs                Spec [section 14](docs/internals/effect-spec/14-replay.md) (Phase 21 implementation reference) + v1.0 launch demo at [docs/meta/v1.0-demo-script.md](docs/meta/v1.0-demo-script.md) + ROADMAP closeout status below.
 
 **Phase 21 closeout status (as of 2026-04-25).**
 
@@ -1476,7 +1476,7 @@ What's between us and a clean "Phase 21 done" on the ROADMAP:
 
 - Nothing in the Phase 21 checklist. Remaining replay work, if any, is future hardening on top of the shipped surface rather than a Phase 21 blocker.
 
-The determinism-source catalog and the language's treatment of non-reproducible sources are documented in [docs/phase-21-determinism-sources.md](docs/phase-21-determinism-sources.md) and summarised in [spec §14.11](docs/effects-spec/14-replay.md). Every trace axis the runtime records is enumerated there, and extensions land through monotonic `SCHEMA_VERSION` bumps + compile-time opt-in at `@replayable` level.
+The determinism-source catalog and the language's treatment of non-reproducible sources are documented in [docs/phases/phase-21-determinism-sources.md](docs/phases/phase-21-determinism-sources.md) and summarised in [spec §14.11](docs/internals/effect-spec/14-replay.md). Every trace axis the runtime records is enumerated there, and extensions land through monotonic `SCHEMA_VERSION` bumps + compile-time opt-in at `@replayable` level.
 
 #### Dev B's lane (runtime + codegen + daemon — ~9 slices)
 
@@ -1608,7 +1608,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Phase 25 reopened 2026-04-29 — gap-closing slice required:**
 
-- [x] 25-G-no-hosted-registry-honesty   The current implementation is a *package format + local resolver + signed-publish-to-a-directory*; no Corvid-hosted registry exists as a running service. README, package CLI help, `docs/package-manager-scope.md`, and the `package.hosted_registry_available` `OutOfScope` guarantee row make the "format-and-tooling, no hosted service yet" boundary explicit. Closes when grep against README + landing page returns zero un-qualified mentions of `registry.corvid.dev`.
+- [x] 25-G-no-hosted-registry-honesty   The current implementation is a *package format + local resolver + signed-publish-to-a-directory*; no Corvid-hosted registry exists as a running service. README, package CLI help, `docs/internals/package-manager-scope.md`, and the `package.hosted_registry_available` `OutOfScope` guarantee row make the "format-and-tooling, no hosted service yet" boundary explicit. Closes when grep against README + landing page returns zero un-qualified mentions of `registry.corvid.dev`.
 
 **Phase 25 next-close criteria:** the ROADMAP-level `[x]` returns only when slice 25-G clears the slice completion gate.
 
@@ -1630,11 +1630,11 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Slice checklist:**
 
-- [x] 26-A-test-declarations          `test name:` declarations parse, resolve, typecheck, and lower into `IrTest` nodes. Tests reuse eval assertion syntax so value, trace-called, approval, ordering, cost, and statistical assertion metadata share one compiler model. See [docs/testing-primitives.md](docs/testing-primitives.md).
+- [x] 26-A-test-declarations          `test name:` declarations parse, resolve, typecheck, and lower into `IrTest` nodes. Tests reuse eval assertion syntax so value, trace-called, approval, ordering, cost, and statistical assertion metadata share one compiler model. See [docs/internals/testing-primitives.md](docs/internals/testing-primitives.md).
 - [x] 26-B-test-runner                `corvid test <file>` discovers `test` declarations, executes setup bodies, evaluates value assertions, and reports typed pass/fail output with CI exit codes. Statistical value assertions rerun setup for the requested run count; trace/process assertions fail explicitly until 26-E implements trace fixtures.
-- [x] 26-C-mocks-fixtures             `fixture` declarations are typed reusable test data callable only from tests/mocks; `mock` declarations are typed overrides for existing tools with exact signature matching. Test execution activates mocks through the VM after the normal approval/confidence gate, so mocked dangerous tools still preserve the target effect profile. See [docs/testing-primitives.md](docs/testing-primitives.md).
-- [x] 26-D-snapshots                  `assert_snapshot` evaluates typed runtime values, stores deterministic JSON snapshots under `.corvid-snapshots/<source-stem>/`, reports first-run updates, fails with diff output on mismatches, and supports `corvid test --update-snapshots` plus `CORVID_UPDATE_SNAPSHOTS=1`. See [docs/testing-primitives.md](docs/testing-primitives.md).
-- [x] 26-E-trace-fixtures             `test name from_trace "trace.jsonl":` binds schema-validated production traces to language tests. Trace assertions now evaluate against JSONL fixtures: `called`, ordering, approval, and cost checks fail with typed runner output instead of reporting unsupported placeholders. Trace paths resolve relative to the `.cor` file, so production traces can live beside the tests that lock their behavior. See [docs/testing-primitives.md](docs/testing-primitives.md).
+- [x] 26-C-mocks-fixtures             `fixture` declarations are typed reusable test data callable only from tests/mocks; `mock` declarations are typed overrides for existing tools with exact signature matching. Test execution activates mocks through the VM after the normal approval/confidence gate, so mocked dangerous tools still preserve the target effect profile. See [docs/internals/testing-primitives.md](docs/internals/testing-primitives.md).
+- [x] 26-D-snapshots                  `assert_snapshot` evaluates typed runtime values, stores deterministic JSON snapshots under `.corvid-snapshots/<source-stem>/`, reports first-run updates, fails with diff output on mismatches, and supports `corvid test --update-snapshots` plus `CORVID_UPDATE_SNAPSHOTS=1`. See [docs/internals/testing-primitives.md](docs/internals/testing-primitives.md).
+- [x] 26-E-trace-fixtures             `test name from_trace "trace.jsonl":` binds schema-validated production traces to language tests. Trace assertions now evaluate against JSONL fixtures: `called`, ordering, approval, and cost checks fail with typed runner output instead of reporting unsupported placeholders. Trace paths resolve relative to the `.cor` file, so production traces can live beside the tests that lock their behavior. See [docs/internals/testing-primitives.md](docs/internals/testing-primitives.md).
 
 ### Phase 27 — Eval tooling CLI (~3 weeks) ✅ closed
 
@@ -1706,7 +1706,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Phase 29 follow-up audit (2026-04-29) — epistemic verification:**
 
-- [x] 29-K-memory-module-audit-doc       `docs/phase-29-memory-audit.md` ships, enumerating every memory primitive against the ROADMAP claims with source file + line range + positive + adversarial tests for each surface. Audit confirmed native-tier coverage; identified one cross-tier gap (wasm IndexedDB backing) that promotes into slice 29-L below.
+- [x] 29-K-memory-module-audit-doc       `docs/phases/phase-29-memory-audit.md` ships, enumerating every memory primitive against the ROADMAP claims with source file + line range + positive + adversarial tests for each surface. Audit confirmed native-tier coverage; identified one cross-tier gap (wasm IndexedDB backing) that promotes into slice 29-L below.
 - [x] 29-L-wasm-indexeddb-host-import    The wasm-codegen ES loader exports a typed `createIndexedDbStoreHost` wrapper for browser-side `store.get` / `store.put` / `store.delete`; `examples/wasm_browser_demo` uses it to persist run count and last result across page reloads, and the Phase 23 Playwright browser CI test verifies persistence.
 
 ### Phase 30 — Python FFI via PyO3 (~5–6 weeks) ✅ closed
@@ -1733,7 +1733,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Phase 30 reopened 2026-04-29 — gap-closing slice required:**
 
-- [x] 30-J-default-ci-pyo3        The Python FFI integration tests run in the `python-features` CI job with pinned CPython 3.11 and `cargo test -p corvid-runtime --features python --tests`. The feature tests assert scalar, list, and dict/object round-trips, traceback-preserving exception marshalling, `python.call` / `python.result` / `python.error` trace events, and sandbox-profile-denied imports. `docs/ci.md` documents the matrix entry.
+- [x] 30-J-default-ci-pyo3        The Python FFI integration tests run in the `python-features` CI job with pinned CPython 3.11 and `cargo test -p corvid-runtime --features python --tests`. The feature tests assert scalar, list, and dict/object round-trips, traceback-preserving exception marshalling, `python.call` / `python.result` / `python.error` trace events, and sandbox-profile-denied imports. `docs/operations/ci.md` documents the matrix entry.
 
 **Phase 30 next-close criteria:** the ROADMAP-level `[x]` returns only when slice 30-J clears the slice completion gate.
 
@@ -1790,7 +1790,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Phase 32 follow-up audit (2026-04-29) — per-module verification:**
 
-- [x] 32-T-stdlib-effect-tag-audit-doc    `docs/phase-32-stdlib-audit.md` ships, covering all 11 modules (`ai`, `http`, `io`, `secrets`, `observe`, `cache`, `queue`, `jobs`, `agent`, `rag`, `effects`, `db`). Each row lists module path, public surface, effect tags, runtime backing (where applicable), compile test ref, imported-helpers typecheck ref, and adversarial coverage where present. Audit confirmed full coverage; identified one expansion opportunity that promotes into slice 32-U below.
+- [x] 32-T-stdlib-effect-tag-audit-doc    `docs/phases/phase-32-stdlib-audit.md` ships, covering all 11 modules (`ai`, `http`, `io`, `secrets`, `observe`, `cache`, `queue`, `jobs`, `agent`, `rag`, `effects`, `db`). Each row lists module path, public surface, effect tags, runtime backing (where applicable), compile test ref, imported-helpers typecheck ref, and adversarial coverage where present. Audit confirmed full coverage; identified one expansion opportunity that promotes into slice 32-U below.
 - [x] 32-U-stdlib-adversarial-expansion   Every `std.*` module now has a named adversarial test beside its compile + imported-helpers test in `crates/corvid-driver/tests/stdlib.rs`: secret value leaks, untagged HTTP/IO/cache/queue/job surfaces, raw auth/approval/observe/AI payload surfaces, missing provenance for agent/RAG answers, missing replay keys for effects, and the existing `std.db` token-redaction surface.
 
 **v0.9 cuts here.** Language feature-complete: HITL, memory, Python FFI, multi-provider LLMs, stdlib. Only polish remaining.
@@ -1806,7 +1806,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 **Scope:**
 - [x] In-repo installer flow: checked-in Unix + PowerShell install scripts under `install/` plus the documented `cargo install` path.
 - [x] Documentation rewrite foundation: launch reference, tutorial, cookbook, and migration-from-Python docs checked into `docs/`.
-- [x] Claim audit foundation: `docs/launch-claim-audit.md` links launch claims to concrete commands and committed artifacts, and keeps external-only claims explicitly blocked until the artifact exists.
+- [x] Claim audit foundation: `docs/meta/launch-claim-audit.md` links launch claims to concrete commands and committed artifacts, and keeps external-only claims explicitly blocked until the artifact exists.
 - [x] `corvid audit`: project-level static report for approval boundaries, replay coverage gaps, budget exposure, secret-bearing effects, money-moving paths, grounding signals, and semantic-effect violations.
 - [x] Stability contract foundation: checked-in launch contract for syntax, type system, CLI, stdlib, and benchmark-claim semantics.
 - [x] `corvid doctor` launch checks: provider keys, local-model tooling, replay storage, approval configuration, wasm/native toolchains, registry lock presence, and platform prerequisites.
@@ -1838,6 +1838,13 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 - [x] 33H-repro-scripts              Benchmark and bundle claim reproduction scripts are checked in.
 - [x] 33I-platform-parity            The `platform-parity` CI matrix runs on Windows, Linux, and macOS; each leg executes the platform installer, `corvid doctor`, and the WASM/Wasmtime cross-platform parity harness.
 - [ ] 33J-website-playground         Website, docs site, benchmark page, blog shell, and WASM playground are live from committed assets.
+  - [x] 33J1-homepage-live             Marketing landing page is live with hero / problem / demo / effect-algebra / inventions / examples / community / CTA from committed HTML assets at `Micrurus-Ai/corvid-website`.
+  - [x] 33J2-prep-doc-tree             Developer docs reorganized into Diataxis-style tree (`docs/book/`, `docs/guides/`, `docs/recipes/`, `docs/reference/`, `docs/migration/`, `docs/operations/`, `docs/security/`, `docs/internals/`, `docs/help/`, `docs/meta/`, `docs/phases/`); 4660-line mega-file split into 45 per-topic pages; obsolete stubs deleted; phase docs moved to `docs/phases/`; cross-references in source code updated; `docs/core-semantics.md` regenerated through `corvid contract regen-doc docs/reference/core-semantics.md`.
+  - [ ] 33J3-docs-site-build           Docs-site build pipeline (Astro Starlight or similar) renders the per-topic markdown into a navigable site at the website domain.
+  - [ ] 33J4-benchmark-page            Renders `benches/moat/RESULTS.md` and the `benches/results/*/ratios.json` archives at `corvid.dev/benchmarks`.
+  - [ ] 33J5-blog-shell                Blog shell with at least one launch post.
+  - [ ] 33J6-grammar-drift-gate        Drift-gate test that cross-checks `docs/reference/grammar.md` against the parser tests in `crates/corvid-syntax/src/parser/tests.rs`.
+  - [ ] 33J7-wasm-playground           Browser playground using the cdylib/WASM target with Corvid syntax highlighting via Prism.
 - [x] 33K-reference-demo-pack        One-command demo apps have tests, evals, traces, and benchmark notes.
 - [ ] 33L-launch-materials           GIF/video, launch drafts, and external-reader review are complete.
 - [ ] 33M-beta-feedback              20 external-developer feedback items are closed as code/docs/tests or explicit non-scope.
@@ -1858,7 +1865,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 - [x] Landing page rewrite (`docs/site/`): every invention gets a runnable playground example. "Corvid is faster than Python at X" / "safer than TypeScript at Y" claims are supported with side-by-side comparisons that actually run.
 - [x] Runnable invention index: `corvid tour --topic <name>` CLI command opens the REPL pre-loaded with compiler-checked demos; `corvid tour --list` shows the shipped catalog across safety, AI-native ergonomics, adaptive routing, streaming, and verification.
 - [x] Cross-references: each invention in the README links to (a) the roadmap slice that shipped it, (b) the spec section that formalizes it, (c) the example in the tour, (d) the test that validates it.
-- [x] Headline inventions page (`docs/inventions.md`): the standalone artifact HN threads link to. No install prerequisite, no build system context — just the inventions, their syntax, and why each is unique.
+- [x] Headline inventions page (`docs/reference/inventions.md`): the standalone artifact HN threads link to. No install prerequisite, no build system context — just the inventions, their syntax, and why each is unique.
 - [x] Invention proof matrix: every catalog entry has columns for shipped status, runnable command, test coverage, docs/spec link, and explicit non-scope.
 - [x] Update `CLAUDE.md` (or equivalent contributor doc) to require that every new invention ships with a README catalog entry + tour demo.
 
@@ -1887,14 +1894,14 @@ This phase closes all five end-to-end with no shortcuts: a guarantee manifest ta
 - [x] 35-A-registry             `corvid-guarantees` crate: `GuaranteeKind` / `GuaranteeClass` (Static / RuntimeChecked / OutOfScope) / `Phase` enums + canonical `GUARANTEE_REGISTRY` static array. Every public Corvid guarantee enumerated with id, class, enforcing pipeline phase, description, and required test references.
 - [x] 35-B-diag-tagging          Every contract-enforcing diagnostic in resolve / typecheck / IR-lower / codegen / runtime carries its `guarantee_id`. Build-time lint rejects untagged contract diagnostics. No contract enforcement is anonymous.
 - [x] 35-C-contract-list         `corvid contract list` CLI subcommand emits the canonical guarantee table as JSON or human-readable. Single source of truth — every later artifact derives from this command's output.
-- [x] 35-D-spec-generation       `xtask` regenerates `docs/core-semantics.md` from `GUARANTEE_REGISTRY`; CI fails on drift between committed doc and generated. Spec ≡ implementation, automatically. No hand-edited semantics page.
+- [x] 35-D-spec-generation       `xtask` regenerates `docs/reference/core-semantics.md` from `GUARANTEE_REGISTRY`; CI fails on drift between committed doc and generated. Spec ≡ implementation, automatically. No hand-edited semantics page.
 - [x] 35-E-test-cross-refs       Every Static guarantee carries `positive_test_refs` and `adversarial_test_refs`; build-time check rejects empty adversarial coverage on a Static guarantee. Every guarantee in the registry must point to real test functions that compile and run.
 - [x] 35-F-fuzz-abi              Adversarial fuzz corpus over the ABI surface: `proptest`-driven byte mutators on descriptor JSON and DSSE attestation envelopes (corrupt signatures, swap payload types, mutate PAE bytes, drop required fields, inject extra symbols). ≥100 mutants per gate; each must be rejected with the documented exit code; benign mutations must round-trip.
 - [x] 35-G-fuzz-source           Adversarial fuzz corpus over source-level bypasses: AST mutators for `@approve` re-export bypass, effect under-reporting at module boundary, `Grounded<T>` provenance loss across function calls, import-aliasing of dangerous tools. Each mutated source must fail typecheck with the diagnostic tagged to the right `guarantee_id` from slice 35-B.
 - [x] 35-H-bilateral-verifier    Separate-binary ABI verifier (`corvid-abi-verify`): rebuilds the descriptor through the workspace's shared frontend (lex / parse / resolve / typecheck / IR-lower / abi-emit) and byte-compares the rebuilt descriptor against the embedded `CORVID_ABI_DESCRIPTOR` symbol in a built cdylib. Disagreement = build rejection. Defends against post-link descriptor tampering, build-cache modifications, and partial-rebuild drift between the source-of-truth and the artifact a host receives. **Phase 35V-T1-H wording correction (2026-05-08):** earlier slice text claimed "independent code path", "two implementations", and "TCB shrinkage" — none of those are shipped: the verifier links the same `corvid-syntax` / `corvid-resolve` / `corvid-types` / `corvid-ir` / `corvid-abi` libraries the main pipeline uses, so a logic bug in any of those frontends affects both paths identically. The shipped property is "rebuild + byte-compare across a separate process invocation," which is real and useful but narrower than full TCB shrinkage. **Non-scope (post-v1.0):** true second-implementation TCB shrinkage — a separate parser/resolver/typechecker reaching `AbiDescriptor` independently — is a future-phase effort; promotion of any registry row that depends on it stays gated on that work landing.
 - [x] 35-I-claim-explain         `corvid claim --explain <cdylib>`: emits a self-contained provenance statement listing every guarantee enforced for the given binary, by id and class, plus the signing key fingerprint and verifier-agreement attestation from slice 35-H. The artifact HN threads can quote without further context.
 - [x] 35-J-sign-refusal          `corvid build --sign` refuses to emit a signed cdylib unless every declared contract in the source maps to a `GUARANTEE_REGISTRY` entry that was actually checked in this build. No silent skips, no "we didn't run that pass on this target" downgrades. The signed artifact carries the *enforced* claim, not the *intended* claim.
-- [x] 35-K-security-model        `docs/security-model.md`: TCB diagram (compiler + verifier + runtime + signer + ABI surface), threat model (insider/outsider, what each defends against), explicit non-goals (compromised host kernel, signing-key compromise, compiler-toolchain compromise). References slice 35-H/I/J behaviours; does not over-claim.
+- [x] 35-K-security-model        `docs/security/model.md`: TCB diagram (compiler + verifier + runtime + signer + ABI surface), threat model (insider/outsider, what each defends against), explicit non-goals (compromised host kernel, signing-key compromise, compiler-toolchain compromise). References slice 35-H/I/J behaviours; does not over-claim.
 - [x] 35-L-readme-alignment      Replace any aspirational launch wording with claims derivable from `corvid claim --explain`, the adversarial corpus, and the bilateral verifier. README and landing page point at runnable commands; the wording is the *output* of the artifacts, not a separate prose layer.
 - [x] 35-M-ci-gate               CI workflow runs the fuzz corpus + bilateral verifier + spec drift check on every push. Phase 35 artifacts are continuously enforced, not point-in-time at launch.
 
@@ -1907,7 +1914,7 @@ This phase closes all five end-to-end with no shortcuts: a guarantee manifest ta
 - Formal mechanized proof of the type system (post-v1.0 research; the core-semantics manifest is the v1.0 surface).
 - Proof of cryptographic primitives — we use ed25519, SHA-256, and DSSE as standardized primitives, not redesigns.
 - Defense against compiler-toolchain compromise (we trust rustc and Cranelift; reproducible builds are a post-v1.0 hardening).
-- Defense against signing-key compromise — key management is a host responsibility, not a Corvid responsibility, and `docs/security-model.md` says so explicitly.
+- Defense against signing-key compromise — key management is a host responsibility, not a Corvid responsibility, and `docs/security/model.md` says so explicitly.
 - Bug-bounty program, third-party audit contract, formal launch comms — those belong to the final market-launch phase, not to Phase 35.
 
 **Defensible-core cut here.** Phase 35 proves the language's claims. The next phases prove Corvid is a complete backend language for production AI applications, not just a compiler with excellent AI-safety primitives.
@@ -1952,7 +1959,7 @@ Maintainers paste the filled-in checklist into the dev-log entry that documents 
 - [ ] **Claim coverage updated.** Every new declared contract pattern (new attribute, new keyword, new effect dimension, new connector method, new approval clause) is added to `validate_signed_claim_coverage` so `corvid build --sign` cannot ship an incomplete claim.
 - [ ] **`corvid claim --explain` reports it.** Any new public guarantee or contract surface shows up in `claim --explain` output for an exemplar binary.
 - [ ] **`corvid contract list` shows it.** Same for the canonical guarantee table; verified by pasting the JSON output into the dev-log entry.
-- [ ] **`docs/core-semantics.md` regenerated.** `cargo run -q -p corvid-cli -- contract regen-doc docs/core-semantics.md` runs cleanly; the drift gate test in `corvid-guarantees::render::tests::rendered_markdown_matches_committed_doc` passes.
+- [ ] **`docs/reference/core-semantics.md` regenerated.** `cargo run -q -p corvid-cli -- contract regen-doc docs/reference/core-semantics.md` runs cleanly; the drift gate test in `corvid-guarantees::render::tests::rendered_markdown_matches_committed_doc` passes.
 
 **Adversarial gates**
 
@@ -1976,7 +1983,7 @@ Maintainers paste the filled-in checklist into the dev-log entry that documents 
 
 - [ ] **`dev-log.md` entry.** One date-stamped entry per slice; explains *what* changed, *why*, and *how it's tested*. Filled-in checklist pasted in.
 - [ ] **`learnings.md` entry (if user-visible).** Doc-and-feature land together.
-- [ ] **`docs/security-model.md` reviewed.** If the slice changes the TCB, threat model, or non-goals, the security model is updated in the same commit.
+- [ ] **`docs/security/model.md` reviewed.** If the slice changes the TCB, threat model, or non-goals, the security model is updated in the same commit.
 - [ ] **README + landing page alignment.** If the slice introduces a public claim, the wording is derivable from a runnable command. No aspirational copy.
 
 **Phase-level gates (apply when ticking the *phase* done — not the slice)**
@@ -1994,7 +2001,7 @@ A slice that fails any box rolls back to `[ ]`. The `[x]` is a contract, not a w
 
 **Why this phase exists.** Phase 35 is the v1.0 launch gate; every public claim Corvid will make at launch traces through its 14 slices. None has had an independent verification pass. The 2026-04-29 audit found four phase-done bullets in Phases 38–41 structurally absent — that audit only happened because one was overdue. Phase 35V exists so the next audit doesn't happen *during* launch.
 
-**Detailed plan:** [docs/phase-35V-pre-launch-audit.md](./docs/phase-35V-pre-launch-audit.md) — three-track structure, per-slice verification methodology, drift-found-vs-clean-signal handling, sequencing rules.
+**Detailed plan:** [docs/phases/phase-35V-pre-launch-audit.md](./docs/phases/phase-35V-pre-launch-audit.md) — three-track structure, per-slice verification methodology, drift-found-vs-clean-signal handling, sequencing rules.
 
 **The verifier-correction pattern, applied to the launch surface.** Same shape as Phase 20m's reconciliation of Phase 20l, applied to a wider surface. Each verification slice produces either (a) a *clean-signal sentinel test* that pins the verified property going forward, or (b) a *drift-correction commit* that closes the gap and adds the same sentinel. Phase 35 itself does not reopen; drift is corrected within Phase 35V.
 
@@ -2012,14 +2019,14 @@ Track 1 — Phase 35 verification (the launch gate):
 - [x] 35V-T1-A — Verify 35-A registry coverage. Walk every `GUARANTEE_REGISTRY` row; each test ref resolves to a real `fn`.
 - [x] 35V-T1-B — Verify 35-B diagnostic tagging. Every contract-enforcing diagnostic carries a `guarantee_id`; build-time lint catches an untagged one (verify by mutation).
 - [x] 35V-T1-C — Verify 35-C `corvid contract list`. JSON output equals registry programmatically; human-readable renders for every kind/class.
-- [x] 35V-T1-D — Verify 35-D spec generation. Regenerate `docs/core-semantics.md`; bit-compare against committed; mutate registry, verify CI fails.
+- [x] 35V-T1-D — Verify 35-D spec generation. Regenerate `docs/reference/core-semantics.md`; bit-compare against committed; mutate registry, verify CI fails.
 - [x] 35V-T1-E — Verify 35-E test cross-refs. Every `Static` guarantee has ≥1 positive + ≥1 adversarial test ref resolving to real fns.
 - [x] 35V-T1-F — Verify 35-F ABI fuzz corpus. ≥100 mutants per gate; each rejected with documented exit code; benign mutations round-trip.
 - [x] 35V-T1-G — Verify 35-G source fuzz corpus. AST mutators cover all four documented attack classes; each fails typecheck with the right `guarantee_id`.
 - [x] 35V-T1-H — Verify 35-H bilateral verifier independence. `corvid-abi-verify`'s dep tree does NOT transitively include the main pipeline's typechecker; disagreement triggers build rejection.
 - [x] 35V-T1-I — Verify 35-I `claim --explain` stability. Output stable byte-for-byte across re-runs; references registry rows that exist.
 - [x] 35V-T1-J — Verify 35-J sign-refusal. Adversarial: declare an unregistered contract; `corvid build --sign` rejects with the right diagnostic id.
-- [x] 35V-T1-K — Verify 35-K security model. `docs/security-model.md` exists; TCB diagram references real components; threat model maps to registry rows or non-goals; no over-claims.
+- [x] 35V-T1-K — Verify 35-K security model. `docs/security/model.md` exists; TCB diagram references real components; threat model maps to registry rows or non-goals; no over-claims.
 - [x] 35V-T1-L — Verify 35-L README alignment. Every README launch claim has a runnable command; no aspirational wording.
 - [x] 35V-T1-M — Verify 35-M CI gate. `.github/workflows/*.yml` actually runs fuzz + bilateral verifier + spec drift on every push.
 - [x] 35V-T1-N — Verify 35-N claim coverage extension. All promoted rows present; `validate_signed_claim_coverage` walks `Decl::Schedule` and `Decl::Server`; adversarial test exists.
@@ -2041,7 +2048,7 @@ Track 2 — Audit-correction completeness (36/38/39/41):
 
 Track 3 — Closer commits:
 
-- [x] 35V-T3-A — Phase 35 closer. Write `docs/phase-35-defensible-core.md` if absent. `✅ closed` marker. Closing audit. Learnings entries. `memory/project_phase_35_closed.md`. MEMORY.md pointer.
+- [x] 35V-T3-A — Phase 35 closer. Write `docs/phases/phase-35-defensible-core.md` if absent. `✅ closed` marker. Closing audit. Learnings entries. `memory/project_phase_35_closed.md`. MEMORY.md pointer.
 - [x] 35V-T3-B — Phase 36 closer. Mirror of T3-A for Phase 36. Includes audit-correction work Track 2 verified.
 - [x] 35V-T3-C — Phase 38/39/41 audit-correction re-confirmation. Update each phase's audit-correction note in ROADMAP with re-verification status.
 - [x] 35V-T3-D — Phase 35V closer. `✅ closed` marker. Closing audit. Learnings rollup of cross-slice patterns. `memory/project_phase_35V_closed.md`. MEMORY.md pointer.
@@ -2058,7 +2065,7 @@ Track 3 — Closer commits:
 - [x] Every Track 1 slice (T1-A through T1-N) lands with either a clean-signal sentinel test OR a drift-correction commit.
 - [x] Every Track 2 slice (T2-A through T2-L) lands with the same shape.
 - [x] Track 3 closers land for Phase 35 and Phase 36; phase docs written if absent; `learnings.md` updated; memory records written; ROADMAP `✅ closed` markers; MEMORY.md pointers.
-- [x] Closing audit recorded in `docs/phase-35V-pre-launch-audit.md` with per-slice status (verified-clean / drift-found-and-closed).
+- [x] Closing audit recorded in `docs/phases/phase-35V-pre-launch-audit.md` with per-slice status (verified-clean / drift-found-and-closed).
 - [x] Memory record `project_phase_35V_closed.md` summarises every drift found and the verification methodology for future audit rounds.
 
 ---
@@ -2085,7 +2092,7 @@ Track 3 — Closer commits:
 
 **Slice checklist:**
 
-- [x] 36A-backend-design-brief       `docs/phase-36-backend-core.md` defines backend syntax, runtime ownership, non-scope, route examples, and acceptance tests before code.
+- [x] 36A-backend-design-brief       `docs/phases/phase-36-backend-core.md` defines backend syntax, runtime ownership, non-scope, route examples, and acceptance tests before code.
 - [x] 36B-minimal-server-target      `corvid build --target=server` accepts one backend entrypoint and emits a runnable local server binary.
 - [x] 36C-typed-route-model          GET/POST routes have typed path/query/body/response shapes and compile-time validation.
 - [x] 36D-json-boundary              Server errors use a stable JSON envelope with request IDs, route, kind, message, and route-aware diagnostics.
@@ -2122,7 +2129,7 @@ Track 3 — Closer commits:
 
 **Slice checklist:**
 
-- [x] 37A-persistence-design-brief   `docs/phase-37-persistence.md` defines DB scope, SQL posture, migration rules, effect model, replay model, and non-scope.
+- [x] 37A-persistence-design-brief   `docs/phases/phase-37-persistence.md` defines DB scope, SQL posture, migration rules, effect model, replay model, and non-scope.
 - [x] 37B-sqlite-connection-query    `std.db` exposes SQLite connection, parameterized query/execute, result, and redacted error envelopes.
 - [x] 37C-typed-row-decoding         `std.db` exposes typed row decode envelopes for success, missing columns, and wrong value kinds.
 - [x] 37D-transactions               `std.db` exposes transaction envelopes for commit, rollback, and nested-scope rejection metadata.
@@ -2181,7 +2188,7 @@ Track 3 — Closer commits:
 
 **Slice checklist:**
 
-- [x] 38A-jobs-design-brief          `docs/phase-38-jobs.md` defines queue semantics, durability model, scheduler model, approval waits, replay behavior, and non-scope.
+- [x] 38A-jobs-design-brief          `docs/phases/phase-38-jobs.md` defines queue semantics, durability model, scheduler model, approval waits, replay behavior, and non-scope.
 - [x] 38B-enqueue-run-one-job        Runtime can enqueue and execute one persisted background job with typed input/output.
 - [x] 38C-retry-backoff-dlq          Jobs support retry policies, backoff, terminal failure, and dead-letter inspection.
 - [x] 38D-delayed-jobs-cron          Delayed jobs and cron schedules persist, recover after restart, and appear in `corvid audit`.
@@ -2291,7 +2298,7 @@ corvid jobs drain --workers=all
 
 **Slice checklist:**
 
-- [x] 39A-auth-approval-design-brief `docs/phase-39-auth-approval.md` defines identity, tenant, session, approval, threat, and non-scope models.
+- [x] 39A-auth-approval-design-brief `docs/phases/phase-39-auth-approval.md` defines identity, tenant, session, approval, threat, and non-scope models.
 - [x] 39B-session-api-key-auth        `std.auth` supports sessions and API keys with typed actor propagation into routes and traces.
 - [x] 39C-jwt-oauth-callbacks        JWT verification and OAuth callback handling work for connector authorization flows.
 - [x] 39D-tenant-role-permissions    User, organization, role, and permission checks propagate through routes, jobs, tools, and traces.
@@ -2408,7 +2415,7 @@ corvid approvals export --since=2026-04-01  # audit dump
 
 **Slice checklist:**
 
-- [x] 40A-observability-design-brief `docs/phase-40-observability.md` defines trace schema, metrics taxonomy, eval promotion, retention, redaction, and non-scope.
+- [x] 40A-observability-design-brief `docs/phases/phase-40-observability.md` defines trace schema, metrics taxonomy, eval promotion, retention, redaction, and non-scope.
 - [x] 40B-lineage-trace-model        Route -> job -> agent -> prompt -> tool -> approval -> DB lineage is represented in one trace model.
 - [x] 40C-otel-export                OpenTelemetry export covers requests, jobs, LLM calls, tools, approvals, errors, retries, costs, and replay IDs.
 - [x] 40D-observe-command-basics     `corvid observe` lists traces, costs, approvals, failures, and hot spots from local stores.
@@ -2474,7 +2481,7 @@ corvid observe metrics --listen=:9090
 
 **Audit correction (Phase 35-41 audit, 2026-04-29):** Phase 40's lineage model, redaction, eval promotion, drift report, and review queue all ship as real implementations, but the OTel export uses hand-rolled JSON over `reqwest` rather than the standard `opentelemetry` SDK + `tracing-opentelemetry` bridge — the docker-compose Jaeger conformance test the phase-done checklist names cannot run today. The `corvid observe explain/cost-optimise` and `corvid eval drift/generate-from-feedback` AI-helper subcommands the developer-flow doc names are not wired. Phase 40 is not market-frozen until those land. **Re-verified clean by Phase 35V Track 1 + spot-check on 2026-05-09:** OTel export uses the standard `opentelemetry` SDK (`crates/corvid-runtime/src/otel_sdk_export.rs`); `cargo test -p corvid-runtime --lib otel_sdk_export` (5 passed including `sdk_exporter_reaches_in_process_otlp_receiver`); lineage / redaction / incident grouping all green (16 lineage-related tests pass); the four observability rows (`observability.otel_conformance`, `observability.lineage_completeness`, `observability.redaction_determinism`, `observability.contract_aware_grouping`) had their literal-anchor wiring confirmed by Phase 35V-T1-Drift commit C; the audit-correction track landed honestly.
 
-- [x] 40J-otel-sdk-swap           Add `corvid-runtime/src/otel_sdk_export.rs` built on the standard `opentelemetry` + `opentelemetry-otlp` SDK so spans flow through the canonical OTLP/HTTP pipeline. Spans carry `corvid.guarantee_id`, `corvid.cost_usd`, `corvid.approval_id`, `corvid.replay_key` attributes. Conformance is exercised in two layers: (a) unit tests assert wire shape against an in-process TCP receiver, and (b) `docs/observability-conformance.md` ships a docker-compose Jaeger harness operators can run on a clean machine to confirm the attributes survive end-to-end. The harness is documented (not committed as a CI workflow) because it requires Docker.
+- [x] 40J-otel-sdk-swap           Add `corvid-runtime/src/otel_sdk_export.rs` built on the standard `opentelemetry` + `opentelemetry-otlp` SDK so spans flow through the canonical OTLP/HTTP pipeline. Spans carry `corvid.guarantee_id`, `corvid.cost_usd`, `corvid.approval_id`, `corvid.replay_key` attributes. Conformance is exercised in two layers: (a) unit tests assert wire shape against an in-process TCP receiver, and (b) `docs/operations/observability-conformance.md` ships a docker-compose Jaeger harness operators can run on a clean machine to confirm the attributes survive end-to-end. The harness is documented (not committed as a CI workflow) because it requires Docker.
 - [x] 40K-observe-eval-helpers    `corvid observe explain <trace-id>` (RAG-grounded over the typed trace), `corvid observe cost-optimise <agent>` (generative route/escalate suggestions), `corvid eval drift --explain` (decompose model / input / prompt / index drift), `corvid eval generate-from-feedback <id>` (eval from a "wrong answer" report). Each is a Corvid program with `@budget`, typed effects, and `Grounded<T>` outputs.
 
 ### Phase 41 — Production connectors (~8-12 weeks)
@@ -2496,7 +2503,7 @@ corvid observe metrics --listen=:9090
 
 **Slice checklist:**
 
-- [x] 41A-connector-design-brief     `docs/phase-41-connectors.md` defines connector manifest shape, OAuth/token state, effect profiles, mocks, replay, and non-scope.
+- [x] 41A-connector-design-brief     `docs/phases/phase-41-connectors.md` defines connector manifest shape, OAuth/token state, effect profiles, mocks, replay, and non-scope.
 - [x] 41B-connector-runtime-contract Shared connector runtime handles auth state, rate limits, retries, redaction, trace events, and mock mode.
 - [x] 41C-gmail-google-workspace     Gmail/Google Workspace connector supports read/search/draft/send-with-approval and token refresh.
 - [x] 41D-microsoft-365              Microsoft 365 connector supports Outlook mail, calendar basics, contacts, Graph auth, and tenant-aware scopes.
@@ -2610,7 +2617,7 @@ corvid connectors verify-webhook --sig=<...>
 
 **Slice checklist:**
 
-- [x] 42A-reference-app-brief        `docs/phase-42-reference-apps.md` defines app selection, shared architecture, quality bar, security posture, demo mode, and non-scope.
+- [x] 42A-reference-app-brief        `docs/phases/phase-42-reference-apps.md` defines app selection, shared architecture, quality bar, security posture, demo mode, and non-scope.
 - [x] 42B-shared-app-template        Common backend template provides routes, DB, jobs, auth, connectors, approvals, traces, evals, deployment manifest, and runbook skeleton.
 - [x] 42C-personal-executive-agent   Personal Executive Agent backend ships inbox triage, drafts, calendar scheduling, meeting prep, daily brief, tasks, follow-ups, approvals, and replay.
 - [x] 42D-personal-knowledge-agent   Knowledge Agent backend ships ingestion, grounded search, citations, private/local mode, feedback evals, and provenance-preserving answers.
@@ -2706,7 +2713,7 @@ corvid run --target=server --mode=real             # real-provider mode behind e
 
 **Slice checklist:**
 
-- [x] 43A-market-readiness-brief     `docs/phase-43-market-readiness.md` defines launch gates, release channels, support posture, security process, beta criteria, and non-scope.
+- [x] 43A-market-readiness-brief     `docs/phases/phase-43-market-readiness.md` defines launch gates, release channels, support posture, security process, beta criteria, and non-scope.
 - [x] 43B-deploy-package             `corvid deploy package` emits Dockerfile, OCI metadata, health/readiness config, migration runner, env schema, and signed build attestation.
 - [x] 43C-deployment-manifests       Docker Compose, single-service PaaS, Kubernetes, and systemd manifests work for at least one reference app.
 - [x] 43D-release-channels           Nightly, beta, and stable release channels are documented and wired to SemVer/stability policy.
@@ -2863,7 +2870,7 @@ To keep momentum honest, ship one observable artefact at every phase boundary. E
 - **End of Phase 27** — Full developer workflow demo: write in VS Code with live type hints, `corvid add` a registry package, `corvid test` runs, `corvid eval` produces the HTML report. (v0.8)
 - **End of Phase 32** — Feature-complete: agents ask/choose humans, sessions persist to SQLite, Python libs import effect-tagged, Google + Ollama + Anthropic + OpenAI all work, `std.*` batteries included. (v0.9)
 - **End of Phase 33** — launch polish foundation: installer, website, beta-tester feedback loop, launch GIF, announcement drafts, and claim audit scaffolding.
-- **End of Phase 35** — `corvid claim --explain refund_bot.dylib` prints the binary's enforced guarantee set, signing key fingerprint, and bilateral-verifier attestation. `corvid contract list --json` round-trips into `docs/core-semantics.md` byte-for-byte. The fuzz corpus rejects 100% of mutated descriptors and bypassed sources. Independent verifier `corvid-abi-verify` rebuilds the descriptor for any signed cdylib and bit-matches the embedded one. CI re-runs all four on every push.
+- **End of Phase 35** — `corvid claim --explain refund_bot.dylib` prints the binary's enforced guarantee set, signing key fingerprint, and bilateral-verifier attestation. `corvid contract list --json` round-trips into `docs/reference/core-semantics.md` byte-for-byte. The fuzz corpus rejects 100% of mutated descriptors and bypassed sources. Independent verifier `corvid-abi-verify` rebuilds the descriptor for any signed cdylib and bit-matches the embedded one. CI re-runs all four on every push.
 - **End of Phase 36** — `corvid build --target=server examples/backend/refund_api` emits a runnable backend binary with routes, config validation, health checks, traces, and approval-gated dangerous actions.
 - **End of Phase 38** — the Personal Executive Agent's daily brief, meeting prep, and follow-up jobs survive process restart and resume with bounded cost, bounded steps, replay IDs, and auditable approval waits.
 - **End of Phase 41** — email, calendar, task, chat, and file connectors all expose effect manifests, mock modes, OAuth/token state, replay fixtures, and approval-gated write operations.

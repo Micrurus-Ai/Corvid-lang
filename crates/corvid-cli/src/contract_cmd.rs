@@ -5,7 +5,7 @@
 //! human-readable table or structured JSON. The JSON output is the
 //! single source of truth that:
 //!
-//!   * `docs/core-semantics.md` is generated from in slice 35-D
+//!   * `docs/reference/core-semantics.md` is generated from in slice 35-D
 //!     (CI rejects drift between the committed doc and this command's
 //!     output), and
 //!   * `corvid claim --explain` (slice 35-I) cross-references when
@@ -59,7 +59,7 @@ pub fn run_list(json: bool, class_filter: Option<&str>, kind_filter: Option<&str
 
 /// Run `corvid contract regen-doc <output>`.
 ///
-/// Writes the canonical `docs/core-semantics.md` rendering to the
+/// Writes the canonical `docs/reference/core-semantics.md` rendering to the
 /// given path. The output is byte-deterministic for a given
 /// registry, so committing the result and gating CI on
 /// `corvid_guarantees::render::tests::rendered_markdown_matches_committed_doc`

@@ -708,7 +708,7 @@ pub enum AgentAttribute {
     /// nondeterministic input in the agent's body is captured
     /// in the recorded trace, so a `corvid replay` reproduces
     /// the agent byte-identically. See Phase 21 slice
-    /// `21-inv-A` and `docs/phase-21-determinism-sources.md`.
+    /// `21-inv-A` and `docs/phases/phase-21-determinism-sources.md`.
     Replayable { span: Span },
     /// `@deterministic` — strictly stronger than `@replayable`.
     /// Given the same inputs, always produces the same outputs,

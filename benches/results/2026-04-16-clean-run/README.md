@@ -65,7 +65,7 @@ The raw outputs are still useful as harness-validation artifacts:
 - the raw Criterion outputs are preserved for audit
 - the next clean rerun should be performed on a quieter machine or under a
   tighter process/power-management envelope before any numbers are copied into
-  `docs/memory-foundation-results.md`
+  `docs/phases/memory-foundation-results.md`
 
 ## Best observed stable cluster
 

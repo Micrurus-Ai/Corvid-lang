@@ -113,7 +113,7 @@ fn html_file_name(path: &Path) -> String {
 fn render_spec_index(pages: &[SpecSitePage]) -> String {
     let mut body = String::new();
     body.push_str("<h1>Corvid executable effects specification</h1>\n");
-    body.push_str("<p>Every page is generated from <code>docs/effects-spec</code>. Every runnable block is the exact Corvid source verified by <code>corvid test spec</code>.</p>\n");
+    body.push_str("<p>Every page is generated from <code>docs/internals/effect-spec</code>. Every runnable block is the exact Corvid source verified by <code>corvid test spec</code>.</p>\n");
     body.push_str("<ol class=\"toc\">\n");
     for page in pages {
         let name = page

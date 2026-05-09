@@ -114,7 +114,7 @@ pub enum Command {
     /// Targets:
     ///   `dimensions`    algebraic-law proptest over every custom dimension
     ///                   declared in corvid.toml
-    ///   `spec`          recompile every .cor example in docs/effects-spec/
+    ///   `spec`          recompile every .cor example in docs/internals/effect-spec/
     ///                   against the current toolchain; with --meta, run the
     ///                   self-verifying verification harness
     ///   `rewrites`      preserved-semantics rewrite fuzzing; failures name

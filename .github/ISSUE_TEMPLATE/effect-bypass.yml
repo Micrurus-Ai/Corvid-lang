@@ -72,8 +72,8 @@ body:
     id: spec_links
     attributes:
       label: Relevant spec links
-      description: Link to docs/effects-spec sections if you know the rule.
-      placeholder: docs/effects-spec/04-builtin-dimensions.md#cost
+      description: Link to docs/internals/effect-spec sections if you know the rule.
+      placeholder: docs/internals/effect-spec/04-builtin-dimensions.md#cost
   - type: textarea
     id: environment
     attributes:

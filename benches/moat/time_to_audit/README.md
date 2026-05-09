@@ -121,7 +121,7 @@ Same flow as `replay_determinism` and `provenance_preservation`:
 2. Submitter regenerates RESULTS.md locally; CI drift gate diffs
    against the committed file.
 3. ≥7-day adversarial review window per
-   `docs/effects-spec/bounty.md` before the published numbers
+   `docs/internals/effect-spec/bounty.md` before the published numbers
    update.
 
 ## Honesty rules

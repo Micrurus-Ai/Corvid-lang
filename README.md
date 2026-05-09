@@ -43,7 +43,7 @@ Those commands are the public claim boundary:
 - `corvid-abi-verify` rebuilds the ABI descriptor from source through a separate process and byte-compares it with the cdylib's embedded `CORVID_ABI_DESCRIPTOR` (catches post-link tampering and build-cache drift; full second-implementation TCB shrinkage is post-v1.0).
 - `corvid receipt verify-abi` verifies the DSSE attestation and descriptor match.
 
-For the exact trust boundary and non-goals, read [docs/security-model.md](./docs/security-model.md). For the canonical guarantee table, read [docs/core-semantics.md](./docs/core-semantics.md).
+For the exact trust boundary and non-goals, read [docs/security/model.md](./docs/security/model.md). For the canonical guarantee table, read [docs/reference/core-semantics.md](./docs/reference/core-semantics.md).
 
 Run the shipped invention tour:
 
@@ -74,7 +74,7 @@ agent refund(id: String) -> Receipt:
     return issue_refund(id)
 ```
 
-Spec: [typing rules](./docs/effects-spec/03-typing-rules.md)
+Spec: [typing rules](./docs/internals/effect-spec/03-typing-rules.md)
 Tour: `corvid tour --topic approve-gates`
 Roadmap: [Phase 20 safety wave](./ROADMAP.md)
 Proof: [approval checker tests](./crates/corvid-types/src/lib.rs)
@@ -101,7 +101,7 @@ agent summarize_twice(text: String) -> String:
     return summarize(first)
 ```
 
-Spec: [composition algebra](./docs/effects-spec/02-composition-algebra.md)
+Spec: [composition algebra](./docs/internals/effect-spec/02-composition-algebra.md)
 Tour: `corvid tour --topic dimensional-effects`
 Roadmap: [Phase 20a and Phase 20g](./ROADMAP.md)
 Proof: [effect composition tests](./crates/corvid-types/src/effects.rs)
@@ -123,7 +123,7 @@ agent research(id: String) -> Grounded<String>:
     return fetch_doc(id)
 ```
 
-Spec: [grounding](./docs/effects-spec/05-grounding.md)
+Spec: [grounding](./docs/internals/effect-spec/05-grounding.md)
 Tour: `corvid tour --topic grounded-values`
 Roadmap: [Phase 20b](./ROADMAP.md)
 Proof: [grounded effect tests](./crates/corvid-types/src/effects/grounded.rs)
@@ -141,7 +141,7 @@ prompt answer(ctx: Grounded<String>) -> Grounded<String>:
     "Answer from {ctx}"
 ```
 
-Spec: [grounding and citation contracts](./docs/effects-spec/05-grounding.md)
+Spec: [grounding and citation contracts](./docs/internals/effect-spec/05-grounding.md)
 Tour: `corvid tour --topic strict-citations`
 Roadmap: [Phase 20b cites ctx strictly](./ROADMAP.md)
 Proof: [VM citation tests](./crates/corvid-vm/src/tests/dispatch.rs)
@@ -166,7 +166,7 @@ agent bounded(text: String) -> String:
     return classify(first)
 ```
 
-Spec: [cost budgets](./docs/effects-spec/07-cost-budgets.md)
+Spec: [cost budgets](./docs/internals/effect-spec/07-cost-budgets.md)
 Tour: `corvid tour --topic cost-budgets`
 Roadmap: [Phase 20d](./ROADMAP.md)
 Proof: [cost analysis tests](./crates/corvid-types/src/effects/cost.rs)
@@ -187,7 +187,7 @@ agent bot(query: String) -> String:
     return search(query)
 ```
 
-Spec: [confidence gates](./docs/effects-spec/06-confidence-gates.md)
+Spec: [confidence gates](./docs/internals/effect-spec/06-confidence-gates.md)
 Tour: `corvid tour --topic confidence-gates`
 Roadmap: [Phase 20e](./ROADMAP.md)
 Proof: [minimum confidence tests](./crates/corvid-types/src/tests.rs)
@@ -213,7 +213,7 @@ agent hello(name: String) -> String:
     return say(name)
 ```
 
-Spec: [dimensional syntax](./docs/effects-spec/01-dimensional-syntax.md)
+Spec: [dimensional syntax](./docs/internals/effect-spec/01-dimensional-syntax.md)
 Tour: `corvid tour --topic language-keywords`
 Roadmap: [Phase 20 language surface](./ROADMAP.md)
 Proof: [parser tests](./crates/corvid-syntax/src/parser/tests.rs)
@@ -234,7 +234,7 @@ eval refund_accuracy:
     assert result == true
 ```
 
-Spec: [verification](./docs/effects-spec/12-verification.md)
+Spec: [verification](./docs/internals/effect-spec/12-verification.md)
 Tour: `corvid tour --topic eval-traces`
 Roadmap: [Phase 20c](./ROADMAP.md)
 Proof: [eval assertion tests](./crates/corvid-types/src/lib.rs)
@@ -253,7 +253,7 @@ agent classify(text: String) -> String:
     return text
 ```
 
-Spec: [replay](./docs/effects-spec/14-replay.md) and [bundle format](./docs/bundle-format.md)
+Spec: [replay](./docs/internals/effect-spec/14-replay.md) and [bundle format](./docs/internals/bundle-format.md)
 Tour: `corvid tour --topic replay-receipts`
 Roadmap: [Phase 21 and Phase 22](./ROADMAP.md)
 Proof: [bundle verification tests](./crates/corvid-cli/tests/bundle_verify.rs)
@@ -281,7 +281,7 @@ prompt answer(q: String) -> String:
     "Answer {q}"
 ```
 
-Spec: [typed model substrate](./docs/effects-spec/13-model-substrate-shipped.md)
+Spec: [typed model substrate](./docs/internals/effect-spec/13-model-substrate-shipped.md)
 Tour: `corvid tour --topic model-routing`
 Roadmap: [Phase 20h](./ROADMAP.md)
 Proof: [dispatch tests](./crates/corvid-vm/src/tests/dispatch.rs)
@@ -302,7 +302,7 @@ prompt classify(q: String) -> String:
     "Classify {q}"
 ```
 
-Spec: [progressive refinement](./docs/effects-spec/13-model-substrate-shipped.md#135-progressive-refinement-slice-e)
+Spec: [progressive refinement](./docs/internals/effect-spec/13-model-substrate-shipped.md#135-progressive-refinement-slice-e)
 Tour: `corvid tour --topic progressive-routing`
 Roadmap: [Phase 20h slice E](./ROADMAP.md)
 Proof: [progressive dispatch tests](./crates/corvid-vm/src/tests/dispatch.rs)
@@ -320,7 +320,7 @@ prompt classify(q: String) -> String:
     "Classify {q}"
 ```
 
-Spec: [ensemble voting](./docs/effects-spec/13-model-substrate-shipped.md#137-ensemble-voting-slice-f)
+Spec: [ensemble voting](./docs/internals/effect-spec/13-model-substrate-shipped.md#137-ensemble-voting-slice-f)
 Tour: `corvid tour --topic ensemble-voting`
 Roadmap: [Phase 20h slice F](./ROADMAP.md)
 Proof: [ensemble tests](./crates/corvid-vm/src/tests/dispatch.rs)
@@ -340,7 +340,7 @@ model eu_private:
     capability: expert
 ```
 
-Spec: [regulatory dimensions](./docs/effects-spec/13-model-substrate-shipped.md#134-regulatory--compliance--privacy-dimensions-slice-d)
+Spec: [regulatory dimensions](./docs/internals/effect-spec/13-model-substrate-shipped.md#134-regulatory--compliance--privacy-dimensions-slice-d)
 Tour: `corvid tour --topic privacy-routing`
 Roadmap: [Phase 20h slice D](./ROADMAP.md)
 Proof: [dimension law tests](./crates/corvid-types/src/effects.rs)
@@ -360,7 +360,7 @@ agent count() -> Stream<Int>:
     yield 2
 ```
 
-Spec: [streaming](./docs/effects-spec/08-streaming.md)
+Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic streaming-effects`
 Roadmap: [Phase 20f](./ROADMAP.md)
 Proof: [stream tests](./crates/corvid-vm/src/tests/stream.rs)
@@ -381,7 +381,7 @@ agent read(snapshot: Partial<Plan>) -> Option<String>:
     return snapshot.title
 ```
 
-Spec: [streaming](./docs/effects-spec/08-streaming.md)
+Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic partial-streams`
 Roadmap: [Phase 20f Stream<Partial<T>>](./ROADMAP.md)
 Proof: [partial stream tests](./crates/corvid-types/src/tests.rs)
@@ -399,7 +399,7 @@ agent capture(topic: String) -> ResumeToken<String>:
     return resume_token(stream)
 ```
 
-Spec: [streaming](./docs/effects-spec/08-streaming.md)
+Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic stream-resume`
 Roadmap: [Phase 20f resumption tokens](./ROADMAP.md)
 Proof: [stream resume tests](./crates/corvid-vm/src/tests/stream.rs)
@@ -417,7 +417,7 @@ agent fanout() -> Stream<Event>:
     return merge(groups).ordered_by("fair_round_robin")
 ```
 
-Spec: [streaming](./docs/effects-spec/08-streaming.md)
+Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic stream-fanout`
 Roadmap: [Phase 20f fan-out/fan-in](./ROADMAP.md)
 Proof: [stream type tests](./crates/corvid-types/src/tests.rs)
@@ -439,7 +439,7 @@ effect local_policy:
 tool read_profile(id: String) -> String uses local_policy
 ```
 
-Spec: [dimension artifacts](./docs/effects-spec/dimension-artifacts.md)
+Spec: [dimension artifacts](./docs/internals/effect-spec/dimension-artifacts.md)
 Tour: `corvid tour --topic effect-registry`
 Roadmap: [Phase 20g invention 9](./ROADMAP.md)
 Proof: [dimension registry tests](./crates/corvid-driver/src/dimension_registry.rs)
@@ -460,7 +460,7 @@ agent safe_refund(id: String) -> String:
     return refund(id)
 ```
 
-Spec: [adversarial taxonomy](./docs/effects-spec/adversarial-taxonomy.md)
+Spec: [adversarial taxonomy](./docs/internals/effect-spec/adversarial-taxonomy.md)
 Tour: `corvid tour --topic adversarial-tests`
 Roadmap: [Phase 20g adversarial generator](./ROADMAP.md)
 Proof: [adversarial tests](./crates/corvid-driver/src/adversarial.rs)
@@ -545,16 +545,16 @@ If `cargo fmt --check` fails because `cargo-fmt` is not installed, install the R
 ## Documentation
 
 - [ROADMAP.md](./ROADMAP.md): build plan and shipped slices.
-- [docs/inventions.md](./docs/inventions.md): standalone invention catalog and proof matrix.
-- [docs/effects-spec/](./docs/effects-spec/): AI-native effect system, grounding, budgets, confidence, streaming, model substrate, replay, and verification specs.
-- [docs/core-semantics.md](./docs/core-semantics.md): generated guarantee registry with ids, classes, phases, and test references.
-- [docs/security-model.md](./docs/security-model.md): signed artifact trust boundary, host acceptance workflow, and explicit non-goals.
-- [docs/ci.md](./docs/ci.md): CI matrix, including optional Python FFI feature coverage.
-- [docs/bundle-format.md](./docs/bundle-format.md): signed bundle and receipt format.
+- [docs/reference/inventions.md](./docs/reference/inventions.md): standalone invention catalog and proof matrix.
+- [docs/internals/effect-spec/](./docs/internals/effect-spec/): AI-native effect system, grounding, budgets, confidence, streaming, model substrate, replay, and verification specs.
+- [docs/reference/core-semantics.md](./docs/reference/core-semantics.md): generated guarantee registry with ids, classes, phases, and test references.
+- [docs/security/model.md](./docs/security/model.md): signed artifact trust boundary, host acceptance workflow, and explicit non-goals.
+- [docs/operations/ci.md](./docs/operations/ci.md): CI matrix, including optional Python FFI feature coverage.
+- [docs/internals/bundle-format.md](./docs/internals/bundle-format.md): signed bundle and receipt format.
 - [ARCHITECTURE.md](./ARCHITECTURE.md): compiler design and repo structure.
 - [CONTRIBUTING.md](./CONTRIBUTING.md): project rules and contribution expectations.
-- [docs/effects-spec/bounty.md](./docs/effects-spec/bounty.md): public submission process for effect-system bypasses and false positives. Accepted reports are credited to the reporter and added to [docs/effects-spec/counterexamples/](./docs/effects-spec/counterexamples/) as permanent regression fixtures.
-- [docs/package-manager-scope.md](./docs/package-manager-scope.md): what the package manager does today vs what would require a hosted registry service.
+- [docs/internals/effect-spec/bounty.md](./docs/internals/effect-spec/bounty.md): public submission process for effect-system bypasses and false positives. Accepted reports are credited to the reporter and added to [docs/internals/effect-spec/counterexamples/](./docs/internals/effect-spec/counterexamples/) as permanent regression fixtures.
+- [docs/internals/package-manager-scope.md](./docs/internals/package-manager-scope.md): what the package manager does today vs what would require a hosted registry service.
   Corvid ships package format and local/self-hosted registry tooling; no Corvid-hosted package registry service runs yet.
 - [dev-log.md](./dev-log.md): chronological build journal.
 - [learnings.md](./learnings.md): durable engineering lessons.

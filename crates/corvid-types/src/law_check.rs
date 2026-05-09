@@ -15,7 +15,7 @@
 //!     any future change to the composition rules that would break a
 //!     law gets caught immediately.
 //!
-//! See `docs/effects-spec/02-composition-algebra.md` §3 for the
+//! See `docs/internals/effect-spec/02-composition-algebra.md` §3 for the
 //! archetype classification these laws pin down.
 //!
 //! No external dependencies — the generator is a seeded xorshift PRNG

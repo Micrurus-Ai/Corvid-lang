@@ -3191,7 +3191,7 @@ Deferred to the remainder of Phase 17b or to Phase 17.5:
 
 ### Numbers placeholder
 
-The final close-out commit should replace this section with locked benchmark tables from `docs/phase-17-results.md` after rerunning:
+The final close-out commit should replace this section with locked benchmark tables from `docs/phases/phase-17-results.md` after rerunning:
 
 ```bash
 cargo bench -p corvid-runtime --bench phase17_runtime -- --sample-size 10 --warm-up-time 1 --measurement-time 3
@@ -3338,7 +3338,7 @@ Closed the memory-foundation wave with the same-session ratio methodology and th
 
 What landed:
 
-- methodology rewrite in `docs/memory-foundation-results.md` and `benches/README.md`
+- methodology rewrite in `docs/phases/memory-foundation-results.md` and `benches/README.md`
 - same-session ratio tooling in `benches/analysis/`
 - published ratio archive in `benches/results/2026-04-16-ratio-session/`
 - roadmap / learnings / close-out docs updated together
@@ -4225,7 +4225,7 @@ me in the room.
 
 What shipped:
 
-- `docs/effects-spec/14-replay.md` — new spec section mirroring the
+- `docs/internals/effect-spec/14-replay.md` — new spec section mirroring the
   style of §13 (Phase 20h's "what shipped"). Covers the Phase 21 thesis
   in eleven subsections: `@replayable` + `@deterministic` checkers,
   the trace schema, three replay modes (plain / differential /
@@ -4236,8 +4236,8 @@ What shipped:
   DAG + `corvid trace dag`, a CLI reference, and the determinism-source
   catalogue. Every code block is a real `.cor` program that the
   `corvid test spec` harness will re-compile on CI.
-- `docs/effects-spec/README.md` table of contents gains row 14.
-- `docs/v1.0-demo-script.md` — a five-act demo script for the v1.0
+- `docs/internals/effect-spec/README.md` table of contents gains row 14.
+- `docs/meta/v1.0-demo-script.md` — a five-act demo script for the v1.0
   launch. Each act ends at a command whose output proves the previous
   claim: compile-time `@dangerous`+`approve` ensibility (Act I),
   cross-tier differential verification (Act II), prod-as-test-suite
@@ -4730,7 +4730,7 @@ Shipped:
 - five failing sibling bundles with typed failure assertions:
   `failing_hash`, `failing_signature`, `failing_rebuild`,
   `failing_lineage`, `failing_adversarial`
-- `docs/bundle-format.md` as the public spec mirror of the
+- `docs/internals/bundle-format.md` as the public spec mirror of the
   shipped implementation
 - `.github/workflows/demo-verify.yml`
 - committed example coverage in
@@ -5120,7 +5120,7 @@ credit process exists, without changing the meta-verifier contract.
 ## 2026-04-25 - Phase 20h roadmap reconciliation
 
 Reconciled the stale Phase 20h checklist against the shipped implementation and
-the `docs/effects-spec/13-model-substrate-shipped.md` trail. Marked complete:
+the `docs/internals/effect-spec/13-model-substrate-shipped.md` trail. Marked complete:
 model declarations, model scope registration, capability `requires:`,
 content-aware `route:`, classifier-via-Bool-guard design, progressive runtime
 escalation, majority ensembles, adversarial prompt pipelines, jurisdiction /
@@ -5636,7 +5636,7 @@ copies the snippet for local REPL execution.
 ## 2026-04-25 - Effect-system bounty process
 
 Closed the parked Phase 20g public bounty follow-up. Added
-`docs/effects-spec/bounty.md` and `.github/ISSUE_TEMPLATE/effect-bypass.yml` so
+`docs/internals/effect-spec/bounty.md` and `.github/ISSUE_TEMPLATE/effect-bypass.yml` so
 effect-system bypass reports have a public submission path before launch.
 
 The process defines accepted bypasses, false positives, spec ambiguities,
@@ -5653,7 +5653,7 @@ and verifies the Ed25519 signature, semver version, single-dimension contract,
 normal dimension validation, archetype law checks, optional proof replay, and
 artifact regression programs before installing the declaration.
 
-The artifact format is documented in `docs/effects-spec/dimension-artifacts.md`.
+The artifact format is documented in `docs/internals/effect-spec/dimension-artifacts.md`.
 The hosted registry can now distribute the same files later; the local verifier
 is already the source of truth.
 
@@ -5709,7 +5709,7 @@ belong on the site when backed by a reproducible command.
 
 ## 2026-04-25 - Standalone inventions page and proof matrix
 
-Added `docs/inventions.md` as the shareable invention artifact. It removes
+Added `docs/reference/inventions.md` as the shareable invention artifact. It removes
 install/build context and focuses on the language ideas themselves: syntax,
 why each one is unique, and the safety/product boundary each one covers.
 
@@ -5722,7 +5722,7 @@ artifact.
 
 Updated `CLAUDE.md` and `CONTRIBUTING.md` with the invention shipping contract:
 new Corvid-specific inventions must ship with README/catalog coverage, a
-compiler-checked `corvid tour --topic <name>` demo, a `docs/inventions.md`
+compiler-checked `corvid tour --topic <name>` demo, a `docs/reference/inventions.md`
 proof-matrix row, spec/reference docs, tests, and explicit non-scope.
 
 This closes the Phase 34 maintenance loop so future inventions cannot remain
@@ -5745,12 +5745,12 @@ independent code paths through the codebase.
 
 Phase 35 scope (13 slices, ~6–8 weeks):
 `corvid-guarantees` registry → diagnostic tagging → `corvid contract list` →
-generated `docs/core-semantics.md` → test cross-reference enforcement →
+generated `docs/reference/core-semantics.md` → test cross-reference enforcement →
 adversarial fuzz corpus over the ABI surface → adversarial fuzz corpus over
 source-level bypasses → independent `corvid-abi-verify` binary doing a
 bilateral descriptor rebuild → `corvid claim --explain` provenance statement →
 `corvid build --sign` refusal when declared contracts have no registered check
-→ `docs/security-model.md` with TCB diagram + threat model + non-goals →
+→ `docs/security/model.md` with TCB diagram + threat model + non-goals →
 README claim alignment derived from shipped artifacts → CI gate that re-runs
 the corpus + verifier + spec drift check on every push.
 
@@ -5866,7 +5866,7 @@ The JSON form is the load-bearing artifact: it carries
 rows including `out_of_scope_reason` for `OutOfScope` entries
 (skipped on enforced rows so the JSON does not falsely imply a
 non-defense exists). Slice 35-D will lock the JSON as the input to
-the `docs/core-semantics.md` generator and gate CI on drift.
+the `docs/reference/core-semantics.md` generator and gate CI on drift.
 
 The human-readable table prints reasons inline beneath each
 `OutOfScope` row so a reviewer scanning the output can immediately
@@ -5883,10 +5883,10 @@ nested under a `ContractCommand` enum mirroring the existing
 acceptance and rejection paths plus the JSON payload's count and
 out-of-scope-reason policy.
 
-## 2026-04-28 - Phase 35-D: generated `docs/core-semantics.md` with drift gate
+## 2026-04-28 - Phase 35-D: generated `docs/reference/core-semantics.md` with drift gate
 
 Spec ≡ implementation, automatically. The committed
-`docs/core-semantics.md` is now generated from
+`docs/reference/core-semantics.md` is now generated from
 `corvid_guarantees::GUARANTEE_REGISTRY` via a new
 `render_core_semantics_markdown()` function in
 `crates/corvid-guarantees/src/render.rs`. The render output is
@@ -5894,7 +5894,7 @@ byte-deterministic for a given registry, and three unit tests in
 the same module enforce it:
 
 - `rendered_markdown_matches_committed_doc` — the load-bearing drift
-  gate: `include_str!("../../../docs/core-semantics.md")` must equal
+  gate: `include_str!("../../../docs/reference/core-semantics.md")` must equal
   the live render. CI fails if the registry evolves without the
   doc being regenerated.
 - `rendered_markdown_includes_every_registered_id` — sanity check
@@ -5908,7 +5908,7 @@ rendered markdown to a path. The sanctioned update workflow when a
 guarantee's description changes or a new entry is added is now:
 
 ```
-cargo run -q -p corvid-cli -- contract regen-doc docs/core-semantics.md
+cargo run -q -p corvid-cli -- contract regen-doc docs/reference/core-semantics.md
 ```
 
 then commit the regenerated file alongside the registry change.
@@ -5962,7 +5962,7 @@ shipped with hand-waving test_refs:
   byte fuzzer will add the explicit determinism harness and promote
   this back to Static.
 
-`docs/core-semantics.md` was regenerated to include the test
+`docs/reference/core-semantics.md` was regenerated to include the test
 references inline in each guarantee's detail section, taking the
 file from 9.9 KB / 22 rows to 15.5 KB / 22 rows. The drift gate
 holds the regenerated doc against the registry. Tests in
@@ -6045,7 +6045,7 @@ emitter with an IR-only fallback descriptor for imported/helper agents
 instead of panicking.
 
 The guarantee registry now includes
-`abi_descriptor.bilateral_source_match`, and `docs/core-semantics.md`
+`abi_descriptor.bilateral_source_match`, and `docs/reference/core-semantics.md`
 is regenerated from that registry. This gives external reviewers a
 named proof artifact for "the source descriptor and embedded cdylib
 descriptor agree."
@@ -6112,7 +6112,7 @@ Validation:
 
 ## 2026-04-28 - Phase 35-K: security model
 
-Slice 35-K is complete. Added `docs/security-model.md` with the signed
+Slice 35-K is complete. Added `docs/security/model.md` with the signed
 cdylib launch claim, trust-boundary diagram, TCB list, attacker model,
 maintainer rules for future contract syntax, host acceptance workflow,
 and explicit non-goals. The document references the concrete slice
@@ -6126,7 +6126,7 @@ runtime budget termination, or application policy gaps.
 
 Validation:
 
-- Documentation-only slice; reviewed against `docs/core-semantics.md`
+- Documentation-only slice; reviewed against `docs/reference/core-semantics.md`
   and the Phase 35-H/I/J command behavior.
 
 ## 2026-04-28 - Phase 35-L: README claim alignment
@@ -6146,7 +6146,7 @@ generated core-semantics registry and the security model.
 Validation:
 
 - Documentation-only slice; README wording is derived from the Phase
-  35-H/I/J commands and `docs/security-model.md`.
+  35-H/I/J commands and `docs/security/model.md`.
 
 ## 2026-04-28 - Phase 35-M: CI launch gate
 
@@ -6158,7 +6158,7 @@ independent ABI verifier, signed cdylib attestation tests, claim
 explanation tests, signed-build claim coverage refusal tests, and the
 core-semantics registry/doc drift gate.
 
-The drift gate regenerates `docs/core-semantics.md` into `/tmp` and
+The drift gate regenerates `docs/reference/core-semantics.md` into `/tmp` and
 diffs it against the committed file, so spec drift is caught by CI
 without mutating the checkout.
 
@@ -6173,7 +6173,7 @@ Closed the Phase 20m audit-correction slice by removing the old aspirational
 bounty wording from the verification corpus surfaces. The corpus is now
 described as a seed/internal regression corpus with a public submission process
 for future accepted reports, which matches what actually ships: checked-in
-counterexamples, the meta-verification gate, `docs/effects-spec/bounty.md`, and
+counterexamples, the meta-verification gate, `docs/internals/effect-spec/bounty.md`, and
 the GitHub issue template.
 
 The ROADMAP entry for 20m is ticked, and the already-closed Phase 20j/20k
@@ -6188,7 +6188,7 @@ Validation:
 
 ## 2026-04-28 - Phase 36A: backend core design brief
 
-Slice 36A is complete. Added `docs/phase-36-backend-core.md` as the
+Slice 36A is complete. Added `docs/phases/phase-36-backend-core.md` as the
 implementation brief for production backend core before syntax or runtime code
 lands.
 
@@ -6229,10 +6229,10 @@ not phase-level rollbacks.
 **Reopened phases (gap-closing slices added):**
 
 - Phase 20 → slice 20m-bounty-corpus-honest-naming. The bounty process
-  and counterexamples directory exist (`docs/effects-spec/bounty.md`,
-  `docs/effects-spec/counterexamples/composition/`), but the README did
+  and counterexamples directory exist (`docs/internals/effect-spec/bounty.md`,
+  `docs/internals/effect-spec/counterexamples/composition/`), but the README did
   not announce the public submission path so external developers had no
-  visible inbound. README now links `docs/effects-spec/bounty.md` directly.
+  visible inbound. README now links `docs/internals/effect-spec/bounty.md` directly.
 
 - Phase 23 → slice 23-F-browser-ci-headless. The wasmtime parity harness
   proves the WASM module runs as a runtime; it does not prove
@@ -6255,7 +6255,7 @@ not phase-level rollbacks.
   package format + local resolver + signed-publish-to-a-directory; no
   `registry.corvid.dev` service runs. README + landing-page surfaces are
   already clean (grep returns zero un-qualified registry mentions). The
-  slice ships `docs/package-manager-scope.md` documenting the boundary,
+  slice ships `docs/internals/package-manager-scope.md` documenting the boundary,
   links it from README, and registers `package.hosted_registry_available`
   as `OutOfScope` in the canonical guarantee registry with the explicit
   reason that any user-supplied `--url-base` works.
@@ -6265,7 +6265,7 @@ not phase-level rollbacks.
   ships against ROADMAP claims (session/memory blocks, retention policy,
   approval-required writes, provenance-required reads, conflict
   detection, generated accessors). The slice asks for
-  `docs/phase-29-memory-audit.md` with each row pointing to source +
+  `docs/phases/phase-29-memory-audit.md` with each row pointing to source +
   test refs. Open until the doc lists every claim with a source-of-truth
   pointer.
 
@@ -6273,11 +6273,11 @@ not phase-level rollbacks.
   std.* surface is broad (ai, http, io, secrets, observe, cache, queue,
   agent, rag, effects); a per-module audit doc verifies declared effect
   tags fire at the right runtime callsites. Open until
-  `docs/phase-32-stdlib-audit.md` is written.
+  `docs/phases/phase-32-stdlib-audit.md` is written.
 
 **Tractable implementations landed in this commit:**
 
-1. `docs/package-manager-scope.md` — full registry-scope doc (slice 25-G).
+1. `docs/internals/package-manager-scope.md` — full registry-scope doc (slice 25-G).
 2. README link to bounty + package-manager-scope (slice 20m partial,
    slice 25-G partial).
 3. `package.hosted_registry_available` registry entry as `OutOfScope`
@@ -6285,7 +6285,7 @@ not phase-level rollbacks.
 4. CI matrix entry `phase30-python-ffi` (slice 30-J).
 5. ROADMAP slice entries 20m, 23-F, 25-G, 29-K, 30-J, 32-T with the
    slice-completion-gate format.
-6. `docs/core-semantics.md` regenerated through the drift gate; 18
+6. `docs/reference/core-semantics.md` regenerated through the drift gate; 18
    corvid-guarantees tests pass.
 
 The full implementation of slice 23-F (browser CI), slice 29-K (memory
@@ -6296,7 +6296,7 @@ public bounty inbox shows real submissions.
 
 Validation:
 - `cargo test -p corvid-guarantees --lib` (18 passed).
-- `cargo run -q -p corvid-cli -- contract regen-doc docs/core-semantics.md`
+- `cargo run -q -p corvid-cli -- contract regen-doc docs/reference/core-semantics.md`
   (drift gate green; doc grew from 17.3 KB to 18.0 KB with the new
   `package.hosted_registry_available` row).
 
@@ -6355,7 +6355,7 @@ Validation:
   dict/object round-trips, traceback-preserving exception marshalling,
   `python.call` / `python.result` / `python.error` trace events, and
   sandbox-profile-denied imports.
-- Added `docs/ci.md` and linked it from README so the optional-feature
+- Added `docs/operations/ci.md` and linked it from README so the optional-feature
   gate is visible outside the workflow file.
 
 Validation:
@@ -6395,7 +6395,7 @@ Validation:
   Windows.
 - Each matrix leg runs the checked-in platform installer, then executes
   `corvid doctor` and the WASM/Wasmtime cross-platform parity harness.
-- Documented the matrix in `docs/ci.md` and ticked the ROADMAP slice while
+- Documented the matrix in `docs/operations/ci.md` and ticked the ROADMAP slice while
   keeping the known Windows native `whoami` linker baseline out of this gate.
 
 Validation:

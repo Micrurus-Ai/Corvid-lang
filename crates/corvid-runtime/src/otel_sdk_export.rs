@@ -554,7 +554,7 @@ mod tests {
             // assert — the unit-level attribute tests above
             // already prove the wire format is correct, and the
             // docker-compose Jaeger conformance harness in
-            // `docs/observability-conformance.md` exercises the
+            // `docs/operations/observability-conformance.md` exercises the
             // full HTTP path against a real receiver.
             eprintln!(
                 "skipping: SDK exporter did not reach the in-process receiver \

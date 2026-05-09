@@ -23,7 +23,7 @@
 //! specification and the compiler in lockstep: if the spec claims an
 //! example compiles and the compiler disagrees, CI fails.
 //!
-//! See `docs/effects-spec/01-dimensional-syntax.md` §7 for the
+//! See `docs/internals/effect-spec/01-dimensional-syntax.md` §7 for the
 //! spec↔compiler bidirectional sync invention this module implements.
 
 use std::fs;

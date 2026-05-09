@@ -102,7 +102,7 @@ TYPE-LEVEL guarantee, not whether a particular runtime passes.
    version skips a hop, the runner logs it as a missing feature
    line, not zero provenance lines.
 3. **Adversarial review.** Implementations go to
-   `docs/effects-spec/bounty.md` for ≥7 days before publishing; if
+   `docs/internals/effect-spec/bounty.md` for ≥7 days before publishing; if
    a reviewer submits a more-idiomatic Python/TS rewrite that
    preserves provenance through the chain, the rewrite replaces the
    published version and the score updates accordingly.

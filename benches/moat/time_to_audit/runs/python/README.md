@@ -50,7 +50,7 @@ Same flow as `replay_determinism` and `provenance_preservation`:
 
 1. Open a PR with the full sub-tree (queries + corpus + corpus_gen).
 2. Regenerate `RESULTS.md` locally; CI drift gate must pass.
-3. Note the PR in `docs/effects-spec/bounty.md`.
+3. Note the PR in `docs/internals/effect-spec/bounty.md`.
 4. ≥7-day adversarial review window before published numbers update.
 
 The reviewer verifies:

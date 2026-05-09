@@ -28,7 +28,7 @@ python benches/moat/governance_lines/runner/count.py \
 ```
 
 The Python and TypeScript baselines below are *open for bounty
-submission* — see [`docs/effects-spec/bounty.md`](../../docs/effects-spec/bounty.md).
+submission* — see [`docs/internals/effect-spec/bounty.md`](../../docs/internals/effect-spec/bounty.md).
 The numbers stay marked `bounty-open` until a submission lands.
 
 ## Side-by-side (sketch)

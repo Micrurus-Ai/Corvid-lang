@@ -8,7 +8,7 @@
 //! Corvid refuses cross-tenant message access on Gmail?" by
 //! grepping `tests/threat_corpus.rs`.
 //!
-//! The seven threats (per `docs/effects-spec/bounty.md` and the
+//! The seven threats (per `docs/internals/effect-spec/bounty.md` and the
 //! ROADMAP Phase 41 audit-correction track 41M):
 //!
 //!   T1. token-scope escalation

@@ -194,10 +194,10 @@ pub(crate) fn cmd_test_dimensions() -> Result<u8> {
 }
 
 pub(crate) fn cmd_test_spec() -> Result<u8> {
-    let spec_dir = PathBuf::from("docs/effects-spec");
+    let spec_dir = PathBuf::from("docs/internals/effect-spec");
     if !spec_dir.exists() {
         anyhow::bail!(
-            "`docs/effects-spec/` not found; run `corvid test spec` from the repository root"
+            "`docs/internals/effect-spec/` not found; run `corvid test spec` from the repository root"
         );
     }
     println!(
@@ -215,10 +215,10 @@ pub(crate) fn cmd_test_spec() -> Result<u8> {
 }
 
 pub(crate) fn cmd_test_spec_site(out_dir: &Path) -> Result<u8> {
-    let spec_dir = PathBuf::from("docs/effects-spec");
+    let spec_dir = PathBuf::from("docs/internals/effect-spec");
     if !spec_dir.exists() {
         anyhow::bail!(
-            "`docs/effects-spec/` not found; run `corvid test spec --site-out <DIR>` from the repository root"
+            "`docs/internals/effect-spec/` not found; run `corvid test spec --site-out <DIR>` from the repository root"
         );
     }
     println!(
@@ -233,7 +233,7 @@ pub(crate) fn cmd_test_spec_site(out_dir: &Path) -> Result<u8> {
 
 pub(crate) fn cmd_test_spec_meta() -> Result<u8> {
     println!("corvid test spec --meta — self-verifying verification\n");
-    let corpus_dir = PathBuf::from("docs/effects-spec/counterexamples/composition");
+    let corpus_dir = PathBuf::from("docs/internals/effect-spec/counterexamples/composition");
     if !corpus_dir.exists() {
         anyhow::bail!(
             "counter-example corpus not found at `{}`; run from the repository root",

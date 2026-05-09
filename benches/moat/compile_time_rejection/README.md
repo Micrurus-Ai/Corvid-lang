@@ -115,7 +115,7 @@ fails the case if the rejection happened *for the wrong reason*.
    what a senior developer in that ecosystem would actually write. No
    intentionally-naive baselines.
 4. **Adversarial review.** Before publishing the numbers, the table is
-   posted to the bounty page (`docs/effects-spec/bounty.md`) for at
+   posted to the bounty page (`docs/internals/effect-spec/bounty.md`) for at
    least 7 days; any submitted case that *should* be rejected by
    Corvid but isn't promotes to a real follow-up slice.
 

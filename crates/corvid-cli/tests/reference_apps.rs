@@ -80,7 +80,7 @@ fn maintainer_runbooks_cover_release_security_ci_benchmarks_and_claims() {
         "corvid release <channel>",
         "corvid upgrade check",
         "corvid claim audit",
-        "docs/core-semantics.md",
+        "docs/reference/core-semantics.md",
         "release-attestation.dsse.json",
     ] {
         assert!(runbook.contains(required), "missing {required}");

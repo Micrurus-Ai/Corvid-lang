@@ -10,7 +10,7 @@ pub enum ContractCommand {
     /// pipeline phase, and a one-line description. `--json` emits the
     /// full structured table including test references and (where
     /// applicable) the explicit `out_of_scope_reason` for non-defenses.
-    /// The output is the single source of truth that `docs/core-semantics.md`
+    /// The output is the single source of truth that `docs/reference/core-semantics.md`
     /// is generated from in slice 35-D and that `corvid claim --explain`
     /// reports against in slice 35-I.
     List {
@@ -27,14 +27,14 @@ pub enum ContractCommand {
         #[arg(long, value_name = "KIND")]
         kind: Option<String>,
     },
-    /// Regenerate `docs/core-semantics.md` from the canonical
+    /// Regenerate `docs/reference/core-semantics.md` from the canonical
     /// guarantee registry. Writes the rendered markdown to the given
-    /// `OUTPUT` path (typically `docs/core-semantics.md`); CI fails on
+    /// `OUTPUT` path (typically `docs/reference/core-semantics.md`); CI fails on
     /// drift between the committed file and the live render, so this
     /// command is the only sanctioned way to evolve the spec doc when
     /// the registry changes.
     RegenDoc {
-        /// Output path, e.g. `docs/core-semantics.md`.
+        /// Output path, e.g. `docs/reference/core-semantics.md`.
         output: PathBuf,
     },
 }

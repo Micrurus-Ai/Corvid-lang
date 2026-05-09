@@ -157,7 +157,7 @@ Every new invention ships with:
   already covers it.
 - A `corvid tour --topic <name>` demo whose source compiles through the normal
   driver pipeline.
-- A `docs/inventions.md` proof-matrix row with shipped status, runnable command,
+- A `docs/reference/inventions.md` proof-matrix row with shipped status, runnable command,
   test coverage, spec link, and explicit non-scope.
 - A spec or reference-doc link that defines the behavior.
 - Tests that validate the behavior named in the catalog entry.
