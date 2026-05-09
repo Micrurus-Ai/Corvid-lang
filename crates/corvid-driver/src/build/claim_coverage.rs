@@ -168,7 +168,14 @@ fn collect_tool_contracts(tool: &ToolDecl, claims: &mut DeclaredContractClaims) 
     if tool.effect == Effect::Dangerous {
         claims.required_ids.insert("approval.dangerous_call_requires_token");
         claims.required_ids.insert("approval.token_lexical_only");
-        claims.required_ids.insert("approval.dangerous_marker_preserved");
+        // `approval.dangerous_marker_preserved` was previously
+        // required here. Phase 35V-T1-B (2026-05-08) downgraded
+        // that row to OutOfScope because Corvid's source syntax
+        // has no alias-effect-override surface that could erase a
+        // `@dangerous` marker — the property is structural, not a
+        // separately-fired diagnostic. The two ids above cover
+        // what's actually enforced at the diagnostic surface (no
+        // approve at all + approve out of lexical scope).
     }
     collect_effect_row_claims(&tool.effect_row, claims);
     collect_type_claims(&tool.return_ty, claims);
@@ -185,7 +192,17 @@ fn collect_prompt_contracts(prompt: &PromptDecl, claims: &mut DeclaredContractCl
     }
     if prompt.cites_strictly.is_some() {
         claims.required_ids.insert("grounded.provenance_required");
-        claims.required_ids.insert("grounded.propagation_across_calls");
+        // `grounded.propagation_across_calls` was previously required
+        // here. Phase 35V-T1-B (2026-05-08) downgraded that row to
+        // OutOfScope because the grounded-return analyzer fires a
+        // single `UngroundedReturn` diagnostic that enforces both
+        // the construction-site framing (parent
+        // `grounded.provenance_required`) and the call-boundary
+        // propagation framing — there is no separately-tagged
+        // diagnostic to claim. Requiring it in the signed claim
+        // set would force descriptors to advertise a guarantee id
+        // that is not in `SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`. The
+        // parent above is sufficient.
     }
     if prompt.stream.min_confidence.is_some() {
         claims.required_ids.insert("confidence.min_threshold");
@@ -230,7 +247,14 @@ fn collect_prompt_contracts(prompt: &PromptDecl, claims: &mut DeclaredContractCl
 fn collect_effect_row_claims(row: &EffectRow, claims: &mut DeclaredContractClaims) {
     if !row.is_empty() {
         claims.required_ids.insert("effect_row.body_completeness");
-        claims.required_ids.insert("effect_row.caller_propagation");
+        // `effect_row.caller_propagation` was previously required
+        // here. Phase 35V-T1-B (2026-05-08) downgraded that row to
+        // OutOfScope because the unified effect analyzer fires a
+        // single `EffectConstraintViolation` per dimension that
+        // enforces both the body-completeness framing and the
+        // caller-propagation framing — there is no separately-
+        // tagged diagnostic to claim. The parent
+        // `effect_row.body_completeness` (above) is sufficient.
     }
 }
 
@@ -255,7 +279,10 @@ fn collect_constraint_claims(
 fn collect_type_claims(ty: &TypeRef, claims: &mut DeclaredContractClaims) {
     if type_ref_contains_grounded(ty) {
         claims.required_ids.insert("grounded.provenance_required");
-        claims.required_ids.insert("grounded.propagation_across_calls");
+        // `grounded.propagation_across_calls` was previously required
+        // here too. Phase 35V-T1-B downgraded it to OutOfScope (see
+        // the `cites_strictly` block above for the full rationale).
+        // The parent above is sufficient.
     }
 }
 
