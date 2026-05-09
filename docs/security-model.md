@@ -74,10 +74,19 @@ The trusted computing base for a signed cdylib is:
 - The Rust compiler, Cranelift, system linker, dynamic loader, operating
   system, and CPU executing the artifacts.
 
-The slice 35-H bilateral verifier reduces but does not remove the compiler
-TCB. It gives reviewers an independent descriptor reconstruction path and
-catches source/binary descriptor disagreement; it does not prove that every
-codegen instruction is semantically correct.
+The slice 35-H ABI descriptor verifier (`corvid-abi-verify`) catches
+source/binary descriptor disagreement by rebuilding the descriptor through a
+separate process invocation and byte-comparing against the cdylib's embedded
+`CORVID_ABI_DESCRIPTOR` symbol. The shipped verifier links the same
+`corvid-syntax` / `corvid-resolve` / `corvid-types` / `corvid-ir` /
+`corvid-abi` libraries the main pipeline uses, so a logic bug in any shared
+frontend crate would affect both paths identically — the verifier does not
+shrink the compiler TCB. What it does reliably defend against is
+post-link descriptor tampering, build-cache modifications, and partial-rebuild
+drift between the source-of-truth and the artifact a host receives. True
+second-implementation TCB shrinkage (a separate parser/resolver/typechecker
+reaching `AbiDescriptor` independently) is post-v1.0 work and is not promised
+by the current launch surface.
 
 ## Attacker Model
 
