@@ -544,4 +544,150 @@ mod tests {
             unwired.join("\n  - ")
         );
     }
+
+    // ----------------------------------------------------------------
+    // Phase 35V-T1-B sentinel.
+    //
+    // Verifies 35-B's claim: "Every contract-enforcing diagnostic
+    // in resolve / typecheck / IR-lower / codegen carries its
+    // `guarantee_id`. No contract enforcement is anonymous." This
+    // sentinel narrows that claim to its mechanically-checkable
+    // core: every `Static` guarantee whose enforcement phase is
+    // typecheck / resolve / IR-lower / codegen must be constructed
+    // through `TypeError::with_guarantee(...)` somewhere — the
+    // canonical tagged-diagnostic API. A row with no
+    // `with_guarantee("<id>")` site is one where either the
+    // diagnostic exists but uses the un-tagged `TypeError::new`
+    // (drift to fix by retagging the call site) or the diagnostic
+    // doesn't exist at all (drift to fix by downgrading the row).
+    //
+    // `RuntimeChecked` rows are exempt because runtime enforcement
+    // uses different patterns (constants + `*_guarantee_id()`
+    // methods, anchored by 35V-T1-Drift's sentinel above).
+    //
+    // The forward direction (every `with_guarantee` id resolves in
+    // the registry) is enforced by the debug_assert in
+    // `TypeError::with_guarantee` in `corvid-types/src/errors.rs`.
+    // The 35V-T1-A row-count canary + 35-E test-ref resolution +
+    // 35V-T1-Drift workspace-source anchor + this T1-B
+    // `with_guarantee` anchor together pin the registry's honesty
+    // surface.
+    // ----------------------------------------------------------------
+
+    /// Walk every `.rs` file under `crates/` looking for a
+    /// `with_guarantee(..., "<needle>"...)`-style call. Returns
+    /// true if found in at least one non-skip file.
+    ///
+    /// Same skip list as `id_is_wired_in_workspace_source`: registry
+    /// definition / signed-claim whitelist / render module / test
+    /// files are excluded.
+    fn id_appears_in_with_guarantee_call(needle: &str) -> bool {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root");
+        let crates_dir = workspace_root.join("crates");
+        let mut stack = vec![crates_dir];
+        while let Some(dir) = stack.pop() {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let path_str = path.to_string_lossy();
+                let path_lower = path_str.replace('\\', "/");
+                if path_lower.ends_with("crates/corvid-guarantees/src/registry.rs")
+                    || path_lower.ends_with("crates/corvid-guarantees/src/signed_claim.rs")
+                    || path_lower.ends_with("crates/corvid-guarantees/src/render.rs")
+                {
+                    continue;
+                }
+                if path_lower.ends_with("/tests.rs") || path_lower.contains("/tests/") {
+                    continue;
+                }
+                if let Ok(body) = std::fs::read_to_string(&path) {
+                    // Look for either (a) a tagged-diagnostic call
+                    // that mentions the id, or (b) the
+                    // language-VM's equivalent helper that takes a
+                    // guarantee_id parameter. Since matching the
+                    // multi-line `with_guarantee(...)` syntactic
+                    // shape exactly would require parsing, we
+                    // approximate: the body contains both
+                    // `with_guarantee` AND the id literal.
+                    if body.contains("with_guarantee") && body.contains(needle) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Phase 35V-T1-B permanent sentinel. For every `Static`
+    /// guarantee whose enforcement phase is one of `TypeCheck`,
+    /// `Resolve`, or `IrLower`, the registry id must appear in a
+    /// `with_guarantee(...)` call site somewhere in non-test
+    /// workspace source. These three phases' canonical
+    /// tagged-diagnostic API is `TypeError::with_guarantee`; the
+    /// forward direction is enforced by its debug_assert in
+    /// `corvid-types/src/errors.rs`; this test pins the inverse.
+    ///
+    /// `Codegen` is intentionally NOT in scope here because
+    /// codegen-phase contract enforcement uses `CodegenError`,
+    /// not `TypeError`, and the project does not currently ship a
+    /// tagged-diagnostic constructor for `CodegenError` analogous
+    /// to `with_guarantee`. Codegen-phase rows are still anchored
+    /// in workspace source via the broader 35V-T1-Drift sentinel
+    /// (literal id appears somewhere in non-test code), so they
+    /// are not anonymous; they just don't go through this
+    /// specific construct. A separate slice could add a
+    /// `CodegenError::with_guarantee` constructor and tighten
+    /// this test's scope; that work is filed for a future T1-B
+    /// follow-up rather than blocking the current launch claim.
+    ///
+    /// `RuntimeChecked` rows are also exempt because runtime
+    /// enforcement uses module-level constants (anchored by
+    /// 35V-T1-Drift's sentinel), not `TypeError::with_guarantee`.
+    #[test]
+    fn every_typecheck_phase_static_guarantee_uses_with_guarantee_constructor() {
+        let mut untagged: Vec<&'static str> = Vec::new();
+        for g in GUARANTEE_REGISTRY {
+            if g.class != GuaranteeClass::Static {
+                continue;
+            }
+            let phase_in_scope = matches!(
+                g.phase,
+                Phase::TypeCheck | Phase::Resolve | Phase::IrLower
+            );
+            if !phase_in_scope {
+                continue;
+            }
+            if !id_appears_in_with_guarantee_call(g.id) {
+                untagged.push(g.id);
+            }
+        }
+        assert!(
+            untagged.is_empty(),
+            "phase 35V-T1-B: Static guarantees in TypeCheck / \
+             Resolve / IrLower phase but not constructed via \
+             `TypeError::with_guarantee(...)`:\n  - {}\n\n\
+             Either retag the diagnostic site to use \
+             `with_guarantee` instead of `TypeError::new`, or \
+             downgrade the registry row to OutOfScope with an \
+             explicit `out_of_scope_reason`. The forward direction \
+             is enforced by `with_guarantee`'s debug_assert in \
+             `corvid-types/src/errors.rs`; this test pins the \
+             inverse.",
+            untagged.join("\n  - ")
+        );
+    }
 }
