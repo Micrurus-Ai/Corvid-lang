@@ -14,7 +14,7 @@ agent same_review_surface() -> Bool:
     comment_line_matches = mock_result.comment.line == replay_result.comment.line and replay_result.comment.line == real_result.comment.line
     comment_policy_matches = mock_result.comment.severity == replay_result.comment.severity and replay_result.comment.severity == real_result.comment.severity and mock_result.comment.checklist_id == replay_result.comment.checklist_id and replay_result.comment.checklist_id == real_result.comment.checklist_id
     comment_body_matches = mock_result.comment.body == replay_result.comment.body and replay_result.comment.body == real_result.comment.body
-    seed_matches = mock_result.repo == "Corvid-lang/Corvid-lang" and mock_result.pull_number == 418 and mock_result.comment.checklist_id == "approval-boundary" and mock_result.posted == false
+    seed_matches = mock_result.repo == "Micrurus-Ai/Corvid-lang" and mock_result.pull_number == 418 and mock_result.comment.checklist_id == "approval-boundary" and mock_result.posted == false
     return repo_matches and number_matches and sha_matches and count_matches and posted_matches and comment_path_matches and comment_line_matches and comment_policy_matches and comment_body_matches and seed_matches
 
 test code_review_agent_replay_invariant:

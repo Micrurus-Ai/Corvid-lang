@@ -17,7 +17,7 @@ exercise every shipped invention end-to-end:
 ## How to run
 
 ```sh
-git clone https://github.com/Corvid-lang/Corvid-lang
+git clone https://github.com/Micrurus-Ai/Corvid-lang
 cd Corvid-lang/examples
 corvid run refund_bot.cor
 ```
@@ -40,4 +40,4 @@ Each example has tests, evals, traces, and benchmark notes.
 Phase 33N ships side-by-side benchmark runners against Python and
 TypeScript implementations of `refund_bot`, `rag_qa_bot`, and
 `support_escalation_bot`. Results live in
-[`benches/moat/RESULTS.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/benches/moat/RESULTS.md).
+[`benches/moat/RESULTS.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/benches/moat/RESULTS.md).

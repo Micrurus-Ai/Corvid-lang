@@ -40,7 +40,7 @@ typed error.
 
 For per-struct decoders the compiler emits at codegen time, see the
 slice that landed this surface
-([Phase 20n-C](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/phases/phase-20n-open-gap-implementation.md)).
+([Phase 20n-C](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/phases/phase-20n-open-gap-implementation.md)).
 
 ## Multi-message prompts
 
@@ -58,7 +58,7 @@ sends them, parses the response.
 Which LLM serves the prompt is decided by the typed model-routing
 substrate at deploy time, not by hardcoding the provider in the
 prompt body. See
-[`docs/internals/effect-spec/13-model-substrate-shipped.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/effect-spec/13-model-substrate-shipped.md).
+[`docs/internals/effect-spec/13-model-substrate-shipped.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/effect-spec/13-model-substrate-shipped.md).
 
 ## Budgets
 

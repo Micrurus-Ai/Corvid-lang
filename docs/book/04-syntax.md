@@ -132,8 +132,8 @@ effects across calls; the compiler computes the closure.
 
 The full formal grammar (EBNF derived from the parser) is on the
 **[Grammar](/docs/grammar)** page.
-[`docs/reference/lexer-rules.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/reference/lexer-rules.md)
+[`docs/reference/lexer-rules.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/lexer-rules.md)
 documents the lexer's continuation rules (backslash, brackets, triple-
 quoted strings).
 The typing rules are in
-[`docs/internals/effect-spec/03-typing-rules.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/effect-spec/03-typing-rules.md).
+[`docs/internals/effect-spec/03-typing-rules.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/effect-spec/03-typing-rules.md).

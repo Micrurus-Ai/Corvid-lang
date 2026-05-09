@@ -1,7 +1,7 @@
 {
   "mock": {
     "fetch_pull_request_diff": {
-      "repo": "Corvid-lang/Corvid-lang",
+      "repo": "Micrurus-Ai/Corvid-lang",
       "number": 418,
       "base_sha": "base_redacted_20260504",
       "head_sha": "head_redacted_20260504",
@@ -19,7 +19,7 @@
       "id": "review_comment_9001",
       "key": "PR-418#discussion_r9001",
       "approval_id": "approval_review_comment_9001",
-      "replay_key": "tasks:github_write:Corvid-lang/Corvid-lang:418:Comment"
+      "replay_key": "tasks:github_write:Micrurus-Ai/Corvid-lang:418:Comment"
     }
   },
   "replay": {

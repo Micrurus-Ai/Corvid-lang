@@ -46,7 +46,7 @@ corvid contract list
 ```
 
 The full machine-readable registry lives in
-[`crates/corvid-guarantees/src/registry.rs`](https://github.com/Corvid-lang/Corvid-lang/blob/main/crates/corvid-guarantees/src/registry.rs).
+[`crates/corvid-guarantees/src/registry.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-guarantees/src/registry.rs).
 Every row carries positive and adversarial test references; every
 referenced test exists and runs in CI. The drift-gate test
 (`every_test_ref_resolves_to_a_real_test_function`) catches divergence
@@ -67,9 +67,9 @@ caught four such cases and downgraded them honestly.
   as standardized primitives, we do not redesign them).
 - Compiler toolchain compromise (rustc, the linker, etc. are trusted).
 - Signing-key compromise (host responsibility, see
-  [`docs/security/model.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md)).
+  [`docs/security/model.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md)).
 - Formal mechanized proof of the type system (post-v1.0 research).
 
 The
-[security model doc](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md)
+[security model doc](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md)
 enumerates the trusted computing base and the threat model.

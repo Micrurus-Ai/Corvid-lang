@@ -75,7 +75,7 @@ Generates a starter project with the three-mode skeleton + self-test
 harness.
 
 See per-connector deep docs in
-[`docs/connectors-*.md`](https://github.com/Corvid-lang/Corvid-lang/tree/main/docs).
+[`docs/connectors-*.md`](https://github.com/Micrurus-Ai/Corvid-lang/tree/main/docs).
 
 ## Adversarial coverage
 

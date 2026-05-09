@@ -10,7 +10,7 @@ Set all required variables before running the app:
 ```sh
 CORVID_RUN_REAL=1
 GITHUB_TOKEN=ghp_example_placeholder
-GITHUB_REPOSITORY=Corvid-lang/Corvid-lang
+GITHUB_REPOSITORY=Micrurus-Ai/Corvid-lang
 GITHUB_PULL_REQUEST=418
 OPENAI_API_KEY=sk_example_placeholder
 OPENAI_MODEL=gpt-4o-mini

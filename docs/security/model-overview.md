@@ -3,7 +3,7 @@
 ## TL;DR
 
 Corvid's threat model and trusted computing base are documented in
-[`docs/security/model.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md).
+[`docs/security/model.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md).
 This page is the executive summary.
 
 ## What Corvid defends against
@@ -44,5 +44,5 @@ corvid receipt verify <path>            # third-party receipt verification
 ## Reporting a vulnerability
 
 The security policy and disclosure address live at
-[SECURITY.md](https://github.com/Corvid-lang/Corvid-lang/blob/main/SECURITY.md)
+[SECURITY.md](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/SECURITY.md)
 in the repo.

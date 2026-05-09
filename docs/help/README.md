@@ -5,4 +5,4 @@
 
 If your question isn't answered here, check the
 [reference](../reference/) section first, then open an issue at
-[github.com/Corvid-lang/Corvid-lang](https://github.com/Corvid-lang/Corvid-lang).
+[github.com/Micrurus-Ai/Corvid-lang](https://github.com/Micrurus-Ai/Corvid-lang).

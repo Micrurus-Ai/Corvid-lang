@@ -80,7 +80,7 @@ public agent seeded_review_session() -> ReviewSession:
         "approval-boundary",
         "shortcut_refund calls issue_refund without an approval boundary; require approve IssueRefund before the tool call."
     )
-    return ReviewSession("Corvid-lang/Corvid-lang", 418, "base_redacted_20260504", "head_redacted_20260504", 1, comment, false)
+    return ReviewSession("Micrurus-Ai/Corvid-lang", 418, "base_redacted_20260504", "head_redacted_20260504", 1, comment, false)
 
 public agent mock_review_session_surface() -> ReviewSession:
     return seeded_review_session()
@@ -92,4 +92,4 @@ public agent real_review_session_surface() -> ReviewSession:
     return seeded_review_session()
 
 public agent main() -> ReviewSession:
-    return review_pull_request("Corvid-lang/Corvid-lang", 418)
+    return review_pull_request("Micrurus-Ai/Corvid-lang", 418)

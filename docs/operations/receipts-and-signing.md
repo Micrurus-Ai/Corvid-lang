@@ -14,7 +14,7 @@ The separate-binary verifier `corvid-abi-verify` rebuilds the ABI
 descriptor from source through a separate process and byte-compares
 it with the cdylib's embedded descriptor. This catches post-link
 tampering and build-cache drift. See
-[`docs/security/model.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md)
+[`docs/security/model.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md)
 for the threat model and TCB.
 
 ## Producing a signed build
@@ -89,5 +89,5 @@ signed receipt. No host-secret access is required to verify.
   binary that doesn't match its source. Out of scope for v1.0.
 
 The
-[security model](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md)
+[security model](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md)
 enumerates the trusted computing base.

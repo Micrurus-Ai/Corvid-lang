@@ -25,7 +25,7 @@ allocator (no leaky bump allocator).
 
 ## The deep doc
 
-[`docs/internals/wasm-abi.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/wasm-abi.md)
+[`docs/internals/wasm-abi.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/wasm-abi.md)
 is the spec; Phase 20n-B and Phase 20n-C closing audits document the
 ABI history.
 

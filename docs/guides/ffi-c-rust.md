@@ -107,4 +107,4 @@ returned slice's memory. Free returned slices with
 Struct returns use multi-value WASM-style returns. The generated
 header surfaces them as out-parameters or as packed structs depending
 on the target's calling convention. See the per-target shape in
-[`docs/internals/wasm-abi.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/wasm-abi.md).
+[`docs/internals/wasm-abi.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/wasm-abi.md).

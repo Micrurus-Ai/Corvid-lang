@@ -53,7 +53,7 @@ defined.
 ## Can I bypass `approve` with metaprogramming?
 
 The source-fuzz corpus
-([`crates/corvid-types/tests/source_bypass_corpus.rs`](https://github.com/Corvid-lang/Corvid-lang/blob/main/crates/corvid-types/tests/source_bypass_corpus.rs))
+([`crates/corvid-types/tests/source_bypass_corpus.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-types/tests/source_bypass_corpus.rs))
 exercises four classes of attempted bypass. Each fails to compile
 with the matching `guarantee_id`. New bypass attempts are welcome;
 file them as adversarial test cases.
@@ -64,7 +64,7 @@ Corvid v1.0 ships engineering-grade compile-time guarantees: a
 registry of properties, adversarial tests for each, a separate-binary
 ABI descriptor verifier, and a CI gate. Formal mechanized proof of
 the type system is a post-v1.0 research agenda. The
-[security model](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/security/model.md)
+[security model](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/security/model.md)
 is explicit about what's verified by tests vs. what's verified by
 proof.
 
@@ -78,7 +78,7 @@ the audience.
 ## Is the runtime open source?
 
 Yes. MIT/Apache-2.0 dual-licensed.
-[`Corvid-lang/Corvid-lang`](https://github.com/Corvid-lang/Corvid-lang)
+[`Micrurus-Ai/Corvid-lang`](https://github.com/Micrurus-Ai/Corvid-lang)
 on GitHub.
 
 ## What's the road from here to v2?
@@ -88,5 +88,5 @@ proof of the type system, true second-implementation TCB shrinkage,
 multi-process worker pools for the rendered backend server, custom
 middleware injection from Corvid source, and additional connector
 families. The roadmap lives in
-[`ROADMAP.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/ROADMAP.md)
+[`ROADMAP.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md)
 in the repo.

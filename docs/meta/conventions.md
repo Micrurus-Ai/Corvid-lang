@@ -65,7 +65,7 @@ the page body.
 Internal cross-links use `/docs/<slug>` form. The build pipeline
 resolves these against the slug map. External links to the corvid
 GitHub repo use full URLs to
-`https://github.com/Corvid-lang/Corvid-lang/blob/main/<path>`.
+`https://github.com/Micrurus-Ai/Corvid-lang/blob/main/<path>`.
 
 ## Code-block highlighting
 

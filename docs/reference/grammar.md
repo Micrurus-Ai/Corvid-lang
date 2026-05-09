@@ -7,7 +7,7 @@ implementation in `crates/corvid-syntax/src/parser/`. A drift-gate
 test (slice 33J6) cross-checks every production listed here against
 the parser's tests. The grammar is line-oriented: physical newlines
 are significant, with continuation rules described in
-[`docs/reference/lexer-rules.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/reference/lexer-rules.md).
+[`docs/reference/lexer-rules.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/lexer-rules.md).
 
 ## Notation
 
@@ -286,4 +286,4 @@ truth. This grammar was extracted from it; if a future parser change
 diverges, the drift-gate test fails and one of the two must change.
 The cross-reference table from production rules to parser-test fns
 lives in
-[`crates/corvid-syntax/src/parser/tests.rs`](https://github.com/Corvid-lang/Corvid-lang/blob/main/crates/corvid-syntax/src/parser/tests.rs).
+[`crates/corvid-syntax/src/parser/tests.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-syntax/src/parser/tests.rs).

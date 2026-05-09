@@ -5,7 +5,7 @@
 A short index of Corvid's load-bearing language inventions. Each
 invention has a runnable demo through `corvid tour --topic <name>`, a
 catalog entry in
-[`docs/reference/inventions.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/reference/inventions.md),
+[`docs/reference/inventions.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/inventions.md),
 a spec link, and tests.
 
 ## The six headline inventions
@@ -71,6 +71,6 @@ corvid tour --topic replay-receipts
 ## The full catalog
 
 `corvid tour --list` prints every shipped invention.
-[`docs/reference/inventions.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/reference/inventions.md)
+[`docs/reference/inventions.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/inventions.md)
 is the proof matrix: per-invention shipped status, runnable command,
 test coverage, spec link, explicit non-scope.

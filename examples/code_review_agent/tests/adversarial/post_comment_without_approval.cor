@@ -21,4 +21,4 @@ type ReviewReceipt:
 tool post_review_comment(repo: String, number: Int, comment: ReviewComment) -> ReviewReceipt dangerous uses github_write
 
 agent post_without_approval(comment: ReviewComment) -> ReviewReceipt uses github_write:
-    return post_review_comment("Corvid-lang/Corvid-lang", 418, comment)
+    return post_review_comment("Micrurus-Ai/Corvid-lang", 418, comment)

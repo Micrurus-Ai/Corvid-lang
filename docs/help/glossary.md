@@ -44,7 +44,7 @@ context.
 
 **Invention.** A Corvid-specific language/runtime capability we'd
 name in the README, the website, or launch material. Catalogued in
-[`docs/reference/inventions.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/reference/inventions.md)
+[`docs/reference/inventions.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/inventions.md)
 with shipped status, runnable command, test coverage, spec link.
 
 **Job.** A durable agent run managed by the Phase 38 runner, with

@@ -90,6 +90,6 @@ reversible. Both are checked at compile time.
 ## Deeper material
 
 - The full effect algebra:
-  [`docs/internals/effect-spec/02-composition-algebra.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/effect-spec/02-composition-algebra.md)
+  [`docs/internals/effect-spec/02-composition-algebra.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/effect-spec/02-composition-algebra.md)
 - Typing rules:
-  [`docs/internals/effect-spec/03-typing-rules.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/internals/effect-spec/03-typing-rules.md)
+  [`docs/internals/effect-spec/03-typing-rules.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/internals/effect-spec/03-typing-rules.md)

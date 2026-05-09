@@ -9,7 +9,7 @@ an explicit approval.
 From this directory:
 
 ```sh
-set CORVID_TEST_MOCK_TOOLS={"fetch_pull_request_diff":{"repo":"Corvid-lang/Corvid-lang","number":418,"base_sha":"base_redacted_20260504","head_sha":"head_redacted_20260504","diff":"approval bypass diff"}}
+set CORVID_TEST_MOCK_TOOLS={"fetch_pull_request_diff":{"repo":"Micrurus-Ai/Corvid-lang","number":418,"base_sha":"base_redacted_20260504","head_sha":"head_redacted_20260504","diff":"approval bypass diff"}}
 set CORVID_TEST_MOCK_LLM=1
 set CORVID_TEST_MOCK_LLM_REPLIES={"draft_review_comment":{"path":"examples/refund_bot/src/main.cor","line":43,"severity":"high","checklist_id":"approval-boundary","body":"shortcut_refund calls issue_refund without an approval boundary; require approve IssueRefund before the tool call."}}
 cargo run -q -p corvid-cli -- build

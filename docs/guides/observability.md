@@ -71,5 +71,5 @@ The Phase 40 operator runbook ships canonical playbooks:
 - "Why did this model swap break X?"
 
 Each runbook is a `.md` file in
-[`docs/operations/operator-runbooks.md`](https://github.com/Corvid-lang/Corvid-lang/blob/main/docs/operations/operator-runbooks.md)
+[`docs/operations/operator-runbooks.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/operations/operator-runbooks.md)
 with concrete CLI commands and diff-against-baseline patterns.
