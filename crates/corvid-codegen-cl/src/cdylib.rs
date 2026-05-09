@@ -185,6 +185,13 @@ fn link_shared_library(
             // can compare committed and rebuilt shared libraries
             // byte-for-byte on MSVC hosts.
             .arg("/BREPRO")
+            // `secur32.lib` is needed by the bundled `whoami` crate
+            // (`GetUserNameExW` import). Mirror of the same fix in
+            // `link.rs::link_binary` — Phase 35V-T1-H landed both
+            // call sites together so the bilateral-verifier test
+            // run that 35-H ships as evidence can actually link
+            // its temporary cdylib on Windows.
+            .arg("secur32.lib")
             .arg("bcrypt.lib")
             .arg("advapi32.lib")
             .arg("kernel32.lib")

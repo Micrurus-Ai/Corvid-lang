@@ -123,6 +123,14 @@ pub fn link_binary(
             // on the corvid-runtime build. Update this list if the
             // corvid-runtime dep graph changes in a way that adds
             // new system-lib requirements.
+            //
+            // `secur32.lib` is needed by the bundled `whoami` crate
+            // (`GetUserNameExW` import). Phase 20n filed the
+            // missing-secur32 baseline as a follow-up; Phase 35V-T1-H
+            // (2026-05-08) closed it because the missing lib was
+            // blocking the bilateral-verifier test run that 35-H
+            // ships as evidence.
+            .arg("secur32.lib")
             .arg("bcrypt.lib")
             .arg("advapi32.lib")
             .arg("kernel32.lib")
