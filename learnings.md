@@ -4115,3 +4115,85 @@ a callback parameter. Combinatorial typed-bridge families
 + a callback or descriptor stays linear. 20n-B's multi-value WASM
 returns and 20n-C's function-pointer decoder callback both fit
 this pattern.
+
+## Phase 35 closeout — defensible core
+
+Registry as single source of truth scales when every consumer
+derives, not duplicates. Phase 35-A's `GUARANTEE_REGISTRY` is
+read by `corvid contract list`, `docs/core-semantics.md`
+generation, the bilateral verifier, `corvid claim --explain`,
+and `corvid build --sign`. A drift-gate test
+(`rendered_markdown_matches_committed_doc`) catches divergence
+between the rendered spec and the committed doc; CI runs it on
+every push. When N artifacts must agree, generate them all from
+one in-code source of truth and gate divergence at CI rather than
+relying on human discipline.
+
+Registry honesty pinned in three orthogonal directions: forward
+(`with_guarantee` debug_assert verifies tagged ids resolve in
+the registry), inverse-broad (every Static/RuntimeChecked id
+appears as a literal in non-test workspace source), inverse-
+narrow (every typecheck-shaped Static id goes through the
+tagged constructor). Each sentinel catches a different drift
+mode. Phase 20m's "verify the comparison site, not the
+suggestion field" rule generalises: every comparison-site
+property gets its own sentinel; one isn't enough.
+
+Honest classification beats optimistic tagging. Phase 35V-T1-B
+found four typecheck-shaped Static rows whose enforcement
+mechanism didn't fire a separately-tagged diagnostic. The
+options were: discriminate in code (real engineering work), or
+honestly downgrade to OutOfScope with explicit
+`out_of_scope_reason`. The shortcut would be inventing fake
+"subsumed_by" relationships that paper over the lack of separate
+diagnostics. The phase chose discrimination where the
+typechecker had the information (added an `approvals_seen_in_agent`
+body-wide audit log) and honest downgrade where the unified
+analyzer fundamentally fires one diagnostic for both
+perspectives. Downgrading is not a shortcut; claiming Static
+when only the parent enforces is.
+
+Aspirational launch wording surfaces at verification, not at
+implementation. Phase 35V-T1-H found ROADMAP, README, and
+docs/security-model.md all carried "bilateral verifier" / "two
+implementations" / "TCB shrinkage" claims that the implementation
+doesn't deliver. The shipped verifier IS useful (post-link
+descriptor tampering, build-cache drift) but not at the level
+the wording promised. The corrective work was to tighten the
+wording, not to invent the missing implementation. Launch
+surfaces (ROADMAP slice descriptions, README claim boundaries,
+security model doc) are checkable against shipped behavior; a
+verification round that doesn't audit them misses a load-bearing
+class of drift.
+
+Cross-component coupling discovered at verification time. Phase
+35V-T1-B downgraded three registry rows. Phase 35V-T1-J found
+that `validate_signed_claim_coverage` in the driver still
+required those ids in every signed claim set — without the
+validator alignment, signed builds for any source touching those
+surfaces would have rejected at sign time. Existing tests
+(`signed_claim_coverage_*`) tripped after the downgrade,
+catching the coupling. A registry change has cross-component
+consequences that a phase-level audit catches but a slice-level
+review does not.
+
+Pre-existing baselines that survive multiple phases need
+periodic re-evaluation. The whoami `secur32.lib` linker baseline
+filed by Phase 20n was treated as "expected exit=2" through
+20n, 20n-A/B/C, and the early Track 1 slices of Phase 35V. T1-H
+found the fix was a one-line addition to two MSVC linker
+invocation sites, AND it unblocked the bilateral-verifier tests
+that 35-H ships as evidence. Lesson: when a "filed for later"
+baseline is small enough to fix now, fix it now — especially when
+it's blocking adjacent verification work. The cost of carrying
+the baseline (every commit message qualifies "exit=2 is the
+baseline") was higher than the cost of the fix.
+
+The verifier-correction pattern from Phase 20m scales to a
+launch-gate surface. Phase 35V applied it to 14 launch-gate
+slices + 12 audit-correction slices + 4 closer slices (~30
+verifications total). Outputs: 8 commits of corrective work in
+Track 1, zero corrective work in Track 2 (all 12 audit-
+correction tracks were honestly shipped), 4 closer commits in
+Track 3. The pattern's value scales with the breadth of what's
+claimed; per-slice verification cost stays roughly constant.

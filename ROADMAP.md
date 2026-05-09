@@ -1866,7 +1866,7 @@ The determinism-source catalog and the language's treatment of non-reproducible 
 
 **Defensibility gate.** Phase 34 closes the inventions catalog. Phase 35 closes the *defensible-core* surface that the catalog rests on. Public launch is gated on Phase 35 plus the production-backend market track below; Corvid does not go online as a language for real AI applications until it can build and operate a full backend product itself.
 
-### Phase 35 — Defensible core (~6–8 weeks)
+### Phase 35 — Defensible core (~6–8 weeks) ✅ closed
 
 **Goal.** Make Corvid's launch claim defensible under hostile public scrutiny. Every public guarantee is enumerated in a machine-readable manifest, every guarantee is backed by adversarial tests, the ABI surface is bilaterally verified, and the launch wording is derivable from shipped artifacts rather than aspirational. After Phase 35, an outside reviewer can answer "what does Corvid guarantee, what is checked statically, what is checked at runtime, what is out of scope, and how do I verify each independently?" in under ten minutes by running committed commands.
 
