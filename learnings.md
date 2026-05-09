@@ -4197,3 +4197,61 @@ Track 1, zero corrective work in Track 2 (all 12 audit-
 correction tracks were honestly shipped), 4 closer commits in
 Track 3. The pattern's value scales with the breadth of what's
 claimed; per-slice verification cost stays roughly constant.
+
+## Phase 35V closeout — running a launch-gate audit as its own phase
+
+Audit rounds need their own phase, not a parallel review. Phase
+35V was sized as a full phase (~30 slice-equivalents) with its
+own ROADMAP entry, its own pre-phase chat checklist, and its own
+slice-by-slice closer ceremony. Treating verification as
+"inline polish on Phase 35" would have either been skipped
+under deadline pressure or absorbed silently by Phase 35's slice
+list. Sized as Phase 35V, the work has line-of-sight commits,
+explicit corrective-track scope, and a closing audit that future
+external reviewers can read. The phase-as-audit shape is what
+makes the verifier-correction pattern carry weight at launch
+scale; the audit's authority comes from its independence from
+the work it audits.
+
+Three-track decomposition keeps verification scope honest. Track
+1 verifies the slices of the phase being audited (Phase 35).
+Track 2 verifies prior audit corrections still match shipped
+behavior (the 36/38/39/41 audit-correction completeness check).
+Track 3 closes phases via the formal closer ceremony. Mixing
+these tracks would have led to ambiguous "what does this slice
+verify?" commits. Separating them gives each commit one job and
+allows Track 2 to chain quietly through clean signals (zero
+corrective commits in Phase 35V's case) while Track 1 pre-phase-
+chats every drift discovery.
+
+Bulk-tick at slice closure, not phase closure. Phase 35V used a
+Python regex to bulk-tick all 30 slice checkboxes once each
+slice's commit landed and was pushed. The discipline: each slice
+gets its own commit FIRST (with the dev-log-style commit message
+labelling clean-vs-drift outcome), THEN the ROADMAP checkbox
+ticks as part of the next commit. The bulk-tick at the closer
+itself is for the phase-done criteria boxes, not the slice
+boxes — those should already be ticked. Mixing slice ticks into
+the phase closer commit hides which slices actually shipped from
+git history.
+
+Closing audits are a deliverable, not paperwork. The closing
+audit appended to `docs/phase-35V-pre-launch-audit.md` (per-
+slice outcome table, drift modes surfaced, verification
+methodology) is the artifact the next external-reviewer round
+reads first. A phase that closes without a closing audit
+forces the next reviewer to reconstruct outcomes from commit
+messages — which is fine until commits get squashed, branches
+get pruned, or memory records turn out to summarise rather than
+reproduce. The audit's weight comes from being inside the repo,
+versioned with the code, and consumable by humans who weren't in
+the conversation.
+
+Memory records for audit phases capture *methodology*, not just
+*outcomes*. The Phase 35 and Phase 36 memory records summarise
+what shipped. The Phase 35V memory record additionally captures
+the verifier-correction methodology, the three-track structure,
+the orthogonal-sentinel discipline, and the launch-wording-audit
+class of drift. Memory records that document HOW Phase 35V was
+run let future audit rounds adopt the pattern without re-
+deriving it from commit archaeology.

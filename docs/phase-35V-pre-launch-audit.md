@@ -246,3 +246,134 @@ Before any verification slice starts, confirm:
 4. **Clean-signal vs drift-signal evidence.** Each slice's commit
    message explicitly labels which outcome occurred and what
    sentinel test pins the property going forward.
+
+---
+
+## Closing audit (2026-05-09)
+
+Phase 35V closed 2026-05-09 after every track verified all slices
+against shipped behavior. Per-slice outcome below.
+
+### Track 1 — verify Phase 35 slices (14 + 1 cross-cutting drift)
+
+| Slice  | Outcome                       | Evidence / corrective commit                                                                       |
+|--------|-------------------------------|----------------------------------------------------------------------------------------------------|
+| T1-A   | clean + 2 sentinels           | `1908e8e` — `by_class_partitions_registry`, row-count baseline canary                              |
+| Drift  | drift-found, 6 corrective + 1 sentinel | `60decf2`, `73b0d70`, `e35206b`, `cad5817`, `c41f1d6` tag 18 enforcement sites; `79d2c96` permanent inverse-coverage sentinel |
+| T1-B   | drift-found, 3 corrective     | `3566033` typecheck discrimination (`approval.token_lexical_only`); `75b0bc0` + `80f8224` downgrade 3 unenforceable rows; permanent tagged-constructor sentinel |
+| T1-C   | clean + 1 sentinel            | `6af0ef6` — `json_payload_contains_every_registry_id`                                              |
+| T1-D   | clean signal via existing tests | spec-generation drift gate already covers; no commit                                              |
+| T1-E   | clean signal via existing tests | test cross-reference inventory already pinned; no commit                                          |
+| T1-F   | clean signal via existing tests | ABI fuzz mutant baseline already pinned; no commit                                                |
+| T1-G   | drift-found, 1 corrective     | `478b484` — corpus assertion realigned with T1-B discrimination                                   |
+| T1-H   | drift-found, 1 corrective     | `0b277d9` — `secur32.lib` added to MSVC linker (closes Phase 20n baseline); 35-H wording trim     |
+| T1-I   | clean + 1 sentinel            | `d75e19c` — `claim_explain_output_is_byte_stable_across_re_runs`                                  |
+| T1-J   | drift-found, 1 corrective     | `f829f86` — claim-coverage validator alignment with T1-B downgrades                               |
+| T1-K   | drift-found, 1 corrective     | `fef332e` — `docs/security-model.md` verifier-section trim; aspirational TCB-shrinkage wording removed |
+| T1-L   | clean signal via existing tests | README claim boundaries already aligned by T1-H; no commit                                        |
+| T1-M   | clean signal via existing tests | CI gate workflow already enforces; no commit                                                      |
+| T1-N   | clean signal via existing tests | adversarial corpus already pinned; no commit                                                      |
+
+Track 1 totals: **8 corrective commits + 6 clean signals** across 14
+slices + 1 cross-cutting drift discovery (T1-Drift). Seven permanent
+sentinels landed:
+- `every_enforced_guarantee_id_is_wired_to_workspace_source`
+- `every_typecheck_phase_static_guarantee_uses_with_guarantee_constructor`
+- `by_class_partitions_registry`
+- `registry_row_count_at_or_above_phase_35V_t1_a_baseline`
+- `json_payload_contains_every_registry_id`
+- `claim_explain_output_is_byte_stable_across_re_runs`
+- the 18 inverse-coverage anchor literals at enforcement sites
+
+### Track 2 — audit-correction completeness (12 slices)
+
+All 12 slices clean — zero corrective commits.
+
+| Slice  | Subject                                                | Outcome                                       |
+|--------|--------------------------------------------------------|-----------------------------------------------|
+| T2-A   | 36-K real HTTP runtime via axum 0.7 + tower-http       | clean — verified at `server_render.rs`        |
+| T2-B   | 36-L middleware pipeline order + `x-corvid-middleware` | clean — verified at server_render.rs:110-119  |
+| T2-C   | 36-M shutdown / timeout / body-limit / handler isolation end-to-end test | clean — `build_server_emits_runnable_local_http_binary` passes |
+| T2-D   | 38-K multi-worker job runner (4 workers, 100% no-double-process) | clean — runner test passes                  |
+| T2-E   | 38-M SIGKILL crash-recovery requeue                    | clean — crash-recovery test passes            |
+| T2-F   | 39-K real JWT verification with kid/alg/jwks-fetch     | clean — verifier rejects unsigned/altered jwt |
+| T2-G   | 39-L `corvid auth` / `corvid approvals` / `corvid connectors` top-level subcommands | clean — `--help` lists all three          |
+| T2-H   | 41-K connector replay quarantine fires for every connector type | clean — quarantine matrix test passes     |
+| T2-I   | 41-L threat corpus end-to-end coverage                 | clean — corpus coverage matrix passes         |
+| T2-J   | 41-M DSSE-bundle bilateral signature acceptance        | clean — bundle accepted from both sides       |
+| T2-K   | 38-cron DST-aware scheduling                           | clean — DST test passes                       |
+| T2-L   | 39-OAuth token-rotation refusal under expired creds    | clean — refusal test passes                   |
+
+The 2026-04-29 audit's filed corrective tracks (36K/L/M, 38K/M,
+39K/L, 41K/L/M, plus DST-cron and OAuth-rotation) all landed
+honestly during their respective phases. Track 2 verification
+pattern: read shipped commit, run shipped test, confirm test
+exercises the claimed property.
+
+### Track 3 — closer slices (4 slices)
+
+| Slice  | Outcome                                                                                            | Commit       |
+|--------|----------------------------------------------------------------------------------------------------|--------------|
+| T3-A   | Phase 35 closed; `docs/phase-35-defensible-core.md` written; `learnings.md` + `MEMORY.md` updated; memory record `project_phase_35_closed.md` written | `8076bf7`    |
+| T3-B   | Phase 36 closed; closing audit appended to `docs/phase-36-backend-core.md`; memory record `project_phase_36_closed.md` written | `979f0b1`    |
+| T3-C   | Phase 38/39/40/41 audit-correction notes annotated with "Re-verified clean by Phase 35V Track 2 on 2026-05-09" | `e5d45d5`    |
+| T3-D   | Phase 35V's own closer (this entry); memory record `project_phase_35V_closed.md` written           | (this commit)|
+
+### Drift modes Phase 35V surfaced and pinned
+
+1. **Inverse-coverage gap.** 18 enforced registry rows lacked
+   literal anchors in non-test workspace source. A row could be
+   tagged Static/RuntimeChecked yet have no enforcement-site
+   string referencing its id. Permanent sentinel
+   (`every_enforced_guarantee_id_is_wired_to_workspace_source`)
+   plus `pub const GUARANTEE_ID_<NAME>` anchors at every
+   enforcement site.
+2. **Untagged typecheck-phase contract diagnostics.** 4 Static
+   typecheck-shaped rows fired diagnostics that didn't go through
+   `TypeError::with_guarantee`. T1-B discriminated where the
+   typechecker had the information (1 implementation:
+   `approval.token_lexical_only` via `approvals_seen_in_agent`
+   audit log) and honestly downgraded where the unified analyzer
+   fundamentally fires one diagnostic for both perspectives (3
+   downgrades to OutOfScope).
+3. **Cross-component coupling failures.** Three downgraded ids
+   were still required by `validate_signed_claim_coverage`. T1-J
+   removed the four `claims.required_ids.insert(...)` calls.
+   Existing `signed_claim_coverage_*` tests caught the coupling.
+4. **Aspirational launch wording.** ROADMAP, README, and
+   `docs/security-model.md` carried "bilateral verifier" / "two
+   implementations" / "TCB shrinkage" claims wider than what's
+   shipped. T1-H + T1-K trimmed wording to match the
+   separate-binary descriptor verifier that actually ships.
+5. **Phase 20n-baseline secur32 linker.** The whoami
+   `__imp_GetUserNameExW` linker baseline filed by Phase 20n
+   blocked abi-verify tests. T1-H added `secur32.lib` to both
+   MSVC linker invocations (link.rs and cdylib.rs), closing the
+   baseline.
+
+### Verification methodology (for future audit rounds)
+
+The verifier-correction pattern (formalised in Phase 20m,
+applied at scale in Phase 35V) generalises:
+
+- **Per slice**: read claim → run shipped tests → if claim
+  matches behavior, pin a sentinel; if not, file drift.
+- **Drift triggers pre-phase chat**: each drift either becomes a
+  corrective slice (real implementation) or an honest downgrade.
+  Optimistic tagging is the shortcut and is forbidden.
+- **Cross-component coupling discovery**: whenever a registry
+  row changes class, also check the validator surface that
+  consumes the registry. Existing whitelist/coverage tests are
+  the load-bearing signal.
+- **Launch-surface wording audit**: ROADMAP slice descriptions,
+  README claim boundaries, and security-model docs are all
+  checkable against shipped behavior. A verification round that
+  doesn't audit them misses a load-bearing class of drift.
+- **Forward + inverse-broad + inverse-narrow sentinels**: a
+  single sentinel catches one drift mode while leaving others
+  open. Each load-bearing claim needs orthogonal pins.
+
+Phase 35V cost: ~30 slice-equivalents; 12 corrective commits
+(8 in T1, 0 in T2, 4 in T3) plus 7 permanent sentinels and 18
+enforcement-site anchors. The next external-reviewer round
+should be cheaper because recurring drift modes are now pinned.
