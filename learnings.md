@@ -4307,3 +4307,54 @@ calling out at the test site. Phase 33J6 (grammar drift gate)
 should follow the same pattern: assert the rendered grammar
 matches the parser, and embed the parser-tests path explicitly
 so a future move surfaces immediately.
+
+## Phase 33J3 — handoff briefs as deliverables
+
+Slice 33J3 (docs site build) closed via a handoff brief at
+`docs/meta/website-docs-handoff.md` — a 509-line self-contained
+spec that another developer (or coding agent) could execute
+without prior Corvid knowledge. The deliverable shipped live at
+<https://corvid-lang.org/docs> rendering the full Diataxis tree:
+all 11 sections, 18 book chapters, Corvid syntax highlighting,
+resolved cross-links.
+
+The lesson generalises beyond docs: **when a slice's executor is
+not on this conversation, the brief is the load-bearing
+artifact**. A good brief is structured like a one-shot prompt:
+- Both repo URLs up front.
+- One-paragraph context for someone who doesn't know the domain.
+- A complete directory tree of the inputs.
+- Concrete deliverables with acceptance criteria.
+- Framework recommendation with reasoning + "if you prefer X,
+  here's the shape to keep."
+- Three sourcing options (submodule / build-fetch / monorepo)
+  with pros and cons.
+- Cross-link, syntax-highlight, and theme requirements explicit
+  enough to verify without back-and-forth.
+- Constraints framed as no-shortcut rules ("do not edit upstream
+  source", "do not edit auto-generated docs", "exclude phases/
+  from rendered output").
+- 9 numbered "where to start" steps.
+- Open questions to ask before starting.
+- Out-of-scope list (so adjacent slices don't expand scope).
+
+Briefs that don't include all of these get clarification rounds
+that defeat the point of a brief.
+
+Two confirmations the brief made load-bearing:
+
+1. **Sourcing strategy as the executor's choice, not the brief's
+   choice.** The brief listed three options with pros/cons and
+   said "pick one and document the choice." This lets the
+   executor optimise for their tooling without our pre-empting.
+2. **Acceptance criteria as binary checks.** Each criterion is a
+   pass/fail observation a third party can verify by visiting
+   the URL ("Visiting `/docs` shows the docs landing page",
+   "Mobile breakpoints are usable at <768px", "Search returns
+   results for 'approve'"). No subjective "looks good" criteria.
+
+The brief also surfaced one drift mode worth pinning: when a
+slice deliverable is verified live by URL, the verification step
+is `WebFetch <url>` + structural-assertion. Future "verify a
+live deliverable" slices should follow the same shape — name the
+URL, list the structural assertions, log the WebFetch results.
