@@ -81,6 +81,15 @@ cargo build -p corvid-browser --target wasm32-unknown-unknown --release
 Postprocess with `wasm-bindgen` for browser consumption:
 
 ```sh
+# Pin wasm-bindgen-cli to the same version Cargo.lock pins for the
+# `wasm-bindgen` crate. A default `cargo install -f wasm-bindgen-cli`
+# may pull a newer version that errors with a schema-version
+# mismatch against the .wasm artifact. Read the version out of
+# Cargo.lock and install the matching CLI:
+WASM_BINDGEN_VERSION=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock \
+    | head -2 | grep version | sed -E 's/.*"([^"]+)".*/\1/')
+cargo install -f wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+
 wasm-bindgen target/wasm32-unknown-unknown/release/corvid_browser.wasm \
              --out-dir <website>/public/playground \
              --target web
