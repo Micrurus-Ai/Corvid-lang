@@ -4467,3 +4467,70 @@ slice deliverable is verified live by URL, the verification step
 is `WebFetch <url>` + structural-assertion. Future "verify a
 live deliverable" slices should follow the same shape — name the
 URL, list the structural assertions, log the WebFetch results.
+
+## Phase 33J7b — direct-deps audit catches what transitive-deps misses
+
+The 33J7b pre-phase chat included Q3: is `corvid-vm` a pure
+port or its own split? The earlier probe (`cargo tree -p
+corvid-vm | grep tokio`) showed tokio in its tree but
+attributed it to the transitive `corvid-runtime` dep. The
+working hypothesis was "split corvid-runtime, port the VM."
+
+Reading `crates/corvid-vm/Cargo.toml` directly surfaced what
+the tree summary hid: `tokio` is a **direct** dep in the VM's
+own manifest, alongside `async-recursion` and `async-trait`.
+The VM has its own async surface area for prompt/tool
+dispatch; the runtime is one source of tokio but not the only
+source. The "pure port" plan would have wedged on tokio after
+the runtime split landed clean.
+
+**Lesson:** when auditing a crate for wasm compatibility,
+the `cargo tree` view tells you what compiles in; the
+`Cargo.toml` view tells you what the crate *owns* directly.
+Both audits are needed before scoping a split. The direct-deps
+audit caught a ~1-week estimate revision (port → split) at
+zero cost in pre-phase chat. Catching it in code would have
+cost the whole port attempt.
+
+Generalises: any "is X already wasm-clean?" question gets two
+answers — the transitive tree's answer (am I pulled into a
+build) and the direct manifest's answer (do I own this surface
+to refactor). Both matter; check both.
+
+## Phase 33J7b decisions recorded (chat closed 2026-05-12)
+
+All six boundary questions resolved. The decision record is at
+`docs/meta/runtime-split-design.md` under "Decisions". Six
+load-bearing calls plus five risk mitigations.
+
+The six decisions (D1-D6 in the design doc) for future audit
+reference:
+
+1. **Receipts** — core emits canonical bytes; host signs.
+   Browser can verify but never sign.
+2. **Replay** — state machine in core; persistence behind
+   `ReplaySource` / `RecorderSink` traits.
+3. **VM** — split (not port); `corvid-vm-core` synchronous
+   IR-walker yielding `HostRequest`, `corvid-vm-host` native
+   async wrapper.
+4. **Stdlib impls** — single `corvid-runtime-host` crate with
+   per-module feature flags; per-module crate extraction is a
+   follow-up if any module crosses the file-responsibility
+   threshold.
+5. **Connector modes** — mock + replay in core, real in host.
+   Phase 41L drift test splits into core-only (mock ≡ replay)
+   + host integration (real ≡ replay).
+6. **Public re-exports** — host re-exports core so
+   `corvid_runtime::Foo` keeps working for native users.
+
+Pattern worth pinning: **the chat-closing entry on a pre-phase
+design doc is its own deliverable**. Future audit rounds (a
+hypothetical Phase 35V-equivalent for Phase 33) read the
+chat-closing decisions and verify shipped behavior against
+them. A pre-phase chat doc that closes without a dated, signed
+decision record fails to do its job — the rationale survives,
+but "what we actually agreed to" gets reconstructed from
+commit archaeology. Phase 35V's pattern-3 ("memory records
+capture methodology, not just outcomes") applies one layer up:
+pre-phase chat docs need to capture decisions, not just
+agendas.

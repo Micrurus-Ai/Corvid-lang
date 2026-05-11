@@ -309,6 +309,199 @@ file, listing each question + its resolution + a date.
 The chat does not produce code. After it closes, slice 33J7b
 opens as a multi-week code slice with its own commit cadence.
 
+---
+
+## Decisions (2026-05-12 — CTO delegated to Rust lead)
+
+All six questions resolved. Recording here. CTO confirmation:
+"choose the best ones for corvid please" + "even if it takes
+20,000 years we need it working no shortcuts" + Path B locked.
+The Rust lead exercised the delegation.
+
+### D1 (resolves Q1, receipts) — Core emits canonical bytes; host signs
+
+**Decision.** `corvid-runtime-core` produces canonical receipt
+bytes (audit log entries, prompt records, tool calls, trace
+metadata in a byte-stable order). `corvid-runtime-host` owns
+DSSE signing and key-material access. The browser playground
+can **verify** receipts (read DSSE signature, check ed25519
+public key against an embedded or fetched key list) but never
+**signs** them — no key material in the browser ever.
+
+**Why best for Corvid.** The receipt contents are a public
+contract; they must be byte-identical regardless of where the
+signing happens. Keeping the canonical-bytes derivation in core
+guarantees that. Keeping the signing in host respects the
+trust boundary — keys belong to the host, full stop. The
+browser-verify path is a small bonus: a user can paste a
+signed trace into the playground and verify "yes this run is
+authentic" without needing to install Corvid. That deepens the
+"see how it works" experience without compromising the key-
+material posture.
+
+### D2 (resolves Q2, replay) — State machine in core; persistence behind traits
+
+**Decision.** `corvid-runtime-core` owns the replay state
+machine (`ReplayPlayer` / `ReplayRecorder`) — the deterministic
+"we're on step N, the next expected event is X, here's the
+replay-key derivation" logic. Persistence is exposed as two
+traits in core (`ReplaySource` / `RecorderSink`). The host
+crate provides the filesystem-backed implementations for
+native; the browser implements them for IndexedDB.
+
+**Why best for Corvid.** Replay is the project's flagship
+invention. If the state machine lived separately in browser
+vs. native, the moat would split — a trace recorded on native
+might replay differently in browser. State machine in core is
+the only honest call. Persistence is genuinely
+context-dependent, so the trait abstraction is the right
+boundary. This is the same pattern the project used for
+`TraceEmitter` in Phase 21.
+
+### D3 (resolves Q3, corvid-vm) — Split (not just port); same shape as runtime-split
+
+**Decision.** `corvid-vm` is NOT a pure port. Audit found
+**direct** wasm-blocking deps in `crates/corvid-vm/Cargo.toml`:
+`corvid-runtime` (full grab-bag), direct `tokio`, plus
+`async-recursion` and `async-trait`. The fix mirrors the
+runtime split:
+
+- `corvid-vm-core` (wasm-clean) — the IR-walking interpreter
+  loop as a synchronous state machine. Yields `HostRequest` at
+  every prompt / tool / external-host-call boundary; resumes
+  on `HostResponse`. No tokio. No async fn in the hot path.
+- `corvid-vm-host` (native-only) — native-side async dispatch
+  via tokio, wrapping `corvid-vm-core` and providing the
+  request-resolution loop. Same shape as `corvid-runtime-host`.
+
+This is a structural refactor of corvid-vm too, not just a
+`cfg(target_arch)` gate. The async-fn-in-VM pattern unwinds to
+sync state machines. Estimate revised upward from "~2 weeks
+port" to **~3 weeks split** for 33J7c.
+
+**Why best for Corvid.** The suspend/resume primitive is the
+right shape for browser execution (`wasm-bindgen-futures`
+coroutines map to it 1:1) AND it cleans up the VM's existing
+async-trait soup, which has been a recurring source of
+async-recursion grief on the native side. The refactor pays
+double dividends. Skipping the split and trying to compile
+async-trait + tokio + corvid-runtime to wasm32 would either
+not work or require so much `cfg` gating that the code
+diverges between targets — and diverged code is what the no-
+shortcut rule guards against.
+
+### D4 (resolves Q4, stdlib impls) — Single `corvid-runtime-host` with per-module feature flags
+
+**Decision.** All stdlib impls (`std.db`, `std.http`,
+`std.jobs`, `std.auth`, `std.observability`, `std.connectors`)
+live in `corvid-runtime-host` initially, gated by feature
+flags (`db`, `http`, `jobs`, `auth`, `observability`,
+`connectors`) so users can disable a module's native deps if
+they don't use it. Per-module crate extraction is a follow-up
+that lands if any specific module grows past the file-
+responsibility threshold (~3,000 lines per CLAUDE.md's rubric)
+or starts needing its own dep audit boundary.
+
+**Why best for Corvid.** Two competing pressures here. (1) The
+file-responsibility rule prefers tight crates; per-module
+extraction is the principled answer. (2) Per-module
+proliferation has its own costs (6 new crates × 6 Cargo.toml +
+6 lib.rs + 6 test surfaces = ~30 new files to maintain). The
+compromise is feature flags: same isolation for users (turn off
+a module, lose its deps) without the crate-proliferation tax.
+If a module's footprint or dep audit pressure grows, extract
+it then — under user-driven evidence rather than upfront
+guesswork. This is the principle-aligned-with-pragmatism move
+Phase 35V's pattern 5 ("cross-component coupling discovered at
+verification time") taught: extract when the boundary
+discovers itself, not before.
+
+### D5 (resolves Q5, connector modes) — Mock + replay in core, real in host
+
+**Decision.** Mock and replay connector machinery lives in
+`corvid-runtime-core` — they're deterministic and IO-free
+(mock returns canned responses; replay reads from a recorded
+trace). Real-mode connector adapters live in
+`corvid-runtime-host`. The browser playground gets mock +
+replay automatically; real-mode connectors return a
+"sandboxed in browser — install locally to use real
+connectors" diagnostic via the suspend/resume bridge that
+33J7d ships.
+
+**Why best for Corvid.** Same shape as D2 (replay): the
+deterministic surface lives in core, the IO-touching surface
+lives in host. A real bonus: the Phase 41L connector contract
+drift test (mock ≡ replay ≡ real shared typed surface) becomes
+a core-only test (mock ≡ replay) PLUS a host integration test
+(real ≡ replay). Two tighter tests with clearer failure modes.
+The cross-component coupling between mock/replay/real that
+Phase 41 originally pinned now has a structural enforcement
+mechanism — they're in the same crate, sharing types directly.
+
+### D6 (resolves Q6, public re-exports) — Host re-exports core; `corvid_runtime::Foo` stays working
+
+**Decision.** `corvid-runtime-host` re-exports every public
+type from `corvid-runtime-core` so existing `use
+corvid_runtime::*` paths keep resolving for native users. The
+split is invisible to native CLI / REPL / test consumers.
+Browser code depends on `corvid-runtime-core` directly via
+`corvid-browser`.
+
+**Why best for Corvid.** No-shortcut answer for SemVer
+stability. Breaking every existing CLI/REPL/example/test user
+on a behind-the-scenes refactor would violate the project's
+stability contract (`docs/security/stability-contract.md`).
+Re-exports cost ~one line per public type and produce zero
+divergence between what native users see today and what they
+see post-split. The pattern is well-trodden: Tokio uses it
+extensively (`tokio::sync::*` re-exports from internal
+crates), Serde uses it (`serde::*` re-exports from
+`serde_core` for some types), no surprises.
+
+## Risk mitigations (recorded)
+
+Each of the five identified risks gets a mitigation that lands
+in the 33J7b slice plan:
+
+- **R1 Wrong boundary.** Stress-test the proposed split against
+  every Phase 21–41 feature in a checklist before writing code.
+  Drafts as a `33J7b-pre-code-stress-test.md` doc; each Phase
+  20–41 feature is listed with "where does it land — core or
+  host? what does the test of this need?" If any feature
+  resists clean placement, revisit the boundary.
+- **R2 Hidden tokio.** Build `corvid-runtime-core` as a
+  `wasm32-unknown-unknown` target from slice 1 of 33J7b's
+  decomposition. Failed builds are the early-warning system. CI
+  enforces the wasm32 build on every push to the core crate.
+- **R3 Replay determinism.** The `AgentExecutor` in core
+  enforces an invariant: pending `HostRequest`s are sequential.
+  Parallel-await on multiple host calls is disallowed and
+  caught at compile time via the suspend/resume API shape
+  (the executor yields one request, then awaits one response,
+  then continues — never yields multiple in flight).
+- **R4 Wire format coupling.** `HostRequest` and `HostResponse`
+  carry a `version: "v1"` field at the root, matching the
+  `CheckResult` schema. Schema changes follow the same protocol
+  documented in `crates/corvid-browser/README.md`'s "Schema-
+  change protocol" section.
+- **R5 Tokio in tests.** `corvid-runtime-core` tests are pure
+  `#[test]` (synchronous). `corvid-runtime-host` tests stay
+  `#[tokio::test]` where they need the runtime. The 33J7b
+  refactor includes a per-test-fn audit to move each test to
+  the right crate.
+
+## Closing the chat
+
+All six questions decided. Pre-phase chat closed.
+33J7b is now an open code slice with stable design. Estimated
+duration: ~3-4 weeks (was ~3-4 weeks before chat; unchanged
+since the design held up). Estimated 33J7c duration revised
+from ~2 weeks port to **~3 weeks split** (Q3 finding).
+
+Updated 33J7 path total: ~13-15 weeks Rust (was ~12-14).
+
+---
+
 ## Reference
 
 - The current `corvid-runtime` crate:
