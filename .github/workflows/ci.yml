@@ -269,6 +269,57 @@ jobs:
         working-directory: examples/wasm_browser_demo/test
         run: npx playwright test
 
+  browser-typechecker-wasm:
+    # Slice 33J7-prereq: build the `corvid-browser` crate to
+    # `wasm32-unknown-unknown` on every push. The website-side
+    # playground (slice 33J7 at corvid-lang.org/playground) consumes
+    # this artifact for in-browser typechecking. Keeping the build
+    # green on every push protects three properties: (1) the
+    # typechecker stays WASM-compatible (no surprise tokio / rayon /
+    # filesystem deps creep in via the dep graph), (2) the artifact
+    # size stays under the 8 MB gzipped wire budget, (3) the
+    # integration tests against the compile-refusal example continue
+    # to surface `approval.dangerous_call_requires_token` so the
+    # playground's load-bearing moat demo doesn't silently regress.
+    name: 33J7-prereq browser typechecker (wasm32)
+    runs-on: ubuntu-latest
+    needs: workspace-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (with wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-corvid-browser-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-corvid-browser-
+
+      - name: Build corvid-browser for wasm32-unknown-unknown
+        run: cargo build -p corvid-browser --target wasm32-unknown-unknown --release
+
+      - name: Run native integration tests (typecheck pipeline)
+        run: cargo test -p corvid-browser --tests
+
+      - name: Enforce WASM wire-size budget (8 MB gzipped)
+        run: |
+          ARTIFACT=target/wasm32-unknown-unknown/release/corvid_browser.wasm
+          RAW_BYTES=$(stat -c%s "$ARTIFACT")
+          GZIP_BYTES=$(gzip -9 -c "$ARTIFACT" | wc -c)
+          BUDGET=8388608
+          echo "corvid_browser.wasm: raw=${RAW_BYTES} bytes, gzipped=${GZIP_BYTES} bytes (budget ${BUDGET})"
+          if [ "$GZIP_BYTES" -gt "$BUDGET" ]; then
+            echo "::error::wasm wire size ${GZIP_BYTES} exceeds 8 MB gzipped budget"
+            exit 1
+          fi
+
   python-features:
     # Phase 30-J: Python FFI integration tests must run on every push.
     # The default workspace test run does NOT enable the `python`

@@ -24,6 +24,7 @@ members = [
     "crates/corvid-driver",
     "crates/corvid-differential-verify",
     "crates/corvid-cli",
+    "crates/corvid-browser",
     "crates/corvid-bind",
     "crates/corvid-host-compliance-tests",
     "crates/corvid-shadow-daemon",

@@ -1,0 +1,34 @@
+[package]
+name = "corvid-browser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+description = """
+WASM-targeting typechecker entry point for the Corvid playground.
+Exposes a single `check(source: &str) -> CheckResult` function via
+wasm-bindgen. Typecheck-only: no codegen, no runtime, no connectors,
+no LLM calls. The browser playground (slice 33J7) consumes this.
+"""
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+corvid-ast = { path = "../corvid-ast" }
+corvid-syntax = { path = "../corvid-syntax" }
+corvid-resolve = { path = "../corvid-resolve" }
+corvid-types = { path = "../corvid-types" }
+corvid-guarantees = { path = "../corvid-guarantees" }
+serde = { workspace = true, features = ["derive"] }
+
+# wasm-bindgen + serde-wasm-bindgen only on wasm32. Native builds
+# still compile cleanly (the rlib target is callable from native
+# Rust tests so we can validate the pipeline locally without WASM).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -4308,6 +4308,62 @@ should follow the same pattern: assert the rendered grammar
 matches the parser, and embed the parser-tests path explicitly
 so a future move surfaces immediately.
 
+## Phase 33J7-prereq — `corvid-browser` crate (probe-first slice)
+
+The 33J7-prereq slice (a WASM-compatible typechecker entry
+point for the playground) was filed with a 2-week best-case, 6+
+week hard-case estimate. The dep-audit probe finished it in a
+single session.
+
+The pattern that scales: **before agreeing to a multi-week
+slice's scope, run the cheap probe first**. For 33J7-prereq the
+probe was 60 seconds of `cargo tree -p <each-typechecker-crate>`
+piped through grep for tokio/rayon/libloading/tempfile/etc. The
+result reframed the slice: all four typechecker crates
+(corvid-ast, corvid-syntax, corvid-resolve, corvid-types,
+corvid-guarantees) already compiled to wasm32-unknown-unknown
+with zero refactoring needed. The 6-week hard-case scenario was
+ruled out before code started.
+
+`corvid-driver` was the only blocking dep — it pulls tokio +
+hyper through the codegen-py and replay surfaces. But the
+typecheck pipeline is just 4 calls (`lex` → `parse_file` →
+`resolve` → `typecheck_with_config`, visible at
+`corvid-driver/src/pipeline/compile.rs:44-69`). Lifting those
+lines into a new crate with `wasm-bindgen` glue was a one-day
+slice, not a multi-week refactor.
+
+Three patterns to carry forward:
+
+**1. Probe before scope.** When the slice estimate has a wide
+spread (best ↔ hard differ by 3-6×), the cheapest reducer is
+the audit, not more planning. 60 seconds of `cargo tree` ruled
+out the hard case Phase 33J7-prereq feared.
+
+**2. Lift, don't refactor.** The typecheck pipeline already
+existed in `corvid-driver`. The new crate didn't refactor the
+typechecker — it copied the 4-line pipeline shape and added
+glue. Phase 35V's "design-reversal recording" pattern from
+20n-B applies in reverse here: when a brief over-estimates the
+work, document the reduction.
+
+**3. Flat wire schemas with `version` field.** The
+`CheckResult` ships a `version: "v1"` field at the root.
+Additive changes (new optional fields) don't bump it; older
+renderers safely ignore unknown fields. Non-additive changes
+(renamed / removed fields) bump it. Same pattern protobuf and
+LSP both use. Cheap insurance against schema-change
+coordination cost — write it in v1 so v2 doesn't break the
+website renderer silently.
+
+The slice also added the load-bearing
+`dangerous_call_without_approve_refuses` integration test
+asserting that the compile-refusal moat demo surfaces
+`approval.dangerous_call_requires_token` through the wire
+format. If a future change ever silently breaks that pipeline,
+the playground's marquee demo would refuse to refuse. The test
+pins that property and the CI enforces it.
+
 ## Phase 33J3 — handoff briefs as deliverables
 
 Slice 33J3 (docs site build) closed via a handoff brief at
