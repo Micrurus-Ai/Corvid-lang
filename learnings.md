@@ -4364,6 +4364,59 @@ format. If a future change ever silently breaks that pipeline,
 the playground's marquee demo would refuse to refuse. The test
 pins that property and the CI enforces it.
 
+## Phase 33J7a — multi-file typecheck (path-shape lesson)
+
+The 33J7a slice (`check_project` for the playground) was
+straightforward — an additive function on `corvid-browser` that
+walks an in-memory file map instead of `std::fs`. ~280 lines of
+new code in `multi_file.rs`, 8 new tests, no refactor. The
+slice closed in one session.
+
+One surprise worth recording: **PathBuf is the wrong abstraction
+for web-context paths.** `PathBuf::from("./policy")` followed by
+`PathBuf::join("src")` produces `src/./policy` on Linux and
+`src\./policy` on Windows — neither matches the user's
+`"src/policy.cor"` key. The corvid-resolve crate's existing
+`resolve_import_path` helper uses `PathBuf::join` and inherits
+this quirk; we couldn't reuse it. The fix was to use string
+operations directly:
+
+```rust
+fn normalize_web_path(raw: &str) -> String {
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in raw.split(|c| c == '/' || c == '\\') {
+        match seg { "" | "." => continue, ".." => { stack.pop(); }
+                    other => stack.push(other), }
+    }
+    stack.join("/")
+}
+```
+
+Web-context path discipline:
+- Always use `/` as the separator regardless of host OS.
+- Drop `.` and `""` segments silently.
+- Resolve `..` segments greedily.
+- Treat `.cor` extension as implicit (user can write `./policy`
+  or `./policy.cor`, both resolve to `src/policy.cor`).
+
+The native `corvid` CLI uses filesystem paths and `PathBuf` is
+fine there. The browser playground uses URL-shaped paths and
+needs the string-based normalization. The split happens at the
+in-memory file map boundary. Future runtime-split work (33J7b)
+should expect to repeat this pattern at every boundary between
+host-native code and browser-native code.
+
+A second small lesson: **only Type / Store / Tool / Prompt /
+Agent declarations export across files.** Plain `fn`
+declarations are file-local — `collect_public_exports` in
+`corvid-resolve` skips them. The test corpus initially used
+`public fn allowed()` for the imported function and the
+typechecker correctly refused to resolve it as a member. This
+is a pre-existing Corvid invariant; document it in
+`docs/book/06-modules.md` if it isn't already, and surface it
+in the playground's first-time-user tips when they hit a
+"unknown member" diagnostic on an imported `fn`.
+
 ## Phase 33J3 — handoff briefs as deliverables
 
 Slice 33J3 (docs site build) closed via a handoff brief at

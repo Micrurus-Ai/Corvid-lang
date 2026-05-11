@@ -3,9 +3,18 @@
 WASM-targeting typechecker entry point for the Corvid playground
 (slice 33J7 at <https://corvid-lang.org/playground>).
 
-This crate exposes one function — `check(source: &str) -> CheckResult` —
-that runs the Corvid typecheck pipeline (lex → parse → resolve →
-typecheck) and returns a flat-wire-format result that the browser
+This crate exposes two functions:
+
+- **`check(source: &str) -> CheckResult`** — single-file typecheck
+  (slice 33J7-prereq).
+- **`check_project(files: &HashMap<String, String>, entry: &str) ->
+  CheckResult`** — multi-file typecheck (slice 33J7a). Resolves
+  imports through the in-memory file map instead of the
+  filesystem, so the playground's multi-tab editor can typecheck a
+  real project shape.
+
+Both run the same Corvid pipeline (lex → parse → resolve →
+typecheck) and return a flat-wire-format result that the browser
 playground renders inline.
 
 ## What ships
@@ -50,6 +59,7 @@ interface Diagnostic {
   message: string;                   // primary message, single line
   span: BrowserSpan;
   help: string | null;               // optional fix hint
+  path: string | null;               // source file (multi-file only; null for `check`)
 }
 
 interface BrowserSpan {
@@ -64,6 +74,49 @@ The schema is intentionally flat. Multi-span and related-info fields
 can be added later as additive `Option<Vec<...>>` fields — older
 renderers safely ignore unknown fields. The `version` field signals
 non-additive changes.
+
+The `path` field is `null` for single-file `check()` results
+(the diagnostic is unambiguously about the one source) and `Some`
+for multi-file `check_project()` results, where the playground
+must route the squiggle to the right editor tab. The field was
+added in the 33J7a slice; older renderers safely ignore it.
+
+## Multi-file API (slice 33J7a)
+
+```ts
+// JS-side signature exposed via wasm-bindgen as `checkProject`:
+function checkProject(
+  files: { [path: string]: string },
+  entry: string
+): CheckResult;
+```
+
+The `files` argument maps path-keyed strings (e.g. `"src/main.cor"`)
+to source. The `entry` argument names the file to typecheck against;
+imports inside it are resolved against the same map.
+
+Resolution semantics:
+
+- Only `import "./..." as alias` (`ImportSource::Corvid`) imports
+  load. Python (`import python "..."`), remote
+  (`import "https://..."`), and package (`import "corvid://..."`)
+  imports refuse with a playground-sandbox diagnostic.
+- Paths normalize to web-style canonical form (`./` segments
+  dropped, `..` resolved, `/` separator, `.cor` extension implicit).
+  So `import "./policy"` from `src/main.cor` looks up
+  `src/policy.cor` in the file map.
+- Cycles surface as a single diagnostic at the import that closes
+  the back-edge.
+- Module not found → diagnostic anchored at the import site in
+  the importing file.
+- A file with a parse error in it still contributes its parse
+  errors to `diagnostics`, anchored to its own path.
+
+Cross-file moat property: a dangerous tool defined in module A,
+called from module B, still requires an `approve` token at the
+call site. The compile-time guarantee `approval.dangerous_call_
+requires_token` fires across file boundaries the same way it
+fires within one file.
 
 ## Building
 
