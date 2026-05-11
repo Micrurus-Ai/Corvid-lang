@@ -1,6 +1,6 @@
-# Handoff prompt — finish Phase 33 (33J4–J7 + 33L + 33M)
+# Handoff prompt — finish Phase 33 (33J3-polish + 33J4–J7 + 33J7-prereq + 33L + 33M)
 
-This brief covers the six remaining slices in Phase 33 (the
+This brief covers the remaining slices in Phase 33 (the
 launch phase). It is a single document because the slices share
 context, but each slice is independently scoped and can be
 executed by a different person or coding agent. Read the shared
@@ -24,9 +24,11 @@ header, then jump to the slice you are working on.
 
 | Slice | Title | Audience |
 |---|---|---|
+| 33J3-polish | Highlight declaration names in the docs grammar | Frontend / website developer |
 | 33J4 | Benchmark page | Frontend / website developer |
 | 33J5 | Blog shell + first launch post | Frontend + writer |
 | 33J6 | Grammar drift-gate test | Rust developer |
+| 33J7-prereq | `corvid-browser` crate — WASM-compatible typechecker | Rust developer (BLOCKS 33J7) |
 | 33J7 | WASM playground | Frontend + Rust developer |
 | 33L  | Launch materials (video + announcement drafts + review) | Dev-rel / marketing |
 | 33M  | Beta program (20 external developers + feedback triage) | Dev-rel / community |
@@ -76,6 +78,104 @@ These are the project's hardest rules. Honor them.
 6. **Truth in launch wording.** Phase 35V spent multiple
    verification slices tightening aspirational launch wording.
    Do not re-introduce claims wider than what ships.
+
+---
+
+# Slice 33J3-polish — Highlight declaration names in the docs grammar
+
+## Goal
+
+Fix a real gap in the deployed Corvid TextMate grammar at
+`docs-site/src/grammars/corvid.tmLanguage.json` (in the
+`Micrurus-Ai/corvid-website` repo): declaration names (the
+identifier after `agent`, `tool`, `prompt`, `fn`, `effect`,
+`struct`, `type`, `server`) are not highlighted. Only function
+*calls* (identifier before `(`) get `entity.name.function.corvid`.
+So in `agent refund_bot(...)`, the word `refund_bot` falls
+through to plain identifier color instead of the function-name
+color visible on call sites.
+
+Surfaced during a structural review of the deployed grammar
+after slice 33J3 shipped at <https://corvid-lang.org/docs>.
+
+## Audience
+
+Frontend / website developer working in
+`Micrurus-Ai/corvid-website`.
+
+## Concrete deliverable
+
+A single edit to
+`docs-site/src/grammars/corvid.tmLanguage.json` adding two
+rules of roughly this shape, placed **before** the generic
+keyword and identifier rules so they match first:
+
+```json
+{
+  "match": "\\b(agent|tool|prompt|fn)\\s+([a-z_][A-Za-z0-9_]*)",
+  "captures": {
+    "1": { "name": "keyword.declaration.corvid" },
+    "2": { "name": "entity.name.function.corvid" }
+  }
+},
+{
+  "match": "\\b(effect|struct|type|server)\\s+([a-z_][A-Za-z0-9_]*)",
+  "captures": {
+    "1": { "name": "keyword.declaration.corvid" },
+    "2": { "name": "entity.name.type.corvid" }
+  }
+}
+```
+
+## Acceptance criteria
+
+- [ ] Visiting
+  <https://corvid-lang.org/docs/book/03-tutorial-refund-agent>
+  shows declaration names (e.g. `handle_refund` in
+  `agent handle_refund(...)`) rendered in the same color as
+  call sites later on the same page.
+- [ ] Same fix verified on at least three pages:
+  `book/03-tutorial-refund-agent`, `book/02-quickstart`,
+  `recipes`.
+- [ ] No regression on existing scopes: keywords still
+  highlight, `approve <Action>` still highlights its action
+  name, types still highlight, `#:` doc comments still gray.
+- [ ] Build is reproducible (`pnpm build` or whatever the
+  website's build command is) and the new grammar lands in
+  the deployed bundle.
+
+## Constraints
+
+- The grammar file is the source of truth for highlighting on
+  every Corvid code block on the docs site. Test locally
+  before merging — render at least the three pages above.
+- Do not change Shiki theme or Expressive Code config in this
+  slice; this is a grammar-only fix.
+- Match the existing coding style in `corvid.tmLanguage.json`
+  (scope naming, regex format, ordering).
+
+## Out of scope
+
+- Rewriting the grammar wholesale (this is a one-rule
+  addition).
+- Highlighting effect-row member names inside `uses` clauses
+  (separate polish slice).
+- Highlighting agent annotation names like `@budget`,
+  `@retry` (separate polish slice; would need a
+  `meta.annotation.corvid` scope).
+- LSP-style features (out of scope for the docs site; see
+  `docs/guides/editor-and-lsp.md`).
+
+## Reference
+
+- The grammar file:
+  <https://github.com/Micrurus-Ai/corvid-website/blob/main/docs-site/src/grammars/corvid.tmLanguage.json>
+- The deployed docs page to verify against:
+  <https://corvid-lang.org/docs/book/03-tutorial-refund-agent>
+- TextMate grammar reference:
+  <https://macromates.com/manual/en/language_grammars>
+- Shiki / Expressive Code grammar loading:
+  <https://expressive-code.com/key-features/syntax-highlighting/>
 
 ---
 
@@ -460,7 +560,285 @@ sentinel in `crates/corvid-guarantees/src/lib.rs`).
 
 ---
 
+# Slice 33J7-prereq — `corvid-browser` crate (WASM-compatible typechecker)
+
+> **Status: BLOCKING.** The 33J7 playground cannot proceed on
+> the website side until this lands. Filed by the website team
+> on 2026-05-11 after probing `Corvid-lang/main` and finding
+> the compiler binary cannot be compiled to
+> `wasm32-unknown-unknown` as it stands.
+
+## Audience
+
+Rust developer with workspace knowledge of
+`Micrurus-Ai/Corvid-lang`. Lands in the **main repo**, not the
+website repo.
+
+## Why this exists
+
+The website team is building a browser-based cloud IDE for
+Corvid as part of slice 33J7. The IDE compiles user-written
+`.cor` source in the browser via a WASM module and renders the
+resulting diagnostics with `guarantee_id` badges that link to
+`/docs/reference/guarantees#<id>`.
+
+A probe of `Micrurus-Ai/Corvid-lang/main` on 2026-05-11 found
+three concrete blockers:
+
+1. **`crates/corvid-cli/Cargo.toml` declares only `[[bin]]`**,
+   no `[lib]` with `crate-type = ["cdylib"]`. To produce a WASM
+   module callable from JavaScript, we need either a `cdylib`
+   library target or a new wrapper crate.
+
+2. **`corvid-cli`'s dependency graph pulls in wasm-
+   incompatible crates**:
+   - `tokio` with `rt-multi-thread` — does not compile to
+     `wasm32-unknown-unknown`.
+   - `rayon` — same problem.
+   - `libloading` — needs dlopen, no browser equivalent.
+   - `tempfile` — needs filesystem.
+   - `tar` — fine on its own but ties into filesystem
+     workflows.
+
+   Pulling `corvid-cli` directly into a WASM build will fail at
+   compile time. We need a crate that depends only on the
+   typechecking surface, not on the orchestration runtime.
+
+3. **`crates/corvid-codegen-wasm` exists, but it's the wrong
+   direction.** That crate emits WASM as a *target* for
+   compiled Corvid programs (Corvid source → WASM binary). What
+   we need is the compiler *frontend* to run in the browser as
+   a WASM module so end-users can paste Corvid source into a
+   textarea and get back diagnostics. There is no precedent
+   crate for that direction yet.
+
+The crate does **not** need to run programs — only check them.
+Compile-refusal (the moat demo) is a typecheck-time signal, not
+a runtime signal. Running agents and calling LLM providers is
+explicitly out of scope for the WASM build; that happens
+locally after `curl install`.
+
+## Concrete deliverable
+
+A new crate, suggested name `corvid-browser` (rename to taste
+— `corvid-wasm-check`, `corvid-playground-wasm`, etc.):
+
+```
+crates/corvid-browser/
+├── Cargo.toml          # cdylib, dep set below
+├── src/
+│   └── lib.rs          # exposes pub fn check(source: &str) -> CheckResult
+└── README.md
+```
+
+**`Cargo.toml`** depends only on the typechecking surface —
+concretely (subject to audit):
+
+- `corvid-syntax` (parser, lexer)
+- `corvid-ast`
+- `corvid-resolve`
+- `corvid-types` (effect calculus)
+- `corvid-guarantees`
+- `serde` + `serde_json` for diagnostic serialization
+- `wasm-bindgen` for the JS binding layer
+
+**Critical:** before adding a dep here, check that its
+transitive graph compiles to `wasm32-unknown-unknown`. The
+typechecker may have tokio woven through it in ways that aren't
+visible from API names — audit and either gate problematic
+features with `cfg(target_arch = "wasm32")` or extract pure-
+Rust subsets.
+
+**`src/lib.rs`** exposes a single entry point:
+
+```rust
+use serde::Serialize;
+use wasm_bindgen::prelude::*;
+
+#[derive(Serialize)]
+pub struct Diagnostic {
+    pub guarantee_id: String,    // e.g. "approval.dangerous_call_requires_token"
+    pub severity: String,        // "error" | "warning" | "info"
+    pub message: String,         // primary message
+    pub span: Span,              // location
+    pub help: Option<String>,    // suggested fix, if any
+}
+
+#[derive(Serialize)]
+pub struct Span {
+    pub start_line: u32,         // 1-indexed
+    pub start_col: u32,          // 1-indexed
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
+#[derive(Serialize)]
+pub struct CheckResult {
+    pub diagnostics: Vec<Diagnostic>,
+    pub ok: bool,                // true if no errors (warnings OK)
+}
+
+#[wasm_bindgen]
+pub fn check(source: &str) -> JsValue {
+    let result: CheckResult = run_typecheck(source);
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+}
+```
+
+The exact serialization shape is negotiable — propose
+something cleaner if you see one. The key requirement: the
+website renderer can map each diagnostic to a `guarantee_id`
+for the docs link, a message for inline display, and a span for
+editor squiggles.
+
+## Suggested approach
+
+1. **Audit the typechecker's dep graph first.** Run
+   `cargo tree -p corvid-types`, `corvid-resolve`,
+   `corvid-guarantees`, etc. Identify any tokio / rayon /
+   filesystem pulls. For each: `cfg(not(target_arch = "wasm32"))`
+   gate, refactor, or pull the offending sub-feature into a
+   different crate.
+
+2. **Stand up the empty `corvid-browser` crate** with a stub
+   `check()` that returns an empty diagnostics array. Verify it
+   builds clean:
+
+   ```sh
+   cargo build -p corvid-browser --target wasm32-unknown-unknown --release
+   ```
+
+   This proves the dep graph is clean before any real logic
+   lands.
+
+3. **Wire the real typecheck path.** From `check(source)`, call
+   into the same pipeline `corvid check src/main.cor` uses for
+   typechecking, but **stop before code generation, runtime,
+   connectors.** The typecheck pipeline exists and is well-
+   tested; this slice exposes it through a thin browser-
+   targeting wrapper.
+
+4. **Map internal diagnostic types to the `Diagnostic` shape.**
+   Existing internal diagnostics carry richer info (multi-span
+   notes, fix-it suggestions). For v1 of the playground, flatten
+   to: one primary span, one message, optional help. Future
+   versions can extend.
+
+5. **Run-size budget: WASM module ≤8 MB gzipped on the wire**
+   (per the 33J7 brief). After the first build, run
+   `wasm-bindgen --out-dir target/wasm-pack
+   target/wasm32-unknown-unknown/release/corvid_browser.wasm`
+   and check gzipped size. If over budget:
+   - `wasm-opt -Oz` (binaryen) — usually 20–40% reduction.
+   - Strip unused codegen backends (the browser-check use case
+     does not need the Python or Cranelift code generators).
+   - Audit dep graph for surprise pull-ins.
+
+6. **Hook into CI.** Add a build step in the Corvid-lang
+   workflow that compiles the WASM artifact on every push to
+   `main`. Publish it as a release asset, or trigger a
+   `repository_dispatch` to `Micrurus-Ai/corvid-website` so the
+   website CI re-pulls and re-deploys. The website-side
+   dispatch listener `corvid-lang-wasm-changed` will be added
+   by the website team once the crate ships.
+
+## Acceptance criteria
+
+- [ ] `cargo build -p corvid-browser --target
+      wasm32-unknown-unknown --release` completes with no
+      errors.
+- [ ] `wasm-bindgen` postprocessing produces a JS-importable
+      module plus a `.wasm` artifact.
+- [ ] Gzipped wire size of the `.wasm` artifact is ≤8 MB.
+- [ ] Calling `check("agent foo(t: Ticket) -> Decision uses
+      bar: return baz()")` (a compile-refusal example) from JS
+      returns a `CheckResult` whose `diagnostics[0].guarantee_id`
+      matches what the native compiler reports for the same
+      source.
+- [ ] Calling `check("# valid corvid")` (a trivial valid
+      program) returns `{ ok: true, diagnostics: [] }`.
+- [ ] At least one accepted-input and one rejected-input test
+      under `crates/corvid-browser/tests/`.
+- [ ] CI workflow at `.github/workflows/build-wasm.yml` (or
+      added to existing CI) produces the artifact on every push
+      to `main`.
+
+## Constraints
+
+- Match the workspace conventions documented in `CLAUDE.md`
+  (file-responsibility rubric, invention shipping contract,
+  pre-phase chat before code).
+- This is a code-touching slice. Phase 35V's pattern 5
+  ("cross-component coupling discovered at verification time")
+  applies: any time you split a workspace boundary, validators
+  on the other side (registry coverage, signed-claim coverage,
+  contract-list output) may need alignment. Run
+  `cargo test --workspace` before opening the PR.
+- The diagnostic schema is load-bearing — once the website
+  consumes it, schema changes require a coordinated rollout.
+  Document it clearly in the crate README.
+
+## Out of scope (explicit non-promises for this slice)
+
+- **Runtime execution.** No `corvid run`, no agent execution.
+  Typecheck only.
+- **LLM provider calls.** Not even via a stub. The playground's
+  user-supplied API key path runs directly from the browser to
+  the provider; the WASM never sees a key.
+- **Connector OAuth flows** (Gmail, Slack, MS365). Out of
+  scope.
+- **Multi-file resolution across an entire `corvid.toml`
+  project.** v1 of the playground supports single-file
+  typechecking. Multi-file is a Phase 2 enhancement; we'll spec
+  it separately if there's demand.
+- **Code generation.** The WASM module does not need to invoke
+  Cranelift, the Python codegen, or any backend. Reject
+  programs at typecheck if they reference things the
+  typecheck-only build can't see.
+- **A formal proof that `corvid-browser` matches `corvid check`
+  byte-for-byte.** Best-effort parity is fine; surface
+  differences as issues.
+
+## Estimated effort
+
+- Best case: **2 weeks** if the typechecker is already cleanly
+  separable from runtime concerns.
+- Typical case: **3–4 weeks** if the dep audit reveals tokio /
+  runtime entanglements that need refactoring.
+- Hard case: **6+ weeks** if the typechecker uses runtime
+  primitives we didn't anticipate.
+
+## Coordination
+
+When the artifact builds:
+
+1. Comment on the tracking issue (or PR) with the WASM module
+   size and a sample `CheckResult` JSON for the compile-refusal
+   example. The website team uses that to wire the renderer.
+2. The website team adds the `corvid-lang-wasm-changed`
+   `repository_dispatch` listener on their side, plus the CI
+   step that clones Corvid-lang and fetches the artifact.
+3. Either side can iterate on the diagnostic schema — propose
+   changes via PR comments on the tracking issue.
+
+## Related
+
+- Slice 33J7 below (the consumer of this crate).
+- Original WASM target work: phase 20n-B in
+  `docs/phases/phase-20n-open-gap-implementation.md` (the
+  `corvid-codegen-wasm` crate — the wrong direction for this
+  slice, but useful context).
+- Effect spec: `docs/internals/effect-spec/`.
+- Diagnostic format reference: `docs/reference/guarantees.md`.
+
+---
+
 # Slice 33J7 — WASM playground
+
+> **Hard dependency on 33J7-prereq above.** The website-side
+> work below cannot proceed until the `corvid-browser` crate
+> ships a `wasm32-unknown-unknown` artifact with the documented
+> diagnostic schema.
 
 ## Goal
 
