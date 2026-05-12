@@ -1,8 +1,10 @@
 //! Shared provenance-chain types.
 //!
-//! These live in `corvid-runtime` so the interpreter, native FFI
-//! boundary, and future host-mint/query slices all speak the same
-//! provenance shape.
+//! These live in `corvid-runtime-core` so the interpreter, native FFI
+//! boundary, browser playground, and future host-mint/query slices
+//! all speak the same provenance shape across the wasm/native split.
+//! `corvid-runtime` re-exports them so existing native consumers see
+//! no API change.
 
 use serde::{Deserialize, Serialize};
 

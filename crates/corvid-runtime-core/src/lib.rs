@@ -26,8 +26,10 @@
 #![deny(unsafe_code)]
 
 pub mod host;
+pub mod provenance;
 
 pub use host::{
     HostBridge, HostErrorKind, HostRequest, HostRequestKind, HostResponse, HostResponseKind,
     LlmMessage, SchemaVersion, TokenUsage,
 };
+pub use provenance::{GroundedValue, ProvenanceChain, ProvenanceEntry, ProvenanceKind};

@@ -75,7 +75,14 @@ pub mod otel_export;
 pub mod otel_sdk_export;
 pub mod otel_schema;
 pub mod prompt_cache;
-pub mod provenance;
+/// Re-export shim. The provenance types moved to `corvid-runtime-core`
+/// in slice 33J7b-3a so the wasm-clean playground can mint and verify
+/// `GroundedValue`s without pulling the native runtime's tokio /
+/// reqwest / postgres surface. Native consumers see no change:
+/// `corvid_runtime::provenance::GroundedValue` continues to resolve.
+pub mod provenance {
+    pub use corvid_runtime_core::provenance::*;
+}
 #[cfg(feature = "python")]
 pub mod python_ffi;
 pub mod queue;
@@ -217,7 +224,9 @@ pub use otel_schema::{
     lineage_to_otel_span, required_otel_metrics, OtelMetricMapping, OtelSpanMapping,
     OTEL_SCHEMA_VERSION,
 };
-pub use provenance::{GroundedValue, ProvenanceChain, ProvenanceEntry, ProvenanceKind};
+pub use corvid_runtime_core::provenance::{
+    GroundedValue, ProvenanceChain, ProvenanceEntry, ProvenanceKind,
+};
 pub use queue::{DurableQueueRuntime, QueueJob, QueueJobStatus, QueueRuntime};
 pub use rag::{
     chunk_document, chunk_document_with_config, document_from_text, load_html, load_markdown,

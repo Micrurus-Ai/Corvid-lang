@@ -55,6 +55,10 @@ inventory = { workspace = true }
 corvid-trace-schema = { workspace = true }
 corvid-abi = { workspace = true }
 corvid-guarantees = { workspace = true }
+# Wasm-clean core. Native runtime re-exports core types so existing
+# `use corvid_runtime::Foo` paths keep resolving for CLI/REPL/test
+# consumers (D6 in docs/meta/runtime-split-design.md).
+corvid-runtime-core = { workspace = true }
 libloading = "0.8"
 slotmap = "1"
 

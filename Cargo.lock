@@ -913,6 +913,7 @@ dependencies = [
  "corvid-guarantees",
  "corvid-ir",
  "corvid-resolve",
+ "corvid-runtime-core",
  "corvid-syntax",
  "corvid-trace-schema",
  "corvid-types",
