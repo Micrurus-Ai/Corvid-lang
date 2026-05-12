@@ -20,3 +20,4 @@ crate-type = ["rlib"]
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+corvid-trace-schema = { workspace = true }

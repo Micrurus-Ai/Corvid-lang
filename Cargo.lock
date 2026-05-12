@@ -949,6 +949,7 @@ dependencies = [
 name = "corvid-runtime-core"
 version = "0.0.1"
 dependencies = [
+ "corvid-trace-schema",
  "serde",
  "serde_json",
 ]

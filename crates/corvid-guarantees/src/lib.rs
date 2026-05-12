@@ -513,7 +513,7 @@ mod tests {
     /// anchor (add `pub const GUARANTEE_ID_<NAME>: &str = "<id>"`
     /// near the enforcement code, with a doc comment, mirroring
     /// `ReplayDivergence::guarantee_id` in
-    /// `corvid-runtime/src/replay/diverge.rs`).
+    /// `corvid-runtime-core/src/replay_divergence.rs`).
     ///
     /// Established 2026-05-08 by 35V-T1-Drift after the draft of
     /// this test surfaced 18 unwired ids (commits A-E added their

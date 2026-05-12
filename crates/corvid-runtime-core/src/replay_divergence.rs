@@ -1,3 +1,19 @@
+//! Replay-divergence error type.
+//!
+//! Surfaces the precise mismatch when a replay run sees an event
+//! shape different from the recorded trace. The compile-time half
+//! of the `replay.deterministic_pure_path` guarantee is enforced
+//! by `TypeErrorKind::NonReplayableCall` /
+//! `TypeErrorKind::NonDeterministicCall` in `corvid-types`; this
+//! runtime divergence catches the cases the compile-time check
+//! could not statically prove.
+//!
+//! Lives in `corvid-runtime-core` so the browser playground's
+//! future replay path (33J7b-3g) can surface divergence diagnostics
+//! without depending on the native runtime's tokio / DB surface.
+//! `corvid-runtime` re-exports through its `replay` module so
+//! existing native consumers see no API change.
+
 use corvid_trace_schema::TraceEvent;
 
 #[derive(Debug, Clone)]

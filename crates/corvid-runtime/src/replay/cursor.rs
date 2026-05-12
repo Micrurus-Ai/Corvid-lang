@@ -1,4 +1,4 @@
-use super::diverge::ReplayDivergence;
+use super::ReplayDivergence;
 use super::substitute::is_dispatch_metadata;
 use corvid_trace_schema::TraceEvent;
 

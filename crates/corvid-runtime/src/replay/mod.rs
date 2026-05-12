@@ -1,7 +1,6 @@
 mod approval_outcome;
 mod cursor;
 mod differential;
-mod diverge;
 mod event_classify;
 mod mutation;
 mod mutation_session;
@@ -31,7 +30,12 @@ use cursor::TraceCursor;
 pub use differential::{
     LlmDivergence, ReplayDifferentialReport, RunCompletionDivergence, SubstitutionDivergence,
 };
-pub use diverge::ReplayDivergence;
+// `ReplayDivergence` moved to `corvid-runtime-core` in slice
+// 33J7b-3d so the wasm-clean errors module can reference it
+// without dragging the rest of replay::* into core. Re-exported
+// here so existing `corvid_runtime::replay::ReplayDivergence`
+// paths keep resolving (D6 contract).
+pub use corvid_runtime_core::replay_divergence::ReplayDivergence;
 pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;

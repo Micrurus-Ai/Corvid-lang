@@ -49,7 +49,14 @@ pub mod db;
 pub mod effect_filter;
 pub mod ensemble;
 pub mod env;
-pub mod errors;
+/// Re-export shim. `RuntimeError` and the `errors` module moved to
+/// `corvid-runtime-core` in slice 33J7b-3d so wasm-clean callers
+/// can surface the same error vocabulary as native CLI users. The
+/// `crate::errors::RuntimeError` path keeps resolving for every
+/// internal call site.
+pub mod errors {
+    pub use corvid_runtime_core::errors::*;
+}
 pub mod ffi_bridge;
 pub mod grounded_handles;
 pub mod human;
@@ -175,7 +182,7 @@ pub use db::{
 pub use effect_filter::CorvidFindAgentsStatus;
 pub use ensemble::{majority_vote, weighted_vote, EnsembleVoteOutcome};
 pub use env::{find_dotenv_walking, load_dotenv, load_dotenv_walking};
-pub use errors::RuntimeError;
+pub use corvid_runtime_core::errors::RuntimeError;
 pub use http::{
     record_exchange, request_fingerprint, HttpClient, HttpHeader, HttpRequest, HttpResponse,
     HttpRetryPolicy, RecordedHttpExchange,

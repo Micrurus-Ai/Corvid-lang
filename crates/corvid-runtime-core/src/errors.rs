@@ -1,4 +1,4 @@
-//! Runtime errors raised by `corvid-runtime`.
+//! Runtime errors raised by Corvid's deterministic core.
 //!
 //! Distinct from `corvid-vm::InterpError` — those are interpreter-level
 //! (type mismatch, division by zero). These cover the runtime boundary:
@@ -7,8 +7,14 @@
 //! The interpreter wraps `RuntimeError` into `InterpError::Runtime(...)`
 //! when it bubbles up to user code; downstream renderers can pattern-match
 //! either form.
+//!
+//! Lives in `corvid-runtime-core` so wasm-clean callers (the browser
+//! playground, future agent-execution paths) can surface the same
+//! error vocabulary as native CLI users. `corvid-runtime` re-exports
+//! through its `errors` module so existing native consumers see no API
+//! change.
 
-use crate::replay::ReplayDivergence;
+use crate::replay_divergence::ReplayDivergence;
 use std::fmt;
 use std::path::PathBuf;
 

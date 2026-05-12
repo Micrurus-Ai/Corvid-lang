@@ -19,7 +19,7 @@
 use corvid_trace_schema::TraceEvent;
 
 use super::cursor::TraceCursor;
-use super::diverge::ReplayDivergence;
+use super::ReplayDivergence;
 use super::{ReplayApprovalDecision, ReplayApprovalOutcome};
 use crate::errors::RuntimeError;
 
