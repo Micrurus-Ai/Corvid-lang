@@ -25,10 +25,14 @@
 
 #![deny(unsafe_code)]
 
+pub mod approval_card;
+pub mod approval_request;
 pub mod approval_token;
 pub mod host;
 pub mod provenance;
 
+pub use approval_card::{ApprovalCard, ApprovalCardArgument, ApprovalRisk};
+pub use approval_request::{ApprovalDecision, ApprovalRequest};
 pub use approval_token::{ApprovalToken, ApprovalTokenScope};
 pub use host::{
     HostBridge, HostErrorKind, HostRequest, HostRequestKind, HostResponse, HostResponseKind,

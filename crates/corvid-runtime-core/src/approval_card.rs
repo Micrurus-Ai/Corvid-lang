@@ -12,10 +12,15 @@
 //! all of this together; `to_html` is the rendering path used
 //! by the web approver. The remaining `fn` helpers live here
 //! because they're consumed only by the card builders.
+//!
+//! Lives in `corvid-runtime-core` so the browser playground can
+//! render approval cards without depending on the native runtime's
+//! tokio / DB / OAuth surface. `corvid-runtime` re-exports through
+//! `approvals` so existing native consumers see no API change.
 
 use serde::{Deserialize, Serialize};
 
-use super::ApprovalRequest;
+use crate::approval_request::ApprovalRequest;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApprovalCard {
