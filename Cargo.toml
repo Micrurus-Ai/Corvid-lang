@@ -17,6 +17,7 @@ members = [
     "crates/corvid-codegen-py",
     "crates/corvid-codegen-cl",
     "crates/corvid-codegen-wasm",
+    "crates/corvid-runtime-core",
     "crates/corvid-runtime",
     "crates/corvid-connector-runtime",
     "crates/corvid-macros",
@@ -89,6 +90,7 @@ corvid-repl     = { path = "crates/corvid-repl" }
 corvid-codegen-py = { path = "crates/corvid-codegen-py" }
 corvid-codegen-cl = { path = "crates/corvid-codegen-cl" }
 corvid-codegen-wasm = { path = "crates/corvid-codegen-wasm" }
+corvid-runtime-core = { path = "crates/corvid-runtime-core" }
 corvid-runtime  = { path = "crates/corvid-runtime" }
 corvid-connector-runtime = { path = "crates/corvid-connector-runtime" }
 corvid-macros   = { path = "crates/corvid-macros" }

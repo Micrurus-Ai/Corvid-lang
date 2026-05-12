@@ -1,0 +1,22 @@
+[package]
+name = "corvid-runtime-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wasm-clean, IO-free core of the Corvid agent runtime: deterministic state machine, replay engine, suspend/resume host bridge, mock+replay connectors, canonical receipt-bytes derivation. Native capabilities live in corvid-runtime-host."
+
+# Library only. Explicitly NOT a cdylib: this crate is consumed as a Rust
+# rlib by both corvid-runtime-host (native) and corvid-browser (wasm).
+# JS-callable cdylib glue lives in corvid-browser, never here.
+[lib]
+crate-type = ["rlib"]
+
+# Slice 33J7b-1 is an empty scaffold. Deps land in 33J7b-2 (HostBridge
+# trait) and 33J7b-3 (deterministic state move). The allowed dep ceiling
+# is documented in docs/meta/runtime-split-design.md and enforced by the
+# wasm32-unknown-unknown build gate: corvid-ast, corvid-ir,
+# corvid-resolve, corvid-types, corvid-guarantees, corvid-trace-schema,
+# corvid-prompt-format, serde, serde_json. No tokio, postgres, reqwest,
+# opentelemetry, libloading, or hyper - if any of those creep in, the
+# wasm32 build fails and the slice does not land.
+[dependencies]
