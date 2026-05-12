@@ -12,6 +12,12 @@
 //! issuer, so token forgery is bounded by Rust's memory safety
 //! model. Cross-process token transfer would require a signed
 //! envelope; that's filed as a future invention slice.
+//!
+//! Lives in `corvid-runtime-core` so the browser playground can
+//! issue + validate approval tokens without depending on the
+//! native runtime's tokio / DB / OAuth surface. `corvid-runtime`
+//! re-exports through `approvals` so existing native consumers
+//! see no API change.
 
 use serde::{Deserialize, Serialize};
 
@@ -108,4 +114,81 @@ fn largest_numeric_arg(args: &[serde_json::Value]) -> Option<f64> {
                 .partial_cmp(&right.abs())
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn approval_token_scopes_fail_closed() {
+        let mut token = ApprovalToken {
+            token_id: "apr_test".into(),
+            label: "ChargeCard".into(),
+            args: vec![json!("ord_1"), json!(100.0)],
+            scope: ApprovalTokenScope::AmountLimited { max_amount: 100.0 },
+            issued_at_ms: 10,
+            expires_at_ms: 1000,
+            uses_remaining: 1,
+        };
+        assert!(token
+            .validate("ChargeCard", &[json!("ord_1"), json!(101.0)], 20, None)
+            .is_err());
+        assert_eq!(token.uses_remaining, 1);
+
+        token
+            .validate("ChargeCard", &[json!("ord_1"), json!(100.0)], 20, None)
+            .unwrap();
+        assert_eq!(token.uses_remaining, 0);
+        assert!(token
+            .validate("ChargeCard", &[json!("ord_1"), json!(100.0)], 20, None)
+            .is_err());
+    }
+
+    #[test]
+    fn approval_token_session_time_and_argument_scopes_are_enforced() {
+        let mut session_token = ApprovalToken {
+            token_id: "apr_session".into(),
+            label: "SendEmail".into(),
+            args: vec![json!("user@example.com")],
+            scope: ApprovalTokenScope::Session {
+                session_id: "s-1".into(),
+            },
+            issued_at_ms: 10,
+            expires_at_ms: 1000,
+            uses_remaining: 1,
+        };
+        assert!(session_token
+            .validate("SendEmail", &[json!("user@example.com")], 20, Some("s-2"))
+            .is_err());
+
+        let mut argument_token = ApprovalToken {
+            token_id: "apr_args".into(),
+            label: "SendEmail".into(),
+            args: vec![json!("user@example.com")],
+            scope: ApprovalTokenScope::ArgumentBound {
+                args: vec![json!("user@example.com")],
+            },
+            issued_at_ms: 10,
+            expires_at_ms: 1000,
+            uses_remaining: 1,
+        };
+        assert!(argument_token
+            .validate("SendEmail", &[json!("other@example.com")], 20, None)
+            .is_err());
+
+        let mut time_token = ApprovalToken {
+            token_id: "apr_time".into(),
+            label: "SendEmail".into(),
+            args: vec![json!("user@example.com")],
+            scope: ApprovalTokenScope::TimeLimited { expires_at_ms: 30 },
+            issued_at_ms: 10,
+            expires_at_ms: 1000,
+            uses_remaining: 1,
+        };
+        assert!(time_token
+            .validate("SendEmail", &[json!("user@example.com")], 31, None)
+            .is_err());
+    }
 }

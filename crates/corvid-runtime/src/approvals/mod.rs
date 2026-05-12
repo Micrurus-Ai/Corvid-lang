@@ -19,10 +19,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod approver_impls;
 mod card;
-mod token;
 pub use approver_impls::{ProgrammaticApprover, StdinApprover};
 pub use card::{ApprovalCard, ApprovalCardArgument, ApprovalRisk};
-pub use token::{ApprovalToken, ApprovalTokenScope};
+// `ApprovalToken` + `ApprovalTokenScope` moved to `corvid-runtime-core`
+// in slice 33J7b-3b. Re-exported here so existing
+// `corvid_runtime::approvals::ApprovalToken` paths keep resolving for
+// native consumers (D6 in docs/meta/runtime-split-design.md).
+pub use corvid_runtime_core::approval_token::{ApprovalToken, ApprovalTokenScope};
 
 pub(super) static BENCH_APPROVAL_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -146,74 +149,9 @@ mod tests {
         assert!(html.contains("&lt;redacted&gt;"));
     }
 
-    #[test]
-    fn approval_token_scopes_fail_closed() {
-        let mut token = ApprovalToken {
-            token_id: "apr_test".into(),
-            label: "ChargeCard".into(),
-            args: vec![json!("ord_1"), json!(100.0)],
-            scope: ApprovalTokenScope::AmountLimited { max_amount: 100.0 },
-            issued_at_ms: 10,
-            expires_at_ms: 1000,
-            uses_remaining: 1,
-        };
-        assert!(token
-            .validate("ChargeCard", &[json!("ord_1"), json!(101.0)], 20, None)
-            .is_err());
-        assert_eq!(token.uses_remaining, 1);
-
-        token
-            .validate("ChargeCard", &[json!("ord_1"), json!(100.0)], 20, None)
-            .unwrap();
-        assert_eq!(token.uses_remaining, 0);
-        assert!(token
-            .validate("ChargeCard", &[json!("ord_1"), json!(100.0)], 20, None)
-            .is_err());
-    }
-
-    #[test]
-    fn approval_token_session_time_and_argument_scopes_are_enforced() {
-        let mut session_token = ApprovalToken {
-            token_id: "apr_session".into(),
-            label: "SendEmail".into(),
-            args: vec![json!("user@example.com")],
-            scope: ApprovalTokenScope::Session {
-                session_id: "s-1".into(),
-            },
-            issued_at_ms: 10,
-            expires_at_ms: 1000,
-            uses_remaining: 1,
-        };
-        assert!(session_token
-            .validate("SendEmail", &[json!("user@example.com")], 20, Some("s-2"))
-            .is_err());
-
-        let mut argument_token = ApprovalToken {
-            token_id: "apr_args".into(),
-            label: "SendEmail".into(),
-            args: vec![json!("user@example.com")],
-            scope: ApprovalTokenScope::ArgumentBound {
-                args: vec![json!("user@example.com")],
-            },
-            issued_at_ms: 10,
-            expires_at_ms: 1000,
-            uses_remaining: 1,
-        };
-        assert!(argument_token
-            .validate("SendEmail", &[json!("other@example.com")], 20, None)
-            .is_err());
-
-        let mut time_token = ApprovalToken {
-            token_id: "apr_time".into(),
-            label: "SendEmail".into(),
-            args: vec![json!("user@example.com")],
-            scope: ApprovalTokenScope::TimeLimited { expires_at_ms: 30 },
-            issued_at_ms: 10,
-            expires_at_ms: 1000,
-            uses_remaining: 1,
-        };
-        assert!(time_token
-            .validate("SendEmail", &[json!("user@example.com")], 31, None)
-            .is_err());
-    }
+    // The two `approval_token_*` tests that previously lived here
+    // moved with the type to `corvid-runtime-core::approval_token`'s
+    // own `#[cfg(test)] mod tests` in slice 33J7b-3b. Co-located unit
+    // tests follow their type per CLAUDE.md's file-responsibility
+    // carve-out 1.
 }
