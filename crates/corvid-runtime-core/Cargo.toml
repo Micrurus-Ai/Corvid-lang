@@ -21,3 +21,8 @@ crate-type = ["rlib"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 corvid-trace-schema = { workspace = true }
+# Pure-Rust futures combinators. Used for `BoxFuture` in the
+# `Approver` trait and for executor-free Future composition. The
+# crate's default features compile to wasm32 cleanly; the brief's
+# allowed-dep ceiling permits "pure-Rust algorithmic deps".
+futures = "0.3"

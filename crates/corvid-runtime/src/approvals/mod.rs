@@ -13,25 +13,27 @@
 //! story. Tests that need it construct `ProgrammaticApprover::always_yes`
 //! explicitly so the intent is on the page.
 
-use crate::errors::RuntimeError;
-use futures::future::BoxFuture;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod approver_impls;
 pub use approver_impls::{ProgrammaticApprover, StdinApprover};
-// Approval data types moved to `corvid-runtime-core` across slices
-// 33J7b-3b (token) and 33J7b-3c (card + request + decision). Re-
-// exported here so existing `corvid_runtime::approvals::Foo` paths
-// keep resolving for native consumers (D6 in
-// docs/meta/runtime-split-design.md). The `Approver` trait +
-// `ProgrammaticApprover` / `StdinApprover` impls stay in this crate
-// until slice 33J7b-3d untangles `RuntimeError` from `replay::
-// ReplayDivergence` (the trait's error type currently requires it).
+// Approval data types and the `Approver` trait moved to
+// `corvid-runtime-core` across slices 33J7b-3b (token), 33J7b-3c
+// (card + request + decision), and 33J7b-3e (trait). Re-exported
+// here so existing `corvid_runtime::approvals::Foo` paths keep
+// resolving for native consumers (D6 in
+// docs/meta/runtime-split-design.md). The `ProgrammaticApprover` /
+// `StdinApprover` impls stay in this crate because they pull
+// host-only deps (tokio for stdin async, `std::thread::sleep` for
+// bench-latency injection); the trait being core-resident is what
+// lets future browser-native approver impls satisfy the same
+// contract.
 pub use corvid_runtime_core::approval_card::{
     ApprovalCard, ApprovalCardArgument, ApprovalRisk,
 };
 pub use corvid_runtime_core::approval_request::{ApprovalDecision, ApprovalRequest};
 pub use corvid_runtime_core::approval_token::{ApprovalToken, ApprovalTokenScope};
+pub use corvid_runtime_core::approver::Approver;
 
 pub(super) static BENCH_APPROVAL_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -58,14 +60,6 @@ pub(super) fn emit_wait_profile(kind: &str, name: &str, nominal_ms: u64, actual_
 }
 
 
-
-/// Trait every approver implements.
-pub trait Approver: Send + Sync {
-    fn approve<'a>(
-        &'a self,
-        req: &'a ApprovalRequest,
-    ) -> BoxFuture<'a, Result<ApprovalDecision, RuntimeError>>;
-}
 
 #[cfg(test)]
 mod tests {

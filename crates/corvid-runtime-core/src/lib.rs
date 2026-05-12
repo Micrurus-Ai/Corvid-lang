@@ -28,6 +28,7 @@
 pub mod approval_card;
 pub mod approval_request;
 pub mod approval_token;
+pub mod approver;
 pub mod errors;
 pub mod host;
 pub mod provenance;
@@ -36,6 +37,7 @@ pub mod replay_divergence;
 pub use approval_card::{ApprovalCard, ApprovalCardArgument, ApprovalRisk};
 pub use approval_request::{ApprovalDecision, ApprovalRequest};
 pub use approval_token::{ApprovalToken, ApprovalTokenScope};
+pub use approver::Approver;
 pub use errors::RuntimeError;
 pub use host::{
     HostBridge, HostErrorKind, HostRequest, HostRequestKind, HostResponse, HostResponseKind,
