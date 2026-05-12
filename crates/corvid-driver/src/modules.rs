@@ -167,12 +167,6 @@ impl ImportTarget {
         }
     }
 
-    fn display(&self) -> String {
-        match self {
-            Self::Local(path) => path.display().to_string(),
-            Self::Remote { url, .. } => url.clone(),
-        }
-    }
 }
 
 pub fn inspect_import_semantics(root_path: &Path) -> Result<Vec<NamedModuleSemanticSummary>> {

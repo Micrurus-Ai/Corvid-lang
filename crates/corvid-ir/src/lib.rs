@@ -5,8 +5,6 @@
 //!
 //! See `ARCHITECTURE.md` §4.
 
-#![allow(dead_code)]
-
 mod imports;
 pub mod lower;
 pub mod types;

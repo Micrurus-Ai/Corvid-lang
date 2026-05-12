@@ -474,9 +474,6 @@ impl SeededRng {
         lo + u * (hi - lo)
     }
 
-    fn nonneg_float_capped(&mut self, hi: f64) -> f64 {
-        self.float_in_range(0.0, hi)
-    }
 }
 
 #[cfg(test)]

@@ -138,13 +138,6 @@ impl<'a> Parser<'a> {
         tok
     }
 
-    fn at_end(&self) -> bool {
-        matches!(
-            self.peek(),
-            TokKind::Eof | TokKind::Newline | TokKind::Indent | TokKind::Dedent
-        )
-    }
-
     fn expect_ident(&mut self) -> Result<(String, Span), ParseError> {
         let span = self.peek_span();
         match self.peek().clone() {

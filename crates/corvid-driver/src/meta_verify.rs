@@ -325,7 +325,11 @@ mod tests {
         let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         dir.pop(); // crates/
         dir.pop(); // repo root
-        dir.join("docs").join("effects-spec").join("counterexamples").join("composition")
+        dir.join("docs")
+            .join("internals")
+            .join("effect-spec")
+            .join("counterexamples")
+            .join("composition")
     }
 
     #[test]

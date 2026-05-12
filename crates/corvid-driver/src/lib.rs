@@ -5,8 +5,6 @@
 //!
 //! See `ARCHITECTURE.md` §4.
 
-#![allow(dead_code)]
-
 pub mod add_dimension;
 pub mod adversarial;
 pub mod approver;

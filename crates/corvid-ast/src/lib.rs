@@ -6,8 +6,6 @@
 //!
 //! See `ARCHITECTURE.md` §5 for the high-level design.
 
-#![allow(dead_code)]
-
 pub mod decl;
 pub mod effect;
 pub mod expr;

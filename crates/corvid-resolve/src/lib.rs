@@ -6,8 +6,6 @@
 //!
 //! See `ARCHITECTURE.md` §4.
 
-#![allow(dead_code)]
-
 pub mod depgraph;
 pub mod errors;
 pub mod modules;

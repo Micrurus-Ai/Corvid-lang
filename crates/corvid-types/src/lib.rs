@@ -7,8 +7,6 @@
 //!
 //! See `ARCHITECTURE.md` §5–§6.
 
-#![allow(dead_code)]
-
 mod approval_reachability;
 pub mod checker;
 pub mod config;

@@ -112,41 +112,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn parse_constraints(&mut self) -> Result<Vec<EffectConstraint>, ParseError> {
-        let mut constraints = Vec::new();
-        while matches!(self.peek(), TokKind::At) {
-            let start = self.peek_span();
-            self.bump(); // @
-            let (name, name_span) = self.expect_ident()?;
-            if name == "budget" && matches!(self.peek(), TokKind::LParen) {
-                constraints.extend(self.parse_budget_constraints(start, name_span)?);
-                self.expect_newline()?;
-                continue;
-            }
-            let value = if matches!(self.peek(), TokKind::LParen) {
-                self.bump();
-                if matches!(self.peek(), TokKind::RParen) {
-                    self.bump();
-                    None
-                } else {
-                    let value = self.parse_dimension_value()?;
-                    self.expect(TokKind::RParen, "`)` after constraint value")?;
-                    Some(value)
-                }
-            } else {
-                None
-            };
-            let end = self.prev_span();
-            self.expect_newline()?;
-            constraints.push(EffectConstraint {
-                dimension: Ident::new(name, name_span),
-                value,
-                span: start.merge(end),
-            });
-        }
-        Ok(constraints)
-    }
-
     /// Parse the pre-agent annotation stream as a mix of compile-
     /// time agent attributes (e.g. `@replayable`) and dimensional
     /// effect constraints (e.g. `@cost(<=$1)`, `@budget($0.10)`).

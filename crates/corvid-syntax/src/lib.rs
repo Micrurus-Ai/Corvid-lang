@@ -2,8 +2,6 @@
 //!
 //! Produces AST from source text. See `ARCHITECTURE.md` §4.
 
-#![allow(dead_code)]
-
 pub mod errors;
 pub mod lexer;
 pub mod parser;

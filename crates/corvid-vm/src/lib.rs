@@ -16,7 +16,6 @@
 //! See `ARCHITECTURE.md` §4 (pipeline).
 
 #![forbid(unsafe_code)]
-#![allow(dead_code)]
 
 pub mod conv;
 pub mod cycle_collector;

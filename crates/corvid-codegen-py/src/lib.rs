@@ -3,8 +3,6 @@
 //! v0.1 target. Emits Python 3.11+ with async support.
 //! Output goes to `target/py/` under each user project.
 
-#![allow(dead_code)]
-
 pub mod codegen;
 pub mod emitter;
 
