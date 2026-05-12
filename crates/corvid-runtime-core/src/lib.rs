@@ -24,3 +24,10 @@
 //! the build refuses and the regression surfaces immediately.
 
 #![deny(unsafe_code)]
+
+pub mod host;
+
+pub use host::{
+    HostBridge, HostErrorKind, HostRequest, HostRequestKind, HostResponse, HostResponseKind,
+    LlmMessage, SchemaVersion, TokenUsage,
+};
