@@ -29,10 +29,6 @@ impl<T> AttestationStore<T> {
             .is_some()
     }
 
-    pub fn len(&self) -> usize {
-        self.handles.len()
-    }
-
     pub fn emit_debug_leak_warning(&self) {
         if !cfg!(debug_assertions) {
             return;

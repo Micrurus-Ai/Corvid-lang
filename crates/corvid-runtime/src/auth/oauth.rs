@@ -32,6 +32,11 @@ use crate::tracing::now_ms;
 /// `resolve_oauth_callback`. Tagged at module level so the
 /// `corvid-guarantees` inverse-coverage sentinel can confirm the
 /// enforcement site is wired to the registry row.
+// Not referenced by symbol; declared so the Phase 35V-T1-Drift sentinel
+// (`every_enforced_guarantee_id_is_wired_to_workspace_source` in
+// corvid-guarantees) finds the literal "auth.oauth_pkce_required" at
+// the enforcement site. allow(dead_code) is the load-bearing attribute.
+#[allow(dead_code)]
 pub const GUARANTEE_ID_OAUTH_PKCE_REQUIRED: &str = "auth.oauth_pkce_required";
 
 use super::{

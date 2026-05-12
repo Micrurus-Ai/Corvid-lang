@@ -27,7 +27,6 @@
 // that, and `ffi_bridge` opts in explicitly with a module-level allow
 // alongside a written rationale.
 #![deny(unsafe_code)]
-#![allow(dead_code)]
 
 pub mod abi;
 pub mod adversarial;

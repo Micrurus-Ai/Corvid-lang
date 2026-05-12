@@ -8,7 +8,9 @@
 //! and explicit `exp` re-checks against a caller-supplied clock so
 //! tests stay deterministic without depending on system time.
 
-use super::jwks::{JsonWebKey, JsonWebKeySet, JwksFetcher};
+use super::jwks::{JsonWebKey, JwksFetcher};
+#[cfg(test)]
+use super::jwks::JsonWebKeySet;
 use super::{JwtVerifyError, VerifiedJwtClaims};
 use crate::auth::JwtVerificationContract;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};

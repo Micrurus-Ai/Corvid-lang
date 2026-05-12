@@ -42,6 +42,13 @@ use super::{
 /// `verify_api_key_secret` path below. Tagged at module level so
 /// the `corvid-guarantees` inverse-coverage sentinel can confirm
 /// the enforcement site is wired to the registry row.
+// Decorative anchor for the Phase 35V-T1-Drift sentinel
+// (`every_enforced_guarantee_id_is_wired_to_workspace_source` in
+// corvid-guarantees). The sentinel scans source files for the literal
+// `"auth.api_key_at_rest_hashed"`; this constant declaration provides
+// that literal at the enforcement site. Not referenced by symbol;
+// allow(dead_code) is the load-bearing attribute.
+#[allow(dead_code)]
 pub const GUARANTEE_ID_API_KEY_AT_REST_HASHED: &str = "auth.api_key_at_rest_hashed";
 
 pub fn hash_api_key_secret(raw_key: &str) -> Result<String, RuntimeError> {

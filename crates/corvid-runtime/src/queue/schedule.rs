@@ -33,6 +33,11 @@ use crate::errors::RuntimeError;
 /// iterator is timezone-aware. Tagged at module level so the
 /// `corvid-guarantees` inverse-coverage sentinel can confirm the
 /// enforcement site is wired to the registry row.
+// Not referenced by symbol; declared so the Phase 35V-T1-Drift sentinel
+// (`every_enforced_guarantee_id_is_wired_to_workspace_source` in
+// corvid-guarantees) finds the literal "jobs.cron_dst_correct" at the
+// enforcement site. allow(dead_code) is the load-bearing attribute.
+#[allow(dead_code)]
 pub const GUARANTEE_ID_CRON_DST_CORRECT: &str = "jobs.cron_dst_correct";
 
 pub(super) fn validate_schedule(cron: &str, zone: &str) -> Result<(), RuntimeError> {

@@ -39,10 +39,3 @@ pub(super) fn insert_job_audit_event(
     Ok(())
 }
 
-fn eligible_to_run(job: &QueueJob) -> bool {
-    match job.status {
-        QueueJobStatus::Pending => job.next_run_ms.map(|next| next <= now_ms()).unwrap_or(true),
-        QueueJobStatus::RetryWait => job.next_run_ms.map(|next| next <= now_ms()).unwrap_or(true),
-        _ => false,
-    }
-}

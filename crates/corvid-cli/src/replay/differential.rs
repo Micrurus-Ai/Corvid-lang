@@ -18,7 +18,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use corvid_driver::{run_replay_from_source, ReplayMode, ReplayOutcome};
 use corvid_runtime::{LlmDivergence, SubstitutionDivergence};

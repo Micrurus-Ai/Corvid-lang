@@ -5,8 +5,6 @@
 //! interaction — they own the trace-event bracketing and the
 //! replay-source consultation that those paths require.
 
-use std::sync::Arc;
-
 use sha2::{Digest, Sha256};
 
 use crate::approvals::{ApprovalDecision, ApprovalRequest, ApprovalToken};
@@ -16,7 +14,7 @@ use crate::llm::{LlmRequest, LlmRequestRef, LlmResponse};
 use crate::prompt_cache::PromptCache;
 use crate::tracing::now_ms;
 use crate::usage::{normalized_total_tokens, LlmUsageRecord};
-use corvid_trace_schema::{TraceEvent, WRITER_INTERPRETER};
+use corvid_trace_schema::TraceEvent;
 
 use super::{Runtime, APPROVAL_TOKEN_SCOPE_ONE_TIME, APPROVAL_TOKEN_TTL_MS};
 

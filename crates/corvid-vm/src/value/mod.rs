@@ -12,7 +12,6 @@
 //! ownership and participate in the VM collector.
 
 use crate::errors::InterpError;
-use corvid_ast::BackpressurePolicy;
 use corvid_resolve::DefId;
 use corvid_runtime::{ProvenanceChain, ProvenanceEntry, ProvenanceKind};
 use std::collections::HashMap;
