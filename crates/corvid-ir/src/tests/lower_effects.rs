@@ -181,3 +181,87 @@ agent load(id: String) -> String:
         );
         assert_eq!(ret.ty, corvid_types::Type::String);
     }
+
+    // Provenance Propagation slice 3 — the IR-tier checkpoint. Slice 2
+    // taught the typechecker the contagion law (`g + 1` where `g` is
+    // grounded has checker type `Grounded<Int>`). `lower_expr` copies
+    // the checker's per-span type into `IrExpr.ty`, so that contagion
+    // result must flow end-to-end into the IR: the `BinOp` node's
+    // `ty` is `Grounded<Int>`. This is the field slices 4 (interpreter)
+    // and 5 (native codegen) read to know an operator result is
+    // grounded — without re-deriving it. The mechanism already exists;
+    // these tests prove it and guard it against regression.
+
+    #[test]
+    fn contagious_operator_carries_grounded_result_type_into_the_ir() {
+        let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Int uses retrieval
+
+agent add_to_grounded(id: String) -> Grounded<Int>:
+    g = fetch_n(id)
+    return g + 1
+";
+        let ir = lower_src(src);
+        let agent = ir
+            .agents
+            .iter()
+            .find(|a| a.name == "add_to_grounded")
+            .expect("add_to_grounded agent");
+        let ret = agent
+            .body
+            .stmts
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStmt::Return {
+                    value: Some(value), ..
+                } => Some(value),
+                _ => None,
+            })
+            .expect("return value");
+        assert!(
+            matches!(ret.kind, IrExprKind::BinOp { .. }),
+            "expected BinOp, got {:?}",
+            ret.kind
+        );
+        assert_eq!(
+            ret.ty,
+            corvid_types::Type::Grounded(Box::new(corvid_types::Type::Int)),
+            "the contagious operator's IR node must carry Grounded<Int>"
+        );
+    }
+
+    #[test]
+    fn ordinary_operator_carries_plain_result_type_into_the_ir() {
+        // Regression guard: a non-contagious operator's IR node carries
+        // the plain inner type — no spurious `Grounded` wrapper.
+        let src = "\
+agent ordinary() -> Int:
+    return 2 + 3
+";
+        let ir = lower_src(src);
+        let agent = ir
+            .agents
+            .iter()
+            .find(|a| a.name == "ordinary")
+            .expect("ordinary agent");
+        let ret = agent
+            .body
+            .stmts
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStmt::Return {
+                    value: Some(value), ..
+                } => Some(value),
+                _ => None,
+            })
+            .expect("return value");
+        assert!(
+            matches!(ret.kind, IrExprKind::BinOp { .. }),
+            "expected BinOp, got {:?}",
+            ret.kind
+        );
+        assert_eq!(ret.ty, corvid_types::Type::Int);
+    }

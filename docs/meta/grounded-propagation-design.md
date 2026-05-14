@@ -346,14 +346,14 @@ tiers must agree on *types and values*, which is what D1–D6 deliver.
   the load-bearing arithmetic/concat slices. If it ripples past its
   slice, it splits — it does not block the rest of the phase.
 - **R4 — D5's visible-discard change could surface existing silent
-  coercions.** *Mitigation:* D5 is *additive* — the coercion still
-  compiles and runs, it just gains an IR node. Only `@grounded_pure`
-  agents are affected, and there are none until slice 8. Confirmed
-  by the full workspace test run + corpus baseline staying green
-  through slices 2–5.
+  coercions.** *Mitigation:* the slice-7 discard node is *additive*
+  — the coercion still compiles and runs, it just gains an IR node.
+  Only `@grounded_pure` agents are affected, and there are none
+  until slice 8. Confirmed by the full workspace test run + corpus
+  baseline staying green through slices 3–7.
 - **R5 — `@grounded_pure` interaction with `@deterministic` /
   `@replayable`.** *Mitigation:* D6 specifies orthogonal composition
-  up front; slice 8 includes a test matrix over the attribute
+  up front; slice 9 includes a test matrix over the attribute
   subsets.
 - **R6 — Design X blast radius (added 2026-05-12).** Making `data:
   grounded` produce `Type::Grounded<T>` means every consumer of a
@@ -430,20 +430,38 @@ boundaries.
     `cargo check --workspace --tests`: 0 errors. `cargo test
     --workspace --lib`: only the pre-existing
     `corpus_scan_includes_deliberate_failure` red (unchanged — goes
-    green at slice 9). `corvid-types`: 222/222. `verify --corpus`:
+    green at slice 10). `corvid-types`: 222/222. `verify --corpus`:
     baseline unchanged. Every `examples/*.cor` clean except
     `refund_bot.cor`, which fails *identically on HEAD* (pre-existing
     `python import` effect-constraint issue, unrelated to grounding).
     The legacy rule (D5) + 2a's contagion law absorbed the entire
     blast radius — not "a countable handful," nil. R6's
     stop-and-rescope gate does NOT trigger.
-  - D5 groundwork (making the legacy coercion *detectable* for
-    lowering, so slice 3 can insert the visible discard node) moves
-    to **slice 3** — it is IR-lowering work, and 2b/2c proved the
-    typechecker side needs nothing further. Slice 2 is now closed.
-- **Slice 3 — IR.** `corvid-ir`: operator nodes carry/derive
-  grounded-result info; lowering emits the visible discard node at
-  implicit-coercion sites (D5). IR lowering tests.
+- **Slice plan reshaped (2026-05-12, after slice-3 recon).** The
+  recon found two things: (1) "operator nodes carry grounded-result
+  info" is *already done* — `IrExpr` carries `ty: Type` and
+  `lower_expr` copies it from the typechecker's `self.types`, which
+  slice 2 made contagion-aware; nothing to build. (2) The D5 discard
+  node is real work (~4 coercion-site categories — return /
+  call-args / typed-bindings / struct-fields — and lowering has no
+  central coercion point today), but it is a `@grounded_pure`
+  *prerequisite*, not an *execution* prerequisite: slices 4/5/6
+  (interpreter / native / control-flow) do not need it
+  (`combined_all.cor` runs once `eval_arithmetic` handles
+  `Value::Grounded` operands — the runtime does not type-check
+  returns). So D5 moves to its own dedicated slice adjacent to its
+  only consumer. Decisions D1–D8 untouched; execution ordering now
+  tracks the real dependency graph. Phase grows 11 → 12 slices.
+- **Slice 3 — IR carries grounded-result info (verification). ✅
+  shipped.** `corvid-ir`: 2 lowering tests confirming slice 2's
+  contagion law flows end-to-end into `IrExpr.ty` — a contagious
+  operator's IR `BinOp` node has `ty: Grounded<Int>`, an ordinary
+  one keeps the plain inner type. The IR-tier checkpoint. No
+  production code: `lower_expr` already copies the typechecker's
+  per-span type into `IrExpr.ty`, so slice 2's contagion result
+  flows in for free; this slice proves it and guards against
+  regression. Gate green: corvid-ir 34/34, workspace check clean,
+  wasm build clean, corpus baseline unchanged.
 - **Slice 4 — interpreter.** `corvid-vm`: `eval_arithmetic` /
   comparison eval handle `Grounded` operands — unwrap, operate,
   re-wrap with the `Derived` chain (D3) and `Min` confidence (D4).
@@ -453,17 +471,25 @@ boundaries.
 - **Slice 6 — control-flow conditions.** `Grounded<Bool>` accepted
   by `if` / `while` / `match` across all tiers, with the recorded
   implicit condition-unwrap (D2).
-- **Slice 7 — `@grounded_pure` front end.** `corvid-syntax` /
+- **Slice 7 — D5 discard node.** `corvid-ir`: lowering inserts the
+  visible discard node (reuse `UnwrapGrounded` or a dedicated
+  `CoerceGroundedDiscard`) at every implicit `Grounded<T> → T`
+  coercion site — return, call-args, typed bindings, struct fields.
+  This is the `@grounded_pure` prerequisite: it makes every silent
+  provenance drop greppable in the IR. Must be *complete* across
+  all coercion sites or `@grounded_pure` (slice 9) is unsound.
+- **Slice 8 — `@grounded_pure` front end.** `corvid-syntax` /
   `corvid-ast` / `corvid-resolve`: parse + represent + resolve the
   attribute.
-- **Slice 8 — `@grounded_pure` proof.** `corvid-types` / `corvid-ir`:
-  the reachability proof obligation (D6) + the attribute-composition
-  test matrix (R5).
-- **Slice 9 — corpus + differential-verify.** `combined_all.cor` →
+- **Slice 9 — `@grounded_pure` proof.** `corvid-types` / `corvid-ir`:
+  the reachability proof obligation (D6) — no `UnwrapGrounded` and no
+  slice-7 discard node reachable in a `@grounded_pure` agent's body —
+  plus the attribute-composition test matrix (R5).
+- **Slice 10 — corpus + differential-verify.** `combined_all.cor` →
   `Grounded<String>` (D7); new dedicated legacy-coercion fixture;
   the `corpus_scan_includes_deliberate_failure` test goes green
   *because the four tiers genuinely agree*.
-- **Slice 10 — invention-shipping contract.** README catalog entry,
+- **Slice 11 — invention-shipping contract.** README catalog entry,
   `corvid tour --topic provenance-propagation` demo, `inventions.md`
   proof-matrix row, spec section, `learnings.md` closeout, ROADMAP
   tick.
@@ -475,7 +501,7 @@ not shipped.
 ## Invention-shipping contract (CLAUDE.md)
 
 Provenance Propagation is a nameable Corvid capability. Before the
-phase closes, slice 10 must deliver:
+phase closes, slice 11 must deliver:
 
 - **README catalog entry** — "Provenance Propagation" with the
   contagion law + the `@grounded_pure` guarantee.
@@ -492,7 +518,7 @@ phase closes, slice 10 must deliver:
 
 ## Acceptance criteria for closing the phase
 
-- [ ] All 11 slices (0–10) on `main`.
+- [ ] All 12 slices (0–11) on `main`.
 - [ ] `Grounded<T>` contagious through arithmetic, concat, and
       comparison — verified across checker, interpreter, native,
       replay.
@@ -506,7 +532,7 @@ phase closes, slice 10 must deliver:
       unchanged.
 - [ ] `corvid-runtime-core` still builds to `wasm32-unknown-unknown`
       (the `Derived` addition must stay wasm-clean).
-- [ ] Invention-shipping contract delivered (slice 10).
+- [ ] Invention-shipping contract delivered (slice 11).
 - [ ] `learnings.md` + ROADMAP updated.
 
 ## What's out of scope
