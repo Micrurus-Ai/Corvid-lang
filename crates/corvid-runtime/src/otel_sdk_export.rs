@@ -131,7 +131,7 @@ impl OtelSdkExporter {
         let resource = Resource::new(resource_attributes(&config));
 
         let provider = SdkTracerProvider::builder()
-            .with_config(opentelemetry_sdk::trace::Config::default().with_resource(resource))
+            .with_resource(resource)
             .with_simple_exporter(exporter)
             .build();
 

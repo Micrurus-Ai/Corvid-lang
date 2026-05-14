@@ -305,6 +305,19 @@ jobs:
       - name: Build corvid-browser for wasm32-unknown-unknown
         run: cargo build -p corvid-browser --target wasm32-unknown-unknown --release
 
+      # corvid-runtime-core (33J7b runtime split) and
+      # corvid-tour-catalog (33J7-playground) are both wasm-clean by
+      # construction — the whole point of carving them out. Gate that
+      # property here: if a wasm-blocking dep (tokio, reqwest,
+      # postgres, …) ever creeps into either, this build fails on the
+      # push that introduced it rather than weeks later when the
+      # playground tries to consume it.
+      - name: Build corvid-runtime-core for wasm32-unknown-unknown
+        run: cargo build -p corvid-runtime-core --target wasm32-unknown-unknown --release
+
+      - name: Build corvid-tour-catalog for wasm32-unknown-unknown
+        run: cargo build -p corvid-tour-catalog --target wasm32-unknown-unknown --release
+
       - name: Run native integration tests (typecheck pipeline)
         run: cargo test -p corvid-browser --tests
 
