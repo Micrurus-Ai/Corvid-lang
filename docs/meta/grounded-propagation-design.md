@@ -289,11 +289,16 @@ boundaries.
 
 - **Slice 0 — design doc.** This document. Commit:
   `docs(grounded-prop-0): record provenance-propagation design`.
-- **Slice 1 — `Derived` representation.** Add
-  `ProvenanceKind::Derived { op, inputs }` to
-  `corvid-runtime-core/src/provenance.rs`; resolve the `Eq` derive
-  consequence (D3). Round-trip tests. Foundational + small, like
-  33J7b-2.
+- **Slice 1 — `Derived` representation. ✅ shipped.**
+  `ProvenanceKind::Derived { op, inputs: Vec<ProvenanceChain> }`
+  landed in `corvid-runtime-core/src/provenance.rs`. `Eq` added to
+  `ProvenanceChain` + `ProvenanceEntry` (the recursive tree needs it;
+  no floats in core's chain types so total equality is sound).
+  `ProvenanceChain::derived(op, inputs, timestamp_ms)` constructor —
+  the single mint point all four tiers will use. 5 round-trip tests
+  (incl. recursive-tree survival + empty ungrounded-operand chain +
+  `Eq`). Gate green: wasm32 build clean, core 20/20, runtime 257/257,
+  workspace check clean, corpus baseline unchanged.
 - **Slice 2 — typechecker contagion law.** `corvid-types`: operator
   result types per D1; comparisons per D1; the legacy rule made
   detectable for lowering (D5). Checker tests for every operand
