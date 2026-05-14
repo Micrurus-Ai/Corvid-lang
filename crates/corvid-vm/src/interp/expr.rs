@@ -1,8 +1,9 @@
 use super::effect_compose::overflow;
 use crate::errors::{InterpError, InterpErrorKind};
-use crate::value::Value;
+use crate::value::{GroundedValue, Value};
 use corvid_ast::{BinaryOp, Span, UnaryOp};
 use corvid_ir::IrLiteral;
+use corvid_runtime::ProvenanceChain;
 use std::sync::Arc;
 
 pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
@@ -23,11 +24,73 @@ pub(super) fn eval_binop(
     wrapping: bool,
 ) -> Result<Value, InterpError> {
     use BinaryOp::*;
+
+    // Provenance Propagation contagion law (D1) at the value level.
+    // If either operand is grounded, lift the operation through
+    // `Grounded`: strip the wrappers, run the normal operator on the
+    // inner values, then re-wrap the result with the `Derived`
+    // provenance chain (D3) and `Min`-composed confidence (D4).
+    // `Grounded` is an applicative functor — every binary operator
+    // lifts through it at this one site, so arithmetic, equality, and
+    // ordering all propagate uniformly. `&&` / `||` never reach here
+    // (short-circuited upstream), matching D1's scope.
+    if matches!(l, Value::Grounded(_)) || matches!(r, Value::Grounded(_)) {
+        let (l_inner, l_chain, l_conf) = unwrap_for_op(l);
+        let (r_inner, r_chain, r_conf) = unwrap_for_op(r);
+        let inner = eval_binop(op, l_inner, r_inner, span, wrapping)?;
+        let provenance =
+            ProvenanceChain::derived(binop_label(op), vec![l_chain, r_chain], 0);
+        return Ok(Value::Grounded(GroundedValue::with_confidence(
+            inner,
+            provenance,
+            l_conf.min(r_conf),
+        )));
+    }
+
     match op {
         Add | Sub | Mul | Div | Mod => eval_arithmetic(op, l, r, span, wrapping),
         Eq => Ok(Value::Bool(l == r)),
         NotEq => Ok(Value::Bool(l != r)),
         Lt | LtEq | Gt | GtEq => eval_ordering(op, l, r, span),
+        And | Or => unreachable!("and/or is short-circuited upstream"),
+    }
+}
+
+/// Fully strip `Grounded` wrappers from an operand for the contagion
+/// lift in `eval_binop`. Returns the inner (un-grounded) value, the
+/// provenance chain, and the confidence. An un-grounded operand
+/// contributes an empty chain and confidence `1.0` (D4). Nested
+/// `Grounded<Grounded<T>>` — which the type system prevents but which
+/// this stays robust against — has its chains merged and confidences
+/// `Min`-composed rather than producing a malformed value.
+fn unwrap_for_op(v: Value) -> (Value, ProvenanceChain, f64) {
+    match v {
+        Value::Grounded(g) => {
+            let (inner, mut chain, conf) = unwrap_for_op(g.inner.get());
+            chain.merge(&g.provenance);
+            (inner, chain, conf.min(g.confidence))
+        }
+        other => (other, ProvenanceChain::new(), 1.0),
+    }
+}
+
+/// Stable operator label for the `Derived` provenance entry's `op`
+/// field. Must stay byte-stable — it is recorded provenance and
+/// feeds replay determinism.
+fn binop_label(op: BinaryOp) -> &'static str {
+    use BinaryOp::*;
+    match op {
+        Add => "add",
+        Sub => "sub",
+        Mul => "mul",
+        Div => "div",
+        Mod => "mod",
+        Eq => "eq",
+        NotEq => "ne",
+        Lt => "lt",
+        LtEq => "le",
+        Gt => "gt",
+        GtEq => "ge",
         And | Or => unreachable!("and/or is short-circuited upstream"),
     }
 }
@@ -200,5 +263,105 @@ pub(super) fn require_bool(v: &Value, span: Span, context: &str) -> Result<bool,
             },
             span,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use corvid_runtime::ProvenanceKind;
+
+    fn span() -> Span {
+        Span::new(0, 0)
+    }
+
+    /// A `Grounded<Int>` value carrying a single retrieval source and
+    /// the given confidence — the runtime shape `data: grounded`
+    /// calls produce.
+    fn grounded_int(n: i64, source: &str, confidence: f64) -> Value {
+        Value::Grounded(GroundedValue::with_confidence(
+            Value::Int(n),
+            ProvenanceChain::with_retrieval(source, 1),
+            confidence,
+        ))
+    }
+
+    #[test]
+    fn grounded_operand_makes_the_arithmetic_result_grounded() {
+        // D1 contagion at the value level: `Grounded<Int> + Int`
+        // evaluates to `Grounded<Int>`. Before slice 4 this was the
+        // original `TypeMismatch` crash that opened the whole phase.
+        let result = eval_binop(BinaryOp::Add, grounded_int(40, "search", 0.9), Value::Int(2), span(), false)
+            .expect("grounded arithmetic must not error");
+        let Value::Grounded(g) = result else {
+            panic!("expected a Grounded result, got {result:?}");
+        };
+        // The arithmetic ran on the unwrapped operands.
+        assert_eq!(g.inner.get(), Value::Int(42));
+        // D3: a single `Derived` entry recording the op + operand chains.
+        assert_eq!(g.provenance.entries.len(), 1);
+        match &g.provenance.entries[0].kind {
+            ProvenanceKind::Derived { op, inputs } => {
+                assert_eq!(op, "add");
+                assert_eq!(inputs.len(), 2);
+                // Left operand grounded -> its source survives; right
+                // operand was a plain `Int` -> empty input chain.
+                assert!(inputs[0].has_source("search"));
+                assert!(inputs[1].entries.is_empty());
+            }
+            other => panic!("expected Derived, got {other:?}"),
+        }
+        // D4: Min(0.9 grounded, 1.0 ungrounded) = 0.9.
+        assert_eq!(g.confidence, 0.9);
+    }
+
+    #[test]
+    fn both_operands_grounded_merge_into_one_derived_tree() {
+        let result = eval_binop(
+            BinaryOp::Mul,
+            grounded_int(6, "left_src", 0.8),
+            grounded_int(7, "right_src", 0.95),
+            span(),
+            false,
+        )
+        .expect("eval");
+        let Value::Grounded(g) = result else {
+            panic!("expected Grounded");
+        };
+        assert_eq!(g.inner.get(), Value::Int(42));
+        match &g.provenance.entries[0].kind {
+            ProvenanceKind::Derived { op, inputs } => {
+                assert_eq!(op, "mul");
+                assert!(inputs[0].has_source("left_src"));
+                assert!(inputs[1].has_source("right_src"));
+            }
+            other => panic!("expected Derived, got {other:?}"),
+        }
+        // D4: Min(0.8, 0.95) = 0.8.
+        assert_eq!(g.confidence, 0.8);
+    }
+
+    #[test]
+    fn grounded_comparison_yields_a_grounded_bool() {
+        // D1: a comparison with a grounded operand is `Grounded<Bool>`.
+        let result = eval_binop(BinaryOp::Lt, grounded_int(1, "src", 1.0), Value::Int(2), span(), false)
+            .expect("eval");
+        let Value::Grounded(g) = result else {
+            panic!("expected Grounded<Bool>");
+        };
+        assert_eq!(g.inner.get(), Value::Bool(true));
+        assert!(matches!(
+            g.provenance.entries[0].kind,
+            ProvenanceKind::Derived { .. }
+        ));
+    }
+
+    #[test]
+    fn ungrounded_operands_stay_ungrounded() {
+        // The contagion lift fires only when an operand is grounded —
+        // ordinary arithmetic is untouched.
+        let result =
+            eval_binop(BinaryOp::Add, Value::Int(2), Value::Int(3), span(), false).expect("eval");
+        assert_eq!(result, Value::Int(5));
     }
 }

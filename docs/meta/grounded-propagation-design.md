@@ -462,9 +462,31 @@ boundaries.
   flows in for free; this slice proves it and guards against
   regression. Gate green: corvid-ir 34/34, workspace check clean,
   wasm build clean, corpus baseline unchanged.
-- **Slice 4 — interpreter.** `corvid-vm`: `eval_arithmetic` /
-  comparison eval handle `Grounded` operands — unwrap, operate,
-  re-wrap with the `Derived` chain (D3) and `Min` confidence (D4).
+- **Slice 4 — interpreter. ✅ shipped.** `corvid-vm`: a single
+  contagion lift at the top of `eval_binop` — if either operand is
+  `Value::Grounded`, strip the wrappers (`unwrap_for_op`, fully
+  recursive), run the normal operator on the inner values, re-wrap
+  with the `Derived` chain (D3) and `Min` confidence (D4).
+  Applicative-functor framing: arithmetic, equality, and ordering
+  all lift through the one site. 4 unit tests + full workspace
+  sweep green.
+
+  **Finding — `corpus_scan_includes_deliberate_failure` went green
+  here, not at slice 10 as the plan predicted.** Why: that test
+  was red because `verify_corpus` *aborted the whole scan* when the
+  interpreter run of `combined_all.cor` crashed (the original
+  `eval_arithmetic` `TypeMismatch`). The test only ever needed the
+  interpreter crash unblocked — not all four tiers. The
+  differential verifier compares *effect profiles*, and per D8
+  contagion does not touch effect rows, so once the interpreter run
+  completes, all four tiers agree on `combined_all.cor`'s profile.
+  This does **not** mean the phase is done: the test going green is
+  a weaker property than "the contagion law executes correctly on
+  all four tiers." Native codegen producing correct grounded
+  *values* (slice 5), control-flow (6), the `@grounded_pure` moat
+  (7–9), the D7 fixture (10), and the invention contract (11) are
+  all still required deliverables — the profile-level differential
+  verifier simply does not exercise them.
 - **Slice 5 — native codegen.** `corvid-codegen-cl`: same semantics
   through the C runtime. Gated by the differential verifier
   re-agreeing interpreter ≡ native (R1).
@@ -485,10 +507,13 @@ boundaries.
   the reachability proof obligation (D6) — no `UnwrapGrounded` and no
   slice-7 discard node reachable in a `@grounded_pure` agent's body —
   plus the attribute-composition test matrix (R5).
-- **Slice 10 — corpus + differential-verify.** `combined_all.cor` →
-  `Grounded<String>` (D7); new dedicated legacy-coercion fixture;
-  the `corpus_scan_includes_deliberate_failure` test goes green
-  *because the four tiers genuinely agree*.
+- **Slice 10 — corpus fixtures (D7).** `combined_all.cor`'s `main()`
+  → `-> Grounded<String>` so the corpus shows *idiomatic* Corvid
+  (the program genuinely produces a grounded value); new dedicated
+  legacy-coercion fixture exercising the slice-7 discard node. Note:
+  `corpus_scan_includes_deliberate_failure` already went green at
+  slice 4 (see that slice's finding) — this slice is now just the
+  fixture work, not the test-revival.
 - **Slice 11 — invention-shipping contract.** README catalog entry,
   `corvid tour --topic provenance-propagation` demo, `inventions.md`
   proof-matrix row, spec section, `learnings.md` closeout, ROADMAP
