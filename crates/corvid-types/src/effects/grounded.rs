@@ -197,6 +197,29 @@ fn expr_is_grounded(
             // Field access on a grounded struct is grounded.
             expr_is_grounded(target, file, resolved, registry, grounded)
         }
+        corvid_ast::Expr::BinOp { op, left, right, .. } => {
+            // Provenance Propagation contagion law (D1): an operator
+            // expression is grounded if either operand is grounded —
+            // the reachability-analysis half of the law that
+            // `check_binop` enforces at the type level. `&&` / `||`
+            // are scoped out of the contagion law (they short-circuit),
+            // so they do not propagate grounding, matching the
+            // type-level rule.
+            if matches!(
+                op,
+                corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or
+            ) {
+                false
+            } else {
+                expr_is_grounded(left, file, resolved, registry, grounded)
+                    || expr_is_grounded(right, file, resolved, registry, grounded)
+            }
+        }
+        corvid_ast::Expr::UnOp { operand, .. } => {
+            // Contagion law (D1): a unary operator expression is
+            // grounded if its operand is grounded.
+            expr_is_grounded(operand, file, resolved, registry, grounded)
+        }
         _ => false,
     }
 }

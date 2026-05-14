@@ -4465,3 +4465,151 @@ fn module_resolution_from_source(
         all_modules,
     }
 }
+
+// ------------------------------------------------------------------
+// Provenance Propagation — slice 2a: the contagion law in the
+// operator checks (`check_binop` / `check_unop`, D1 part B).
+// `Grounded<T>` is contagious through arithmetic, concatenation,
+// comparison, and unary operators: any operator with a grounded
+// operand yields a grounded result.
+//
+// These tests drive `Grounded<T>` operands via explicit `Grounded<T>`
+// tool returns — the only source of `Type::Grounded` until slice 2b
+// wires `data: grounded` effects into the type system. Each positive
+// test returns `-> Grounded<T>`, so a clean check proves *both* that
+// the operator accepted the grounded operand AND that the result is
+// grounded: a plain (un-grounded) result would not satisfy the
+// grounded return type. Every positive test below also fails without
+// slice 2a — arithmetic on a grounded operand was a hard type error,
+// and a grounded comparison produced a plain `Bool` that the grounded
+// return rejected.
+// ------------------------------------------------------------------
+
+#[test]
+fn grounded_propagates_through_arithmetic_left_operand() {
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Grounded<Int> uses retrieval
+
+agent add_to_grounded(id: String) -> Grounded<Int>:
+    g = fetch_n(id)
+    return g + 1
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_propagates_through_arithmetic_right_operand() {
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Grounded<Int> uses retrieval
+
+agent add_to_grounded(id: String) -> Grounded<Int>:
+    g = fetch_n(id)
+    return 1 + g
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_propagates_when_both_operands_are_grounded() {
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Grounded<Int> uses retrieval
+
+agent sum_two_grounded(id: String) -> Grounded<Int>:
+    return fetch_n(id) + fetch_n(id)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_propagates_through_string_concat() {
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_doc(id: String) -> Grounded<String> uses retrieval
+
+agent suffix(id: String) -> Grounded<String>:
+    g = fetch_doc(id)
+    return g + \"!\"
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_comparison_yields_grounded_bool() {
+    // `Grounded<Int> > Int` must yield `Grounded<Bool>` (D1). Without
+    // slice 2a the comparison produced a plain `Bool` (the legacy
+    // assignability rule let the grounded operand through the
+    // assignability check) that the `-> Grounded<Bool>` return then
+    // rejected — so this test specifically pins the contagion *wrap*.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Grounded<Int> uses retrieval
+
+agent is_big(id: String) -> Grounded<Bool>:
+    g = fetch_n(id)
+    return g > 100
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_propagates_through_unary_neg() {
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Grounded<Int> uses retrieval
+
+agent negate(id: String) -> Grounded<Int>:
+    g = fetch_n(id)
+    return -g
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn contagion_is_conditional_plain_operands_stay_plain() {
+    // The contagion law fires only when an operand is grounded. With
+    // two plain operands the result is plain `Int`, which does not
+    // satisfy a `-> Grounded<Int>` return — proving the law is
+    // conditional, not a blanket "every operator result is grounded."
+    let src = "\
+agent plain_stays_plain() -> Grounded<Int>:
+    return 1 + 1
+";
+    let c = check(src);
+    assert!(
+        !c.errors.is_empty(),
+        "plain `1 + 1` must not satisfy a `Grounded<Int>` return"
+    );
+}
+
+#[test]
+fn ordinary_arithmetic_is_unaffected_by_the_contagion_law() {
+    // Regression guard: slice 2a must not change the type of an
+    // operator applied to ordinary (un-grounded) operands.
+    let src = "\
+agent ordinary() -> Int:
+    return 2 + 3
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}

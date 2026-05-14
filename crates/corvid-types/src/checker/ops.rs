@@ -19,7 +19,51 @@ impl<'a> Checker<'a> {
         let lt = self.check_expr(l);
         let rt = self.check_expr(r);
         use BinaryOp::*;
-        match op {
+
+        // `&&` / `||` short-circuit; the Provenance Propagation design
+        // (D1) scopes them out of the contagion law. Original logic,
+        // operating on the un-stripped operand types.
+        if matches!(op, And | Or) {
+            if !matches!(lt, Type::Bool | Type::Unknown) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: "Bool".into(),
+                        got: lt.display_name(),
+                        context: "logical operator".into(),
+                    },
+                    l.span(),
+                ));
+            }
+            if !matches!(rt, Type::Bool | Type::Unknown) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: "Bool".into(),
+                        got: rt.display_name(),
+                        context: "logical operator".into(),
+                    },
+                    r.span(),
+                ));
+            }
+            return Type::Bool;
+        }
+
+        // D1 part B — the contagion law. `Grounded<T>` is an applicative
+        // functor: strip the `Grounded<>` wrapper(s) from the operands,
+        // run the operator's normal type rule on the inner types, then
+        // re-wrap the result if either operand was grounded.
+        //
+        // Dormant until slice 2b makes `data: grounded` produce
+        // `Type::Grounded`. No program today carries an effect-grounded
+        // type into an operator, and an explicit `Grounded<T>`
+        // annotation flowing into an operator was a hard type error
+        // before this slice — so for the current corpus this is purely
+        // additive: it never changes an existing acceptance, only adds
+        // new ones.
+        let contagious = matches!(lt, Type::Grounded(_)) || matches!(rt, Type::Grounded(_));
+        let lt = ungrounded(&lt).clone();
+        let rt = ungrounded(&rt).clone();
+
+        let result = match op {
             // `+` is overloaded: numeric addition OR string concatenation.
             Add => match (&lt, &rt) {
                 (Type::Int, Type::Int) => Type::Int,
@@ -73,35 +117,30 @@ impl<'a> Checker<'a> {
                 }
                 Type::Bool
             }
-            And | Or => {
-                if !matches!(lt, Type::Bool | Type::Unknown) {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::TypeMismatch {
-                            expected: "Bool".into(),
-                            got: lt.display_name(),
-                            context: "logical operator".into(),
-                        },
-                        l.span(),
-                    ));
-                }
-                if !matches!(rt, Type::Bool | Type::Unknown) {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::TypeMismatch {
-                            expected: "Bool".into(),
-                            got: rt.display_name(),
-                            context: "logical operator".into(),
-                        },
-                        r.span(),
-                    ));
-                }
-                Type::Bool
-            }
+            And | Or => unreachable!("handled by the early return above"),
+        };
+
+        // Re-wrap unless the operator itself failed (`Type::Unknown` is
+        // the error/recovery sentinel — `Grounded<Unknown>` would add
+        // no information and could mask the error downstream).
+        if contagious && !matches!(result, Type::Unknown) {
+            Type::Grounded(Box::new(result))
+        } else {
+            result
         }
     }
 
     pub(super) fn check_unop(&mut self, op: UnaryOp, operand: &Expr) -> Type {
         let t = self.check_expr(operand);
-        match op {
+
+        // D1 part B — the contagion law covers unary operators too:
+        // strip `Grounded<>`, run the normal rule, re-wrap if the
+        // operand was grounded. Dormant until slice 2b (see
+        // `check_binop` for the full rationale).
+        let contagious = matches!(t, Type::Grounded(_));
+        let t = ungrounded(&t).clone();
+
+        let result = match op {
             UnaryOp::Neg => match t {
                 Type::Int => Type::Int,
                 Type::Float => Type::Float,
@@ -132,6 +171,12 @@ impl<'a> Checker<'a> {
                     Type::Bool
                 }
             },
+        };
+
+        if contagious && !matches!(result, Type::Unknown) {
+            Type::Grounded(Box::new(result))
+        } else {
+            result
         }
     }
 
@@ -196,5 +241,18 @@ impl<'a> Checker<'a> {
                 span,
             )),
         }
+    }
+}
+
+/// Strip every `Grounded<>` wrapper from a type, returning the inner
+/// non-grounded type. A (degenerate) `Grounded<Grounded<T>>` normalises
+/// to `T`. Used by the operator checks to implement the Provenance
+/// Propagation contagion law (D1): the operator's normal type rule
+/// runs on the inner type, and the caller re-wraps the result in a
+/// single `Grounded<>` if any operand was grounded.
+fn ungrounded(ty: &Type) -> &Type {
+    match ty {
+        Type::Grounded(inner) => ungrounded(inner),
+        other => other,
     }
 }

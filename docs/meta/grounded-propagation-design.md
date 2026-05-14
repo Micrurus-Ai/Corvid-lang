@@ -397,11 +397,23 @@ boundaries.
 - **Slice 2 — typechecker: contagion law + Design X (revised
   2026-05-12).** `corvid-types`, landed in two coupled steps within
   one slice per D1's ordering note:
-  - **2a — contagion law, dormant.** `check_binop` / `check_unop`
-    handle `Type::Grounded` operands: result is `Grounded<T>` /
-    `Grounded<Bool>` per D1 part B. Nothing produces `Type::Grounded`
-    from effects yet, so this is dormant — corpus + workspace stay
-    green. Checker tests for every operand shape.
+  - **2a — contagion law, dormant. ✅ shipped.** `check_binop` /
+    `check_unop` strip `Grounded<>` from operands, run the normal
+    rule on the inner types, re-wrap if any operand was grounded
+    (`ungrounded()` helper). **Mid-slice finding:** the contagion
+    law has a *second* enforcement site in the checker — the
+    provenance-reachability analysis `effects/grounded.rs::
+    expr_is_grounded`, which proves a `-> Grounded<T>` agent's
+    return actually traces to a `data: grounded` source. Its
+    `_ => false` arm swallowed `BinOp` / `UnOp`, so a grounded
+    operand's grounding did not reach the return. 2a fixes both
+    halves: the type rule *and* the reachability walk. `&&` / `||`
+    scoped out of both (D1). 8 checker tests (every operand shape +
+    a conditional-not-blanket guard + an ordinary-arithmetic
+    regression guard); each positive test fails without 2a.
+    Dormant confirmed: full workspace test sweep stays green except
+    the one pre-existing `corpus_scan_includes_deliberate_failure`
+    (the failure this phase exists to fix — unchanged).
   - **2b — Design X.** `data: grounded` on an effect row wraps the
     prompt/tool/agent return type to `Type::Grounded<T>` (D1 part A).
     This *activates* 2a. The legacy rule (D5) absorbs the
