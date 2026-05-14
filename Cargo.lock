@@ -662,6 +662,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-tour-catalog",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -1000,6 +1001,13 @@ dependencies = [
  "corvid-macros",
  "corvid-runtime",
  "tokio",
+]
+
+[[package]]
+name = "corvid-tour-catalog"
+version = "0.0.1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

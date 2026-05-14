@@ -1,0 +1,13 @@
+[package]
+name = "corvid-tour-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Curated Corvid demo catalog (the `corvid tour` topics): wasm-clean static data shared by the native CLI and the browser playground."
+
+# Pure `&'static str` data + lookup. No deps beyond serde for the
+# wire-format derive. Compiles to wasm32-unknown-unknown so
+# corvid-browser can render the catalog in the playground without
+# pulling corvid-cli's native surface.
+[dependencies]
+serde = { workspace = true }
