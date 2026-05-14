@@ -4613,3 +4613,59 @@ agent ordinary() -> Int:
     let c = check(src);
     assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
 }
+
+// ------------------------------------------------------------------
+// Provenance Propagation — slice 2b: Design X (D1 part A). A prompt /
+// tool / agent whose effect row carries `data: grounded` has its
+// call-site return type wrapped to `Grounded<T>`. The typechecker
+// stops being blind to effect-induced grounding — the same fact the
+// runtime acts on (it wraps the value in `Value::Grounded`) is now
+// visible to the type system, which is what makes the contagion law
+// (2a) and the provenance-reachability analysis observe it.
+// ------------------------------------------------------------------
+
+#[test]
+fn data_grounded_effect_makes_a_plain_return_grounded() {
+    // A tool declared `-> String` but `uses` an effect with
+    // `data: grounded` produces `Grounded<String>` at the call site —
+    // no explicit `Grounded<>` annotation. Proven end-to-end: the
+    // result flows through `+` (2a contagion keeps it grounded) and
+    // satisfies a `-> Grounded<String>` return. Without slice 2b,
+    // `fetch` would be plain `String`, `raw + "!"` plain `String`,
+    // and the grounded return would reject it. The effect is named
+    // `my_source` (not the `retrieval` built-in) to prove the
+    // `data: grounded` *dimension* is what does the work.
+    let src = "\
+effect my_source:
+    data: grounded
+
+tool fetch(id: String) -> String uses my_source
+
+agent use_it(id: String) -> Grounded<String>:
+    raw = fetch(id)
+    return raw + \"!\"
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn non_grounded_effect_leaves_the_return_plain() {
+    // Design X is conditional: an effect WITHOUT `data: grounded`
+    // does not wrap the return type. A plain `String` returned into a
+    // `-> Grounded<String>` agent must still be rejected.
+    let src = "\
+effect plain_io:
+    cost: $0.01
+
+tool fetch(id: String) -> String uses plain_io
+
+agent use_it(id: String) -> Grounded<String>:
+    return fetch(id)
+";
+    let c = check(src);
+    assert!(
+        !c.errors.is_empty(),
+        "a non-grounded effect must not ground the return type"
+    );
+}

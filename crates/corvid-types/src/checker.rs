@@ -107,15 +107,12 @@ fn typecheck_with_everything(
     config: Option<&crate::config::CorvidConfig>,
     modules: Option<&corvid_resolve::ModuleResolution>,
 ) -> Checked {
-    let mut c = Checker::new(file, resolved, modules);
-    c.validate_import_use_items(file);
-    c.validate_python_import_effects(file);
-    c.check_file(file);
-    c.errors
-        .extend(crate::approval_reachability::check_approval_reachability(
-            file, resolved,
-        ));
-
+    // Build the effect registry up front. Slice 2b of Provenance
+    // Propagation (Design X, D1 part A) needs it *during* the main
+    // check pass so `check_*_call` can wrap a `data: grounded`
+    // callee's return type to `Grounded<T>`. The post-passes below
+    // (analyze_effects, compute_worst_case_cost, check_grounded_returns)
+    // reuse the same registry.
     let effect_decls: Vec<&corvid_ast::EffectDecl> = file
         .decls
         .iter()
@@ -127,10 +124,22 @@ fn typecheck_with_everything(
             }
         })
         .collect();
+    let owned_decls: Vec<corvid_ast::EffectDecl> =
+        effect_decls.iter().cloned().cloned().collect();
+    let registry = crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config);
+
+    let mut c = Checker::new(file, resolved, modules, &registry);
+    c.validate_import_use_items(file);
+    c.validate_python_import_effects(file);
+    c.check_file(file);
+    c.errors
+        .extend(crate::approval_reachability::check_approval_reachability(
+            file, resolved,
+        ));
+
     for effect in &effect_decls {
         c.check_effect_decl_confidence(effect);
     }
-    let owned_decls: Vec<corvid_ast::EffectDecl> = effect_decls.iter().cloned().cloned().collect();
 
     // Validate config-declared dimensions up-front so malformed entries
     // become surfaceable diagnostics instead of being swallowed by the
@@ -157,10 +166,8 @@ fn typecheck_with_everything(
         }
     }
 
-    let registry = crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config);
-
-    // Dimensional effect analysis: collect effect declarations, build
-    // the registry, analyze agents, and report non-cost constraint violations.
+    // Dimensional effect analysis: analyze agents against the
+    // registry built above, and report non-cost constraint violations.
     if !effect_decls.is_empty()
         || file
             .decls
@@ -322,6 +329,13 @@ struct Checker<'a> {
     /// successful public type exports resolve to `Type::ImportedStruct`.
     module_resolution: Option<&'a corvid_resolve::ModuleResolution>,
 
+    /// The effect registry, built before the main check pass so
+    /// `check_*_call` can apply the Provenance Propagation Design X
+    /// rule (D1 part A): a call to a prompt / tool / agent whose
+    /// effect row carries `data: grounded` has its return type
+    /// wrapped to `Grounded<T>`.
+    registry: &'a crate::effects::EffectRegistry,
+
     /// Type of each local binding, populated as we enter scopes.
     local_types: HashMap<LocalId, Type>,
 
@@ -426,6 +440,7 @@ impl<'a> Checker<'a> {
         file: &'a File,
         resolved: &'a Resolved,
         module_resolution: Option<&'a corvid_resolve::ModuleResolution>,
+        registry: &'a crate::effects::EffectRegistry,
     ) -> Self {
         let mut tools = HashMap::new();
         let mut prompts = HashMap::new();
@@ -520,6 +535,7 @@ impl<'a> Checker<'a> {
             methods: &resolved.methods,
             replay_pattern_bindings: &resolved.replay_pattern_bindings,
             module_resolution,
+            registry,
             local_types: HashMap::new(),
             current_return: None,
             in_agent_body: false,

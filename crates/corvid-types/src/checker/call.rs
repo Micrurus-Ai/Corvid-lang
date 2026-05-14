@@ -160,7 +160,30 @@ impl<'a> Checker<'a> {
         }
 
         self.bump_effect(WeakEffect::ToolCall);
-        self.type_ref_to_type(&tool.return_ty)
+        let ret = self.type_ref_to_type(&tool.return_ty);
+        self.ground_if_effect_grounded(&tool.effect_row, ret)
+    }
+
+    /// Provenance Propagation Design X (D1 part A): if a callee's
+    /// effect row carries `data: grounded`, a call to it produces a
+    /// `Grounded<T>` value at runtime — so the call expression's type
+    /// is `Grounded<T>`. The type system thus reflects what the
+    /// runtime actually produces, which is what lets the contagion
+    /// law (D1 part B — `check_binop` / `check_unop`) and the
+    /// provenance-reachability analysis observe effect-induced
+    /// grounding instead of being blind to it.
+    ///
+    /// An already-grounded return type (an explicit `Grounded<T>`
+    /// annotation on the callee) is not double-wrapped.
+    fn ground_if_effect_grounded(&self, effect_row: &corvid_ast::EffectRow, ret: Type) -> Type {
+        if matches!(ret, Type::Grounded(_)) {
+            return ret;
+        }
+        if crate::effects::effect_row_is_grounded(effect_row, self.registry) {
+            Type::Grounded(Box::new(ret))
+        } else {
+            ret
+        }
     }
 
     fn check_fixture_call(
@@ -193,7 +216,8 @@ impl<'a> Checker<'a> {
             .expect("prompt DefId not indexed");
         self.check_args_against_params(name, &prompt.params, args);
         self.bump_effect(WeakEffect::Llm);
-        self.type_ref_to_type(&prompt.return_ty)
+        let ret = self.type_ref_to_type(&prompt.return_ty);
+        self.ground_if_effect_grounded(&prompt.effect_row, ret)
     }
 
     fn check_agent_call(&mut self, def_id: DefId, name: &str, args: &[Expr]) -> Type {
@@ -205,7 +229,8 @@ impl<'a> Checker<'a> {
         self.bump_effect(WeakEffect::ToolCall);
         self.bump_effect(WeakEffect::Llm);
         self.bump_effect(WeakEffect::Approve);
-        self.type_ref_to_type(&agent.return_ty)
+        let ret = self.type_ref_to_type(&agent.return_ty);
+        self.ground_if_effect_grounded(&agent.effect_row, ret)
     }
 
     fn check_builtin_constructor_call(

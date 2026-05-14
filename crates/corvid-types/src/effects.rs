@@ -484,6 +484,7 @@ pub use cost::{
     numeric_constraint_value, render_cost_tree,
 };
 pub use grounded::{check_grounded_returns, ProvenanceResult, ProvenanceViolation};
+pub(crate) use grounded::effect_row_is_grounded;
 
 #[cfg(test)]
 mod tests {

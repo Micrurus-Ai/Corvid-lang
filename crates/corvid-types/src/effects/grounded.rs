@@ -224,19 +224,33 @@ fn expr_is_grounded(
     }
 }
 
+/// Does this effect row carry `data: grounded` — i.e. does a value
+/// produced under it carry provenance?
+///
+/// The single source of truth for "is this grounded," shared by the
+/// provenance-reachability analysis (this module) and the
+/// typechecker's Design X return-type wrapping (`check_*_call` in
+/// `checker/call.rs`). The built-in `retrieval` effect is grounded by
+/// definition; user effects are grounded iff their `data` dimension
+/// resolves to `grounded` in the registry.
+pub(crate) fn effect_row_is_grounded(
+    effect_row: &corvid_ast::EffectRow,
+    registry: &EffectRegistry,
+) -> bool {
+    effect_row.effects.iter().any(|eff| {
+        eff.name.name == "retrieval"
+            || registry
+                .get(&eff.name.name)
+                .map(|profile| {
+                    profile.dimensions.get("data")
+                        == Some(&DimensionValue::Name("grounded".into()))
+                })
+                .unwrap_or(false)
+    })
+}
+
 fn tool_is_grounded(tool: &corvid_ast::ToolDecl, registry: &EffectRegistry) -> bool {
-    for eff in &tool.effect_row.effects {
-        if let Some(profile) = registry.get(&eff.name.name) {
-            if profile.dimensions.get("data") == Some(&DimensionValue::Name("grounded".into())) {
-                return true;
-            }
-        }
-        // Built-in: "retrieval" effect has data: grounded.
-        if eff.name.name == "retrieval" {
-            return true;
-        }
-    }
-    false
+    effect_row_is_grounded(&tool.effect_row, registry)
 }
 
 fn check_return_grounded(

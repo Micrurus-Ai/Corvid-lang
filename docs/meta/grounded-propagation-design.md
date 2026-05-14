@@ -414,17 +414,33 @@ boundaries.
     Dormant confirmed: full workspace test sweep stays green except
     the one pre-existing `corpus_scan_includes_deliberate_failure`
     (the failure this phase exists to fix — unchanged).
-  - **2b — Design X.** `data: grounded` on an effect row wraps the
-    prompt/tool/agent return type to `Type::Grounded<T>` (D1 part A).
-    This *activates* 2a. The legacy rule (D5) absorbs the
-    return/arg/binding/field positions.
-  - **2c — blast-radius measurement (R6).** Full workspace test
-    suite + `verify --corpus` + every `examples/` program; enumerate
-    every new failure. If the residue is a countable handful → note
-    them, they get explicit annotations in later slices. **If it is
-    large or structural → stop, re-scope the phase.**
-  - The legacy rule is also made *detectable* for lowering here (D5
-    groundwork) so slice 3 can insert the visible discard node.
+  - **2b — Design X. ✅ shipped.** The `EffectRegistry` is now built
+    *before* the main check pass and threaded into `Checker` (it was
+    built only for the post-passes before). `check_tool_call` /
+    `check_prompt_call` / `check_agent_call` call
+    `ground_if_effect_grounded`: if the callee's effect row carries
+    `data: grounded`, the call-site return type is wrapped to
+    `Type::Grounded<T>` (already-grounded returns are not
+    double-wrapped). A shared `effect_row_is_grounded` helper was
+    extracted in `effects/grounded.rs` (one source of truth, also
+    used by the reachability analysis). 2 Design-X tests added
+    (effect-induced grounding via a non-`retrieval` user effect +
+    a conditional guard).
+  - **2c — blast-radius measurement (R6). ✅ ZERO residue.**
+    `cargo check --workspace --tests`: 0 errors. `cargo test
+    --workspace --lib`: only the pre-existing
+    `corpus_scan_includes_deliberate_failure` red (unchanged — goes
+    green at slice 9). `corvid-types`: 222/222. `verify --corpus`:
+    baseline unchanged. Every `examples/*.cor` clean except
+    `refund_bot.cor`, which fails *identically on HEAD* (pre-existing
+    `python import` effect-constraint issue, unrelated to grounding).
+    The legacy rule (D5) + 2a's contagion law absorbed the entire
+    blast radius — not "a countable handful," nil. R6's
+    stop-and-rescope gate does NOT trigger.
+  - D5 groundwork (making the legacy coercion *detectable* for
+    lowering, so slice 3 can insert the visible discard node) moves
+    to **slice 3** — it is IR-lowering work, and 2b/2c proved the
+    typechecker side needs nothing further. Slice 2 is now closed.
 - **Slice 3 — IR.** `corvid-ir`: operator nodes carry/derive
   grounded-result info; lowering emits the visible discard node at
   implicit-coercion sites (D5). IR lowering tests.
