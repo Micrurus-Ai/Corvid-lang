@@ -1,34 +1,79 @@
 # Pre-phase design — Provenance Propagation
 
-**Status:** DECISIONS RECORDED. Slice 0 of the Provenance
+**Status:** DECISIONS RECORDED — **revised 2026-05-12 after slice-2
+recon** (see "Design correction" below). Slice 0 of the Provenance
 Propagation phase. CTO delegated the scope call; this doc is the
 contract the multi-tier work executes against. Same role
 `runtime-split-design.md` played for 33J7b.
 
-**Filed:** 2026-05-12.
+**Filed:** 2026-05-12. **Revised:** 2026-05-12 (slice-2 recon
+corrected a load-bearing premise — D1, D5, R6, and the slice plan
+changed; the original framing is preserved struck-through where it
+matters so the correction is auditable).
 
 **Origin:** the `corvid-differential-verify` test
 `corpus_scan_includes_deliberate_failure` is red. Investigation
-traced it to a real tier-soundness divergence: the typechecker
-accepts `Grounded<String> + String` (via a "legacy compatibility"
-assignability rule) but the interpreter rejects it — `Value::Grounded`
-falls through `eval_arithmetic`. `tests/corpus/combined_all.cor` has
-been byte-identical since Phase 20g, where it was committed as a
-program that *should* agree across all four tiers. The CTO call:
-don't paper over it — close it as an **invention**, not a fix.
+traced it to a real tier-soundness divergence and
+`tests/corpus/combined_all.cor` has been byte-identical since Phase
+20g, where it was committed as a program that *should* agree across
+all four tiers. The CTO call: don't paper over it — close it as an
+**invention**, not a fix.
 
 ---
 
-## The problem, precisely
+## Design correction — the typechecker is grounded-blind (recon, 2026-05-12)
+
+The slice-2 recon pass falsified this doc's original premise before
+any code was written. **What the original draft assumed:** the
+typechecker sees `Grounded<String>` for a `data: grounded` prompt's
+return and accepts `String + Grounded<String>` via the "legacy
+compatibility" assignability rule at `types.rs:153-156`.
+
+**What the recon found:** `Type::Grounded` is *only ever constructed
+from an explicit `Grounded<T>` type annotation* a user writes by
+hand (`checker/expr.rs:536`, `checker/types.rs:261`). There is **no
+path** from a `data: grounded` effect to `Type::Grounded` in the
+checker. So:
+
+- `audit() -> String uses audit_effect` (effect carries `data:
+  grounded`) returns plain `Type::String` to the typechecker. The
+  grounding lives **only in the effect row**, never in the type.
+- `first + second` in `combined_all.cor` is `String + String` to the
+  checker → it typechecks clean (confirmed: differential-verify's
+  error is "interpreter run failed", not "typecheck failed" — so
+  `typecheck` passed).
+- At runtime the interpreter wraps `audit()`'s result in
+  `Value::Grounded` *because of the effect* → `eval_arithmetic` sees
+  `Value::String + Value::Grounded` → `TypeMismatch`.
+
+The divergence is not "checker permissive, interpreter strict." It
+is **the checker and the runtime disagree about whether the value is
+grounded at all.** The type system is *unsound* here — it says
+`String` where the runtime produces `Grounded<String>`.
+
+**Consequence for the moat.** `@grounded_pure` (D6) needs the
+*compiler* to reason about grounded-ness. A grounded-blind checker
+can never prove "no laundering." So the real fix is not "teach the
+interpreter to tolerate `Value::Grounded`" (that would be Design Y —
+the rejected shortcut, since it leaves the moat impossible). The fix
+is **Design X: make `data: grounded` a type-system property** — a
+prompt/tool/agent whose effect row carries `data: grounded` returns
+`Type::Grounded<T>`. CTO call (delegated 2026-05-12): Design X, it
+is the only design that fixes the soundness hole *and* enables the
+moat. D1, D5, R6 and the slice plan below are revised accordingly.
+
+## The problem, precisely (revised)
 
 `Grounded<T>` is Corvid's provenance-carrying type — a value plus a
 `ProvenanceChain` proving where it came from. Today:
 
-1. **Typechecker** (`corvid-types/src/types.rs:153-156`) has a rule
-   labeled *"Legacy compatibility: Grounded<T> remains assignable to
-   T"*. `Type::Grounded(inner)` is assignable wherever `inner` is.
-   So `Grounded<String>` passes as a `+` operand and as a `-> String`
-   return — silently.
+1. **Typechecker is grounded-blind for effect-induced grounding.**
+   `data: grounded` never produces `Type::Grounded`; only an
+   explicit `Grounded<T>` annotation does. The `types.rs:153-156`
+   "legacy compatibility: Grounded<T> assignable to T" rule exists
+   but only fires for hand-annotated grounded values — it is *not*
+   what lets `combined_all.cor` pass (that passes because the
+   checker never sees grounding at all).
 2. **IR lowering** (`corvid-ir/src/lower.rs:1172-1187`) only emits
    `UnwrapGrounded` for an *explicit* `.unwrap_discarding_sources()`
    call. Implicit `Grounded<T> → T` coercions produce no IR node.
@@ -39,8 +84,9 @@ don't paper over it — close it as an **invention**, not a fix.
    handled, but since lowering never emits one for implicit
    coercions, those tiers face the same raw-grounded-operand gap.
 
-The typechecker says "treat `Grounded<T>` as `T`" and nothing
-downstream actually does. That is the gap.
+The gap: `data: grounded` is a runtime-value fact the type system
+cannot see, so the four tiers cannot be made to agree on it — and
+the moat cannot be built on a fact the compiler is blind to.
 
 ## The reframe: invention, not fix
 
@@ -94,10 +140,21 @@ ships fully later):**
 
 ## Decisions
 
-### D1 — The contagion law (uniform, all operators)
+### D1 — Grounding is a type-system property + the contagion law (revised 2026-05-12)
 
-**Decision.** Any operator application with at least one `Grounded`
-operand produces a `Grounded` result. No exceptions:
+**Decision, part A — `data: grounded` produces `Type::Grounded<T>`
+(Design X).** A prompt / tool / agent whose effect row carries
+`data: grounded` has its declared return type `T` wrapped to
+`Type::Grounded<T>` by the checker. The type system stops being
+blind to effect-induced grounding; the checker, interpreter, native
+codegen, and replay finally agree on *which values are grounded*.
+This is the soundness fix the recon surfaced as mandatory — without
+it the contagion law has nothing to operate on and `@grounded_pure`
+(D6) is uncheckable.
+
+**Decision, part B — the contagion law (uniform, all operators).**
+Any operator application with at least one `Grounded` operand
+produces a `Grounded` result. No exceptions:
 
 - `Grounded<T> ⊕ T` → `Grounded<T>`
 - `T ⊕ Grounded<T>` → `Grounded<T>`
@@ -108,6 +165,15 @@ operand produces a `Grounded` result. No exceptions:
 `⊕` ranges over arithmetic (`+ - * / %`) and string/list concat;
 `⊗` over comparisons (`== != < <= > >=`). `&&` / `||` are
 short-circuit and out of scope (they already route specially).
+
+**Ordering note.** Parts A and B are coupled: shipping A without B
+would *break* `combined_all.cor` at the checker — `check_binop`
+matches concrete `Type::Int`/`Type::String` arms, so a
+`Type::Grounded` operand would fall through to its error arm. B
+(contagion in `check_binop` / `check_unop`) must land first (dormant
+— nothing produces `Type::Grounded` from effects yet), then A
+activates it. Both are `corvid-types` changes; the slice plan lands
+them as one slice for that reason.
 
 **Why uniform.** A per-operator carve-out is the pile-of-special-
 cases anti-pattern. The applicative-functor framing demands one
@@ -148,12 +214,14 @@ operand order; an ungrounded operand contributes an empty
 `ProvenanceChain` (self-describing as "(ungrounded)" to renderers —
 no new `Literal` variant needed).
 
-**Mechanical consequence.** `ProvenanceKind` currently derives `Eq`;
-`ProvenanceChain` / `ProvenanceEntry` do not. Adding a recursive
-`Vec<ProvenanceChain>` payload means either dropping `Eq` from
-`ProvenanceKind` or adding `Eq` to the chain types. The chain types
-carry no floats (confidence lives on the VM's `GroundedValue`, not
-core's `ProvenanceChain`), so `Eq` is achievable — slice 1 adds it.
+**Mechanical consequence — shipped in slice 1.** `ProvenanceKind`
+derived `Eq`; `ProvenanceChain` / `ProvenanceEntry` did not. The
+recursive `Vec<ProvenanceChain>` payload needs the whole tree `Eq`.
+Slice 1 added `Eq` to the chain types — sound because they carry no
+floats (confidence lives on the VM's `GroundedValue`, not core's
+`ProvenanceChain`). Also shipped: a `ProvenanceChain::derived(op,
+inputs, timestamp_ms)` constructor as the single mint point all four
+tiers call. ✅ Done — see slice 1 in the plan.
 
 **Why a tree, not a flat merge.** `ProvenanceChain` already has a
 flat `merge()` — it stays, for cases that legitimately accumulate
@@ -179,21 +247,30 @@ question. Using the shipped rule is not a shortcut; refining it is
 the deferred pillar's job, and refining it later is non-breaking
 (it only tightens runtime confidence values, never types).
 
-### D5 — The legacy `Grounded<T> → T` rule: keep it, make it visible
+### D5 — The legacy `Grounded<T> → T` rule: load-bearing now, keep it, make it visible (revised 2026-05-12)
 
-**Decision.** Do **not** remove the legacy assignability rule.
-Instead, make every implicit `Grounded<T> → T` coercion **IR-
-visible**: when the typechecker's legacy coercion fires (return
-position, function arguments, type-annotated bindings, struct
-fields — operator operands no longer need it, D1 covers them), IR
+**Decision.** Keep the `types.rs:153-156` legacy assignability rule.
+Under Design X (D1 part A) it is no longer "legacy cruft to retire"
+— it is **load-bearing**: when `data: grounded` starts producing
+`Type::Grounded<T>`, *every* existing consumer of a grounded
+prompt/tool result suddenly sees `Grounded<T>` where it saw `T`. The
+legacy rule is what keeps that from breaking every program — it lets
+`Grounded<T>` keep flowing into `T` positions (return, args,
+bindings, struct fields). Removing it would turn Design X into a
+workspace-wide breaking change. It stays.
+
+But it must not stay *invisible*. Make every implicit `Grounded<T>
+→ T` coercion **IR-visible**: when the legacy coercion fires, IR
 lowering inserts an explicit discard node (reuse `UnwrapGrounded`,
 or a dedicated `CoerceGroundedDiscard` — slice 3 decides which is
-cleaner).
+cleaner). Operator operands do *not* need this — D1's contagion law
+covers them (the result stays grounded; nothing is dropped).
 
 Consequence:
-- **Normal agents:** implicit coercion still compiles and runs. Zero
-  blast radius on existing code — the coercion still *works*, it is
-  just no longer *invisible*.
+- **Normal agents:** implicit coercion still compiles and runs.
+  Near-zero blast radius on existing code — the coercion still
+  *works*, it is just no longer *invisible*. (Exact blast radius is
+  measured in slice 2 — see R6.)
 - **`@grounded_pure` agents:** the checker sees the discard node and
   refuses to compile (D6).
 - The provenance drop becomes greppable in the IR and visible in
@@ -201,11 +278,12 @@ Consequence:
   removal.
 
 **Why.** This is the powerful-and-safe resolution. Removing the rule
-outright (the option the chat rejected as "powerless") would force
-ceremony on all existing code. Keeping it invisible (the rejected
-"shortcut") leaves silent laundering. Keeping it *visible* gives
-normal code its ergonomics back AND gives `@grounded_pure` something
-concrete to forbid AND makes every drop auditable. Best of three.
+outright (the option the chat rejected as "powerless") would now —
+post-Design-X — be a workspace-wide break, not just "ceremony on
+existing code." Keeping it invisible (the rejected "shortcut")
+leaves silent laundering. Keeping it *visible* gives normal code its
+ergonomics back AND gives `@grounded_pure` something concrete to
+forbid AND makes every drop auditable. Best of three.
 
 ### D6 — `@grounded_pure` — the moat attribute
 
@@ -270,13 +348,30 @@ tiers must agree on *types and values*, which is what D1–D6 deliver.
 - **R4 — D5's visible-discard change could surface existing silent
   coercions.** *Mitigation:* D5 is *additive* — the coercion still
   compiles and runs, it just gains an IR node. Only `@grounded_pure`
-  agents are affected, and there are none until slice 8. Zero blast
-  radius on existing code; confirmed by the full workspace test run
-  + corpus baseline staying green through slices 2–5.
+  agents are affected, and there are none until slice 8. Confirmed
+  by the full workspace test run + corpus baseline staying green
+  through slices 2–5.
 - **R5 — `@grounded_pure` interaction with `@deterministic` /
   `@replayable`.** *Mitigation:* D6 specifies orthogonal composition
   up front; slice 8 includes a test matrix over the attribute
   subsets.
+- **R6 — Design X blast radius (added 2026-05-12).** Making `data:
+  grounded` produce `Type::Grounded<T>` means every consumer of a
+  grounded prompt/tool result now sees `Grounded<T>`. The legacy
+  rule (D5) absorbs *most* positions (return / args / bindings /
+  fields — anything governed by `is_assignable_to`). The positions
+  it does NOT absorb are operator operands (`check_binop` /
+  `check_unop` match concrete arms) — which D1 part B covers — and
+  any position with a hard concrete-type match elsewhere in the
+  checker. *Mitigation:* slice 2 includes an explicit blast-radius
+  measurement — after wiring Design X, run the full workspace test
+  suite + `verify --corpus` + every `examples/` program, and
+  enumerate every new failure. The expectation is that legacy-rule
+  + D1-contagion cover essentially all of it and the residue is a
+  countable handful of sites needing explicit `Grounded<T>`
+  annotations or `.unwrap_discarding_sources()`. **If the residue is
+  large or structural, slice 2 stops and the phase re-scopes** —
+  that is the recon gate, not a thing to patch around.
 
 ---
 
@@ -299,10 +394,25 @@ boundaries.
   (incl. recursive-tree survival + empty ungrounded-operand chain +
   `Eq`). Gate green: wasm32 build clean, core 20/20, runtime 257/257,
   workspace check clean, corpus baseline unchanged.
-- **Slice 2 — typechecker contagion law.** `corvid-types`: operator
-  result types per D1; comparisons per D1; the legacy rule made
-  detectable for lowering (D5). Checker tests for every operand
-  shape.
+- **Slice 2 — typechecker: contagion law + Design X (revised
+  2026-05-12).** `corvid-types`, landed in two coupled steps within
+  one slice per D1's ordering note:
+  - **2a — contagion law, dormant.** `check_binop` / `check_unop`
+    handle `Type::Grounded` operands: result is `Grounded<T>` /
+    `Grounded<Bool>` per D1 part B. Nothing produces `Type::Grounded`
+    from effects yet, so this is dormant — corpus + workspace stay
+    green. Checker tests for every operand shape.
+  - **2b — Design X.** `data: grounded` on an effect row wraps the
+    prompt/tool/agent return type to `Type::Grounded<T>` (D1 part A).
+    This *activates* 2a. The legacy rule (D5) absorbs the
+    return/arg/binding/field positions.
+  - **2c — blast-radius measurement (R6).** Full workspace test
+    suite + `verify --corpus` + every `examples/` program; enumerate
+    every new failure. If the residue is a countable handful → note
+    them, they get explicit annotations in later slices. **If it is
+    large or structural → stop, re-scope the phase.**
+  - The legacy rule is also made *detectable* for lowering here (D5
+    groundwork) so slice 3 can insert the visible discard node.
 - **Slice 3 — IR.** `corvid-ir`: operator nodes carry/derive
   grounded-result info; lowering emits the visible discard node at
   implicit-coercion sites (D5). IR lowering tests.
