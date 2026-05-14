@@ -487,9 +487,39 @@ boundaries.
   (7–9), the D7 fixture (10), and the invention contract (11) are
   all still required deliverables — the profile-level differential
   verifier simply does not exercise them.
-- **Slice 5 — native codegen.** `corvid-codegen-cl`: same semantics
-  through the C runtime. Gated by the differential verifier
-  re-agreeing interpreter ≡ native (R1).
+- **Slice 5 — native codegen: value-correctness (reshaped
+  2026-05-12 after recon; CTO decision).** Recon found the native
+  grounded model is *structurally degenerate*: a `Grounded<T>` is a
+  bare machine value (`grounded_attest_*` returns `value_ty`
+  unchanged, registering provenance into a single global
+  "last scalar attestation" slot). It has no per-value provenance
+  tracking, so it *cannot* build the byte-identical `Derived` tree
+  the contagion law (D3) requires — that needs grounded values to
+  carry runtime identity (handles), a native-ABI rework rippling
+  through native codegen + the C runtime + the attestation store +
+  possibly the Phase 22 FFI surface. That is **phase-sized**, and
+  per CLAUDE.md needs its own pre-phase design chat.
+
+  CTO decision: this is honest sequencing, not a shortcut. Slice 5
+  ships native **value-correctness** — a real, tractable fix. Recon
+  found a genuine bug: `BinOp` lowering routes on `matches!(left.ty,
+  Type::String)`, which is *false* for `Type::Grounded<String>`, so
+  `Grounded<String> + String` falls through to `lower_binop_strict`
+  and does integer `iadd` on string pointers → garbage. Slice 5
+  strips `Grounded<>` from operand types before the
+  string / list / refcount / wrapping-int routing decisions (mirror
+  the typechecker's `ungrounded()` helper), so native produces
+  *correct grounded values*. Verified by native-tier tests, not the
+  profile-level differential verifier (R1's stated mitigation does
+  not catch grounded-value correctness — see the slice-4 finding).
+
+  The native grounded-handle rework — per-value provenance, the
+  `Derived` DAG at native — is a **dedicated follow-up phase**, with
+  a pre-phase stub at `docs/meta/native-grounded-handles-design.md`.
+  The "all four tiers" acceptance criterion is amended accordingly:
+  native is *value-contagious* in this phase; native's
+  provenance-DAG-through-operators is the follow-up phase's
+  deliverable.
 - **Slice 6 — control-flow conditions.** `Grounded<Bool>` accepted
   by `if` / `while` / `match` across all tiers, with the recorded
   implicit condition-unwrap (D2).
@@ -545,8 +575,11 @@ phase closes, slice 11 must deliver:
 
 - [ ] All 12 slices (0–11) on `main`.
 - [ ] `Grounded<T>` contagious through arithmetic, concat, and
-      comparison — verified across checker, interpreter, native,
-      replay.
+      comparison — verified across checker, interpreter, and native
+      (native = *value-correctness*; native's byte-identical
+      provenance-DAG is the `native-grounded-handles` follow-up
+      phase per the slice-5 CTO decision). Replay consistency
+      verified for the tiers in scope.
 - [ ] `@grounded_pure` compiles clean agents and refuses laundering
       agents; orthogonal composition with `@deterministic` /
       `@replayable` tested.
