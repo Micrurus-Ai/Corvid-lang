@@ -21,6 +21,9 @@ corvid-syntax = { path = "../corvid-syntax" }
 corvid-resolve = { path = "../corvid-resolve" }
 corvid-types = { path = "../corvid-types" }
 corvid-guarantees = { path = "../corvid-guarantees" }
+# Curated demo catalog — the playground examples picker renders it.
+# Wasm-clean by design; see docs/meta/playground-examples-contract.md.
+corvid-tour-catalog = { path = "../corvid-tour-catalog" }
 serde = { workspace = true, features = ["derive"] }
 
 # wasm-bindgen + serde-wasm-bindgen only on wasm32. Native builds

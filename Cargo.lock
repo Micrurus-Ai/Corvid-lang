@@ -624,6 +624,7 @@ dependencies = [
  "corvid-guarantees",
  "corvid-resolve",
  "corvid-syntax",
+ "corvid-tour-catalog",
  "corvid-types",
  "serde",
  "serde-wasm-bindgen",

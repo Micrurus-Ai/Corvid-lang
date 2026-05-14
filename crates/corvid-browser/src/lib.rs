@@ -31,7 +31,10 @@ use corvid_syntax::{lex, parse_file};
 use corvid_types::{typecheck_with_config, typecheck_with_config_and_modules, TypeError};
 use serde::Serialize;
 
+mod examples;
 mod multi_file;
+
+pub use examples::{check_example, list_examples, ExampleCatalog, ExampleMeta};
 
 /// Wire-format diagnostic. Flat schema by design (one primary span per
 /// diagnostic plus an optional help string). Multi-span / related-info
@@ -90,7 +93,7 @@ pub struct CheckResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-const SCHEMA_VERSION: &str = "v1";
+pub(crate) const SCHEMA_VERSION: &str = "v1";
 
 /// Typecheck `source` and return diagnostics as a flat wire-format
 /// `CheckResult`. This is the only function the playground needs to

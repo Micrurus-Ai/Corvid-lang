@@ -118,6 +118,45 @@ call site. The compile-time guarantee `approval.dangerous_call_
 requires_token` fires across file boundaries the same way it
 fires within one file.
 
+## Examples API (slice 33J7-playground)
+
+The playground's examples picker + terminal panel call two more
+entries. Both are tier 1 (typecheck / analyze) — they ship today
+on the existing `check` pipeline. Tier 2 (`runExample` — actual
+agent execution) lands when the wasm-clean runtime exists; see
+[`docs/meta/playground-examples-contract.md`](../../docs/meta/playground-examples-contract.md).
+
+```ts
+// JS-side signatures exposed via wasm-bindgen:
+function listExamples(): ExampleCatalog;
+function checkExample(name: string): CheckResult;
+
+interface ExampleCatalog {
+  version: "v1";              // versions independently of CheckResult
+  examples: ExampleMeta[];
+}
+
+interface ExampleMeta {
+  name: string;               // stable kebab-case id, e.g. "approve-gates"
+  title: string;              // "Approve Before Dangerous"
+  category: string;           // "Safety at compile time" — picker groups by this
+  pitch: string;              // one-paragraph why-this-matters
+  source: string;             // the baked .cor program
+  spec_path: string;          // docs link, e.g. "docs/internals/effect-spec/03-typing-rules.md"
+  non_scope: string;          // what the demo deliberately does not prove
+  tier: number;               // 1 = typecheck-demo (today), 2 = needs execution
+}
+```
+
+The catalog is the `corvid tour` topic set — one source of truth,
+shared with the native CLI via the wasm-clean `corvid-tour-catalog`
+crate. `checkExample(name)` is a thin wrapper over `check` using
+the topic's baked `source`; an unknown name fails closed with a
+`CheckResult { ok: false }` carrying one error diagnostic. The
+approve-refusal demo edits `ExampleMeta.source` in-place and routes
+the edited text through `check` directly, not back through
+`checkExample`.
+
 ## Building
 
 ```sh
