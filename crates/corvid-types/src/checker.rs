@@ -16,7 +16,7 @@ use corvid_ast::{
 use corvid_resolve::{
     resolver::MethodEntry, Binding, DefId, LocalId, ReplayPatternBinding, Resolved, SymbolTable,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn file_top_span(file: &File) -> Span {
     file.span
@@ -38,6 +38,17 @@ pub struct Checked {
     /// consumes this to emit a direct call to the imported declaration
     /// instead of treating the field access as an indirect value.
     pub imported_calls: HashMap<Span, ImportedCallTarget>,
+    /// Spans of value expressions where the legacy `Grounded<T> -> T`
+    /// assignability rule (`types.rs:153`) silently coerced a grounded
+    /// value into a non-grounded slot — return / let-with-annotation /
+    /// yield / call-arg / struct-field-init / control-flow condition.
+    /// Provenance Propagation D5 (slice 7): IR lowering reads this set
+    /// and inserts an `IrExprKind::UnwrapGrounded` node at each
+    /// recorded span, so every silent provenance drop becomes
+    /// IR-visible — which is what `@grounded_pure` (slice 9) forbids.
+    /// Sound enumeration is the load-bearing property: a missed site
+    /// is a silent moat hole.
+    pub grounded_coercion_sites: HashSet<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,6 +296,7 @@ fn typecheck_with_everything(
         errors: c.errors,
         warnings: c.warnings,
         imported_calls: c.imported_calls,
+        grounded_coercion_sites: c.grounded_coercion_sites,
     }
 }
 
@@ -295,6 +307,14 @@ struct Checker<'a> {
     errors: Vec<TypeError>,
     warnings: Vec<TypeWarning>,
     imported_calls: HashMap<Span, ImportedCallTarget>,
+    /// Provenance Propagation D5 (slice 7): every value-expression
+    /// span where the legacy `Grounded<T> -> T` rule fired during
+    /// slot-checking. Populated by `record_if_grounded_coercion` from
+    /// the slot-check sites (return / let / yield / call-arg /
+    /// struct-field-init / control-flow condition). Surfaces on
+    /// `Checked` so IR lowering can insert a visible `UnwrapGrounded`
+    /// at each recorded span.
+    grounded_coercion_sites: HashSet<Span>,
 
     /// Indexed declarations for O(1) lookup by DefId. Methods from
     /// `extend` blocks get inserted here too — a method `extend Order: agent
@@ -526,6 +546,7 @@ impl<'a> Checker<'a> {
             errors: Vec::new(),
             warnings: Vec::new(),
             imported_calls: HashMap::new(),
+            grounded_coercion_sites: HashSet::new(),
             tools_by_id: tools,
             prompts_by_id: prompts,
             agents_by_id: agents,
@@ -591,6 +612,21 @@ impl<'a> Checker<'a> {
         self.tools_by_id.values().any(|tool| {
             matches!(tool.effect, Effect::Dangerous) && pascal_case(&tool.name.name) == label
         })
+    }
+
+    /// Provenance Propagation D5 (slice 7): record `span` if `from`
+    /// is a `Grounded<...>` type being silently coerced into a
+    /// non-grounded `to` slot. Call at every slot-check site that
+    /// invokes `is_assignable_to` (return / let / yield / call-arg /
+    /// struct-field-init), plus control-flow conditions that strip
+    /// grounded via `.ungrounded()`. The recorded spans drive IR
+    /// lowering to emit visible `UnwrapGrounded` nodes; missing a
+    /// site is a silent moat hole, so the enumeration is the
+    /// load-bearing property here, not the helper's wording.
+    fn record_if_grounded_coercion(&mut self, from: &Type, to: &Type, span: Span) {
+        if matches!(from, Type::Grounded(_)) && !matches!(to, Type::Grounded(_)) {
+            self.grounded_coercion_sites.insert(span);
+        }
     }
 
     fn bind_params(&mut self, params: &[Param]) {

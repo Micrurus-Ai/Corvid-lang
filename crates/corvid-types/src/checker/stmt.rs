@@ -44,6 +44,7 @@ impl<'a> Checker<'a> {
                         value.span(),
                     ));
                 }
+                self.record_if_grounded_coercion(&value_ty, &local_ty, value.span());
                 if let Some(Binding::Local(local_id)) = self.bindings.get(&name.span) {
                     self.update_weak_local_on_assignment(*local_id, value, &local_ty);
                     self.local_types.insert(*local_id, local_ty);
@@ -57,8 +58,8 @@ impl<'a> Checker<'a> {
                     }
                     None => Type::Nothing,
                 };
-                if let Some(expected) = &self.current_return {
-                    if !got.is_assignable_to(expected) {
+                if let Some(expected) = self.current_return.clone() {
+                    if !got.is_assignable_to(&expected) {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::ReturnTypeMismatch {
                                 expected: expected.display_name(),
@@ -66,6 +67,9 @@ impl<'a> Checker<'a> {
                             },
                             *span,
                         ));
+                    }
+                    if let Some(e) = value {
+                        self.record_if_grounded_coercion(&got, &expected, e.span());
                     }
                 }
             }
@@ -80,8 +84,11 @@ impl<'a> Checker<'a> {
                 // branching consumes the bool to pick a path, it does
                 // not emit a laundered value, so contagion through `if`
                 // is not required (and `&&` / `||` stay out of scope per
-                // D1). The condition-unwrap is recorded + IR-visible
-                // when the D5 discard node lands (slice 7).
+                // D1). D5: record the condition span when grounded so
+                // IR lowering inserts a visible `UnwrapGrounded` at the
+                // condition — the bool is destroyed by the branch, not
+                // propagated, but `@grounded_pure` still has to see the
+                // discard.
                 if !matches!(cond_ty.ungrounded(), Type::Bool | Type::Unknown) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeMismatch {
@@ -92,6 +99,7 @@ impl<'a> Checker<'a> {
                         cond.span(),
                     ));
                 }
+                self.record_if_grounded_coercion(&cond_ty, &Type::Bool, cond.span());
                 let entry_frontier = self.effect_frontier;
                 let entry_weak_refresh = self.weak_refresh.clone();
 
@@ -121,10 +129,10 @@ impl<'a> Checker<'a> {
                         .push(TypeError::new(TypeErrorKind::YieldOutsideAgent, *span));
                     return;
                 }
-                match self.current_return.as_ref() {
+                match self.current_return.clone() {
                     Some(Type::Stream(inner)) => {
                         self.saw_yield = true;
-                        if !yielded.is_assignable_to(inner) {
+                        if !yielded.is_assignable_to(&inner) {
                             self.errors.push(TypeError::new(
                                 TypeErrorKind::YieldReturnTypeMismatch {
                                     expected: inner.display_name(),
@@ -133,6 +141,7 @@ impl<'a> Checker<'a> {
                                 value.span(),
                             ));
                         }
+                        self.record_if_grounded_coercion(&yielded, &inner, value.span());
                     }
                     Some(other) => {
                         self.errors.push(TypeError::new(

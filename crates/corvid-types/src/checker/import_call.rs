@@ -520,6 +520,7 @@ impl<'a> Checker<'a> {
                                 arg.span(),
                             ));
                         }
+                        self.record_if_grounded_coercion(&arg_ty, &field_ty, arg.span());
                     } else {
                         let _ = self.check_expr(arg);
                     }
@@ -572,6 +573,7 @@ impl<'a> Checker<'a> {
                         arg.span(),
                     ));
                 }
+                self.record_if_grounded_coercion(&arg_ty, &param_ty, arg.span());
             } else {
                 let _ = self.check_expr(arg);
             }

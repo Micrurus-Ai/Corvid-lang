@@ -306,7 +306,12 @@ impl<'a> Checker<'a> {
                 };
                 let inner_ty = self.check_expr_as(&args[0], expected_inner);
                 let final_inner_ty = match expected_inner {
-                    Some(exp) if inner_ty.is_assignable_to(exp) => exp.clone(),
+                    Some(exp) if inner_ty.is_assignable_to(exp) => {
+                        // D5: `Some(g)` where `g: Grounded<T>` and the
+                        // expected slot is `Option<T>` silently strips.
+                        self.record_if_grounded_coercion(&inner_ty, exp, args[0].span());
+                        exp.clone()
+                    }
                     _ => inner_ty,
                 };
                 Type::Option(Box::new(final_inner_ty))
@@ -791,6 +796,7 @@ impl<'a> Checker<'a> {
                         arg.span(),
                     ));
                 }
+                self.record_if_grounded_coercion(&arg_ty, &field_ty, arg.span());
             } else {
                 let _ = self.check_expr(arg);
             }
@@ -823,6 +829,7 @@ impl<'a> Checker<'a> {
                         arg.span(),
                     ));
                 }
+                self.record_if_grounded_coercion(&arg_ty, &param_ty, arg.span());
             } else {
                 let _ = self.check_expr(arg);
             }

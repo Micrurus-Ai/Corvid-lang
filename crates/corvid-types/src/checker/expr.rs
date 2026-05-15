@@ -107,6 +107,11 @@ impl<'a> Checker<'a> {
                             // Promote list to Float.
                             elem_ty = Type::Float;
                         }
+                    } else {
+                        // D5: a Grounded<T> item flowing into a list
+                        // inferred as List<T> by the first element is a
+                        // silent grounded-to-bare coercion site.
+                        self.record_if_grounded_coercion(&item_ty, &elem_ty, item.span());
                     }
                 }
                 let _ = span;
@@ -406,10 +411,22 @@ impl<'a> Checker<'a> {
             self.register_replay_arm_capture_types(arm);
 
             let arm_ty = self.check_expr(&arm.body);
+            // D5: replay arm bodies that strip a `Grounded<T>` to fit
+            // the running joined type are silent coercion sites; record
+            // them so IR lowering can insert a visible discard.
+            if let Some(existing) = joined.as_ref() {
+                let from = arm_ty.clone();
+                self.record_if_grounded_coercion(&from, existing, arm.body.span());
+            }
             unify_replay_arm_type(&mut joined, arm_ty, &mut self.errors, arm, "a `when` arm");
         }
 
         let else_ty = self.check_expr(else_body);
+        // D5: same for the `else` arm.
+        if let Some(existing) = joined.as_ref() {
+            let from = else_ty.clone();
+            self.record_if_grounded_coercion(&from, existing, else_body.span());
+        }
         unify_replay_arm_type_for_else(&mut joined, else_ty, &mut self.errors, else_body);
 
         joined.unwrap_or(Type::Unknown)

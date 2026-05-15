@@ -4693,3 +4693,186 @@ agent use_it(id: String) -> Grounded<String>:
         "a non-grounded effect must not ground the return type"
     );
 }
+
+// ------------------------------------------------------------------
+// Provenance Propagation D5 (slice 7a): the typechecker records
+// every value-expression span where the legacy `Grounded<T> -> T`
+// rule fired during slot-checking. IR lowering (slice 7b) reads
+// this side table to emit a visible `UnwrapGrounded` discard node,
+// so `@grounded_pure` (slice 9) can fail any function whose body
+// implicitly strips a grounded value. The tests below pin the
+// soundness contract: every named slot-check site MUST be in the
+// set when a grounded value flows into a non-grounded slot. A
+// missed site is a silent moat hole — that is why the assertions
+// here use exact-span equality, not "set is non-empty".
+
+#[test]
+fn grounded_coercion_recorded_at_return() {
+    // `data: grounded` makes `fetch(id)` produce `Grounded<String>`;
+    // the agent returns it into a plain `String` slot. The legacy
+    // rule lets it through; D5 records the value expression's span.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+agent leak(id: String) -> String:
+    return fetch(id)
+";
+    let (file, _resolved, c) = checked_with_file(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+    let agent = file
+        .decls
+        .iter()
+        .find_map(|d| {
+            if let corvid_ast::Decl::Agent(a) = d {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .expect("agent decl");
+    let body = &agent.body;
+    let return_value_span = body
+        .stmts
+        .iter()
+        .find_map(|s| {
+            if let corvid_ast::Stmt::Return {
+                value: Some(e), ..
+            } = s
+            {
+                Some(e.span())
+            } else {
+                None
+            }
+        })
+        .expect("return value");
+    assert!(
+        c.grounded_coercion_sites.contains(&return_value_span),
+        "expected return value span {:?} in recorded coercion sites {:?}",
+        return_value_span,
+        c.grounded_coercion_sites,
+    );
+}
+
+#[test]
+fn grounded_coercion_recorded_at_call_arg() {
+    // `Grounded<String>` passed into a plain-`String` parameter.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+tool sink(s: String) -> Nothing
+
+agent leak(id: String) -> Nothing:
+    sink(fetch(id))
+";
+    let (file, _resolved, c) = checked_with_file(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+    let agent = file
+        .decls
+        .iter()
+        .find_map(|d| {
+            if let corvid_ast::Decl::Agent(a) = d {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .expect("agent decl");
+    let body = &agent.body;
+    let call_arg_span = body
+        .stmts
+        .iter()
+        .find_map(|s| {
+            if let corvid_ast::Stmt::Expr {
+                expr: corvid_ast::Expr::Call { args, .. },
+                ..
+            } = s
+            {
+                args.first().map(|a| a.span())
+            } else {
+                None
+            }
+        })
+        .expect("call arg");
+    assert!(
+        c.grounded_coercion_sites.contains(&call_arg_span),
+        "expected call arg span {:?} in recorded coercion sites {:?}",
+        call_arg_span,
+        c.grounded_coercion_sites,
+    );
+}
+
+#[test]
+fn grounded_coercion_recorded_at_if_condition() {
+    // The condition of `if` is grounded-tolerant (D2) but the
+    // unwrap still has to be IR-visible.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_flag(id: String) -> Bool uses retrieval
+
+agent decide(id: String) -> Int:
+    if fetch_flag(id):
+        return 1
+    return 0
+";
+    let (file, _resolved, c) = checked_with_file(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+    let agent = file
+        .decls
+        .iter()
+        .find_map(|d| {
+            if let corvid_ast::Decl::Agent(a) = d {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .expect("agent decl");
+    let body = &agent.body;
+    let cond_span = body
+        .stmts
+        .iter()
+        .find_map(|s| {
+            if let corvid_ast::Stmt::If { cond, .. } = s {
+                Some(cond.span())
+            } else {
+                None
+            }
+        })
+        .expect("if cond");
+    assert!(
+        c.grounded_coercion_sites.contains(&cond_span),
+        "expected if cond span {:?} in recorded coercion sites {:?}",
+        cond_span,
+        c.grounded_coercion_sites,
+    );
+}
+
+#[test]
+fn no_coercion_recorded_when_slot_is_already_grounded() {
+    // Returning `Grounded<String>` into `-> Grounded<String>` is
+    // not a coercion — the wrapper is preserved. Nothing should be
+    // recorded.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+agent keep(id: String) -> Grounded<String>:
+    return fetch(id)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+    assert!(
+        c.grounded_coercion_sites.is_empty(),
+        "no coercion expected, got {:?}",
+        c.grounded_coercion_sites,
+    );
+}
