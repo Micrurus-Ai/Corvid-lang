@@ -545,9 +545,37 @@ boundaries.
   native is *value-contagious* in this phase; native's
   provenance-DAG-through-operators is the follow-up phase's
   deliverable.
-- **Slice 6 — control-flow conditions.** `Grounded<Bool>` accepted
-  by `if` / `while` / `match` across all tiers, with the recorded
-  implicit condition-unwrap (D2).
+- **Slice 6 — control-flow conditions. ✅ shipped.** Recon found
+  Corvid has only `Stmt::If` (and `Stmt::For`, but `for` iterates,
+  not Bool-conditions); `while` and `match`/`when` don't exist as
+  stmts — D2's "if/while/match" was partially aspirational.
+  Slice 6 covers every Bool-condition site that exists today:
+  - Typechecker `Stmt::If` (`checker/stmt.rs`) and eval-decl
+    `assert <expr>` (`checker/decl_eval.rs`) now use
+    `cond_ty.ungrounded()` so `Grounded<Bool>` flows through.
+  - Interpreter `require_bool` strips `Value::Grounded` recursively
+    (the centralised Bool-extraction helper); the if-stmt evaluator
+    refactored to call `require_bool` instead of its inline
+    grounded-blind match (DRY).
+  - Native: no change needed. `Grounded<Bool>` is machine-identical
+    to `Bool` (a bare `i8`), `Bool` is not refcounted (no ownership
+    entanglement like slice 5's refcounted-type case), and `brif`
+    on a bare bool already works.
+  - 1 corvid-types test (`if_condition_accepts_grounded_bool`) +
+    1 corvid-vm test (`require_bool_strips_grounded_for_control_flow`).
+    Workspace sweep stays 0 failures.
+
+  D2's "recorded + IR-visible" condition-unwrap defers to slice 7:
+  the trace event + the IR-visible discard node ride on D5's
+  general discard-node mechanism, which slice 7 ships across all
+  implicit-coercion sites (return / args / bindings / fields /
+  conditions). Slice 6 makes the condition path *work*; slice 7
+  makes its drop *visible* for `@grounded_pure` (slice 9).
+
+  Out-of-scope follow-up: `&&` / `||` operators still reject a
+  `Grounded<Bool>` operand (the design doc's existing non-scope
+  for `&&`/`||` contagion); `if grounded_bool && other` therefore
+  still errors at the operator, not the condition.
 - **Slice 7 — D5 discard node.** `corvid-ir`: lowering inserts the
   visible discard node (reuse `UnwrapGrounded` or a dedicated
   `CoerceGroundedDiscard`) at every implicit `Grounded<T> → T`

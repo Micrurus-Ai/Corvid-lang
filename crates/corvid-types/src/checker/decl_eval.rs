@@ -138,7 +138,10 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let ty = self.check_expr(expr);
-                if !matches!(ty, Type::Bool | Type::Unknown) {
+                // D2: assert accepts `Grounded<Bool>` — same shape as
+                // `if`-condition (consumes the bool to produce a
+                // verdict, does not emit a laundered value).
+                if !matches!(ty.ungrounded(), Type::Bool | Type::Unknown) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::AssertNotBool {
                             got: ty.display_name(),

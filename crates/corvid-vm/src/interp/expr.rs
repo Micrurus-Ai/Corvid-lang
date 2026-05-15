@@ -254,8 +254,20 @@ pub(super) fn eval_unop(
 }
 
 pub(super) fn require_bool(v: &Value, span: Span, context: &str) -> Result<bool, InterpError> {
+    // D2 Provenance Propagation: control-flow conditions and other
+    // bool-consumption sites accept `Value::Grounded<Bool>` —
+    // branching/asserting consumes the bool to pick a path or
+    // produce a verdict, it does not emit a laundered value, so
+    // unwrapping to the inner bool is sound. Recursive strip handles
+    // nested grounding (which the type system prevents but which
+    // this stays robust against). The unwrap is recorded + IR-visible
+    // when the D5 discard node lands (slice 7).
     match v {
         Value::Bool(b) => Ok(*b),
+        Value::Grounded(g) => {
+            let inner = g.inner.get();
+            require_bool(&inner, span, context)
+        }
         other => Err(InterpError::new(
             InterpErrorKind::TypeMismatch {
                 expected: format!("Bool for {context}"),
@@ -363,5 +375,37 @@ mod tests {
         let result =
             eval_binop(BinaryOp::Add, Value::Int(2), Value::Int(3), span(), false).expect("eval");
         assert_eq!(result, Value::Int(5));
+    }
+
+    /// A `Grounded<Bool>` value carrying a single retrieval source.
+    fn grounded_bool(b: bool, source: &str) -> Value {
+        Value::Grounded(GroundedValue::with_confidence(
+            Value::Bool(b),
+            ProvenanceChain::with_retrieval(source, 1),
+            1.0,
+        ))
+    }
+
+    #[test]
+    fn require_bool_strips_grounded_for_control_flow() {
+        // D2 Provenance Propagation: a control-flow condition (`if`,
+        // assert) accepts `Value::Grounded<Bool>` — `require_bool`
+        // strips to the inner bool so the branch decision proceeds.
+        // Without slice 6 this was a `TypeMismatch` "expected Bool"
+        // crash at runtime.
+        let span = span();
+        assert_eq!(
+            require_bool(&grounded_bool(true, "src"), span, "test").unwrap(),
+            true
+        );
+        assert_eq!(
+            require_bool(&grounded_bool(false, "src"), span, "test").unwrap(),
+            false
+        );
+        // Plain `Value::Bool` still works (regression guard).
+        assert_eq!(require_bool(&Value::Bool(true), span, "test").unwrap(), true);
+        // Non-bool still errors (the strip is grounding-only, not
+        // type-coercion).
+        assert!(require_bool(&Value::Int(1), span, "test").is_err());
     }
 }

@@ -1,3 +1,4 @@
+use super::expr::require_bool;
 use super::{Flow, Interpreter};
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::step::{StepAction, StepEvent, StmtKind};
@@ -248,18 +249,11 @@ impl<'ir> Interpreter<'ir> {
                     Ok(v) => v,
                     Err(v) => return Ok(Flow::Return(v)),
                 };
-                let take_then = match c {
-                    Value::Bool(b) => b,
-                    other => {
-                        return Err(InterpError::new(
-                            InterpErrorKind::TypeMismatch {
-                                expected: "Bool".into(),
-                                got: other.type_name(),
-                            },
-                            cond.span,
-                        ));
-                    }
-                };
+                // D2 Provenance Propagation: `require_bool` strips
+                // `Value::Grounded` so a grounded-Bool condition picks
+                // the right branch. Centralised in the helper rather
+                // than duplicated here.
+                let take_then = require_bool(&c, cond.span, "`if` condition")?;
                 if take_then {
                     self.eval_block(then_block).await
                 } else if let Some(eb) = else_block {

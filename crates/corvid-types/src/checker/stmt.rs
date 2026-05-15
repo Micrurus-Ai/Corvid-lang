@@ -76,7 +76,13 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let cond_ty = self.check_expr(cond);
-                if !matches!(cond_ty, Type::Bool | Type::Unknown) {
+                // D2: control-flow conditions accept `Grounded<Bool>` —
+                // branching consumes the bool to pick a path, it does
+                // not emit a laundered value, so contagion through `if`
+                // is not required (and `&&` / `||` stay out of scope per
+                // D1). The condition-unwrap is recorded + IR-visible
+                // when the D5 discard node lands (slice 7).
+                if !matches!(cond_ty.ungrounded(), Type::Bool | Type::Unknown) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeMismatch {
                             expected: "Bool".into(),

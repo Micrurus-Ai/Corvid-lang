@@ -4650,6 +4650,30 @@ agent use_it(id: String) -> Grounded<String>:
 }
 
 #[test]
+fn if_condition_accepts_grounded_bool() {
+    // D2 Provenance Propagation: an `if` condition accepts
+    // `Grounded<Bool>` — branching consumes the bool to pick a path,
+    // it does not emit a laundered value, so the implicit unwrap is
+    // sound. Without slice 6 the typechecker rejected this with
+    // "expected Bool, got Grounded<Bool>" because the
+    // `matches!(cond_ty, Type::Bool | Type::Unknown)` check was
+    // grounded-blind.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_flag(id: String) -> Bool uses retrieval
+
+agent decide(id: String) -> Int:
+    if fetch_flag(id):
+        return 1
+    return 0
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn non_grounded_effect_leaves_the_return_plain() {
     // Design X is conditional: an effect WITHOUT `data: grounded`
     // does not wrap the return type. A plain `String` returned into a
