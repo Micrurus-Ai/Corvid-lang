@@ -128,6 +128,24 @@ impl Type {
         }
     }
 
+    /// Strip every `Grounded<>` wrapper, returning the inner
+    /// non-grounded type. A (degenerate) `Grounded<Grounded<T>>`
+    /// normalises to `T`.
+    ///
+    /// The single source of truth for "see through grounding." A
+    /// `Grounded<T>` value is operationally a `T` carrying provenance;
+    /// any site that routes on the *shape* of a type — the operator
+    /// checks (`checker/ops.rs`), the wrapping-int IR-lowering test
+    /// (`corvid-ir`), the native operand-routing decisions
+    /// (`corvid-codegen-cl`) — must see through the wrapper so a
+    /// grounded operand routes exactly as its inner type would.
+    pub fn ungrounded(&self) -> &Type {
+        match self {
+            Type::Grounded(inner) => inner.ungrounded(),
+            other => other,
+        }
+    }
+
     /// Is this type compatible with `other` in a value-assignment position?
     ///
     /// v0.1 is intentionally lenient: structurally identical types match,

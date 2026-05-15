@@ -510,6 +510,14 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
         Type::Option(inner) => {
             matches!(&**inner, Type::Int | Type::Bool | Type::Float) || is_refcounted(inner)
         }
+        // `Type::Grounded` is deliberately NOT treated as refcounted
+        // here: the native grounded path has its own ownership model
+        // (the attestation store + `grounded_handle_ptr` out-param),
+        // and the dataflow / dup-drop passes are built around
+        // `Grounded` being opaque to the normal refcount analysis.
+        // Making this see through `Grounded` double-frees grounded
+        // refcounted values. Untangling that is the
+        // `native-grounded-handles` follow-up phase, not slice 5.
         _ => false,
     }
 }

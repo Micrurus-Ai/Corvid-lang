@@ -1388,11 +1388,16 @@ fn agent_cost_budget(agent: &AgentDecl) -> Option<f64> {
 }
 
 fn is_wrapping_int_binop(op: BinaryOp, ty: Option<&Type>) -> bool {
-    matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) && matches!(ty, Some(Type::Int))
+    // See through `Grounded<>`: a grounded `Int` operator under a
+    // `@wrapping` agent must lower to the wrapping path, not the
+    // overflow-trapping one — `Grounded<Int>` is operationally an
+    // `Int` (Provenance Propagation, native value-correctness).
+    matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul)
+        && matches!(ty.map(Type::ungrounded), Some(Type::Int))
 }
 
 fn is_wrapping_int_unop(op: UnaryOp, ty: Option<&Type>) -> bool {
-    matches!(op, UnaryOp::Neg) && matches!(ty, Some(Type::Int))
+    matches!(op, UnaryOp::Neg) && matches!(ty.map(Type::ungrounded), Some(Type::Int))
 }
 
 /// Retrieve a tool's declared effect by its `DefId`.

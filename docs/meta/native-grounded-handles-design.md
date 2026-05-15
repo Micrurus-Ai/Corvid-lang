@@ -38,10 +38,29 @@ It cannot:
 - Build the `Derived` tree the contagion law (D3) requires for
   byte-identical provenance across tiers.
 
-Provenance Propagation slice 5 shipped native **value-correctness**
-(grounded operators produce correct values — see that phase's
-slice-5 entry). This phase ships native **provenance-correctness**:
-the `Derived` DAG, byte-identical to the interpreter's.
+Provenance Propagation slice 5 shipped native **grounded-scalar
+value-correctness** (grounded Int/Bool/Float operators produce
+correct values, including under `@wrapping`). It could *not* cleanly
+ship grounded-**refcounted-type** value-correctness: routing a
+`Grounded<String> + String` concat correctly produces the right
+value but **leaks**, because the dataflow / dup-drop passes treat
+`Grounded<...>` as opaque (`ownership::is_refcounted` returns
+`false` for it — deliberately; making it see through `Grounded`
+double-frees). That is the same ownership-model entanglement this
+phase exists to untangle.
+
+So this phase ships two things native is missing:
+1. **Grounded-refcounted-type value-correctness** — `Grounded<String
+   / List / Struct>` operators produce correct, leak-free values.
+   The `#[ignore]`d `grounded_string_concat_native_matches_
+   interpreter` parity test in `corvid-codegen-cl` is the
+   executable spec; un-ignore it when this phase lands.
+2. **Provenance-correctness** — the `Derived` DAG, byte-identical
+   to the interpreter's.
+
+Both reduce to the same root: native grounded values need a real
+per-value ownership + provenance model instead of "bare value +
+single global attestation slot."
 
 ## What the pre-phase chat must settle
 

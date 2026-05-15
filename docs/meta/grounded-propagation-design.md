@@ -500,18 +500,43 @@ boundaries.
   possibly the Phase 22 FFI surface. That is **phase-sized**, and
   per CLAUDE.md needs its own pre-phase design chat.
 
-  CTO decision: this is honest sequencing, not a shortcut. Slice 5
-  ships native **value-correctness** — a real, tractable fix. Recon
-  found a genuine bug: `BinOp` lowering routes on `matches!(left.ty,
-  Type::String)`, which is *false* for `Type::Grounded<String>`, so
-  `Grounded<String> + String` falls through to `lower_binop_strict`
-  and does integer `iadd` on string pointers → garbage. Slice 5
-  strips `Grounded<>` from operand types before the
-  string / list / refcount / wrapping-int routing decisions (mirror
-  the typechecker's `ungrounded()` helper), so native produces
-  *correct grounded values*. Verified by native-tier tests, not the
-  profile-level differential verifier (R1's stated mitigation does
-  not catch grounded-value correctness — see the slice-4 finding).
+  CTO decision: honest sequencing, not a shortcut. Slice 5 ships
+  native **grounded-scalar value-correctness**. ✅ shipped.
+
+  **Recon during execution sharpened the scope.** The initial plan
+  was "strip `Grounded<>` before all native operand-routing
+  decisions." Two of those landed cleanly; one did not:
+  - ✅ `is_wrapping_int_binop` / `is_wrapping_int_unop`
+    (`corvid-ir`) were grounded-blind — under `@wrapping`, a
+    grounded-`Int` operator lowered to the overflow-trapping
+    `BinOp` instead of `WrappingBinOp`. Fixed with the shared
+    `Type::ungrounded()` method. Grounded *scalars* (Int/Bool/Float)
+    are now value-correct at native — and they were the only
+    cleanly-tractable case, because scalars are not refcounted, so
+    there is no ownership entanglement.
+  - ❌ The `BinOp` string-routing fix (`matches!(left.ty,
+    Type::String)` → see through `Grounded`) produces correct
+    *values* but **leaks**: the dataflow / dup-drop passes treat
+    `Grounded<...>` as opaque (`ownership::is_refcounted` returns
+    `false` for it — *deliberately*; making it see through
+    `Grounded` double-frees, proven by a broken parity test). So
+    grounded-**refcounted-type** (String / List / Struct) operator
+    value-correctness is *entangled with the native grounded
+    ownership model* — the same model the follow-up phase reworks.
+    Reverted; the string-routing site keeps a `NOTE` comment
+    recording why it is deliberately grounded-blind.
+
+  **Net slice-5 scope:** grounded-scalar value-correctness (the
+  `@wrapping` IR fix) + the shared `Type::ungrounded()` method
+  (used by `checker/ops.rs`, `corvid-ir`, and available to
+  `corvid-codegen-cl`). Grounded-refcounted-type operator
+  value-correctness joins the native grounded-handle rework in the
+  `native-grounded-handles` follow-up phase — an `#[ignore]`d
+  `grounded_string_concat` parity test is filed as that phase's
+  executable spec. Verified by `corvid-ir` unit tests + the
+  pre-existing grounded parity tests staying green (the
+  profile-level differential verifier does not catch grounded-value
+  correctness — see the slice-4 finding).
 
   The native grounded-handle rework — per-value provenance, the
   `Derived` DAG at native — is a **dedicated follow-up phase**, with

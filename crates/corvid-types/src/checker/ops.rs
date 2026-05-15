@@ -60,8 +60,8 @@ impl<'a> Checker<'a> {
         // additive: it never changes an existing acceptance, only adds
         // new ones.
         let contagious = matches!(lt, Type::Grounded(_)) || matches!(rt, Type::Grounded(_));
-        let lt = ungrounded(&lt).clone();
-        let rt = ungrounded(&rt).clone();
+        let lt = lt.ungrounded().clone();
+        let rt = rt.ungrounded().clone();
 
         let result = match op {
             // `+` is overloaded: numeric addition OR string concatenation.
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
         // operand was grounded. Dormant until slice 2b (see
         // `check_binop` for the full rationale).
         let contagious = matches!(t, Type::Grounded(_));
-        let t = ungrounded(&t).clone();
+        let t = t.ungrounded().clone();
 
         let result = match op {
             UnaryOp::Neg => match t {
@@ -244,15 +244,3 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Strip every `Grounded<>` wrapper from a type, returning the inner
-/// non-grounded type. A (degenerate) `Grounded<Grounded<T>>` normalises
-/// to `T`. Used by the operator checks to implement the Provenance
-/// Propagation contagion law (D1): the operator's normal type rule
-/// runs on the inner type, and the caller re-wraps the result in a
-/// single `Grounded<>` if any operand was grounded.
-fn ungrounded(ty: &Type) -> &Type {
-    match ty {
-        Type::Grounded(inner) => ungrounded(inner),
-        other => other,
-    }
-}

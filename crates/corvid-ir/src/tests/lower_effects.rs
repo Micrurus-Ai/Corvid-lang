@@ -265,3 +265,48 @@ agent ordinary() -> Int:
         );
         assert_eq!(ret.ty, corvid_types::Type::Int);
     }
+
+    #[test]
+    fn wrapping_agent_with_grounded_int_lowers_to_wrapping_binop() {
+        // Provenance Propagation slice 5 — native value-correctness.
+        // Under `@wrapping`, a grounded-`Int` operator must still lower
+        // to `WrappingBinOp` (the wrapping path), not `BinOp` (the
+        // overflow-trapping path). `is_wrapping_int_binop` must see
+        // through `Grounded<>` — a `Grounded<Int>` is operationally an
+        // `Int`. Without the slice-5 fix this lowers to `BinOp` and a
+        // `@wrapping` agent's grounded-int arithmetic would trap on
+        // overflow instead of wrapping.
+        let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch_n(id: String) -> Int uses retrieval
+
+@wrapping
+agent add_grounded(id: String) -> Grounded<Int>:
+    g = fetch_n(id)
+    return g + 1
+";
+        let ir = lower_src(src);
+        let agent = ir
+            .agents
+            .iter()
+            .find(|a| a.name == "add_grounded")
+            .expect("add_grounded agent");
+        let ret = agent
+            .body
+            .stmts
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStmt::Return {
+                    value: Some(value), ..
+                } => Some(value),
+                _ => None,
+            })
+            .expect("return value");
+        assert!(
+            matches!(ret.kind, IrExprKind::WrappingBinOp { .. }),
+            "expected WrappingBinOp under @wrapping, got {:?}",
+            ret.kind
+        );
+    }

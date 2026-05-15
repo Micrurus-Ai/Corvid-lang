@@ -109,6 +109,18 @@ pub(super) fn lower_expr(
             // call results) still produce an Owned +1 and are
             // released by the helper as before ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the original
             // ownership contract.
+            // NOTE: this routes only on bare `Type::String`, not
+            // `Grounded<String>`. Routing a grounded-string operator
+            // through the String helpers produces correct *values*
+            // but leaks the result: the dataflow / dup-drop passes
+            // treat `Grounded<...>` as opaque (see
+            // `ownership::is_refcounted`), so no Drop is scheduled.
+            // Grounded-refcounted-type operator value-correctness is
+            // entangled with the native grounded ownership model and
+            // is the `native-grounded-handles` follow-up phase, not
+            // slice 5. Grounded *scalars* (Int/Bool/Float) are
+            // already value-correct — they are not refcounted, so
+            // there is no ownership entanglement.
             if matches!(&left.ty, Type::String) && matches!(&right.ty, Type::String) {
                 let (l, l_borrowed) =
                     lower_string_operand_maybe_borrowed(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;

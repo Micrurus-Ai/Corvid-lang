@@ -144,6 +144,47 @@ agent main() -> Int:
 }
 
 #[test]
+#[ignore = "native-grounded-handles follow-up phase: grounded-refcounted-type \
+            operator value-correctness is entangled with the native grounded \
+            ownership model — routing the concat correctly produces the right \
+            value but leaks (dataflow/dup-drop treat Grounded<...> as opaque, \
+            see ownership::is_refcounted). Un-ignore when that phase lands."]
+fn grounded_string_concat_native_matches_interpreter() {
+    // Executable spec for the `native-grounded-handles` follow-up
+    // phase (docs/meta/native-grounded-handles-design.md). When that
+    // phase gives grounded values a real native ownership model,
+    // `Grounded<String> + String` will route through the String
+    // helpers AND have its result Dropped — and this test will pass.
+    // Slice 5 of Provenance Propagation deliberately scopes to
+    // grounded *scalars* (Int/Bool/Float — not refcounted, no
+    // ownership entanglement); grounded refcounted types are this
+    // follow-up phase's deliverable.
+    let src = r#"
+effect retrieval:
+    data: grounded
+
+tool grounded_echo(s: String) -> Grounded<String> uses retrieval
+tool string_len(s: String) -> Int
+
+agent main() -> Int:
+    g = grounded_echo("hello")
+    combined = g + " world"
+    return string_len(combined.unwrap_discarding_sources())
+"#;
+    assert_parity_prebuilt_tools(src, 11, |builder| {
+        builder
+            .tool("grounded_echo", |args| async move {
+                Ok(serde_json::json!(args[0].as_str().unwrap()))
+            })
+            .tool("string_len", |args| async move {
+                Ok(serde_json::json!(
+                    args[0].as_str().unwrap().chars().count() as i64
+                ))
+            })
+    });
+}
+
+#[test]
 fn tool_result_in_arithmetic() {
     assert_parity_with_mock_tools(
         "tool base() -> Int\n\nagent main() -> Int:\n    return base() * 2 + 5\n",
