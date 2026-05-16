@@ -119,6 +119,28 @@ agent cited(id: String) -> Grounded<String>:
 "#,
     },
     TourTopic {
+        name: "provenance-propagation",
+        title: "Provenance Propagation + @grounded_pure",
+        category: "Safety at compile time",
+        pitch: "Grounded values stay grounded as they flow through ordinary code: the contagion law lifts Grounded<T> through operators and call sites; the runtime delivers Value::Grounded wherever the type promises it. Mark an agent @grounded_pure and the compiler refuses every laundering shape — silent Grounded<T> -> T coercion, explicit .unwrap_discarding_sources(), and calls into agents that aren't themselves @grounded_pure. The moat composes through the call graph the same way @deterministic does.",
+        spec: "docs/meta/grounded-propagation-design.md",
+        roadmap: "Provenance Propagation phase",
+        test: "crates/corvid-types/src/tests.rs grounded_pure_* tests + tests/corpus/combined_all.cor + tests/corpus/legacy_grounded_coercion.cor",
+        non_scope: "@grounded_pure forbids laundering inside an agent body; it does not validate the truth of the cited source. Trust in the upstream retrieval is the operator's responsibility.",
+        source: r#"effect retrieval:
+    data: grounded
+
+prompt audit() -> String uses retrieval:
+    "Audit"
+
+@grounded_pure
+agent run() -> Grounded<String>:
+    head = "Summary: "
+    tail = audit()
+    return head + tail
+"#,
+    },
+    TourTopic {
         name: "cost-budgets",
         title: "Compile-Time Budgets",
         category: "Safety at compile time",

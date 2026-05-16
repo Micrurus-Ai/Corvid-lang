@@ -4534,3 +4534,68 @@ commit archaeology. Phase 35V's pattern-3 ("memory records
 capture methodology, not just outcomes") applies one layer up:
 pre-phase chat docs need to capture decisions, not just
 agendas.
+
+## Provenance Propagation closed (2026-05-16)
+
+Eleven slices over four sessions; the shipped capability is the
+contagion law (`Grounded<T>` flows through ordinary operators +
+call sites), the runtime alignment (`maybe_ground_*_result`
+delivers `Value::Grounded` wherever the type promises it), the
+IR-visible discard (`UnwrapGrounded` at every legacy
+`Grounded<T> -> T` coercion site), and `@grounded_pure` — the
+compile-time moat that refuses any laundering inside an agent
+body.
+
+Three patterns kept surfacing across the phase and are worth
+recording for the next moat-shaped feature:
+
+1. **Design X reversal at slice 2.** The doc opened with a wrong
+   premise — that the typechecker already saw `Grounded<T>` for
+   `data: grounded` returns and just needed contagion glue. The
+   slice-2 recon falsified it before any code: the typechecker was
+   *grounded-blind* for effect-induced grounding. The fix was not
+   "teach the interpreter to tolerate `Value::Grounded`" (that
+   would leave the moat impossible); the fix was Design X — make
+   `data: grounded` a type-system property so the typechecker
+   sees what the runtime sees. The slice plan reshaped 11→12
+   slices and the lesson generalised: *a design doc's first
+   recon pass is the cheap moment to falsify the load-bearing
+   premise*. Mid-implementation discovery costs the whole plan.
+
+2. **Each downstream consumer of a type-level promise needs to
+   be re-audited.** Design X (slice 2b) promoted return types at
+   the typechecker. Slices 7b and 10 each found a downstream
+   consumer that wasn't re-audited:
+
+   - 7b: `maybe_ground_tool_result` only wrapped tools with
+     literal effect name `"retrieval"`, not the general
+     `data: grounded` row. Surfaced because the new IR
+     `UnwrapGrounded` forced the runtime to encounter a value as
+     `Grounded` for the first time.
+   - 10: `expr_is_grounded`'s `Prompt` arm walked args only,
+     never the prompt's own effect row. Surfaced because the new
+     idiomatic fixture (return `Grounded<String>` end-to-end)
+     forced the reachability analysis to recognise a no-args
+     `data: grounded` prompt as a provenance source.
+
+   The pattern: *when a type-level promise lands, list every
+   downstream consumer (runtime grounding, reachability analysis,
+   IR lowering, codegen, ABI) and re-audit each one against the
+   new promise*. Each gap surfaces only when a later slice forces
+   the value through that consumer.
+
+3. **Sub-splitting load-bearing slices early.** Slices 2, 3, 5,
+   and 7 all sub-split into a/b/c/etc after the recon revealed
+   the work was bigger than the design doc estimated. The
+   sub-splits paid off in two ways: each commit was small enough
+   to roll back, and the dev-log + design doc could record the
+   exact boundary where the work expanded (e.g., slice 7's
+   sub-split into 7a typechecker recorder + 7b IR insertion +
+   runtime alignment, where the runtime alignment was a
+   pre-existing gap surfaced by 7b that the design doc had not
+   anticipated). The rubric: *if a slice's recon finds two
+   independent shapes of work, sub-split before the first
+   commit, and update the design doc with the sub-split + the
+   reason*.
+
+The shipped moat is at `crates/corvid-types/src/checker/decl_grounded_pure.rs`. The slice-by-slice design doc with sub-split rationale is at `docs/meta/grounded-propagation-design.md`. The invention catalog entry is in `README.md` under "Provenance Propagation + `@grounded_pure`" and `docs/reference/inventions.md`.

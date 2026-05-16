@@ -147,6 +147,34 @@ Roadmap: [Phase 20b cites ctx strictly](./ROADMAP.md)
 Proof: [VM citation tests](./crates/corvid-vm/src/tests/dispatch.rs)
 Non-scope: Citation checks textual evidence, not the truth of the cited document.
 
+#### Provenance Propagation + `@grounded_pure`
+
+Grounded values stay grounded as they flow through ordinary code. Add a `Grounded<String>` to a plain `String`, pass it as a call argument, return it through a branch — the wrapper carries through and the runtime delivers what the type promises.
+
+Mark an agent `@grounded_pure` and the compiler refuses to launder. Every silent `Grounded<T> -> T` coercion, every `.unwrap_discarding_sources()`, every call into an agent that isn't itself `@grounded_pure` — all rejected at compile time. The moat composes through the call graph the same way `@deterministic` does.
+
+```corvid
+effect retrieval:
+    data: grounded
+
+prompt audit() -> String uses retrieval:
+    "Audit"
+
+# `+` lifts `String + Grounded<String>` to `Grounded<String>`
+# via the contagion law; the wrapper rides through to return.
+@grounded_pure
+agent run() -> Grounded<String>:
+    head = "Summary: "
+    tail = audit()
+    return head + tail
+```
+
+Spec: [grounded propagation design](./docs/meta/grounded-propagation-design.md)
+Tour: `corvid tour --topic provenance-propagation`
+Roadmap: [Provenance Propagation phase](./ROADMAP.md)
+Proof: [proof tests + corpus fixtures](./crates/corvid-types/src/tests.rs) (`grounded_pure_*` + `tests/corpus/combined_all.cor`, `tests/corpus/legacy_grounded_coercion.cor`)
+Non-scope: `@grounded_pure` forbids laundering inside an agent's body; it does not validate that the cited source is truthful (citation contracts handle one layer; trust in the upstream retrieval is the operator's responsibility).
+
 #### Compile-Time Budgets
 
 `@budget` is a static constraint over composed declared cost. The compiler rejects workflows whose worst-case cost exceeds the bound.

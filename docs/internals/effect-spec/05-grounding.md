@@ -123,6 +123,50 @@ A grounded, low-confidence answer is still grounded; it's just not confident. Co
 - Runtime chain: `GroundedValue` in [../../crates/corvid-vm/src/value.rs](../../crates/corvid-vm/src/value.rs).
 - Citation verifier: search for `cites_strictly_param` in [../../crates/corvid-vm/src/interp.rs](../../crates/corvid-vm/src/interp.rs).
 
+## 9. Provenance propagation and `@grounded_pure`
+
+The grounding from sections 1-8 is *constructive* — a value either has a `Grounded<T>` type or it does not. The Provenance Propagation phase adds two things on top of that base: the **contagion law** (grounded-ness flows through ordinary code so users do not have to thread `Grounded<T>` annotations everywhere) and the **`@grounded_pure` moat** (a compile-time guarantee that an agent body launders no grounded value into a non-grounded slot).
+
+### 9.1. Contagion law
+
+A binary or unary operator over a `Grounded<T>` operand returns `Grounded<T>`:
+
+- `Grounded<String> + String` returns `Grounded<String>`. The wrapper is propagated; the inner type is the operator's normal result type. The runtime lifts both operands, computes on the inner values, and re-wraps with the minimum of the two confidences and a `Derived` provenance node naming the operator and pointing at both source chains.
+- The rule covers arithmetic, comparison, string concat, and unary operators. **Short-circuit `&&` / `||` are out of scope** because they would change evaluation order; control-flow conditions instead get the dedicated D2 rule below.
+- A call to a prompt / tool / agent whose declared `effect_row` carries `data: grounded` returns `Grounded<T>` at the call site even when the declared return is plain `T`. The typechecker, the IR, and the runtime all agree the result is grounded.
+
+### 9.2. Control-flow conditions (D2)
+
+`if <expr>:` accepts `Grounded<Bool>` directly — branching consumes the bool to pick a path, it does not emit a laundered value. The implicit unwrap is recorded as an IR-visible discard so `@grounded_pure` can still see it.
+
+### 9.3. Legacy `Grounded<T> -> T` coercion + IR-visible discard
+
+The historical `is_assignable_to` rule that lets a `Grounded<T>` value flow into a non-grounded slot remains in place for backwards compatibility. Every such site is now recorded in `Checked.grounded_coercion_sites` and IR lowering wraps the produced expression in `IrExprKind::UnwrapGrounded`. The recorded sites are:
+
+- return value, yield value, let binding with type annotation;
+- call argument, struct field initialiser, `Some(...)` against an `Option<T>` slot;
+- list element flowing into an inferred bare-`T` element type;
+- replay arm body, `else` arm body;
+- `if` condition (D2).
+
+A laundering site that the slot-check enumeration misses is a silent moat hole — the proof obligation rests on completeness here, not on the rule's wording.
+
+### 9.4. `@grounded_pure` proof obligation (D6)
+
+An agent annotated `@grounded_pure` fails compile if its body contains any of:
+
+1. A recorded coercion site (case 1, implicit coercion).
+2. A `.unwrap_discarding_sources()` method-style call (case 2, explicit unwrap).
+3. A call into another agent that is not itself `@grounded_pure` (case 3, transitive composition).
+
+Tools and prompts are external boundaries that cannot launder by construction — their declared return type either is `Grounded<T>` (preserved) or non-grounded (which the slot-check at the call site catches as case 1). The composition through the call graph mirrors `@deterministic`: a `@grounded_pure` agent can only call other `@grounded_pure` agents.
+
+Guarantee row: `grounded.no_laundering` in [../../../crates/corvid-guarantees/src/registry.rs](../../../crates/corvid-guarantees/src/registry.rs). Proof tests: `grounded_pure_*` in [../../../crates/corvid-types/src/tests.rs](../../../crates/corvid-types/src/tests.rs). Tour: `corvid tour --topic provenance-propagation`.
+
+### 9.5. Design doc
+
+The full design plus slice-by-slice rationale (Decisions D1-D8, risks R1-R6, shipped sub-splits per slice) is in [../../meta/grounded-propagation-design.md](../../meta/grounded-propagation-design.md).
+
 ## Next
 
 [06 — Confidence-gated trust](./06-confidence-gates.md) — how `autonomous_if_confident(T)` threads a runtime trust boundary through the statically-composed trust dimension.

@@ -6720,3 +6720,75 @@ Validation:
 - Credential-pattern scan over `examples/support_escalation_bot`
 
 ---
+
+## 2026-05-16 — Provenance Propagation phase closed
+
+Eleven slices, four sessions, twelve commits on `main`. The
+shipped capability is the contagion law (`Grounded<T>` flows
+through ordinary operators and call sites without explicit
+re-annotation), the runtime alignment (the interpreter's prompt /
+tool finalisers wrap in `Value::Grounded` whenever a `data:
+grounded` effect promises it), the IR-visible discard
+(`IrExprKind::UnwrapGrounded` inserted at every legacy
+`Grounded<T> -> T` slot-check site), and `@grounded_pure` — the
+compile-time moat that refuses any laundering inside an agent
+body and composes through the call graph the same way
+`@deterministic` does.
+
+Slice-by-slice commits:
+
+- Slice 0-6: contagion law (typechecker + interpreter), Design X
+  reversal at slice 2 (typechecker is grounded-blind for
+  effect-induced grounding — fixed at type level rather than at
+  runtime), control-flow condition tolerance (D2), legacy rule
+  retained but recorded.
+- Slice 7a (`6bad408`): typechecker side table
+  `Checked.grounded_coercion_sites` populated at every value-flow
+  `is_assignable_to` site (return / let / yield / call-arg /
+  struct-field / list-element / replay-arm / if-condition).
+- Slice 7b (`942c7e7`): IR lowering wraps recorded spans in
+  `UnwrapGrounded`; surfaced a pre-existing runtime gap and
+  closed it inline (`produces_grounded: bool` on `IrTool` /
+  `IrPrompt`; `maybe_ground_prompt_result` mirrors the tool
+  path); `UnwrapGrounded` runtime semantics preserve confidence
+  while discarding provenance.
+- Slice 7 design doc anchor (`53f3336`): recorded the sub-split
+  and the runtime-alignment finding in
+  `docs/meta/grounded-propagation-design.md`.
+- Slice 8 (`2e0642c`): `@grounded_pure` front end — parser
+  recognises the attribute and produces
+  `AgentAttribute::GroundedPure { span }`. Front end alone,
+  dormant.
+- Slice 9 (`814d665`): the proof. `decl_grounded_pure.rs` walks
+  the agent body for three laundering shapes (implicit coercion
+  via slice 7a sites, explicit `.unwrap_discarding_sources()`,
+  transitive non-`@grounded_pure` call). Guarantee row
+  `grounded.no_laundering` registered in
+  `corvid_guarantees::GUARANTEE_REGISTRY`; doc auto-regenerated.
+- Slice 10 (`ba1326b`): corpus fixtures.
+  `tests/corpus/combined_all.cor` updated to the idiomatic
+  end-to-end-`Grounded<String>` shape; new
+  `tests/corpus/legacy_grounded_coercion.cor` exercises the
+  slice-7 discard node across all four tiers. Inline fix to
+  `expr_is_grounded`'s `Prompt` arm (the second downstream
+  consumer to surface a Design X re-audit gap).
+- Slice 11 (this commit): invention-shipping contract — README
+  catalog entry, `corvid tour --topic provenance-propagation`
+  demo, `docs/reference/inventions.md` row, spec section in
+  `05-grounding.md` §9, learnings.md closeout, dev-log entry,
+  ROADMAP tick.
+
+Validation:
+
+- `cargo test -p corvid-types --lib`: 232 passed.
+- `cargo test -p corvid-vm --lib`: 98 passed.
+- `cargo test -p corvid-ir --lib`: 37 passed.
+- `cargo test -p corvid-driver --lib`: 181 passed.
+- `cargo test -p corvid-syntax --lib`: 207 passed.
+- `cargo test -p corvid-guarantees --lib`: 22 passed.
+- `cargo check --workspace`: clean.
+- `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`:
+  exit 1 (only the two deliberate `should_fail` fixtures
+  diverge); `combined_all.cor` and `legacy_grounded_coercion.cor`
+  both agree across all four tiers.
+- `cargo run -q -p corvid-cli -- check <tour-demo>.cor`: clean.

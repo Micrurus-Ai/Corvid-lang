@@ -2092,6 +2092,49 @@ Track 3 — Closer commits:
 
 ---
 
+### Provenance Propagation — Grounded contagion + `@grounded_pure` moat ✅ closed (2026-05-16)
+
+**Goal.** Make `Grounded<T>` ergonomic across ordinary code (the contagion law lifts grounded-ness through operators and call sites without explicit re-annotation) and ship the compile-time moat that refuses any laundering inside an agent body (`@grounded_pure`, composes through the call graph like `@deterministic`).
+
+**Why this phase exists.** Phase 20's grounding work proved that a value can be typed `Grounded<T>` and that the typechecker rejects unsourced grounded returns. But Phase 35V's verification round surfaced `combined_all.cor` going red under differential verify because the typechecker was *grounded-blind* for effect-induced grounding — `data: grounded` only produced `Type::Grounded` when the user wrote the wrapper explicitly. The four tiers disagreed about whether the same value was grounded. Without the contagion law + IR-visible discard + moat, `Grounded<T>` was a type users had to thread by hand, and "no laundering" was a property the compiler couldn't prove. The phase closed both gaps end-to-end across typechecker / IR / interpreter / native / replay.
+
+**Hard dep:** Phase 20 (grounding base + `data: grounded` effect dimension), Phase 35V (the verification round that surfaced the gap). The phase originated from a Phase-35V-era differential-verify red test rather than from a Phase 20 follow-up, so it sits chronologically between Phase 35V and Phase 36 in the dev-log even though its substance extends Phase 20's grounding work.
+
+**Scope:** 11 slices, sub-split where the recon found load-bearing work bigger than the design doc estimated:
+
+- [x] Slice 0           Pre-phase design doc + Decisions D1-D8 / risks R1-R6 / sub-split rationale (`docs/meta/grounded-propagation-design.md`).
+- [x] Slice 1           `ProvenanceChain::Derived` how-provenance node + round-trip tests.
+- [x] Slice 2a          Contagion law at the type level: `check_binop` / `check_unop` strip-and-rewrap.
+- [x] Slice 2b          Design X reversal — `data: grounded` promotes a prompt / tool / agent's return type at the call site (typechecker stops being grounded-blind).
+- [x] Slice 3a-3e       Min-confidence composition, runtime grounded operator path, errors-untangle (`ProvenanceChain` + `Approver` + approval types + `RuntimeError` moved to `corvid-runtime-core`).
+- [x] Slice 4           Interpreter contagion: `eval_binop` lifts when either operand is `Value::Grounded`.
+- [x] Slice 5           Native attestation model for scalar grounded values; refcounted-type path deferred to a follow-up phase.
+- [x] Slice 6           Control-flow condition tolerance (D2: `if` accepts `Grounded<Bool>`); `require_bool` strips `Value::Grounded` recursively.
+- [x] Slice 7a (`6bad408`)    Typechecker side table `Checked.grounded_coercion_sites` populated at every value-flow `is_assignable_to` site.
+- [x] Slice 7b (`942c7e7`)    IR lowering inserts `IrExprKind::UnwrapGrounded` at every recorded span; runtime alignment (`produces_grounded` on `IrTool` / `IrPrompt`, `maybe_ground_prompt_result` mirrors the tool path); `UnwrapGrounded` runtime semantics preserve confidence while discarding provenance.
+- [x] Slice 7 doc       Design doc anchor (`53f3336`) records the sub-split + the runtime-alignment finding for future audits.
+- [x] Slice 8 (`2e0642c`)     `@grounded_pure` front end — parser + AST (`AgentAttribute::GroundedPure`); dormant.
+- [x] Slice 9 (`814d665`)     The proof — `decl_grounded_pure.rs` walks the agent body for three laundering shapes (implicit coercion via slice 7a sites, explicit `.unwrap_discarding_sources()`, transitive non-`@grounded_pure` call); guarantee row `grounded.no_laundering` registered.
+- [x] Slice 10 (`ba1326b`)    Corpus fixtures (D7) — `combined_all.cor` to the idiomatic end-to-end-grounded shape; new `legacy_grounded_coercion.cor` exercises the discard node across all four tiers; inline fix to `expr_is_grounded`'s `Prompt` arm.
+- [x] Slice 11          Invention-shipping contract — README catalog entry, `corvid tour --topic provenance-propagation`, `docs/reference/inventions.md` row, spec section in `05-grounding.md` §9, `learnings.md` closeout, dev-log entry, ROADMAP tick.
+
+**Out of scope (deferred):**
+
+- Native grounded handles for refcounted types (`Grounded<String>` and `Grounded<Struct>` in the native tier) — own follow-up phase stub at `docs/meta/native-grounded-handles-design.md`. The scalar path ships in this phase; the refcounted path needs the dataflow / dup-drop analysis to see through `Grounded` without double-freeing.
+- Short-circuit `&&` / `||` contagion. `Grounded<Bool> && other` still errors at the operator. Different design question (evaluation order); not a moat hole.
+- Cross-module composition for `@grounded_pure` on imports (R5 attribute-composition matrix at the import boundary). Slice 8's import handler accepts the attribute on imports but does not check the imported agent. Future-slice work.
+
+**Phase-done criteria:**
+
+- [x] Every slice has a commit on `main` with a passing validation gate (workspace check + targeted tests + corpus verify exit 1 only on the two deliberate fixtures).
+- [x] Design doc records sub-splits and recon findings (Design X reversal, slice-7 runtime-alignment gap, slice-10 reachability-analysis gap).
+- [x] Guarantee row `grounded.no_laundering` registered with five wired test refs (`every_test_ref_resolves_to_a_real_test_function` enforces).
+- [x] `docs/reference/core-semantics.md` auto-regenerated and committed.
+- [x] Tour demo `corvid tour --topic provenance-propagation` source compiles through the normal driver pipeline (`corvid check`).
+- [x] README catalog entry, `docs/reference/inventions.md` row, spec section in `05-grounding.md` §9, `learnings.md` closeout, dev-log entry all in place.
+
+---
+
 ### Phase 36 — Production backend core (~8-10 weeks) ✅ closed
 
 **Goal.** Corvid can build an always-on HTTP backend without a host framework. A developer should be able to write routes, JSON APIs, middleware, health checks, configuration, secrets, structured logs, graceful shutdown, and deployment-ready binaries in Corvid itself.
