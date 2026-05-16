@@ -10,7 +10,7 @@
 //! Extracted from `effects.rs` as part of Phase 20i responsibility
 //! decomposition.
 
-use super::analyze::{find_agent, find_tool};
+use super::analyze::{find_agent, find_prompt, find_tool};
 use super::EffectRegistry;
 use corvid_ast::DimensionValue;
 
@@ -156,8 +156,17 @@ fn expr_is_grounded(
                             }
                         }
                         corvid_resolve::DeclKind::Prompt => {
-                            // A prompt is grounded if ANY of its args are grounded.
-                            // This is the key provenance flow: grounded input → grounded output.
+                            // A prompt is grounded if its own effect row
+                            // carries `data: grounded` (Design X, slice
+                            // 2b — promotes the prompt's return type),
+                            // OR if any of its args are grounded (the
+                            // original args-flow rule: grounded input
+                            // produces grounded output).
+                            if let Some(prompt) = find_prompt(file, &entry.name) {
+                                if effect_row_is_grounded(&prompt.effect_row, registry) {
+                                    return true;
+                                }
+                            }
                             for arg in args {
                                 if expr_is_grounded(arg, file, resolved, registry, grounded) {
                                     return true;

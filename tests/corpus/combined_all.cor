@@ -14,7 +14,14 @@ prompt search() -> String uses search_effect:
 prompt audit() -> String uses audit_effect:
     "Audit"
 
-agent main() -> String:
+# Provenance Propagation D7: idiomatic shape. The agent returns
+# Grounded<String> so audit()'s grounding flows through the
+# contagion-lifted first + second all the way to the return slot
+# with no silent strip. All four tiers agree because the value is
+# grounded end-to-end. The legacy-coercion shape (agent returns
+# plain String and the slice-7 discard node fires) lives in the
+# companion fixture legacy_grounded_coercion.cor.
+agent main() -> Grounded<String>:
     first = search()
     second = audit()
     return first + second

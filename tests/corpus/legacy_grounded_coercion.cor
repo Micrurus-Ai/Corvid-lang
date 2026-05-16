@@ -1,0 +1,22 @@
+# Provenance Propagation D7: this fixture exercises the legacy
+# Grounded<T> -> T coercion end-to-end across all four tiers,
+# pinning the slice-7 discard node behaviour. audit() returns
+# Grounded<String> via Design X data: grounded promotion; main()
+# declares -> String, so the typechecker records the return-value
+# span in Checked.grounded_coercion_sites and IR lowering wraps
+# the value in IrExprKind::UnwrapGrounded. The interpreter strips
+# Value::Grounded to its inner value; native and replay agree.
+# Without the slice-7 discard node plus the runtime alignment of
+# slice 7b (maybe_ground_prompt_result), the tiers would diverge
+# on grounded-ness. The program is NOT @grounded_pure: the moat
+# would reject it. Companion fixture combined_all.cor shows the
+# idiomatic shape where the wrapper is preserved end-to-end.
+
+effect audit_effect:
+    data: grounded
+
+prompt audit() -> String uses audit_effect:
+    "Audit"
+
+agent main() -> String:
+    return audit()
