@@ -583,6 +583,55 @@ boundaries.
   This is the `@grounded_pure` prerequisite: it makes every silent
   provenance drop greppable in the IR. Must be *complete* across
   all coercion sites or `@grounded_pure` (slice 9) is unsound.
+
+  **Shipped 2026-05-15/16 as a sub-split** (commits `6bad408`,
+  `942c7e7`):
+
+  - **7a — typechecker side table.** `Checked.grounded_coercion_sites:
+    HashSet<Span>` populated by a `record_if_grounded_coercion`
+    helper called at every value-flow `is_assignable_to` site:
+    return / let-with-annotation / yield / call-arg /
+    struct-field-init (free + imported) / `Some(...)` against an
+    `Option<T>` expectation / list-element flowing into an
+    inferred-bare element type / replay-arm + `else`-arm bodies /
+    `if`-condition (D2 grounded-tolerant but still IR-visible).
+    Operator unification and signature compatibility sites are
+    intentionally NOT recorded — those aren't value-flow sites.
+    Test coverage pins exact-span equality at the four most
+    visible sites so any new site added without a recorder call
+    breaks the test, not the moat.
+
+  - **7b — IR insertion + runtime alignment.** `corvid-ir`'s
+    `lower_expr` wraps the produced `IrExpr` in
+    `IrExprKind::UnwrapGrounded` at every recorded span. The
+    inner expression keeps its `Grounded<T>` type; the wrapper
+    carries the stripped inner type. **Inserting the node
+    surfaced a pre-existing soundness gap:** the runtime only
+    wrapped tool results in `Value::Grounded` when the literal
+    effect name was `"retrieval"`, but Design X (slice 2b) had
+    promoted ANY `data: grounded` effect's return to `Type::Grounded`.
+    Closing the gap inside 7b (required by the validation gate):
+
+    - `IrTool.produces_grounded` / `IrPrompt.produces_grounded`
+      computed once at lower time via the now-public
+      `corvid_types::effects::effect_row_is_grounded` helper.
+    - `maybe_ground_tool_result` reads the field instead of
+      name-matching `"retrieval"`; idempotent on already-Grounded
+      values so adversarial double-wrap paths stay safe.
+    - New `maybe_ground_prompt_result` mirrors the tool path for
+      non-stream prompt finalisation in
+      `corvid-vm::interp::prompt::finalize_prompt_result`. Stream
+      prompts are explicit non-scope here — chunk-by-chunk
+      grounding is a larger contract.
+    - `UnwrapGrounded` runtime semantics preserve confidence
+      while discarding provenance: `Value::Grounded(v, chain,
+      conf)` strips to bare `v` when `conf == 1.0`, otherwise
+      re-wraps as `Value::Grounded(v, EMPTY_CHAIN, conf)`. The
+      split honours slice 7's intent — "where it came from" is
+      what's being discarded; "how trusty it is" is a separate
+      concern downstream confidence-gate checks still need.
+      Defensive no-op on already-bare values keeps an
+      out-of-sync tier from panicking the interpreter.
 - **Slice 8 — `@grounded_pure` front end.** `corvid-syntax` /
   `corvid-ast` / `corvid-resolve`: parse + represent + resolve the
   attribute.
