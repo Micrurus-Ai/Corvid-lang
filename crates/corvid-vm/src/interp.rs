@@ -342,14 +342,40 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 match value {
-                    Value::Grounded(grounded) => Ok(ExprFlow::Value(grounded.inner.get())),
-                    other => Err(InterpError::new(
-                        InterpErrorKind::TypeMismatch {
-                            expected: "Grounded<T>".into(),
-                            got: other.type_name(),
-                        },
-                        expr.span,
-                    )),
+                    Value::Grounded(grounded) => {
+                        // Slice 7b semantics: discard the
+                        // provenance chain (the typechecker-flagged
+                        // legacy coercion is the user explicitly
+                        // dropping "where it came from"), but
+                        // preserve confidence — "how trusty it is"
+                        // is a separate concern that downstream
+                        // confidence-gate checks still need. The
+                        // re-wrap keeps `Value::Grounded` only when
+                        // confidence < 1.0 so a fully-confident
+                        // value strips clean to bare.
+                        let conf = grounded.confidence;
+                        let inner = grounded.inner.get();
+                        if conf < 1.0 {
+                            Ok(ExprFlow::Value(Value::Grounded(
+                                crate::value::GroundedValue::with_confidence(
+                                    inner,
+                                    crate::ProvenanceChain::new(),
+                                    conf,
+                                ),
+                            )))
+                        } else {
+                            Ok(ExprFlow::Value(inner))
+                        }
+                    }
+                    // Defensive no-op: the typechecker only inserts
+                    // `UnwrapGrounded` where it observed a
+                    // `Grounded<T> -> T` coercion, so the runtime
+                    // should always deliver `Value::Grounded` here
+                    // (`maybe_ground_*_result` aligns the runtime
+                    // with the type promise). If a tier ships out of
+                    // sync, the strip is a harmless identity rather
+                    // than a panic.
+                    other => Ok(ExprFlow::Value(other)),
                 }
             }
 

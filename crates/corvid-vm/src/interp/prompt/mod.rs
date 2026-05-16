@@ -85,8 +85,22 @@ impl<'ir> Interpreter<'ir> {
             }
             Ok(ExprFlow::Value(value))
         } else {
+            // Provenance Propagation slice 7b: wrap in `Value::Grounded`
+            // when the prompt's effect row carries `data: grounded`,
+            // mirroring the typechecker's Design X return-type
+            // promotion. Without this the IR's `UnwrapGrounded` (which
+            // the typechecker inserts at every implicit
+            // `Grounded<T> -> T` coercion site) finds a plain value at
+            // runtime and panics. Grounding happens BEFORE confidence
+            // composition so the confidence rides on the Grounded
+            // wrapper, not buried inside.
+            let grounded = super::grounding::maybe_ground_prompt_result(
+                prompt,
+                callee_name,
+                result.value,
+            );
             Ok(ExprFlow::Value(
-                super::effect_compose::with_value_confidence(result.value, result.confidence),
+                super::effect_compose::with_value_confidence(grounded, result.confidence),
             ))
         }
     }

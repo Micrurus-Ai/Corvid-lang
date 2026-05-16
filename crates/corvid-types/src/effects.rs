@@ -483,8 +483,9 @@ pub use cost::{
     compute_worst_case_cost, cost_path_for_dimension, format_numeric_dimension,
     numeric_constraint_value, render_cost_tree,
 };
-pub use grounded::{check_grounded_returns, ProvenanceResult, ProvenanceViolation};
-pub(crate) use grounded::effect_row_is_grounded;
+pub use grounded::{
+    check_grounded_returns, effect_row_is_grounded, ProvenanceResult, ProvenanceViolation,
+};
 
 #[cfg(test)]
 mod tests {

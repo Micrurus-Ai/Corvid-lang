@@ -88,6 +88,13 @@ struct Lowerer<'a> {
     current_module: Option<&'a ResolvedModule>,
     imported_def_ids: &'a HashMap<ImportedDefKey, DefId>,
     imported_calls: &'a HashMap<Span, ImportedCallTarget>,
+    /// Provenance Propagation D5 (slice 7b): every value-expression
+    /// span the typechecker flagged (`Checked.grounded_coercion_sites`)
+    /// as the site of a silent `Grounded<T> -> T` strip. `lower_expr`
+    /// wraps the produced `IrExpr` in `IrExprKind::UnwrapGrounded` at
+    /// each match, so `@grounded_pure` (slice 9) can fail a function
+    /// whose body launders a grounded value through any slot-check.
+    grounded_coercion_sites: &'a std::collections::HashSet<Span>,
     wrapping_arithmetic: bool,
 }
 
@@ -110,6 +117,7 @@ impl<'a> Lowerer<'a> {
             current_module,
             imported_def_ids,
             imported_calls: &checked.imported_calls,
+            grounded_coercion_sites: &checked.grounded_coercion_sites,
             wrapping_arithmetic: false,
         }
     }
@@ -395,6 +403,10 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        let produces_grounded = corvid_types::effects::effect_row_is_grounded(
+            &t.effect_row,
+            &self.effect_registry,
+        );
         IrTool {
             id: self.remap_def_id(id),
             name: t.name.name.clone(),
@@ -408,6 +420,7 @@ impl<'a> Lowerer<'a> {
                 .map(|e| e.name.name.clone())
                 .collect(),
             confidence_gate,
+            produces_grounded,
             span: t.span,
         }
     }
@@ -507,6 +520,10 @@ impl<'a> Lowerer<'a> {
                 span: spec.span,
             })
         });
+        let produces_grounded = corvid_types::effects::effect_row_is_grounded(
+            &p.effect_row,
+            &self.effect_registry,
+        );
         IrPrompt {
             id: self.remap_def_id(id),
             name: p.name.name.clone(),
@@ -516,6 +533,7 @@ impl<'a> Lowerer<'a> {
             effect_names,
             effect_cost: numeric_profile_dimension(&profile, "cost"),
             effect_confidence: confidence_profile_dimension(&profile),
+            produces_grounded,
             cites_strictly_param,
             min_confidence: p.stream.min_confidence,
             max_tokens: p.stream.max_tokens,
@@ -821,10 +839,32 @@ impl<'a> Lowerer<'a> {
                 else_body: Box::new(self.lower_expr(else_body)),
             },
         };
-        IrExpr {
+        let lowered = IrExpr {
             kind,
-            ty,
+            ty: ty.clone(),
             span: e.span(),
+        };
+        // Provenance Propagation D5 (slice 7b): if the typechecker
+        // flagged this span as a silent `Grounded<T> -> T` coercion
+        // site, wrap the lowered expression in `UnwrapGrounded` so
+        // the discard is IR-visible. The inner `IrExpr` keeps its
+        // `Grounded<T>` IR type; the wrapper's outer type is the
+        // stripped inner. `@grounded_pure` (slice 9) walks for
+        // `UnwrapGrounded` to fail the moat.
+        if self.grounded_coercion_sites.contains(&e.span()) {
+            let unwrapped_ty = match &ty {
+                Type::Grounded(inner) => inner.as_ref().clone(),
+                other => other.clone(),
+            };
+            IrExpr {
+                kind: IrExprKind::UnwrapGrounded {
+                    value: Box::new(lowered),
+                },
+                ty: unwrapped_ty,
+                span: e.span(),
+            }
+        } else {
+            lowered
         }
     }
 

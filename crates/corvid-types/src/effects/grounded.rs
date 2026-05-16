@@ -233,7 +233,7 @@ fn expr_is_grounded(
 /// `checker/call.rs`). The built-in `retrieval` effect is grounded by
 /// definition; user effects are grounded iff their `data` dimension
 /// resolves to `grounded` in the registry.
-pub(crate) fn effect_row_is_grounded(
+pub fn effect_row_is_grounded(
     effect_row: &corvid_ast::EffectRow,
     registry: &EffectRegistry,
 ) -> bool {

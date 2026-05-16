@@ -454,6 +454,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
             effect_names: vec!["expensive".into()],
             effect_cost: 0.75,
             effect_confidence: 1.0,
+            produces_grounded: false,
             cites_strictly_param: None,
             min_confidence: None,
             max_tokens: None,

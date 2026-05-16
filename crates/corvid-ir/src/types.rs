@@ -76,6 +76,15 @@ pub struct IrTool {
     /// interpreter checks composed input confidence and activates the
     /// approval gate if confidence is below this threshold.
     pub confidence_gate: Option<f64>,
+    /// Provenance Propagation (slice 7b): true when any of this
+    /// tool's declared effects carries `data: grounded` (or is the
+    /// built-in `retrieval` effect). Mirrors the typechecker's
+    /// Design X return-type wrapping: if this is set, the runtime
+    /// MUST wrap the tool's result in `Value::Grounded` so the
+    /// value-level invariant matches the type-level invariant. The
+    /// IR computes this once at lower time from the effect registry
+    /// so the interpreter doesn't need to consult the registry.
+    pub produces_grounded: bool,
     pub span: Span,
 }
 
@@ -90,6 +99,13 @@ pub struct IrPrompt {
     pub effect_names: Vec<String>,
     pub effect_cost: f64,
     pub effect_confidence: f64,
+    /// Provenance Propagation (slice 7b): true when any of this
+    /// prompt's declared effects carries `data: grounded`. The
+    /// runtime wraps the prompt's result in `Value::Grounded` when
+    /// set, matching the typechecker's Design X return-type
+    /// wrapping. Computed once at lower time from the effect
+    /// registry.
+    pub produces_grounded: bool,
     /// Index of the parameter whose content must appear in the LLM response.
     /// Set when the prompt declares `cites <param> strictly`.
     pub cites_strictly_param: Option<usize>,
