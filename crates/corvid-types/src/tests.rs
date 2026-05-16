@@ -4876,3 +4876,172 @@ agent keep(id: String) -> Grounded<String>:
         c.grounded_coercion_sites,
     );
 }
+
+// ------------------------------------------------------------------
+// Provenance Propagation D6 (slice 9): `@grounded_pure` proof.
+// The moat attribute forbids three laundering shapes anywhere in
+// the agent's body — silent `Grounded<T> -> T` coercion (case 1,
+// driven by slice 7a's recorded coercion sites), explicit
+// `.unwrap_discarding_sources()` (case 2), and transitive calls
+// into agents not themselves marked `@grounded_pure` (case 3).
+// Tests below pin the positive cases (the moat doesn't false-
+// positive on idiomatic grounded code) and the three adversarial
+// cases (the moat catches each laundering shape).
+// ------------------------------------------------------------------
+
+fn has_grounded_pure_laundering(c: &Checked) -> bool {
+    c.errors
+        .iter()
+        .any(|e| matches!(e.kind, TypeErrorKind::GroundedPureLaundering { .. }))
+}
+
+#[test]
+fn grounded_pure_passes_when_body_preserves_grounded() {
+    // Positive: every value path keeps the `Grounded<T>` wrapper
+    // intact — return type matches, no implicit coercion, no
+    // explicit unwrap, no non-`@grounded_pure` agent call.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+@grounded_pure
+agent cite(id: String) -> Grounded<String>:
+    return fetch(id)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_pure_passes_when_calling_another_grounded_pure_agent() {
+    // Positive: composition works — a `@grounded_pure` agent may
+    // call another `@grounded_pure` agent.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+@grounded_pure
+agent inner(id: String) -> Grounded<String>:
+    return fetch(id)
+
+@grounded_pure
+agent outer(id: String) -> Grounded<String>:
+    return inner(id)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_pure_rejects_implicit_coercion() {
+    // Adversarial case 1: the agent returns `Grounded<String>`
+    // into a plain `String` slot. Without `@grounded_pure` this
+    // would typecheck via the legacy `Grounded<T> -> T` rule
+    // (slice 7a still records the site for IR-discard
+    // insertion). With `@grounded_pure` the recorded site fails
+    // the moat.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+@grounded_pure
+agent leak(id: String) -> String:
+    return fetch(id)
+";
+    let c = check(src);
+    assert!(
+        has_grounded_pure_laundering(&c),
+        "expected GroundedPureLaundering, got {:?}",
+        c.errors
+    );
+    let kind_label = c
+        .errors
+        .iter()
+        .find_map(|e| match &e.kind {
+            TypeErrorKind::GroundedPureLaundering { kind, .. } => Some(kind.clone()),
+            _ => None,
+        })
+        .expect("error variant");
+    assert_eq!(kind_label, "implicit_coercion");
+}
+
+#[test]
+fn grounded_pure_rejects_explicit_unwrap() {
+    // Adversarial case 2: the user explicitly calls
+    // `.unwrap_discarding_sources()`. The moat forbids it even
+    // when the resulting plain value flows into a non-grounded
+    // slot legitimately — `@grounded_pure` is about the agent's
+    // promise to preserve provenance, not about whether the
+    // outer slot can accept the bare value.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> Grounded<String> uses retrieval
+
+@grounded_pure
+agent leak(id: String) -> String:
+    raw = fetch(id)
+    return raw.unwrap_discarding_sources()
+";
+    let c = check(src);
+    assert!(
+        has_grounded_pure_laundering(&c),
+        "expected GroundedPureLaundering, got {:?}",
+        c.errors
+    );
+    let kind_label = c
+        .errors
+        .iter()
+        .find_map(|e| match &e.kind {
+            TypeErrorKind::GroundedPureLaundering { kind, .. } => Some(kind.clone()),
+            _ => None,
+        })
+        .expect("error variant");
+    assert_eq!(kind_label, "explicit_unwrap");
+}
+
+#[test]
+fn grounded_pure_rejects_call_to_non_grounded_pure_agent() {
+    // Adversarial case 3: composition fails — a `@grounded_pure`
+    // outer calls an inner that is not itself `@grounded_pure`.
+    // The compiler cannot prove inner doesn't launder
+    // internally, so the call is the moat hole.
+    let src = "\
+effect retrieval:
+    data: grounded
+
+tool fetch(id: String) -> String uses retrieval
+
+agent inner(id: String) -> Grounded<String>:
+    return fetch(id)
+
+@grounded_pure
+agent outer(id: String) -> Grounded<String>:
+    return inner(id)
+";
+    let c = check(src);
+    assert!(
+        has_grounded_pure_laundering(&c),
+        "expected GroundedPureLaundering, got {:?}",
+        c.errors
+    );
+    let (kind_label, target_label) = c
+        .errors
+        .iter()
+        .find_map(|e| match &e.kind {
+            TypeErrorKind::GroundedPureLaundering { kind, target, .. } => {
+                Some((kind.clone(), target.clone()))
+            }
+            _ => None,
+        })
+        .expect("error variant");
+    assert_eq!(kind_label, "non_grounded_pure_call");
+    assert_eq!(target_label, "inner");
+}

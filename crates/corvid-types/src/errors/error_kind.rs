@@ -183,6 +183,28 @@ pub enum TypeErrorKind {
         call_kind: String,
     },
 
+    /// An agent marked `@grounded_pure` (Provenance Propagation
+    /// D6) launders a `Grounded<T>` value somewhere in its body
+    /// — either via a silent `Grounded<T> -> T` coercion (slice 7
+    /// recorded site), an explicit `.unwrap_discarding_sources()`
+    /// call, or a transitive call into a non-`@grounded_pure`
+    /// agent that might launder internally. The proof obligation
+    /// composes through the call graph the same way
+    /// `@deterministic` does.
+    GroundedPureLaundering {
+        agent: String,
+        /// How the laundering surfaces: `"implicit_coercion"`
+        /// (a silent `Grounded<T> -> T` at a slot-check site),
+        /// `"explicit_unwrap"` (`.unwrap_discarding_sources()`),
+        /// or `"non_grounded_pure_call"` (a call to an agent
+        /// not itself marked `@grounded_pure`).
+        kind: String,
+        /// Human-readable target — the callee name for `_call`
+        /// kinds, or the type that was coerced for `_coercion`
+        /// / `_unwrap` kinds.
+        target: String,
+    },
+
     /// A custom dimension declared in `corvid.toml` under
     /// `[effect-system.dimensions.*]` failed validation. Rejects
     /// unknown composition rules, unknown value-types, malformed
@@ -475,6 +497,27 @@ impl TypeErrorKind {
                     "agent `{agent}` is marked `@deterministic` but calls `{call}` ({call_kind}), which the compiler cannot prove is a pure function of the agent's inputs"
                 )
             }
+            Self::GroundedPureLaundering {
+                agent,
+                kind,
+                target,
+            } => {
+                let phrase = match kind.as_str() {
+                    "implicit_coercion" => format!(
+                        "silently coerces a `Grounded<T>` into a non-grounded slot at `{target}`"
+                    ),
+                    "explicit_unwrap" => format!(
+                        "calls `{target}.unwrap_discarding_sources()`, which explicitly drops the provenance chain"
+                    ),
+                    "non_grounded_pure_call" => format!(
+                        "calls `{target}`, which is not itself marked `@grounded_pure` and could launder internally"
+                    ),
+                    _ => format!("launders provenance at `{target}` ({kind})"),
+                };
+                format!(
+                    "agent `{agent}` is marked `@grounded_pure` but {phrase}"
+                )
+            }
             Self::InvalidCustomDimension { dimension, message } => {
                 format!("invalid custom dimension `{dimension}` in corvid.toml: {message}")
             }
@@ -755,6 +798,23 @@ impl TypeErrorKind {
                  an agent you control, or drop the `@deterministic` attribute and use \
                  `@replayable` if replay reproducibility is enough"
             )),
+            Self::GroundedPureLaundering { kind, target, .. } => Some(match kind.as_str() {
+                "implicit_coercion" => format!(
+                    "preserve the `Grounded<T>` wrapper at `{target}` — return / parameter / \
+                     field types should match the source's grounding, not strip it. The \
+                     typechecker recorded this site because the legacy `Grounded<T> -> T` \
+                     rule fired silently; under `@grounded_pure` it has to be visible"
+                ),
+                "explicit_unwrap" => format!(
+                    "remove the `{target}.unwrap_discarding_sources()` call, or drop \
+                     `@grounded_pure` if the laundering is genuinely intended"
+                ),
+                "non_grounded_pure_call" => format!(
+                    "mark `{target}` `@grounded_pure` so the compiler can prove it does not \
+                     launder, or refactor to avoid calling it"
+                ),
+                _ => format!("see docs/meta/grounded-propagation-design.md §D6 for the moat contract"),
+            }),
             Self::InvalidCustomDimension { .. } => Some(
                 "see docs/internals/effect-spec/01-dimensional-syntax.md §4 for the supported \
                  composition rules, value types, and default-value shapes"

@@ -230,6 +230,31 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
+    Guarantee {
+        id: "grounded.no_laundering",
+        kind: GuaranteeKind::Grounded,
+        class: GuaranteeClass::Static,
+        phase: Phase::TypeCheck,
+        description:
+            "An agent annotated `@grounded_pure` fails compile if its body \
+             launders a `Grounded<T>` value into a non-grounded slot — \
+             either via the silent legacy coercion at a slot-check site \
+             (return / parameter / field), an explicit \
+             `.unwrap_discarding_sources()` call, or a transitive call \
+             into another agent not itself marked `@grounded_pure`. The \
+             moat composes through the call graph the same way \
+             `@deterministic` does.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-types/src/tests.rs::grounded_pure_passes_when_body_preserves_grounded",
+            "crates/corvid-types/src/tests.rs::grounded_pure_passes_when_calling_another_grounded_pure_agent",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-types/src/tests.rs::grounded_pure_rejects_implicit_coercion",
+            "crates/corvid-types/src/tests.rs::grounded_pure_rejects_explicit_unwrap",
+            "crates/corvid-types/src/tests.rs::grounded_pure_rejects_call_to_non_grounded_pure_agent",
+        ],
+    },
     // ----- Budgets ------------------------------------------------
     Guarantee {
         id: "budget.compile_time_ceiling",

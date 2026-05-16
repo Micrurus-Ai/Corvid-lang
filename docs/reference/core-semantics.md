@@ -25,6 +25,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `effect_row.import_boundary` | effect_row | static | resolve |
 | `grounded.provenance_required` | grounded | static | typecheck |
 | `grounded.propagation_across_calls` | grounded | out_of_scope | typecheck |
+| `grounded.no_laundering` | grounded | static | typecheck |
 | `budget.compile_time_ceiling` | budget | static | typecheck |
 | `budget.runtime_termination` | budget | out_of_scope | runtime |
 | `confidence.min_threshold` | confidence | static | typecheck |
@@ -192,6 +193,23 @@ Constructing a `Grounded<T>` value requires citing a source; unsourced `Grounded
 Provenance is preserved across function boundaries — a `Grounded<T>` returned from a callee retains its citation chain into the caller without separate annotation.
 
 > **Why out of scope:** Subsumed by `grounded.provenance_required` at the diagnostic level. The shipped grounded-return analysis fires a single `UngroundedReturn` diagnostic when a function declares a `Grounded<T>` return type but the returned expression's provenance chain is empty. The check is unified: it does not distinguish whether the missing provenance came from a directly-constructed value (parent's framing: provenance must be cited at construction) or from a value flowed across a callee boundary (this row's framing: provenance must be preserved across calls). The user's mitigation is the same in both cases: ensure the returned value carries a non-empty provenance chain. Phase 35V-T1-B (2026-05-08) downgraded this row from `Static` to `OutOfScope` because the analyzer fires one diagnostic for both perspectives; there is no discriminable site to tag separately. The property is documentary; the enforcement is via the parent's unified diagnostic. A future slice that splits the analyzer to distinguish construction-site failures from call-boundary propagation failures would promote this row back to `Static`.
+
+#### `grounded.no_laundering`
+- **class**: static
+- **phase**: typecheck
+
+An agent annotated `@grounded_pure` fails compile if its body launders a `Grounded<T>` value into a non-grounded slot — either via the silent legacy coercion at a slot-check site (return / parameter / field), an explicit `.unwrap_discarding_sources()` call, or a transitive call into another agent not itself marked `@grounded_pure`. The moat composes through the call graph the same way `@deterministic` does.
+
+**Positive tests:**
+
+- `crates/corvid-types/src/tests.rs::grounded_pure_passes_when_body_preserves_grounded`
+- `crates/corvid-types/src/tests.rs::grounded_pure_passes_when_calling_another_grounded_pure_agent`
+
+**Adversarial tests:**
+
+- `crates/corvid-types/src/tests.rs::grounded_pure_rejects_implicit_coercion`
+- `crates/corvid-types/src/tests.rs::grounded_pure_rejects_explicit_unwrap`
+- `crates/corvid-types/src/tests.rs::grounded_pure_rejects_call_to_non_grounded_pure_agent`
 
 ### Budgets
 

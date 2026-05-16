@@ -657,6 +657,7 @@ mod case;
 mod decl;
 mod decl_eval;
 mod decl_extern_c;
+mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
 mod expr;

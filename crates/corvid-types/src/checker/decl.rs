@@ -75,6 +75,18 @@ impl<'a> Checker<'a> {
             self.check_deterministic_body(&a.name.name, &a.body);
         }
 
+        // Provenance Propagation D6 (slice 9): enforce
+        // `@grounded_pure`. No `Grounded<T> -> T` laundering
+        // anywhere in the body — neither the silent legacy
+        // coercion (slice 7a recorded sites) nor the explicit
+        // `.unwrap_discarding_sources()` call. Calls to other
+        // agents must target agents that are themselves marked
+        // `@grounded_pure` so the moat composes through the
+        // call graph (R5).
+        if AgentAttribute::is_grounded_pure(&a.attributes) {
+            self.check_grounded_pure_body(&a.name.name, &a.body);
+        }
+
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
         self.saw_yield = prev_saw_yield;
