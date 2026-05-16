@@ -124,8 +124,8 @@ impl<'a> Parser<'a> {
     /// dimensions named "replayable".
     ///
     /// Attribute names are a fixed catalog (`replayable`,
-    /// `deterministic`, `wrapping`). Anything not in the catalog
-    /// is treated as an effect constraint.
+    /// `deterministic`, `wrapping`, `grounded_pure`). Anything not
+    /// in the catalog is treated as an effect constraint.
     pub(super) fn parse_agent_annotations(
         &mut self,
     ) -> Result<(Vec<AgentAttribute>, Vec<EffectConstraint>), ParseError> {
@@ -209,6 +209,7 @@ impl<'a> Parser<'a> {
             "replayable" => |span| AgentAttribute::Replayable { span },
             "deterministic" => |span| AgentAttribute::Deterministic { span },
             "wrapping" => |span| AgentAttribute::Wrapping { span },
+            "grounded_pure" => |span| AgentAttribute::GroundedPure { span },
             _ => return Ok(None),
         };
 

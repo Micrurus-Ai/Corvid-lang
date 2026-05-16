@@ -116,6 +116,10 @@ fn collect_decl_contracts(decl: &Decl, claims: &mut DeclaredContractClaims) {
                         "agent `{}` declares `@wrapping`, but no signed cdylib guarantee id covers wrapping arithmetic yet",
                         agent.name.name
                     )),
+                    AgentAttribute::GroundedPure { .. } => claims.unsupported.push(format!(
+                        "agent `{}` declares `@grounded_pure`, but no signed cdylib guarantee id covers the provenance-propagation moat yet (slice 9 lands the proof; slice 11 registers the guarantee id)",
+                        agent.name.name
+                    )),
                 }
             }
         }

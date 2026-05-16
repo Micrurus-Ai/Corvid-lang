@@ -722,6 +722,20 @@ pub enum AgentAttribute {
     /// agent. Integer add/sub/mul/neg wrap as i64 two's-complement;
     /// division and modulo by zero still trap.
     Wrapping { span: Span },
+    /// `@grounded_pure` — Provenance Propagation moat (D6).
+    /// Compile-time guarantee that the agent's body launders no
+    /// `Grounded<T>` value into a non-grounded slot. The proof
+    /// obligation (slice 9): no `IrExprKind::UnwrapGrounded` is
+    /// reachable in the agent's IR body. The discard nodes are
+    /// inserted by slice 7 at every silent `Grounded<T> -> T`
+    /// coercion site, so a passing `@grounded_pure` agent is one
+    /// whose every grounded value either reaches a grounded slot
+    /// or is explicitly stripped via `.unwrap_discarding_sources()`.
+    /// The attribute composes through the call graph the same way
+    /// `@deterministic` does — a `@grounded_pure` agent may only
+    /// call other `@grounded_pure` (or laundering-free built-in)
+    /// agents.
+    GroundedPure { span: Span },
 }
 
 impl AgentAttribute {
@@ -731,6 +745,7 @@ impl AgentAttribute {
             Self::Replayable { span } => *span,
             Self::Deterministic { span } => *span,
             Self::Wrapping { span } => *span,
+            Self::GroundedPure { span } => *span,
         }
     }
 
@@ -740,6 +755,7 @@ impl AgentAttribute {
             Self::Replayable { .. } => "replayable",
             Self::Deterministic { .. } => "deterministic",
             Self::Wrapping { .. } => "wrapping",
+            Self::GroundedPure { .. } => "grounded_pure",
         }
     }
 
@@ -761,6 +777,14 @@ impl AgentAttribute {
 
     pub fn is_wrapping(attrs: &[AgentAttribute]) -> bool {
         attrs.iter().any(|a| matches!(a, Self::Wrapping { .. }))
+    }
+
+    /// True when any of `attrs` carries `@grounded_pure`. Slice 9
+    /// uses this to gate the IR reachability check.
+    pub fn is_grounded_pure(attrs: &[AgentAttribute]) -> bool {
+        attrs
+            .iter()
+            .any(|a| matches!(a, Self::GroundedPure { .. }))
     }
 }
 

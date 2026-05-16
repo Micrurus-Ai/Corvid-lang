@@ -1209,6 +1209,76 @@ agent refund_flow(q: String) -> String:
     }
 
     #[test]
+    fn parses_agent_with_grounded_pure_attribute() {
+        // Provenance Propagation slice 8 / D6: parse `@grounded_pure`
+        // as an `AgentAttribute::GroundedPure` marker. The proof
+        // obligation (no `UnwrapGrounded` reachable in the body) is
+        // slice 9's work; here we only assert the front end produces
+        // the right AST node.
+        let src = "\
+@grounded_pure
+agent cite_only(ctx: Grounded<String>) -> Grounded<String>:
+    return ctx
+";
+        let file = parse_file_src(src);
+        let agent = match &file.decls[0] {
+            Decl::Agent(a) => a,
+            other => panic!("expected Agent, got {other:?}"),
+        };
+        assert_eq!(agent.attributes.len(), 1);
+        assert!(matches!(
+            agent.attributes[0],
+            corvid_ast::AgentAttribute::GroundedPure { .. }
+        ));
+        // `@grounded_pure` is an attribute, not an effect constraint.
+        assert!(agent.constraints.is_empty());
+    }
+
+    #[test]
+    fn parses_agent_with_grounded_pure_empty_parens() {
+        let src = "\
+@grounded_pure()
+agent cite_only(ctx: Grounded<String>) -> Grounded<String>:
+    return ctx
+";
+        let file = parse_file_src(src);
+        let agent = match &file.decls[0] {
+            Decl::Agent(a) => a,
+            other => panic!("expected Agent, got {other:?}"),
+        };
+        assert_eq!(agent.attributes.len(), 1);
+        assert!(matches!(
+            agent.attributes[0],
+            corvid_ast::AgentAttribute::GroundedPure { .. }
+        ));
+    }
+
+    #[test]
+    fn grounded_pure_composes_with_other_attributes() {
+        // Attributes are independent — `@grounded_pure` stacks with
+        // `@deterministic` (and any other marker). The proof
+        // obligations compose; the parser just collects them.
+        let src = "\
+@deterministic
+@grounded_pure
+agent cite_only(ctx: Grounded<String>) -> Grounded<String>:
+    return ctx
+";
+        let file = parse_file_src(src);
+        let agent = match &file.decls[0] {
+            Decl::Agent(a) => a,
+            other => panic!("expected Agent, got {other:?}"),
+        };
+        assert_eq!(agent.attributes.len(), 2);
+        assert!(corvid_ast::AgentAttribute::is_deterministic(
+            &agent.attributes
+        ));
+        assert!(corvid_ast::AgentAttribute::is_grounded_pure(
+            &agent.attributes
+        ));
+    }
+
+    #[test]
     fn parses_agent_with_replayable_empty_parens() {
         let src = "\
 @replayable()

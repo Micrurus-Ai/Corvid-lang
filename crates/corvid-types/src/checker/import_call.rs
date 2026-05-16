@@ -115,6 +115,16 @@ impl<'a> Checker<'a> {
                         "effect_row.import_boundary",
                     ));
                 }
+                AgentAttribute::GroundedPure { .. } => {
+                    // Provenance Propagation slice 8: front end only.
+                    // Cross-module composition for `@grounded_pure`
+                    // (R5 attribute-composition matrix) is slice 9's
+                    // work — the proof has to land before the import
+                    // boundary can meaningfully enforce that an
+                    // imported agent satisfies the same no-laundering
+                    // contract. Until then, requiring `@grounded_pure`
+                    // on an import parses but is not checked.
+                }
             }
         }
         if import.required_constraints.is_empty() {
