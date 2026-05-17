@@ -1199,10 +1199,13 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              surfaces low-confidence + high-risk outputs ranked \
              by the `cost_of_being_wrong` policy.",
         out_of_scope_reason:
-            "Review-queue envelopes ship at `corvid_runtime::review_queue`; \
-             the ranking CLI subcommand is not yet wired. A \
-             follow-up slice promotes this row when \
-             `corvid review-queue list` lands.",
+            "Review-queue envelopes ship at `corvid_runtime::review_queue`. \
+             The `corvid review-queue list --rank=cost-of-being-wrong` \
+             CLI subcommand that surfaces the ranked queue is not yet \
+             wired. Filed as launch-readiness slice \
+             `35V2-P40-C-LR-review-queue-ranking-cli` — promotes this \
+             row to RuntimeChecked when the subcommand ships + the \
+             ranking-correctness test lands alongside it.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },

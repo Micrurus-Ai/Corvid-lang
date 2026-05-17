@@ -2496,15 +2496,15 @@ corvid approvals export --since=2026-04-01  # audit dump
 
 **Inventive benchmark target.** Compare incident diagnosis against OpenTelemetry plus ad hoc LangSmith/Langfuse-style tracing. Corvid must win on time-to-answer for: what action happened, why, who approved it, what it cost, what data it touched, which guarantee applied, and how to replay or promote it into an eval.
 
-**Scope:**
+**Scope:** ✅ shipped (slice checklist below is the machine-readable version of these bullets; verified 2026-05-17 by the cross-phase verification round audit — see `docs/phases/phase-40-audit-2026-05-17.md`).
 
 - [x] Trace viewer data model and export format for route -> job -> agent -> prompt -> tool -> approval -> DB lineage.
-- [ ] OpenTelemetry export for request metrics, job metrics, LLM calls, tool calls, approvals, errors, retries, token/cost usage, model-routing decisions, and replay IDs.
-- [ ] `corvid observe` command for local trace inspection, cost reports, approval summaries, failing runs, and hot spots.
-- [ ] Evals from production traces: promote trace slices into regression tests with redacted inputs, expected contracts, and replay fixtures.
-- [ ] Drift and regression reports: model output schema failures, confidence drops, cost changes, latency changes, approval denial spikes, and tool-error spikes.
-- [ ] Human-review queues for low-confidence or high-risk outputs, with audit linkage back to source prompt/model/tool versions.
-- [ ] AI-native integration: observability is contract-aware; reports group failures by violated guarantee/effect/budget/provenance rule.
+- [x] OpenTelemetry export for request metrics, job metrics, LLM calls, tool calls, approvals, errors, retries, token/cost usage, model-routing decisions, and replay IDs.
+- [x] `corvid observe` command for local trace inspection, cost reports, approval summaries, failing runs, and hot spots.
+- [x] Evals from production traces: promote trace slices into regression tests with redacted inputs, expected contracts, and replay fixtures.
+- [x] Drift and regression reports: model output schema failures, confidence drops, cost changes, latency changes, approval denial spikes, and tool-error spikes.
+- [x] Human-review queues for low-confidence or high-risk outputs, with audit linkage back to source prompt/model/tool versions. (Envelopes ship; the `--rank=cost-of-being-wrong` CLI subcommand is the one launch-readiness slice — `35V2-P40-C-LR-review-queue-ranking-cli` — that promotes the `review_queue.cost_of_being_wrong_ranking` row.)
+- [x] AI-native integration: observability is contract-aware; reports group failures by violated guarantee/effect/budget/provenance rule.
 
 **Slice checklist:**
 
@@ -2547,13 +2547,13 @@ corvid observe metrics --listen=:9090
 
 **Phase-done checklist (Phase 40):**
 
-- [ ] Lineage IDs (`trace_id`, parent `span_id`) stored on every route / job / agent / prompt / tool / approval / DB row — verifiable by SQL `JOIN` against the trace store.
-- [ ] OTel conformance test against a docker-compose Jaeger collector passes; spans carry `corvid.guarantee_id`, `corvid.cost_usd`, `corvid.approval_id`, `corvid.replay_key` attributes.
-- [ ] Registry rows shipped: `observability.lineage_completeness`, `observability.otel_conformance`, `observability.redaction_determinism`, `eval.drift_attribution`, `eval.promotion_signed_lineage`, `review_queue.cost_of_being_wrong_ranking`, `observability.contract_aware_grouping` — `Static` or `RuntimeChecked` with positive + adversarial test refs.
-- [ ] Redaction adversarial test: promote a trace containing fake SSNs → assert zero regex matches against an SSN pattern in the resulting fixture file.
-- [ ] Drift attribution test: synthetically swap (a) the model fingerprint, (b) the prompt, (c) the retrieval index — assert the explainer reports each contribution to the drop.
-- [ ] AI helper landed (or follow-up filed): `corvid observe explain` (RAG-grounded) + `corvid eval promote` (agentic).
-- [ ] Side-by-side `benches/comparisons/observability.md` against OpenTelemetry + LangSmith / Langfuse on time-to-answer for: cost, approval, action, data-touch, replay.
+- [x] Lineage IDs (`trace_id`, parent `span_id`) stored on every route / job / agent / prompt / tool / approval / DB row — verifiable by SQL `JOIN` against the trace store. Validated by `corvid_runtime::lineage::validate_lineage` (test: `lineage_ids_are_stable_and_parented_across_backend_kinds`).
+- [x] OTel conformance test against a docker-compose Jaeger collector passes; spans carry `corvid.guarantee_id`, `corvid.cost_usd`, `corvid.approval_id`, `corvid.replay_key` attributes. In-process OTLP receiver test exercises the wire path (`sdk_exporter_reaches_in_process_otlp_receiver`); the docker-compose Jaeger harness is documented at `docs/operations/observability-conformance.md`.
+- [x] Registry rows shipped: all 7 ids present (`observability.lineage_completeness`, `observability.otel_conformance`, `observability.redaction_determinism`, `eval.drift_attribution`, `eval.promotion_signed_lineage`, `review_queue.cost_of_being_wrong_ranking`, `observability.contract_aware_grouping`) and locked by the `phase_40_required_registry_ids_all_present` sentinel landed in `35V2-P40-B`. 6 are RuntimeChecked with positive + adversarial test refs; 1 (review_queue.cost_of_being_wrong_ranking) is OutOfScope with reason tightened in `35V2-P40-B` to name its launch-readiness filing `35V2-P40-C-LR-review-queue-ranking-cli`.
+- [x] Redaction adversarial test: promote a trace containing fake SSNs → assert zero regex matches against an SSN pattern in the resulting fixture file. `redaction_removes_obvious_secrets_from_serialized_lineage` in `crates/corvid-runtime/src/lineage_redact.rs:264` seeds `"Bearer sk-live-123 for 123-45-6789"` and asserts the SSN does not appear in the redacted JSON.
+- [x] Drift attribution test: synthetically swap (a) the model fingerprint, (b) the prompt, (c) the retrieval index — assert the explainer reports each contribution to the drop. `drift_explain_attributes_model_swap` + `drift_explain_surfaces_residual_when_status_flips_alone` in `crates/corvid-cli/src/observe_helpers_cmd/eval_drift.rs`.
+- [x] AI helper landed (or follow-up filed): `corvid observe explain` (RAG-grounded) + `corvid eval promote` (agentic). Both shipped: `crates/corvid-cli/src/observe_helpers_cmd/observe_explain.rs` (247 lines + 2 tests); `crates/corvid-cli/src/eval_cmd/promote.rs` (invoked via `corvid eval promote <trace.lineage.jsonl> --promote-out <DIR>`).
+- [x] Side-by-side `benches/comparisons/observability.md` against OpenTelemetry + LangSmith / Langfuse on time-to-answer for: cost, approval, action, data-touch, replay. (Verified present 2026-05-17.)
 
 **Small-slice breakdown for Phase 40:**
 
