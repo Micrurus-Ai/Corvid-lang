@@ -156,6 +156,39 @@ mod tests {
         );
     }
 
+    /// 35V2-P39-E sentinel: every guarantee id named by the Phase 39
+    /// phase-done checklist in ROADMAP.md must exist in the registry.
+    /// Same drift mode as the Phase-38 sentinel above. The Phase 39
+    /// audit (`docs/phases/phase-39-audit-2026-05-17.md`) verified
+    /// all 9 are present at audit time; this sentinel locks the
+    /// presence property going forward.
+    #[test]
+    fn phase_39_required_registry_ids_all_present() {
+        const REQUIRED: &[&str] = &[
+            "auth.session_rotation_on_privilege_change",
+            "auth.api_key_at_rest_hashed",
+            "auth.jwt_kid_rotation",
+            "auth.oauth_pkce_required",
+            "auth.csrf_double_submit",
+            "tenant.cross_tenant_compile_error",
+            "approval.policy_clause_static_check",
+            "approval.batch_equivalence_typed",
+            "approval.confused_deputy_typecheck",
+        ];
+        let missing: Vec<&str> = REQUIRED
+            .iter()
+            .filter(|id| lookup(id).is_none())
+            .copied()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Phase 39 phase-done checklist names ids that are absent \
+             from the registry: {missing:?}. Add the row to \
+             registry.rs or update the Phase 39 phase-done checklist \
+             in ROADMAP.md to match shipped reality."
+        );
+    }
+
     #[test]
     fn out_of_scope_without_reason_rejected() {
         let bad = Guarantee {

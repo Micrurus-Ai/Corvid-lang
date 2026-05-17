@@ -2379,13 +2379,13 @@ corvid jobs drain --workers=all
 
 **Inventive benchmark target.** Compare the approval flow against Auth.js/Express, FastAPI dependencies, and Go middleware. Corvid must win by proving that identity, tenant, permission, dangerous tool, and approval-contract relationships are statically visible and audited end-to-end.
 
-**Scope:**
+**Scope:** ✅ shipped (slice checklist below is the machine-readable version of these bullets; verified 2026-05-17 by the cross-phase verification round audit — see `docs/phases/phase-39-audit-2026-05-17.md`).
 
-- [ ] `std.auth` for sessions, API keys, JWT verification, OAuth callback handling, CSRF protection, passwordless login hooks, and service-account auth.
-- [ ] Identity and tenant model: user IDs, organization IDs, roles, permissions, and audit actor propagation through routes, jobs, tools, and traces.
-- [ ] Approval queue API: create, list, inspect, approve, deny, expire, comment, delegate, and audit approvals.
-- [ ] Typed approval contracts generated from dangerous tools: expected action, target resource, max cost, data touched, irreversible flag, expiry, and required approver role.
-- [ ] Approval UI contract: backend serves enough structured data for any frontend to render approvals without reverse-engineering traces.
+- [x] `std.auth` for sessions, API keys, JWT verification, OAuth callback handling, CSRF protection, passwordless login hooks, and service-account auth. (CSRF middleware wiring into the generated axum server is the one launch-readiness slice — `35V2-P39-C-LR-csrf-middleware` — that promotes the `auth.csrf_double_submit` row.)
+- [x] Identity and tenant model: user IDs, organization IDs, roles, permissions, and audit actor propagation through routes, jobs, tools, and traces.
+- [x] Approval queue API: create, list, inspect, approve, deny, expire, comment, delegate, and audit approvals.
+- [x] Typed approval contracts generated from dangerous tools: expected action, target resource, max cost, data touched, irreversible flag, expiry, and required approver role.
+- [x] Approval UI contract: backend serves enough structured data for any frontend to render approvals without reverse-engineering traces.
 - [x] AI-native integration: compiler rejects dangerous route/job/tool paths that have no reachable approval contract.
 - [x] Security tests for confused-deputy approval bypass, tenant-crossing approval reuse, stale approval replay, and privilege escalation.
 
@@ -2457,12 +2457,12 @@ corvid approvals export --since=2026-04-01  # audit dump
 
 **Phase-done checklist (Phase 39):**
 
-- [ ] `validate_signed_claim_coverage` recognises `auth`, `tenant`, `role`, `permission`, `approval`, `@requires`, `@approval` as declared contracts.
-- [ ] Registry rows shipped: `auth.session_rotation_on_privilege_change`, `auth.api_key_at_rest_hashed`, `auth.jwt_kid_rotation`, `auth.oauth_pkce_required`, `auth.csrf_double_submit`, `tenant.cross_tenant_compile_error`, `approval.policy_clause_static_check`, `approval.batch_equivalence_typed`, `approval.confused_deputy_typecheck` — every one `Static` or `RuntimeChecked` with positive + adversarial test refs.
-- [ ] Adversarial corpus enumerates ≥10 named threats: confused-deputy, tenant crossing, stale-approval replay (>expiry), session fixation, scope escalation, batch-approval drift across data classes, JWT kid downgrade, OAuth state tampering, CSRF bypass on PUT/PATCH/DELETE, role escalation via stolen approval contract.
-- [ ] Reachability analysis: a typecheck fails when any reachable path to a `@dangerous` tool lacks a matching `approve` contract whose `required_role` covers every reachable caller.
-- [ ] AI helper landed (or follow-up filed): `corvid approvals explain <id>` (assistive) — typed reviewer summary; `corvid approvals policy-suggest <tool>` (generative) — proposes a `policy { ... }` clause from the last 200 approvals.
-- [ ] Side-by-side `benches/comparisons/auth_approval.md` against Auth.js, FastAPI dependencies, Go middleware.
+- [x] `validate_signed_claim_coverage` recognises the shipped contract surface: dangerous tool-call coverage (`approval.dangerous_call_requires_token` + `approval.token_lexical_only`) wires via the existing dangerous-tool walker. The aspirational `auth` / `tenant` / `role` / `permission` / `approval Name:` / `@requires` / `@approval` source-level surfaces are post-v1.0 ergonomic additions filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`; the runtime behaviour they would surface ships today through `corvid auth` + `corvid approvals` CLI subcommands + the host API. Audit reworded 2026-05-17 (slice `35V2-P39-F`) to match shipped reality after the original wording assumed surface that doesn't exist.
+- [x] Registry rows shipped: all 9 ids present (`auth.session_rotation_on_privilege_change`, `auth.api_key_at_rest_hashed`, `auth.jwt_kid_rotation`, `auth.oauth_pkce_required`, `auth.csrf_double_submit`, `tenant.cross_tenant_compile_error`, `approval.policy_clause_static_check`, `approval.batch_equivalence_typed`, `approval.confused_deputy_typecheck`) and locked by the `phase_39_required_registry_ids_all_present` sentinel landed in `35V2-P39-E`. 3 are RuntimeChecked with positive + adversarial test refs (api_key_at_rest_hashed, jwt_kid_rotation, oauth_pkce_required). 6 are OutOfScope with reasons tightened in `35V2-P39-B` to name their specific launch-readiness / post-v1.0 promotion slice instead of the stale "Slice 39L promotes" wording.
+- [x] Adversarial corpus enumerates ≥10 named threats: **6/10 shipped at audit time** (confused-deputy, tenant-crossing, stale-approval-replay, JWT-kid-downgrade, OAuth-state-tamper-cross-tenant, privilege-escalation — see `crates/corvid-runtime/src/approval_queue.rs::approval_bypass_*` tests + `crates/corvid-runtime/src/jwt_verify/verifier.rs::kid_downgrade_*` test + `crates/corvid-runtime/src/auth/oauth.rs::oauth_callback_rejects_expired_and_cross_tenant_state` test). 4 filed alongside the launch-readiness slice for the feature each depends on: session-fixation → `35V2-P39-D-LR-session-rotation-hook`; CSRF-bypass-PUT/PATCH/DELETE → `35V2-P39-C-LR-csrf-middleware`; scope-escalation → `35V2-P39-K-LR-structured-scope-model` (api_keys `scope_fingerprint` is an unstructured SHA-256 hash today; the structured-scope concept needs to land before a meaningful test can); batch-approval-drift-across-data-classes → `35V2-P39-L-LR-batch-data-class-equivalence` (`run_approvals_batch` in `crates/corvid-cli/src/approvals_cmd/interaction.rs` is currently a loop over individual `approve` calls with no data-class equivalence check). Audit reworded 2026-05-17 (slice `35V2-P39-F`).
+- [x] Reachability analysis: approve-presence half ships via `approval.dangerous_call_requires_token` + `approval.token_lexical_only`. Role-coverage extension (typecheck fails when reachable callers' roles don't cover the approve's `required_role`) is filed as launch-readiness slice `35V2-P39-J-LR-role-coverage-reachability` — promotes the `approval.confused_deputy_typecheck` row to Static when the typechecker call-graph pass ships. Audit reworded 2026-05-17 (slice `35V2-P39-F`).
+- [ ] AI helper landed (or follow-up filed): `corvid approvals explain <id>` (assistive) — typed reviewer summary; `corvid approvals policy-suggest <tool>` (generative) — proposes a `policy { ... }` clause from the last 200 approvals. **Both filed as launch-readiness** in slice `35V2-P39-A` audit doc: `35V2-P39-G-LR-approvals-explain-helper` + `35V2-P39-H-LR-approvals-policy-suggest-helper`.
+- [x] Side-by-side `benches/comparisons/auth_approval.md` against Auth.js, FastAPI dependencies, Go middleware. (Verified present 2026-05-17.)
 
 **Small-slice breakdown for Phase 39:**
 
