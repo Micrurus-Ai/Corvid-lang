@@ -647,7 +647,7 @@ A connector cannot use a scope its manifest does not declare and an actor cannot
 
 A connector method whose effect set names a write (`gmail.send`, `slack.post`, `github.create_issue`) reaches typecheck only when its caller has a matching `approve` boundary in lexical scope.
 
-> **Why out of scope:** Manifest declares write effects but the connector AST surface is not yet parser-level — connectors today are configured by Rust data, not source. Slice 41L promotes.
+> **Why out of scope:** Manifest declares write effects (`*.write`, `send_*`) in `shipped_manifests` and the runtime refuses unsafe effects via `ConnectorRuntimeError::ReplayWriteQuarantined` when not authorized. The source-level `connector ... uses dangerous` declaration that would let typecheck refuse a call without a lexical-scope `approve` does not exist yet — connectors are configured by Rust data, not Corvid source. Filed as post-v1.0 `35V2-P41-I-post-v1.0-connector-syntax-sugar` — the runtime behaviour (manifest enforcement at write time) ships today; the typecheck-time form is the syntax sugar that promotes this row to Static.
 
 #### `connector.rate_limit_respects_provider`
 - **class**: runtime_checked
@@ -671,7 +671,7 @@ A connector honors the provider's rate-limit advice (`Retry-After`, 429, 5xx). T
 
 `corvid connectors check --live` compares the manifest to the live (or recorded-cassette) provider response shape and exits non-zero when fields drift.
 
-> **Why out of scope:** Slice 41L wired `corvid connectors check`, which validates every shipped manifest against the manifest schema and reports diagnostics per connector (`shipped_manifests` → `validate_connector_manifest`). The `--live` drift-narration path that compares the manifest to a live provider response shape is gated behind `CORVID_PROVIDER_LIVE=1` and currently returns an explicit `Err` directing the caller to slice 41M-C; until that slice ships, drift detection itself is not exercised end-to-end and this row stays out of scope.
+> **Why out of scope:** Slice 41L wired `corvid connectors check`, which validates every shipped manifest against the manifest schema and reports diagnostics per connector (`shipped_manifests` → `validate_connector_manifest`). The `--live` drift-narration path that compares the manifest to a live provider response shape is gated behind `CORVID_PROVIDER_LIVE=1` and currently returns an explicit `Err` directing the caller to a future slice. Filed as launch-readiness slice `35V2-P41-D-LR-connector-drift-narration` — promotes this row to RuntimeChecked when the live drift path ships + the AI-helper narrator layer (35V2-P41-H-LR) surfaces the diff in human-readable form.
 
 #### `connector.webhook_signature_verified`
 - **class**: runtime_checked

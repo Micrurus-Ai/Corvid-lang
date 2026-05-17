@@ -156,6 +156,35 @@ mod tests {
         );
     }
 
+    /// 35V2-P41-B sentinel: every guarantee id named by the Phase 41
+    /// phase-done checklist in ROADMAP.md must exist in the registry.
+    /// Same drift mode as the Phase-38/39/40 sentinels above. The
+    /// Phase 41 audit (`docs/phases/phase-41-audit-2026-05-17.md`)
+    /// verified all 6 are present at audit time.
+    #[test]
+    fn phase_41_required_registry_ids_all_present() {
+        const REQUIRED: &[&str] = &[
+            "connector.scope_minimum_enforced",
+            "connector.write_requires_approval",
+            "connector.rate_limit_respects_provider",
+            "connector.contract_drift_detected",
+            "connector.webhook_signature_verified",
+            "connector.replay_quarantine",
+        ];
+        let missing: Vec<&str> = REQUIRED
+            .iter()
+            .filter(|id| lookup(id).is_none())
+            .copied()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Phase 41 phase-done checklist names ids that are absent \
+             from the registry: {missing:?}. Add the row to \
+             registry.rs or update the Phase 41 phase-done checklist \
+             in ROADMAP.md to match shipped reality."
+        );
+    }
+
     /// 35V2-P40-B sentinel: every guarantee id named by the Phase 40
     /// phase-done checklist in ROADMAP.md must exist in the registry.
     /// Same drift mode as the Phase-38 + Phase-39 sentinels above.

@@ -953,10 +953,18 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              reaches typecheck only when its caller has a matching \
              `approve` boundary in lexical scope.",
         out_of_scope_reason:
-            "Manifest declares write effects but the connector AST \
-             surface is not yet parser-level — connectors today are \
-             configured by Rust data, not source. Slice 41L \
-             promotes.",
+            "Manifest declares write effects (`*.write`, `send_*`) \
+             in `shipped_manifests` and the runtime refuses unsafe \
+             effects via `ConnectorRuntimeError::ReplayWriteQuarantined` \
+             when not authorized. The source-level `connector ... \
+             uses dangerous` declaration that would let typecheck \
+             refuse a call without a lexical-scope `approve` does \
+             not exist yet — connectors are configured by Rust data, \
+             not Corvid source. Filed as post-v1.0 \
+             `35V2-P41-I-post-v1.0-connector-syntax-sugar` — the \
+             runtime behaviour (manifest enforcement at write time) \
+             ships today; the typecheck-time form is the syntax \
+             sugar that promotes this row to Static.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
@@ -1000,9 +1008,12 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              The `--live` drift-narration path that compares the \
              manifest to a live provider response shape is gated \
              behind `CORVID_PROVIDER_LIVE=1` and currently returns \
-             an explicit `Err` directing the caller to slice 41M-C; \
-             until that slice ships, drift detection itself is not \
-             exercised end-to-end and this row stays out of scope.",
+             an explicit `Err` directing the caller to a future \
+             slice. Filed as launch-readiness slice \
+             `35V2-P41-D-LR-connector-drift-narration` — promotes \
+             this row to RuntimeChecked when the live drift path \
+             ships + the AI-helper narrator layer (35V2-P41-H-LR) \
+             surfaces the diff in human-readable form.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },

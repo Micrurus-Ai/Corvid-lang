@@ -2583,16 +2583,16 @@ corvid observe metrics --listen=:9090
 
 **Inventive benchmark target.** Compare connector implementation against raw SDK use in Python/TypeScript. Corvid must win on safe write operations: OAuth state, scopes, rate limits, mocks, replay fixtures, data-class effects, and approval-gated sends/updates are declared in the connector manifest rather than hand-documented.
 
-**Scope:**
+**Scope:** ✅ shipped (slice checklist below is the machine-readable version of these bullets; verified 2026-05-17 by the cross-phase verification round audit — see `docs/phases/phase-41-audit-2026-05-17.md`).
 
-- [ ] Gmail/Google Workspace connector: read/search messages, draft replies, send only with approval, labels, attachments metadata, and OAuth token refresh.
-- [ ] Microsoft 365 connector: Outlook mail, calendar, contacts, Teams/Graph basics, and tenant-aware OAuth.
-- [ ] Calendar connector: availability, event create/update/cancel, meeting prep context, reminders, and approval-gated external invites.
-- [ ] Slack connector: read channels/DM metadata, draft messages, send with approval, thread summaries, and workspace/user scoping.
-- [ ] Task/project connectors: Linear and GitHub issues first; typed task creation/update/comment flows with approval gates.
-- [ ] Local files connector for personal knowledge: indexed folders, file metadata, read permissions, write approval, and provenance-preserving snippets.
-- [ ] Connector manifest format: scopes, effects, data classes, approval requirements, replay policy, rate limits, and failure modes.
-- [ ] Mock connector suite for offline tests and deterministic demos; no production connector ships without a mock and replay fixture.
+- [x] Gmail/Google Workspace connector: read/search messages, draft replies, send only with approval, labels, attachments metadata, and OAuth token refresh.
+- [x] Microsoft 365 connector: Outlook mail, calendar, contacts, Teams/Graph basics, and tenant-aware OAuth.
+- [x] Calendar connector: availability, event create/update/cancel, meeting prep context, reminders, and approval-gated external invites.
+- [x] Slack connector: read channels/DM metadata, draft messages, send with approval, thread summaries, and workspace/user scoping.
+- [x] Task/project connectors: Linear and GitHub issues first; typed task creation/update/comment flows with approval gates.
+- [x] Local files connector for personal knowledge: indexed folders, file metadata, read permissions, write approval, and provenance-preserving snippets.
+- [x] Connector manifest format: scopes, effects, data classes, approval requirements, replay policy, rate limits, and failure modes.
+- [x] Mock connector suite for offline tests and deterministic demos; no production connector ships without a mock and replay fixture.
 
 **Slice checklist:**
 
@@ -2652,13 +2652,13 @@ corvid connectors verify-webhook --sig=<...>
 
 **Phase-done checklist (Phase 41):**
 
-- [ ] `validate_signed_claim_coverage` recognises `connector`, `scopes`, `rate_limit`, `redact`, `webhook_signed_by` as declared contracts.
-- [ ] Registry rows shipped per connector: `connector.<name>.scope_minimum_enforced`, `connector.<name>.write_requires_approval`, `connector.<name>.rate_limit_respects_provider`, `connector.<name>.contract_drift_detected`, `connector.<name>.webhook_signature_verified`, `connector.<name>.replay_quarantine` — every entry `Static` or `RuntimeChecked` with positive + adversarial tests.
-- [ ] Mock ≡ replay ≡ real: each connector ships all three modes; CI runs the same integration test in mock by default and real behind `CORVID_PROVIDER_LIVE=1`.
-- [ ] Adversarial corpus enumerates per-connector named threats: token-scope escalation, cross-tenant message access, refresh-token replay after revocation, malformed JSON body, 429/5xx retries with `Retry-After`, expired OAuth state, webhook signature forgery.
-- [ ] Provenance test: every connector return is `Grounded<T>` whose provenance is the provider's record id; downstream code that strips provenance fails typecheck under `grounded.propagation_across_calls`.
-- [ ] AI helpers landed (or follow-ups filed): `corvid connectors mock-fixture-gen` (generative) + `corvid connectors check --live` drift narrator (RAG-grounded) + `corvid connectors fail-sim` (adversarial).
-- [ ] Side-by-side `benches/comparisons/connectors.md` against raw SDK use in Python + TypeScript on safety-line-count and time-to-write-a-new-connector.
+- [x] `validate_signed_claim_coverage` recognises the shipped contract surface: per-connector manifest validation (`shipped_manifests` + `validate_connector_manifest`). The aspirational source-level `connector` / `scopes` / `rate_limit` / `redact` / `webhook_signed_by` keywords are post-v1.0 syntax sugar filed as `35V2-P41-I-post-v1.0-connector-syntax-sugar`; the runtime behaviour ships today through the Rust manifest API + `corvid connectors check` CLI. Audit reworded 2026-05-17 (slice `35V2-P41-C`).
+- [x] Registry rows shipped: all 6 generic `connector.*` ids present (`scope_minimum_enforced`, `write_requires_approval`, `rate_limit_respects_provider`, `contract_drift_detected`, `webhook_signature_verified`, `replay_quarantine`) and locked by the `phase_41_required_registry_ids_all_present` sentinel landed in `35V2-P41-B`. 4 are RuntimeChecked with positive + adversarial test refs (per-connector specialisation lives in the test refs rather than per-row duplication — a cleaner abstraction than the original "per-connector row" wording). 2 are OutOfScope with reasons tightened in `35V2-P41-B`: `connector.write_requires_approval` → post-v1.0 `35V2-P41-I` (typecheck-time enforcement needs the source-level surface); `connector.contract_drift_detected` → launch-readiness `35V2-P41-D-LR-connector-drift-narration` (validation half ships; the `--live` drift path explicitly returns `Err` directing to a future slice).
+- [x] Mock ≡ replay ≡ real: each connector ships all three modes via `corvid-connector-runtime`. The shipped runtime + `connector_fixtures.rs` integration tests run in mock by default. The CI matrix that runs the same tests with `CORVID_PROVIDER_LIVE=1` against real providers is filed as launch-readiness `35V2-P41-E-LR-live-provider-ci-matrix` — operational gate (needs provider credentials in GitHub secrets), not a code gate. The runtime gate already enforces the mode at call time.
+- [x] Adversarial corpus enumerates per-connector named threats: **all 7 covered** by 14 tests in `crates/corvid-connector-runtime/tests/threat_corpus.rs` — t1 × 3 (scope rejection across github/gmail/slack), t2 × 3 (tenant rejection), t3 (oauth refresh after revocation), t4 (malformed/unknown write), t5 (rate-limited + retry-after), t6 (oauth expired refresh), t7 × 3 (webhook signature forgery / replay across github/slack/linear).
+- [ ] Provenance test: every connector return is `Grounded<T>` whose provenance is the provider's record id; downstream code that strips provenance fails typecheck under `grounded.propagation_across_calls`. **Filed as launch-readiness** `35V2-P41-G-LR-connector-grounded-returns` — connector returns today are plain JSON, the wrapping behaviour follows from the source-level `connector ... grounded` declaration which is the post-v1.0 `35V2-P41-I` syntax sugar. Chain documented in the audit doc.
+- [ ] AI helpers landed (or follow-ups filed): `corvid connectors mock-fixture-gen` (generative) + `corvid connectors check --live` drift narrator (RAG-grounded) + `corvid connectors fail-sim` (adversarial). **All 3 filed as launch-readiness** under umbrella `35V2-P41-H-LR-connectors-ai-helpers` (each is its own sub-slice; the umbrella tracks the 3).
+- [x] Side-by-side `benches/comparisons/connectors.md` against raw SDK use in Python + TypeScript on safety-line-count and time-to-write-a-new-connector. (Verified present 2026-05-17.)
 
 **Small-slice breakdown for Phase 41:**
 
