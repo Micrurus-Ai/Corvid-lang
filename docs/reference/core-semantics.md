@@ -521,7 +521,7 @@ Agent loops driven by jobs honor max-steps, max-wall-time, max-spend, and max-to
 
 A job marked `@replayable` records its tool / prompt / approval / DB side-effects into the trace so a later `corvid replay <job-trace>` reproduces the run without re-issuing real side-effect calls.
 
-> **Why out of scope:** The Phase 21 replay infrastructure ships and the queue runtime persists step checkpoints, but the cross-layer integration test that pins `replay an old job trace, assert no real provider call left the process` is the gap surfaced by the 35V2-P38-A audit. Slice 35V2-P38-C lands the integration test and promotes this row to RuntimeChecked when the test exists.
+> **Why out of scope:** The Phase 21 replay infrastructure ships and the queue runtime persists step checkpoints, but the integration wiring that would let a recorded job trace drive a replay-mode job runner (with the LlmRegistry quarantined so a real provider call cannot leave the process) does not exist. The 35V2-P38-A audit assumed the wiring was present and only the test was missing; recon under 35V2-P38-C found the wiring is the work, not the test. Filed as a v1.0 launch-readiness slice (35V2-P38-C-deferred) — promotes this row to RuntimeChecked when the wiring ships and the cross-layer assertion test joins the durability corpus.
 
 ### Auth and approvals
 
