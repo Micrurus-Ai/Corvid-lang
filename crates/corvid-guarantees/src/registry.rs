@@ -543,10 +543,14 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              retry envelope of a job so a transient failure cannot \
              escalate into unbounded re-spend.",
         out_of_scope_reason:
-            "The runtime queue and lease envelopes are shipped, but \
-             `@retry` is not yet a parser-level attribute. Slice 38K \
-             promotes this row to `RuntimeChecked` when the multi-worker \
-             runner consumes the attribute end-to-end.",
+            "The runtime queue and lease envelopes are shipped and the \
+             retry policy is configurable at enqueue time via the host \
+             API + `corvid jobs limit`. `@retry` as a Corvid source-level \
+             attribute is filed as a post-v1.0 ergonomic improvement \
+             (35V2-P38-H), not a launch-blocker — the runtime behaviour \
+             the attribute would surface is already shipped. Slice 38K \
+             promoted the runtime; the syntactic promotion of this row \
+             tracks with the post-v1.0 syntax slice.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
@@ -646,13 +650,17 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         class: GuaranteeClass::OutOfScope,
         phase: Phase::Runtime,
         description:
-            "`await_approval` pauses a job until an approval token \
-             arrives, expires, or is denied; the resume path writes \
-             the audit transition.",
+            "An approval boundary inside a job pauses the run until \
+             an approval token arrives, expires, or is denied; the \
+             resume path writes the audit transition.",
         out_of_scope_reason:
-            "Runtime approval-wait state ships; `await_approval` is \
-             not yet a parser-level keyword. Slice 38K (or a \
-             follow-up syntax slice) promotes.",
+            "Runtime approval-wait state ships and is reachable via \
+             `corvid jobs wait-approval` + `corvid jobs approval \
+             approve/deny` (the shipped surface). `await_approval` \
+             as a Corvid source-level keyword is filed as a post-v1.0 \
+             ergonomic improvement (35V2-P38-H), not a launch-blocker \
+             — the runtime behaviour already ships, the syntax just \
+             surfaces it more compactly.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
@@ -666,9 +674,17 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              max-spend, and max-tool-calls; exceeding any bound \
              escalates or terminates with trace evidence.",
         out_of_scope_reason:
-            "Loop-bound envelopes ship; the multi-worker runner that \
-             enforces them across crash + restart is not yet wired. \
-             Slice 38K promotes.",
+            "Loop-bound storage + tracking ship at \
+             `corvid-runtime::queue::loops` (set_loop_limits, \
+             loop_limits, loop_usage, record_loop_usage_report) and \
+             the multi-worker runner from 38K is in place. What's \
+             missing is the runner's enforcement hook — exceeding a \
+             bound should terminate or escalate the job with trace \
+             evidence; today the bounds are recorded but not enforced \
+             at the runner. Filed as a v1.0 launch-readiness slice \
+             (35V2-P38-D-LR-loop-bounds-enforcement-hook) — promotes \
+             this row to RuntimeChecked when the enforcement hook \
+             ships.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },

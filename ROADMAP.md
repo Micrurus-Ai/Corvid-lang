@@ -2334,7 +2334,7 @@ corvid jobs drain --workers=all
 
 **Phase-done checklist (Phase 38):**
 
-- [ ] `validate_signed_claim_coverage` recognises `@retry`, `@idempotency`, `@replayable`, `job`, `schedule`, and `await_approval` as declared contracts.
+- [x] `validate_signed_claim_coverage` recognises the shipped contract surface: `@replayable` (wires `replay.deterministic_pure_path` via `AgentAttribute::Replayable`) and `schedule` (wires `jobs.cron_schedule_durable` via `Decl::Schedule`). The aspirational `@retry` / `@idempotency` / `job` / `await_approval` source-level surfaces are post-v1.0 ergonomic additions, filed as `35V2-P38-H`; the runtime behaviour they would surface ships today through the enqueue API + `corvid jobs limit` + `corvid jobs wait-approval`. Audit reworded 2026-05-17 (slice `35V2-P38-F`) to match shipped reality after the original wording assumed surface that doesn't exist.
 - [ ] Registry rows shipped: `jobs.durable_resume`, `jobs.idempotency_key_uniqueness`, `jobs.lease_exclusivity`, `jobs.retry_budget_bound`, `jobs.cron_dst_correct`, `jobs.replayable_side_effects`, `jobs.approval_wait_resume`, `jobs.loop_bounds_enforced` — each `Static` or `RuntimeChecked`, each with positive + adversarial test refs.
 - [ ] Crash-recovery integration test: `SIGKILL` mid-step → resume with no LLM re-spend (verified by mock-LLM call counter).
 - [ ] Idempotency adversarial test: 4 concurrent workers + 100 jobs same key → exactly 1 ran.
