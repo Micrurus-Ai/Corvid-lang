@@ -6916,3 +6916,33 @@ rather than papering it over.
 
 Next: open the pre-phase chat for the cross-phase verification
 round.
+
+## 2026-05-17 — 35V2-P38-A: Phase 38 phase-done audit
+
+First slice of the cross-phase verification round. Methodology +
+findings + correction-slice list at
+`docs/phases/phase-38-audit-2026-05-17.md`.
+
+Headline: 5 of 8 phase-done items pass cleanly. 3 need correction
+slices (1 missing registry row, 1 missing test, 1 OutOfScope-row
+investigation), 1 file is filed as launch-readiness (AI helper),
+1 file is filed as post-v1.0 follow-up (aspirational keyword
+surface).
+
+Plus one finding outside the original audit scope: `docs/guides/
+jobs.md` is user-facing and uses the aspirational `job` keyword
+that doesn't parse. Launch-blocking docs drift. Reference apps
+already use the shipped `agent` + `schedule` surface, so the docs
+lag the apps. Rewriting the guide is 35V2-P38-E.
+
+Total in-flight correction work: ~8 hours across 35V2-P38-B
+through F.
+
+Sentinels added as part of those slices:
+- docs-as-code drift gate (catches the user-facing-doc drift mode
+  going forward)
+- registry-row presence sentinel for required Phase 38 ids
+  (catches the missing-row drift mode going forward)
+
+Next: execute B → C → D → E → F as separate commits, then file G
+and H.
