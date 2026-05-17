@@ -6946,3 +6946,39 @@ Sentinels added as part of those slices:
 
 Next: execute B → C → D → E → F as separate commits, then file G
 and H.
+
+## 2026-05-17 — 35V2-P39-A: Phase 39 phase-done audit
+
+Second audit of the cross-phase verification round. Findings at
+`docs/phases/phase-39-audit-2026-05-17.md`.
+
+Headline: 3 of 11 phase-done items pass cleanly (3 RuntimeChecked
+registry rows + the present benchmark file + the present approval
+queue API). 6 OutOfScope registry rows need reasons tightened. 4
+named-threat tests are absent (2 land now in 35V2-P39-E, 2 wait
+on launch-readiness middleware). 2 AI helpers missing (filed as
+launch-readiness). Aspirational `auth`/`tenant`/`role`/
+`permission`/`approval Name:`/`@requires`/`@approval` surface
+doesn't exist as Corvid syntax — same shape as P38's `job` syntax
+sugar; filed as post-v1.0 35V2-P39-I.
+
+Systemic finding repeated from P38: OutOfScope reasons reference
+promotion slices that shipped without promoting. 39L wired the
+`corvid auth` + `corvid approvals` CLI subcommands and shipped
+[x], but didn't tick any of the 6 OutOfScope rows that named it
+as the promoter. The 35-N audit-correction slice added these
+placeholder rows in 2026-04-29 expecting downstream slices to
+promote them; the downstream slices shipped their stated surface
+but did not own the promotion. Audit catches this systematically.
+
+Pattern to pin in learnings.md when verification round closes:
+when a phase ships an OutOfScope row that names a future slice
+for promotion, the future slice's phase-done checklist must
+include "promote OR tighten reason on row X." Otherwise the row
+sits OutOfScope under stale "Slice N promotes" wording forever.
+
+Correction plan: 4 in-flight slices (B, E, F + Phase 39 doc tick)
++ 6 filings (C/D/G/H/I/J + 2 named-threat tests filed alongside
+middleware). ~4 hours in-flight work.
+
+Next: execute B, E, F as separate commits, then file C/D/G/H/I/J.
