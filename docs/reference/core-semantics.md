@@ -531,7 +531,7 @@ A job marked `@replayable` records its tool / prompt / approval / DB side-effect
 
 A session id rotates on privilege escalation (role upgrade, password change) so a stolen pre-escalation cookie cannot exercise the post-escalation privilege.
 
-> **Why out of scope:** Session table ships; rotation hook is not yet wired through a parser-level `auth` block. Slice 39L promotes.
+> **Why out of scope:** Session storage + the rotation primitive exist in `corvid-runtime/src/auth/sessions.rs` (verified by the session_rotation_invalidates_old_token_* test). The gap is the runtime hook that fires the rotation on a privilege-change event (role upgrade, password change) inside the generated axum server. Filed as launch- readiness slice `35V2-P39-D-LR-session-rotation-hook` — promotes this row to RuntimeChecked when the hook ships + the named-threat test for session-fixation lands alongside it.
 
 #### `auth.api_key_at_rest_hashed`
 - **class**: runtime_checked
@@ -589,7 +589,7 @@ OAuth callback state requires PKCE for public clients; the state record carries 
 
 CSRF protection on cookie-bearing requests uses a double-submit token verified by HMAC-SHA256.
 
-> **Why out of scope:** Token shape is documented in the design brief; the middleware path that enforces it on every cookie-bearing POST/PUT/PATCH/DELETE is not yet wired into the generated axum server. Slice 39L promotes.
+> **Why out of scope:** Token shape is documented in the design brief; the middleware path that enforces it on every cookie-bearing POST / PUT / PATCH / DELETE is not yet wired into the generated axum server. Filed as launch-readiness slice `35V2-P39-C-LR-csrf-middleware` — promotes this row to RuntimeChecked when the middleware ships + the named-threat test for `CSRF-bypass-on-PUT/PATCH/DELETE` lands alongside it.
 
 #### `tenant.cross_tenant_compile_error`
 - **class**: out_of_scope
@@ -597,7 +597,7 @@ CSRF protection on cookie-bearing requests uses a double-submit token verified b
 
 A function whose actor came from tenant A may not pass a record owned by tenant B to a tool that writes back into A — the typechecker rejects the cross-tenant reference.
 
-> **Why out of scope:** Tenant tagging exists in runtime envelopes but the parser-level `tenant Org { ... }` block does not exist yet. Slice 39L (parser surface) plus a typecheck slice promotes this row to `Static`.
+> **Why out of scope:** Tenant tagging exists in runtime envelopes + the CLI (`corvid approvals` honours tenant scoping; the approval_bypass_rejects_tenant_crossing_actor test pins the runtime half). The parser-level `tenant Org { ... }` block + the typechecker reachability that would refuse a cross-tenant value at compile time does not exist yet. Filed as post-v1.0 `35V2-P39-I-post-v1.0-auth-syntax-sugar` — the runtime behaviour ships today, the syntactic promotion of this row tracks with the post-v1.0 parser surface slice.
 
 #### `approval.policy_clause_static_check`
 - **class**: out_of_scope
@@ -605,7 +605,7 @@ A function whose actor came from tenant A may not pass a record owned by tenant 
 
 An `approval Name:` block's `policy { ... }` clause type-checks at compile time so a malformed predicate (wrong field name, wrong type, undeclared role) cannot ship.
 
-> **Why out of scope:** Approval store ships; the `approval Name:` parser-level block does not. Slice 39L promotes.
+> **Why out of scope:** Approval store + queue API ship and are reachable via `corvid approvals queue/inspect/approve/deny`. The `approval Name:` parser-level block is post-v1.0 ergonomic surface — filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`. The runtime behaviour (typed approval contracts with required fields validated at issue time) ships today via the host API; the source-level `policy { ... }` clause is the sugar.
 
 #### `approval.batch_equivalence_typed`
 - **class**: out_of_scope
@@ -613,7 +613,7 @@ An `approval Name:` block's `policy { ... }` clause type-checks at compile time 
 
 An `approval ... batch_with: same_tool, same_data_class, same_role` clause groups equivalent approvals so a reviewer can approve one record and have N equivalent-by-typed-shape records auto-resolve.
 
-> **Why out of scope:** Batch logic exists in the approval queue runtime but the `batch_with` clause has no parser surface. Slice 39L promotes.
+> **Why out of scope:** Batch logic exists in the approval queue runtime + the CLI (`corvid approvals batch` ships). The `batch_with: same_tool, same_data_class, same_role` source-level clause is post-v1.0 ergonomic surface — filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`. Runtime callers configure batching at the approval-contract issue site today; the source-level clause is the compact form.
 
 #### `approval.confused_deputy_typecheck`
 - **class**: out_of_scope
@@ -621,7 +621,7 @@ An `approval ... batch_with: same_tool, same_data_class, same_role` clause group
 
 A reachable path from any route or job to a `@dangerous` tool must have an `approve` token whose `required_role` covers every reachable caller — otherwise typecheck rejects.
 
-> **Why out of scope:** Lexical-scope approval check ships (`approval.token_lexical_only`); the cross-call reachability extension into routes/jobs is not yet wired. Slice 39L promotes.
+> **Why out of scope:** Lexical-scope approve-presence check ships (`approval.dangerous_call_requires_token` + `approval.token_lexical_only`). The role-coverage extension — typecheck fails when a reachable caller's role is not covered by the approve's `required_role` — needs a typechecker pass that walks the call graph from every route / job entry point. Filed as launch- readiness slice `35V2-P39-J-LR-role-coverage-reachability` — promotes this row to Static when the analysis ships.
 
 ### Connectors
 
