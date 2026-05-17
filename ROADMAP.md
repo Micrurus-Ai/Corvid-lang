@@ -29,6 +29,34 @@
 
 **The test applied to every proposed feature:** does it strengthen a moat dimension, or bring us to parity on a table-stakes dimension where we're below the floor? If yes, build it. If it moves neither bar, defer.
 
+## Launch strategy — Path A (silent build → v1.0)
+
+**Decision recorded 2026-05-17.** v1.0 is the production-backend launch, not the defensible-core launch. Phase 35's defensibility gate is shipped and Phase 35V verified it, but a v1.0 stamp on the language alone underdelivers against the audience this language is built for. The audience is **AI engineers building real products today.** They need persistence, jobs, auth, observability, connectors, deploy — the things Python + FastAPI + Postgres ship out of the box — *plus* the moat the language adds. Half a stack does not get them to ship; both halves do.
+
+**Path A:** silent build. No preview release, no marketing push, no public ETA. Repo and website stay live in their current shape (landing page + docs + Tier-1 playground at corvid-lang.org) because removing them sends the wrong signal, but no active promotion happens during the build. The 33M beta is dropped from its original gate position and repositioned as a 2-week friends-and-family round in the final 4 weeks of Phase 43. The 33J4 benchmark page, 33J5 blog shell, and 33L launch materials all land in the final 2 weeks of Phase 43, not before. Phase 33's remaining polish items below carry `[launch-readiness]` markers to flag this.
+
+**What stays the same:** every CLAUDE.md rule. Commits land publicly on `main`. Pre-phase chat mandatory before each Phase. Slice boundaries get dev-log + learnings + ROADMAP updates. Validation gate green between every commit. Invention-shipping contract on every Corvid-specific capability shipped during the build. No shortcuts. The repo is public, the work is auditable, the discipline is unchanged — the only thing that's silent is the marketing, not the engineering.
+
+**Estimated build time:** Phases 37 → 38 → 39 → 40 → 41 → 42 → 43, ~57-75 weeks bottom-up (~13-18 months focused solo work). Strict ROADMAP order honored unless a follow-up pre-phase chat agrees to parallelize independent phases (37 + 38 are the natural candidate).
+
+**Reversibility.** Nothing about Path A is irreversible until v1.0 is announced. If 6 months in we want to pivot to Path B (developer preview during the build), the decision reopens as its own pre-phase chat.
+
+### v1.0 launch criteria — every box must be ticked before the cut
+
+- [ ] Every Phase 37-43 closed per the phase-done criteria each phase defines.
+- [ ] Every reference application from Phase 42 demoably ships, runs in production-shape, and deploys via the Phase 43 packaging path on at least one supported target (Fly.io, Render, AWS Lambda, or self-hosted).
+- [ ] Every cdylib claim id introduced in Phases 37-43 is wired into the signed-claim coverage gate (Phase 35-N pattern), with `OutOfScope` rows promoted to `Static` or `RuntimeChecked` where the implementation is shipped.
+- [ ] Launch claim audit (`docs/meta/launch-claim-audit.md`) re-run after Phase 43 closes; every launch claim points at a runnable command or committed artifact; zero aspirational wording survives Phase 35V's audit pattern applied at v1.0 scale.
+- [ ] Bilateral verifier (Phase 35-H) green across the production-backend surface — every Phase 37-43 contract id reachable from a built cdylib reconstructs and byte-matches.
+- [ ] Friends-and-family round (repositioned 33M): 5-10 hand-picked AI engineers build a small production-shape app on the v1.0 release candidate; their feedback closes as code / docs / tests / explicit non-scope before the public cut.
+- [ ] 33J4 benchmark page, 33J5 blog shell + launch post, 33L launch GIF + announcement drafts all shipped on the website in the final 2 weeks before the cut.
+
+### v1.0 launch pitch (working draft, lock or iterate)
+
+> *Build the same production AI app you'd build in Python — auth, jobs, persistence, deploy — but with the safety guarantees compiled into the binary instead of audited by humans after the fact.*
+
+The pitch is what every Phase 37-43 scope decision anchors against. Lock or iterate before Phase 37 opens.
+
 ### Phase standard
 
 Every remaining phase must make Corvid more AI-native and more general-purpose at the same time. Generic infrastructure is allowed only when it carries Corvid's effect, provenance, approval, cost, replay, eval, model, human-boundary, distribution, or deployment semantics through that layer.
@@ -1842,8 +1870,8 @@ The determinism-source catalog and the language's treatment of non-reproducible 
   - [x] 33J2-prep-doc-tree             Developer docs reorganized into Diataxis-style tree (`docs/book/`, `docs/guides/`, `docs/recipes/`, `docs/reference/`, `docs/migration/`, `docs/operations/`, `docs/security/`, `docs/internals/`, `docs/help/`, `docs/meta/`, `docs/phases/`); 4660-line mega-file split into 45 per-topic pages; obsolete stubs deleted; phase docs moved to `docs/phases/`; cross-references in source code updated; `docs/core-semantics.md` regenerated through `corvid contract regen-doc docs/reference/core-semantics.md`.
   - [x] 33J3-docs-site-build           Docs-site build pipeline renders the per-topic markdown from `Micrurus-Ai/Corvid-lang`'s `docs/` tree into a navigable site at <https://corvid-lang.org/docs>. All 11 Diataxis sections (Book, Guides, Recipes, Reference, Migration, Operations, Security, Internals, Help, Meta, plus the docs landing) render; 18 book chapters navigable; Corvid syntax highlighting active for keywords (`effect`, `prompt`, `agent`, `approve`, `tool`, `uses`, type names); cross-links resolve; ToC + left-nav generated from the directory tree.
   - [x] 33J7-prereq-corvid-browser     `crates/corvid-browser` ships a WASM-compatible typechecker entry point (`check(source) -> CheckResult`) for the playground. Pipeline mirrors `corvid-driver/src/pipeline/compile.rs` steps 1–4 (lex, parse, resolve, typecheck); steps 5–6 (lower, codegen) excluded. Flat wire schema with `version: "v1"` field for forward-compat. Imports refuse with documented browser-only message. 6 integration tests pass including the load-bearing `dangerous_call_without_approve_refuses` test that surfaces `approval.dangerous_call_requires_token`. WASM artifact: ~1.2 MB raw (250 KB gzipped, post-bindgen), well under the 8 MB budget. CI step `browser-typechecker-wasm` builds + tests + enforces the size budget on every push.
-  - [ ] 33J4-benchmark-page            Renders `benches/moat/RESULTS.md` and the `benches/results/*/ratios.json` archives at `corvid-lang.org/benchmarks`.
-  - [ ] 33J5-blog-shell                Blog shell with at least one launch post.
+  - [ ] 33J4-benchmark-page            **[launch-readiness — final 2 weeks of Phase 43 per Path A]** Renders `benches/moat/RESULTS.md` and the `benches/results/*/ratios.json` archives at `corvid-lang.org/benchmarks`.
+  - [ ] 33J5-blog-shell                **[launch-readiness — final 2 weeks of Phase 43 per Path A]** Blog shell with at least one launch post.
   - [ ] 33J6-grammar-drift-gate        Drift-gate test that cross-checks `docs/reference/grammar.md` against the parser tests in `crates/corvid-syntax/src/parser/tests.rs`.
   - [ ] 33J7-wasm-playground           Browser-based cloud IDE at `corvid-lang.org/playground` with multi-file editor, agent execution in WASM, and BYO-API-key LLM provider calls. Five sub-slices below (33J7a-e) decompose the work. Path B confirmed 2026-05-12 after CTO call.
   - [x] 33J7a-check-project            `corvid-browser` exposes `check_project(files: &HashMap<String, String>, entry: &str) -> CheckResult` for multi-file typecheck. Resolver walks an in-memory file map instead of `std::fs`; paths normalize to web-style canonical form (`./` dropped, `..` resolved, `/` separator, `.cor` implicit). Only local `import "./..."` resolves; Python/remote/package imports refuse with sandbox messages. Cycles surface as a single diagnostic. Cross-file moat property pinned: `approval.dangerous_call_requires_token` fires across file boundaries the same way it fires within one file. Diagnostic schema additively extended with `path: Option<String>` so the playground can route squiggles to the right editor tab. 8 new integration tests pass; 14 total in the crate. WASM artifact: 1.21 MB (+75 KB for multi-file machinery; well under the 8 MB gzipped budget).
@@ -1868,8 +1896,8 @@ The determinism-source catalog and the language's treatment of non-reproducible 
   - [ ] 33J7d-run-agent-bridge         `corvid-browser` exposes `run_agent(files, entry, invoke_args) -> RunResult` with a suspend/resume coroutine API via `wasm-bindgen-futures`. When the runtime hits a JS-resolvable boundary (LLM call, sandboxed file access), suspends and returns a structured request; JS resolves; WASM resumes. No mocked providers — fail honestly on capabilities out of scope.
   - [ ] 33J7e-byo-api-key              Browser-side LLM provider call plumbing with BYO API key: IndexedDB AES-GCM-encrypted storage, Argon2-derived encryption key from user passphrase, direct browser-to-provider fetch through the 33J7d suspend/resume bridge. External security review required before launch (key exfiltration via XSS, replay-mode key bleed-through, supply-chain risk). No corvid-side servers see the key.
 - [x] 33K-reference-demo-pack        One-command demo apps have tests, evals, traces, and benchmark notes.
-- [ ] 33L-launch-materials           GIF/video, launch drafts, and external-reader review are complete.
-- [ ] 33M-beta-feedback              20 external-developer feedback items are closed as code/docs/tests or explicit non-scope.
+- [ ] 33L-launch-materials           **[launch-readiness — final 2 weeks of Phase 43 per Path A]** GIF/video, launch drafts, and external-reader review are complete.
+- [ ] 33M-beta-feedback              **[launch-readiness — final 4 weeks of Phase 43 per Path A; repositioned as a 5-10 friends-and-family round, not 20-external public beta]** External-developer feedback items closed as code/docs/tests or explicit non-scope.
 - [x] 33N-moat-benchmarks            `benches/moat/` ships the two defensibility benchmarks the website can quote: compile-time rejection over 50 bug-class cases and governance line-count over 3 reference apps (`refund_bot`, `rag_qa_bot`, `support_escalation_bot`) implemented in Corvid, Python, and TypeScript. Each benchmark has a deterministic runner and `RESULTS.md`; CI runs both runners and drift-gates the committed results on every push.
 
 ### Phase 34 — Inventions readme + landing page (~2 weeks) ✅ closed
@@ -2868,28 +2896,29 @@ Scoped-out of the pre-v1.0 critical path. Not abandoned — explicitly planned, 
 - **Generational GC, concurrent cycle collection.** Phase 17's cycle collector is good enough; generational + concurrent are post-v1.0 if allocation benchmarks ever justify the complexity.
 - **Private package registries, binary packages.** Phase 25 ships the OSS registry + source packages; enterprise and binary distribution are post-v1.0.
 - **Other editors (vim / emacs / JetBrains official extensions).** Phase 24 ships VS Code + the LSP; the LSP works with any client, but branded extensions are post-v1.0.
+- **Tier-2 browser playground (33J7c/d/e).** `corvid-vm-core` + `corvid-vm-host` split, browser run-agent suspend/resume bridge, BYO-API-key flow with IndexedDB AES-GCM storage. Tier-1 (typecheck only) ships at v1.0 in its current form; full agent execution in the browser is post-v1.0 because the runtime split + bridge is ~3 months of focused work and is unrelated to the production-backend launch claim.
+- **Phase 23 reopen — browser end-to-end CI gap.** Filed 2026-04-29. Cross-platform parity harness for the WASM target needs the end-to-end suite. Post-v1.0 unless a Phase 37-43 slice surfaces a regression that forces it earlier.
+- **Provenance Propagation deferred follow-ups.** Native grounded handles for refcounted `Grounded<String>` / `Grounded<Struct>` types (stub at `docs/meta/native-grounded-handles-design.md`), short-circuit `&&` / `||` contagion, cross-module composition for `@grounded_pure` on imports (R5 attribute-composition matrix at the import boundary). All three are correctness-extensions to the shipped moat, not launch-blockers. Post-v1.0 unless a v1.0 user surfaces a real-world program that's blocked by one.
 
 ---
 
 ## Total estimated effort
 
-**~47-57 months of focused solo work** from today to v1.0 public launch if done by one person, summed from the per-phase estimates above. The earlier 27-month plan proved the language core; the updated plan also proves Corvid as a production backend language for real AI applications.
+**~13-18 months of focused solo work** remaining from 2026-05-17 to v1.0 public launch under Path A (silent build), on top of the ~33 months already shipped (Phases 1-36 + 35V + Provenance Propagation). The earlier "~47-57 months" estimate is preserved in git history; this section reflects what's actually left.
 
-| Release | Phases | Bottom-up estimate |
-|---|---|---|
-| v0.3 (close Phase 12) | 12k | ~2 weeks |
-| v0.4 (native tier useful) | 13, 14, 15 | ~3 months |
-| v0.5 (GP feel) | 16, 17, 18, 19 | ~3 months |
-| v0.6 (moat + replay) | 20 (7 slices), 21 | ~5 months |
-| v0.7 (embed + deploy) | 22, 23 | ~4 months |
-| v0.8 (dev workflow) | 24, 25, 26, 27 | ~5 months |
-| v0.9 (feature-complete) | 28, 29, 30, 31, 32 | ~5 months |
-| v1.0 (launch polish) | 33, 34 | ~2 months |
-| v1.0 (defensible core) | 35 | ~6-8 weeks |
-| v1.0 (production backend) | 36, 37, 38, 39, 40, 41 | ~11-14 months |
-| v1.0 (reference products + market readiness) | 42, 43 | ~4-5 months |
+| Release | Phases | Bottom-up estimate | Status |
+|---|---|---|---|
+| v0.3 (close Phase 12) | 12k | ~2 weeks | ✅ shipped |
+| v0.4 (native tier useful) | 13, 14, 15 | ~3 months | ✅ shipped |
+| v0.5 (GP feel) | 16, 17, 18, 19 | ~3 months | ✅ shipped |
+| v0.6 (moat + replay) | 20 (7 slices), 21 | ~5 months | ✅ shipped |
+| v0.7 (embed + deploy) | 22, 23 | ~4 months | ✅ shipped (23 reopened, post-v1.0) |
+| v0.8 (dev workflow) | 24, 25, 26, 27 | ~5 months | ✅ shipped |
+| v0.9 (feature-complete) | 28, 29, 30, 31, 32 | ~5 months | ✅ shipped |
+| v1.0 prerequisites | 33 (partial), 34, 35, 35V, 36, Provenance Propagation | ~5 months | ✅ shipped (33J4/5/L/M deferred to launch-readiness window) |
+| v1.0 launch (production backend + market readiness, Path A) | 37, 38, 39, 40, 41, 42, 43 | **~13-18 months from 2026-05-17** | 🟡 in flight |
 
-Bottom-up now sums to **~47-57 months** for a solo lane because the launch target changed: Corvid is no longer merely proving a language core plus defensible claims; it is proving that the language can build the full backend of production AI applications itself. Real slip will come from Phase 20 unknowns (slice 20d's cost-analysis is novel research; slice 20e's `T?confidence` interaction with the type system is unpredictable), Phase 24 (LSP - scope tends to grow), Phase 36-41 (backend/runtime/connectors create real operational surface area), and Phase 42 (reference apps expose missing language/runtime pieces). Build schedule with a 20% buffer; re-plan quarterly.
+Real slip will come from Phase 39 (auth scope tends to expand once real OAuth flows are wired), Phase 41 (connector count gates breadth; each connector is a small phase of its own), and Phase 42 (reference apps surface missing language/runtime pieces that get folded back as out-of-band slices). Build with a 25% buffer; re-plan at every phase boundary per Path A's "no public ETA" stance.
 
 The original "~18-24 months" quote is not preserved above because preserving it would be dishonest. Quoting a smaller number while adding production backend, auth, persistence, jobs, connectors, observability, deployment, and reference products would be the shortcut; quoting what the plan actually sums to is the non-shortcut.
 

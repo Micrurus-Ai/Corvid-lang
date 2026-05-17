@@ -4599,3 +4599,54 @@ recording for the next moat-shaped feature:
    reason*.
 
 The shipped moat is at `crates/corvid-types/src/checker/decl_grounded_pure.rs`. The slice-by-slice design doc with sub-split rationale is at `docs/meta/grounded-propagation-design.md`. The invention catalog entry is in `README.md` under "Provenance Propagation + `@grounded_pure`" and `docs/reference/inventions.md`.
+
+## Path A locked — silent build to v1.0 (2026-05-17)
+
+The launch chat opened with "I want us to launch" and closed with
+"silent build, ship v1.0 when the full backend track is complete."
+The decision is not the headline. The lesson is the framing move
+that made the decision tractable.
+
+**Frame shift that mattered.** The pre-chat ROADMAP entangled two
+different launches under one v1.0 label: the defensible-core
+launch (the language + the moat, gated by Phase 35) and the
+production-backend launch (the same plus persistence + jobs +
+auth + observability + connectors + deploy, gated by Phases
+37-43). Both were sitting under one "v1.0" stamp with one big
+estimate. Conflating them forced an answer of either "ship now
+under-delivered" or "wait 3-4 years for the whole thing." Neither
+is the actual decision.
+
+Splitting them — naming the defensible-core surface as already
+shipped and the production-backend surface as the actual launch
+gate — unlocked the real call: pick the audience first, then the
+scope falls out. AI engineers building products need the second
+launch, not the first. The chat closed in three exchanges once
+the frame was right.
+
+**Path A vs Path B.** With the audience pinned, the next real
+decision was operational, not strategic: build silently and ship
+all at once (Path A) versus run a developer preview during the
+build to shape the backend with real feedback (Path B). The
+recommendation was Path B for one structural reason — the
+original ROADMAP itself put a 20-developer beta ahead of the v1.0
+cut as a gate, and Path A drops it. The user took Path A anyway,
+which is a defensible call: silent build is lower PR overhead and
+lets the launch land as a fully-formed surprise. Worth recording
+that the call was made knowing the trade-off, not by default.
+
+**Pattern worth pinning for the next launch-shape decision.**
+
+1. *List the launches the ROADMAP secretly contains.* If a single
+   version label is gated by multiple independent surfaces, the
+   first move is to separate them and name them.
+2. *Pick the audience before the scope.* Different audiences want
+   different launches; conflating them is what makes the
+   estimate balloon.
+3. *Make the operational choice (silent vs preview) consciously,
+   not by default.* Both are defensible; recording which one was
+   chosen and why is the audit trail future planning needs.
+4. *The pitch sentence is the anchor.* Every scope decision in
+   the launch track hinges on it. Lock or iterate before the next
+   phase opens, not after code is written against an implicit
+   pitch.

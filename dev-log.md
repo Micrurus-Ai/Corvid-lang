@@ -6792,3 +6792,54 @@ Validation:
   diverge); `combined_all.cor` and `legacy_grounded_coercion.cor`
   both agree across all four tiers.
 - `cargo run -q -p corvid-cli -- check <tour-demo>.cor`: clean.
+
+## 2026-05-17 — Launch strategy locked: Path A (silent build → v1.0)
+
+Pre-phase chat closed with the CTO call: **Path A.** v1.0 is the
+production-backend launch, not the defensible-core launch.
+Audience: AI engineers building real products today. Both halves
+of the stack ship together — the safety moat (already shipped)
+plus persistence + jobs + auth + observability + connectors +
+deploy (Phases 37-43, ~13-18 months from today).
+
+Silent build. No preview release, no marketing push, no public
+ETA. Repo and website stay live as-is; no active promotion. The
+33M beta is dropped from its original gate position and
+repositioned as a 2-week friends-and-family round in the final
+4 weeks of Phase 43. 33J4 / 33J5 / 33L all land in the final 2
+weeks of Phase 43. Marked `[launch-readiness]` in the ROADMAP
+slice checklist.
+
+Pitch sentence drafted (working — lock or iterate before Phase
+37 opens):
+
+> Build the same production AI app you'd build in Python — auth,
+> jobs, persistence, deploy — but with the safety guarantees
+> compiled into the binary instead of audited by humans after
+> the fact.
+
+v1.0 launch criteria checklist landed in the ROADMAP (every
+Phase 37-43 phase-done, every reference app demoably ships +
+deploys, every new cdylib claim id wired into the signed-claim
+gate, launch claim audit re-run, bilateral verifier green across
+the production-backend surface, friends-and-family round
+closes, launch-readiness website artifacts shipped).
+
+Total-effort table reshaped to reflect what's actually remaining:
+~13-18 months for Phases 37-43, on top of the ~33 months already
+shipped. Earlier "~47-57 months" estimate preserved in git
+history.
+
+Three items added to the Post-v1.0 list:
+- Tier-2 browser playground (33J7c/d/e).
+- Phase 23 reopen (browser e2e CI gap).
+- Provenance Propagation deferred follow-ups (native grounded
+  handles for refcounted types, `&&` / `||` contagion,
+  cross-module `@grounded_pure` composition).
+
+What stays the same: every CLAUDE.md rule. Commits land publicly.
+Pre-phase chat mandatory before each Phase. Validation gate green
+between every commit. No shortcuts.
+
+Next: Phase 37 (Persistence) pre-phase chat. No code lands until
+the chat closes.
