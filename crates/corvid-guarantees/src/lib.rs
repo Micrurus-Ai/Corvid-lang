@@ -122,6 +122,40 @@ mod tests {
         assert!(matches!(err, RegistryError::DuplicateId(_)));
     }
 
+    /// 35V2-P38-B sentinel: every guarantee id named by the Phase 38
+    /// phase-done checklist in ROADMAP.md must exist in the registry.
+    /// The audit (`docs/phases/phase-38-audit-2026-05-17.md`) surfaced
+    /// `jobs.replayable_side_effects` missing despite being one of the
+    /// eight Phase 38 required ids; this sentinel catches the same
+    /// drift mode (a future contributor removes a row, or adds the
+    /// id to ROADMAP without adding the row) the next time it
+    /// happens.
+    #[test]
+    fn phase_38_required_registry_ids_all_present() {
+        const REQUIRED: &[&str] = &[
+            "jobs.durable_resume",
+            "jobs.idempotency_key_uniqueness",
+            "jobs.lease_exclusivity",
+            "jobs.retry_budget_bound",
+            "jobs.cron_dst_correct",
+            "jobs.replayable_side_effects",
+            "jobs.approval_wait_resume",
+            "jobs.loop_bounds_enforced",
+        ];
+        let missing: Vec<&str> = REQUIRED
+            .iter()
+            .filter(|id| lookup(id).is_none())
+            .copied()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Phase 38 phase-done checklist names ids that are absent \
+             from the registry: {missing:?}. Add the row to \
+             registry.rs or update the Phase 38 phase-done checklist \
+             in ROADMAP.md to match shipped reality."
+        );
+    }
+
     #[test]
     fn out_of_scope_without_reason_rejected() {
         let bad = Guarantee {

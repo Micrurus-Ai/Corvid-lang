@@ -672,6 +672,27 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
+    Guarantee {
+        id: "jobs.replayable_side_effects",
+        kind: GuaranteeKind::Jobs,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Runtime,
+        description:
+            "A job marked `@replayable` records its tool / prompt / \
+             approval / DB side-effects into the trace so a later \
+             `corvid replay <job-trace>` reproduces the run without \
+             re-issuing real side-effect calls.",
+        out_of_scope_reason:
+            "The Phase 21 replay infrastructure ships and the queue \
+             runtime persists step checkpoints, but the cross-layer \
+             integration test that pins `replay an old job trace, \
+             assert no real provider call left the process` is the \
+             gap surfaced by the 35V2-P38-A audit. Slice 35V2-P38-C \
+             lands the integration test and promotes this row to \
+             RuntimeChecked when the test exists.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
     // ----- Auth (Phase 39) ---------------------------------------
     Guarantee {
         id: "auth.session_rotation_on_privilege_change",

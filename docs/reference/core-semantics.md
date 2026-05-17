@@ -47,6 +47,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `jobs.cron_dst_correct` | jobs | runtime_checked | runtime |
 | `jobs.approval_wait_resume` | jobs | out_of_scope | runtime |
 | `jobs.loop_bounds_enforced` | jobs | out_of_scope | runtime |
+| `jobs.replayable_side_effects` | jobs | out_of_scope | runtime |
 | `auth.session_rotation_on_privilege_change` | auth | out_of_scope | runtime |
 | `auth.api_key_at_rest_hashed` | auth | runtime_checked | runtime |
 | `auth.jwt_kid_rotation` | auth | runtime_checked | runtime |
@@ -513,6 +514,14 @@ Cron schedules expressed in `America/New_York` (and other DST-observing timezone
 Agent loops driven by jobs honor max-steps, max-wall-time, max-spend, and max-tool-calls; exceeding any bound escalates or terminates with trace evidence.
 
 > **Why out of scope:** Loop-bound envelopes ship; the multi-worker runner that enforces them across crash + restart is not yet wired. Slice 38K promotes.
+
+#### `jobs.replayable_side_effects`
+- **class**: out_of_scope
+- **phase**: runtime
+
+A job marked `@replayable` records its tool / prompt / approval / DB side-effects into the trace so a later `corvid replay <job-trace>` reproduces the run without re-issuing real side-effect calls.
+
+> **Why out of scope:** The Phase 21 replay infrastructure ships and the queue runtime persists step checkpoints, but the cross-layer integration test that pins `replay an old job trace, assert no real provider call left the process` is the gap surfaced by the 35V2-P38-A audit. Slice 35V2-P38-C lands the integration test and promotes this row to RuntimeChecked when the test exists.
 
 ### Auth and approvals
 
