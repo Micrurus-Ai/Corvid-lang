@@ -37,7 +37,7 @@
 
 **What stays the same:** every CLAUDE.md rule. Commits land publicly on `main`. Pre-phase chat mandatory before each Phase. Slice boundaries get dev-log + learnings + ROADMAP updates. Validation gate green between every commit. Invention-shipping contract on every Corvid-specific capability shipped during the build. No shortcuts. The repo is public, the work is auditable, the discipline is unchanged — the only thing that's silent is the marketing, not the engineering.
 
-**Estimated build time:** Phases 37 → 38 → 39 → 40 → 41 → 42 → 43, ~57-75 weeks bottom-up (~13-18 months focused solo work). Strict ROADMAP order honored unless a follow-up pre-phase chat agrees to parallelize independent phases (37 + 38 are the natural candidate).
+**Estimated build time (revised 2026-05-17 after audit):** **~3-5 months focused solo work** to v1.0, broken down as roughly 4-8 weeks for a Phase 35V-style cross-phase verification round over Phases 38-42 (their slice work is closed; the phase-done checklists need audit + correction slices where drift exists, applying the Phase 35V Track 2 pattern), plus ~6-8 weeks for Phase 43 (deploy package, signed-attestation chain, release channels, reproducible-build verification, claim audit, `corvid upgrade --check`, `corvid ops show`, AI helpers, benchmark file — the real launch-finishing work), plus ~2-3 weeks for the Path A launch-readiness tail (33J4 + 33J5 + 33L + repositioned 33M). The earlier "~13-18 months" estimate (corrective commit pending) was based on the false premise that Phases 37-43 were full open phases; the audit found that Phases 37-42 are essentially shipped at slice level and the remaining work is verification-shaped, not implementation-shaped.
 
 **Reversibility.** Nothing about Path A is irreversible until v1.0 is announced. If 6 months in we want to pivot to Path B (developer preview during the build), the decision reopens as its own pre-phase chat.
 
@@ -2210,15 +2210,15 @@ Track 3 — Closer commits:
 
 **Inventive benchmark target.** Compare a task/approval/audit schema against Prisma/TypeScript, SQLAlchemy/Alembic, and sqlx/Rust. Corvid must prove migration drift, typed decode failures, DB effects, replay summaries, and AI-action audit logs are first-class instead of manually assembled.
 
-**Scope:**
+**Scope:** ✅ shipped (slice checklist below is the machine-readable version of these bullets; spot-checked 2026-05-17 — every acceptance criterion holds).
 
-- [ ] `std.db` with SQLite first, Postgres second: connection config, query execution, transactions, prepared statements, row decoding, and typed errors.
-- [ ] Migration system: checked-in migrations, `corvid migrate up/down/status`, drift detection, checksum validation, and CI-safe dry runs.
-- [ ] Typed records mapped to tables without hiding SQL; developers can use explicit queries and still get typed decode guarantees.
-- [ ] Encrypted token/credential storage for OAuth refresh tokens and connector state, with clear host key-management boundaries.
-- [ ] Audit-log table pattern for AI actions: who/what/why, prompt version, model, tool call, approval state, cost, trace ID, and replay key.
-- [ ] AI-native integration: DB reads/writes are effect-tagged; dangerous writes can require approval; replay records deterministic DB interaction summaries.
-- [ ] Golden examples for session state, task state, approval state, trace state, and connector token state.
+- [x] `std.db` with SQLite first, Postgres second: connection config, query execution, transactions, prepared statements, row decoding, and typed errors.
+- [x] Migration system: checked-in migrations, `corvid migrate up/down/status`, drift detection, checksum validation, and CI-safe dry runs.
+- [x] Typed records mapped to tables without hiding SQL; developers can use explicit queries and still get typed decode guarantees.
+- [x] Encrypted token/credential storage for OAuth refresh tokens and connector state, with clear host key-management boundaries.
+- [x] Audit-log table pattern for AI actions: who/what/why, prompt version, model, tool call, approval state, cost, trace ID, and replay key.
+- [x] AI-native integration: DB reads/writes are effect-tagged; dangerous writes can require approval; replay records deterministic DB interaction summaries.
+- [x] Golden examples for session state, task state, approval state, trace state, and connector token state.
 
 **Slice checklist:**
 
@@ -2904,7 +2904,7 @@ Scoped-out of the pre-v1.0 critical path. Not abandoned — explicitly planned, 
 
 ## Total estimated effort
 
-**~13-18 months of focused solo work** remaining from 2026-05-17 to v1.0 public launch under Path A (silent build), on top of the ~33 months already shipped (Phases 1-36 + 35V + Provenance Propagation). The earlier "~47-57 months" estimate is preserved in git history; this section reflects what's actually left.
+**~3-5 months of focused solo work** remaining from 2026-05-17 to v1.0 public launch under Path A (silent build), on top of the ~33 months already shipped (Phases 1-36 + 35V + Provenance Propagation + Phases 37-42 slice work). The earlier "~13-18 months" estimate (commit `f42b508`) and the original "~47-57 months" estimate are preserved in git history; this section reflects what an audit of the actual ROADMAP slice state showed on 2026-05-17.
 
 | Release | Phases | Bottom-up estimate | Status |
 |---|---|---|---|
@@ -2916,9 +2916,14 @@ Scoped-out of the pre-v1.0 critical path. Not abandoned — explicitly planned, 
 | v0.8 (dev workflow) | 24, 25, 26, 27 | ~5 months | ✅ shipped |
 | v0.9 (feature-complete) | 28, 29, 30, 31, 32 | ~5 months | ✅ shipped |
 | v1.0 prerequisites | 33 (partial), 34, 35, 35V, 36, Provenance Propagation | ~5 months | ✅ shipped (33J4/5/L/M deferred to launch-readiness window) |
-| v1.0 launch (production backend + market readiness, Path A) | 37, 38, 39, 40, 41, 42, 43 | **~13-18 months from 2026-05-17** | 🟡 in flight |
+| v1.0 production-backend slice work | 37, 38, 39, 40, 41, 42 | ~10 months | ✅ shipped (slices closed; phase-done checklists need verification — see audit-round row below) |
+| v1.0 verification round (Phase 35V Track 2 pattern, applied to 38-42) | 38, 39, 40, 41, 42 phase-done audit | **~4-8 weeks from 2026-05-17** | 🟡 in flight |
+| v1.0 packaging + deploy + release + market readiness | 43 | **~6-8 weeks** | 🔴 not started |
+| v1.0 launch-readiness tail | 33J4 / 33J5 / 33L / repositioned 33M | **~2-3 weeks** | 🔴 not started (final weeks of Phase 43 per Path A) |
 
-Real slip will come from Phase 39 (auth scope tends to expand once real OAuth flows are wired), Phase 41 (connector count gates breadth; each connector is a small phase of its own), and Phase 42 (reference apps surface missing language/runtime pieces that get folded back as out-of-band slices). Build with a 25% buffer; re-plan at every phase boundary per Path A's "no public ETA" stance.
+The audit-round row is the biggest unknown. If the Phases 37-42 phase-done checklists are mostly clean (drift count low, like Phase 35V Track 2 was), it finishes in ~4 weeks. If drift count is high enough that each phase needs 1-3 correction slices, it stretches to ~8 weeks. Either way, the implementation work is genuinely small — the slice trees are already on `main`.
+
+Real slip risk in Phase 43 (deploy + release surface introduces real ops complexity — reproducible builds, signed-attestation chain, distroless image budgets, K8s manifest smoke deploys). Build with a 25% buffer on Phase 43; the audit round absorbs less buffer because the corrective pattern is already proven from Phase 35V.
 
 The original "~18-24 months" quote is not preserved above because preserving it would be dishonest. Quoting a smaller number while adding production backend, auth, persistence, jobs, connectors, observability, deployment, and reference products would be the shortcut; quoting what the plan actually sums to is the non-shortcut.
 

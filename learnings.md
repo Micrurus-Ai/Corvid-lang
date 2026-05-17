@@ -4650,3 +4650,45 @@ that the call was made knowing the trade-off, not by default.
    the launch track hinges on it. Lock or iterate before the next
    phase opens, not after code is written against an implicit
    pitch.
+
+## Audit-before-implement before any phase-tagged "next phase" (2026-05-17)
+
+After Path A landed and the chat moved to "now implement Phase
+37," the spot-check found Phase 37 was already shipped. Counting
+slices across Phases 37-43 then found that Phases 38-42 were also
+slice-complete; the open work is verification-shaped, not
+implementation-shaped. The "~13-18 months remaining" estimate
+landed in commit f42b508 the same morning had to be corrected to
+"~3-5 months" within hours.
+
+**Lesson — audit the actual state of an upcoming phase BEFORE
+opening its pre-phase chat.** A phase-by-phase reading of the
+ROADMAP's top-of-phase scope bullets is misleading because scope
+bullets are not always re-ticked when slices close. The slice
+checklist is the source of truth. Counting `[x]` vs `[ ]` on
+slice lines (the lines that match `[0-9]+[A-Z]`) gives the
+honest state in seconds.
+
+**Generalises:** any time the next-step plan is "open phase X,"
+the pre-step is "audit phase X's slice list against the
+acceptance criteria — and audit the immediate downstream phases
+too, in case their slice work is also further along than the
+top-of-phase narrative suggests." The 30-minute audit cost would
+have caught the 13-18-vs-3-5 month estimate gap before the
+commit landed, not after.
+
+**Why the gap existed at all.** Phase-done checklist items (claim
+coverage rows + guarantee registry entries + named adversarial
+tests + AI helpers + benchmark files) look superficially like
+slice work but are actually verification work in the Phase 35V
+Track 2 pattern. The slice closes when the runtime/typechecker/
+CLI surface ships; the phase-done items get ticked later, often
+by a verification round. Confusing the two over-estimates by an
+order of magnitude.
+
+**Pattern to lock for the next planning move:** before any
+"open phase X" decision, run the slice-count script (`awk` over
+the ROADMAP looking for `[x]` and `[ ]` patterns under each
+phase heading) and report what's actually open. Treat top-of-
+phase scope bullets and phase-done checklists as advisory, not
+authoritative. The slice checklist is the source of truth.

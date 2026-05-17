@@ -6843,3 +6843,76 @@ between every commit. No shortcuts.
 
 Next: Phase 37 (Persistence) pre-phase chat. No code lands until
 the chat closes.
+
+## 2026-05-17 — ROADMAP audit correction: ~3-5 months remaining, not ~13-18
+
+Spot-checking Phase 37 to open its pre-phase chat surfaced a
+finding that invalidated the estimate landed in commit `f42b508`
+the same morning.
+
+Phase 37 was supposed to be the next-up open phase but the slice
+checklist showed 37A-37M all `[x]`. Verification ran:
+
+  - `cargo test -p corvid-runtime --lib db` → 4/4 passing
+  - `cargo test -p corvid-cli --test migrate` → 11/11 passing
+  - `cargo test -p corvid-cli --test doctor` → 2/2 passing
+  - `cargo test -p corvid-runtime --lib` → 257/257 passing
+  - `corvid migrate status/up` against `examples/backend/state_app`
+    applied 1 migration cleanly; status reported applied+pending
+    + drift correctly
+  - `corvid migrate down` correctly failed when no rollback SQL
+    exists for the migration
+  - state_app schema has all 6 required tables (users, tasks,
+    approvals, traces, connector_tokens, agent_state)
+
+Phase 37 acceptance criterion holds — done. Top-of-phase scope
+bullets ticked (hygiene).
+
+That prompted re-counting slices across Phases 37-43:
+
+  - Phase 37: 33 closed, 0 open
+  - Phase 38: 34 closed, 0 open
+  - Phase 39: 30 closed, 0 open
+  - Phase 40: 25 closed, 0 open
+  - Phase 41: 31 closed, 0 open
+  - Phase 42: 25 closed, 3 open (42I1/I2 external-trial + summary)
+  - Phase 43: 25 closed, 3 open (43H + 43H1/H2 beta)
+
+The earlier "~13-18 months" estimate was based on the false
+premise that the phase-done checklist items (claim coverage rows
++ guarantee registry entries + named adversarial tests + AI
+helpers + benchmark files) were slice-level implementation work.
+They aren't — they're verification/audit items in the Phase
+35V Track 2 pattern. The slice work itself is essentially
+shipped.
+
+Five reference app directories already exist under
+`examples/backend/` (personal_executive_agent,
+personal_knowledge_agent, finance_operations_agent,
+customer_support_agent, code_maintenance_agent), each with
+adversarial/deploy/evals/migrations/mocks/ops/security-model/seeds
+subdirs. Phase 42 looks substantially done at directory level;
+the open work is auditing them against the summary bar (≥10
+tables, ≥5 approvals, ≥3 cron jobs, etc.) and the external
+reviewer signoff.
+
+Revised total remaining work: **~3-5 months** to v1.0, broken
+into:
+
+  - ~4-8 weeks Phase 35V-style verification round over Phases
+    38-42 (audit phase-done checklists, land correction slices
+    where drift exists, add sentinels)
+  - ~6-8 weeks Phase 43 (deploy package + signed-attestation
+    chain + release channels + reproducible build + claim audit
+    + `corvid upgrade --check` + `corvid ops show` + AI helpers
+    + benchmark)
+  - ~2-3 weeks launch-readiness tail (33J4 / 33J5 / 33L /
+    repositioned 33M, final weeks of Phase 43)
+
+ROADMAP correction commit follows — the wrong estimate is on
+`main` from f42b508 and a stranger reading it would be misled,
+so the no-shortcuts rule requires the correction to land openly
+rather than papering it over.
+
+Next: open the pre-phase chat for the cross-phase verification
+round.
