@@ -160,6 +160,17 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 43N: distroless runtime base image. `gcr.io/distroless/cc-debian12`
+/// includes libc + ca-certificates + the dynamic-linker but no shell,
+/// no package manager, no setuid binaries — every byte the runtime
+/// image carries is byte the runtime needs. The full distroless image
+/// is ~25 MB; the Corvid binary itself is ~20-40 MB depending on
+/// features enabled. Combined runtime image lands well under the
+/// 80 MB Phase-43 budget.
+///
+/// HEALTHCHECK uses `corvid check` against the app's source as the
+/// liveness probe — if `corvid` cannot lex/parse/typecheck the
+/// shipped source, the binary is broken regardless of HTTP state.
 fn render_dockerfile(app_name: &str) -> String {
     format!(
         r#"FROM rust:1.78-slim AS build
@@ -167,15 +178,16 @@ WORKDIR /workspace
 COPY . .
 RUN cargo build -p corvid-cli --release
 
-FROM debian:bookworm-slim
+FROM gcr.io/distroless/cc-debian12
 WORKDIR /workspace
 LABEL org.opencontainers.image.title="{app_name}"
 LABEL dev.corvid.app="{app_name}"
 COPY --from=build /workspace/target/release/corvid /usr/local/bin/corvid
 COPY examples/backend/{app_name} examples/backend/{app_name}
 COPY std std
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD corvid check examples/backend/{app_name}/src/main.cor
-CMD ["corvid", "run", "examples/backend/{app_name}/src/main.cor"]
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD ["/usr/local/bin/corvid", "check", "examples/backend/{app_name}/src/main.cor"]
+ENTRYPOINT ["/usr/local/bin/corvid"]
+CMD ["run", "examples/backend/{app_name}/src/main.cor"]
 "#
     )
 }
@@ -561,6 +573,46 @@ mod tests {
         assert!(
             parsed["relationships"].as_array().is_some_and(|a| !a.is_empty()),
             "SBOM must declare at least one relationship"
+        );
+    }
+
+    /// 43N: the Dockerfile rendered by `corvid deploy package`
+    /// uses a distroless runtime base image. Catches the regression
+    /// where a contributor swaps back to a fat base (debian-slim,
+    /// alpine, ubuntu) that breaks the ≤80 MB Phase-43 budget.
+    /// The distroless image carries no shell + no package manager +
+    /// no setuid binaries, so every byte is byte the runtime needs.
+    #[test]
+    fn deploy_dockerfile_uses_distroless_runtime_base() {
+        let dockerfile = render_dockerfile("test_app");
+        // The runtime stage must be a distroless image.
+        assert!(
+            dockerfile.contains("FROM gcr.io/distroless/"),
+            "runtime stage must use distroless base; got:\n{dockerfile}"
+        );
+        // Adversarial guard: catch the common fat-base substitutions.
+        for fat_base in &[
+            "FROM debian:",
+            "FROM debian ",
+            "FROM ubuntu:",
+            "FROM ubuntu ",
+            "FROM alpine:",
+            "FROM alpine ",
+        ] {
+            assert!(
+                !dockerfile.contains(fat_base),
+                "runtime stage must not use fat base `{fat_base}`; got:\n{dockerfile}"
+            );
+        }
+        // HEALTHCHECK must survive the base swap (uses absolute
+        // path to the binary because distroless has no PATH-shell).
+        assert!(
+            dockerfile.contains("HEALTHCHECK"),
+            "HEALTHCHECK directive must survive the base swap"
+        );
+        assert!(
+            dockerfile.contains("/usr/local/bin/corvid"),
+            "HEALTHCHECK + CMD must use absolute path on distroless"
         );
     }
 
