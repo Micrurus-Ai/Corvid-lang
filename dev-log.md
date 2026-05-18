@@ -6982,3 +6982,43 @@ Correction plan: 4 in-flight slices (B, E, F + Phase 39 doc tick)
 middleware). ~4 hours in-flight work.
 
 Next: execute B, E, F as separate commits, then file C/D/G/H/I/J.
+
+## 2026-05-17 → 2026-05-18 — Cross-phase verification round CLOSED (P38-P42)
+
+Twelve commits across five phases applying the Phase 35V Track 2
+pattern to Phases 38-42's phase-done checklists. Found 33 launch-
+readiness + 3 post-v1.0 filings that the original phase-done ticks
+would have missed.
+
+Audit reports landed:
+- 35V2-P38-A → P38-{B,C-deferred,E,D+F+G+H} (6 commits)
+- 35V2-P39-A → P39-{B,E+F} (3 commits)
+- 35V2-P40-A → P40-{B,C} (2 commits)
+- 35V2-P41-{A,B,C} (1 commit batched)
+- 35V2-P42-{A,B,C} (1 commit batched)
+
+Permanent sentinels added (each catches a specific drift mode the
+audit surfaced):
+- `phase_38_required_registry_ids_all_present` (8 ids)
+- `phase_39_required_registry_ids_all_present` (9 ids)
+- `phase_40_required_registry_ids_all_present` (7 ids)
+- `phase_41_required_registry_ids_all_present` (6 ids)
+- `phase_42_required_app_directories_all_present` (5 apps × 7 subdirs + security-model.md + README.md per app)
+- `every_corvid_block_in_guides_compiles_clean` (docs-as-code drift gate; EXEMPT_GUIDES allowlist for 7 tracked launch-readiness guide rewrites)
+
+Documents:
+- `docs/phases/phase-{38,39,40,41,42}-audit-2026-05-17.md` (5 audit reports)
+- `learnings.md` — round-closeout entry with 4 systemic patterns:
+  OutOfScope-promotion drift, AI-helpers-deferred, audit-recon-
+  flips-estimates, reference-apps-need-maturity-gate.
+
+cargo test -p corvid-guarantees --lib: 27 passed (was 22 pre-round
++ 5 phase-done sentinels = +5).
+
+Phase 38-42 ROADMAP scope bullets all ticked. The "shipped" half
+of the v1.0 production-backend track is now honestly recorded;
+the launch-readiness tail (33 filings) tracks the substance work
+that lands during the launch-readiness window before v1.0.
+
+Next: Phase 43 (Packaging, deployment, release, market readiness)
+opens. Pre-phase chat mandatory before any code lands.

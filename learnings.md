@@ -4692,3 +4692,92 @@ the ROADMAP looking for `[x]` and `[ ]` patterns under each
 phase heading) and report what's actually open. Treat top-of-
 phase scope bullets and phase-done checklists as advisory, not
 authoritative. The slice checklist is the source of truth.
+
+## Cross-phase verification round CLOSED — P38-P42 (2026-05-17 → 2026-05-18)
+
+Twelve commits across five phases. The verification round applied
+the Phase 35V Track 2 pattern to Phases 38-42's phase-done
+checklists and surfaced 36 launch-readiness/post-v1.0 filings
+that the original phase-done ticks would have missed.
+
+Headline metrics:
+
+  - 5 audit reports landed (`docs/phases/phase-{38,39,40,41,42}-
+    audit-2026-05-17.md`).
+  - 5 phase-done sentinels landed (P38/P39/P40/P41 registry-id
+    presence sentinels + P42 app-directory shape sentinel).
+  - All OutOfScope reasons across P38-P42 tightened to name the
+    specific filing slice that promotes them.
+  - 33 launch-readiness filings + 3 post-v1.0 filings.
+  - 1 permanent docs-as-code drift gate
+    (`crates/corvid-cli/tests/docs_drift_gate.rs`) that extracts
+    every fenced ```corvid``` block from `docs/guides/*.md` and
+    routes each through `corvid check`; 7 guides currently in
+    EXEMPT_GUIDES allowlist tied to per-guide rewrite filings.
+
+Four systemic patterns worth pinning for the next moat-shaped
+verification round:
+
+1. **OutOfScope-promotion drift.** The 35-N slice (2026-04-29)
+   added placeholder OutOfScope rows naming "the audit-correction
+   slice that promotes." Downstream slices (38K, 39L, 40-various,
+   41L/M) shipped their stated runtime/CLI surfaces but
+   consistently did not own the registry-row promotion as part of
+   "phase done." This was the most consistent drift across P38,
+   P39, and P41 (P40 had only 1 OutOfScope row to begin with,
+   which is why it was the cleanest phase). Future fix: when a
+   phase ships an OutOfScope row that names a future slice for
+   promotion, that future slice's phase-done checklist must
+   include "promote OR tighten reason on row X." Without this,
+   the row sits OutOfScope under stale "Slice N promotes"
+   wording forever.
+
+2. **AI-helpers-absent.** AI helpers (`corvid jobs explain`,
+   `corvid approvals explain/policy-suggest`, `corvid connectors
+   mock-fixture-gen/check --live narrator/fail-sim`) are the most
+   consistently-deferred deliverable across P38/P39/P41. P40 was
+   the exception (`corvid observe explain` + `corvid eval promote`
+   both shipped in-phase). Pattern: when AI helpers ship in-phase,
+   the launch-readiness tail shrinks; when they're deferred, it
+   grows. Future fix: every phase that names AI helpers in its
+   phase-done checklist should ship them as part of the phase OR
+   explicitly file them as launch-readiness at the same time as
+   the runtime they explain.
+
+3. **Audit-recon-flips-estimates.** Three slices in this round had
+   their estimates flip 4-10× after recon under the slice:
+   35V2-P38-C (replay-quarantine: 2 hr test → multi-day cross-
+   layer wiring), 35V2-P38-E (jobs.md docs rewrite: 2 hr → ~4 hr
+   + 7 launch-readiness guide-rewrite filings + a permanent drift-
+   gate sentinel), 35V2-P39-E (2 named-threat tests landable now:
+   recon found both need runtime concepts that don't exist yet).
+   Future fix: include "cross-layer wiring recon" in every audit-
+   correction slice's first 30 minutes; don't commit to an
+   estimate before that recon completes.
+
+4. **Reference-apps-need-maturity-gate.** Phase 42's slice
+   checklist closed the SHAPE (5 reference app directories with
+   full subdir trees); the per-app maturity bars (≥10 tables,
+   ≥5 migrations, ≥5 approvals, ≥3 cron, ≥10 evals, ≥5
+   adversarial tests, ≥1500-line runbook, deploy manifests,
+   benchmark file, CLAIM.md, AI helpers per app) are
+   substantially un-met outside the marquee Personal Executive
+   Agent. This isn't drift the verification round failed to
+   catch — it's drift the verification round is uniquely
+   positioned to surface because each per-app maturity gap is
+   binary and easy to measure. Future fix: reference-app phases
+   need a "per-app maturity gate" slice as part of the phase, not
+   after — a maturity-validation slice that programmatically
+   checks each app against the bar and fails the phase-done
+   check until the bars are met.
+
+The round shipped 12 commits and was structurally complete in
+~6 hours of focused execution after the original ROADMAP
+correction (commit `649676c`) revised the remaining effort
+estimate from ~13-18 months to ~3-5 months. The verification
+round itself fit inside that ~3-5 month window cleanly; the 33
+launch-readiness filings represent the substance of the
+remaining ~3-5 months.
+
+Next: Phase 43 (Packaging, deployment, release, market readiness)
+opens. Pre-phase chat mandatory before any code lands.
