@@ -70,6 +70,13 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `eval.drift_attribution` | observability | runtime_checked | runtime |
 | `eval.promotion_signed_lineage` | observability | runtime_checked | runtime |
 | `review_queue.cost_of_being_wrong_ranking` | observability | out_of_scope | runtime |
+| `deploy.reproducible_build` | deploy | out_of_scope | platform |
+| `deploy.attestation_chain` | deploy | out_of_scope | platform |
+| `deploy.sbom_completeness` | deploy | out_of_scope | platform |
+| `release.signed_artifact` | release | out_of_scope | platform |
+| `upgrade.claim_regression_check` | upgrade | out_of_scope | platform |
+| `ops.live_introspection_signed` | ops | out_of_scope | runtime |
+| `claim.audit_runnable_artifacts` | claim | out_of_scope | platform |
 | `platform.host_kernel_compromise` | platform | out_of_scope | platform |
 | `platform.signing_key_compromise` | platform | out_of_scope | platform |
 | `platform.toolchain_compromise` | platform | out_of_scope | platform |
@@ -804,6 +811,72 @@ Redacting the same lineage event twice with the same `LineageRedactionPolicy` yi
 `corvid review-queue list --rank=cost-of-being-wrong` surfaces low-confidence + high-risk outputs ranked by the `cost_of_being_wrong` policy.
 
 > **Why out of scope:** Review-queue envelopes ship at `corvid_runtime::review_queue`. The `corvid review-queue list --rank=cost-of-being-wrong` CLI subcommand that surfaces the ranked queue is not yet wired. Filed as launch-readiness slice `35V2-P40-C-LR-review-queue-ranking-cli` — promotes this row to RuntimeChecked when the subcommand ships + the ranking-correctness test lands alongside it.
+
+### Deploy packaging
+
+#### `deploy.reproducible_build`
+- **class**: out_of_scope
+- **phase**: platform
+
+Building the same `corvid deploy package` input twice on two different hosts produces bit-identical signed artifacts (binary + SBOM + DSSE attestation envelope). A second build that differs is a build-environment leak — timestamps, hostnames, paths — and the verification CI must reject it.
+
+> **Why out of scope:** `corvid deploy package` shipped at slice 43B emits a Dockerfile + OCI metadata + DSSE attestation, but the reproducible-build verification CI workflow that rebuilds on a second runner and diffs the artifacts has not landed. Filed as `43R-reproducible-build-ci` — promotes this row to RuntimeChecked when the CI workflow ships + the diff-on-second-build sentinel passes.
+
+#### `deploy.attestation_chain`
+- **class**: out_of_scope
+- **phase**: platform
+
+`corvid deploy package`'s DSSE envelope references the cdylib's `corvid claim --explain` DSSE digest, so a deploy attestation cannot be detached from the claim attestation it was built against. Two envelopes whose chain references don't match means the deploy package was built from a different cdylib than its attestation claims, and the verification refuses.
+
+> **Why out of scope:** `corvid deploy package`'s DSSE envelope ships (slice 43B3) but its payload does not yet include the cdylib's claim-attestation digest. Filed as `43O-signed-attestation-chain` — promotes this row to Static when the chain reference is wired + the chain-drift adversarial test lands.
+
+#### `deploy.sbom_completeness`
+- **class**: out_of_scope
+- **phase**: platform
+
+`corvid deploy package` emits a complete SPDX SBOM (`sbom.spdx.json`) covering every Rust dependency, every Corvid source file, and the cdylib itself. The SBOM identifies licenses, versions, and source paths — an artifact whose SBOM omits a dependency the binary actually links is a completeness failure.
+
+> **Why out of scope:** `corvid deploy package` ships the Dockerfile + OCI metadata but does not yet emit an SPDX SBOM. Filed as `43M-sbom-generation` — promotes this row to RuntimeChecked when the SBOM generation lands + a completeness test asserts every linked dep appears.
+
+### Release channels
+
+#### `release.signed_artifact`
+- **class**: out_of_scope
+- **phase**: platform
+
+Every artifact emitted by `corvid release nightly/beta/stable` is signed with the release key + paired with a `SHA256SUMS.txt` whose contents the user can verify with `sha256sum -c`. The signed manifest is a DSSE envelope over the release contents.
+
+> **Why out of scope:** `corvid release` runtime functionality ships in `crates/corvid-cli/src/release_cmd.rs` — `sign_release_manifest` uses `corvid_abi::sign_envelope` with `CORVID_RELEASE_SIGNING_KEY` and `release_cmd` writes `SHA256SUMS.txt`. What's missing is the unit-test + integration-test pair that pins (a) a nightly release produces a signed manifest + checksum file with the expected envelope payload type, and (b) a channel/version mismatch is refused. Filed for the same slice that writes the tests (folds into 43V's promotion sweep).
+
+### Upgrade compatibility
+
+#### `upgrade.claim_regression_check`
+- **class**: out_of_scope
+- **phase**: platform
+
+`corvid upgrade --check` consults the current binary's `corvid claim --explain` output and the upgrade target's claim manifest, and refuses to apply the upgrade if any registered guarantee id would be removed or downgraded (Static → RuntimeChecked, or RuntimeChecked → OutOfScope). The user sees the specific guarantee id + what it would weaken to before the upgrade applies.
+
+> **Why out of scope:** `corvid upgrade check` ships for syntax + stdlib migrations (slice 43E1/E2). The claim-regression comparison + rejection path has not landed. Filed as `43Q-upgrade-claim-regression` — promotes this row to Static when the comparison + rejection ships + the refused-weakening adversarial test lands.
+
+### Live ops introspection
+
+#### `ops.live_introspection_signed`
+- **class**: out_of_scope
+- **phase**: runtime
+
+`corvid ops show <prod-url>` returns the live binary's signed claim manifest + cost-since-start + approvals- pending. The response is signed by the binary's signing key (matching the cdylib's DSSE envelope key); a response whose signature doesn't match the expected key means either a man-in-the-middle or the wrong binary is running at the URL.
+
+> **Why out of scope:** `corvid ops show` CLI subcommand does not exist yet (verified by `corvid ops --help` → unrecognised). The Phase 36-generated axum server has no `/__ops` introspection endpoint. Filed as `43P-ops-show` — promotes this row to RuntimeChecked when both the CLI + the server endpoint ship + the signature-match test lands.
+
+### Claim audit
+
+#### `claim.audit_runnable_artifacts`
+- **class**: out_of_scope
+- **phase**: platform
+
+Every claim listed in `docs/meta/launch-claim-audit.md` points at either a runnable command or a committed artifact (test, example, benchmark, doc section). `corvid claim audit` exits 0 only when every claim has evidence; aspirational wording flagged at audit time fails the check.
+
+> **Why out of scope:** `corvid claim audit` runtime ships in `crates/corvid-cli/src/claim_cmd.rs` (`run_claim_audit` + `audit_claim_inventory`); the CLI subcommand resolves and the audit walks the inventory. What's missing is the unit-test pair that pins (a) audit passes when every claim has evidence, and (b) audit fails when a claim lacks evidence. Filed for the same slice that writes the tests (folds into 43V's promotion sweep).
 
 ### Platform — explicit non-defenses
 

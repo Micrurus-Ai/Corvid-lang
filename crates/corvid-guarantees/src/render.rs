@@ -156,6 +156,11 @@ fn kind_heading(kind: GuaranteeKind) -> &'static str {
         GuaranteeKind::Auth => "Auth and approvals",
         GuaranteeKind::Connector => "Connectors",
         GuaranteeKind::Observability => "Observability and evals",
+        GuaranteeKind::Deploy => "Deploy packaging",
+        GuaranteeKind::Release => "Release channels",
+        GuaranteeKind::Upgrade => "Upgrade compatibility",
+        GuaranteeKind::Ops => "Live ops introspection",
+        GuaranteeKind::Claim => "Claim audit",
         GuaranteeKind::Platform => "Platform — explicit non-defenses",
     }
 }

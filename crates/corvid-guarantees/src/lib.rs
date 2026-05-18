@@ -156,6 +156,37 @@ mod tests {
         );
     }
 
+    /// 43L sentinel: every guarantee id named by the Phase 43
+    /// phase-done checklist in ROADMAP.md must exist in the registry.
+    /// Same drift mode as the Phase-38/39/40/41 sentinels above.
+    /// Phase 43's slice plan landed all 7 as OutOfScope placeholders
+    /// in slice 43L; the 43V rolling promotion slice ticks each one
+    /// as its underlying surface ships.
+    #[test]
+    fn phase_43_required_registry_ids_all_present() {
+        const REQUIRED: &[&str] = &[
+            "deploy.reproducible_build",
+            "deploy.attestation_chain",
+            "deploy.sbom_completeness",
+            "release.signed_artifact",
+            "upgrade.claim_regression_check",
+            "ops.live_introspection_signed",
+            "claim.audit_runnable_artifacts",
+        ];
+        let missing: Vec<&str> = REQUIRED
+            .iter()
+            .filter(|id| lookup(id).is_none())
+            .copied()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Phase 43 phase-done checklist names ids that are absent \
+             from the registry: {missing:?}. Add the row to \
+             registry.rs or update the Phase 43 phase-done checklist \
+             in ROADMAP.md to match shipped reality."
+        );
+    }
+
     /// 35V2-P42-B sentinel: every Phase 42 reference-app directory
     /// exists with its required subdirectory tree. Phase 42 doesn't
     /// have its own `*` registry rows (per-app guarantees are

@@ -1220,6 +1220,172 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },
+    // ----- Deploy / Release / Upgrade / Ops / Claim (Phase 43) ----
+    Guarantee {
+        id: "deploy.reproducible_build",
+        kind: GuaranteeKind::Deploy,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "Building the same `corvid deploy package` input twice on \
+             two different hosts produces bit-identical signed artifacts \
+             (binary + SBOM + DSSE attestation envelope). A second \
+             build that differs is a build-environment leak — \
+             timestamps, hostnames, paths — and the verification \
+             CI must reject it.",
+        out_of_scope_reason:
+            "`corvid deploy package` shipped at slice 43B emits a \
+             Dockerfile + OCI metadata + DSSE attestation, but the \
+             reproducible-build verification CI workflow that \
+             rebuilds on a second runner and diffs the artifacts \
+             has not landed. Filed as `43R-reproducible-build-ci` — \
+             promotes this row to RuntimeChecked when the CI \
+             workflow ships + the diff-on-second-build sentinel \
+             passes.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "deploy.attestation_chain",
+        kind: GuaranteeKind::Deploy,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "`corvid deploy package`'s DSSE envelope references the \
+             cdylib's `corvid claim --explain` DSSE digest, so a \
+             deploy attestation cannot be detached from the claim \
+             attestation it was built against. Two envelopes whose \
+             chain references don't match means the deploy package \
+             was built from a different cdylib than its attestation \
+             claims, and the verification refuses.",
+        out_of_scope_reason:
+            "`corvid deploy package`'s DSSE envelope ships (slice \
+             43B3) but its payload does not yet include the \
+             cdylib's claim-attestation digest. Filed as \
+             `43O-signed-attestation-chain` — promotes this row to \
+             Static when the chain reference is wired + the \
+             chain-drift adversarial test lands.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "deploy.sbom_completeness",
+        kind: GuaranteeKind::Deploy,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "`corvid deploy package` emits a complete SPDX SBOM \
+             (`sbom.spdx.json`) covering every Rust dependency, \
+             every Corvid source file, and the cdylib itself. The \
+             SBOM identifies licenses, versions, and source paths \
+             — an artifact whose SBOM omits a dependency the \
+             binary actually links is a completeness failure.",
+        out_of_scope_reason:
+            "`corvid deploy package` ships the Dockerfile + OCI \
+             metadata but does not yet emit an SPDX SBOM. Filed \
+             as `43M-sbom-generation` — promotes this row to \
+             RuntimeChecked when the SBOM generation lands + a \
+             completeness test asserts every linked dep appears.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "release.signed_artifact",
+        kind: GuaranteeKind::Release,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "Every artifact emitted by `corvid release nightly/beta/\
+             stable` is signed with the release key + paired with a \
+             `SHA256SUMS.txt` whose contents the user can verify \
+             with `sha256sum -c`. The signed manifest is a DSSE \
+             envelope over the release contents.",
+        out_of_scope_reason:
+            "`corvid release` runtime functionality ships in \
+             `crates/corvid-cli/src/release_cmd.rs` — \
+             `sign_release_manifest` uses `corvid_abi::sign_envelope` \
+             with `CORVID_RELEASE_SIGNING_KEY` and `release_cmd` writes \
+             `SHA256SUMS.txt`. What's missing is the unit-test + \
+             integration-test pair that pins (a) a nightly release \
+             produces a signed manifest + checksum file with the \
+             expected envelope payload type, and (b) a channel/version \
+             mismatch is refused. Filed for the same slice that \
+             writes the tests (folds into 43V's promotion sweep).",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "upgrade.claim_regression_check",
+        kind: GuaranteeKind::Upgrade,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "`corvid upgrade --check` consults the current binary's \
+             `corvid claim --explain` output and the upgrade target's \
+             claim manifest, and refuses to apply the upgrade if any \
+             registered guarantee id would be removed or downgraded \
+             (Static → RuntimeChecked, or RuntimeChecked → OutOfScope). \
+             The user sees the specific guarantee id + what it would \
+             weaken to before the upgrade applies.",
+        out_of_scope_reason:
+            "`corvid upgrade check` ships for syntax + stdlib \
+             migrations (slice 43E1/E2). The claim-regression \
+             comparison + rejection path has not landed. Filed as \
+             `43Q-upgrade-claim-regression` — promotes this row to \
+             Static when the comparison + rejection ships + the \
+             refused-weakening adversarial test lands.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "ops.live_introspection_signed",
+        kind: GuaranteeKind::Ops,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Runtime,
+        description:
+            "`corvid ops show <prod-url>` returns the live binary's \
+             signed claim manifest + cost-since-start + approvals- \
+             pending. The response is signed by the binary's \
+             signing key (matching the cdylib's DSSE envelope key); \
+             a response whose signature doesn't match the expected \
+             key means either a man-in-the-middle or the wrong \
+             binary is running at the URL.",
+        out_of_scope_reason:
+            "`corvid ops show` CLI subcommand does not exist yet \
+             (verified by `corvid ops --help` → unrecognised). The \
+             Phase 36-generated axum server has no `/__ops` \
+             introspection endpoint. Filed as `43P-ops-show` — \
+             promotes this row to RuntimeChecked when both the CLI \
+             + the server endpoint ship + the signature-match \
+             test lands.",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "claim.audit_runnable_artifacts",
+        kind: GuaranteeKind::Claim,
+        class: GuaranteeClass::OutOfScope,
+        phase: Phase::Platform,
+        description:
+            "Every claim listed in `docs/meta/launch-claim-audit.md` \
+             points at either a runnable command or a committed \
+             artifact (test, example, benchmark, doc section). \
+             `corvid claim audit` exits 0 only when every claim has \
+             evidence; aspirational wording flagged at audit time \
+             fails the check.",
+        out_of_scope_reason:
+            "`corvid claim audit` runtime ships in \
+             `crates/corvid-cli/src/claim_cmd.rs` \
+             (`run_claim_audit` + `audit_claim_inventory`); the \
+             CLI subcommand resolves and the audit walks the \
+             inventory. What's missing is the unit-test pair that \
+             pins (a) audit passes when every claim has evidence, \
+             and (b) audit fails when a claim lacks evidence. \
+             Filed for the same slice that writes the tests (folds \
+             into 43V's promotion sweep).",
+        positive_test_refs: &[],
+        adversarial_test_refs: &[],
+    },
     // ----- Platform: explicit non-defenses ------------------------
     Guarantee {
         id: "platform.host_kernel_compromise",

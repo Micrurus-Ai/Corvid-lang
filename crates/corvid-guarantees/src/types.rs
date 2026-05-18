@@ -39,6 +39,19 @@ pub enum GuaranteeKind {
     Auth,
     Connector,
     Observability,
+    /// Phase 43: `corvid deploy package` reproducibility +
+    /// attestation chain + SBOM completeness.
+    Deploy,
+    /// Phase 43: `corvid release` channel artifact signing.
+    Release,
+    /// Phase 43: `corvid upgrade --check` claim-regression
+    /// rejection.
+    Upgrade,
+    /// Phase 43: `corvid ops show` live-binary introspection
+    /// signed by the binary's signing key.
+    Ops,
+    /// Phase 43: `corvid claim audit` runnable-artifacts rule.
+    Claim,
     Platform,
 }
 
@@ -63,6 +76,11 @@ impl GuaranteeKind {
             GuaranteeKind::Auth => "auth",
             GuaranteeKind::Connector => "connector",
             GuaranteeKind::Observability => "observability",
+            GuaranteeKind::Deploy => "deploy",
+            GuaranteeKind::Release => "release",
+            GuaranteeKind::Upgrade => "upgrade",
+            GuaranteeKind::Ops => "ops",
+            GuaranteeKind::Claim => "claim",
             GuaranteeKind::Platform => "platform",
         }
     }
@@ -82,6 +100,11 @@ impl GuaranteeKind {
         GuaranteeKind::Auth,
         GuaranteeKind::Connector,
         GuaranteeKind::Observability,
+        GuaranteeKind::Deploy,
+        GuaranteeKind::Release,
+        GuaranteeKind::Upgrade,
+        GuaranteeKind::Ops,
+        GuaranteeKind::Claim,
         GuaranteeKind::Platform,
     ];
 }
