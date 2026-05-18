@@ -7022,3 +7022,35 @@ that lands during the launch-readiness window before v1.0.
 
 Next: Phase 43 (Packaging, deployment, release, market readiness)
 opens. Pre-phase chat mandatory before any code lands.
+
+## 2026-05-18 — 43K: Phase 43 pre-phase chat closed, implementation opens
+
+Phase 43 design + slice plan + pitch lock at
+`docs/phases/phase-43-implementation-plan-2026-05-18.md`. Pitch
+sentence locked as the Path A draft:
+
+> Build the same production AI app you'd build in Python — auth,
+> jobs, persistence, deploy — but with the safety guarantees
+> compiled into the binary instead of audited by humans after
+> the fact.
+
+Phase 43 spot-check showed 16 of 19 sub-slices closed (43A-G +
+I-J + sub-slices); 3 open (43H beta = Path A friends-and-family).
+Phase-done checklist breakdown: 4 of 12 items effectively
+shipped (HEALTHCHECK / OCI labels / release sign + SHA256SUMS /
+`corvid claim audit`), 3 partial (deploy package needs distroless
++ SBOM; upgrade --check needs claim-regression; attestation
+chain needs cdylib digest), 5 not shipped (`corvid ops show`,
+reproducible-build CI, deploy smoke-deploy CI, 5 AI helpers,
+clone_to_deploy benchmark), 1 operational (beta).
+
+Slice plan opens as 43L through 43X (14 sub-slices). Strict
+order: 43L before 43V; 43M before 43R. Everything else parallel.
+Launch-readiness tail (33 filings from P38-P42) interleaved as
+43W where independent of Phase 43 code work.
+
+Realistic estimate: 6-8 weeks of focused work to v1.0 cut, plus
+~2 calendar weeks for the friends-and-family round = 8-10 weeks
+wall-clock to v1.0.
+
+Next: 43L registry rows + presence sentinel.
