@@ -156,6 +156,70 @@ mod tests {
         );
     }
 
+    /// 35V2-P42-B sentinel: every Phase 42 reference-app directory
+    /// exists with its required subdirectory tree. Phase 42 doesn't
+    /// have its own `*` registry rows (per-app guarantees are
+    /// inherited from P38/P39/P40/P41), so the sentinel asserts the
+    /// app-shape property directly. Catches the drift mode where a
+    /// future contributor renames or removes an app without updating
+    /// the Phase 42 phase-done checklist in ROADMAP.md.
+    #[test]
+    fn phase_42_required_app_directories_all_present() {
+        const REQUIRED_APPS: &[&str] = &[
+            "personal_executive_agent",
+            "personal_knowledge_agent",
+            "finance_operations_agent",
+            "customer_support_agent",
+            "code_maintenance_agent",
+        ];
+        const REQUIRED_SUBDIRS: &[&str] = &[
+            "adversarial",
+            "deploy",
+            "evals",
+            "migrations",
+            "mocks",
+            "ops",
+            "seeds",
+        ];
+        // Locate the workspace root from the guarantees crate
+        // manifest: $WORKSPACE/crates/corvid-guarantees -> $WORKSPACE.
+        let workspace = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let backend_dir = workspace.join("examples").join("backend");
+        let mut missing: Vec<String> = Vec::new();
+        for app in REQUIRED_APPS {
+            let app_dir = backend_dir.join(app);
+            if !app_dir.is_dir() {
+                missing.push(format!("missing app directory: {app}"));
+                continue;
+            }
+            for subdir in REQUIRED_SUBDIRS {
+                let sub = app_dir.join(subdir);
+                if !sub.is_dir() {
+                    missing.push(format!("missing subdir: {app}/{subdir}"));
+                }
+            }
+            let security_model = app_dir.join("security-model.md");
+            if !security_model.is_file() {
+                missing.push(format!("missing security-model.md in {app}"));
+            }
+            let readme = app_dir.join("README.md");
+            if !readme.is_file() {
+                missing.push(format!("missing README.md in {app}"));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "Phase 42 reference-app shape audit failed: {missing:?}. \
+             Either restore the missing files / directories or update \
+             the Phase 42 phase-done checklist in ROADMAP.md to match \
+             shipped reality."
+        );
+    }
+
     /// 35V2-P41-B sentinel: every guarantee id named by the Phase 41
     /// phase-done checklist in ROADMAP.md must exist in the registry.
     /// Same drift mode as the Phase-38/39/40 sentinels above. The

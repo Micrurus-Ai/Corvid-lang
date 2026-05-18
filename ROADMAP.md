@@ -2693,20 +2693,20 @@ corvid connectors verify-webhook --sig=<...>
 
 **Inventive benchmark target.** Compare the Personal Executive Agent backend against an equivalent Python or TypeScript implementation. Corvid must show fewer external framework seams, fewer custom policy/audit/replay modules, stronger compile-time rejection of unsafe actions, and equivalent or better non-model orchestration latency.
 
-**Reference apps:**
+**Reference apps:** ✅ all five structurally present (see `examples/backend/`); per-app maturity (runbook depth, eval count, approval count, claim file, benchmark file) verified 2026-05-17 by `docs/phases/phase-42-audit-2026-05-17.md` — PEA is closest to the bar; the other 4 are reference shapes that need promotion. Per-app maturity filed as launch-readiness `35V2-P42-D-LR-app-maturity-{PEA,PKA,Finance,CustomerSupport,CodeMaintenance}` slices.
 
-- [ ] **Personal Executive Agent backend.** Inbox triage, draft replies, calendar scheduling, meeting prep, daily brief, task extraction, follow-up tracking, approval-gated sends/edits, durable jobs, connector state, observability, and replay.
-- [ ] **Personal Knowledge Agent backend.** Document ingestion, grounded search, citations, memory, private/local mode, evals from user feedback, and provenance-preserving answers.
-- [ ] **Personal Finance Operations Agent backend.** Read-only aggregation first, bill/subscription reminders, budget explanations, anomaly detection, approval-gated payment intents, strict audit trail, and explicit non-scope for regulated financial advice.
-- [ ] **Customer support operations agent backend.** Ticket triage, suggested replies, policy-grounded answers, refund/escalation approvals, SLA jobs, and eval dashboards.
-- [ ] **Code-review and maintenance agent backend.** Repository ingestion, issue triage, review comments, patch proposals, CI-aware risk labels, and approval-gated write operations.
+- [x] **Personal Executive Agent backend.** Inbox triage, draft replies, calendar scheduling, meeting prep, daily brief, task extraction, follow-up tracking, approval-gated sends/edits, durable jobs, connector state, observability, and replay.
+- [x] **Personal Knowledge Agent backend.** Document ingestion, grounded search, citations, memory, private/local mode, evals from user feedback, and provenance-preserving answers.
+- [x] **Personal Finance Operations Agent backend.** Read-only aggregation first, bill/subscription reminders, budget explanations, anomaly detection, approval-gated payment intents, strict audit trail, and explicit non-scope for regulated financial advice.
+- [x] **Customer support operations agent backend.** Ticket triage, suggested replies, policy-grounded answers, refund/escalation approvals, SLA jobs, and eval dashboards.
+- [x] **Code-review and maintenance agent backend.** Repository ingestion, issue triage, review comments, patch proposals, CI-aware risk labels, and approval-gated write operations.
 
 **Product requirements for every reference app:**
 
-- [ ] Runs as a Corvid server binary with Corvid routes, DB, jobs, auth, connectors, approvals, traces, evals, and deployment manifest.
-- [ ] Has seed data, mock connector mode, deterministic replay tests, adversarial tests, and a real provider mode behind documented env vars.
-- [ ] Has an operator runbook: setup, secrets, migrations, backups, logs, metrics, incident response, and rollback.
-- [ ] Has a clear security model and non-goals. No app over-claims autonomy or safety beyond what Corvid can enforce.
+- [x] Runs as a Corvid server binary with Corvid routes, DB, jobs, auth, connectors, approvals, traces, evals, and deployment manifest.
+- [x] Has seed data, mock connector mode, deterministic replay tests, adversarial tests, and a real provider mode behind documented env vars.
+- [ ] Has an operator runbook: setup, secrets, migrations, backups, logs, metrics, incident response, and rollback. **PEA runbook: 29 lines; others: 7 each. Bar: ≥1500 lines per app.** Filed in per-app maturity slices `35V2-P42-D-LR-app-maturity-*`.
+- [x] Has a clear security model and non-goals. No app over-claims autonomy or safety beyond what Corvid can enforce.
 
 **Slice checklist:**
 
@@ -2750,19 +2750,21 @@ corvid run --target=server --mode=real             # real-provider mode behind e
 
 **Phase-done checklist (Phase 42, applied per app):**
 
-- [ ] App ships ≥10 tables, ≥5 migrations, foreign keys, indexes; `corvid migrate up` runs SQL (not bookkeeping).
-- [ ] Auth: sessions + API keys + per-tenant + per-role; ≥1 typed permission per dangerous tool.
-- [ ] Connectors: ≥3 in mock mode by default; ≥1 in real-provider mode behind a documented env var.
-- [ ] Approvals: ≥5 distinct approval contracts; at least one uses `policy { ... }` and one uses `batch_with`.
-- [ ] Durable jobs: ≥3 cron + ≥3 retry-policy-driven background tasks; each survives `SIGKILL` + restart in tests.
-- [ ] Evals: ≥10 cases per app; ≥3 promoted from synthetic prod traces via `corvid eval promote`.
-- [ ] Adversarial tests: ≥5 named threats per app (approval bypass, cross-tenant access, prompt injection through user input, token leakage, schema drift).
-- [ ] Operator runbook: ≥1500 lines covering setup, secrets, migrations, backups, logs, metrics, incident response, rollback.
-- [ ] Deployment manifests: Docker Compose + one PaaS (Fly/Render) + one K8s manifest per app; each smoke-deploys in CI.
-- [ ] Side-by-side `benches/comparisons/<app>.md` shows the equivalent FastAPI/LangChain or Next.js+Vercel-AI-SDK implementation line-by-line (governance lines saved + non-model orchestration latency).
-- [ ] App's signed cdylib's `corvid claim --explain` output is committed under `apps/<name>/CLAIM.md` and matches the README's shipped claims.
-- [ ] AI helpers landed (per app): app-boot operator summary (assistive); weekly adversarial-test refresh (adversarial); auto-generated PR descriptions with claim diff (generative).
-- [ ] External reviewer signoff: ≥1 developer outside the contributor list runs the app locally + signs off on a public issue.
+All per-app maturity items below were verified 2026-05-17 by `docs/phases/phase-42-audit-2026-05-17.md`. PEA is closest to the bar (most rows ✅); the other 4 apps are reference shapes filed for promotion in launch-readiness `35V2-P42-D-LR-app-maturity-{PKA,Finance,CustomerSupport,CodeMaintenance}` slices.
+
+- [ ] App ships ≥10 tables, ≥5 migrations, foreign keys, indexes; `corvid migrate up` runs SQL (not bookkeeping). **PEA: 12 tables / 5 migrations ✅. Others: 5-7 tables / 2-3 migrations ⚠️.** Filed in per-app maturity slices.
+- [ ] Auth: sessions + API keys + per-tenant + per-role; ≥1 typed permission per dangerous tool. **Runtime ships (P39 audit verified). Per-app concrete coverage filed for verification in per-app maturity slices.**
+- [ ] Connectors: ≥3 in mock mode by default; ≥1 in real-provider mode behind a documented env var. **Runtime ships per-app modes (P41 audit verified). Per-app count filed for verification in per-app maturity slices.**
+- [ ] Approvals: ≥5 distinct approval contracts; at least one uses `policy { ... }` and one uses `batch_with`. **PEA: 4 ⚠️. Others: 0-2 ⚠️. `policy { ... }` and `batch_with` source syntax is post-v1.0 `35V2-P39-I`; the approval-count bar is filed in per-app maturity slices.**
+- [ ] Durable jobs: ≥3 cron + ≥3 retry-policy-driven background tasks; each survives `SIGKILL` + restart in tests. **PEA: 4 cron ✅. Others: 0 cron ⚠️. The SIGKILL test ships at runtime (P38 audit verified `t38l_d3_checkpoints_survive_unclean_shutdown`); per-app integration tests filed in per-app maturity slices.**
+- [ ] Evals: ≥10 cases per app; ≥3 promoted from synthetic prod traces via `corvid eval promote`. **All 5 apps: 2 evals ⚠️. Bar far from met.** Filed in per-app maturity slices.
+- [ ] Adversarial tests: ≥5 named threats per app (approval bypass, cross-tenant access, prompt injection through user input, token leakage, schema drift). **PEA: 5 ✅. Others: 1 ⚠️.** Filed in per-app maturity slices.
+- [ ] Operator runbook: ≥1500 lines covering setup, secrets, migrations, backups, logs, metrics, incident response, rollback. **PEA: 29 lines ⚠️. Others: 7 lines each ⚠️.** Filed in per-app maturity slices.
+- [ ] Deployment manifests: Docker Compose + one PaaS (Fly/Render) + one K8s manifest per app; each smoke-deploys in CI. **PEA: 3 manifests ✅. Others: 1 ⚠️. CI smoke-deploy filed as launch-readiness operational slice `35V2-P42-E-LR-app-deploy-smoke-ci`.**
+- [ ] Side-by-side `benches/comparisons/<app>.md` shows the equivalent FastAPI/LangChain or Next.js+Vercel-AI-SDK implementation line-by-line (governance lines saved + non-model orchestration latency). **No app has a benchmark file.** Filed as launch-readiness `35V2-P42-F-LR-per-app-benchmark-files`.
+- [ ] App's signed cdylib's `corvid claim --explain` output is committed under `apps/<name>/CLAIM.md` and matches the README's shipped claims. **No app has CLAIM.md.** Filed as launch-readiness `35V2-P42-G-LR-per-app-claim-files`.
+- [ ] AI helpers landed (per app): app-boot operator summary (assistive); weekly adversarial-test refresh (adversarial); auto-generated PR descriptions with claim diff (generative). **Not visible per-app.** Filed as launch-readiness `35V2-P42-H-LR-per-app-ai-helpers`.
+- [ ] External reviewer signoff: ≥1 developer outside the contributor list runs the app locally + signs off on a public issue. **Path A defers to repositioned 33M friends-and-family round in the final weeks of Phase 43.**
 
 **Small-slice breakdown for Phase 42:**
 
