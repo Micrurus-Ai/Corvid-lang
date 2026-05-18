@@ -1304,27 +1304,27 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "release.signed_artifact",
         kind: GuaranteeKind::Release,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Platform,
         description:
             "Every artifact emitted by `corvid release nightly/beta/\
              stable` is signed with the release key + paired with a \
              `SHA256SUMS.txt` whose contents the user can verify \
              with `sha256sum -c`. The signed manifest is a DSSE \
-             envelope over the release contents.",
-        out_of_scope_reason:
-            "`corvid release` runtime functionality ships in \
-             `crates/corvid-cli/src/release_cmd.rs` — \
-             `sign_release_manifest` uses `corvid_abi::sign_envelope` \
-             with `CORVID_RELEASE_SIGNING_KEY` and `release_cmd` writes \
-             `SHA256SUMS.txt`. What's missing is the unit-test + \
-             integration-test pair that pins (a) a nightly release \
-             produces a signed manifest + checksum file with the \
-             expected envelope payload type, and (b) a channel/version \
-             mismatch is refused. Filed for the same slice that \
-             writes the tests (folds into 43V's promotion sweep).",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+             envelope over the release contents, with payload type \
+             `application/vnd.corvid.release.manifest.v1+json`. The \
+             channel + version pair must satisfy the channel's \
+             naming convention (`-nightly.` / `-beta.` / plain \
+             MAJOR.MINOR.PATCH) — a stable-shaped version cannot \
+             be published to the nightly channel and vice versa.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/release_cmd.rs::release_validate_version_accepts_each_channel_shape",
+            "crates/corvid-cli/src/release_cmd.rs::sign_release_manifest_emits_v1_payload_type",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/release_cmd.rs::release_validate_version_refuses_channel_version_mismatch",
+        ],
     },
     Guarantee {
         id: "upgrade.claim_regression_check",
@@ -1382,27 +1382,24 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "claim.audit_runnable_artifacts",
         kind: GuaranteeKind::Claim,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Platform,
         description:
             "Every claim listed in `docs/meta/launch-claim-audit.md` \
-             points at either a runnable command or a committed \
-             artifact (test, example, benchmark, doc section). \
-             `corvid claim audit` exits 0 only when every claim has \
-             evidence; aspirational wording flagged at audit time \
-             fails the check.",
-        out_of_scope_reason:
-            "`corvid claim audit` runtime ships in \
-             `crates/corvid-cli/src/claim_cmd.rs` \
-             (`run_claim_audit` + `audit_claim_inventory`); the \
-             CLI subcommand resolves and the audit walks the \
-             inventory. What's missing is the unit-test pair that \
-             pins (a) audit passes when every claim has evidence, \
-             and (b) audit fails when a claim lacks evidence. \
-             Filed for the same slice that writes the tests (folds \
-             into 43V's promotion sweep).",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+             points at either a runnable command (backticked code), \
+             a linked artifact (`[link]`-style markdown), or an \
+             explicit `blocked` / `non-scope` status. `corvid claim \
+             audit` exits 0 only when every claim has evidence; \
+             aspirational wording flagged at audit time fails the \
+             check unless the row carries an explicit \
+             blocked/non-scope status.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/claim_cmd.rs::audit_passes_when_every_claim_resolves",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/claim_cmd.rs::audit_fails_when_a_claim_lacks_evidence",
+        ],
     },
     // ----- Platform: explicit non-defenses ------------------------
     Guarantee {

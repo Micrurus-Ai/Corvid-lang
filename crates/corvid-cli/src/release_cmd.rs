@@ -270,3 +270,86 @@ fn sign_release_manifest(manifest_json: &str) -> Result<String> {
     );
     serde_json::to_string_pretty(&envelope).context("serialize release attestation")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 43V: `corvid release` accepts a known channel + a version
+    /// that matches the channel's pattern. This is the positive
+    /// half of the `release.signed_artifact` contract — the
+    /// validate-version path is the gatekeeper that prevents a
+    /// nightly-shaped version from being shipped as stable.
+    #[test]
+    fn release_validate_version_accepts_each_channel_shape() {
+        // Each channel accepts its own pattern.
+        assert!(validate_version("nightly", "0.0.0-nightly.20260518").is_ok());
+        assert!(validate_version("beta", "1.0.0-beta.3").is_ok());
+        assert!(validate_version("stable", "1.0.0").is_ok());
+        // normalize_channel accepts the three documented channels.
+        assert!(normalize_channel("nightly").is_ok());
+        assert!(normalize_channel("beta").is_ok());
+        assert!(normalize_channel("stable").is_ok());
+    }
+
+    /// 43V: a channel/version mismatch is refused. Catches the
+    /// failure mode where a stable version (1.0.0) is published
+    /// to the nightly channel, or a nightly-suffixed version
+    /// ships as stable.
+    #[test]
+    fn release_validate_version_refuses_channel_version_mismatch() {
+        // Stable can't take a -nightly. or -beta. suffix.
+        assert!(validate_version("stable", "1.0.0-nightly.20260518").is_err());
+        assert!(validate_version("stable", "1.0.0-beta.3").is_err());
+        // Nightly must have -nightly. — plain stable is refused.
+        assert!(validate_version("nightly", "1.0.0").is_err());
+        assert!(validate_version("nightly", "1.0.0-beta.3").is_err());
+        // Beta must have -beta. — neither stable nor nightly is
+        // accepted as beta.
+        assert!(validate_version("beta", "1.0.0").is_err());
+        assert!(validate_version("beta", "1.0.0-nightly.20260518").is_err());
+        // Unknown channel refused at normalization.
+        assert!(normalize_channel("preview").is_err());
+        assert!(normalize_channel("rc").is_err());
+        assert!(normalize_channel("").is_err());
+    }
+
+    /// 43V: `sign_release_manifest` produces a DSSE envelope
+    /// whose payload type names the v1 release manifest schema
+    /// + whose payload decodes to JSON that round-trips through
+    /// serde. This is the structural sanity check the
+    /// `release.signed_artifact` row promises — the
+    /// payload-type drift mode the audit was specifically
+    /// guarding against.
+    #[test]
+    fn sign_release_manifest_emits_v1_payload_type() {
+        std::env::set_var(
+            "CORVID_RELEASE_SIGNING_KEY",
+            "0".repeat(64),
+        );
+        let manifest_json = r#"{"schema":"corvid.release.manifest.v1","channel":"nightly"}"#;
+        let envelope_json = sign_release_manifest(manifest_json).expect("sign manifest");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&envelope_json).expect("envelope JSON");
+        assert_eq!(
+            parsed["payloadType"],
+            "application/vnd.corvid.release.manifest.v1+json",
+            "payload type must name the v1 schema; mismatch means the \
+             release attestation's downstream consumers cannot rely \
+             on the documented payload shape"
+        );
+        // DSSE envelope base64s the payload; decode + round-trip.
+        use base64::Engine as _;
+        let payload_b64 = parsed["payload"]
+            .as_str()
+            .expect("DSSE payload base64 field");
+        let payload_bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload_b64)
+            .expect("decode DSSE payload");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&payload_bytes).expect("payload JSON");
+        assert_eq!(payload["schema"], "corvid.release.manifest.v1");
+        assert_eq!(payload["channel"], "nightly");
+        std::env::remove_var("CORVID_RELEASE_SIGNING_KEY");
+    }
+}

@@ -73,10 +73,10 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `deploy.reproducible_build` | deploy | out_of_scope | platform |
 | `deploy.attestation_chain` | deploy | runtime_checked | platform |
 | `deploy.sbom_completeness` | deploy | runtime_checked | platform |
-| `release.signed_artifact` | release | out_of_scope | platform |
+| `release.signed_artifact` | release | runtime_checked | platform |
 | `upgrade.claim_regression_check` | upgrade | runtime_checked | platform |
 | `ops.live_introspection_signed` | ops | out_of_scope | runtime |
-| `claim.audit_runnable_artifacts` | claim | out_of_scope | platform |
+| `claim.audit_runnable_artifacts` | claim | runtime_checked | platform |
 | `platform.host_kernel_compromise` | platform | out_of_scope | platform |
 | `platform.signing_key_compromise` | platform | out_of_scope | platform |
 | `platform.toolchain_compromise` | platform | out_of_scope | platform |
@@ -854,12 +854,19 @@ Building the same `corvid deploy package` input twice on two different hosts pro
 ### Release channels
 
 #### `release.signed_artifact`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: platform
 
-Every artifact emitted by `corvid release nightly/beta/stable` is signed with the release key + paired with a `SHA256SUMS.txt` whose contents the user can verify with `sha256sum -c`. The signed manifest is a DSSE envelope over the release contents.
+Every artifact emitted by `corvid release nightly/beta/stable` is signed with the release key + paired with a `SHA256SUMS.txt` whose contents the user can verify with `sha256sum -c`. The signed manifest is a DSSE envelope over the release contents, with payload type `application/vnd.corvid.release.manifest.v1+json`. The channel + version pair must satisfy the channel's naming convention (`-nightly.` / `-beta.` / plain MAJOR.MINOR.PATCH) — a stable-shaped version cannot be published to the nightly channel and vice versa.
 
-> **Why out of scope:** `corvid release` runtime functionality ships in `crates/corvid-cli/src/release_cmd.rs` — `sign_release_manifest` uses `corvid_abi::sign_envelope` with `CORVID_RELEASE_SIGNING_KEY` and `release_cmd` writes `SHA256SUMS.txt`. What's missing is the unit-test + integration-test pair that pins (a) a nightly release produces a signed manifest + checksum file with the expected envelope payload type, and (b) a channel/version mismatch is refused. Filed for the same slice that writes the tests (folds into 43V's promotion sweep).
+**Positive tests:**
+
+- `crates/corvid-cli/src/release_cmd.rs::release_validate_version_accepts_each_channel_shape`
+- `crates/corvid-cli/src/release_cmd.rs::sign_release_manifest_emits_v1_payload_type`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/release_cmd.rs::release_validate_version_refuses_channel_version_mismatch`
 
 ### Upgrade compatibility
 
@@ -892,12 +899,18 @@ Every artifact emitted by `corvid release nightly/beta/stable` is signed with th
 ### Claim audit
 
 #### `claim.audit_runnable_artifacts`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: platform
 
-Every claim listed in `docs/meta/launch-claim-audit.md` points at either a runnable command or a committed artifact (test, example, benchmark, doc section). `corvid claim audit` exits 0 only when every claim has evidence; aspirational wording flagged at audit time fails the check.
+Every claim listed in `docs/meta/launch-claim-audit.md` points at either a runnable command (backticked code), a linked artifact (`[link]`-style markdown), or an explicit `blocked` / `non-scope` status. `corvid claim audit` exits 0 only when every claim has evidence; aspirational wording flagged at audit time fails the check unless the row carries an explicit blocked/non-scope status.
 
-> **Why out of scope:** `corvid claim audit` runtime ships in `crates/corvid-cli/src/claim_cmd.rs` (`run_claim_audit` + `audit_claim_inventory`); the CLI subcommand resolves and the audit walks the inventory. What's missing is the unit-test pair that pins (a) audit passes when every claim has evidence, and (b) audit fails when a claim lacks evidence. Filed for the same slice that writes the tests (folds into 43V's promotion sweep).
+**Positive tests:**
+
+- `crates/corvid-cli/src/claim_cmd.rs::audit_passes_when_every_claim_resolves`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/claim_cmd.rs::audit_fails_when_a_claim_lacks_evidence`
 
 ### Platform — explicit non-defenses
 

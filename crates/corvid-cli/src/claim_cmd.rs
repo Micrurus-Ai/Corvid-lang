@@ -363,3 +363,85 @@ fn read_attestation_bytes(cdylib: &Path) -> std::result::Result<Vec<u8>, ReadAtt
     std::mem::forget(lib);
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn write_inventory(rows: &[&str]) -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        // Header line + separator + data rows. The header line
+        // contains "| Claim |" which `audit_claim_inventory` uses
+        // to skip the table header.
+        writeln!(file, "| Claim | Evidence |").unwrap();
+        writeln!(file, "|---|---|").unwrap();
+        for row in rows {
+            writeln!(file, "{row}").unwrap();
+        }
+        file
+    }
+
+    /// 43V: positive — `corvid claim audit` produces an empty
+    /// findings list when every claim has a runnable command, a
+    /// linked artifact, or an explicit blocked / non-scope
+    /// status. This is the contract `claim.audit_runnable_artifacts`
+    /// promises.
+    #[test]
+    fn audit_passes_when_every_claim_resolves() {
+        let inventory = write_inventory(&[
+            "| Compile-time approval gate | `cargo test -p corvid-types --lib approval` |",
+            "| Replay determinism | [Phase 21 corpus](../21-replay.md) |",
+            "| WASM target shipped | blocked on browser e2e CI gap, see Phase 23 reopen |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text);
+        assert_eq!(report.claim_count, 3, "all 3 rows counted");
+        assert_eq!(
+            report.findings.len(),
+            0,
+            "audit must be silent when every claim has evidence; got: {:?}",
+            report.findings
+        );
+    }
+
+    /// 43V: adversarial — a claim that lacks runnable evidence
+    /// AND lacks an explicit blocked / non-scope status is
+    /// flagged. Catches the "aspirational claim slipped in
+    /// without backing" failure mode the `corvid claim audit`
+    /// gate exists to prevent.
+    #[test]
+    fn audit_fails_when_a_claim_lacks_evidence() {
+        let inventory = write_inventory(&[
+            "| Future moat feature | will land in v2.0 |",
+            "| Compile-time approval gate | `cargo test -p corvid-types approval` |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text);
+        assert_eq!(report.claim_count, 2);
+        assert!(
+            !report.findings.is_empty(),
+            "audit must flag the aspirational row"
+        );
+        let aspirational_flagged = report
+            .findings
+            .iter()
+            .any(|f| f.claim == "Future moat feature");
+        assert!(
+            aspirational_flagged,
+            "the 'Future moat feature' row must be in the findings: {:?}",
+            report.findings
+        );
+        // The row with `cargo test` evidence must NOT be flagged.
+        let backed_flagged = report
+            .findings
+            .iter()
+            .any(|f| f.claim == "Compile-time approval gate");
+        assert!(
+            !backed_flagged,
+            "the runnable-command-backed row must not be flagged: {:?}",
+            report.findings
+        );
+    }
+}
