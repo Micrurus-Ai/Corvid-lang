@@ -61,7 +61,8 @@ fn docs_guides_dir() -> PathBuf {
 /// exemption. When that slice lands, delete the entry; the gate
 /// will then enforce on the rewritten guide.
 const EXEMPT_GUIDES: &[(&str, &str)] = &[
-    ("auth.md", "35V2-P38-E-LR-auth-guide-rewrite"),
+    // 43W landed the auth.md rewrite — entry removed; the gate now
+    // enforces on auth.md.
     ("backend.md", "35V2-P38-E-LR-backend-guide-rewrite"),
     ("connectors.md", "35V2-P38-E-LR-connectors-guide-rewrite"),
     ("ffi-c-rust.md", "35V2-P38-E-LR-ffi-c-rust-guide-rewrite"),
