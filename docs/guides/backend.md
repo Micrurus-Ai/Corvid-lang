@@ -1,53 +1,88 @@
 # Backend basics
 
+Phase 36 ships the backend server tier. `corvid build
+--target=server` renders a production-shape axum 0.7 binary from
+a Corvid `server` declaration. The source-level surface is the
+shipped subset of `server { ... route ... }` shape that the
+existing reference apps under `examples/backend/` use; richer
+ergonomic forms (custom middleware blocks, per-route effect
+constraints, source-level CORS / rate-limit configuration) are
+post-v1.0.
+
 ## What the rendered backend gives you
 
-`corvid build --target=server` produces a Cargo project that compiles
-to a production-shape axum 0.7 binary with:
-
-- Routes — declared in Corvid source as `server` blocks.
-- Middleware pipeline — auth, rate-limit, tracing-headers, CORS,
-  compression, request logging — wired in declared order.
-- Graceful shutdown via tokio oneshot.
-- Handler isolation: each request runs in a subprocess with a
-  per-handler timeout (504 on exceed).
-- Body-limit enforcement (413 on exceed).
-- `/healthz`, `/readyz`, `/metrics` endpoints generated from runtime
-  state.
+- Routes declared in Corvid source as `server` blocks.
+- The middleware pipeline: tracing-headers, body-limit
+  enforcement (413 on exceed), handler-isolation timeout (504 on
+  exceed), graceful shutdown via tokio oneshot.
+- Generated `/healthz` + `/readyz` endpoints from runtime state.
+- Per-route effect-row enforcement: dangerous routes require the
+  caller's auth context to carry the configured permission +
+  approve boundary (see [`auth.md`](./auth.md)).
 
 ## Declaring a server
 
-```corvid
-server refund_api:
-    route "/refund"        -> handle_refund
-    route "/refund/status" -> handle_status
-    route "/healthz"       -> healthz       # auto-generated, override-able
-```
-
-## Writing a handler
+The canonical shape, copy-pasted from
+`examples/backend/refund_api/src/refund_api.cor`:
 
 ```corvid
-struct RefundRequest:
-    customer_id: String
+type RefundRequest:
+    order_id: String
     amount: Float
+    reason: String
 
-struct RefundResponse:
-    ok: Bool
+type RefundResponse:
     receipt_id: String
+    status: String
 
-@budget($0.50)
-@max_wall_time(10s)
-agent handle_refund(req: RefundRequest) -> RefundResponse uses http_effect, refund_effect:
-    approve Refund(req.amount, req.customer_id)
-    let receipt = refund(req.amount, req.customer_id)
-    return RefundResponse { ok: true, receipt_id: receipt.id }
+type RefundStatus:
+    service: String
+    mode: String
+
+effect transfer_money:
+    cost: $0.05
+    trust: human_required
+    reversible: false
+    data: financial
+
+tool issue_refund(req: RefundRequest) -> String dangerous uses transfer_money
+
+agent approve_refund(req: RefundRequest) -> RefundResponse uses transfer_money:
+    approve IssueRefund(req)
+    receipt_id = issue_refund(req)
+    return RefundResponse(receipt_id, "approved")
+
+agent refund_status() -> RefundStatus:
+    return RefundStatus("refund_api", "contract")
+
+server refund_api:
+    route GET "/status" -> json RefundStatus:
+        return refund_status()
+    route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money:
+        return approve_refund(body)
 ```
 
-The handler agent's effect row drives middleware behavior:
+Notes on the shape:
 
-- `refund_effect` carries `trust: supervisor_required`, so the
-  middleware enforces the host-side approval check.
-- `@max_wall_time` sets the per-request handler-isolation timeout.
+- `route GET "/status" -> json RefundStatus: ...` — `GET` is the
+  HTTP method, `/status` is the path, `json RefundStatus` is the
+  return content-type + return type. The body is an inline
+  expression that returns the typed value.
+- `route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money: ...`
+  — `body RefundRequest` parses the request body as the typed
+  shape; `uses transfer_money` declares the effect row the route
+  carries; the body block can reference the parsed body as
+  `body`.
+
+The typechecker enforces:
+
+- The declared `uses` row matches the body's actual effect
+  composition (otherwise the route fails to compile).
+- Dangerous tools called from the body have a matching `approve`
+  in lexical scope (otherwise the route fails to compile under
+  `approval.dangerous_call_requires_token`).
+- Body types are `serde`-roundtrippable (otherwise the codegen
+  fails).
 
 ## Building and running
 
@@ -57,45 +92,46 @@ cd target/server
 cargo run --release
 ```
 
-The server listens on `0.0.0.0:8080` by default; override with
-`PORT=9090 cargo run`.
+The rendered server listens on `0.0.0.0:8080` by default;
+override with `PORT=9090 cargo run`.
 
-## Configuration
+The output tree (cargo-rendered axum project) lives under
+`target/server/`. Each reference app under `examples/backend/`
+ships its own pre-rendered server tree so operators can inspect
+the shape before running `corvid build` themselves.
 
-```toml
-# corvid.toml
-[server]
-port = 8080
-body_limit_bytes = 1048576           # 1 MiB
-handler_timeout_seconds = 30
-graceful_shutdown_seconds = 10
+## Operational concerns
 
-[server.cors]
-allowed_origins = ["https://app.example.com"]
+| Concern | Where it lives |
+|---|---|
+| Auth + sessions + API keys | [`auth.md`](./auth.md) — `corvid auth migrate` + `corvid auth keys issue/revoke/rotate` |
+| Persistence + migrations | [`persistence.md`](./persistence.md) — `corvid migrate up/down/status` |
+| Background jobs + cron | [`jobs.md`](./jobs.md) — `corvid jobs run --workers=N` |
+| Observability + traces + evals | [`observability.md`](./observability.md) — `corvid observe list/show/explain` |
+| Connectors (Gmail / Slack / etc.) | [`connectors.md`](./connectors.md) |
+| Deploy + signed attestation | the deploy + release CLI; see `corvid deploy package` + `corvid release` |
 
-[server.rate_limit]
-requests_per_minute = 1000
-burst = 100
+## Scope boundaries — out of scope for v1.0
 
-[server.auth]
-jwt_jwks_url = "https://auth.example.com/.well-known/jwks.json"
-required_claims = ["sub", "tenant"]
-```
+- Multi-process worker pool (current shape: one server process
+  per binary; horizontal scaling lives at the operator's
+  load-balancer tier).
+- Custom middleware injection from Corvid source (the shipped
+  middleware pipeline is the renderer-fixed set; per-app custom
+  middleware is post-v1.0).
+- Per-route source-level CORS / rate-limit / body-limit
+  configuration (today these are middleware-pipeline-fixed; the
+  per-route ergonomic surface is post-v1.0).
+- WebSockets, server-sent events, long-poll HTTP streaming (the
+  v1.0 backend serves request-response HTTP; streaming
+  primitives are post-v1.0).
 
-## Observability
+## Pointers to the registry contracts
 
-Every request emits structured logs and OTel spans. The `/metrics`
-endpoint exposes Prometheus-format counters: requests by route, by
-status, by effect-row, plus handler-isolation timeouts and body-limit
-hits.
-
-See **[Observability](/docs/observability)**.
-
-## Scope boundaries
-
-Out of scope for v1.0:
-
-- Multi-process worker pool (current shape: one server process,
-  subprocess-spawned handlers per request).
-- Custom middleware injection from Corvid source (current set is
-  fixed by the renderer).
+| Property | Registry id | Class | Where |
+|---|---|---|---|
+| Dangerous route handler requires approve | `approval.dangerous_call_requires_token` | Static | `crates/corvid-types/src/checker/` |
+| Effect row propagates through route body | `effect_row.body_completeness` | Static | `crates/corvid-types/src/effects.rs` |
+| Cross-tenant value refused at compile time | `tenant.cross_tenant_compile_error` | OutOfScope | gated on `35V2-P39-I-post-v1.0-auth-syntax-sugar` |
+| Routes carry signed claim manifest | `claim.audit_runnable_artifacts` (43V) | RuntimeChecked | `crates/corvid-cli/src/claim_cmd.rs` |
+| Lineage IDs per request | `observability.lineage_completeness` | RuntimeChecked | `crates/corvid-runtime/src/lineage.rs` |
