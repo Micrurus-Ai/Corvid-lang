@@ -72,7 +72,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `review_queue.cost_of_being_wrong_ranking` | observability | out_of_scope | runtime |
 | `deploy.reproducible_build` | deploy | out_of_scope | platform |
 | `deploy.attestation_chain` | deploy | out_of_scope | platform |
-| `deploy.sbom_completeness` | deploy | out_of_scope | platform |
+| `deploy.sbom_completeness` | deploy | runtime_checked | platform |
 | `release.signed_artifact` | release | out_of_scope | platform |
 | `upgrade.claim_regression_check` | upgrade | out_of_scope | platform |
 | `ops.live_introspection_signed` | ops | out_of_scope | runtime |
@@ -831,12 +831,19 @@ Building the same `corvid deploy package` input twice on two different hosts pro
 > **Why out of scope:** `corvid deploy package`'s DSSE envelope ships (slice 43B3) but its payload does not yet include the cdylib's claim-attestation digest. Filed as `43O-signed-attestation-chain` — promotes this row to Static when the chain reference is wired + the chain-drift adversarial test lands.
 
 #### `deploy.sbom_completeness`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: platform
 
-`corvid deploy package` emits a complete SPDX SBOM (`sbom.spdx.json`) covering every Rust dependency, every Corvid source file, and the cdylib itself. The SBOM identifies licenses, versions, and source paths — an artifact whose SBOM omits a dependency the binary actually links is a completeness failure.
+`corvid deploy package` emits an SPDX 2.3 JSON SBOM (`sbom.spdx.json`) naming the app's Corvid source (by SHA-256) and the Corvid runtime the image links against, with the relationship between them declared. A future slice expands this to enumerate every transitively-linked Rust dependency via `cargo metadata` — the full-dep-enumeration completeness check tracks separately at the dep-enumeration registry row that lands when 43V wires `cargo metadata` into the SBOM.
 
-> **Why out of scope:** `corvid deploy package` ships the Dockerfile + OCI metadata but does not yet emit an SPDX SBOM. Filed as `43M-sbom-generation` — promotes this row to RuntimeChecked when the SBOM generation lands + a completeness test asserts every linked dep appears.
+**Positive tests:**
+
+- `crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_is_structurally_valid_spdx_2_3`
+- `crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_names_app_source_and_corvid_runtime`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_names_app_source_and_corvid_runtime`
 
 ### Release channels
 

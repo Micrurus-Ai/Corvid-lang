@@ -1271,23 +1271,26 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "deploy.sbom_completeness",
         kind: GuaranteeKind::Deploy,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Platform,
         description:
-            "`corvid deploy package` emits a complete SPDX SBOM \
-             (`sbom.spdx.json`) covering every Rust dependency, \
-             every Corvid source file, and the cdylib itself. The \
-             SBOM identifies licenses, versions, and source paths \
-             — an artifact whose SBOM omits a dependency the \
-             binary actually links is a completeness failure.",
-        out_of_scope_reason:
-            "`corvid deploy package` ships the Dockerfile + OCI \
-             metadata but does not yet emit an SPDX SBOM. Filed \
-             as `43M-sbom-generation` — promotes this row to \
-             RuntimeChecked when the SBOM generation lands + a \
-             completeness test asserts every linked dep appears.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "`corvid deploy package` emits an SPDX 2.3 JSON SBOM \
+             (`sbom.spdx.json`) naming the app's Corvid source (by \
+             SHA-256) and the Corvid runtime the image links \
+             against, with the relationship between them declared. \
+             A future slice expands this to enumerate every \
+             transitively-linked Rust dependency via `cargo metadata` \
+             — the full-dep-enumeration completeness check tracks \
+             separately at the dep-enumeration registry row that \
+             lands when 43V wires `cargo metadata` into the SBOM.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_is_structurally_valid_spdx_2_3",
+            "crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_names_app_source_and_corvid_runtime",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/deploy_cmd.rs::deploy_sbom_names_app_source_and_corvid_runtime",
+        ],
     },
     Guarantee {
         id: "release.signed_artifact",

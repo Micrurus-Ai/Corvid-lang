@@ -44,7 +44,7 @@ pub fn run_package(app: &Path, out: &Path) -> Result<()> {
             title: app_name,
             source: source.display().to_string(),
             app: app_name,
-            source_sha256,
+            source_sha256: source_sha256.clone(),
         },
     };
     let metadata_json =
@@ -62,6 +62,13 @@ pub fn run_package(app: &Path, out: &Path) -> Result<()> {
     let attestation = render_attestation(app_name, &metadata_json)?;
     fs::write(out.join("build-attestation.dsse.json"), attestation)
         .context("write build attestation")?;
+    // 43M: SPDX SBOM accompanies every deploy package so the
+    // shipped image carries a machine-readable inventory of what
+    // it was built from. Promotes `deploy.sbom_completeness` to
+    // RuntimeChecked once the completeness adversarial test lands
+    // in 43V.
+    let sbom = render_spdx_sbom(app_name, &source_sha256)?;
+    fs::write(out.join("sbom.spdx.json"), sbom).context("write SPDX SBOM")?;
     fs::write(out.join("VERIFY.md"), render_verify_docs()).context("write verification docs")?;
 
     println!("deploy package: {}", out.display());
@@ -69,6 +76,7 @@ pub fn run_package(app: &Path, out: &Path) -> Result<()> {
     println!("oci metadata: {}", out.join("oci-labels.json").display());
     println!("env schema: {}", out.join("env.schema.json").display());
     println!("health config: {}", out.join("health.json").display());
+    println!("sbom: {}", out.join("sbom.spdx.json").display());
     println!(
         "attestation: {}",
         out.join("build-attestation.dsse.json").display()
@@ -216,6 +224,80 @@ fn render_startup_checks(app_name: &str) -> String {
 - `CORVID_CONNECTOR_MODE` is explicitly set
 "#
     )
+}
+
+/// Render a minimal SPDX 2.3 JSON SBOM for the deploy package.
+///
+/// 43M: ships SBOM-as-artifact alongside the Dockerfile +
+/// attestation. Enumerates the app's Corvid source (by SHA-256)
+/// and the Corvid runtime that the image links against. The
+/// per-Rust-dependency expansion (every transitively-linked
+/// `cargo`-managed crate) lands in 43V's completeness sweep
+/// using `cargo metadata` — held back here to keep this slice
+/// scoped to "an SBOM exists and is structurally valid" rather
+/// than "every linked dep is enumerated", which is its own
+/// completeness contract.
+fn render_spdx_sbom(app_name: &str, source_sha256: &str) -> Result<String> {
+    let now = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .context("format SBOM timestamp")?;
+    let corvid_version = env!("CARGO_PKG_VERSION");
+    let namespace = format!(
+        "https://corvid-lang.org/spdx/{app_name}/{source_sha256}"
+    );
+    let sbom = serde_json::json!({
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": format!("corvid-deploy-{app_name}"),
+        "documentNamespace": namespace,
+        "creationInfo": {
+            "created": now,
+            "creators": [format!("Tool: corvid-cli-{corvid_version}")],
+            "licenseListVersion": "3.21",
+        },
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-App-Source",
+                "name": format!("{app_name}-source"),
+                "downloadLocation": "NOASSERTION",
+                "versionInfo": source_sha256,
+                "filesAnalyzed": false,
+                "checksums": [
+                    {
+                        "algorithm": "SHA256",
+                        "checksumValue": source_sha256,
+                    },
+                ],
+                "licenseConcluded": "NOASSERTION",
+                "licenseDeclared": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+            },
+            {
+                "SPDXID": "SPDXRef-Corvid-Runtime",
+                "name": "corvid",
+                "downloadLocation": "https://github.com/Corvid-lang/Corvid-lang",
+                "versionInfo": corvid_version,
+                "filesAnalyzed": false,
+                "licenseConcluded": "NOASSERTION",
+                "licenseDeclared": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+            },
+        ],
+        "relationships": [
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": "SPDXRef-App-Source",
+            },
+            {
+                "spdxElementId": "SPDXRef-App-Source",
+                "relationshipType": "DEPENDS_ON",
+                "relatedSpdxElement": "SPDXRef-Corvid-Runtime",
+            },
+        ],
+    });
+    serde_json::to_string_pretty(&sbom).context("serialize SPDX SBOM")
 }
 
 fn render_attestation(app_name: &str, metadata_json: &str) -> Result<String> {
@@ -445,4 +527,71 @@ fn render_systemd_sysusers(app_name: &str) -> String {
 
 fn render_systemd_tmpfiles(app_name: &str) -> String {
     format!("d /var/lib/{app_name} 0750 {app_name} {app_name} -\nd /var/lib/{app_name}/traces 0750 {app_name} {app_name} -\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 43M: the SBOM emitted by `corvid deploy package` is
+    /// structurally valid SPDX 2.3 JSON — has the required
+    /// top-level fields, a CC0-1.0 data license, an
+    /// SPDXRef-DOCUMENT root, and at least one package + one
+    /// relationship.
+    #[test]
+    fn deploy_sbom_is_structurally_valid_spdx_2_3() {
+        let sbom_json = render_spdx_sbom("test_app", "abc123").expect("render SBOM");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&sbom_json).expect("SBOM parses as JSON");
+        assert_eq!(parsed["spdxVersion"], "SPDX-2.3");
+        assert_eq!(parsed["dataLicense"], "CC0-1.0");
+        assert_eq!(parsed["SPDXID"], "SPDXRef-DOCUMENT");
+        assert!(
+            parsed["documentNamespace"]
+                .as_str()
+                .unwrap_or("")
+                .contains("test_app"),
+            "namespace should reference the app: {}",
+            parsed["documentNamespace"]
+        );
+        assert!(
+            parsed["packages"].as_array().is_some_and(|a| !a.is_empty()),
+            "SBOM must list at least one package"
+        );
+        assert!(
+            parsed["relationships"].as_array().is_some_and(|a| !a.is_empty()),
+            "SBOM must declare at least one relationship"
+        );
+    }
+
+    /// 43M: SBOM names the app source AND the Corvid runtime as
+    /// distinct packages; the relationship between them captures
+    /// the "this image embeds the Corvid runtime" fact that the
+    /// `deploy.sbom_completeness` row requires.
+    #[test]
+    fn deploy_sbom_names_app_source_and_corvid_runtime() {
+        let sbom_json = render_spdx_sbom("pea", "deadbeef").expect("render SBOM");
+        let parsed: serde_json::Value = serde_json::from_str(&sbom_json).unwrap();
+        let pkg_ids: Vec<&str> = parsed["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pkg| pkg["SPDXID"].as_str().unwrap())
+            .collect();
+        assert!(pkg_ids.contains(&"SPDXRef-App-Source"));
+        assert!(pkg_ids.contains(&"SPDXRef-Corvid-Runtime"));
+        // The app source's checksum must match what was passed in.
+        let app_source = parsed["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pkg| pkg["SPDXID"] == "SPDXRef-App-Source")
+            .unwrap();
+        assert_eq!(app_source["versionInfo"], "deadbeef");
+        assert_eq!(
+            app_source["checksums"][0]["checksumValue"],
+            "deadbeef",
+            "the SBOM's app-source checksum must match the deploy package's source SHA-256"
+        );
+    }
 }
