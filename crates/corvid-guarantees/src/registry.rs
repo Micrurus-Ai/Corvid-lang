@@ -1234,14 +1234,21 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              timestamps, hostnames, paths — and the verification \
              CI must reject it.",
         out_of_scope_reason:
-            "`corvid deploy package` shipped at slice 43B emits a \
-             Dockerfile + OCI metadata + DSSE attestation, but the \
-             reproducible-build verification CI workflow that \
-             rebuilds on a second runner and diffs the artifacts \
-             has not landed. Filed as `43R-reproducible-build-ci` — \
-             promotes this row to RuntimeChecked when the CI \
-             workflow ships + the diff-on-second-build sentinel \
-             passes.",
+            "Slice 43R landed the reproducible-build CI workflow \
+             at `.github/workflows/reproducible-build.yml`. The \
+             workflow builds the corvid CLI twice on Ubuntu 22.04 \
+             with SOURCE_DATE_EPOCH pinned to the commit time and \
+             two separate target directories, SHA-256s the outputs, \
+             and fails if the hashes differ. The workflow has not \
+             yet completed a green run on `main` — until that first \
+             run lands green (or we close the determinism gap it \
+             surfaces), the row stays OutOfScope. Promotion is \
+             mechanical at that point: change class to \
+             RuntimeChecked + add the workflow run URL as the test \
+             reference. Cross-platform (Ubuntu / macOS / Windows) \
+             and cross-host reproducibility are explicit non-scope \
+             for this row — they need deterministic-toolchain work \
+             beyond the v1.0 surface.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },

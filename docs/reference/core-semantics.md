@@ -820,7 +820,7 @@ Redacting the same lineage event twice with the same `LineageRedactionPolicy` yi
 
 Building the same `corvid deploy package` input twice on two different hosts produces bit-identical signed artifacts (binary + SBOM + DSSE attestation envelope). A second build that differs is a build-environment leak — timestamps, hostnames, paths — and the verification CI must reject it.
 
-> **Why out of scope:** `corvid deploy package` shipped at slice 43B emits a Dockerfile + OCI metadata + DSSE attestation, but the reproducible-build verification CI workflow that rebuilds on a second runner and diffs the artifacts has not landed. Filed as `43R-reproducible-build-ci` — promotes this row to RuntimeChecked when the CI workflow ships + the diff-on-second-build sentinel passes.
+> **Why out of scope:** Slice 43R landed the reproducible-build CI workflow at `.github/workflows/reproducible-build.yml`. The workflow builds the corvid CLI twice on Ubuntu 22.04 with SOURCE_DATE_EPOCH pinned to the commit time and two separate target directories, SHA-256s the outputs, and fails if the hashes differ. The workflow has not yet completed a green run on `main` — until that first run lands green (or we close the determinism gap it surfaces), the row stays OutOfScope. Promotion is mechanical at that point: change class to RuntimeChecked + add the workflow run URL as the test reference. Cross-platform (Ubuntu / macOS / Windows) and cross-host reproducibility are explicit non-scope for this row — they need deterministic-toolchain work beyond the v1.0 surface.
 
 #### `deploy.attestation_chain`
 - **class**: runtime_checked

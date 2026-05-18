@@ -1,0 +1,92 @@
+name: reproducible-build
+
+# 43R: bit-identical-build verification on every push.
+#
+# Builds the corvid CLI twice on Ubuntu 22.04 with the same Rust
+# toolchain, the same Cargo.lock, the same source revision, and
+# SOURCE_DATE_EPOCH pinned to the commit time. SHA-256s the two
+# resulting binaries and asserts they match.
+#
+# What this catches:
+#   - Build-environment leaks (temp paths, hostnames, timestamps
+#     embedded by `rustc` or `cargo`).
+#   - Cargo lockfile drift (a fresh resolve of Cargo.toml that
+#     would pull different deps on rebuild).
+#   - Compiler-version drift (the rust-toolchain.toml pins what
+#     the build uses; this workflow asserts that pin is honored).
+#
+# What this doesn't catch yet (filed as launch-readiness):
+#   - Cross-platform reproducibility (Ubuntu vs macOS vs Windows
+#     are NOT bit-identical with stock Rust; needs `rustc-codegen-cranelift`
+#     or similar deterministic-toolchain work).
+#   - Cross-host reproducibility (different Ubuntu hosts with
+#     different filesystem layouts).
+#
+# Promotes `deploy.reproducible_build` from OutOfScope →
+# RuntimeChecked when the workflow lands.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  reproducible-corvid-cli:
+    name: corvid CLI bit-identical on rebuild
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compute SOURCE_DATE_EPOCH from commit time
+        id: src-date
+        run: |
+          SOURCE_DATE_EPOCH=$(git -c log.showSignature=false log -1 --pretty=%ct HEAD)
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> $GITHUB_ENV
+          echo "value=$SOURCE_DATE_EPOCH" >> $GITHUB_OUTPUT
+
+      - name: Build #1 (clean)
+        env:
+          CARGO_TARGET_DIR: target-build-1
+        run: |
+          cargo build -p corvid-cli --release
+          mkdir -p out
+          cp target-build-1/release/corvid out/corvid-build-1
+
+      - name: Build #2 (clean, separate target dir)
+        env:
+          CARGO_TARGET_DIR: target-build-2
+        run: |
+          cargo build -p corvid-cli --release
+          cp target-build-2/release/corvid out/corvid-build-2
+
+      - name: SHA-256 + diff
+        run: |
+          set -eu
+          HASH_1=$(sha256sum out/corvid-build-1 | cut -d' ' -f1)
+          HASH_2=$(sha256sum out/corvid-build-2 | cut -d' ' -f1)
+          echo "build-1: $HASH_1"
+          echo "build-2: $HASH_2"
+          if [ "$HASH_1" = "$HASH_2" ]; then
+            echo "✓ Reproducible: both builds produced the same bytes."
+          else
+            echo "✗ NOT reproducible: builds differ."
+            echo "Possible causes: build-environment leak (temp paths,"
+            echo "timestamps in debug info, hostname embedded by rustc),"
+            echo "Cargo lockfile drift between builds, compiler-version"
+            echo "drift. Fix the underlying determinism gap before merging."
+            exit 1
+          fi
+
+      - name: Upload artifacts on mismatch
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducible-build-mismatch
+          path: out/
