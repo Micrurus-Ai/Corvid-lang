@@ -24,7 +24,7 @@ struct OciLabels<'a> {
     source_sha256: String,
 }
 
-pub fn run_package(app: &Path, out: &Path) -> Result<()> {
+pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> {
     let app_name = app
         .file_name()
         .and_then(|name| name.to_str())
@@ -34,6 +34,24 @@ pub fn run_package(app: &Path, out: &Path) -> Result<()> {
         fs::read(&source).with_context(|| format!("read app source `{}`", source.display()))?;
     fs::create_dir_all(out)
         .with_context(|| format!("create deploy package `{}`", out.display()))?;
+
+    // 43O: chain anchor for the deploy attestation. When `--cdylib`
+    // is provided, the SHA-256 of the cdylib's bytes goes into the
+    // attestation payload — the cdylib carries its own embedded
+    // claim attestation, so binding the deploy attestation to the
+    // cdylib's bytes binds the whole chain. If `--cdylib` is not
+    // provided, the chain is incomplete and the attestation marks
+    // it explicitly so downstream verification refuses to trust an
+    // unchained deploy.
+    let cdylib_sha256 = match cdylib {
+        Some(path) => {
+            let bytes = fs::read(path).with_context(|| {
+                format!("read cdylib for attestation chain `{}`", path.display())
+            })?;
+            Some(hex::encode(Sha256::digest(&bytes)))
+        }
+        None => None,
+    };
 
     fs::write(out.join("Dockerfile"), render_dockerfile(app_name)).context("write Dockerfile")?;
 
@@ -59,7 +77,7 @@ pub fn run_package(app: &Path, out: &Path) -> Result<()> {
         render_startup_checks(app_name),
     )
     .context("write startup checks")?;
-    let attestation = render_attestation(app_name, &metadata_json)?;
+    let attestation = render_attestation(app_name, &metadata_json, cdylib_sha256.as_deref())?;
     fs::write(out.join("build-attestation.dsse.json"), attestation)
         .context("write build attestation")?;
     // 43M: SPDX SBOM accompanies every deploy package so the
@@ -312,13 +330,34 @@ fn render_spdx_sbom(app_name: &str, source_sha256: &str) -> Result<String> {
     serde_json::to_string_pretty(&sbom).context("serialize SPDX SBOM")
 }
 
-fn render_attestation(app_name: &str, metadata_json: &str) -> Result<String> {
+fn render_attestation(
+    app_name: &str,
+    metadata_json: &str,
+    cdylib_sha256: Option<&str>,
+) -> Result<String> {
     let signing_key = std::env::var("CORVID_DEPLOY_SIGNING_KEY")
         .context("CORVID_DEPLOY_SIGNING_KEY is required for deploy package attestation")?;
     let key = load_signing_key(&KeySource::Env(signing_key))
         .map_err(|err| anyhow::anyhow!("load deploy signing key: {err}"))?;
+    // 43O: payload carries the attestation-chain anchor. When
+    // `cdylib_sha256` is `Some`, the deploy attestation binds to
+    // the exact cdylib bytes that ship in the image — the cdylib
+    // itself carries its `corvid claim --explain` embedded
+    // attestation, so the chain `claim --explain → cdylib bytes →
+    // deploy attestation` cannot drift without changing one of
+    // the digests. `chain_status` is the explicit honesty marker:
+    // `"complete"` when bound, `"incomplete"` when the operator
+    // skipped `--cdylib`.
+    let (chain_status, cdylib_field) = match cdylib_sha256 {
+        Some(digest) => ("complete", format!("\"{digest}\"")),
+        None => ("incomplete", "null".to_string()),
+    };
     let payload = format!(
-        "{{\"schema\":\"corvid.deploy.attestation.v1\",\"app\":\"{app_name}\",\"oci\":{metadata_json}}}"
+        "{{\"schema\":\"corvid.deploy.attestation.v1\",\
+         \"app\":\"{app_name}\",\
+         \"chain_status\":\"{chain_status}\",\
+         \"cdylib_sha256\":{cdylib_field},\
+         \"oci\":{metadata_json}}}"
     );
     let envelope = sign_envelope(
         payload.as_bytes(),
@@ -574,6 +613,71 @@ mod tests {
             parsed["relationships"].as_array().is_some_and(|a| !a.is_empty()),
             "SBOM must declare at least one relationship"
         );
+    }
+
+    /// 43O: when `corvid deploy package` runs without `--cdylib`,
+    /// the attestation payload marks the chain as incomplete with
+    /// `cdylib_sha256: null` + `chain_status: "incomplete"`.
+    /// Downstream verification refuses to trust an unchained
+    /// deploy attestation.
+    #[test]
+    fn deploy_attestation_marks_chain_incomplete_without_cdylib() {
+        // Use the `inner` payload format the render function emits
+        // (the wrapper sign_envelope adds a DSSE envelope around
+        // it). Test the payload structure by exercising the public
+        // render path directly via a controlled key.
+        std::env::set_var(
+            "CORVID_DEPLOY_SIGNING_KEY",
+            "0".repeat(64),
+        );
+        let envelope =
+            render_attestation("test_app", "{\"image\":\"test_app\"}", None).expect("render");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&envelope).expect("envelope JSON");
+        // DSSE envelope base64s the payload; decode + parse.
+        use base64::Engine as _;
+        let payload_b64 = parsed["payload"]
+            .as_str()
+            .expect("DSSE payload base64 field");
+        let payload_bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload_b64)
+            .expect("decode DSSE payload");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&payload_bytes).expect("payload JSON");
+        assert_eq!(payload["chain_status"], "incomplete");
+        assert!(payload["cdylib_sha256"].is_null());
+        assert_eq!(payload["app"], "test_app");
+        std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
+    }
+
+    /// 43O: when `--cdylib` is provided, the attestation payload
+    /// carries the cdylib's SHA-256 + `chain_status: "complete"`.
+    /// A second build with a different cdylib produces a different
+    /// digest, breaking the chain as intended.
+    #[test]
+    fn deploy_attestation_binds_to_cdylib_digest_when_provided() {
+        std::env::set_var(
+            "CORVID_DEPLOY_SIGNING_KEY",
+            "0".repeat(64),
+        );
+        let cdylib_digest = "abc123def456";
+        let envelope =
+            render_attestation("test_app", "{\"image\":\"test_app\"}", Some(cdylib_digest))
+                .expect("render");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&envelope).expect("envelope JSON");
+        use base64::Engine as _;
+        let payload_b64 = parsed["payload"]
+            .as_str()
+            .expect("DSSE payload base64 field");
+        let payload_bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload_b64)
+            .expect("decode DSSE payload");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&payload_bytes).expect("payload JSON");
+        assert_eq!(payload["chain_status"], "complete");
+        assert_eq!(payload["cdylib_sha256"], cdylib_digest);
+        std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
     }
 
     /// 43N: the Dockerfile rendered by `corvid deploy package`

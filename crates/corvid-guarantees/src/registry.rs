@@ -1248,25 +1248,27 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "deploy.attestation_chain",
         kind: GuaranteeKind::Deploy,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Platform,
         description:
-            "`corvid deploy package`'s DSSE envelope references the \
-             cdylib's `corvid claim --explain` DSSE digest, so a \
-             deploy attestation cannot be detached from the claim \
-             attestation it was built against. Two envelopes whose \
-             chain references don't match means the deploy package \
-             was built from a different cdylib than its attestation \
-             claims, and the verification refuses.",
-        out_of_scope_reason:
-            "`corvid deploy package`'s DSSE envelope ships (slice \
-             43B3) but its payload does not yet include the \
-             cdylib's claim-attestation digest. Filed as \
-             `43O-signed-attestation-chain` — promotes this row to \
-             Static when the chain reference is wired + the \
-             chain-drift adversarial test lands.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "`corvid deploy package --cdylib <path>` binds the deploy \
+             attestation to the SHA-256 of the cdylib's bytes; the \
+             cdylib itself carries its `corvid claim --explain` \
+             embedded attestation, so the chain `claim --explain → \
+             cdylib bytes → deploy attestation` cannot drift without \
+             changing one of the digests. The attestation payload \
+             carries `chain_status: \"complete\"` + `cdylib_sha256: \
+             <hex>` when `--cdylib` is provided; `chain_status: \
+             \"incomplete\"` + `cdylib_sha256: null` when omitted so \
+             downstream verification can refuse an unchained \
+             deploy.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/deploy_cmd.rs::deploy_attestation_binds_to_cdylib_digest_when_provided",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/deploy_cmd.rs::deploy_attestation_marks_chain_incomplete_without_cdylib",
+        ],
     },
     Guarantee {
         id: "deploy.sbom_completeness",

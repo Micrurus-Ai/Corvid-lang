@@ -412,9 +412,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Doctor) => cmd_doctor_v2(),
         Some(Command::Audit { file, json }) => audit_cmd::run_audit(&file, json),
         Some(Command::Deploy { command }) => match command {
-            DeployCommand::Package { app, out } => {
+            DeployCommand::Package { app, out, cdylib } => {
                 let out = out.unwrap_or_else(|| app.join("target").join("deploy-package"));
-                deploy_cmd::run_package(&app, &out).map(|_| 0)
+                deploy_cmd::run_package(&app, &out, cdylib.as_deref()).map(|_| 0)
             }
             DeployCommand::Compose { app, out } => {
                 let out = out.unwrap_or_else(|| app.join("target").join("compose"));

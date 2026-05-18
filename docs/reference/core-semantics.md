@@ -71,7 +71,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `eval.promotion_signed_lineage` | observability | runtime_checked | runtime |
 | `review_queue.cost_of_being_wrong_ranking` | observability | out_of_scope | runtime |
 | `deploy.reproducible_build` | deploy | out_of_scope | platform |
-| `deploy.attestation_chain` | deploy | out_of_scope | platform |
+| `deploy.attestation_chain` | deploy | runtime_checked | platform |
 | `deploy.sbom_completeness` | deploy | runtime_checked | platform |
 | `release.signed_artifact` | release | out_of_scope | platform |
 | `upgrade.claim_regression_check` | upgrade | out_of_scope | platform |
@@ -823,12 +823,18 @@ Building the same `corvid deploy package` input twice on two different hosts pro
 > **Why out of scope:** `corvid deploy package` shipped at slice 43B emits a Dockerfile + OCI metadata + DSSE attestation, but the reproducible-build verification CI workflow that rebuilds on a second runner and diffs the artifacts has not landed. Filed as `43R-reproducible-build-ci` — promotes this row to RuntimeChecked when the CI workflow ships + the diff-on-second-build sentinel passes.
 
 #### `deploy.attestation_chain`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: platform
 
-`corvid deploy package`'s DSSE envelope references the cdylib's `corvid claim --explain` DSSE digest, so a deploy attestation cannot be detached from the claim attestation it was built against. Two envelopes whose chain references don't match means the deploy package was built from a different cdylib than its attestation claims, and the verification refuses.
+`corvid deploy package --cdylib <path>` binds the deploy attestation to the SHA-256 of the cdylib's bytes; the cdylib itself carries its `corvid claim --explain` embedded attestation, so the chain `claim --explain → cdylib bytes → deploy attestation` cannot drift without changing one of the digests. The attestation payload carries `chain_status: "complete"` + `cdylib_sha256: <hex>` when `--cdylib` is provided; `chain_status: "incomplete"` + `cdylib_sha256: null` when omitted so downstream verification can refuse an unchained deploy.
 
-> **Why out of scope:** `corvid deploy package`'s DSSE envelope ships (slice 43B3) but its payload does not yet include the cdylib's claim-attestation digest. Filed as `43O-signed-attestation-chain` — promotes this row to Static when the chain reference is wired + the chain-drift adversarial test lands.
+**Positive tests:**
+
+- `crates/corvid-cli/src/deploy_cmd.rs::deploy_attestation_binds_to_cdylib_digest_when_provided`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/deploy_cmd.rs::deploy_attestation_marks_chain_incomplete_without_cdylib`
 
 #### `deploy.sbom_completeness`
 - **class**: runtime_checked

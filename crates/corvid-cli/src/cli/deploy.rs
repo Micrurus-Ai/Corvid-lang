@@ -10,6 +10,15 @@ pub enum DeployCommand {
         /// Output directory for generated artifacts.
         #[arg(long, value_name = "DIR")]
         out: Option<PathBuf>,
+        /// Path to the signed cdylib this deploy package will host.
+        /// When provided, the build attestation's payload includes
+        /// the cdylib's SHA-256 so the chain from `corvid claim
+        /// --explain <cdylib>` to `corvid deploy package` cannot
+        /// drift. Without `--cdylib`, the attestation marks the
+        /// chain as incomplete and operators must record the cdylib
+        /// digest manually.
+        #[arg(long, value_name = "PATH")]
+        cdylib: Option<PathBuf>,
     },
     /// Emit Docker Compose deployment artifacts.
     Compose {
