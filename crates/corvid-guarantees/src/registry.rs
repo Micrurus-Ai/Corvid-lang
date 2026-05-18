@@ -1322,25 +1322,31 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "upgrade.claim_regression_check",
         kind: GuaranteeKind::Upgrade,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Platform,
         description:
-            "`corvid upgrade --check` consults the current binary's \
-             `corvid claim --explain` output and the upgrade target's \
-             claim manifest, and refuses to apply the upgrade if any \
-             registered guarantee id would be removed or downgraded \
-             (Static → RuntimeChecked, or RuntimeChecked → OutOfScope). \
-             The user sees the specific guarantee id + what it would \
-             weaken to before the upgrade applies.",
-        out_of_scope_reason:
-            "`corvid upgrade check` ships for syntax + stdlib \
-             migrations (slice 43E1/E2). The claim-regression \
-             comparison + rejection path has not landed. Filed as \
-             `43Q-upgrade-claim-regression` — promotes this row to \
-             Static when the comparison + rejection ships + the \
-             refused-weakening adversarial test lands.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "`corvid upgrade check --claims-current <path> \
+             --claims-target <path>` compares two claim manifests \
+             and refuses (exit 1) if the upgrade target removes any \
+             registered guarantee id OR downgrades any class \
+             (Static → RuntimeChecked / OutOfScope, RuntimeChecked → \
+             OutOfScope). Upgrades (OutOfScope → RuntimeChecked, \
+             etc.) are NOT regressions. The two manifests are JSON \
+             arrays of `{id, class}` rows the operator produces via \
+             `corvid claim --explain --json <cdylib>` against the \
+             current and target binaries. The `--json` mode of \
+             `claim --explain` itself lands as a sibling launch- \
+             readiness slice — the comparison + rejection is what \
+             this row promises.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/upgrade_cmd.rs::claim_regression_check_passes_when_manifests_match",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/upgrade_cmd.rs::claim_regression_check_flags_removed_guarantee",
+            "crates/corvid-cli/src/upgrade_cmd.rs::claim_regression_check_flags_class_downgrades_only",
+            "crates/corvid-cli/src/upgrade_cmd.rs::upgrade_check_refuses_unpaired_claim_manifest_flag",
+        ],
     },
     Guarantee {
         id: "ops.live_introspection_signed",

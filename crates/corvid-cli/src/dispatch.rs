@@ -446,7 +446,17 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             release_cmd::run_release(&channel, version.as_deref(), &out).map(|_| 0)
         }
         Some(Command::Upgrade { command }) => match command {
-            UpgradeCommand::Check { path, json } => upgrade_cmd::run_check(&path, json),
+            UpgradeCommand::Check {
+                path,
+                json,
+                claims_current,
+                claims_target,
+            } => upgrade_cmd::run_check(
+                &path,
+                json,
+                claims_current.as_deref(),
+                claims_target.as_deref(),
+            ),
             UpgradeCommand::Apply { path, json } => upgrade_cmd::run_apply(&path, json),
         },
         Some(Command::Migrate { command }) => match command {
