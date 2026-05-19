@@ -1026,12 +1026,27 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "Lexical-scope approve-presence check ships \
              (`approval.dangerous_call_requires_token` + \
              `approval.token_lexical_only`). The role-coverage \
-             extension — typecheck fails when a reachable caller's \
-             role is not covered by the approve's `required_role` \
-             — needs a typechecker pass that walks the call graph \
-             from every route / job entry point. Filed as launch- \
-             readiness slice `35V2-P39-J-LR-role-coverage-reachability` \
-             — promotes this row to Static when the analysis ships.",
+             extension needs a typechecker pass that walks the \
+             call graph from every route / job entry point AND \
+             a source-level role-declaration syntax for the pass \
+             to reason over. Recon under slice \
+             `35V2-P39-J-LR-role-coverage-reachability` found the \
+             role syntax does not exist in the AST today \
+             (`AgentAttribute` variants today are `Replayable`, \
+             `Deterministic`, `Wrapping`, `GroundedPure` — no \
+             `@requires(role)` or `@approval(role)` variant). \
+             The required source-level surface is filed at \
+             post-v1.0 `35V2-P39-I-post-v1.0-auth-syntax-sugar` \
+             (the `auth` / `tenant` / `role` / `permission` / \
+             `approval Name:` / `@requires` / `@approval` \
+             keyword set). The role-coverage typechecker pass \
+             therefore moves to post-v1.0 too, blocked on the \
+             same syntax dependency. The runtime half of the \
+             confused-deputy threat — approve-presence check + \
+             role-fingerprint match at request time — already \
+             ships (test: \
+             `approval_bypass_rejects_confused_deputy_self_approval` \
+             in `crates/corvid-runtime/src/approval_queue.rs`).",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
     },

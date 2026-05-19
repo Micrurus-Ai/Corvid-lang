@@ -5171,3 +5171,42 @@ Phase 39 adversarial-corpus is now **10/10**. The 11th item
 ergonomic-sugar rows (filed at `35V2-P39-I` post-v1.0) are
 genuinely waiting on the parser-level surface, not on more
 runtime work.
+
+## 35V2-P39-J refile — role-coverage typechecker pass is post-v1.0 (2026-05-19)
+
+Recon under the slice found
+`35V2-P39-J-LR-role-coverage-reachability` is genuinely blocked,
+not just unshipped. The typechecker pass needs a source-level
+role-declaration syntax to reason over, and that syntax does not
+exist in the AST: `AgentAttribute` today is `Replayable`,
+`Deterministic`, `Wrapping`, `GroundedPure` only — no
+`@requires(role)` or `@approval(role)` variant. The required
+surface is filed at post-v1.0
+`35V2-P39-I-post-v1.0-auth-syntax-sugar` (the
+`auth`/`tenant`/`role`/`permission`/`approval Name:`/`@requires`/
+`@approval` keyword set).
+
+The honest correction: the J-LR row moves to post-v1.0
+alongside its syntax dependency. Filing it as launch-readiness
+was an audit-time optimism — the audit assumed the AST
+already carried the role concept and only the typechecker
+pass was missing; recon found both halves are missing.
+
+`approval.confused_deputy_typecheck` registry-row reason
+tightened to record the dependency chain explicitly and name
+the runtime test that already covers the threat
+(`approval_bypass_rejects_confused_deputy_self_approval` in
+`crates/corvid-runtime/src/approval_queue.rs`). The Phase 39
+adversarial-corpus 10/10 coverage already accounts for the
+runtime half; only the *compile-time* promotion is post-v1.0.
+
+This is a new drift mode the verification round did not
+anticipate: **launch-readiness-misfile**. The cross-phase round
+found OutOfScope rows where the runtime work had silently
+shipped (the OutOfScope-promotion-drift pattern); this finding
+is the reverse — a row whose unshipped surface depends on a
+*different* unshipped surface that the audit had already
+correctly filed as post-v1.0. The chain wasn't followed
+through. Future audits should walk every filing reference to
+make sure its dependency chain bottoms out before assigning a
+class.
