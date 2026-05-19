@@ -57,6 +57,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `approval.policy_clause_static_check` | auth | out_of_scope | typecheck |
 | `approval.batch_equivalence_typed` | auth | out_of_scope | typecheck |
 | `approval.batch_refuses_cross_data_class_drift` | auth | runtime_checked | runtime |
+| `approval.explain_sources_grounded` | auth | runtime_checked | runtime |
 | `approval.confused_deputy_typecheck` | auth | out_of_scope | typecheck |
 | `connector.scope_minimum_enforced` | connector | runtime_checked | runtime |
 | `connector.write_requires_approval` | connector | out_of_scope | typecheck |
@@ -636,6 +637,20 @@ An `approval ... batch_with: same_tool, same_data_class, same_role` clause group
 **Adversarial tests:**
 
 - `crates/corvid-cli/src/approvals_cmd/interaction.rs::approvals_batch_refuses_cross_data_class_drift_without_pin`
+
+#### `approval.explain_sources_grounded`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid approvals explain <id>` renders a typed reviewer summary whose `sources` array names every audit-event id the explanation consulted — the Grounded<T> shape at the JSON layer. Every transition surfaced in the explanation has a back-reference in `sources`, so a reviewer can audit-trail every claim back to a queue row. Cross-tenant requests are refused with an explicit diagnostic rather than silently leaking state.
+
+**Positive tests:**
+
+- `crates/corvid-cli/src/approvals_cmd/explain.rs::approvals_explain_pending_carries_grounded_sources`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/approvals_cmd/explain.rs::approvals_explain_cross_tenant_refused`
 
 #### `approval.confused_deputy_typecheck`
 - **class**: out_of_scope

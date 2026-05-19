@@ -223,5 +223,49 @@ pub(crate) fn cmd_approvals(command: ApprovalsCommand) -> Result<u8> {
             }
             Ok(0)
         }
+        ApprovalsCommand::Explain {
+            approvals_state,
+            tenant,
+            approval_id,
+        } => {
+            let report = run_approvals_explain(ApprovalsExplainArgs {
+                approvals_state,
+                tenant_id: tenant,
+                approval_id,
+            })?;
+            let payload = serde_json::json!({
+                "approval_id": report.approval_id,
+                "tenant_id": report.tenant_id,
+                "lifecycle_position": report.lifecycle_position,
+                "headline": report.headline,
+                "reviewer_facts": {
+                    "status": report.reviewer_facts.status,
+                    "action": report.reviewer_facts.action,
+                    "target_kind": report.reviewer_facts.target_kind,
+                    "target_id": report.reviewer_facts.target_id,
+                    "required_role": report.reviewer_facts.required_role,
+                    "risk_level": report.reviewer_facts.risk_level,
+                    "data_class": report.reviewer_facts.data_class,
+                    "irreversible": report.reviewer_facts.irreversible,
+                    "max_cost_usd": report.reviewer_facts.max_cost_usd,
+                    "expires_at_ms": report.reviewer_facts.expires_at_ms,
+                    "created_at_ms": report.reviewer_facts.created_at_ms,
+                    "trace_id": report.reviewer_facts.trace_id,
+                },
+                "transitions": report.transitions.iter().map(|t| serde_json::json!({
+                    "audit_event_id": t.audit_event_id,
+                    "event_kind": t.event_kind,
+                    "status_before": t.status_before,
+                    "status_after": t.status_after,
+                    "actor_id": t.actor_id,
+                    "reason": t.reason,
+                    "created_at_ms": t.created_at_ms,
+                })).collect::<Vec<_>>(),
+                "suggested_next_steps": report.suggested_next_steps,
+                "sources": report.sources,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            Ok(0)
+        }
     }
 }

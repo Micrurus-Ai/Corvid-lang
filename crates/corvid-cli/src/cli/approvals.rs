@@ -132,4 +132,16 @@ pub enum ApprovalsCommand {
         #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
     },
+    /// Render a typed reviewer summary of a single approval +
+    /// every audit-event transition. Output's `sources` array
+    /// names every audit-event id the explanation consulted so a
+    /// reviewer can audit-trail every claim back to a queue row.
+    /// Assistive AI helper — deterministic by construction.
+    Explain {
+        #[arg(long, value_name = "PATH", default_value = "target/approvals.db")]
+        approvals_state: PathBuf,
+        #[arg(long)]
+        tenant: String,
+        approval_id: String,
+    },
 }

@@ -919,6 +919,29 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "approval.explain_sources_grounded",
+        kind: GuaranteeKind::Auth,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid approvals explain <id>` renders a typed \
+             reviewer summary whose `sources` array names every \
+             audit-event id the explanation consulted — the \
+             Grounded<T> shape at the JSON layer. Every transition \
+             surfaced in the explanation has a back-reference in \
+             `sources`, so a reviewer can audit-trail every claim \
+             back to a queue row. Cross-tenant requests are \
+             refused with an explicit diagnostic rather than \
+             silently leaking state.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/approvals_cmd/explain.rs::approvals_explain_pending_carries_grounded_sources",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/approvals_cmd/explain.rs::approvals_explain_cross_tenant_refused",
+        ],
+    },
+    Guarantee {
         id: "approval.confused_deputy_typecheck",
         kind: GuaranteeKind::Auth,
         class: GuaranteeClass::OutOfScope,

@@ -4860,3 +4860,46 @@ Phase 39 adversarial threat coverage: 7/10 (was 6/10). Three
 threats still file-tied to their feature slice (session-fixation,
 CSRF-bypass, scope-escalation) and ship with their respective
 launch-readiness slices.
+
+## 35V2-P39-G-LR-approvals-explain-helper closed (2026-05-19)
+
+`corvid approvals explain <id> --tenant <T>` ships the first
+half of the Phase 39 AI-helper pair. Renders a typed reviewer
+summary: lifecycle classification + a one-line headline + the
+typed reviewer facts (role, risk, cost ceiling, data class,
+irreversibility, expiry) + every audit-event transition + a
+short suggested-next-steps list. The output's `sources` array
+carries the audit-event ids the explanation consulted —
+Grounded<T> at the JSON layer: every claim back-references a
+queue row.
+
+Deterministic by construction. The "AI helper" framing names the
+*role* the output plays for a reviewer (assistive
+summarisation), not the call pattern. No LLM round trip, no
+prompt template — typed classifier over the typed approval
+record + typed audit-event trail. Same pattern as the Phase 40
+`corvid observe explain` helper.
+
+New registry row: `approval.explain_sources_grounded` ships
+RuntimeChecked from day 1 (Auth / Runtime phase) with positive
++ adversarial test refs. The cross-tenant refusal is the
+adversarial test — a request whose `--tenant` flag points at the
+wrong tenant returns Err with "different tenant", not a silent
+leak. This catches the operator-misconfiguration failure mode.
+
+Four test refs:
+  - approvals_explain_pending_carries_grounded_sources (positive,
+    grounded-sources contract)
+  - approvals_explain_after_resolution_records_approver (positive,
+    post-resolution headline + sources still grounded)
+  - approvals_explain_unknown_id_refuses (adversarial, clear
+    error on unknown id)
+  - approvals_explain_cross_tenant_refused (adversarial, explicit
+    cross-tenant refusal)
+
+Phase 39 launch-readiness tail loses one filing. The companion
+generative helper `corvid approvals policy-suggest <tool>`
+remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
+— that one *does* need a generative model + prompt + grounded
+sources for the proposed policy clause, so it's a bigger slice
+than the assistive helper.
