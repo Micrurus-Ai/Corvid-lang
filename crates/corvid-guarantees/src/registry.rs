@@ -667,26 +667,23 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "jobs.loop_bounds_enforced",
         kind: GuaranteeKind::Jobs,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
             "Agent loops driven by jobs honor max-steps, max-wall-time, \
-             max-spend, and max-tool-calls; exceeding any bound \
-             escalates or terminates with trace evidence.",
-        out_of_scope_reason:
-            "Loop-bound storage + tracking ship at \
-             `corvid-runtime::queue::loops` (set_loop_limits, \
-             loop_limits, loop_usage, record_loop_usage_report) and \
-             the multi-worker runner from 38K is in place. What's \
-             missing is the runner's enforcement hook — exceeding a \
-             bound should terminate or escalate the job with trace \
-             evidence; today the bounds are recorded but not enforced \
-             at the runner. Filed as a v1.0 launch-readiness slice \
-             (35V2-P38-D-LR-loop-bounds-enforcement-hook) — promotes \
-             this row to RuntimeChecked when the enforcement hook \
-             ships.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+             max-spend, and max-tool-calls; exceeding any bound moves \
+             the job to `loop_budget_exceeded` and writes a \
+             `loop_bound_exceeded` audit event listing the violated \
+             bounds. Post-termination `record_loop_usage` calls are \
+             refused so a stale worker cannot silently keep charging \
+             spend / steps against a terminal job.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/queue/tests/loops.rs::durable_queue_enforces_loop_budget_limits_with_audit",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/queue/tests/loops.rs::durable_queue_refuses_loop_usage_after_budget_exceeded_termination",
+        ],
     },
     Guarantee {
         id: "jobs.explain_sources_grounded",

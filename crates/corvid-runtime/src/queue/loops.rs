@@ -1,5 +1,15 @@
 use super::*;
 
+/// In-binary anchor for the `phase 35V-T1-Drift` inverse-coverage
+/// sentinel. Names the registry id whose runtime enforcement lives
+/// in `record_loop_usage_at` below: when a usage delta would push
+/// the cumulative count past a stored bound, the job is forcibly
+/// moved to `loop_budget_exceeded` and the `loop_bound_exceeded`
+/// audit event records the violated bound list — recorded
+/// evidence that the bound was honored, not just stored.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_LOOP_BOUNDS_ENFORCED: &str = "jobs.loop_bounds_enforced";
+
 impl DurableQueueRuntime {
     pub fn set_loop_limits(
         &self,

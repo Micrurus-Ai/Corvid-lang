@@ -68,6 +68,55 @@ fn durable_queue_enforces_loop_budget_limits_with_audit() {
         .is_err());
 }
 
+/// Slice 35V2-P38-D-LR (adversarial): after the runner has
+/// forcibly terminated a job for blowing its loop budget, any
+/// later `record_loop_usage` call from the same (or another)
+/// worker must be refused. Without this, a stale worker that
+/// kept running after the termination could keep charging
+/// spend / steps / tool calls against a job that is supposed to
+/// be terminal — silently defeating the budget enforcement.
+#[test]
+fn durable_queue_refuses_loop_usage_after_budget_exceeded_termination() {
+    let queue = DurableQueueRuntime::open_in_memory().unwrap();
+    let job = queue
+        .enqueue(
+            "agent_loop",
+            serde_json::json!({"n": 1}),
+            1,
+            0.10,
+            None,
+            None,
+        )
+        .unwrap();
+    queue
+        .set_loop_limits(&job.id, Some(2), None, None, None)
+        .unwrap();
+    // Push past max_steps in one update → job enters
+    // LoopBudgetExceeded with the loop_bound_exceeded audit row.
+    let exceeded = queue
+        .record_loop_usage_at(&job.id, 3, 0, 0.0, 0, "worker-a", 10_000)
+        .unwrap();
+    assert!(!exceeded.violated_bounds.is_empty());
+    let terminal = queue.get(&job.id).unwrap().unwrap();
+    assert_eq!(terminal.status, QueueJobStatus::LoopBudgetExceeded);
+
+    // A second worker, ignorant of the termination, tries to
+    // charge another step. The runtime must refuse.
+    let err = queue
+        .record_loop_usage_at(&job.id, 1, 0, 0.0, 0, "worker-b", 10_500)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("terminal") || err.contains("cannot record"),
+        "expected terminal-state rejection, got: {err}"
+    );
+
+    // The terminal state must be unchanged — no stealthy
+    // increment leaked through.
+    let still_terminal = queue.get(&job.id).unwrap().unwrap();
+    assert_eq!(still_terminal.status, QueueJobStatus::LoopBudgetExceeded);
+}
+
 #[test]
 fn durable_queue_escalates_or_terminates_stalled_loops_with_audit() {
     let queue = DurableQueueRuntime::open_in_memory().unwrap();

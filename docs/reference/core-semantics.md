@@ -46,7 +46,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `jobs.durable_resume` | jobs | runtime_checked | runtime |
 | `jobs.cron_dst_correct` | jobs | runtime_checked | runtime |
 | `jobs.approval_wait_resume` | jobs | out_of_scope | runtime |
-| `jobs.loop_bounds_enforced` | jobs | out_of_scope | runtime |
+| `jobs.loop_bounds_enforced` | jobs | runtime_checked | runtime |
 | `jobs.explain_sources_grounded` | jobs | runtime_checked | runtime |
 | `jobs.replayable_side_effects` | jobs | out_of_scope | runtime |
 | `auth.session_rotation_on_privilege_change` | auth | runtime_checked | runtime |
@@ -518,12 +518,18 @@ An approval boundary inside a job pauses the run until an approval token arrives
 > **Why out of scope:** Runtime approval-wait state ships and is reachable via `corvid jobs wait-approval` + `corvid jobs approval approve/deny` (the shipped surface). `await_approval` as a Corvid source-level keyword is filed as a post-v1.0 ergonomic improvement (35V2-P38-H), not a launch-blocker — the runtime behaviour already ships, the syntax just surfaces it more compactly.
 
 #### `jobs.loop_bounds_enforced`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: runtime
 
-Agent loops driven by jobs honor max-steps, max-wall-time, max-spend, and max-tool-calls; exceeding any bound escalates or terminates with trace evidence.
+Agent loops driven by jobs honor max-steps, max-wall-time, max-spend, and max-tool-calls; exceeding any bound moves the job to `loop_budget_exceeded` and writes a `loop_bound_exceeded` audit event listing the violated bounds. Post-termination `record_loop_usage` calls are refused so a stale worker cannot silently keep charging spend / steps against a terminal job.
 
-> **Why out of scope:** Loop-bound storage + tracking ship at `corvid-runtime::queue::loops` (set_loop_limits, loop_limits, loop_usage, record_loop_usage_report) and the multi-worker runner from 38K is in place. What's missing is the runner's enforcement hook — exceeding a bound should terminate or escalate the job with trace evidence; today the bounds are recorded but not enforced at the runner. Filed as a v1.0 launch-readiness slice (35V2-P38-D-LR-loop-bounds-enforcement-hook) — promotes this row to RuntimeChecked when the enforcement hook ships.
+**Positive tests:**
+
+- `crates/corvid-runtime/src/queue/tests/loops.rs::durable_queue_enforces_loop_budget_limits_with_audit`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/queue/tests/loops.rs::durable_queue_refuses_loop_usage_after_budget_exceeded_termination`
 
 #### `jobs.explain_sources_grounded`
 - **class**: runtime_checked

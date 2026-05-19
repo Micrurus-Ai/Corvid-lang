@@ -5002,3 +5002,47 @@ threats remain file-tied to their feature slice (CSRF-bypass
 → 35V2-P39-C-LR-csrf-middleware; scope-escalation →
 35V2-P39-K-LR-structured-scope-model). Phase 39 launch-readiness
 tail loses one more filing.
+
+## 35V2-P38-D-LR-loop-bounds-enforcement-hook closed (2026-05-19)
+
+Recon under the slice found the enforcement hook + positive
+test were already shipped: `record_loop_usage_at` in
+`crates/corvid-runtime/src/queue/loops.rs` already detects
+budget violations, transitions the job to
+`loop_budget_exceeded`, writes a `loop_bound_exceeded` audit
+event listing every violated bound, and refuses post-termination
+usage records. The positive test
+`durable_queue_enforces_loop_budget_limits_with_audit` covers
+all four bound dimensions (steps, wall_ms, spend_usd,
+tool_calls). The "OutOfScope until the hook ships" wording was
+stale from the original 38K landing — the registry row sat
+OutOfScope based on a stale read of the runtime.
+
+This is the same `OutOfScope-promotion drift` pattern recorded
+in the cross-phase verification round closeout — a slice ships
+the runtime work without owning the registry-row promotion as
+part of "phase done." Three rows in P38 / six in P39 followed
+the pattern; verifying-then-promoting clears one row at a time.
+
+What this slice added:
+  - The in-binary anchor
+    `GUARANTEE_ID_LOOP_BOUNDS_ENFORCED` in
+    `queue/loops.rs` so the inverse-coverage sentinel grep-finds
+    the enforcement site.
+  - A new adversarial test
+    `durable_queue_refuses_loop_usage_after_budget_exceeded_termination`
+    asserting a stale worker cannot silently keep charging spend
+    against a terminal job. The existing positive test asserts
+    this inline; a separately-named test gives the registry's
+    `adversarial_test_refs` a clean anchor.
+  - Registry-row promotion to RuntimeChecked + tightened
+    description naming the post-termination refusal as part of
+    the contract.
+
+Phase 38 launch-readiness tail loses one more filing. Phase 38
+registry rows: 5/8 RuntimeChecked (was 4/8). The three still
+OutOfScope each name their specific filing slice (no more "Slice
+N promotes" boilerplate). Each remaining promotion is the same
+kind of recon-then-promote pattern OR awaiting genuinely
+unshipped surface (post-v1.0 sugar or the cross-layer
+replay-quarantine wiring).
