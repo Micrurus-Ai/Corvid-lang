@@ -61,10 +61,11 @@ fn docs_guides_dir() -> PathBuf {
 /// exemption. When that slice lands, delete the entry; the gate
 /// will then enforce on the rewritten guide.
 const EXEMPT_GUIDES: &[(&str, &str)] = &[
-    // 43W-1..43W-6 landed rewrites of auth.md, persistence.md,
-    // observability.md, ffi-c-rust.md, ffi-python.md, backend.md;
-    // entries removed. The gate enforces on all but connectors.md.
-    ("connectors.md", "35V2-P38-E-LR-connectors-guide-rewrite"),
+    // 43W-1..43W-7 landed rewrites of ALL 7 originally-exempt
+    // guides (auth / persistence / observability / ffi-c-rust /
+    // ffi-python / backend / connectors). The gate now enforces
+    // on every Corvid block in every guide. EXEMPT_GUIDES is
+    // empty — the docs-as-code drift gate is fully live.
 ];
 
 /// One Corvid code block extracted from a markdown file. The

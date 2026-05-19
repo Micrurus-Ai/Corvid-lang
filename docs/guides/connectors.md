@@ -1,90 +1,148 @@
 # Connectors
 
+Phase 41 ships six production connectors via the
+`corvid-connector-runtime` crate. Each connector runs in three
+modes (mock / replay / real) that share the same typed surface;
+the runtime enforces the mode boundary so a replay session
+cannot accidentally make a real provider call.
+
+The source-level `import "@connector/gmail" as gmail` /
+`gmail.recent(...)` ergonomic surface is post-v1.0 sugar (tracked
+at `35V2-P41-I-post-v1.0-connector-syntax-sugar`); today
+connectors enter Corvid through `tool` declarations whose
+host-side implementation calls into `corvid-connector-runtime`.
+Same pattern as persistence + Python FFI.
+
 ## What ships
 
-Typed connectors for:
+Six connectors, each tested in all three modes:
 
-- **Gmail** — read, send, search, label.
-- **MS365** — Outlook mail, Teams, OneDrive.
-- **Calendar** — Google Calendar, Microsoft Calendar.
-- **Slack** — read channels, post messages, react.
-- **Tasks** — Linear, GitHub issues, Notion.
-- **Files** — Google Drive, OneDrive, Dropbox.
+| Connector | Read | Write | OAuth | Webhooks |
+|---|---|---|---|---|
+| Gmail | `gmail_recent`, `gmail_search` | `gmail_send` (dangerous) | ✓ | n/a |
+| MS365 | `ms365_recent` | `ms365_send` (dangerous) | ✓ (tenant-aware) | n/a |
+| Calendar | availability, event read | event create/update/cancel (dangerous + approval-gated for external invites) | ✓ | n/a |
+| Slack | channel + DM metadata | post messages (dangerous) | ✓ | ✓ HMAC-SHA256 + 5-min replay window |
+| Linear + GitHub | issue read + search | issue create / update / comment (dangerous) | ✓ | ✓ HMAC-SHA256 |
+| Local files | indexed folder read | provenance-preserving snippet write (approval-gated) | n/a | n/a |
 
-## Three modes
+## The three modes
 
-Every connector ships in three modes that share the same typed surface:
+Every connector exposes:
 
-- **Mock** — in-memory simulator for tests. No network.
-- **Replay** — serves recorded responses from a trace. No network.
-- **Real** — actual API calls. Requires OAuth or API key.
+- **Mock** — in-memory deterministic responses. No network. Used
+  by default in CI + by `cargo test`. Token scope + tenant
+  enforcement still applies at the runtime boundary.
+- **Replay** — serves recorded responses from a JSONL trace. No
+  network. Write operations refuse and surface
+  `ConnectorRuntimeError::ReplayWriteQuarantined` — the
+  `connector.replay_quarantine` row guarantees a replay session
+  cannot escape into real-mode writes.
+- **Real** — live API calls behind `CORVID_PROVIDER_LIVE=1` +
+  per-provider credential env vars. The shared `ReqwestRealClient`
+  honours `Retry-After` on 429/5xx via
+  `parse_retry_after_header` and surfaces the typed
+  `ConnectorRuntimeError::RateLimited { retry_after_ms }`
+  variant.
 
-A test or replay run cannot accidentally hit `real` mode — the runtime
-distinguishes them at the connector boundary, and a quarantine fires
-if a replay tries to escape into real-mode.
+## Using a connector from Corvid
 
-## Using a connector
+Today connectors enter through `tool` declarations:
 
 ```corvid
-import "@connector/gmail" as gmail
+effect gmail_read_effect:
+    cost: $0.001
 
-@budget($0.05)
-agent triage_inbox(user_id: String) -> List<Triage> uses gmail_effect:
-    let recent = gmail.recent(user_id, since: yesterday())
-    return recent.map(fn (m) -> classify(m))
+effect gmail_send_effect:
+    cost: $0.002
+    trust: human_required
+    reversible: false
+
+tool gmail_recent(user_id: String, since: String) -> String uses gmail_read_effect
+tool gmail_send(user_id: String, message: String) -> Nothing dangerous uses gmail_send_effect
+
+agent send_reply(user_id: String, reply: String) -> Nothing uses gmail_send_effect:
+    approve GmailSend(user_id, reply)
+    gmail_send(user_id, reply)
 ```
 
-The first call requires OAuth setup:
+The host-side implementation of `gmail_recent` + `gmail_send`
+calls into `corvid_connector_runtime::gmail`; the typechecker
+enforces the effect row + the approve boundary at the Corvid
+layer.
+
+## CLI
 
 ```sh
-corvid connectors auth gmail --user=alice@example.com
+corvid connectors list                              # shipped connectors + modes + scopes + rate limits
+corvid connectors check                             # validate every shipped manifest
+corvid connectors check --live                      # also detect drift against the real provider
+                                                    # (CORVID_PROVIDER_LIVE=1; the --live drift
+                                                    # path is filed as launch-readiness
+                                                    # 35V2-P41-D-LR-connector-drift-narration)
+corvid connectors run <connector> <op> [--mode=mock|replay|real]
+corvid connectors oauth <provider>                  # OAuth2 token lifecycle (issue / refresh)
+corvid connectors verify-webhook --provider github|slack|linear --signature <sig>
+                                                    # HMAC-SHA256 webhook signature verification
 ```
 
-This opens the browser, completes the OAuth flow, encrypts the
-refresh token, and stores it under `db.tokens`.
-
-## Self-test
+## OAuth setup
 
 ```sh
-corvid connectors test gmail
+export CORVID_GMAIL_OAUTH_CLIENT_ID=<id>
+export CORVID_GMAIL_OAUTH_CLIENT_SECRET=<secret>
+corvid connectors oauth google
 ```
 
-Runs:
-1. Mock-mode test (no network).
-2. Replay-mode test against a recorded fixture.
-3. Real-mode test (if credentials are configured).
+This walks the PKCE-required OAuth code flow + stores the
+refresh token Argon2id-hashed (see `auth.api_key_at_rest_hashed`
++ `auth.oauth_pkce_required`). Refresh-token rotation is
+automatic; a revoked refresh token surfaces as
+`BearerTokenError::Revoked` on the next refresh attempt.
 
-A diff between mock/replay/real shows up as a connector contract
-drift. Phase 41L's connector-contract test pins this.
-
-## Writing your own connector
-
-A connector is a Corvid module that:
-- Declares effect rows for each operation.
-- Implements three modes (mock, replay, real).
-- Ships a typed surface (one struct per response shape).
-- Lands in `examples/connectors/<name>/` with self-tests.
-
-The connector template:
+## Webhook signature verification
 
 ```sh
-corvid connector new my-connector
+# GitHub webhook (X-Hub-Signature-256: sha256=<hex>)
+corvid connectors verify-webhook --provider github \
+    --signature "$X_HUB_SIGNATURE_256" \
+    --body @webhook-body.json \
+    --secret-env GITHUB_WEBHOOK_SECRET
+
+# Slack webhook (v0:<ts>:<body> with 5-min replay window)
+corvid connectors verify-webhook --provider slack \
+    --signature "$X_SLACK_SIGNATURE" \
+    --timestamp "$X_SLACK_REQUEST_TIMESTAMP" \
+    --body @webhook-body.json \
+    --secret-env SLACK_WEBHOOK_SECRET
 ```
 
-Generates a starter project with the three-mode skeleton + self-test
-harness.
+Exit 0 on a valid signature, exit 1 on mismatch / stale
+timestamp / malformed header. Comparison is constant-time; the
+five-minute window catches Slack-style replay attacks.
 
-See per-connector deep docs in
-[`docs/connectors-*.md`](https://github.com/Micrurus-Ai/Corvid-lang/tree/main/docs).
+## Adversarial corpus (7 named threats, 14 tests)
 
-## Adversarial coverage
+The Phase 41 audit verified all 7 named threats are covered.
+Tests live in `crates/corvid-connector-runtime/tests/threat_corpus.rs`:
 
-Replay quarantine fires for every connector type. The threat corpus
-exercises:
+| Threat | Tests |
+|---|---|
+| token-scope escalation | `t1_github_rejects_unauthorised_scope` + per-provider variants |
+| cross-tenant message access | `t2_*_rejects_missing_tenant` |
+| refresh-token replay after revocation | `t3_oauth_refresh_after_revocation_marks_store_revoked` |
+| malformed JSON body | `t4_github_search_missing_required_field` + `t4_github_write_unknown_kind_refused` |
+| 429/5xx retries with Retry-After | `t5_rate_limited_propagates_retry_after_ms` + `t5_retry_after_parser_handles_seconds_form` |
+| expired OAuth state | `t6_expired_oauth_access_triggers_refresh` |
+| webhook signature forgery | `t7_github_webhook_forgery_rejected` + per-provider variants |
 
-- Replay → real mode escape.
-- Approval bypass through a connector wrapper.
-- Token leakage through trace records.
-- DSSE-bundle bilateral signature acceptance.
+## Pointers to the registry contracts
 
-Each is caught with the matching `guarantee_id`.
+| Property | Registry id | Class | Where |
+|---|---|---|---|
+| Scope minimum enforced before HTTP call | `connector.scope_minimum_enforced` | RuntimeChecked | `crates/corvid-connector-runtime/src/runtime.rs` |
+| Rate limit honours provider Retry-After | `connector.rate_limit_respects_provider` | RuntimeChecked | `crates/corvid-connector-runtime/src/real_client.rs` |
+| Webhook HMAC-SHA256 + replay window | `connector.webhook_signature_verified` | RuntimeChecked | `crates/corvid-connector-runtime/src/webhook_verify.rs` |
+| Replay refuses write operations | `connector.replay_quarantine` | RuntimeChecked | `crates/corvid-connector-runtime/src/runtime.rs` |
+| Connector write requires approval (typecheck) | `connector.write_requires_approval` | OutOfScope | gated on `35V2-P41-I-post-v1.0-connector-syntax-sugar` |
+| `--live` drift detected against real provider | `connector.contract_drift_detected` | OutOfScope | gated on `35V2-P41-D-LR-connector-drift-narration` |
