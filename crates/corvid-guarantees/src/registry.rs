@@ -828,22 +828,41 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "auth.csrf_double_submit",
         kind: GuaranteeKind::Auth,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "CSRF protection on cookie-bearing requests uses a \
-             double-submit token verified by HMAC-SHA256.",
-        out_of_scope_reason:
-            "Token shape is documented in the design brief; the \
-             middleware path that enforces it on every cookie-bearing \
-             POST / PUT / PATCH / DELETE is not yet wired into the \
-             generated axum server. Filed as launch-readiness slice \
-             `35V2-P39-C-LR-csrf-middleware` — promotes this row to \
-             RuntimeChecked when the middleware ships + the \
-             named-threat test for `CSRF-bypass-on-PUT/PATCH/DELETE` \
-             lands alongside it.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "CSRF protection on cookie-bearing state-changing \
+             requests (POST / PUT / PATCH / DELETE) uses a \
+             double-submit token of shape \
+             `<binding>.<hex_hmac>` where `hex_hmac` is \
+             HMAC-SHA256(server_secret, \"corvid-csrf-v1:\" || \
+             binding). The verifier enforces three independent \
+             checks: header and cookie both present, equal under \
+             constant-time comparison (the double-submit \
+             invariant — a cross-site request cannot read the \
+             cookie), and the HMAC component verifies against \
+             the server secret (so a forged token without the \
+             secret is rejected). Safe methods (GET / HEAD / \
+             OPTIONS) skip the check; unknown methods fail \
+             closed. An empty server secret also fails closed \
+             on state-changing requests. The rendered axum \
+             server wires the verifier into its middleware when \
+             `CORVID_CSRF_SECRET` is set; the canonical \
+             implementation lives in \
+             `corvid-runtime::auth::csrf` with 8 exhaustive \
+             unit tests, and the rendered-server end-to-end \
+             test asserts the wire behaviour matches.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/auth/csrf.rs::mint_and_verify_round_trip_on_each_state_changing_method",
+            "crates/corvid-cli/tests/build_server.rs::rendered_server_csrf_middleware_refuses_state_change_without_double_submit_token",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/auth/csrf.rs::csrf_bypass_attempt_without_header_refused_on_put_patch_delete",
+            "crates/corvid-runtime/src/auth/csrf.rs::csrf_token_forged_without_server_secret_refused_on_hmac",
+            "crates/corvid-runtime/src/auth/csrf.rs::csrf_header_and_cookie_must_match_constant_time",
+            "crates/corvid-runtime/src/auth/csrf.rs::csrf_empty_server_secret_fails_closed_on_state_changing_methods",
+        ],
     },
     Guarantee {
         id: "tenant.cross_tenant_compile_error",

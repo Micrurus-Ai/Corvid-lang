@@ -5046,3 +5046,76 @@ N promotes" boilerplate). Each remaining promotion is the same
 kind of recon-then-promote pattern OR awaiting genuinely
 unshipped surface (post-v1.0 sugar or the cross-layer
 replay-quarantine wiring).
+
+## 35V2-P39-C-LR-csrf-middleware closed (2026-05-19)
+
+Ships double-submit CSRF protection end-to-end: a canonical
+verifier in `corvid-runtime::auth::csrf` plus rendered-server
+wiring in `backend_middleware` plus an integration test that
+asserts the wire behaviour matches.
+
+Token shape: `<binding>.<hex_hmac>` where `hex_hmac` is
+`HMAC-SHA256(server_secret, "corvid-csrf-v1:" || binding)`. The
+verifier enforces three independent checks on state-changing
+methods:
+
+  1. Both the `x-corvid-csrf` header AND the `corvid_csrf`
+     cookie are present.
+  2. They are equal under constant-time comparison (the
+     double-submit invariant — a cross-site request cannot
+     read the cookie).
+  3. The HMAC component verifies against the server secret (so
+     a forged token without the secret is rejected even when
+     header and cookie match).
+
+Safe methods (GET/HEAD/OPTIONS) skip the check; unknown methods
+fail closed (treated as state-changing). An empty server secret
+fails closed too — refuses to verify rather than silently
+accepting every request. That's the misconfiguration safety net
+for production where `CORVID_CSRF_SECRET` is forgotten.
+
+Eight unit tests in `corvid-runtime::auth::csrf` cover every
+failure mode (missing header, missing cookie, header≠cookie,
+malformed token, HMAC-forged, empty-secret-fails-closed,
+safe-methods-pass, unknown-methods-fail-closed). One end-to-end
+integration test in `corvid-cli/tests/build_server.rs` builds
+the rendered axum server, spawns it with `CORVID_CSRF_SECRET`
+set, and asserts: GET passes without a token; POST without the
+header gets 403 csrf_violation; POST with a valid double-submit
+pair gets past the CSRF gate (and 405s downstream because the
+fixture handler is GET-only — proving the middleware allowed
+the request through); POST with a forged token gets 403
+csrf_violation.
+
+Design choice: the rendered server inlines the verifier rather
+than depending on `corvid-runtime` directly. The runtime
+universe (rusqlite, opentelemetry, the full crate graph) would
+be a heavy dep injection for a generated standalone binary that
+otherwise only needs axum + tokio + tower-http. The inlined
+verifier mirrors the canonical implementation byte-for-byte;
+the integration test asserts they agree on the wire. A comment
+in the rendered template points back at the canonical source
+so a future divergence surfaces in review.
+
+Backwards-compatibility: when `CORVID_CSRF_SECRET` is unset
+(the default), the middleware is a no-op. Pre-existing
+`build_server_emits_runnable_local_http_binary` test still
+passes — the bullet-point test for the existing GET / POST /
+413 / metrics shape is unchanged. Only the `x-corvid-middleware`
+header label gained `csrf` in its comma-separated list (and the
+existing test was updated to assert it).
+
+Phase 39 adversarial-threat coverage: 9/10 (was 8/10). One
+threat remains file-tied to its dependency slice
+(scope-escalation → `35V2-P39-K-LR-structured-scope-model`).
+Phase 39 launch-readiness tail loses one more filing.
+
+This is the first slice in the session that shipped real
+rendered-server middleware (not just a runtime helper or a CLI
+subcommand). The cost of the integration test is ~80 seconds of
+cargo build + spawn + HTTP, but it's the only test that proves
+the rendered binary's wire behaviour actually rejects the
+threat. Worth the wall-clock — without it, the runtime unit
+tests would only prove that the canonical implementation is
+correct, not that operators using `corvid build --target=server`
+get the same guarantee.

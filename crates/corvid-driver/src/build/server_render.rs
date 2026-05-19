@@ -50,6 +50,9 @@ edition = "2021"
 axum = "0.7"
 tokio = {{ version = "1", features = ["full"] }}
 tower-http = {{ version = "0.6", features = ["compression-full", "cors", "trace"] }}
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
 "#
     )
 }
@@ -64,19 +67,31 @@ use axum::response::{{IntoResponse, Response}};
 use axum::routing::get;
 use axum::middleware;
 use axum::Router;
+use hmac::{{Hmac, Mac}};
+use sha2::Sha256;
 use std::io::Read;
 use std::process::{{Command, Stdio}};
 use std::sync::atomic::{{AtomicU64, Ordering}};
 use std::sync::{{Arc, Mutex}};
 use std::time::{{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+type HmacSha256 = Hmac<Sha256>;
+
 const HANDLER: &str = "{handler}";
 const MAX_REQUEST_BYTES: usize = 4096;
+// Mirrors `corvid-runtime::auth::csrf` (the canonical
+// implementation + adversarial tests live there). Inlined here
+// so the rendered server stays standalone; the `build_server`
+// integration test asserts behavioural equivalence end-to-end.
+const CSRF_BINDING_DOMAIN: &[u8] = b"corvid-csrf-v1:";
+const CSRF_HEADER: &str = "x-corvid-csrf";
+const CSRF_COOKIE: &str = "corvid_csrf";
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 static REQUEST_TOTAL: AtomicU64 = AtomicU64::new(0);
 static ERROR_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -86,6 +101,11 @@ struct AppState {{
     max_requests: Option<u64>,
     require_auth: bool,
     rate_limit_requests: Option<u64>,
+    /// CSRF server secret. Empty means CSRF enforcement is off
+    /// (default; backwards-compatible). Non-empty enables the
+    /// double-submit verifier on every state-changing method.
+    /// Sourced from `CORVID_CSRF_SECRET` at startup.
+    csrf_secret: Arc<Vec<u8>>,
     rate_limit_seen: Arc<AtomicU64>,
     handled_requests: Arc<AtomicU64>,
     shutdown: Arc<Mutex<Option<oneshot::Sender<()>>>>,
@@ -103,6 +123,7 @@ async fn main() -> std::io::Result<()> {{
         max_requests: max_requests(),
         require_auth: require_auth(),
         rate_limit_requests: rate_limit_requests(),
+        csrf_secret: Arc::new(csrf_secret()),
         rate_limit_seen: Arc::new(AtomicU64::new(0)),
         handled_requests: Arc::new(AtomicU64::new(0)),
         shutdown: Arc::new(Mutex::new(Some(shutdown_tx))),
@@ -155,6 +176,20 @@ async fn backend_middleware(
             started,
         );
     }}
+    if !state.csrf_secret.is_empty() {{
+        if let Err(reason) = verify_csrf(&method, request.headers(), &state.csrf_secret) {{
+            return error_response(
+                state,
+                403,
+                &method,
+                &path,
+                "csrf_violation",
+                reason,
+                request_id,
+                started,
+            );
+        }}
+    }}
     if let Some(limit) = state.rate_limit_requests {{
         let seen = state.rate_limit_seen.fetch_add(1, Ordering::Relaxed) + 1;
         if seen > limit {{
@@ -174,7 +209,7 @@ async fn backend_middleware(
     let headers = response.headers_mut();
     headers.insert(
         "x-corvid-middleware",
-        HeaderValue::from_static("auth,rate_limit,tracing,cors,compression,request_logging,effect_policy"),
+        HeaderValue::from_static("auth,csrf,rate_limit,tracing,cors,compression,request_logging,effect_policy"),
     );
     headers.insert("x-corvid-effect-policy", HeaderValue::from_static("enforced"));
     response
@@ -447,6 +482,95 @@ fn rate_limit_requests() -> Option<u64> {{
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|limit| *limit > 0)
+}}
+
+fn csrf_secret() -> Vec<u8> {{
+    std::env::var("CORVID_CSRF_SECRET")
+        .ok()
+        .map(|value| value.into_bytes())
+        .unwrap_or_default()
+}}
+
+fn verify_csrf(
+    method: &str,
+    headers: &axum::http::HeaderMap,
+    secret: &[u8],
+) -> Result<(), &'static str> {{
+    // Safe methods pass through — GET / HEAD / OPTIONS are not
+    // state-changing. Anything else (POST / PUT / PATCH /
+    // DELETE / unknown) is treated as state-changing and the
+    // double-submit verifier runs. Mirrors
+    // `corvid-runtime::auth::csrf::CsrfRequestMethod::classify`.
+    if matches!(method, "GET" | "HEAD" | "OPTIONS") {{
+        return Ok(());
+    }}
+    let header_token = headers
+        .get(CSRF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("csrf header missing")?;
+    let cookie_token = read_cookie(headers, CSRF_COOKIE).ok_or("csrf cookie missing")?;
+    if header_token.as_bytes().ct_eq(cookie_token.as_bytes()).unwrap_u8() == 0 {{
+        return Err("csrf header and cookie do not match");
+    }}
+    let (binding, supplied_hex) = header_token
+        .split_once('.')
+        .ok_or("csrf token malformed")?;
+    if binding.is_empty() || supplied_hex.is_empty() {{
+        return Err("csrf token malformed");
+    }}
+    let supplied = decode_hex(supplied_hex).ok_or("csrf token malformed")?;
+    let expected = compute_csrf_hmac(binding, secret).ok_or("csrf secret invalid")?;
+    if supplied.ct_eq(&expected).unwrap_u8() == 0 {{
+        return Err("csrf token failed hmac verification");
+    }}
+    Ok(())
+}}
+
+fn compute_csrf_hmac(binding: &str, secret: &[u8]) -> Option<Vec<u8>> {{
+    let mut mac = HmacSha256::new_from_slice(secret).ok()?;
+    mac.update(CSRF_BINDING_DOMAIN);
+    mac.update(binding.as_bytes());
+    Some(mac.finalize().into_bytes().to_vec())
+}}
+
+fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {{
+    let raw = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    for entry in raw.split(';') {{
+        let entry = entry.trim();
+        if let Some((key, value)) = entry.split_once('=') {{
+            if key.trim() == name {{
+                let value = value.trim();
+                if !value.is_empty() {{
+                    return Some(value.to_string());
+                }}
+            }}
+        }}
+    }}
+    None
+}}
+
+fn decode_hex(input: &str) -> Option<Vec<u8>> {{
+    if !input.len().is_multiple_of(2) {{
+        return None;
+    }}
+    let mut out = Vec::with_capacity(input.len() / 2);
+    for pair in input.as_bytes().chunks_exact(2) {{
+        let hi = decode_nibble(pair[0])?;
+        let lo = decode_nibble(pair[1])?;
+        out.push((hi << 4) | lo);
+    }}
+    Some(out)
+}}
+
+fn decode_nibble(byte: u8) -> Option<u8> {{
+    match byte {{
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }}
 }}
 
 fn validate_runtime_config() -> std::io::Result<()> {{

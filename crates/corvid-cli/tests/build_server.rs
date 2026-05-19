@@ -130,6 +130,7 @@ fn build_server_emits_runnable_local_http_binary() {
     assert!(health.contains(r#"{"status":"ok"}"#), "{health}");
     assert!(health.contains("x-corvid-request-id:"), "{health}");
     assert!(health.contains("x-corvid-middleware:"), "{health}");
+    assert!(health.contains("csrf"), "{health}");
     assert!(health.contains("x-corvid-effect-policy: enforced"), "{health}");
 
     let ready = http_get(addr, "/readyz");
@@ -460,4 +461,149 @@ fn shared_app_template_checks_and_builds() {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
+}
+
+/// Slice 35V2-P39-C-LR (end-to-end, named-threat):
+/// `CSRF-bypass-on-PUT/PATCH/DELETE`.
+///
+/// Builds the rendered axum server, sets `CORVID_CSRF_SECRET` so
+/// the middleware enforces CSRF, then asserts:
+///
+///   - GET passes without any token (safe method).
+///   - POST without the `x-corvid-csrf` header is refused with
+///     403 csrf_violation (the central threat — the rendered
+///     server never reaches the handler).
+///   - POST with both cookie + header carrying a valid
+///     double-submit token passes the CSRF middleware (the
+///     downstream handler still 405s for this GET-only fixture,
+///     proving CSRF allowed the request past the gate).
+///   - POST with a forged token (no knowledge of the server
+///     secret) is refused with 403 csrf_violation.
+#[test]
+fn rendered_server_csrf_middleware_refuses_state_change_without_double_submit_token() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).expect("src dir");
+    let source_path = src_dir.join("hello.cor");
+    std::fs::write(&source_path, SOURCE).expect("write source");
+
+    let args = vec![
+        "build".to_string(),
+        source_path.to_string_lossy().into_owned(),
+        "--target=server".to_string(),
+    ];
+    let out = run_corvid(&args, dir.path());
+    assert!(
+        out.status.success(),
+        "server build failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let server = dir
+        .path()
+        .join("target")
+        .join("server")
+        .join(server_binary_name("hello"));
+
+    const SECRET: &str = "csrf-test-secret-32-bytes-long-ok!";
+    let child = Command::new(&server)
+        .env("CORVID_PORT", "0")
+        .env("CORVID_CSRF_SECRET", SECRET)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn server");
+    let mut child = ChildGuard(child);
+    let stdout = child.0.stdout.take().expect("server stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let start = Instant::now();
+    while line.is_empty() && start.elapsed() < Duration::from_secs(10) {
+        reader.read_line(&mut line).expect("read listening line");
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("listening: http://")
+        .expect("listening prefix");
+
+    // Safe method passes — no CSRF check on GET.
+    let safe = http_get(addr, "/healthz");
+    assert!(safe.contains("HTTP/1.1 200 OK"), "{safe}");
+
+    // POST without the CSRF header is refused with 403 — the
+    // named CSRF-bypass-on-PUT/PATCH/DELETE threat.
+    let bypass = http_request(
+        addr,
+        &format!("POST / HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\n\r\n"),
+    );
+    assert!(
+        bypass.contains("HTTP/1.1 403 Forbidden"),
+        "expected 403 on POST without CSRF, got: {bypass}"
+    );
+    assert!(
+        bypass.contains(r#""kind":"csrf_violation""#),
+        "expected csrf_violation kind: {bypass}"
+    );
+
+    // Mint a valid double-submit token. Mirror the rendered
+    // server's HMAC scheme: hex(HMAC-SHA256(secret,
+    // "corvid-csrf-v1:" || binding)).
+    let binding = "sess-test";
+    let valid_token = mint_csrf_for_test(binding, SECRET.as_bytes());
+
+    // POST with valid cookie + header passes the CSRF gate.
+    // The handler still 405s (the fixture's main() is
+    // GET-only), but the response shape proves the middleware
+    // let the request through to the handler.
+    let allowed = http_request(
+        addr,
+        &format!(
+            "POST / HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\nx-corvid-csrf: {valid_token}\r\ncookie: corvid_csrf={valid_token}\r\n\r\n",
+        ),
+    );
+    assert!(
+        allowed.contains("HTTP/1.1 405 Method Not Allowed"),
+        "expected 405 on POST with valid CSRF (fixture is GET-only), got: {allowed}"
+    );
+    assert!(
+        !allowed.contains("csrf_violation"),
+        "valid CSRF token should not produce csrf_violation: {allowed}"
+    );
+
+    // POST with a forged token (no knowledge of the secret)
+    // is refused on HMAC verification.
+    let forged_token = format!("{binding}.deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    let forged = http_request(
+        addr,
+        &format!(
+            "POST / HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\nx-corvid-csrf: {forged_token}\r\ncookie: corvid_csrf={forged_token}\r\n\r\n",
+        ),
+    );
+    assert!(
+        forged.contains("HTTP/1.1 403 Forbidden"),
+        "expected 403 on POST with forged CSRF, got: {forged}"
+    );
+    assert!(
+        forged.contains(r#""kind":"csrf_violation""#),
+        "expected csrf_violation kind on forged token: {forged}"
+    );
+
+    drop(child);
+}
+
+fn mint_csrf_for_test(binding: &str, secret: &[u8]) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(secret).expect("hmac key");
+    mac.update(b"corvid-csrf-v1:");
+    mac.update(binding.as_bytes());
+    let digest = mac.finalize().into_bytes();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        hex.push(HEX[(byte >> 4) as usize] as char);
+        hex.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    format!("{binding}.{hex}")
 }
