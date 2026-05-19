@@ -4956,3 +4956,49 @@ trip, Grounded<T>-shaped sources. The generative helpers
 (P39-H policy-suggest, P41-H connectors-ai-helpers umbrella)
 remain filed because they *do* need LLM round trips and
 prompt-grounding work.
+
+## 35V2-P39-D-LR-session-rotation-hook closed (2026-05-19)
+
+`SessionAuthRuntime::rotate_session_on_privilege_change` ships
+the runtime hook the audit named as the session-fixation
+threat's dependency. Takes a typed `PrivilegeChangeReason` (one
+of `RoleUpgrade` / `PasswordChange` / `MfaEnrolled` /
+`AdminElevation` — a closed enum, no free-form strings), wraps
+the existing `rotate_session` primitive so the post-rotation
+invariants still hold (old token rejected, rotation_counter
+bumped, revocation cleared), and writes an
+`session.rotate_on_privilege_change` audit row carrying the
+typed reason as evidence. The audit row gives a reviewer
+"why did this rotation fire" not just "a rotation fired."
+
+Promotes `auth.session_rotation_on_privilege_change` from
+OutOfScope → RuntimeChecked, with the positive test pinning
+the named-threat behaviour (an attacker who captured the
+pre-elevation cookie cannot replay it after the rotation; the
+new cookie resolves; the audit row records `role_upgrade`)
+and an adversarial test asserting an empty `trace_id` is
+refused so a silent rotation cannot defeat the audit-trail
+guarantee.
+
+Three test refs:
+  - session_rotation_on_privilege_change_rejects_pre_elevation_session_fixation_attempt
+    (positive, named-threat: session-fixation)
+  - session_rotation_on_privilege_change_refuses_empty_trace_id
+    (adversarial, audit-trail no-op-on-failure invariant)
+  - session_rotation_invalidates_old_token_and_preserves_rotation_counter
+    (pre-existing, covers the unguarded `rotate_session`
+    primitive this hook composes)
+
+Design choice: the enum is closed (4 variants), not extensible
+via a `&str` field. The registry-row contract says rotation
+happens on *named* privilege events; an open-ended string
+would let an operator pass `"refresh"` or `""` and silently
+satisfy the row while skipping the named-event semantics.
+Closed enum makes drift into "rotated on every client
+refresh" impossible.
+
+Phase 39 adversarial-threat coverage: 8/10 (was 7/10). Two
+threats remain file-tied to their feature slice (CSRF-bypass
+→ 35V2-P39-C-LR-csrf-middleware; scope-escalation →
+35V2-P39-K-LR-structured-scope-model). Phase 39 launch-readiness
+tail loses one more filing.

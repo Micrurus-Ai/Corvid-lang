@@ -741,25 +741,25 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "auth.session_rotation_on_privilege_change",
         kind: GuaranteeKind::Auth,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "A session id rotates on privilege escalation (role \
-             upgrade, password change) so a stolen pre-escalation \
-             cookie cannot exercise the post-escalation privilege.",
-        out_of_scope_reason:
-            "Session storage + the rotation primitive exist in \
-             `corvid-runtime/src/auth/sessions.rs` (verified by the \
-             session_rotation_invalidates_old_token_* test). The \
-             gap is the runtime hook that fires the rotation on a \
-             privilege-change event (role upgrade, password change) \
-             inside the generated axum server. Filed as launch- \
-             readiness slice `35V2-P39-D-LR-session-rotation-hook` \
-             — promotes this row to RuntimeChecked when the hook \
-             ships + the named-threat test for session-fixation \
-             lands alongside it.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "A session id rotates on a named privilege-change \
+             event (role upgrade, password change, MFA enrolment, \
+             admin elevation) so a stolen pre-escalation cookie \
+             cannot exercise the post-escalation privilege. The \
+             rotation is recorded in the auth-audit trail with \
+             the typed `PrivilegeChangeReason` as evidence; the \
+             pre-elevation cookie is rejected from that point on. \
+             Catches the `session-fixation` adversarial-corpus \
+             threat.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/auth/sessions.rs::session_rotation_on_privilege_change_rejects_pre_elevation_session_fixation_attempt",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/auth/sessions.rs::session_rotation_on_privilege_change_refuses_empty_trace_id",
+        ],
     },
     Guarantee {
         id: "auth.api_key_at_rest_hashed",

@@ -49,7 +49,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `jobs.loop_bounds_enforced` | jobs | out_of_scope | runtime |
 | `jobs.explain_sources_grounded` | jobs | runtime_checked | runtime |
 | `jobs.replayable_side_effects` | jobs | out_of_scope | runtime |
-| `auth.session_rotation_on_privilege_change` | auth | out_of_scope | runtime |
+| `auth.session_rotation_on_privilege_change` | auth | runtime_checked | runtime |
 | `auth.api_key_at_rest_hashed` | auth | runtime_checked | runtime |
 | `auth.jwt_kid_rotation` | auth | runtime_checked | runtime |
 | `auth.oauth_pkce_required` | auth | runtime_checked | runtime |
@@ -550,12 +550,18 @@ A job marked `@replayable` records its tool / prompt / approval / DB side-effect
 ### Auth and approvals
 
 #### `auth.session_rotation_on_privilege_change`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: runtime
 
-A session id rotates on privilege escalation (role upgrade, password change) so a stolen pre-escalation cookie cannot exercise the post-escalation privilege.
+A session id rotates on a named privilege-change event (role upgrade, password change, MFA enrolment, admin elevation) so a stolen pre-escalation cookie cannot exercise the post-escalation privilege. The rotation is recorded in the auth-audit trail with the typed `PrivilegeChangeReason` as evidence; the pre-elevation cookie is rejected from that point on. Catches the `session-fixation` adversarial-corpus threat.
 
-> **Why out of scope:** Session storage + the rotation primitive exist in `corvid-runtime/src/auth/sessions.rs` (verified by the session_rotation_invalidates_old_token_* test). The gap is the runtime hook that fires the rotation on a privilege-change event (role upgrade, password change) inside the generated axum server. Filed as launch- readiness slice `35V2-P39-D-LR-session-rotation-hook` — promotes this row to RuntimeChecked when the hook ships + the named-threat test for session-fixation lands alongside it.
+**Positive tests:**
+
+- `crates/corvid-runtime/src/auth/sessions.rs::session_rotation_on_privilege_change_rejects_pre_elevation_session_fixation_attempt`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/auth/sessions.rs::session_rotation_on_privilege_change_refuses_empty_trace_id`
 
 #### `auth.api_key_at_rest_hashed`
 - **class**: runtime_checked

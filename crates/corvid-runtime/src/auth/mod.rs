@@ -14,7 +14,7 @@ pub use api_keys::{hash_api_key_secret, verify_api_key_secret};
 pub use approvals::{authorize_trace_permission, validate_jwt_verification_contract};
 pub use oauth::hash_oauth_state;
 pub use records::*;
-pub use sessions::hash_session_secret;
+pub use sessions::{hash_session_secret, PrivilegeChangeReason};
 use sessions::read_actor_row;
 
 pub struct SessionAuthRuntime {

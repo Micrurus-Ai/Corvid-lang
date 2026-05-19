@@ -25,6 +25,46 @@ use super::{
     SessionRecord, SessionResolution,
 };
 
+/// Named privilege-change events that mandate a session rotation.
+/// The kind is recorded in the auth-audit trail so a reviewer can
+/// see *why* the rotation fired, not just *that* it fired.
+///
+/// Pinned to a small, explicit enum (no free-form strings) because
+/// the registry row `auth.session_rotation_on_privilege_change`
+/// guarantees the rotation happens on the named events; the closed
+/// set keeps the contract auditable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivilegeChangeReason {
+    /// The actor's role was upgraded (e.g. Member → Admin).
+    RoleUpgrade,
+    /// The actor's password was changed (initiated by the actor or
+    /// reset by an admin).
+    PasswordChange,
+    /// MFA was enrolled, re-enrolled, or strengthened.
+    MfaEnrolled,
+    /// An admin forcibly elevated the actor's privileges out-of-band.
+    AdminElevation,
+}
+
+impl PrivilegeChangeReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RoleUpgrade => "role_upgrade",
+            Self::PasswordChange => "password_change",
+            Self::MfaEnrolled => "mfa_enrolled",
+            Self::AdminElevation => "admin_elevation",
+        }
+    }
+}
+
+/// In-binary anchor for the `phase 35V-T1-Drift` inverse-coverage
+/// sentinel. Names the registry id whose runtime enforcement lives
+/// in `rotate_session_on_privilege_change` below: the session id
+/// rotates + an audit row records the privilege-change reason.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_SESSION_ROTATION_ON_PRIVILEGE_CHANGE: &str =
+    "auth.session_rotation_on_privilege_change";
+
 pub fn hash_session_secret(raw_token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"corvid-auth-session-v1:");
@@ -237,6 +277,45 @@ impl SessionAuthRuntime {
             .ok_or_else(|| RuntimeError::Other(format!("auth session `{session_id}` not found")))
     }
 
+    /// Privilege-change rotation hook: rotate the session id +
+    /// record an audit row naming the privilege-change reason.
+    ///
+    /// Wraps `rotate_session` so the post-rotation invariants
+    /// (old token rejected, rotation_counter bumped, revocation
+    /// cleared) hold here too. The audit row's `event_kind` is
+    /// `session.rotate_on_privilege_change` and the `reason` is
+    /// the typed enum's stable string id — auditable evidence
+    /// that the rotation was tied to a named privilege event,
+    /// not an arbitrary client refresh.
+    ///
+    /// Catches the `session-fixation` named threat from the Phase
+    /// 39 adversarial corpus: a pre-elevation session token
+    /// cannot ride forward into the post-elevation privilege.
+    pub fn rotate_session_on_privilege_change(
+        &self,
+        session_id: &str,
+        reason: PrivilegeChangeReason,
+        new_raw_token: &str,
+        new_expires_ms: u64,
+        trace_id: &str,
+    ) -> Result<SessionRecord, RuntimeError> {
+        validate_non_empty("session id", session_id)?;
+        validate_non_empty("session token", new_raw_token)?;
+        validate_non_empty("trace id", trace_id)?;
+        let rotated = self.rotate_session(session_id, new_raw_token, new_expires_ms)?;
+        self.insert_audit(
+            "session.rotate_on_privilege_change",
+            Some(&rotated.actor_id),
+            Some(&rotated.tenant_id),
+            Some(&rotated.id),
+            None,
+            Some(trace_id),
+            "ok",
+            reason.as_str(),
+        )?;
+        Ok(rotated)
+    }
+
     pub fn revoke_session(
         &self,
         session_id: &str,
@@ -276,6 +355,7 @@ impl SessionAuthRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthAuditEvent;
 
     fn actor(id: &str, tenant_id: &str) -> AuthActor {
         AuthActor {
@@ -412,5 +492,136 @@ mod tests {
             .resolve_session("new-secret", "org-1", "trace-new", "replay-new", 2_000)
             .unwrap();
         assert_eq!(resolved.session.rotation_counter, 1);
+    }
+
+    /// Slice 35V2-P39-D-LR (positive, session-fixation threat):
+    /// rotating on a typed privilege-change event invalidates the
+    /// pre-elevation token AND records the typed reason in the
+    /// audit row. This is the named-threat test for the
+    /// `session-fixation` adversarial corpus entry — an attacker
+    /// who held the pre-elevation cookie cannot ride it forward
+    /// into the post-elevation privilege.
+    #[test]
+    fn session_rotation_on_privilege_change_rejects_pre_elevation_session_fixation_attempt() {
+        let auth = SessionAuthRuntime::open_in_memory().unwrap();
+        auth.upsert_actor(actor("user-1", "org-1")).unwrap();
+        auth.create_session(SessionCreate {
+            id: "sess-1".to_string(),
+            actor_id: "user-1".to_string(),
+            tenant_id: "org-1".to_string(),
+            raw_token: "pre-elevation-cookie".to_string(),
+            issued_ms: 1_000,
+            expires_ms: 5_000,
+            csrf_binding_id: "csrf-1".to_string(),
+        })
+        .unwrap();
+
+        // Attacker captures the pre-elevation cookie; before
+        // rotation it would resolve successfully.
+        let pre = auth
+            .resolve_session(
+                "pre-elevation-cookie",
+                "org-1",
+                "trace-pre",
+                "replay-pre",
+                1_500,
+            )
+            .unwrap();
+        assert_eq!(pre.session.rotation_counter, 0);
+
+        // Privilege event: user's role is upgraded.
+        let rotated = auth
+            .rotate_session_on_privilege_change(
+                "sess-1",
+                PrivilegeChangeReason::RoleUpgrade,
+                "post-elevation-cookie",
+                8_000,
+                "trace-elevation",
+            )
+            .unwrap();
+        assert_eq!(rotated.rotation_counter, 1);
+
+        // Adversarial: attacker replays the captured pre-elevation
+        // cookie post-rotation — must be rejected.
+        let replay_err = auth
+            .resolve_session(
+                "pre-elevation-cookie",
+                "org-1",
+                "trace-replay",
+                "replay-replay",
+                2_000,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            replay_err.contains("session not found") || replay_err.contains("not found"),
+            "expected session-not-found rejection, got: {replay_err}"
+        );
+
+        // The new cookie resolves cleanly.
+        let post = auth
+            .resolve_session(
+                "post-elevation-cookie",
+                "org-1",
+                "trace-post",
+                "replay-post",
+                2_000,
+            )
+            .unwrap();
+        assert_eq!(post.session.rotation_counter, 1);
+
+        // The privilege-change audit row records the typed reason.
+        let audit = auth.audit_events().unwrap();
+        let rotate_events: Vec<&AuthAuditEvent> = audit
+            .iter()
+            .filter(|e| e.event_kind == "session.rotate_on_privilege_change")
+            .collect();
+        assert_eq!(rotate_events.len(), 1);
+        assert_eq!(rotate_events[0].status, "ok");
+        assert_eq!(rotate_events[0].reason, "role_upgrade");
+        assert_eq!(rotate_events[0].session_id.as_deref(), Some("sess-1"));
+        // Adversarial-defence invariant: the raw cookies must NEVER
+        // appear in the audit row or its id.
+        assert!(!rotate_events[0]
+            .reason
+            .contains("pre-elevation-cookie"));
+        assert!(!rotate_events[0].id.contains("post-elevation-cookie"));
+    }
+
+    /// Slice 35V2-P39-D-LR (adversarial): a privilege-change
+    /// rotation that omits the trace id is refused — the audit
+    /// row's grounding requires a trace context, and a silent
+    /// rotation without one would defeat the audit-trail
+    /// guarantee.
+    #[test]
+    fn session_rotation_on_privilege_change_refuses_empty_trace_id() {
+        let auth = SessionAuthRuntime::open_in_memory().unwrap();
+        auth.upsert_actor(actor("user-1", "org-1")).unwrap();
+        auth.create_session(SessionCreate {
+            id: "sess-1".to_string(),
+            actor_id: "user-1".to_string(),
+            tenant_id: "org-1".to_string(),
+            raw_token: "old-secret".to_string(),
+            issued_ms: 1_000,
+            expires_ms: 5_000,
+            csrf_binding_id: "csrf-1".to_string(),
+        })
+        .unwrap();
+        let err = auth
+            .rotate_session_on_privilege_change(
+                "sess-1",
+                PrivilegeChangeReason::PasswordChange,
+                "new-secret",
+                8_000,
+                "",
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("trace id"));
+        // The old session must still resolve — the failed rotation
+        // is a no-op, not a half-applied state.
+        let pre = auth
+            .resolve_session("old-secret", "org-1", "trace-still-ok", "replay-x", 1_500)
+            .unwrap();
+        assert_eq!(pre.session.rotation_counter, 0);
     }
 }
