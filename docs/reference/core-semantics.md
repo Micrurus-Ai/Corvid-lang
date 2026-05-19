@@ -51,6 +51,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `jobs.replayable_side_effects` | jobs | out_of_scope | runtime |
 | `auth.session_rotation_on_privilege_change` | auth | runtime_checked | runtime |
 | `auth.api_key_at_rest_hashed` | auth | runtime_checked | runtime |
+| `auth.api_key_scope_subset_check` | auth | runtime_checked | runtime |
 | `auth.jwt_kid_rotation` | auth | runtime_checked | runtime |
 | `auth.oauth_pkce_required` | auth | runtime_checked | runtime |
 | `auth.csrf_double_submit` | auth | runtime_checked | runtime |
@@ -582,6 +583,22 @@ API keys are stored only as Argon2id hashes; the plaintext leaves Corvid memory 
 **Adversarial tests:**
 
 - `crates/corvid-runtime/src/auth/api_keys.rs::api_key_runtime_rejects_wrong_tenant_revoked_expired_and_user_actors`
+
+#### `auth.api_key_scope_subset_check`
+- **class**: runtime_checked
+- **phase**: runtime
+
+An API key's granted scope is a structured set of `<resource>.<action>` permissions, not an opaque hash. `enforce_scope_grant(granted, required)` refuses the call when the required set is not a subset of the granted set, and the typed error names every missing permission so the audit trail records exactly which scope was attempted. Catches the `scope-escalation` adversarial-corpus threat: a key issued with `{orders.read}` cannot satisfy a required `{refunds.write}` action. Canonical fingerprint over the sorted set is stable across permission-insertion order so the value can be persisted alongside `ApiKeyRecord::scope_fingerprint` without re-computing the source set. Wiring the enforcement into every route is downstream work; this row commits the typed model + the predicate.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/auth/scope.rs::scope_with_subset_satisfies_required_grant`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/auth/scope.rs::scope_escalation_attempt_refused_with_specific_missing_permission`
+- `crates/corvid-runtime/src/auth/scope.rs::scope_escalation_lists_every_missing_permission_not_just_the_first`
+- `crates/corvid-runtime/src/auth/scope.rs::empty_granted_scope_refuses_any_non_empty_required`
 
 #### `auth.jwt_kid_rotation`
 - **class**: runtime_checked

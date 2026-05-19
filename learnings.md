@@ -5119,3 +5119,55 @@ threat. Worth the wall-clock — without it, the runtime unit
 tests would only prove that the canonical implementation is
 correct, not that operators using `corvid build --target=server`
 get the same guarantee.
+
+## 35V2-P39-K-LR-structured-scope-model closed (2026-05-19)
+
+Phase 39's adversarial-corpus coverage hits **10/10**. The last
+threat — `scope-escalation` — needed a structured-scope concept
+the runtime did not have: `ApiKeyRecord::scope_fingerprint`
+stores an opaque SHA-256 hash today, so the runtime cannot
+reason about which permissions a key actually carries.
+
+`corvid_runtime::auth::scope` ships the type + the predicate:
+
+  - `ApiKeyScope { permissions: BTreeSet<String> }` — an
+    immutable, deduplicated, lexicographically-sorted set of
+    `<resource>.<action>` permission strings.
+  - `canonical_fingerprint(scope)` — SHA-256 over the sorted
+    set, stable across insertion order. Safe to persist
+    alongside `scope_fingerprint` for later equality checks.
+  - `enforce_scope_grant(granted, required) -> Result<(),
+    ScopeError>` — refuses when `required ⊄ granted` and names
+    every missing permission in the typed
+    `ScopeError::EscalationAttempt { missing }` so the audit
+    trail records exactly which scope was attempted, not just
+    "denied."
+  - `parse_comma_separated` for operator CLI input; strict
+    permission validation (no whitespace, ascii-alnum + `._-`,
+    `<resource>.<action>` shape required, empty entries
+    refused).
+
+Ten unit tests cover every contract — positive subset, empty
+required, scope-escalation (the named threat), proper-subset
+escalation, multi-permission-missing listing, fingerprint
+stability under reordering, duplicate collapse, comma-separated
+parsing, malformed-permission rejection, empty-granted refusal.
+
+Registry row `auth.api_key_scope_subset_check` ships
+RuntimeChecked from day 1 — three adversarial test refs
+(including the named-threat one) plus the positive subset
+test.
+
+Scope of *this* slice deliberately stops at the model + the
+predicate. Wiring `enforce_scope_grant` into every middleware /
+handler / route is downstream work. The audit's wording was
+"structured-scope concept needs to land before a meaningful
+test can"; the model + the predicate + the named-threat test
+land together, and the rest of the runtime can adopt the type
+without reinventing the shape.
+
+Phase 39 adversarial-corpus is now **10/10**. The 11th item
+(claim coverage for the unshipped source-level surface) and the
+ergonomic-sugar rows (filed at `35V2-P39-I` post-v1.0) are
+genuinely waiting on the parser-level surface, not on more
+runtime work.

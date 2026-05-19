@@ -778,6 +778,38 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "auth.api_key_scope_subset_check",
+        kind: GuaranteeKind::Auth,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "An API key's granted scope is a structured set of \
+             `<resource>.<action>` permissions, not an opaque \
+             hash. `enforce_scope_grant(granted, required)` \
+             refuses the call when the required set is not a \
+             subset of the granted set, and the typed error \
+             names every missing permission so the audit trail \
+             records exactly which scope was attempted. Catches \
+             the `scope-escalation` adversarial-corpus threat: a \
+             key issued with `{orders.read}` cannot satisfy a \
+             required `{refunds.write}` action. Canonical \
+             fingerprint over the sorted set is stable across \
+             permission-insertion order so the value can be \
+             persisted alongside `ApiKeyRecord::scope_fingerprint` \
+             without re-computing the source set. Wiring the \
+             enforcement into every route is downstream work; \
+             this row commits the typed model + the predicate.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/auth/scope.rs::scope_with_subset_satisfies_required_grant",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/auth/scope.rs::scope_escalation_attempt_refused_with_specific_missing_permission",
+            "crates/corvid-runtime/src/auth/scope.rs::scope_escalation_lists_every_missing_permission_not_just_the_first",
+            "crates/corvid-runtime/src/auth/scope.rs::empty_granted_scope_refuses_any_non_empty_required",
+        ],
+    },
+    Guarantee {
         id: "auth.jwt_kid_rotation",
         kind: GuaranteeKind::Auth,
         class: GuaranteeClass::RuntimeChecked,

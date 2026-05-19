@@ -10,12 +10,14 @@ mod audit;
 pub mod csrf;
 mod oauth;
 mod records;
+pub mod scope;
 mod sessions;
 pub use api_keys::{hash_api_key_secret, verify_api_key_secret};
 pub use approvals::{authorize_trace_permission, validate_jwt_verification_contract};
 pub use csrf::{mint_csrf_token, verify_csrf_double_submit, CsrfError, CsrfRequestMethod};
 pub use oauth::hash_oauth_state;
 pub use records::*;
+pub use scope::{enforce_scope_grant, ApiKeyScope, ScopeError};
 pub use sessions::{hash_session_secret, PrivilegeChangeReason};
 use sessions::read_actor_row;
 
