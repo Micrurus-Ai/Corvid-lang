@@ -1126,28 +1126,38 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "connector.contract_drift_detected",
         kind: GuaranteeKind::Connector,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "`corvid connectors check --live` compares the manifest \
-             to the live (or recorded-cassette) provider response \
-             shape and exits non-zero when fields drift.",
-        out_of_scope_reason:
-            "Slice 41L wired `corvid connectors check`, which validates \
-             every shipped manifest against the manifest schema and \
-             reports diagnostics per connector \
-             (`shipped_manifests` → `validate_connector_manifest`). \
-             The `--live` drift-narration path that compares the \
-             manifest to a live provider response shape is gated \
-             behind `CORVID_PROVIDER_LIVE=1` and currently returns \
-             an explicit `Err` directing the caller to a future \
-             slice. Filed as launch-readiness slice \
-             `35V2-P41-D-LR-connector-drift-narration` — promotes \
-             this row to RuntimeChecked when the live drift path \
-             ships + the AI-helper narrator layer (35V2-P41-H-LR) \
-             surfaces the diff in human-readable form.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "`corvid connectors check --baseline <file> --observed \
+             <file>` runs a schema-agnostic structural drift \
+             detector over two JSON payloads and exits non-zero \
+             when any field is added, removed, or type-changed \
+             between the baseline and the observed response. The \
+             detector reports each drift site as a sorted JSON \
+             path so the output is deterministic and \
+             diff-friendly in CI. The canonical detector ships \
+             in `corvid_connector_runtime::contract_drift` \
+             (9 unit tests, schema-agnostic so adopting it does \
+             not require a manifest schema change). The CLI \
+             wires it via the file-input flow — capture the \
+             provider response separately in CI and pipe it \
+             through the command. The live-HTTP fetch path that \
+             would compute `observed` from a real provider call \
+             stays operational scope at \
+             `35V2-P41-E-LR-live-provider-ci-matrix` (provider \
+             credentials live in CI secrets, not local config).",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-connector-runtime/src/contract_drift.rs::identical_shapes_produce_empty_drift_report",
+            "crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_identical_files_report_no_drift",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-connector-runtime/src/contract_drift.rs::provider_removed_field_appears_in_removed_paths_central_threat",
+            "crates/corvid-connector-runtime/src/contract_drift.rs::provider_type_change_appears_in_type_changed_paths",
+            "crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_removed_field_surfaces_with_non_empty_report",
+            "crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_malformed_baseline_file_surfaces_typed_error",
+        ],
     },
     Guarantee {
         id: "connector.webhook_signature_verified",

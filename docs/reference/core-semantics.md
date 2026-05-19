@@ -64,7 +64,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `connector.scope_minimum_enforced` | connector | runtime_checked | runtime |
 | `connector.write_requires_approval` | connector | out_of_scope | typecheck |
 | `connector.rate_limit_respects_provider` | connector | runtime_checked | runtime |
-| `connector.contract_drift_detected` | connector | out_of_scope | runtime |
+| `connector.contract_drift_detected` | connector | runtime_checked | runtime |
 | `connector.webhook_signature_verified` | connector | runtime_checked | runtime |
 | `connector.replay_quarantine` | connector | runtime_checked | runtime |
 | `observability.otel_conformance` | observability | runtime_checked | runtime |
@@ -757,12 +757,22 @@ A connector honors the provider's rate-limit advice (`Retry-After`, 429, 5xx). T
 - `crates/corvid-connector-runtime/tests/threat_corpus.rs::t5_rate_limited_propagates_retry_after_ms`
 
 #### `connector.contract_drift_detected`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: runtime
 
-`corvid connectors check --live` compares the manifest to the live (or recorded-cassette) provider response shape and exits non-zero when fields drift.
+`corvid connectors check --baseline <file> --observed <file>` runs a schema-agnostic structural drift detector over two JSON payloads and exits non-zero when any field is added, removed, or type-changed between the baseline and the observed response. The detector reports each drift site as a sorted JSON path so the output is deterministic and diff-friendly in CI. The canonical detector ships in `corvid_connector_runtime::contract_drift` (9 unit tests, schema-agnostic so adopting it does not require a manifest schema change). The CLI wires it via the file-input flow — capture the provider response separately in CI and pipe it through the command. The live-HTTP fetch path that would compute `observed` from a real provider call stays operational scope at `35V2-P41-E-LR-live-provider-ci-matrix` (provider credentials live in CI secrets, not local config).
 
-> **Why out of scope:** Slice 41L wired `corvid connectors check`, which validates every shipped manifest against the manifest schema and reports diagnostics per connector (`shipped_manifests` → `validate_connector_manifest`). The `--live` drift-narration path that compares the manifest to a live provider response shape is gated behind `CORVID_PROVIDER_LIVE=1` and currently returns an explicit `Err` directing the caller to a future slice. Filed as launch-readiness slice `35V2-P41-D-LR-connector-drift-narration` — promotes this row to RuntimeChecked when the live drift path ships + the AI-helper narrator layer (35V2-P41-H-LR) surfaces the diff in human-readable form.
+**Positive tests:**
+
+- `crates/corvid-connector-runtime/src/contract_drift.rs::identical_shapes_produce_empty_drift_report`
+- `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_identical_files_report_no_drift`
+
+**Adversarial tests:**
+
+- `crates/corvid-connector-runtime/src/contract_drift.rs::provider_removed_field_appears_in_removed_paths_central_threat`
+- `crates/corvid-connector-runtime/src/contract_drift.rs::provider_type_change_appears_in_type_changed_paths`
+- `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_removed_field_surfaces_with_non_empty_report`
+- `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_malformed_baseline_file_surfaces_typed_error`
 
 #### `connector.webhook_signature_verified`
 - **class**: runtime_checked

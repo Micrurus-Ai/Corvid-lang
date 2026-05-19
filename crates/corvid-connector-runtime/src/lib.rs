@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod calendar;
+pub mod contract_drift;
 pub mod files;
 pub mod github_real;
 pub mod gmail;
@@ -18,6 +19,7 @@ pub mod trace;
 pub mod webhook_verify;
 
 pub use auth::{ConnectorAuthError, ConnectorAuthState, ConnectorRefreshTokenState};
+pub use contract_drift::{detect_contract_drift, ContractDriftReport, TypeChange};
 pub use calendar::{
     calendar_manifest, CalendarAvailabilityRequest, CalendarAvailabilitySlot,
     CalendarCancelRequest, CalendarConnector, CalendarEvent, CalendarEventReadRequest,

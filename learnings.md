@@ -5210,3 +5210,68 @@ correctly filed as post-v1.0. The chain wasn't followed
 through. Future audits should walk every filing reference to
 make sure its dependency chain bottoms out before assigning a
 class.
+
+## 35V2-P41-D-LR-connector-drift-narration closed (2026-05-19)
+
+Ships a schema-agnostic structural drift detector for connector
+contracts + the CLI flow that wires it for hermetic CI runs.
+
+Recon under the slice surfaced a design choice: the connector
+manifest does not declare an expected per-operation response
+shape (it carries `scope`, `rate_limit`, `redaction`,
+`replay`, `mode`, never `response_schema`). The audit's
+wording "compares the manifest to the live provider response
+shape" assumed the manifest carried that schema. Two paths
+were available:
+
+  1. Add a `response_schema` field to every manifest. Heavy:
+     schema migration across every connector + per-operation
+     authorship.
+  2. Ship a schema-agnostic structural detector that compares
+     ANY two JSON payloads. Pure-function. Caller picks what
+     "baseline" means (recorded mock fixture, last successful
+     live run, hand-authored expected shape, etc.).
+
+Path 2 is the honest v1.0 minimum: it gives operators a
+working drift gate today, doesn't require touching every
+manifest, and doesn't pre-decide which interpretation of
+"baseline" to commit to.
+
+`corvid_connector_runtime::contract_drift` ships the canonical
+detector with 9 unit tests:
+
+  - identical → empty report
+  - provider-added field appears in `added_paths`
+  - provider-removed field appears in `removed_paths` (the
+    central drift threat; CI exits non-zero)
+  - type-change (e.g. number → string) appears in
+    `type_changed_paths`
+  - nested-object drift uses dotted JSON paths
+  - array-of-records walks the first element's shape
+  - empty arrays skip shape walking (transient empty
+    result-sets do not look like "every field removed")
+  - all three buckets sort lexicographically (deterministic
+    output for golden-fixture diffs)
+  - null-vs-non-null is a type change, not a missing field
+
+`corvid connectors check --baseline <file> --observed <file>`
+wires it. The CLI loads both JSON files, runs the detector,
+prints the report (table by default, JSON with `--json`), and
+exits non-zero on any drift site. Three CLI integration tests
+cover the file-input round-trip + the malformed-input safety
+net.
+
+The `--live` flag without `--baseline`/`--observed` still
+returns a typed Err — but the error message now names the
+file-input mode as the v1.0 surface AND points at
+`35V2-P41-E-LR-live-provider-ci-matrix` as the operational
+slice that wires the actual live-HTTP fetch. This is the
+right separation: the *detector* is testable + ships today;
+the *credentials wiring* is operational, lives in CI secrets,
+and stays operational.
+
+Phase 41 registry: 5/6 RuntimeChecked (was 4/6); only
+`connector.write_requires_approval` remains OutOfScope as a
+post-v1.0 typecheck-time guarantee. Three Phase-41
+launch-readiness filings closed (D-LR shipped, E-LR
+operational, the rest are AI-helper or post-v1.0 work).

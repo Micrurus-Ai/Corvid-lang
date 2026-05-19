@@ -45,7 +45,60 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
             }
             Ok(0)
         }
-        ConnectorsCommand::Check { live, json } => {
+        ConnectorsCommand::Check {
+            live,
+            baseline,
+            observed,
+            json,
+        } => {
+            // Drift-detection mode: both --baseline and --observed
+            // supplied. Runs the schema-agnostic detector and
+            // exits non-zero on any drift. Hermetic (no network).
+            if let (Some(baseline_path), Some(observed_path)) =
+                (baseline.as_ref(), observed.as_ref())
+            {
+                let report = connectors_cmd::run_contract_drift(
+                    baseline_path,
+                    observed_path,
+                )?;
+                if json {
+                    let out = serde_json::to_string_pretty(&serde_json::json!({
+                        "added_paths": report.added_paths,
+                        "removed_paths": report.removed_paths,
+                        "type_changed_paths": report
+                            .type_changed_paths
+                            .iter()
+                            .map(|c| serde_json::json!({
+                                "path": c.path,
+                                "baseline_type": c.baseline_type,
+                                "observed_type": c.observed_type,
+                            }))
+                            .collect::<Vec<_>>(),
+                        "total": report.total(),
+                    }))?;
+                    println!("{out}");
+                } else if report.is_empty() {
+                    println!("contract drift: none (0 sites)");
+                } else {
+                    println!("contract drift: {} site(s)", report.total());
+                    for path in &report.removed_paths {
+                        println!("  removed:        {path}");
+                    }
+                    for path in &report.added_paths {
+                        println!("  added:          {path}");
+                    }
+                    for change in &report.type_changed_paths {
+                        println!(
+                            "  type-changed:   {}  ({} -> {})",
+                            change.path, change.baseline_type, change.observed_type
+                        );
+                    }
+                }
+                return Ok(if report.is_empty() { 0 } else { 1 });
+            }
+            // Default mode: manifest schema validation. `--live`
+            // without --baseline/--observed remains the
+            // operational gate per `35V2-P41-E-LR-live-provider-ci-matrix`.
             let entries = connectors_cmd::run_check(live)?;
             let any_invalid = entries.iter().any(|e| !e.valid);
             if json {

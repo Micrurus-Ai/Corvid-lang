@@ -9,14 +9,37 @@ pub enum ConnectorsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate every shipped connector manifest. Pass `--live` to
-    /// detect contract drift against the real provider; that path
-    /// requires `CORVID_PROVIDER_LIVE=1` and lands end-to-end in
-    /// slice 41M.
+    /// Validate every shipped connector manifest. With
+    /// `--baseline <FILE>` + `--observed <FILE>` runs the
+    /// schema-agnostic contract-drift detector against two
+    /// recorded JSON payloads (a CI-friendly way to catch
+    /// provider-side breakage before deploy). The live-HTTP
+    /// fetch path that would compute `observed` from a real
+    /// provider call is gated on `CORVID_PROVIDER_LIVE=1` +
+    /// per-provider credentials and is operational scope
+    /// (`35V2-P41-E-LR-live-provider-ci-matrix`); use
+    /// `--baseline`/`--observed` from CI scripts that already
+    /// capture provider responses.
     Check {
-        /// Detect manifest-vs-provider drift via real HTTP calls.
+        /// Detect manifest-vs-provider drift via real HTTP
+        /// calls. Operational gate — refuses without
+        /// `CORVID_PROVIDER_LIVE=1`. Prefer
+        /// `--baseline`/`--observed` for hermetic CI runs.
         #[arg(long)]
         live: bool,
+        /// JSON file holding the baseline response shape (a
+        /// recorded mock fixture, the last successful live
+        /// run, or a hand-authored expected shape).
+        #[arg(long, value_name = "FILE")]
+        baseline: Option<PathBuf>,
+        /// JSON file holding the observed response shape (a
+        /// recently-captured live response, the connector
+        /// runtime's recorded output, etc.). When both
+        /// `--baseline` and `--observed` are set, the command
+        /// runs the structural drift detector and exits
+        /// non-zero on any drift.
+        #[arg(long, value_name = "FILE")]
+        observed: Option<PathBuf>,
         /// Emit machine-readable JSON instead of a human report.
         #[arg(long)]
         json: bool,
