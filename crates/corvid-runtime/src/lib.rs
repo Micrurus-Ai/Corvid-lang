@@ -73,6 +73,7 @@ pub mod models;
 mod native_trace;
 pub mod observation_handles;
 pub mod observe;
+pub mod ops_show;
 pub mod otel_export;
 /// Slice 40J: SDK-backed OTLP exporter alongside the hand-rolled
 /// `otel_export` path. Production callers flow through the SDK

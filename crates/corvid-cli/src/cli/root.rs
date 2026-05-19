@@ -33,6 +33,7 @@ use super::jobs::JobsCommand;
 use super::migrate::MigrateCommand;
 use super::observe::ObserveCommand;
 use super::package::PackageCommand;
+pub use super::ops::OpsCommand;
 pub use super::receipt::ReceiptCommand;
 pub use super::review_queue::ReviewQueueCommand;
 pub use super::trace::TraceCommand;
@@ -713,5 +714,15 @@ pub enum Command {
     ReviewQueue {
         #[command(subcommand)]
         command: ReviewQueueCommand,
+    },
+    /// Verify a signed `/__ops` snapshot from a live Corvid
+    /// backend. Operators pipe `curl http://prod/__ops >
+    /// ops.json` then run `corvid ops show --envelope-file
+    /// ops.json --pubkey deploy.pub` to confirm the binary at
+    /// the URL matches the expected signing key and the
+    /// snapshot has not been tampered with in transit.
+    Ops {
+        #[command(subcommand)]
+        command: OpsCommand,
     },
 }

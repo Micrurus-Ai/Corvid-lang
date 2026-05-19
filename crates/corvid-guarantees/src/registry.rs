@@ -1497,26 +1497,42 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "ops.live_introspection_signed",
         kind: GuaranteeKind::Ops,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "`corvid ops show <prod-url>` returns the live binary's \
-             signed claim manifest + cost-since-start + approvals- \
-             pending. The response is signed by the binary's \
-             signing key (matching the cdylib's DSSE envelope key); \
-             a response whose signature doesn't match the expected \
-             key means either a man-in-the-middle or the wrong \
-             binary is running at the URL.",
-        out_of_scope_reason:
-            "`corvid ops show` CLI subcommand does not exist yet \
-             (verified by `corvid ops --help` → unrecognised). The \
-             Phase 36-generated axum server has no `/__ops` \
-             introspection endpoint. Filed as `43P-ops-show` — \
-             promotes this row to RuntimeChecked when both the CLI \
-             + the server endpoint ship + the signature-match \
-             test lands.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "The Phase 36-generated axum server exposes a \
+             `/__ops` endpoint returning a signed DSSE envelope \
+             over a typed `OpsShowSnapshot` (build_id, \
+             started_unix_ms, generated_unix_ms, request_count, \
+             claim_manifest_ids). The envelope is signed with \
+             the ed25519 key supplied via `CORVID_OPS_SIGNING_KEY` \
+             — empty/unset key returns 503 (fail-closed; an \
+             unsigned snapshot is what a MITM would produce). \
+             The `corvid ops show --envelope-file <path> --pubkey \
+             <path>` CLI verifies the envelope against an \
+             operator-supplied public key: a signature mismatch \
+             (wrong key, MITM), payload tampering, or wrong \
+             payload-type (`corvid.ops.show.v1` is pinned so a \
+             signature valid over an ABI attestation cannot be \
+             replayed against the ops surface) all fail closed \
+             with typed errors. The canonical implementation \
+             lives in `corvid_runtime::ops_show` with 5 unit \
+             tests; the rendered server inlines the producer \
+             side (matching DSSE PAE byte-for-byte) and the CLI \
+             reads + verifies via the runtime helper.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/ops_show.rs::ops_snapshot_round_trips_through_sign_then_verify",
+            "crates/corvid-cli/src/ops_cmd.rs::ops_show_verifies_envelope_signed_with_matching_key",
+            "crates/corvid-cli/tests/build_server.rs::rendered_server_ops_show_signs_snapshot_and_cli_verifies_it",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/ops_show.rs::ops_snapshot_signed_with_wrong_key_fails_verification",
+            "crates/corvid-runtime/src/ops_show.rs::ops_snapshot_tampered_payload_fails_verification",
+            "crates/corvid-runtime/src/ops_show.rs::ops_snapshot_refuses_envelope_with_wrong_payload_type",
+            "crates/corvid-cli/src/ops_cmd.rs::ops_show_refuses_envelope_signed_with_wrong_key",
+            "crates/corvid-cli/src/ops_cmd.rs::ops_show_refuses_malformed_envelope_file",
+        ],
     },
     Guarantee {
         id: "claim.audit_runnable_artifacts",

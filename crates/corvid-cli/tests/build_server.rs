@@ -607,3 +607,182 @@ fn mint_csrf_for_test(binding: &str, secret: &[u8]) -> String {
     }
     format!("{binding}.{hex}")
 }
+
+/// Slice 43P-LR (end-to-end): the rendered axum server signs
+/// the `/__ops` snapshot with the operator-supplied ed25519
+/// key when `CORVID_OPS_SIGNING_KEY` is set, and the
+/// `corvid ops show` CLI verifies it against the matching
+/// public key.
+///
+/// Asserts the full producer-consumer loop:
+///
+///   - GET /__ops without `CORVID_OPS_SIGNING_KEY` returns
+///     503 (fail-closed; an unsigned snapshot is exactly what
+///     a MITM would produce).
+///   - With the key set, GET /__ops returns a DSSE envelope
+///     whose payloadType is `corvid.ops.show.v1`.
+///   - `corvid ops show --envelope-file <body> --pubkey <pub>`
+///     verifies the envelope and prints the snapshot.
+///   - Verifying with the WRONG public key (man-in-the-middle
+///     simulation) returns a non-zero exit.
+#[test]
+fn rendered_server_ops_show_signs_snapshot_and_cli_verifies_it() {
+    use ed25519_dalek::SigningKey;
+    use rand_core::OsRng;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).expect("src dir");
+    let source_path = src_dir.join("hello.cor");
+    std::fs::write(&source_path, SOURCE).expect("write source");
+
+    let args = vec![
+        "build".to_string(),
+        source_path.to_string_lossy().into_owned(),
+        "--target=server".to_string(),
+    ];
+    let out = run_corvid(&args, dir.path());
+    assert!(
+        out.status.success(),
+        "server build failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let server = dir
+        .path()
+        .join("target")
+        .join("server")
+        .join(server_binary_name("hello"));
+
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let signing_hex = hex::encode(signing_key.to_bytes());
+    let pubkey_hex = hex::encode(signing_key.verifying_key().as_bytes());
+
+    // 1. Without CORVID_OPS_SIGNING_KEY → /__ops fails closed.
+    let unsigned_child = Command::new(&server)
+        .env("CORVID_PORT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn unsigned server");
+    let mut unsigned_child = ChildGuard(unsigned_child);
+    let stdout = unsigned_child.0.stdout.take().expect("server stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let start = Instant::now();
+    while line.is_empty() && start.elapsed() < Duration::from_secs(10) {
+        reader.read_line(&mut line).expect("read listening line");
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("listening: http://")
+        .expect("listening prefix");
+    let unsigned = http_get(addr, "/__ops");
+    assert!(
+        unsigned.contains("HTTP/1.1 503"),
+        "expected 503 fail-closed on /__ops without signing key, got: {unsigned}"
+    );
+    assert!(
+        unsigned.contains("ops_signing_not_configured"),
+        "expected ops_signing_not_configured kind: {unsigned}"
+    );
+    drop(unsigned_child);
+
+    // 2. With the key + build_id set → /__ops returns a DSSE
+    // envelope the CLI verifies under the matching pubkey.
+    let signed_child = Command::new(&server)
+        .env("CORVID_PORT", "0")
+        .env("CORVID_OPS_SIGNING_KEY", &signing_hex)
+        .env("CORVID_OPS_KEY_ID", "deploy-key-1")
+        .env("CORVID_BUILD_ID", "git:test-build-1234")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn signed server");
+    let mut signed_child = ChildGuard(signed_child);
+    let stdout = signed_child.0.stdout.take().expect("server stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let start = Instant::now();
+    while line.is_empty() && start.elapsed() < Duration::from_secs(10) {
+        reader.read_line(&mut line).expect("read listening line");
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("listening: http://")
+        .expect("listening prefix");
+
+    let signed = http_get(addr, "/__ops");
+    assert!(signed.contains("HTTP/1.1 200 OK"), "{signed}");
+    assert!(
+        signed.contains("application/vnd.corvid.ops.show+json"),
+        "expected ops payloadType in envelope JSON: {signed}"
+    );
+
+    // Extract the envelope body (everything after the blank
+    // header-body separator).
+    let body_start = signed
+        .find("\r\n\r\n")
+        .expect("HTTP body separator")
+        + 4;
+    let envelope_json = &signed[body_start..];
+    let envelope_path = dir.path().join("ops.json");
+    std::fs::write(&envelope_path, envelope_json).unwrap();
+
+    let pubkey_path = dir.path().join("deploy.pub");
+    std::fs::write(&pubkey_path, &pubkey_hex).unwrap();
+
+    let verify = Command::new(corvid_bin())
+        .args([
+            "ops",
+            "show",
+            "--envelope-file",
+            envelope_path.to_string_lossy().as_ref(),
+            "--pubkey",
+            pubkey_path.to_string_lossy().as_ref(),
+        ])
+        .output()
+        .expect("run corvid ops show");
+    assert!(
+        verify.status.success(),
+        "corvid ops show failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&verify.stdout),
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let verify_stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(
+        verify_stdout.contains("git:test-build-1234"),
+        "expected build_id in CLI output: {verify_stdout}"
+    );
+    assert!(
+        verify_stdout.contains("signature-verified"),
+        "expected signature-verified marker: {verify_stdout}"
+    );
+
+    // 3. Verifying with the WRONG pubkey (MITM simulation) is
+    // refused with a non-zero exit.
+    let attacker_key = SigningKey::generate(&mut OsRng);
+    let wrong_pubkey_path = dir.path().join("attacker.pub");
+    std::fs::write(
+        &wrong_pubkey_path,
+        hex::encode(attacker_key.verifying_key().as_bytes()),
+    )
+    .unwrap();
+    let mitm_verify = Command::new(corvid_bin())
+        .args([
+            "ops",
+            "show",
+            "--envelope-file",
+            envelope_path.to_string_lossy().as_ref(),
+            "--pubkey",
+            wrong_pubkey_path.to_string_lossy().as_ref(),
+        ])
+        .output()
+        .expect("run corvid ops show with wrong pubkey");
+    assert!(
+        !mitm_verify.status.success(),
+        "corvid ops show should have rejected wrong pubkey but exited 0"
+    );
+
+    drop(signed_child);
+}

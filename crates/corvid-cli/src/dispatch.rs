@@ -33,8 +33,8 @@ use crate::cli::package::PackageCommand;
 use crate::cli::root::{
     AbiCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand, BenchCommand,
     BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
-    ConnectorsOauthCommand, ContractCommand, DeployCommand, ReceiptCommand, ReviewQueueCommand,
-    TraceCommand, UpgradeCommand,
+    ConnectorsOauthCommand, ContractCommand, DeployCommand, OpsCommand, ReceiptCommand,
+    ReviewQueueCommand, TraceCommand, UpgradeCommand,
 };
 use crate::commands::eval::*;
 use crate::commands::jobs::*;
@@ -55,7 +55,7 @@ use crate::verify_cmd::cmd_verify;
 use crate::{
     abi_cmd, approver_cmd, audit_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
     connectors_cmd, contract_cmd, deploy_cmd, eval_cmd, jobs_explain_cmd, lineage_cmd, observe_cmd,
-    receipt_cmd, release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd,
+    ops_cmd, receipt_cmd, release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd,
     trace_dag, trace_diff, upgrade_cmd,
 };
 
@@ -746,6 +746,12 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 status.as_deref(),
                 json,
             ),
+        },
+        Some(Command::Ops { command }) => match command {
+            OpsCommand::Show {
+                envelope_file,
+                pubkey,
+            } => ops_cmd::run_ops_show(&envelope_file, &pubkey),
         },
         None => {
             println!("corvid - the AI-native language compiler");

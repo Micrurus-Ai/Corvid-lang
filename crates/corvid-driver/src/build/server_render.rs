@@ -53,6 +53,10 @@ tower-http = {{ version = "0.6", features = ["compression-full", "cors", "trace"
 hmac = "0.12"
 sha2 = "0.10"
 subtle = "2.6"
+ed25519-dalek = {{ version = "2", features = ["std"] }}
+base64 = "0.22"
+serde = {{ version = "1", features = ["derive"] }}
+serde_json = "1"
 "#
     )
 }
@@ -67,7 +71,10 @@ use axum::response::{{IntoResponse, Response}};
 use axum::routing::get;
 use axum::middleware;
 use axum::Router;
+use base64::Engine;
+use ed25519_dalek::{{ed25519::signature::Signer, SigningKey}};
 use hmac::{{Hmac, Mac}};
+use serde::Serialize;
 use sha2::Sha256;
 use std::io::Read;
 use std::process::{{Command, Stdio}};
@@ -92,6 +99,14 @@ const MAX_REQUEST_BYTES: usize = 4096;
 const CSRF_BINDING_DOMAIN: &[u8] = b"corvid-csrf-v1:";
 const CSRF_HEADER: &str = "x-corvid-csrf";
 const CSRF_COOKIE: &str = "corvid_csrf";
+// Mirrors `corvid-runtime::ops_show` — canonical implementation
+// + 5 adversarial tests live there. The rendered server
+// produces the signed envelope at `/__ops`; the `corvid ops
+// show` CLI verifies it. The pinned DSSE payload type prevents
+// signature replay across artifacts (an ABI attestation
+// signature cannot be replayed against the ops surface).
+const OPS_SHOW_PAYLOAD_TYPE: &str =
+    "application/vnd.corvid.ops.show+json; version=1";
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 static REQUEST_TOTAL: AtomicU64 = AtomicU64::new(0);
 static ERROR_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -106,9 +121,28 @@ struct AppState {{
     /// double-submit verifier on every state-changing method.
     /// Sourced from `CORVID_CSRF_SECRET` at startup.
     csrf_secret: Arc<Vec<u8>>,
+    /// Optional ed25519 signing key for the `/__ops` snapshot.
+    /// When `None`, `/__ops` returns 503 (fail-closed: a
+    /// snapshot with no signature is exactly what a MITM would
+    /// produce, so refuse rather than serve unsigned).
+    /// Sourced from `CORVID_OPS_SIGNING_KEY` at startup.
+    ops_signing: Option<Arc<OpsSigning>>,
+    /// Free-form binary identifier embedded in every signed
+    /// `/__ops` snapshot. Operators compare this against the
+    /// expected deployed build id. Sourced from
+    /// `CORVID_BUILD_ID` at startup; defaults to `unknown`.
+    build_id: Arc<String>,
+    /// Unix-epoch milliseconds at which this process started.
+    started_unix_ms: u64,
     rate_limit_seen: Arc<AtomicU64>,
     handled_requests: Arc<AtomicU64>,
     shutdown: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+}}
+
+#[derive(Clone)]
+struct OpsSigning {{
+    key: Arc<SigningKey>,
+    key_id: Arc<String>,
 }}
 
 #[tokio::main]
@@ -119,11 +153,19 @@ async fn main() -> std::io::Result<()> {{
     let listener = TcpListener::bind(format!("{{host}}:{{port}}")).await?;
     let addr = listener.local_addr()?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let started_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     let state = AppState {{
         max_requests: max_requests(),
         require_auth: require_auth(),
         rate_limit_requests: rate_limit_requests(),
         csrf_secret: Arc::new(csrf_secret()),
+        ops_signing: load_ops_signing()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?,
+        build_id: Arc::new(build_id()),
+        started_unix_ms,
         rate_limit_seen: Arc::new(AtomicU64::new(0)),
         handled_requests: Arc::new(AtomicU64::new(0)),
         shutdown: Arc::new(Mutex::new(Some(shutdown_tx))),
@@ -132,6 +174,7 @@ async fn main() -> std::io::Result<()> {{
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics))
+        .route("/__ops", get(ops_show))
         .fallback(handle_app)
         .layer(middleware::from_fn_with_state(state.clone(), backend_middleware))
         .layer(CompressionLayer::new())
@@ -257,6 +300,155 @@ async fn metrics(State(state): State<AppState>, request: Request<axum::body::Bod
         request_id(),
         Instant::now(),
     )
+}}
+
+async fn ops_show(
+    State(state): State<AppState>,
+    request: Request<axum::body::Body>,
+) -> Response {{
+    let request_id = request_id();
+    let started = Instant::now();
+    // Fail closed: no signing key configured -> no /__ops
+    // surface. A snapshot with no signature is exactly what a
+    // MITM would produce, so refuse rather than serve unsigned.
+    let signing = match state.ops_signing.as_ref() {{
+        Some(s) => s.clone(),
+        None => {{
+            return error_response(
+                state,
+                503,
+                "GET",
+                request.uri().path(),
+                "ops_signing_not_configured",
+                "CORVID_OPS_SIGNING_KEY is not set; /__ops refuses to serve unsigned snapshots",
+                request_id,
+                started,
+            );
+        }}
+    }};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let snapshot = OpsShowSnapshot {{
+        build_id: state.build_id.as_str().to_string(),
+        started_unix_ms: state.started_unix_ms,
+        generated_unix_ms: now,
+        request_count: REQUEST_TOTAL.load(Ordering::Relaxed),
+        claim_manifest_ids: claim_manifest_ids(),
+    }};
+    let payload = match serde_json::to_vec(&snapshot) {{
+        Ok(bytes) => bytes,
+        Err(err) => {{
+            return error_response(
+                state,
+                500,
+                "GET",
+                request.uri().path(),
+                "ops_snapshot_serialise_failed",
+                &err.to_string(),
+                request_id,
+                started,
+            );
+        }}
+    }};
+    let envelope = sign_dsse(&payload, OPS_SHOW_PAYLOAD_TYPE, &signing.key, &signing.key_id);
+    let body = match serde_json::to_string(&envelope) {{
+        Ok(s) => s,
+        Err(err) => {{
+            return error_response(
+                state,
+                500,
+                "GET",
+                request.uri().path(),
+                "ops_envelope_serialise_failed",
+                &err.to_string(),
+                request_id,
+                started,
+            );
+        }}
+    }};
+    complete(
+        state,
+        "GET",
+        request.uri().path(),
+        200,
+        "application/json",
+        body,
+        request_id,
+        started,
+    )
+}}
+
+#[derive(Serialize)]
+struct OpsShowSnapshot {{
+    build_id: String,
+    started_unix_ms: u64,
+    generated_unix_ms: u64,
+    request_count: u64,
+    #[serde(default)]
+    claim_manifest_ids: Vec<String>,
+}}
+
+#[derive(Serialize)]
+struct DsseEnvelope {{
+    #[serde(rename = "payloadType")]
+    payload_type: String,
+    payload: String,
+    signatures: Vec<DsseSignature>,
+}}
+
+#[derive(Serialize)]
+struct DsseSignature {{
+    keyid: String,
+    sig: String,
+}}
+
+fn sign_dsse(
+    payload: &[u8],
+    payload_type: &str,
+    key: &SigningKey,
+    key_id: &str,
+) -> DsseEnvelope {{
+    let pae = dsse_pae(payload_type, payload);
+    let sig = key.sign(&pae);
+    let b64 = base64::engine::general_purpose::STANDARD;
+    DsseEnvelope {{
+        payload_type: payload_type.to_string(),
+        payload: b64.encode(payload),
+        signatures: vec![DsseSignature {{
+            keyid: key_id.to_string(),
+            sig: b64.encode(sig.to_bytes()),
+        }}],
+    }}
+}}
+
+fn dsse_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {{
+    // DSSEv1 PAE: `DSSEv1 SP LEN(type) SP type SP LEN(payload)
+    // SP payload`. Mirrors corvid-abi::signing::pae byte-for-
+    // byte; the build_server integration test asserts the
+    // CLI-side verifier accepts the rendered server's output.
+    let mut out = Vec::with_capacity(payload.len() + payload_type.len() + 32);
+    out.extend_from_slice(b"DSSEv1 ");
+    out.extend_from_slice(payload_type.len().to_string().as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload_type.as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload.len().to_string().as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload);
+    out
+}}
+
+fn claim_manifest_ids() -> Vec<String> {{
+    // Reserved for future wiring: the rendered binary should
+    // emit the claim ids its embedded ABI attestation asserts.
+    // For v1.0 the snapshot ships an empty list so the verifier
+    // still passes; operators compare `build_id` instead. The
+    // claim-id wiring is filed as a sibling launch-readiness
+    // (the cdylib-side claim infrastructure already ships; the
+    // rendered axum binary does not yet embed it).
+    Vec::new()
 }}
 
 async fn handle_app(
@@ -489,6 +681,53 @@ fn csrf_secret() -> Vec<u8> {{
         .ok()
         .map(|value| value.into_bytes())
         .unwrap_or_default()
+}}
+
+fn build_id() -> String {{
+    std::env::var("CORVID_BUILD_ID").unwrap_or_else(|_| "unknown".to_string())
+}}
+
+fn load_ops_signing() -> Result<Option<Arc<OpsSigning>>, String> {{
+    let Some(raw) = std::env::var("CORVID_OPS_SIGNING_KEY").ok() else {{
+        return Ok(None);
+    }};
+    let trimmed: String = raw.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let seed = if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {{
+        let mut bytes = [0u8; 32];
+        for (i, chunk) in trimmed.as_bytes().chunks_exact(2).enumerate() {{
+            let hi = hex_nibble(chunk[0])
+                .ok_or_else(|| "CORVID_OPS_SIGNING_KEY has non-hex characters".to_string())?;
+            let lo = hex_nibble(chunk[1])
+                .ok_or_else(|| "CORVID_OPS_SIGNING_KEY has non-hex characters".to_string())?;
+            bytes[i] = (hi << 4) | lo;
+        }}
+        bytes
+    }} else if raw.as_bytes().len() == 32 {{
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(raw.as_bytes());
+        bytes
+    }} else {{
+        return Err(format!(
+            "CORVID_OPS_SIGNING_KEY must be 64 hex chars or 32 raw bytes (got {{}} chars)",
+            raw.len()
+        ));
+    }};
+    let key = SigningKey::from_bytes(&seed);
+    let key_id = std::env::var("CORVID_OPS_KEY_ID")
+        .unwrap_or_else(|_| "deploy-key".to_string());
+    Ok(Some(Arc::new(OpsSigning {{
+        key: Arc::new(key),
+        key_id: Arc::new(key_id),
+    }})))
+}}
+
+fn hex_nibble(byte: u8) -> Option<u8> {{
+    match byte {{
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }}
 }}
 
 fn verify_csrf(

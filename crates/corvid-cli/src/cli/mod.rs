@@ -26,6 +26,7 @@ pub mod deploy;
 pub mod jobs;
 pub mod migrate;
 pub mod observe;
+pub mod ops;
 pub mod package;
 pub mod receipt;
 pub mod review_queue;
@@ -61,6 +62,8 @@ pub use jobs::*;
 pub use migrate::*;
 #[allow(unused_imports)]
 pub use observe::*;
+#[allow(unused_imports)]
+pub use ops::*;
 #[allow(unused_imports)]
 pub use package::*;
 #[allow(unused_imports)]

@@ -5275,3 +5275,84 @@ Phase 41 registry: 5/6 RuntimeChecked (was 4/6); only
 post-v1.0 typecheck-time guarantee. Three Phase-41
 launch-readiness filings closed (D-LR shipped, E-LR
 operational, the rest are AI-helper or post-v1.0 work).
+
+## 35V2-P43-P-LR-ops-show closed (2026-05-19)
+
+Cross-layer end-to-end slice: rendered axum server gains a
+`/__ops` endpoint that returns a DSSE-signed `OpsShowSnapshot`
+envelope; `corvid ops show --envelope-file <path> --pubkey
+<path>` verifies it. Promotes `ops.live_introspection_signed`
+to RuntimeChecked.
+
+Three layers ship in lockstep:
+
+  - **Runtime canonical implementation**
+    `corvid_runtime::ops_show`: `OpsShowSnapshot` shape
+    (build_id / started_unix_ms / generated_unix_ms /
+    request_count / claim_manifest_ids), `sign_ops_snapshot` +
+    `verify_ops_snapshot` delegating to
+    `corvid_abi::sign_envelope`/`verify_envelope` with the
+    pinned `corvid.ops.show.v1` payload type. 5 unit tests:
+    round-trip, MITM (wrong key), payload tampering,
+    payload-type replay attack, canonical determinism.
+
+  - **CLI consumer** `corvid ops show`: file-mode flow —
+    operator pipes `curl http://prod/__ops > ops.json` and
+    runs `corvid ops show --envelope-file ops.json --pubkey
+    deploy.pub`. 3 CLI unit tests: matching-key round-trip,
+    wrong-key MITM, malformed-envelope.
+
+  - **Rendered server producer**: `/__ops` endpoint added to
+    the axum server template + `CORVID_OPS_SIGNING_KEY` /
+    `CORVID_OPS_KEY_ID` / `CORVID_BUILD_ID` env wiring.
+    Without the signing key, returns 503 (fail-closed; an
+    unsigned snapshot is exactly what a MITM would produce, so
+    refuse rather than serve unsigned). Inlines DSSE signing
+    primitives (PAE + ed25519) byte-for-byte against the
+    canonical `corvid_abi` implementation; the end-to-end
+    integration test asserts they agree on the wire.
+
+End-to-end integration test
+`rendered_server_ops_show_signs_snapshot_and_cli_verifies_it`
+builds the rendered server, exercises all three:
+
+  - GET /__ops WITHOUT the signing key → 503
+    `ops_signing_not_configured` (fail-closed).
+  - GET /__ops WITH the key + build_id → 200 with the DSSE
+    envelope; `corvid ops show` verifies it against the
+    matching pubkey and prints `build_id: git:test-build-1234`
+    + `signature-verified`.
+  - Same envelope verified against an ATTACKER's pubkey →
+    non-zero exit (MITM simulation: the binary produced the
+    envelope, but the operator's expected key does not match;
+    exactly what the registry row's threat model names).
+
+Three design choices recorded:
+
+  1. **Fail-closed default.** No signing key → 503, never an
+     unsigned 200. The whole guarantee is "the response is
+     signed by the binary's signing key"; serving an unsigned
+     200 would silently break the contract.
+
+  2. **Pinned payload type.** DSSE's payloadType allow-list
+     pinned to `corvid.ops.show.v1` rejects a signature that
+     is mathematically valid but was minted over a *different*
+     artifact (an ABI attestation, a receipt). Without this,
+     an attacker who captured *any* DSSE-signed Corvid
+     artifact from the same key could replay it as an ops
+     snapshot. The pin is the second cheap fix-closed lever.
+
+  3. **Inline-vs-dep (same as CSRF slice).** The rendered
+     server inlines the producer side rather than depending on
+     `corvid-runtime`. The runtime crate would drag the whole
+     opentelemetry/rusqlite universe into a standalone
+     generated binary. The integration test asserts wire-level
+     equivalence; a future divergence surfaces immediately in
+     CI rather than years later in production.
+
+Phase 43 launch-readiness tail loses the largest single
+filing. The remaining tail is mostly per-app maturity work
+(P42-D/E/F/G/H — five reference apps × heavy authoring) +
+AI-helper work (P39-H policy-suggest, P41-H connectors-helpers
+umbrella) + an operational CI matrix for live providers
+(P41-E). All are honestly multi-day; not single-session.
