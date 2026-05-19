@@ -34,6 +34,7 @@ use super::migrate::MigrateCommand;
 use super::observe::ObserveCommand;
 use super::package::PackageCommand;
 pub use super::receipt::ReceiptCommand;
+pub use super::review_queue::ReviewQueueCommand;
 pub use super::trace::TraceCommand;
 pub use super::upgrade::UpgradeCommand;
 
@@ -704,5 +705,13 @@ pub enum Command {
     Approvals {
         #[command(subcommand)]
         command: ApprovalsCommand,
+    },
+    /// Inspect the runtime's human-review queue. Reads
+    /// `ReviewQueueRecord` JSONL captured by the host backend and
+    /// optionally ranks by the `cost_of_being_wrong` policy so the
+    /// highest-cost pending review surfaces at the top.
+    ReviewQueue {
+        #[command(subcommand)]
+        command: ReviewQueueCommand,
     },
 }

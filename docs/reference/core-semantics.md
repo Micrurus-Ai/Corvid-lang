@@ -69,7 +69,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `observability.contract_aware_grouping` | observability | runtime_checked | runtime |
 | `eval.drift_attribution` | observability | runtime_checked | runtime |
 | `eval.promotion_signed_lineage` | observability | runtime_checked | runtime |
-| `review_queue.cost_of_being_wrong_ranking` | observability | out_of_scope | runtime |
+| `review_queue.cost_of_being_wrong_ranking` | observability | runtime_checked | runtime |
 | `deploy.reproducible_build` | deploy | out_of_scope | platform |
 | `deploy.attestation_chain` | deploy | runtime_checked | platform |
 | `deploy.sbom_completeness` | deploy | runtime_checked | platform |
@@ -805,12 +805,18 @@ Redacting the same lineage event twice with the same `LineageRedactionPolicy` yi
 - `crates/corvid-cli/src/observe_helpers_cmd/eval_from_feedback.rs::eval_generate_from_feedback_missing_trace_id_refused`
 
 #### `review_queue.cost_of_being_wrong_ranking`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: runtime
 
 `corvid review-queue list --rank=cost-of-being-wrong` surfaces low-confidence + high-risk outputs ranked by the `cost_of_being_wrong` policy.
 
-> **Why out of scope:** Review-queue envelopes ship at `corvid_runtime::review_queue`. The `corvid review-queue list --rank=cost-of-being-wrong` CLI subcommand that surfaces the ranked queue is not yet wired. Filed as launch-readiness slice `35V2-P40-C-LR-review-queue-ranking-cli` — promotes this row to RuntimeChecked when the subcommand ships + the ranking-correctness test lands alongside it.
+**Positive tests:**
+
+- `crates/corvid-cli/src/review_queue_cmd.rs::rank_cost_of_being_wrong_sorts_highest_first`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/review_queue_cmd.rs::rank_unknown_policy_refused`
 
 ### Deploy packaging
 

@@ -4712,8 +4712,9 @@ Headline metrics:
   - 1 permanent docs-as-code drift gate
     (`crates/corvid-cli/tests/docs_drift_gate.rs`) that extracts
     every fenced ```corvid``` block from `docs/guides/*.md` and
-    routes each through `corvid check`; 7 guides currently in
-    EXEMPT_GUIDES allowlist tied to per-guide rewrite filings.
+    routes each through `corvid check`; all 7 originally-exempt
+    guides rewritten in 43W-1..43W-7 and EXEMPT_GUIDES is now
+    EMPTY — every Corvid block in every guide is enforced.
 
 Four systemic patterns worth pinning for the next moat-shaped
 verification round:
@@ -4781,3 +4782,35 @@ remaining ~3-5 months.
 
 Next: Phase 43 (Packaging, deployment, release, market readiness)
 opens. Pre-phase chat mandatory before any code lands.
+
+## 35V2-P40-C-LR-review-queue-ranking-cli closed (2026-05-19)
+
+`corvid review-queue list --records <path>` shipped as the user-
+visible surface that promotes `review_queue.cost_of_being_wrong_
+ranking` from OutOfScope → RuntimeChecked. The subcommand reads a
+JSONL stream of `ReviewQueueRecord` (captured by the host
+backend; `-` reads from stdin), optionally filters by `--status
+pending|approved|rejected|escalated`, and ranks by
+`--rank=cost-of-being-wrong` so the highest-cost pending review
+surfaces first. Renders as a fixed-width table by default;
+`--json` emits the (optionally ranked) list as pretty JSON.
+
+Five unit tests in `crates/corvid-cli/src/review_queue_cmd.rs`:
+
+  - `rank_cost_of_being_wrong_sorts_highest_first` (positive)
+  - `rank_unknown_policy_refused` (adversarial)
+  - `jsonl_round_trip_preserves_records`
+  - `parse_jsonl_skips_blank_lines`
+  - `parse_status_filter_accepts_each_known_value`
+
+Design note: the review-queue runtime is in-memory; persistence
+is not a v1.0 commitment because the backend pattern is "operator
+ships review-queue records into their own audit store + pipes
+them through the CLI for triage." Filing a persistence layer
+inside the runtime would create a second source of truth for a
+domain operators already own. The JSONL-input shape ducks the
+question and proves the ranking contract without forcing a
+runtime-side persistence decision.
+
+Phase 40 registry: 7 of 7 ids RuntimeChecked, 0 OutOfScope. The
+launch-readiness tail loses one filing.

@@ -28,6 +28,7 @@ pub mod migrate;
 pub mod observe;
 pub mod package;
 pub mod receipt;
+pub mod review_queue;
 pub mod root;
 pub mod trace;
 pub mod upgrade;
@@ -64,6 +65,8 @@ pub use observe::*;
 pub use package::*;
 #[allow(unused_imports)]
 pub use receipt::*;
+#[allow(unused_imports)]
+pub use review_queue::*;
 #[allow(unused_imports)]
 pub use root::*;
 #[allow(unused_imports)]

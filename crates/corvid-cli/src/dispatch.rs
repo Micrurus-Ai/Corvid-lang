@@ -33,8 +33,8 @@ use crate::cli::package::PackageCommand;
 use crate::cli::root::{
     AbiCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand, BenchCommand,
     BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
-    ConnectorsOauthCommand, ContractCommand, DeployCommand, ReceiptCommand, TraceCommand,
-    UpgradeCommand,
+    ConnectorsOauthCommand, ContractCommand, DeployCommand, ReceiptCommand, ReviewQueueCommand,
+    TraceCommand, UpgradeCommand,
 };
 use crate::commands::eval::*;
 use crate::commands::jobs::*;
@@ -55,7 +55,8 @@ use crate::verify_cmd::cmd_verify;
 use crate::{
     abi_cmd, approver_cmd, audit_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
     connectors_cmd, contract_cmd, deploy_cmd, eval_cmd, lineage_cmd, observe_cmd, receipt_cmd,
-    release_cmd, replay, test_from_traces, tour, trace_cmd, trace_dag, trace_diff, upgrade_cmd,
+    release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd, trace_dag,
+    trace_diff, upgrade_cmd,
 };
 
 mod approvals;
@@ -688,6 +689,19 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Connectors { command }) => cmd_connectors(command),
         Some(Command::Auth { command }) => cmd_auth(command),
         Some(Command::Approvals { command }) => cmd_approvals(command),
+        Some(Command::ReviewQueue { command }) => match command {
+            ReviewQueueCommand::List {
+                records,
+                rank,
+                status,
+                json,
+            } => review_queue_cmd::run_list(
+                &records,
+                rank.as_deref(),
+                status.as_deref(),
+                json,
+            ),
+        },
         None => {
             println!("corvid - the AI-native language compiler");
             println!("Run `corvid --help` for usage.");

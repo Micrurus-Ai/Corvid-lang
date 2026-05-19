@@ -59,6 +59,7 @@ mod receipt_cache;
 mod receipt_cmd;
 mod release_cmd;
 mod replay;
+mod review_queue_cmd;
 mod routing_report;
 mod run_cmd;
 mod test_from_traces;

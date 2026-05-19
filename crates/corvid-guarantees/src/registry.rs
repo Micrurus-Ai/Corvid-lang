@@ -1203,22 +1203,19 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "review_queue.cost_of_being_wrong_ranking",
         kind: GuaranteeKind::Observability,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
             "`corvid review-queue list --rank=cost-of-being-wrong` \
              surfaces low-confidence + high-risk outputs ranked \
              by the `cost_of_being_wrong` policy.",
-        out_of_scope_reason:
-            "Review-queue envelopes ship at `corvid_runtime::review_queue`. \
-             The `corvid review-queue list --rank=cost-of-being-wrong` \
-             CLI subcommand that surfaces the ranked queue is not yet \
-             wired. Filed as launch-readiness slice \
-             `35V2-P40-C-LR-review-queue-ranking-cli` — promotes this \
-             row to RuntimeChecked when the subcommand ships + the \
-             ranking-correctness test lands alongside it.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/review_queue_cmd.rs::rank_cost_of_being_wrong_sorts_highest_first",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/review_queue_cmd.rs::rank_unknown_policy_refused",
+        ],
     },
     // ----- Deploy / Release / Upgrade / Ops / Claim (Phase 43) ----
     Guarantee {
