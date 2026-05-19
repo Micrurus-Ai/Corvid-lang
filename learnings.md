@@ -4814,3 +4814,49 @@ runtime-side persistence decision.
 
 Phase 40 registry: 7 of 7 ids RuntimeChecked, 0 OutOfScope. The
 launch-readiness tail loses one filing.
+
+## 35V2-P39-L-LR-batch-data-class-equivalence closed (2026-05-19)
+
+`corvid approvals batch` now enforces a data-class equivalence
+rule at the runtime layer: a batch whose supplied ids span more
+than one `data_class` is refused outright unless the operator
+pins it with `--require-data-class <CLASS>`. Pinning surfaces
+mismatched ids as per-id failures (the existing isolation
+behaviour); spanning without a pin returns `Err` *before* any
+approval is resolved, so the failure is total.
+
+This closes the `batch-approval-drift-across-data-classes`
+threat — the 7th of the 10 named adversarial threats for Phase
+39's auth surface. The threat shape: an operator with the right
+role lists a batch of pending approvals where some are
+`financial` and some are `pii`; reviewer attention is allocated
+to "financial reviews" but `pii` records resolve under the same
+role check. Surface refusal forces the operator to be explicit
+about which data class they are reviewing in this batch.
+
+New registry row: `approval.batch_refuses_cross_data_class_drift`
+ships RuntimeChecked from day 1 (Auth / Runtime phase). The
+existing `approval.batch_equivalence_typed` row stays OutOfScope
+but its reason is tightened to point at the new runtime row + at
+the post-v1.0 `batch_with: ...` source-level sugar that
+type-promotes it. Two test refs:
+
+  - positive: `approvals_batch_require_data_class_pins_to_one_class`
+  - adversarial: `approvals_batch_refuses_cross_data_class_drift_without_pin`
+
+Design note: the inverse-coverage sentinel
+`every_enforced_guarantee_id_is_wired_to_workspace_source`
+caught the new row missing its in-binary anchor on the first
+test run — exactly the drift mode the sentinel was designed for.
+The fix was adding `pub const
+GUARANTEE_ID_BATCH_REFUSES_CROSS_DATA_CLASS_DRIFT` next to the
+enforcement site, the standard pattern. This is the second time
+this round (the first was during P40 close-out) that the
+sentinel surfaced a real anchor gap during a routine row add —
+the cost of being explicit about enforcement-site / registry-row
+coupling is paying for itself.
+
+Phase 39 adversarial threat coverage: 7/10 (was 6/10). Three
+threats still file-tied to their feature slice (session-fixation,
+CSRF-bypass, scope-escalation) and ship with their respective
+launch-readiness slices.

@@ -152,6 +152,7 @@ pub(crate) fn cmd_approvals(command: ApprovalsCommand) -> Result<u8> {
             role,
             reason,
             ids,
+            require_data_class,
         } => {
             let out = run_approvals_batch(ApprovalsBatchArgs {
                 approvals_state,
@@ -160,6 +161,7 @@ pub(crate) fn cmd_approvals(command: ApprovalsCommand) -> Result<u8> {
                 role,
                 approval_ids: ids,
                 reason,
+                require_data_class,
             })?;
             let approved = out
                 .approved

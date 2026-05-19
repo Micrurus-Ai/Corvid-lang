@@ -56,6 +56,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `tenant.cross_tenant_compile_error` | auth | out_of_scope | typecheck |
 | `approval.policy_clause_static_check` | auth | out_of_scope | typecheck |
 | `approval.batch_equivalence_typed` | auth | out_of_scope | typecheck |
+| `approval.batch_refuses_cross_data_class_drift` | auth | runtime_checked | runtime |
 | `approval.confused_deputy_typecheck` | auth | out_of_scope | typecheck |
 | `connector.scope_minimum_enforced` | connector | runtime_checked | runtime |
 | `connector.write_requires_approval` | connector | out_of_scope | typecheck |
@@ -620,7 +621,21 @@ An `approval Name:` block's `policy { ... }` clause type-checks at compile time 
 
 An `approval ... batch_with: same_tool, same_data_class, same_role` clause groups equivalent approvals so a reviewer can approve one record and have N equivalent-by-typed-shape records auto-resolve.
 
-> **Why out of scope:** Batch logic exists in the approval queue runtime + the CLI (`corvid approvals batch` ships). The `batch_with: same_tool, same_data_class, same_role` source-level clause is post-v1.0 ergonomic surface — filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`. Runtime callers configure batching at the approval-contract issue site today; the source-level clause is the compact form.
+> **Why out of scope:** The runtime half of the batch-equivalence guarantee ships today as `approval.batch_refuses_cross_data_class_drift` (RuntimeChecked): `corvid approvals batch` refuses to span >1 data class unless `--require-data-class` pins the batch. The typecheck-time `batch_with: same_tool, same_data_class, same_role` source-level clause is post-v1.0 ergonomic surface — filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`. The runtime check prevents the threat today; the source-level sugar lets contracts declare the batch shape directly.
+
+#### `approval.batch_refuses_cross_data_class_drift`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid approvals batch` refuses outright when the supplied ids span >1 `data_class` unless the operator pins the batch with `--require-data-class <CLASS>`. Catches the `batch-approval-drift-across-data-classes` threat where `financial` and `pii` records would otherwise resolve in the same invocation under a single reviewer's role check.
+
+**Positive tests:**
+
+- `crates/corvid-cli/src/approvals_cmd/interaction.rs::approvals_batch_require_data_class_pins_to_one_class`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/approvals_cmd/interaction.rs::approvals_batch_refuses_cross_data_class_drift_without_pin`
 
 #### `approval.confused_deputy_typecheck`
 - **class**: out_of_scope

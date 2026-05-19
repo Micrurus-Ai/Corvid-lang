@@ -884,16 +884,39 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              reviewer can approve one record and have N \
              equivalent-by-typed-shape records auto-resolve.",
         out_of_scope_reason:
-            "Batch logic exists in the approval queue runtime + the \
-             CLI (`corvid approvals batch` ships). The `batch_with: \
-             same_tool, same_data_class, same_role` source-level \
-             clause is post-v1.0 ergonomic surface — filed as \
-             `35V2-P39-I-post-v1.0-auth-syntax-sugar`. Runtime \
-             callers configure batching at the approval-contract \
-             issue site today; the source-level clause is the \
-             compact form.",
+            "The runtime half of the batch-equivalence guarantee \
+             ships today as `approval.batch_refuses_cross_data_class_drift` \
+             (RuntimeChecked): `corvid approvals batch` refuses to \
+             span >1 data class unless `--require-data-class` pins \
+             the batch. The typecheck-time `batch_with: same_tool, \
+             same_data_class, same_role` source-level clause is \
+             post-v1.0 ergonomic surface — filed as \
+             `35V2-P39-I-post-v1.0-auth-syntax-sugar`. The runtime \
+             check prevents the threat today; the source-level \
+             sugar lets contracts declare the batch shape directly.",
         positive_test_refs: &[],
         adversarial_test_refs: &[],
+    },
+    Guarantee {
+        id: "approval.batch_refuses_cross_data_class_drift",
+        kind: GuaranteeKind::Auth,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid approvals batch` refuses outright when the \
+             supplied ids span >1 `data_class` unless the operator \
+             pins the batch with `--require-data-class <CLASS>`. \
+             Catches the `batch-approval-drift-across-data-classes` \
+             threat where `financial` and `pii` records would \
+             otherwise resolve in the same invocation under a \
+             single reviewer's role check.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/approvals_cmd/interaction.rs::approvals_batch_require_data_class_pins_to_one_class",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/approvals_cmd/interaction.rs::approvals_batch_refuses_cross_data_class_drift_without_pin",
+        ],
     },
     Guarantee {
         id: "approval.confused_deputy_typecheck",

@@ -92,7 +92,10 @@ pub enum ApprovalsCommand {
     /// Approve multiple pending approvals in one invocation.
     /// Per-approval failures (wrong role, wrong tenant, already
     /// resolved) are reported individually rather than aborting
-    /// the whole batch.
+    /// the whole batch. A batch whose ids span >1 `data_class`
+    /// refuses outright unless `--require-data-class <CLASS>` is
+    /// supplied — the adversarial-prevention default for the
+    /// `batch-approval-drift-across-data-classes` threat.
     Batch {
         #[arg(long, value_name = "PATH", default_value = "target/approvals.db")]
         approvals_state: PathBuf,
@@ -107,6 +110,12 @@ pub enum ApprovalsCommand {
         /// Approval ids (repeatable).
         #[arg(long = "id", value_name = "ID")]
         ids: Vec<String>,
+        /// Pin the batch to a single `data_class`. Approvals
+        /// whose data_class doesn't match surface as per-id
+        /// failures. Without this flag, a batch that spans >1
+        /// data class refuses outright.
+        #[arg(long, value_name = "CLASS")]
+        require_data_class: Option<String>,
     },
     /// Export every approval (with full audit trail) for a tenant
     /// since the supplied timestamp. The output is the auditable
