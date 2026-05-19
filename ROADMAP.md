@@ -2340,7 +2340,7 @@ corvid jobs drain --workers=all
 - [ ] Idempotency adversarial test: 4 concurrent workers + 100 jobs same key → exactly 1 ran.
 - [ ] DST cron test: a job scheduled for 2:30am on the spring-forward day fires according to the documented policy.
 - [ ] Replay-quarantine test: replay an old job trace, assert no real provider call left the process.
-- [ ] AI helper landed (or follow-up filed): `corvid jobs explain` (RAG-grounded) using the typed trace.
+- [x] AI helper landed (or follow-up filed): `corvid jobs explain` (assistive — typed classifier over typed records + audit-event trail) shipped 2026-05-19 in slice `35V2-P38-G-LR-corvid-jobs-explain-helper`. Output's `sources` array names every audit-event id the explanation consulted (Grounded<T>). Promotes the new `jobs.explain_sources_grounded` row to RuntimeChecked (positive: `jobs_explain_denied_approval_carries_grounded_sources`; adversarial: `jobs_explain_unknown_job_refuses`).
 - [ ] Side-by-side `benches/comparisons/jobs_durability.md` against Celery + BullMQ + Temporal.
 
 **Small-slice breakdown for Phase 38:**

@@ -54,9 +54,9 @@ use crate::run_cmd::cmd_run;
 use crate::verify_cmd::cmd_verify;
 use crate::{
     abi_cmd, approver_cmd, audit_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
-    connectors_cmd, contract_cmd, deploy_cmd, eval_cmd, lineage_cmd, observe_cmd, receipt_cmd,
-    release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd, trace_dag,
-    trace_diff, upgrade_cmd,
+    connectors_cmd, contract_cmd, deploy_cmd, eval_cmd, jobs_explain_cmd, lineage_cmd, observe_cmd,
+    receipt_cmd, release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd,
+    trace_dag, trace_diff, upgrade_cmd,
 };
 
 mod approvals;
@@ -672,6 +672,51 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 }
             },
             JobsCommand::Dlq { state } => cmd_jobs_dlq(&state),
+            JobsCommand::Explain { state, job } => {
+                let report = jobs_explain_cmd::run_jobs_explain(&state, &job)?;
+                let payload = serde_json::json!({
+                    "job_id": report.job_id,
+                    "operational_position": report.operational_position,
+                    "headline": report.headline,
+                    "operator_facts": {
+                        "task": report.operator_facts.task,
+                        "status": report.operator_facts.status,
+                        "attempts": report.operator_facts.attempts,
+                        "max_retries": report.operator_facts.max_retries,
+                        "budget_usd": report.operator_facts.budget_usd,
+                        "effect_summary": report.operator_facts.effect_summary,
+                        "lease_owner": report.operator_facts.lease_owner,
+                        "lease_expires_ms": report.operator_facts.lease_expires_ms,
+                        "next_run_ms": report.operator_facts.next_run_ms,
+                        "failure_kind": report.operator_facts.failure_kind,
+                        "failure_fingerprint": report.operator_facts.failure_fingerprint,
+                        "approval_id": report.operator_facts.approval_id,
+                        "approval_expires_ms": report.operator_facts.approval_expires_ms,
+                        "approval_reason": report.operator_facts.approval_reason,
+                        "replay_key": report.operator_facts.replay_key,
+                        "idempotency_key": report.operator_facts.idempotency_key,
+                    },
+                    "transitions": report.transitions.iter().map(|t| serde_json::json!({
+                        "audit_event_id": t.audit_event_id,
+                        "event_kind": t.event_kind,
+                        "status_before": t.status_before,
+                        "status_after": t.status_after,
+                        "actor": t.actor,
+                        "reason": t.reason,
+                        "created_at_ms": t.created_at_ms,
+                    })).collect::<Vec<_>>(),
+                    "loop_usage": report.loop_usage.as_ref().map(|u| serde_json::json!({
+                        "steps": u.steps,
+                        "wall_ms": u.wall_ms,
+                        "spend_usd": u.spend_usd,
+                        "tool_calls": u.tool_calls,
+                    })),
+                    "suggested_next_steps": report.suggested_next_steps,
+                    "sources": report.sources,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+                Ok(0)
+            }
         },
         Some(Command::Bench { command }) => match command {
             BenchCommand::Compare {

@@ -47,6 +47,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `jobs.cron_dst_correct` | jobs | runtime_checked | runtime |
 | `jobs.approval_wait_resume` | jobs | out_of_scope | runtime |
 | `jobs.loop_bounds_enforced` | jobs | out_of_scope | runtime |
+| `jobs.explain_sources_grounded` | jobs | runtime_checked | runtime |
 | `jobs.replayable_side_effects` | jobs | out_of_scope | runtime |
 | `auth.session_rotation_on_privilege_change` | auth | out_of_scope | runtime |
 | `auth.api_key_at_rest_hashed` | auth | runtime_checked | runtime |
@@ -523,6 +524,20 @@ An approval boundary inside a job pauses the run until an approval token arrives
 Agent loops driven by jobs honor max-steps, max-wall-time, max-spend, and max-tool-calls; exceeding any bound escalates or terminates with trace evidence.
 
 > **Why out of scope:** Loop-bound storage + tracking ship at `corvid-runtime::queue::loops` (set_loop_limits, loop_limits, loop_usage, record_loop_usage_report) and the multi-worker runner from 38K is in place. What's missing is the runner's enforcement hook — exceeding a bound should terminate or escalate the job with trace evidence; today the bounds are recorded but not enforced at the runner. Filed as a v1.0 launch-readiness slice (35V2-P38-D-LR-loop-bounds-enforcement-hook) — promotes this row to RuntimeChecked when the enforcement hook ships.
+
+#### `jobs.explain_sources_grounded`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid jobs explain <job_id>` renders a typed operational summary whose `sources` array names every audit-event id the explanation consulted — the Grounded<T> shape at the JSON layer. Every transition surfaced in the explanation has a back-reference in `sources`, so an operator can audit-trail every claim back to a queue row. A missing job id is refused with an explicit diagnostic rather than served as an empty report.
+
+**Positive tests:**
+
+- `crates/corvid-cli/src/jobs_explain_cmd.rs::jobs_explain_denied_approval_carries_grounded_sources`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/jobs_explain_cmd.rs::jobs_explain_unknown_job_refuses`
 
 #### `jobs.replayable_side_effects`
 - **class**: out_of_scope

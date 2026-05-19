@@ -689,6 +689,29 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         adversarial_test_refs: &[],
     },
     Guarantee {
+        id: "jobs.explain_sources_grounded",
+        kind: GuaranteeKind::Jobs,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid jobs explain <job_id>` renders a typed \
+             operational summary whose `sources` array names every \
+             audit-event id the explanation consulted — the \
+             Grounded<T> shape at the JSON layer. Every transition \
+             surfaced in the explanation has a back-reference in \
+             `sources`, so an operator can audit-trail every claim \
+             back to a queue row. A missing job id is refused with \
+             an explicit diagnostic rather than served as an empty \
+             report.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/jobs_explain_cmd.rs::jobs_explain_denied_approval_carries_grounded_sources",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/jobs_explain_cmd.rs::jobs_explain_unknown_job_refuses",
+        ],
+    },
+    Guarantee {
         id: "jobs.replayable_side_effects",
         kind: GuaranteeKind::Jobs,
         class: GuaranteeClass::OutOfScope,

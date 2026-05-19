@@ -203,6 +203,19 @@ pub enum JobsCommand {
         #[arg(long, value_name = "PATH", default_value = "target/corvid-jobs.sqlite")]
         state: PathBuf,
     },
+    /// Render a typed operational summary of a single job +
+    /// every audit-event transition. The output's `sources`
+    /// array names every audit-event id the explanation
+    /// consulted (the Grounded<T> shape). Assistive AI helper
+    /// — deterministic by construction.
+    Explain {
+        /// SQLite state file used by the durable local queue.
+        #[arg(long, value_name = "PATH", default_value = "target/corvid-jobs.sqlite")]
+        state: PathBuf,
+        /// Job id to explain.
+        #[arg(long)]
+        job: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

@@ -4903,3 +4903,56 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 — that one *does* need a generative model + prompt + grounded
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
+
+## 35V2-P38-G-LR-corvid-jobs-explain-helper closed (2026-05-19)
+
+`corvid jobs explain --state <path> --job <job_id>` ships the
+jobs-side parallel to Phase 39's `corvid approvals explain` and
+Phase 40's `corvid observe explain`. Walks the durable queue's
+typed `QueueJob` record + its `job_audit_events` trail,
+classifies the operational position (pending / leased /
+retry_wait / approval_wait / approval_denied / approval_expired
+/ dead_lettered / succeeded / failed / canceled / loop_stall_*),
+renders a one-line headline + the typed operator facts (task,
+attempts vs max_retries, lease owner, failure kind, approval
+linkage, replay key, idempotency key), every audit-event
+transition, optional loop usage, and a position-specific
+suggested-next-steps list.
+
+Deterministic by construction. The output's `sources` array
+carries every audit-event id the explanation consulted — every
+transition in `transitions` has a back-reference in `sources`,
+the Grounded<T> contract at the JSON layer.
+
+Implementation finding: the durable queue's audit-event table
+(`queue_job_audit_events`) is only written by approval-decision
+and loop-stall paths, NOT by the lease/fail/dead-letter paths.
+The first positive test was an empty-sources failure because
+the seeded dead-letter flow never produced audit events. Fix:
+seed via the approval-wait + deny flow, which does write audit
+events. This is a real limitation of the helper for purely
+lease-failure jobs (their `transitions` list is empty + the
+operator must read `operator_facts` directly) — recorded here
+because the same gap will surface in any future "trace surface"
+helper that assumes every state transition writes an audit row.
+
+New registry row: `jobs.explain_sources_grounded` (RuntimeChecked,
+Jobs / Runtime phase) with positive + adversarial test refs.
+
+Three test refs:
+  - jobs_explain_denied_approval_carries_grounded_sources (positive)
+  - jobs_explain_pending_suggests_run_workers (positive,
+    no-audit-events path → empty sources is correct behaviour)
+  - jobs_explain_unknown_job_refuses (adversarial, clear
+    "not found" error not an empty report)
+
+Phase 38 launch-readiness tail loses one filing. Three AI
+helpers from the verification round closed in two sessions
+(P40 observe explain shipped in-phase before the round; P39
+approvals explain + P38 jobs explain shipped in this session).
+The pattern that made all three single-session slices:
+deterministic typed classifier over typed records, no LLM round
+trip, Grounded<T>-shaped sources. The generative helpers
+(P39-H policy-suggest, P41-H connectors-ai-helpers umbrella)
+remain filed because they *do* need LLM round trips and
+prompt-grounding work.

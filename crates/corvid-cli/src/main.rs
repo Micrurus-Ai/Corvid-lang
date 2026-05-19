@@ -49,6 +49,7 @@ mod dispatch;
 mod doctor_cmd;
 mod eval_cmd;
 mod format;
+mod jobs_explain_cmd;
 mod lineage_cmd;
 mod migrate_cmd;
 mod observe_cmd;
