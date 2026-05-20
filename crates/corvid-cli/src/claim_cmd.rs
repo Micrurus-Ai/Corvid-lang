@@ -13,11 +13,74 @@ use corvid_abi::{
 use corvid_guarantees::{GuaranteeClass, GUARANTEE_REGISTRY};
 use sha2::{Digest, Sha256};
 
+/// In-binary anchor for the `phase 35V-T1-Drift` inverse-
+/// coverage sentinel. Names the registry id whose CLI surface
+/// lives in `--explain-failures` mode below — every finding
+/// gets a typed `kind` + a `suggested_fix` that back-references
+/// the inventory line (Grounded<T> shape).
+#[allow(dead_code)]
+pub const GUARANTEE_ID_CLAIM_AUDIT_EXPLAIN_GROUNDED: &str =
+    "claim.audit_explain_failures_grounded";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimFindingKind {
+    /// Claim row has no runnable command, linked artifact, or
+    /// explicit `blocked`/`non-scope` annotation.
+    MissingEvidence,
+    /// Claim row's evidence contains aspirational wording
+    /// (`todo`, `planned`, `future`, `soon`, `will support`)
+    /// without an explicit `blocked`/`non-scope` annotation.
+    AspirationalWording,
+}
+
+impl ClaimFindingKind {
+    fn legacy_reason(&self) -> &'static str {
+        match self {
+            Self::MissingEvidence => {
+                "claim must have runnable command, linked artifact, or explicit blocked/non-scope status"
+            }
+            Self::AspirationalWording => {
+                "evidence uses aspirational wording without blocked/non-scope status"
+            }
+        }
+    }
+
+    fn suggested_fix(&self, line: usize) -> String {
+        match self {
+            Self::MissingEvidence => format!(
+                "inventory line {line}: wrap the evidence cell in backticks if it's a \
+                 CLI command (e.g. ``corvid <subcommand> ...``), or use \
+                 `[label](path)` markdown link syntax for a file/test reference, \
+                 or annotate the cell as `blocked: <slice-id>` / `non-scope` \
+                 if the claim is deliberately deferred"
+            ),
+            Self::AspirationalWording => format!(
+                "inventory line {line}: remove aspirational words (todo / planned \
+                 / future / soon / will support) and either point at the shipped \
+                 evidence today, or explicitly mark the row `blocked: <slice-id>` \
+                 if the claim is filed for a later slice"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct ClaimAuditFinding {
     line: usize,
     claim: String,
     reason: String,
+    /// Typed classification. Only populated when
+    /// `--explain-failures` is set; defaults to None to keep
+    /// the existing JSON shape stable for callers that don't
+    /// opt in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<ClaimFindingKind>,
+    /// Concrete remediation paired with a back-reference to
+    /// the inventory line (Grounded<T> shape). Same gating as
+    /// `kind`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_fix: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -28,10 +91,10 @@ struct ClaimAuditReport {
     findings: Vec<ClaimAuditFinding>,
 }
 
-pub fn run_claim_audit(inventory: &Path, json: bool) -> Result<u8> {
+pub fn run_claim_audit(inventory: &Path, json: bool, explain_failures: bool) -> Result<u8> {
     let text = fs::read_to_string(inventory)
         .with_context(|| format!("read claim inventory `{}`", inventory.display()))?;
-    let report = audit_claim_inventory(inventory, &text);
+    let report = audit_claim_inventory(inventory, &text, explain_failures);
     if json {
         println!(
             "{}",
@@ -47,6 +110,9 @@ pub fn run_claim_audit(inventory: &Path, json: bool) -> Result<u8> {
                 "line {}: {} ({})",
                 finding.line, finding.claim, finding.reason
             );
+            if let Some(fix) = finding.suggested_fix.as_deref() {
+                println!("  fix: {fix}");
+            }
         }
     }
     Ok(if report.findings.is_empty() { 0 } else { 1 })
@@ -133,7 +199,11 @@ pub fn run_claim_explain(
     Ok(exit_code)
 }
 
-fn audit_claim_inventory(path: &Path, text: &str) -> ClaimAuditReport {
+fn audit_claim_inventory(
+    path: &Path,
+    text: &str,
+    explain_failures: bool,
+) -> ClaimAuditReport {
     let mut claim_count = 0usize;
     let mut findings = Vec::new();
     for (index, line) in text.lines().enumerate() {
@@ -158,20 +228,22 @@ fn audit_claim_inventory(path: &Path, text: &str) -> ClaimAuditReport {
         let evidence = cells[1];
         let blocked = evidence.contains("blocked") || evidence.contains("non-scope");
         let runnable = evidence.contains('`') || evidence.contains('[');
+        let line_no = index + 1;
         if !blocked && !runnable {
-            findings.push(ClaimAuditFinding {
-                line: index + 1,
-                claim,
-                reason: "claim must have runnable command, linked artifact, or explicit blocked/non-scope status".to_string(),
-            });
+            findings.push(make_finding(
+                line_no,
+                claim.clone(),
+                ClaimFindingKind::MissingEvidence,
+                explain_failures,
+            ));
         }
         if contains_aspirational_word(evidence) && !blocked {
-            findings.push(ClaimAuditFinding {
-                line: index + 1,
-                claim: cells[0].to_string(),
-                reason: "evidence uses aspirational wording without blocked/non-scope status"
-                    .to_string(),
-            });
+            findings.push(make_finding(
+                line_no,
+                cells[0].to_string(),
+                ClaimFindingKind::AspirationalWording,
+                explain_failures,
+            ));
         }
     }
     ClaimAuditReport {
@@ -179,6 +251,21 @@ fn audit_claim_inventory(path: &Path, text: &str) -> ClaimAuditReport {
         claim_count,
         finding_count: findings.len(),
         findings,
+    }
+}
+
+fn make_finding(
+    line: usize,
+    claim: String,
+    kind: ClaimFindingKind,
+    explain_failures: bool,
+) -> ClaimAuditFinding {
+    ClaimAuditFinding {
+        line,
+        claim,
+        reason: kind.legacy_reason().to_string(),
+        kind: explain_failures.then_some(kind),
+        suggested_fix: explain_failures.then(|| kind.suggested_fix(line)),
     }
 }
 
@@ -396,7 +483,7 @@ mod tests {
             "| WASM target shipped | blocked on browser e2e CI gap, see Phase 23 reopen |",
         ]);
         let text = std::fs::read_to_string(inventory.path()).unwrap();
-        let report = audit_claim_inventory(inventory.path(), &text);
+        let report = audit_claim_inventory(inventory.path(), &text, false);
         assert_eq!(report.claim_count, 3, "all 3 rows counted");
         assert_eq!(
             report.findings.len(),
@@ -418,7 +505,7 @@ mod tests {
             "| Compile-time approval gate | `cargo test -p corvid-types approval` |",
         ]);
         let text = std::fs::read_to_string(inventory.path()).unwrap();
-        let report = audit_claim_inventory(inventory.path(), &text);
+        let report = audit_claim_inventory(inventory.path(), &text, false);
         assert_eq!(report.claim_count, 2);
         assert!(
             !report.findings.is_empty(),
@@ -443,5 +530,123 @@ mod tests {
             "the runnable-command-backed row must not be flagged: {:?}",
             report.findings
         );
+        // Without `--explain-failures`, `kind` and `suggested_fix`
+        // are absent — preserves the existing JSON shape for
+        // callers that don't opt in.
+        for finding in &report.findings {
+            assert!(finding.kind.is_none(), "kind must be None without --explain-failures");
+            assert!(
+                finding.suggested_fix.is_none(),
+                "suggested_fix must be None without --explain-failures"
+            );
+        }
+    }
+
+    /// Slice 35V2-P43-T-LR claim-audit-explain-failures
+    /// (positive, MissingEvidence kind): a row that lacks
+    /// runnable evidence + lacks a blocked annotation is
+    /// classified as `MissingEvidence` AND paired with a
+    /// suggested-fix string that back-references the inventory
+    /// line — the Grounded<T> shape at the claim-audit layer.
+    #[test]
+    fn explain_failures_classifies_missing_evidence_with_line_grounded_fix() {
+        let inventory = write_inventory(&[
+            "| Vague claim | something something |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text, true);
+        assert_eq!(report.findings.len(), 1);
+        let finding = &report.findings[0];
+        assert_eq!(finding.kind, Some(ClaimFindingKind::MissingEvidence));
+        let fix = finding.suggested_fix.as_deref().unwrap();
+        assert!(
+            fix.contains(&format!("inventory line {}", finding.line)),
+            "fix must back-reference the inventory line: {fix}"
+        );
+        assert!(
+            fix.contains("backticks") || fix.contains("non-scope") || fix.contains("blocked"),
+            "fix must name the concrete remediation: {fix}"
+        );
+    }
+
+    /// Slice 35V2-P43-T-LR claim-audit-explain-failures
+    /// (positive, AspirationalWording kind): a row whose
+    /// evidence contains aspirational wording but no blocked
+    /// annotation is classified as `AspirationalWording` and
+    /// paired with a remediation naming the specific words to
+    /// remove.
+    #[test]
+    fn explain_failures_classifies_aspirational_wording_with_typed_remediation() {
+        let inventory = write_inventory(&[
+            "| Future feature | will support oauth in v2 |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text, true);
+        // This row triggers BOTH MissingEvidence (no backticks/
+        // link) AND AspirationalWording — the audit fires both.
+        let aspirational = report
+            .findings
+            .iter()
+            .find(|f| f.kind == Some(ClaimFindingKind::AspirationalWording))
+            .expect("expected an AspirationalWording finding");
+        let fix = aspirational.suggested_fix.as_deref().unwrap();
+        assert!(
+            fix.contains("aspirational")
+                || fix.contains("todo")
+                || fix.contains("planned")
+                || fix.contains("will support"),
+            "fix must name the aspirational-words category: {fix}"
+        );
+        assert!(
+            fix.contains(&format!("inventory line {}", aspirational.line)),
+            "fix must back-reference the inventory line: {fix}"
+        );
+    }
+
+    /// Slice 35V2-P43-T-LR claim-audit-explain-failures
+    /// (adversarial, opt-in default): without
+    /// `--explain-failures`, the `kind` + `suggested_fix`
+    /// fields default to None and the JSON shape is the legacy
+    /// `{line, claim, reason}`. This is the backward-compat
+    /// invariant — pre-existing callers (CI scripts, prior
+    /// audit tooling) read the same shape they read before.
+    #[test]
+    fn explain_failures_off_preserves_legacy_finding_shape() {
+        let inventory = write_inventory(&[
+            "| Vague claim | something soon |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text, false);
+        assert!(!report.findings.is_empty());
+        let json = serde_json::to_string(&report.findings[0]).unwrap();
+        // Default shape carries `line, claim, reason` only.
+        assert!(json.contains("\"line\""));
+        assert!(json.contains("\"claim\""));
+        assert!(json.contains("\"reason\""));
+        // `kind` + `suggested_fix` are absent from the JSON
+        // when None (#[serde(skip_serializing_if = "Option::is_none")]).
+        assert!(!json.contains("\"kind\""), "kind must be absent: {json}");
+        assert!(
+            !json.contains("\"suggested_fix\""),
+            "suggested_fix must be absent: {json}"
+        );
+    }
+
+    /// Slice 35V2-P43-T-LR claim-audit-explain-failures
+    /// (positive, no-findings case): `--explain-failures`
+    /// against a clean inventory still produces zero findings.
+    /// The narration layer never synthesises explanations for
+    /// rows that aren't actually flagged — same grounding
+    /// contract as the drift narrator (no narration without
+    /// evidence).
+    #[test]
+    fn explain_failures_on_clean_inventory_yields_zero_findings() {
+        let inventory = write_inventory(&[
+            "| Approval gate | `cargo test approval` |",
+        ]);
+        let text = std::fs::read_to_string(inventory.path()).unwrap();
+        let report = audit_claim_inventory(inventory.path(), &text, true);
+        assert_eq!(report.finding_count, 0);
+        assert!(report.findings.is_empty());
     }
 }

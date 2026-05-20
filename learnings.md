@@ -5476,3 +5476,68 @@ helper (policy-suggest) + the 1 remaining Phase 41 AI helper
 LLM-shaped work. The recurring pattern: deterministic-shaped
 helpers ship one at a time; LLM-shaped helpers wait for shared
 infrastructure.
+
+## 35V2-P43-T-LR claim-audit-explain-failures sub-slice closed (2026-05-20)
+
+Third umbrella-split-this-session. The 5th Phase 43 AI helper
+(`corvid claim audit --explain-failures`) was filed under
+the umbrella as "adversarial — narrates each failed claim
+with the specific evidence path + suggested fix". Recon
+found the narration layer is deterministic: each finding's
+remediation maps 1:1 to its `ClaimFindingKind`, no LLM
+needed.
+
+Ships:
+  - `ClaimFindingKind` enum (`MissingEvidence` /
+    `AspirationalWording`) on top of the existing
+    `ClaimAuditFinding` shape.
+  - `suggested_fix(line)` returns a typed remediation string
+    that back-references the inventory line — Grounded<T> at
+    the claim-audit layer (every remediation cites the row it
+    addresses).
+  - `--explain-failures` flag on `corvid claim audit`. When
+    set, populates `kind` + `suggested_fix`; without it, both
+    fields are absent from the JSON output via
+    `#[serde(skip_serializing_if = "Option::is_none")]` so the
+    pre-existing `{line, claim, reason}` shape is preserved
+    for CI scripts that read the legacy output.
+  - 4 new tests:
+    - positive: `MissingEvidence` carries a line-grounded fix
+    - positive: `AspirationalWording` carries a typed
+      remediation naming the offending words
+    - adversarial: opt-in default keeps legacy JSON shape (CI
+      backward-compat invariant)
+    - positive: no-findings case yields zero findings under
+      `--explain-failures` (narration layer never synthesises
+      explanations for un-flagged rows)
+
+New registry row `claim.audit_explain_failures_grounded`
+(RuntimeChecked, Claim / Platform).
+
+The 2 existing claim-audit tests (`audit_passes_when_every_*`,
+`audit_fails_when_*`) had their `audit_claim_inventory`
+signature updated to take the new `explain_failures: bool`
+parameter — both pass `false` to assert the legacy path is
+unchanged. Regression check confirmed.
+
+Three umbrella-splits this session: P41-H drift-narrator,
+P43-T release-notes, P43-T claim-audit-explain-failures. The
+pattern keeps holding: when an audit files an AI helper as
+"generative" or "adversarial", check whether the v1.0 baseline
+is actually deterministic (typed classifier over typed records
+with Grounded<T> back-references). If yes, ship single-session.
+If no, file under umbrella.
+
+Phase 43 AI-helpers: **2/5 shipped**, **3 remain** (all
+genuinely agentic — deploy tailor, upgrade assist, beta
+synthesize-feedback). Phase 38/39/41 helpers: P38-G shipped
+(jobs explain), P39-G shipped (approvals explain), P40 observe
+explain shipped pre-session; P39-H (policy-suggest), P41-H
+mock-fixture-gen, P41-H fail-sim genuinely need LLM work.
+
+Net registry rows added by deterministic AI-helper slices this
+session: 6 (review_queue, approvals explain, jobs explain,
+session rotation, batch data-class equiv — wait, that's not
+right, let me recount from the AI-helper class specifically):
+3 — drift_narration_grounded, release.notes_grounded,
+claim.audit_explain_failures_grounded.

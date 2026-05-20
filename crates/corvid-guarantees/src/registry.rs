@@ -1630,6 +1630,41 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-cli/src/claim_cmd.rs::audit_fails_when_a_claim_lacks_evidence",
         ],
     },
+    Guarantee {
+        id: "claim.audit_explain_failures_grounded",
+        kind: GuaranteeKind::Claim,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Platform,
+        description:
+            "`corvid claim audit --explain-failures` pairs every \
+             finding with a typed `ClaimFindingKind` \
+             (`missing_evidence` or `aspirational_wording`) + a \
+             `suggested_fix` string that back-references the \
+             inventory line (Grounded<T> shape: every \
+             remediation cites the row it addresses). Without \
+             the flag, the `kind` + `suggested_fix` fields are \
+             absent from the JSON so the pre-existing \
+             `{line, claim, reason}` shape stays \
+             backward-compatible for CI scripts that read the \
+             legacy output. The narration layer never \
+             synthesises explanations for rows that aren't \
+             flagged. Same deterministic-narrator pattern as \
+             `corvid connectors check --narrate` and \
+             `corvid release notes`; the audit's \
+             \"adversarial — narrates each failed claim with \
+             the specific evidence path + suggested fix\" \
+             framing in the 43T umbrella refers to this typed-\
+             remediation property, not to a live LLM round-trip.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/claim_cmd.rs::explain_failures_classifies_missing_evidence_with_line_grounded_fix",
+            "crates/corvid-cli/src/claim_cmd.rs::explain_failures_classifies_aspirational_wording_with_typed_remediation",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/claim_cmd.rs::explain_failures_off_preserves_legacy_finding_shape",
+            "crates/corvid-cli/src/claim_cmd.rs::explain_failures_on_clean_inventory_yields_zero_findings",
+        ],
+    },
     // ----- Platform: explicit non-defenses ------------------------
     Guarantee {
         id: "platform.host_kernel_compromise",

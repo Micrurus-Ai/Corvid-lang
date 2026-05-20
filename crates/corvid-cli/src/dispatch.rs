@@ -391,8 +391,12 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             key,
             source,
         }) => match command {
-            Some(ClaimCommand::Audit { inventory, json }) => {
-                claim_cmd::run_claim_audit(&inventory, json)
+            Some(ClaimCommand::Audit {
+                inventory,
+                json,
+                explain_failures,
+            }) => {
+                claim_cmd::run_claim_audit(&inventory, json, explain_failures)
             }
             None => {
                 if let Some(cdylib) = cdylib {
