@@ -149,6 +149,100 @@ fn json_type_name(value: &Value) -> &'static str {
     }
 }
 
+/// In-binary anchor for the `phase 35V-T1-Drift` inverse-
+/// coverage sentinel. Names the registry id whose runtime
+/// enforcement lives in `narrate_drift_report` below.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_DRIFT_NARRATION_GROUNDED: &str = "connector.drift_narration_grounded";
+
+/// One human-readable explanation of a single drift site,
+/// paired with the back-references that grounded the
+/// narration. The CLI renders this for an operator who is
+/// reviewing why CI flagged a build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriftNarration {
+    /// JSON path of the drift site (e.g. `$.result.thread_id`).
+    pub path: String,
+    /// Drift kind: `removed`, `added`, or `type_changed`. The
+    /// CLI uses this to colour/group output.
+    pub kind: String,
+    /// One-line explanation naming the operational consequence
+    /// in concrete terms ("connector code that consumed this
+    /// field is now broken at parse time").
+    pub consequence: String,
+    /// Severity for triage. `breaking` for sites that fail a
+    /// running connector immediately; `compatible` for additive
+    /// changes the connector can choose to consume.
+    pub severity: String,
+    /// Grounded<T> shape: back-references to the structured
+    /// drift evidence the narration summarised. Today the
+    /// sources name the original report fields; downstream
+    /// they could carry trace ids or audit-event ids when the
+    /// narrator is wired to a live system.
+    pub sources: Vec<String>,
+}
+
+/// Narrate every drift site in `report`. The narration order
+/// matches the report's sorted order so the output is
+/// deterministic + diff-friendly in CI. Empty reports produce
+/// an empty narration vec — caller decides whether the
+/// no-drift case warrants a "no drift detected" notice.
+///
+/// Each `DriftNarration::sources` entry names the report bucket
+/// + the drift path it was synthesised from, so an auditor can
+/// trace every claim in the narration back to a structural
+/// evidence row. The narrator is deterministic + LLM-free; the
+/// "RAG-grounded" framing in the slice description means the
+/// output cites which detection evidence supports the claim,
+/// not that an LLM round-trip is involved.
+pub fn narrate_drift_report(report: &ContractDriftReport) -> Vec<DriftNarration> {
+    let mut narrations = Vec::with_capacity(report.total());
+    for path in &report.removed_paths {
+        narrations.push(DriftNarration {
+            path: path.clone(),
+            kind: "removed".to_string(),
+            consequence: format!(
+                "field `{path}` is missing from the observed response \
+                 — connector code that consumed it now fails at \
+                 deserialization"
+            ),
+            severity: "breaking".to_string(),
+            sources: vec![format!("removed_paths::{path}")],
+        });
+    }
+    for change in &report.type_changed_paths {
+        narrations.push(DriftNarration {
+            path: change.path.clone(),
+            kind: "type_changed".to_string(),
+            consequence: format!(
+                "field `{}` changed type from `{}` to `{}` — \
+                 connector deserialization will fail until the \
+                 expected type is updated to match",
+                change.path, change.baseline_type, change.observed_type
+            ),
+            severity: "breaking".to_string(),
+            sources: vec![format!(
+                "type_changed_paths::{}::baseline={}::observed={}",
+                change.path, change.baseline_type, change.observed_type
+            )],
+        });
+    }
+    for path in &report.added_paths {
+        narrations.push(DriftNarration {
+            path: path.clone(),
+            kind: "added".to_string(),
+            consequence: format!(
+                "field `{path}` is new in the observed response \
+                 — existing connector code is unaffected, but \
+                 the connector may want to start consuming it"
+            ),
+            severity: "compatible".to_string(),
+            sources: vec![format!("added_paths::{path}")],
+        });
+    }
+    narrations
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +386,134 @@ mod tests {
         assert_eq!(report.type_changed_paths[0].path, "$.subject");
         assert_eq!(report.type_changed_paths[0].baseline_type, "null");
         assert_eq!(report.type_changed_paths[0].observed_type, "string");
+    }
+
+    /// Slice 35V2-P41-H-LR (positive, empty input): an empty
+    /// drift report yields an empty narration vec — the
+    /// narrator is a pure projection.
+    #[test]
+    fn drift_narration_for_empty_report_is_empty() {
+        let report = ContractDriftReport::default();
+        let narrations = narrate_drift_report(&report);
+        assert!(narrations.is_empty());
+    }
+
+    /// Slice 35V2-P41-H-LR (positive, Grounded<T> contract):
+    /// every narration cell has a non-empty `sources` array
+    /// that back-references the structural evidence the
+    /// narration summarised. The grounding property is the
+    /// central guarantee — operators can audit-trail every
+    /// claim back to a detector row.
+    #[test]
+    fn every_drift_narration_carries_grounded_sources() {
+        let report = detect_contract_drift(
+            &json!({"alpha": 1, "beta": {"x": 1, "y": 2}, "gamma": "g"}),
+            &json!({"alpha": "1", "beta": {"x": 1}, "delta": "added"}),
+        );
+        assert!(!report.is_empty());
+        let narrations = narrate_drift_report(&report);
+        // Every drift site has exactly one narration; nothing
+        // gets dropped silently.
+        assert_eq!(narrations.len(), report.total());
+        // Every narration is grounded.
+        for narration in &narrations {
+            assert!(!narration.sources.is_empty());
+            // The source row names the bucket + the path so an
+            // auditor can find the evidence in the report.
+            let source = &narration.sources[0];
+            assert!(
+                source.starts_with("removed_paths::")
+                    || source.starts_with("added_paths::")
+                    || source.starts_with("type_changed_paths::")
+            );
+            assert!(
+                source.contains(&narration.path),
+                "narration source `{source}` does not back-reference path `{}`",
+                narration.path
+            );
+        }
+    }
+
+    /// Slice 35V2-P41-H-LR (adversarial, breaking-severity
+    /// classification): removed fields and type changes both
+    /// surface as `breaking` severity. Added fields are
+    /// `compatible`. An operator triaging the report needs the
+    /// severity to be deterministic on the drift kind, not
+    /// reordered or mis-labelled.
+    #[test]
+    fn drift_narration_classifies_breaking_versus_compatible() {
+        let report = detect_contract_drift(
+            &json!({"a": 1, "b": "x"}),
+            &json!({"a": "1", "c": "added"}),
+        );
+        let narrations = narrate_drift_report(&report);
+        let breakings: Vec<&DriftNarration> = narrations
+            .iter()
+            .filter(|n| n.severity == "breaking")
+            .collect();
+        let compatibles: Vec<&DriftNarration> = narrations
+            .iter()
+            .filter(|n| n.severity == "compatible")
+            .collect();
+        // type_change on $.a + removed $.b → 2 breaking
+        assert_eq!(breakings.len(), 2);
+        // added $.c → 1 compatible
+        assert_eq!(compatibles.len(), 1);
+        assert_eq!(compatibles[0].path, "$.c");
+        assert_eq!(compatibles[0].kind, "added");
+    }
+
+    /// Slice 35V2-P41-H-LR (adversarial, removed-field
+    /// consequence narration): the narration for a removed
+    /// field names "deserialization" so the operator knows
+    /// exactly what breaks. Vague wording ("something
+    /// changed") would defeat the helper's purpose.
+    #[test]
+    fn removed_field_narration_names_deserialization_consequence() {
+        let report = detect_contract_drift(
+            &json!({"id": "m", "thread_id": "t-1"}),
+            &json!({"id": "m"}),
+        );
+        let narrations = narrate_drift_report(&report);
+        assert_eq!(narrations.len(), 1);
+        let n = &narrations[0];
+        assert_eq!(n.kind, "removed");
+        assert_eq!(n.severity, "breaking");
+        assert!(
+            n.consequence.contains("deserialization"),
+            "consequence should name deserialization: {}",
+            n.consequence
+        );
+        assert!(n.consequence.contains("thread_id"));
+    }
+
+    /// Slice 35V2-P41-H-LR (positive, ordering invariant):
+    /// the narration order is removed → type_changed → added
+    /// (breaking first, compatible last). Operators read the
+    /// most severe items first.
+    #[test]
+    fn drift_narration_orders_breaking_before_compatible() {
+        let report = detect_contract_drift(
+            &json!({"removed_field": 1, "changed_field": 1}),
+            &json!({"changed_field": "1", "added_field": "new"}),
+        );
+        let narrations = narrate_drift_report(&report);
+        // Find indices to assert ordering.
+        let removed_idx = narrations
+            .iter()
+            .position(|n| n.kind == "removed")
+            .unwrap();
+        let changed_idx = narrations
+            .iter()
+            .position(|n| n.kind == "type_changed")
+            .unwrap();
+        let added_idx = narrations
+            .iter()
+            .position(|n| n.kind == "added")
+            .unwrap();
+        assert!(
+            removed_idx < changed_idx && changed_idx < added_idx,
+            "expected removed < type_changed < added, got: {narrations:?}"
+        );
     }
 }

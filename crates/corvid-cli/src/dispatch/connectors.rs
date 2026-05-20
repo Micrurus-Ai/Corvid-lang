@@ -49,6 +49,7 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
             live,
             baseline,
             observed,
+            narrate,
             json,
         } => {
             // Drift-detection mode: both --baseline and --observed
@@ -57,12 +58,20 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
             if let (Some(baseline_path), Some(observed_path)) =
                 (baseline.as_ref(), observed.as_ref())
             {
-                let report = connectors_cmd::run_contract_drift(
-                    baseline_path,
-                    observed_path,
-                )?;
+                let (report, narrations) = if narrate {
+                    connectors_cmd::run_contract_drift_with_narration(
+                        baseline_path,
+                        observed_path,
+                    )?
+                } else {
+                    let report = connectors_cmd::run_contract_drift(
+                        baseline_path,
+                        observed_path,
+                    )?;
+                    (report, Vec::new())
+                };
                 if json {
-                    let out = serde_json::to_string_pretty(&serde_json::json!({
+                    let mut payload = serde_json::json!({
                         "added_paths": report.added_paths,
                         "removed_paths": report.removed_paths,
                         "type_changed_paths": report
@@ -75,10 +84,37 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
                             }))
                             .collect::<Vec<_>>(),
                         "total": report.total(),
-                    }))?;
+                    });
+                    if narrate {
+                        payload["narration"] = serde_json::Value::Array(
+                            narrations
+                                .iter()
+                                .map(|n| serde_json::json!({
+                                    "path": n.path,
+                                    "kind": n.kind,
+                                    "consequence": n.consequence,
+                                    "severity": n.severity,
+                                    "sources": n.sources,
+                                }))
+                                .collect(),
+                        );
+                    }
+                    let out = serde_json::to_string_pretty(&payload)?;
                     println!("{out}");
                 } else if report.is_empty() {
                     println!("contract drift: none (0 sites)");
+                } else if narrate {
+                    println!("contract drift: {} site(s)", report.total());
+                    for n in &narrations {
+                        println!(
+                            "  [{:<10}] {:<13} {}",
+                            n.severity, n.kind, n.path
+                        );
+                        println!("    {}", n.consequence);
+                        for source in &n.sources {
+                            println!("    source: {source}");
+                        }
+                    }
                 } else {
                     println!("contract drift: {} site(s)", report.total());
                     for path in &report.removed_paths {

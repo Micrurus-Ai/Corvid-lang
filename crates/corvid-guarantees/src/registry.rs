@@ -1160,6 +1160,43 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "connector.drift_narration_grounded",
+        kind: GuaranteeKind::Connector,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid connectors check --baseline <file> \
+             --observed <file> --narrate` pairs every site in \
+             the structural drift report with a typed \
+             `DriftNarration` carrying a one-line consequence \
+             (e.g. \"connector code that consumed this field is \
+             now broken at deserialization\"), a typed severity \
+             (`breaking` for removed/type-changed sites, \
+             `compatible` for added sites), and a Grounded<T> \
+             `sources` array that back-references the detector \
+             bucket + path the narration summarised. The order \
+             is breaking-first so an operator triaging CI \
+             output reads the most consequential items first. \
+             Deterministic + LLM-free; the slice's \
+             \"RAG-grounded\" framing refers to the \
+             evidence-citation property, not to a live LLM \
+             round-trip. The first sub-slice of \
+             `35V2-P41-H-LR-connectors-ai-helpers` to ship; \
+             `mock-fixture-gen` (generative) and `fail-sim` \
+             (adversarial) need LLM work and remain filed under \
+             the umbrella.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-connector-runtime/src/contract_drift.rs::every_drift_narration_carries_grounded_sources",
+            "crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_narration_flow_pairs_every_site_with_grounded_sources",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-connector-runtime/src/contract_drift.rs::drift_narration_classifies_breaking_versus_compatible",
+            "crates/corvid-connector-runtime/src/contract_drift.rs::removed_field_narration_names_deserialization_consequence",
+            "crates/corvid-connector-runtime/src/contract_drift.rs::drift_narration_orders_breaking_before_compatible",
+        ],
+    },
+    Guarantee {
         id: "connector.webhook_signature_verified",
         kind: GuaranteeKind::Connector,
         class: GuaranteeClass::RuntimeChecked,

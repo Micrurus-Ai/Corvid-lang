@@ -65,6 +65,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `connector.write_requires_approval` | connector | out_of_scope | typecheck |
 | `connector.rate_limit_respects_provider` | connector | runtime_checked | runtime |
 | `connector.contract_drift_detected` | connector | runtime_checked | runtime |
+| `connector.drift_narration_grounded` | connector | runtime_checked | runtime |
 | `connector.webhook_signature_verified` | connector | runtime_checked | runtime |
 | `connector.replay_quarantine` | connector | runtime_checked | runtime |
 | `observability.otel_conformance` | observability | runtime_checked | runtime |
@@ -773,6 +774,23 @@ A connector honors the provider's rate-limit advice (`Retry-After`, 429, 5xx). T
 - `crates/corvid-connector-runtime/src/contract_drift.rs::provider_type_change_appears_in_type_changed_paths`
 - `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_removed_field_surfaces_with_non_empty_report`
 - `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_malformed_baseline_file_surfaces_typed_error`
+
+#### `connector.drift_narration_grounded`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid connectors check --baseline <file> --observed <file> --narrate` pairs every site in the structural drift report with a typed `DriftNarration` carrying a one-line consequence (e.g. "connector code that consumed this field is now broken at deserialization"), a typed severity (`breaking` for removed/type-changed sites, `compatible` for added sites), and a Grounded<T> `sources` array that back-references the detector bucket + path the narration summarised. The order is breaking-first so an operator triaging CI output reads the most consequential items first. Deterministic + LLM-free; the slice's "RAG-grounded" framing refers to the evidence-citation property, not to a live LLM round-trip. The first sub-slice of `35V2-P41-H-LR-connectors-ai-helpers` to ship; `mock-fixture-gen` (generative) and `fail-sim` (adversarial) need LLM work and remain filed under the umbrella.
+
+**Positive tests:**
+
+- `crates/corvid-connector-runtime/src/contract_drift.rs::every_drift_narration_carries_grounded_sources`
+- `crates/corvid-cli/src/connectors_cmd/check.rs::contract_drift_narration_flow_pairs_every_site_with_grounded_sources`
+
+**Adversarial tests:**
+
+- `crates/corvid-connector-runtime/src/contract_drift.rs::drift_narration_classifies_breaking_versus_compatible`
+- `crates/corvid-connector-runtime/src/contract_drift.rs::removed_field_narration_names_deserialization_consequence`
+- `crates/corvid-connector-runtime/src/contract_drift.rs::drift_narration_orders_breaking_before_compatible`
 
 #### `connector.webhook_signature_verified`
 - **class**: runtime_checked

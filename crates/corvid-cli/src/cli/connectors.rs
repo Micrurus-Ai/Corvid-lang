@@ -40,6 +40,16 @@ pub enum ConnectorsCommand {
         /// non-zero on any drift.
         #[arg(long, value_name = "FILE")]
         observed: Option<PathBuf>,
+        /// Pair every drift site with a typed
+        /// human-readable consequence (breaking vs.
+        /// compatible) + Grounded<T> back-references to the
+        /// detector evidence. Operators reviewing a CI
+        /// failure read the narration first; the
+        /// machine-readable JSON output is available via
+        /// `--json --narrate`. Combined with `--baseline` +
+        /// `--observed`.
+        #[arg(long)]
+        narrate: bool,
         /// Emit machine-readable JSON instead of a human report.
         #[arg(long)]
         json: bool,

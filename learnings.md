@@ -5356,3 +5356,58 @@ filing. The remaining tail is mostly per-app maturity work
 AI-helper work (P39-H policy-suggest, P41-H connectors-helpers
 umbrella) + an operational CI matrix for live providers
 (P41-E). All are honestly multi-day; not single-session.
+
+## 35V2-P41-H-LR drift-narrator sub-slice closed (2026-05-20)
+
+The first sub-slice of the `35V2-P41-H-LR-connectors-ai-helpers`
+umbrella ships: a deterministic RAG-grounded narrator that
+pairs every site in the contract drift report with a typed
+`DriftNarration` + Grounded<T> back-references. Promotes a new
+row `connector.drift_narration_grounded` to RuntimeChecked.
+
+The "RAG-grounded" framing in the audit's sub-slice description
+refers to the **evidence-citation property** of the output, not
+to a live LLM round-trip. The narration cites which detector
+bucket + path the consequence was synthesised from, so an
+auditor can trace every claim back to a structural evidence
+row. Same pattern as `corvid approvals explain` /
+`corvid observe explain` / `corvid jobs explain` — typed
+classifier over typed records, no LLM in the v1.0 contract.
+
+`DriftNarration` shape:
+  - `path` — the JSON path of the drift site
+  - `kind` — `removed` / `type_changed` / `added`
+  - `consequence` — one-line operational explanation
+    ("connector code that consumed this field is now broken at
+    deserialization")
+  - `severity` — `breaking` (removed/type-changed) or
+    `compatible` (added). Operator triage uses severity to
+    decide what to fix vs. what to adopt.
+  - `sources` — Grounded<T> back-references naming the
+    detector bucket + path the narration summarised
+
+Ordering invariant: `removed` → `type_changed` → `added`, so
+breaking sites surface first. Empty drift report → empty
+narration vec (the narrator never synthesises for sites that
+did not drift; that would defeat the grounding contract).
+
+5 new contract_drift tests + 2 new CLI tests + 1 new registry
+row.
+
+The remaining two sub-slices of the P41-H umbrella stay filed:
+`mock-fixture-gen` (generative; needs LLM prompt + provenance
+chain) and `fail-sim` (adversarial; needs LLM-driven fault
+synthesis). Both honestly require LLM work that is not
+single-session. Recording the split explicitly so a future
+audit doesn't re-file them as launch-readiness when their
+shape is post-v1.0.
+
+Pattern recorded: when an audit files three differently-shaped
+AI helpers under one umbrella, split the umbrella early.
+Deterministic-classifier helpers (assistive, RAG-grounded,
+explain-shaped) ship single-session; generative + adversarial
+helpers need real LLM prompt + grounded-source work that
+belongs in a separate milestone. The umbrella ID stays as the
+filing reference; sub-slice IDs (`P41-H-LR-drift-narrator`,
+`P41-H-LR-mock-fixture-gen`, `P41-H-LR-fail-sim`) carry the
+actual scope.

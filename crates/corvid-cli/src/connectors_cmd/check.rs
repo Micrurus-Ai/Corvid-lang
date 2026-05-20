@@ -10,7 +10,8 @@
 
 use anyhow::{anyhow, Context, Result};
 use corvid_connector_runtime::{
-    detect_contract_drift, validate_connector_manifest, ContractDriftReport,
+    detect_contract_drift, narrate_drift_report, validate_connector_manifest,
+    ContractDriftReport, DriftNarration,
 };
 use std::path::Path;
 
@@ -22,6 +23,25 @@ use super::support::shipped_manifests;
 /// to `corvid_connector_runtime::detect_contract_drift`).
 #[allow(dead_code)]
 pub const GUARANTEE_ID_CONTRACT_DRIFT_DETECTED: &str = "connector.contract_drift_detected";
+
+/// In-binary anchor for the narrator. The CLI's `--narrate`
+/// flag delegates to
+/// `corvid_connector_runtime::narrate_drift_report` and exposes
+/// the Grounded<T>-shaped narration to operators.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_DRIFT_NARRATION_GROUNDED: &str = "connector.drift_narration_grounded";
+
+/// Same shape as `run_contract_drift` but additionally pairs
+/// every drift site with a typed `DriftNarration` carrying
+/// breaking-vs-compatible severity + Grounded<T> sources.
+pub fn run_contract_drift_with_narration(
+    baseline_path: &Path,
+    observed_path: &Path,
+) -> Result<(ContractDriftReport, Vec<DriftNarration>)> {
+    let report = run_contract_drift(baseline_path, observed_path)?;
+    let narrations = narrate_drift_report(&report);
+    Ok((report, narrations))
+}
 
 /// Hermetic file-input mode for `corvid connectors check
 /// --baseline <file> --observed <file>`. Loads both JSON
@@ -168,5 +188,56 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("parse baseline JSON"), "got: {err}");
+    }
+
+    /// Slice 35V2-P41-H-LR (positive): the file-input narrator
+    /// flow pairs every drift site with a typed narration whose
+    /// `sources` field back-references the structural detector
+    /// evidence — the central Grounded<T> contract.
+    #[test]
+    fn contract_drift_narration_flow_pairs_every_site_with_grounded_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = dir.path().join("baseline.json");
+        let observed = dir.path().join("observed.json");
+        std::fs::write(
+            &baseline,
+            r#"{"id":"m","subject":"hi","count":3}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &observed,
+            r#"{"id":"m","subject":"hi","count":"3","new_field":"x"}"#,
+        )
+        .unwrap();
+        let (report, narrations) =
+            run_contract_drift_with_narration(&baseline, &observed).unwrap();
+        // Detector: 1 type change ($.count) + 1 added ($.new_field).
+        assert_eq!(report.total(), 2);
+        // Narrator: every drift site narrated exactly once.
+        assert_eq!(narrations.len(), 2);
+        for n in &narrations {
+            assert!(!n.sources.is_empty(), "narration {n:?} has empty sources");
+        }
+        // Breaking severity surfaces first.
+        assert_eq!(narrations[0].severity, "breaking");
+        assert_eq!(narrations[1].severity, "compatible");
+    }
+
+    /// Slice 35V2-P41-H-LR (adversarial, no-drift case): when
+    /// the report is empty the narrator returns an empty vec;
+    /// the CLI must not synthesise narrations for sites that
+    /// did not drift.
+    #[test]
+    fn contract_drift_narration_flow_returns_empty_when_no_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = dir.path().join("baseline.json");
+        let observed = dir.path().join("observed.json");
+        let payload = r#"{"id":"m","subject":"hi"}"#;
+        std::fs::write(&baseline, payload).unwrap();
+        std::fs::write(&observed, payload).unwrap();
+        let (report, narrations) =
+            run_contract_drift_with_narration(&baseline, &observed).unwrap();
+        assert!(report.is_empty());
+        assert!(narrations.is_empty());
     }
 }

@@ -19,7 +19,9 @@ pub mod trace;
 pub mod webhook_verify;
 
 pub use auth::{ConnectorAuthError, ConnectorAuthState, ConnectorRefreshTokenState};
-pub use contract_drift::{detect_contract_drift, ContractDriftReport, TypeChange};
+pub use contract_drift::{
+    detect_contract_drift, narrate_drift_report, ContractDriftReport, DriftNarration, TypeChange,
+};
 pub use calendar::{
     calendar_manifest, CalendarAvailabilityRequest, CalendarAvailabilitySlot,
     CalendarCancelRequest, CalendarConnector, CalendarEvent, CalendarEventReadRequest,
