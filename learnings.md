@@ -5411,3 +5411,68 @@ belongs in a separate milestone. The umbrella ID stays as the
 filing reference; sub-slice IDs (`P41-H-LR-drift-narrator`,
 `P41-H-LR-mock-fixture-gen`, `P41-H-LR-fail-sim`) carry the
 actual scope.
+
+## 35V2-P43-T-LR-release-notes sub-slice closed (2026-05-20)
+
+Second umbrella-split this session. The Phase 43 AI-helper
+umbrella `35V2-P43-T-LR-phase-43-ai-helpers` filed 5 helpers
+together because they share an LLM-helper infrastructure
+dependency. Recon under the slice found that one of them —
+`corvid release notes <prev> <new>` — is actually
+deterministic (git-log + conventional-commit grouping; no LLM
+needed for the v1.0 baseline). It ships single-session via the
+same pattern that closed the P41-H drift-narrator sub-slice.
+
+The 43T umbrella's surface table described `release notes` as
+"generative — Markdown release notes synthesised from commit
+history + closed launch-readiness slices". The "generative"
+framing anticipated an LLM-summarised version. But the
+baseline release-notes generation that release-please /
+changesets / semantic-release already ship in production is
+just `git log <from>..<to>` + conventional-commit
+categorisation + markdown grouping. That baseline is enough
+for v1.0 — a future generative layer can wrap it later to
+synthesise per-section prose.
+
+Two design choices recorded:
+
+  1. **Subcommand refactor honest in same commit.** The
+     existing `corvid release <channel> <version>` positional
+     surface had to become `corvid release build <channel>
+     <version>` to make room for `corvid release notes`. The
+     audit's surface table named the subcommand shape
+     literally, so following the audit was the no-shortcut
+     path. The CLI is pre-v1.0 so the soft break is
+     acceptable; updated DEMO / ROADMAP / launch-rehearsal /
+     launch-claim-audit refs in the same commit.
+
+  2. **The "RAG-grounded" framing is about the OUTPUT, not the
+     CALL PATTERN.** Every rendered line ends with the short
+     SHA so an operator reading the notes can `git show <sha>`
+     for any claim. That is the Grounded<T> property at the
+     release-notes layer; calling it RAG-grounded is honest
+     even though no retrieval happens in the codepath.
+
+Promotes the new `release.notes_grounded` row to
+RuntimeChecked. 6 new unit tests:
+  - git-log parser drops malformed lines
+  - categoriser routes each prefix correctly
+  - unrecognised prefixes fall through to "Other"
+    (no fuzzy-match drift)
+  - markdown renders sections + grounded SHAs in stable order
+  - empty range produces "No changes" stub, never a partial
+    section header
+  - ref validation refuses empty/flag-shaped inputs before
+    they reach git
+
+Dogfooded by running `corvid release notes b493bb6 HEAD` —
+the command produced clean notes for this session's last two
+slices, proving the end-to-end flow against the live repo.
+
+The remaining 4 Phase 43 AI helpers + the 1 remaining Phase 41
+AI helper (mock-fixture-gen) + the 1 remaining Phase 39 AI
+helper (policy-suggest) + the 1 remaining Phase 41 AI helper
+(fail-sim) stay filed under the umbrella as genuinely
+LLM-shaped work. The recurring pattern: deterministic-shaped
+helpers ship one at a time; LLM-shaped helpers wait for shared
+infrastructure.

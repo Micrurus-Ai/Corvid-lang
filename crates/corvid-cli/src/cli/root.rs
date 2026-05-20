@@ -35,6 +35,7 @@ use super::observe::ObserveCommand;
 use super::package::PackageCommand;
 pub use super::ops::OpsCommand;
 pub use super::receipt::ReceiptCommand;
+pub use super::release::ReleaseCommand;
 pub use super::review_queue::ReviewQueueCommand;
 pub use super::trace::TraceCommand;
 pub use super::upgrade::UpgradeCommand;
@@ -644,15 +645,12 @@ pub enum Command {
         #[command(subcommand)]
         command: DeployCommand,
     },
-    /// Produce signed release-channel artifacts.
+    /// Produce signed release-channel artifacts (`release
+    /// build`) or render structured release notes between two
+    /// git refs (`release notes`).
     Release {
-        /// Release channel: nightly, beta, or stable.
-        channel: String,
-        /// Explicit version. Nightly requires `-nightly.`, beta requires `-beta.`, stable is plain SemVer.
-        version: Option<String>,
-        /// Output directory for generated release artifacts.
-        #[arg(long, value_name = "DIR")]
-        out: Option<PathBuf>,
+        #[command(subcommand)]
+        command: ReleaseCommand,
     },
     /// Check or apply source and stdlib migrations.
     Upgrade {

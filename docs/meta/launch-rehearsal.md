@@ -8,7 +8,7 @@ The launch rehearsal proves the release package can be installed, explained, rol
 corvid check examples/backend/personal_executive_agent/src/main.cor
 corvid audit examples/backend/personal_executive_agent/src/main.cor --json
 corvid deploy package examples/backend/personal_executive_agent --out target/pea-package
-corvid release beta 1.0.0-beta.1 --out target/release/beta
+corvid release build beta 1.0.0-beta.1 --out target/release/beta
 corvid claim audit --json
 ```
 

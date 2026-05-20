@@ -14,7 +14,7 @@ Every launch-facing claim should point at a runnable command, test, or committed
 | Bundle verification is auditable | `corvid bundle verify <bundle>` and `corvid bundle audit <bundle>` |
 | Signed cdylib claims are externally explainable | `corvid claim --explain <cdylib> --key <pubkey> --source <file.cor>` |
 | Deploy packages include signed build attestation | `corvid deploy package <app> --out <dir>` |
-| Release channels emit signed artifacts | `corvid release beta 1.0.0-beta.1 --out <dir>` |
+| Release channels emit signed artifacts | `corvid release build beta 1.0.0-beta.1 --out <dir>` |
 | Upgrade migrations are machine-checkable | `corvid upgrade check <app> --json` |
 | Claim inventory is machine-auditable | `corvid claim audit --json` |
 | External beta feedback is complete | blocked: requires 20 real external developers and closed feedback issues |

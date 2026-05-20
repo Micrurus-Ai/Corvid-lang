@@ -2838,9 +2838,10 @@ corvid deploy compose my_app/                # docker-compose.yml + .env.example
 corvid deploy fly my_app/                    # fly.toml + secrets template + region plan
 corvid deploy k8s my_app/                    # Deployment + Service + Ingress + ConfigMap + Secret + HPA
 corvid deploy systemd my_app/                # service unit + sysusers + tmpfiles
-corvid release nightly                       # signed binaries + checksums + changelog
-corvid release beta v1.0.0-beta.1
-corvid release stable v1.0.0
+corvid release build nightly                 # signed binaries + checksums + changelog
+corvid release build beta 1.0.0-beta.1
+corvid release build stable 1.0.0
+corvid release notes <prev-tag> <new-tag>    # structured markdown release notes
 corvid migrate run --check                   # CI-safe dry run with full drift detection
 corvid upgrade --check                       # AI-assisted claim regression check before upgrade (agentic)
 corvid upgrade --apply                       # applies codemods + flags hand-review cases
@@ -2861,7 +2862,7 @@ corvid claim audit                           # AI-assisted final claim audit (ad
 - [ ] Final claim audit: every README / website / launch-page claim has a runnable command or test; `corvid claim audit` exits 0 with no aspirational wording flagged.
 - [ ] Beta program: ≥20 external developers shipped ≥1 backend app each; their feedback closed as code/docs/tests OR explicit non-scope; the closure rate is published.
 - [ ] Registry rows shipped: `deploy.reproducible_build`, `deploy.attestation_chain`, `deploy.sbom_completeness`, `release.signed_artifact`, `upgrade.claim_regression_check`, `ops.live_introspection_signed`, `claim.audit_runnable_artifacts` — `Static` or `RuntimeChecked`, with positive + adversarial test refs.
-- [ ] AI helpers landed: release-note generator (generative), deployment-target tailor (agentic), migration assistant (agentic), beta-feedback synthesizer (agentic), final claim audit (adversarial).
+- [ ] AI helpers landed: 1/5 shipped. `corvid release notes <prev> <new>` (release-note renderer) shipped 2026-05-20 in slice `35V2-P43-T-LR-release-notes` — deterministic git-log + conventional-commit categorisation; every rendered line ends with its short SHA so the markdown back-references commit history (the Grounded<T>-flavoured property at the release-notes layer); promotes the new `release.notes_grounded` row to RuntimeChecked. The other 4 helpers stay filed under the `35V2-P43-T-LR-phase-43-ai-helpers` umbrella as genuinely LLM-shaped work: `corvid deploy tailor` (agentic), `corvid upgrade assist` (agentic), `corvid beta synthesize-feedback` (agentic), `corvid claim audit --explain-failures` (adversarial — partially-deterministic but the failure-narration layer needs LLM grounding for the suggested-fix half).
 - [ ] Side-by-side `benches/comparisons/clone_to_deploy.md` against FastAPI/LangChain + Next.js/Vercel on time-from-clone-to-production-shaped-deploy.
 
 **Small-slice breakdown for Phase 43:**

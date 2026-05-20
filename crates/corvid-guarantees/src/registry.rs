@@ -1503,6 +1503,43 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "release.notes_grounded",
+        kind: GuaranteeKind::Release,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Platform,
+        description:
+            "`corvid release notes <from> <to>` walks \
+             `git log <from>..<to>` over the current repository, \
+             categorises each non-merge commit by conventional-\
+             commit prefix (feat / fix / perf / refactor / docs / \
+             test / chore / build / ci / style), and emits \
+             markdown grouped by category. Every rendered line \
+             ends with the short SHA so every claim in the notes \
+             back-references commit history — the Grounded<T> \
+             property at the release-notes layer. Empty ranges \
+             produce a typed \"No changes between X and Y\" stub \
+             rather than a partially-rendered section header \
+             with no entries. The slice's \"RAG-grounded\" \
+             framing in the 43T umbrella refers to this \
+             commit-history citation property, not to a live LLM \
+             round-trip: the renderer is deterministic, the \
+             generative half of the audit's helper set stays \
+             filed under `35V2-P43-T-LR-phase-43-ai-helpers` for \
+             the other four sub-helpers that need LLM \
+             prompt-grounding.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_categorise_commits_routes_each_prefix",
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_markdown_renders_sections_with_grounded_shas",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_unrecognised_prefix_falls_through_to_other",
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_empty_range_renders_no_changes_stub",
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_ref_validation_refuses_empty_or_flag_shapes",
+            "crates/corvid-cli/src/release_cmd.rs::release_notes_parse_git_log_output_drops_malformed_lines",
+        ],
+    },
+    Guarantee {
         id: "upgrade.claim_regression_check",
         kind: GuaranteeKind::Upgrade,
         class: GuaranteeClass::RuntimeChecked,

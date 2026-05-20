@@ -34,7 +34,7 @@ use crate::cli::root::{
     AbiCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand, BenchCommand,
     BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
     ConnectorsOauthCommand, ContractCommand, DeployCommand, OpsCommand, ReceiptCommand,
-    ReviewQueueCommand, TraceCommand, UpgradeCommand,
+    ReleaseCommand, ReviewQueueCommand, TraceCommand, UpgradeCommand,
 };
 use crate::commands::eval::*;
 use crate::commands::jobs::*;
@@ -434,18 +434,23 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 deploy_cmd::run_systemd(&app, &out).map(|_| 0)
             }
         },
-        Some(Command::Release {
-            channel,
-            version,
-            out,
-        }) => {
-            let out = out.unwrap_or_else(|| {
-                PathBuf::from("target")
-                    .join("release")
-                    .join(channel.as_str())
-            });
-            release_cmd::run_release(&channel, version.as_deref(), &out).map(|_| 0)
-        }
+        Some(Command::Release { command }) => match command {
+            ReleaseCommand::Build {
+                channel,
+                version,
+                out,
+            } => {
+                let out = out.unwrap_or_else(|| {
+                    PathBuf::from("target")
+                        .join("release")
+                        .join(channel.as_str())
+                });
+                release_cmd::run_release(&channel, version.as_deref(), &out).map(|_| 0)
+            }
+            ReleaseCommand::Notes { from, to, out } => {
+                release_cmd::run_release_notes(&from, &to, out.as_deref()).map(|_| 0)
+            }
+        },
         Some(Command::Upgrade { command }) => match command {
             UpgradeCommand::Check {
                 path,

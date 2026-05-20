@@ -29,6 +29,7 @@ pub mod observe;
 pub mod ops;
 pub mod package;
 pub mod receipt;
+pub mod release;
 pub mod review_queue;
 pub mod root;
 pub mod trace;
@@ -68,6 +69,8 @@ pub use ops::*;
 pub use package::*;
 #[allow(unused_imports)]
 pub use receipt::*;
+#[allow(unused_imports)]
+pub use release::*;
 #[allow(unused_imports)]
 pub use review_queue::*;
 #[allow(unused_imports)]

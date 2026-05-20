@@ -79,6 +79,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `deploy.attestation_chain` | deploy | runtime_checked | platform |
 | `deploy.sbom_completeness` | deploy | runtime_checked | platform |
 | `release.signed_artifact` | release | runtime_checked | platform |
+| `release.notes_grounded` | release | runtime_checked | platform |
 | `upgrade.claim_regression_check` | upgrade | runtime_checked | platform |
 | `ops.live_introspection_signed` | ops | runtime_checked | runtime |
 | `claim.audit_runnable_artifacts` | claim | runtime_checked | platform |
@@ -985,6 +986,24 @@ Every artifact emitted by `corvid release nightly/beta/stable` is signed with th
 **Adversarial tests:**
 
 - `crates/corvid-cli/src/release_cmd.rs::release_validate_version_refuses_channel_version_mismatch`
+
+#### `release.notes_grounded`
+- **class**: runtime_checked
+- **phase**: platform
+
+`corvid release notes <from> <to>` walks `git log <from>..<to>` over the current repository, categorises each non-merge commit by conventional-commit prefix (feat / fix / perf / refactor / docs / test / chore / build / ci / style), and emits markdown grouped by category. Every rendered line ends with the short SHA so every claim in the notes back-references commit history — the Grounded<T> property at the release-notes layer. Empty ranges produce a typed "No changes between X and Y" stub rather than a partially-rendered section header with no entries. The slice's "RAG-grounded" framing in the 43T umbrella refers to this commit-history citation property, not to a live LLM round-trip: the renderer is deterministic, the generative half of the audit's helper set stays filed under `35V2-P43-T-LR-phase-43-ai-helpers` for the other four sub-helpers that need LLM prompt-grounding.
+
+**Positive tests:**
+
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_categorise_commits_routes_each_prefix`
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_markdown_renders_sections_with_grounded_shas`
+
+**Adversarial tests:**
+
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_unrecognised_prefix_falls_through_to_other`
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_empty_range_renders_no_changes_stub`
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_ref_validation_refuses_empty_or_flag_shapes`
+- `crates/corvid-cli/src/release_cmd.rs::release_notes_parse_git_log_output_drops_malformed_lines`
 
 ### Upgrade compatibility
 
