@@ -160,6 +160,7 @@ mod tests {
             return_ty: ret,
             cost_budget: None,
             wrapping_arithmetic: false,
+            is_replayable: false,
             body: IrBlock {
                 stmts: body,
                 span: span(),

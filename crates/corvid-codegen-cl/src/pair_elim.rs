@@ -379,6 +379,7 @@ mod tests {
             return_ty: Type::Int,
             cost_budget: None,
             wrapping_arithmetic: false,
+            is_replayable: false,
             body: IrBlock {
                 stmts: body,
                 span: span(),

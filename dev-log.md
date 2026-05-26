@@ -4,6 +4,59 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-26 - Slice 35V2-P38-C-2 — Per-job JSONL trace emission for `@replayable` durable jobs
+
+- Threaded `@replayable` through IR: added `IrAgent.is_replayable: bool`
+  (`crates/corvid-ir/src/types.rs`), set during lowering via the existing
+  `AgentAttribute::is_replayable(&a.attributes)` helper
+  (`crates/corvid-ir/src/lower.rs`). Mechanically updated 14 IrAgent
+  struct literals across the workspace (codegen-cl, c-header, vm, driver
+  tests + production passes) with `is_replayable: false` — `wrapping_arithmetic`
+  is the precedent for this kind of attribute-derived IR bool.
+- Added `Runtime::with_tracer(&self, Tracer) -> Self` on
+  `corvid-runtime`. Returns a clone of the runtime with `tracer` and the
+  derived `recorder` swapped; re-emits the schema header + initial
+  `SeedRead` for `rollout_default_seed` so the per-job trace file is
+  self-contained.
+- Extended `DefaultJobRuntimeExecutor` (`crates/corvid-vm/src/jobs.rs`):
+  added `trace_dir: PathBuf` field + `with_trace_dir(path)` builder
+  method (default `target/trace/jobs`). On execute, when `agent.is_replayable`:
+  best-effort `fs::create_dir_all`, open `Tracer::open(&trace_dir, &job.id)`,
+  swap into the runtime via `Runtime::with_tracer`. Non-`@replayable`
+  agents skip the swap and run as today.
+- Amended `docs/phases/phase-38-replay-quarantine.md` to align the
+  design with the cleaner semantics: trace path is deterministic from
+  `job_id`; `QueueJob.replay_key` stays as operator metadata (NOT
+  mutated by the executor). The earlier wording — "replay_key resolves
+  to the trace path" — would have required a queue-API change just for
+  path storage. C-3's `replay_job(queue, job_id)` looks the trace up by
+  `job_id` directly.
+
+Validation:
+- `cargo check --workspace --tests` clean (zero errors / warnings).
+- `cargo test -p corvid-vm --lib jobs::` — 7 passed (5 from C-1 + 2 new:
+  `replayable_agent_emits_per_job_jsonl_trace` asserts the file exists,
+  is non-empty, and every line round-trips through
+  `corvid_trace_schema::TraceEvent`;
+  `non_replayable_agent_emits_no_per_job_trace` asserts the file is
+  absent when the agent lacks `@replayable`).
+- `cargo test -p corvid-cli --test c2_trace_integration` — 2 passed
+  (positive: pool drives a `@replayable` job, trace file lands at
+  `<trace_dir>/<job_id>.jsonl` with the expected `RunStarted` +
+  `RunCompleted` events; negative: no trace file for a non-`@replayable`
+  agent).
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2 passed
+  (no C-1 regression).
+- `cargo test -p corvid-cli --test jobs jobs_run` — 2 passed.
+- `cargo test -p corvid-runtime --lib worker_pool` — 3 passed.
+- `cargo test -p corvid-runtime --test durability_corpus` — 4 passed
+  (38L crash-recovery + 38M DST cron still green after the IR + runtime
+  changes).
+- `cargo test -p corvid-guarantees phase_38` — 1 passed (registry
+  sentinel green).
+
+---
+
 ## 2026-05-26 - Slice 35V2-P38-C-1 — Job→Runtime executor bridge
 
 - Added `crates/corvid-vm/src/jobs.rs` with `JobRuntimeExecutor` trait,

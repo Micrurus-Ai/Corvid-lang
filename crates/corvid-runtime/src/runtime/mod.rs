@@ -87,6 +87,32 @@ impl Runtime {
         RuntimeBuilder::default()
     }
 
+    /// Return a new `Runtime` sharing every state-bearing field with
+    /// `self` (tools, LLMs, approver, stores, rollout state, …) but
+    /// emitting trace events to `tracer` instead of `self.tracer`.
+    /// Slice `35V2-P38-C-2` uses this to open a per-job JSONL trace
+    /// for `@replayable` durable-queue runs without rebuilding the
+    /// surrounding runtime stack. The recorder is rebuilt from the
+    /// new tracer so the freshly-opened file carries its own schema
+    /// header + initial seed-read, mirroring the construction path
+    /// in `RuntimeBuilder::build`.
+    pub fn with_tracer(&self, tracer: Tracer) -> Self {
+        let recorder =
+            Recorder::for_tracer(&tracer, corvid_trace_schema::WRITER_INTERPRETER).map(Arc::new);
+        if let Some(rec) = &recorder {
+            rec.emit_schema_header();
+            let seed = self
+                .rollout_state
+                .load(std::sync::atomic::Ordering::Relaxed);
+            rec.emit_seed_read("rollout_default_seed", seed);
+        }
+        Self {
+            tracer,
+            recorder,
+            ..self.clone()
+        }
+    }
+
     // ---- accessors used by the interpreter ----
 
     pub fn tools(&self) -> &ToolRegistry {

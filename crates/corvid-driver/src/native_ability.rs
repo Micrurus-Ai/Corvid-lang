@@ -383,6 +383,7 @@ mod tests {
                 return_ty: Type::Stream(Box::new(Type::String)),
                 cost_budget: None,
                 wrapping_arithmetic: false,
+                is_replayable: false,
                 body: IrBlock {
                     stmts: vec![],
                     span,

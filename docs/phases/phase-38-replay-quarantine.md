@@ -59,24 +59,45 @@ the surface so production job execution uses a real `Runtime`:
 
 ### Per-Job Trace Emission (C-2)
 
-`QueueJob.replay_key` becomes the path to the job's JSONL trace.
-Naming: `target/trace/jobs/<job-id>.jsonl`. The schema reuses
-`corvid-trace-schema` events without extension:
+Trace path is deterministic from `job_id`:
+`<trace_dir>/<job_id>.jsonl`, where `trace_dir` defaults to
+`target/trace/jobs/` and is configurable via
+`DefaultJobRuntimeExecutor::with_trace_dir(path)`. **`QueueJob.replay_key`
+is NOT the trace path** — it stays as operator-provided metadata at
+enqueue time, unchanged from today's queue API. Earlier draft of this
+doc over-specified `replay_key` as the path; that would have required a
+queue-API change just for path storage. C-3's `replay_job(queue, job_id)`
+looks up the trace by `job_id` directly.
 
-- `SchemaHeader` (writer tier = `Job`, source_path = agent source).
-- `RunStarted` (agent name, args fingerprint as recorded JSON array).
+A job that is not `@replayable` does not emit a per-job trace file. The
+emission is gated on `IrAgent.is_replayable` (lowered from
+`AgentAttribute::is_replayable(&a.attributes)` — true when the source
+carries `@replayable` or `@deterministic`, since `@deterministic`
+implies `@replayable`). C-1 already established the `is_replayable: false`
+default; C-2 added the IR field + lowering pass.
+
+The schema reuses `corvid-trace-schema` events without extension. The
+interpreter emits, in order:
+
+- `SchemaHeader` (writer = `interpreter`, recorded by
+  `Runtime::with_tracer` when the per-job tracer is installed).
+- `SeedRead` for `rollout_default_seed` (recorded immediately after the
+  schema header so replay sees every initial state read).
+- `RunStarted` (agent name, args as JSON array).
 - Interleaved `ToolCall` / `ToolResult` / `LlmCall` / `LlmResult` /
   `ApprovalRequest` / `ApprovalResponse` / `ApprovalDecision` /
-  `SeedRead` / `ClockRead`.
-- `RunCompleted` (ok, output fingerprint, terminal status).
+  `SeedRead` / `ClockRead` as the body executes.
+- `RunCompleted` (ok, result, error).
 
-A job that is not `@replayable` does not emit a trace. The emission is
-gated on the agent attribute being present at compile time, surfaced
-through the existing `AgentAttribute::Replayable` AST path.
+The JSONL writer flushes on every emit (today's `Tracer` behaviour), so
+a crashed job leaves a partial trace the operator can inspect — no
+explicit terminal-transition hook is needed.
 
-The trace file is written on every terminal transition (`succeeded`,
-`dead_lettered`, `canceled`) so a crashed job leaves a partial trace
-the operator can inspect.
+`Runtime::with_tracer` is the swap mechanism: clones the surrounding
+runtime (cheap — most fields are Arc'd), substitutes the new tracer +
+freshly-derived recorder, and re-emits the schema header + seed read on
+the new file. The original runtime keeps its existing tracer, so jobs
+running in parallel get isolated per-job trace files.
 
 ### `replay_job` Entry Point (C-3)
 

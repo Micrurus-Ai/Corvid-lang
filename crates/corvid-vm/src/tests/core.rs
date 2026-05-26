@@ -192,6 +192,7 @@ async fn if_non_bool_condition_is_defensive_runtime_error() {
         return_ty: Type::Int,
         cost_budget: None,
         wrapping_arithmetic: false,
+        is_replayable: false,
         body: IrBlock {
             stmts: vec![if_stmt, fallback],
             span: sp,

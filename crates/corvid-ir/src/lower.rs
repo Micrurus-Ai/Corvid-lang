@@ -623,6 +623,7 @@ impl<'a> Lowerer<'a> {
             return_ty: self.type_ref_to_type(&a.return_ty),
             cost_budget: agent_cost_budget(a),
             wrapping_arithmetic: AgentAttribute::is_wrapping(&a.attributes),
+            is_replayable: AgentAttribute::is_replayable(&a.attributes),
             body,
             span: a.span,
             // Populated by corvid-codegen-cl's ownership pass. `None`

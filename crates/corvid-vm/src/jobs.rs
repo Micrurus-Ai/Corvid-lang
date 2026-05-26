@@ -1,25 +1,38 @@
 //! Job executor that drives durable-queue jobs against a real `Runtime`.
 //!
-//! Slice `35V2-P38-C-1` — the cross-layer bridge that lets the multi-worker
-//! `WorkerPool` (shipped in slice 38K) execute agent bodies instead of the
-//! no-op default. Production-mode `corvid jobs run --source <path>.cor`
-//! compiles the source through the normal driver pipeline, constructs a
+//! Slices `35V2-P38-C-1` and `35V2-P38-C-2` — the cross-layer bridge that
+//! lets the multi-worker `WorkerPool` (shipped in slice 38K) execute
+//! agent bodies instead of the no-op default, plus per-job JSONL trace
+//! emission for `@replayable` agents (gated on `IrAgent.is_replayable`).
+//! Production-mode `corvid jobs run --source <path>.cor` compiles the
+//! source through the normal driver pipeline, constructs a
 //! `DefaultJobRuntimeExecutor` over the resulting `IrFile`, and wires it
 //! into the pool via `into_pool_executor`. Test executors and
 //! single-task per-pool deployments can implement [`JobRuntimeExecutor`]
 //! directly and reuse the same adapter.
 //!
-//! Sub-slice C-2 will layer per-job trace emission on top of this surface;
-//! sub-slice C-3 will extend it with replay-mode dispatch. C-1's contract
-//! is the *live*-mode execution path only.
+//! Trace path policy: a `@replayable` job persists its JSONL trace to
+//! `<trace_dir>/<job_id>.jsonl`, where `trace_dir` is configurable via
+//! [`DefaultJobRuntimeExecutor::with_trace_dir`] and defaults to
+//! `target/trace/jobs`. Non-`@replayable` jobs emit no per-job trace
+//! file (they still emit to the runtime's shared tracer if one is
+//! attached). `QueueJob.replay_key` is operator-provided metadata at
+//! enqueue time and is NOT mutated by the executor — the trace path is
+//! always derivable from `job_id`.
+//!
+//! Sub-slice C-3 will extend this surface with replay-mode dispatch
+//! (read the trace, drive the executor with quarantined adapters); C-1
+//! and C-2 ship the *live*-mode execution + recording path only.
 
 use corvid_ir::{IrFile, IrType};
 use corvid_resolve::DefId;
 use corvid_runtime::queue::QueueJob;
+use corvid_runtime::tracing::Tracer;
 use corvid_runtime::worker_pool::{JobExecutor, JobOutcome};
 use corvid_runtime::{Runtime, RuntimeError};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
@@ -58,15 +71,32 @@ pub trait JobRuntimeExecutor: Send + Sync {
 ///   comparison happens through Phase 21's `TraceEvent::RunCompleted`).
 pub struct DefaultJobRuntimeExecutor {
     ir: Arc<IrFile>,
+    trace_dir: PathBuf,
 }
 
 impl DefaultJobRuntimeExecutor {
     pub fn new(ir: Arc<IrFile>) -> Self {
-        Self { ir }
+        Self {
+            ir,
+            trace_dir: PathBuf::from("target/trace/jobs"),
+        }
+    }
+
+    /// Override the directory where `@replayable` jobs persist their
+    /// per-job JSONL traces. The trace file always lands at
+    /// `<trace_dir>/<job_id>.jsonl`. Tests typically point this at a
+    /// `tempfile::tempdir()` to avoid polluting `target/`.
+    pub fn with_trace_dir(mut self, dir: PathBuf) -> Self {
+        self.trace_dir = dir;
+        self
     }
 
     pub fn ir(&self) -> &IrFile {
         &self.ir
+    }
+
+    pub fn trace_dir(&self) -> &std::path::Path {
+        &self.trace_dir
     }
 }
 
@@ -118,6 +148,26 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
             }
         }
 
+        // For `@replayable` agents (slice C-2), open a per-job JSONL
+        // tracer at `<trace_dir>/<job_id>.jsonl` and swap it into the
+        // runtime. The interpreter's `RunStarted` / `ToolCall` /
+        // `LlmCall` / `ApprovalDecision` / `RunCompleted` emits then
+        // land in the per-job file instead of (or alongside) the
+        // runtime's shared tracer. Non-`@replayable` agents skip this
+        // step and use the supplied runtime verbatim.
+        let job_runtime = if agent.is_replayable {
+            // Best-effort directory creation. Tracer::open / its writer
+            // already swallow IO failures (per the tracing module's
+            // "broken tracer must never crash an agent" rule), so even
+            // if create_dir_all fails the agent run still completes —
+            // it just doesn't get a trace file.
+            let _ = std::fs::create_dir_all(&self.trace_dir);
+            let tracer = Tracer::open(&self.trace_dir, &job.id);
+            runtime.with_tracer(tracer)
+        } else {
+            runtime.clone()
+        };
+
         // Drive the async interpreter from a sync executor closure. The
         // surrounding `WorkerPool` calls us under
         // `tokio::task::spawn_blocking`, so we are on a blocking worker
@@ -127,7 +177,7 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
         let ir = self.ir.clone();
         let agent_name = agent.name.clone();
         let interp_result = handle.block_on(async move {
-            run_agent(ir.as_ref(), &agent_name, args, runtime).await
+            run_agent(ir.as_ref(), &agent_name, args, &job_runtime).await
         });
 
         match interp_result {
@@ -355,6 +405,84 @@ agent greet(name: String) -> String:
             }
             other => panic!("expected PayloadArity failure, got {other:?}"),
         }
+    }
+
+    /// Slice C-2 positive: a `@replayable` agent's run emits a per-job
+    /// JSONL trace at `<trace_dir>/<job_id>.jsonl`. The file exists,
+    /// is non-empty, and every line round-trips through
+    /// `corvid_trace_schema::TraceEvent` deserialisation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn replayable_agent_emits_per_job_jsonl_trace() {
+        let ir = Arc::new(compile(
+            r#"
+@replayable
+agent noop() -> String:
+    return "ok"
+"#,
+        ));
+        let runtime = empty_runtime();
+        let trace_dir = tempfile::tempdir().expect("tempdir");
+        let executor = DefaultJobRuntimeExecutor::new(ir)
+            .with_trace_dir(trace_dir.path().to_path_buf());
+        let job = fake_job("noop", serde_json::json!([]));
+        let job_id = job.id.clone();
+        let trace_path = trace_dir.path().join(format!("{job_id}.jsonl"));
+
+        let outcome = tokio::task::spawn_blocking(move || executor.execute(&runtime, &job))
+            .await
+            .expect("blocking task completed")
+            .expect("executor surface ok");
+        assert!(matches!(outcome, JobOutcome::Success { .. }));
+
+        let raw = std::fs::read_to_string(&trace_path)
+            .unwrap_or_else(|err| panic!("trace at {trace_path:?} must exist: {err}"));
+        assert!(!raw.is_empty(), "trace file should not be empty");
+        let mut event_count = 0;
+        for line in raw.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let event: corvid_trace_schema::TraceEvent = serde_json::from_str(line)
+                .unwrap_or_else(|err| panic!("trace line failed to deserialise: {err}\n{line}"));
+            event_count += 1;
+            // Sanity: at least the schema header + RunStarted +
+            // RunCompleted should appear.
+            let _ = event;
+        }
+        assert!(
+            event_count >= 3,
+            "trace should contain ≥3 events (header + start + completed), got {event_count}"
+        );
+    }
+
+    /// Slice C-2 adversarial: a non-`@replayable` agent does NOT emit
+    /// a per-job trace file. The opposite test of the positive case —
+    /// gates the executor on the IR-level attribute.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn non_replayable_agent_emits_no_per_job_trace() {
+        let ir = Arc::new(compile(
+            r#"
+agent noop() -> String:
+    return "ok"
+"#,
+        ));
+        let runtime = empty_runtime();
+        let trace_dir = tempfile::tempdir().expect("tempdir");
+        let executor = DefaultJobRuntimeExecutor::new(ir)
+            .with_trace_dir(trace_dir.path().to_path_buf());
+        let job = fake_job("noop", serde_json::json!([]));
+        let job_id = job.id.clone();
+        let trace_path = trace_dir.path().join(format!("{job_id}.jsonl"));
+
+        let outcome = tokio::task::spawn_blocking(move || executor.execute(&runtime, &job))
+            .await
+            .expect("blocking task completed")
+            .expect("executor surface ok");
+        assert!(matches!(outcome, JobOutcome::Success { .. }));
+        assert!(
+            !trace_path.exists(),
+            "non-@replayable agent must not write {trace_path:?}"
+        );
     }
 
     /// Positive: agent with a String param resolves, binds, returns the

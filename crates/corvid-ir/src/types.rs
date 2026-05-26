@@ -257,11 +257,19 @@ pub struct IrAgent {
     pub return_ty: Type,
     pub cost_budget: Option<f64>,
     pub wrapping_arithmetic: bool,
+    /// True when the source carries `@replayable` or `@deterministic`
+    /// (`@deterministic` implies `@replayable`). Lowered from
+    /// `AgentAttribute::is_replayable(&attributes)`. Consumed by the
+    /// durable-job executor (slice `35V2-P38-C-2`) to gate per-job
+    /// trace emission, and by future replay-mode wiring (slice
+    /// `35V2-P38-C-3` onward) to decide whether a job is safely
+    /// replayable.
+    pub is_replayable: bool,
     pub body: IrBlock,
     pub span: Span,
     /// Per-parameter ownership at the callee ABI.
     /// `None` = ownership analysis hasn't run on this agent (every
-    /// parameter is treated as Owned, matching pre-17b behavior).
+    /// parameter is treated as Owned, matching pre-17b semantics).
     /// `Some(v)` with `v.len() == params.len()` — each entry matches
     /// the parameter at the same index.
     ///

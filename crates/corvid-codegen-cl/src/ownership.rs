@@ -480,6 +480,7 @@ fn transform_agent(
         return_ty: agent.return_ty.clone(),
         cost_budget: agent.cost_budget,
         wrapping_arithmetic: agent.wrapping_arithmetic,
+        is_replayable: agent.is_replayable,
         body,
         span: agent.span,
         borrow_sig: Some(borrow_sig),

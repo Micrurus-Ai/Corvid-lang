@@ -4904,6 +4904,40 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-2 closed (2026-05-26) — `@replayable` durable jobs persist JSONL traces
+
+When a `@replayable` durable job runs through `corvid jobs run --source`,
+the worker emits a per-job JSONL trace alongside the durable queue's
+own checkpoint rows. Path is deterministic: `target/trace/jobs/<job_id>.jsonl`
+by default, configurable per executor via
+`DefaultJobRuntimeExecutor::with_trace_dir(...)`.
+
+Trace contents reuse the existing `corvid-trace-schema` events the
+interpreter already emits — no new event types are invented for jobs.
+Every line is a `TraceEvent` JSON object; the executor adds nothing on
+top. For an `@replayable noop() -> String: return "ok"` you get a
+schema header → initial `SeedRead` for `rollout_default_seed` →
+`RunStarted{agent: "noop"}` → `RunCompleted{ok: true, result: "ok"}`,
+plus any interleaved `ToolCall` / `LlmCall` / `ApprovalDecision` /
+`SeedRead` / `ClockRead` events the body produces.
+
+The emission gate is the source-level attribute, lowered through IR:
+`@replayable` (and `@deterministic`, which implies replayable) becomes
+`IrAgent.is_replayable = true` during lowering, mirroring the
+`wrapping_arithmetic` precedent. Non-`@replayable` agents skip trace
+emission entirely — their queue checkpoints are still durable, but no
+JSONL file is written for them.
+
+`QueueJob.replay_key` is unchanged — it stays as operator metadata at
+enqueue time and is NOT touched by the executor. C-3's `replay_job`
+lookup (next slice) finds traces by `job_id` directly. Cleaner
+separation: queue stores logical metadata, filesystem stores traces.
+
+Sub-slice of `35V2-P38-C-replay-quarantine`. C-3 will layer
+`replay_job(queue, job_id)` (reads the trace, drives the executor in
+replay mode); C-4 / C-5 install quarantine wrappers around LLM / HTTP /
+Store / IO so a replayed job can't leak real side effects.
+
 ## 35V2-P38-C-1 closed (2026-05-26) — `corvid jobs run --source` mandatory; no-op default removed
 
 `corvid jobs run` now requires `--source <path>.cor` to point at a compiled

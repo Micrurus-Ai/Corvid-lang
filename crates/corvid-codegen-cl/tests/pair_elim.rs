@@ -170,6 +170,7 @@ fn benchmark_shaped_fixture_has_nonzero_dup_drop_reduction() {
         return_ty: Type::Int,
         cost_budget: None,
         wrapping_arithmetic: false,
+        is_replayable: false,
         body: IrBlock {
             stmts: vec![
                 IrStmt::Dup {
