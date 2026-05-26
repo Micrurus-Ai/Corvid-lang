@@ -81,6 +81,12 @@ pub enum JobsCommand {
         /// SQLite state file used by the durable local queue.
         #[arg(long, value_name = "PATH", default_value = "target/corvid-jobs.sqlite")]
         state: PathBuf,
+        /// Compiled Corvid source whose `agent` declarations supply the
+        /// job bodies. Required for production execution. To smoke-test
+        /// queue lifecycle without executing agent bodies, use
+        /// `corvid jobs run-one`.
+        #[arg(long, value_name = "PATH")]
+        source: Option<PathBuf>,
         /// Number of concurrent workers.
         #[arg(long, default_value = "1")]
         workers: usize,

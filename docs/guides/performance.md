@@ -41,7 +41,7 @@ they accrete features.
 
 ## Concurrent jobs
 
-The durable runner (`corvid jobs run --workers=N`) scales to N async
+The durable runner (`corvid jobs run --source <path>.cor --workers=N`) scales to N async
 workers per process. Past a few thousand jobs/second per host, scale
 horizontally — multiple runner processes against one queue.
 

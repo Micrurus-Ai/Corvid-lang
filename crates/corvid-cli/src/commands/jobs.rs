@@ -102,17 +102,55 @@ pub(crate) fn cmd_jobs_run_one(
 
 pub(crate) fn cmd_jobs_run(
     state: &Path,
+    source: Option<&Path>,
     workers: usize,
     lease_ttl_ms: u64,
     idle_poll_ms: u64,
     max_runtime_ms: u64,
 ) -> Result<u8> {
+    use corvid_driver::compile_to_ir_with_config_at_path;
     use corvid_runtime::worker_pool::WorkerPool;
+    use corvid_runtime::Runtime;
+    use corvid_vm::{into_pool_executor, DefaultJobRuntimeExecutor, JobRuntimeExecutor};
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
+    let Some(source_path) = source else {
+        anyhow::bail!(
+            "`corvid jobs run` requires --source <path>.cor.\n\
+             This command executes durable jobs against a real Runtime, so it needs\n\
+             the compiled source to resolve agent bodies. For test-mode job\n\
+             lifecycle without executing agent bodies, use:\n\
+             \n    \
+             corvid jobs run-one --output-kind <kind> --output-fingerprint <fp>"
+        );
+    };
+
+    let source_text = std::fs::read_to_string(source_path).with_context(|| {
+        format!("failed to read job source `{}`", source_path.display())
+    })?;
+    let ir = compile_to_ir_with_config_at_path(&source_text, source_path, None)
+        .map_err(|diags| {
+            let rendered = diags
+                .into_iter()
+                .map(|d| format!("- {d}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::anyhow!(
+                "failed to compile job source `{}`:\n{}",
+                source_path.display(),
+                rendered
+            )
+        })?;
+
     let queue = Arc::new(DurableQueueRuntime::open(state)?);
+    let runtime_handle = Arc::new(Runtime::builder().build());
+    let executor: Arc<dyn JobRuntimeExecutor> =
+        Arc::new(DefaultJobRuntimeExecutor::new(Arc::new(ir)));
+    let job_executor = into_pool_executor(executor, runtime_handle);
+
     let pool = WorkerPool::new(queue.clone(), workers)
+        .with_executor(job_executor)
         .with_lease_ttl_ms(lease_ttl_ms)
         .with_idle_poll_ms(idle_poll_ms);
     let drain = pool.drain_handle();
@@ -121,6 +159,7 @@ pub(crate) fn cmd_jobs_run(
 
     println!("corvid jobs run");
     println!("state: {}", state.display());
+    println!("source: {}", source_path.display());
     println!("workers: {workers}");
     println!("lease_ttl_ms: {lease_ttl_ms}");
     println!("idle_poll_ms: {idle_poll_ms}");

@@ -4904,6 +4904,55 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-1 closed (2026-05-26) — `corvid jobs run --source` mandatory; no-op default removed
+
+`corvid jobs run` now requires `--source <path>.cor` to point at a compiled
+Corvid source file whose `agent` declarations supply the bodies the
+worker pool executes. The previous behaviour — no executor wired, every
+leased job marked `succeeded` instantly by a no-op default — was a silent
+durable-state lie: the queue reported jobs as completed when no work had
+actually run. Missing `--source` now errors with a clear message that
+points at `corvid jobs run-one` for true smoke-test lifecycle exercise.
+
+Production shape:
+
+```sh
+corvid jobs enqueue --state queue.db --task daily_brief --payload '["alice"]' \
+  --max-retries 3 --budget-usd 0.50 --effect-summary brief --replay-key rk:1
+
+corvid jobs run --source app.cor --state queue.db --workers 4 \
+  --lease-ttl-ms 60000 --max-runtime-ms 0
+```
+
+The runner compiles `app.cor` once at startup, builds a single shared
+`Runtime`, wraps a `DefaultJobRuntimeExecutor` (which holds the `IrFile`
+and resolves `job.task` against `IrFile.agents`), and threads the
+executor through `WorkerPool::with_executor`. Each worker leases a job,
+deserialises the payload JSON array into a typed `Vec<Value>` against
+the agent's params, runs the body through the same async `run_agent`
+interpreter entry `corvid run` uses, and finalises via the existing
+`complete_leased` / `fail_leased` paths.
+
+Error vocabulary at the executor layer:
+
+- Unknown agent (task name not declared in the source) → `JobOutcome::Skip`,
+  lease releases, job stays eligible for another (per-task) worker pool.
+- Payload not a JSON array → `PayloadShape` failure with retry/backoff
+  per the queue's normal policy.
+- Wrong arity → `PayloadArity` failure naming the agent + expected/got
+  counts.
+- Per-arg type mismatch → `PayloadType` failure naming the offending
+  param + the converter error.
+- Interpreter raised an error → `AgentInterpreter` failure with the
+  stringified `InterpError`.
+
+Sub-slice of the audit-correction track `35V2-P38-C-replay-quarantine`.
+C-2 layers trace emission for `@replayable` agents on top; C-3 adds
+`corvid jobs replay <id>`; C-4/C-5 install quarantine wrappers around
+LLM/HTTP/Store/IO so a replay can't leak side effects. See
+`docs/phases/phase-38-replay-quarantine.md` for the full integration
+design.
+
 ## 35V2-P38-G-LR-corvid-jobs-explain-helper closed (2026-05-19)
 
 `corvid jobs explain --state <path> --job <job_id>` ships the

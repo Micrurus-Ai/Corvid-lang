@@ -4,6 +4,54 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-26 - Slice 35V2-P38-C-1 — Job→Runtime executor bridge
+
+- Added `crates/corvid-vm/src/jobs.rs` with `JobRuntimeExecutor` trait,
+  `DefaultJobRuntimeExecutor` impl (compiles a `.cor` source to IR, resolves
+  agent by name, deserialises payload JSON into typed `Vec<Value>`, drives
+  the async `run_agent` interpreter via `Handle::block_on` inside the
+  pool's `spawn_blocking` worker), and `into_pool_executor` adapter into
+  the existing `corvid_runtime::worker_pool::JobExecutor` closure shape.
+- Made `corvid jobs run --source <path>.cor` mandatory. The previous no-op
+  default executor was a silent durable-state lie — it marked every leased
+  job `succeeded` without executing any agent body. Missing `--source`
+  now errors with a helpful message pointing at `corvid jobs run-one` for
+  smoke testing.
+- Replaces 38K's smoke-test default; production callers compile their
+  source once at runner startup and the agent body executes through the
+  same VM path `corvid run` uses.
+- C-1 is the first sub-slice of the audit-correction track
+  `35V2-P38-C-replay-quarantine` (deferral overridden 2026-05-26 per
+  pre-phase chat); C-2/C-3 layer trace emission and `replay_job` on top.
+
+Validation:
+- `cargo check --workspace` clean.
+- `cargo test -p corvid-vm --lib jobs::` — 5 passed (zero-arg agent
+  success, unknown-task skip, non-array payload rejection, arity
+  mismatch rejection, single-string-arg agent success).
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2 passed
+  (one persisted job runs through real Runtime to `Succeeded` with
+  expected output fingerprint; adversarial unknown-task skips and
+  leaves job eligible).
+- `cargo test -p corvid-cli --test jobs jobs_run` — 2 passed
+  (`jobs_run_multi_worker_drains_pending_jobs` rewritten to use
+  `--source`; new `jobs_run_without_source_errors_with_helpful_message`).
+- `cargo test -p corvid-runtime --lib worker_pool` — 3 passed (no
+  regression).
+- `cargo test -p corvid-runtime --test durability_corpus` — 4 passed
+  (38L crash-recovery + 38M DST cron stable).
+- `cargo test -p corvid-guarantees phase_38` — 1 passed
+  (`phase_38_required_registry_ids_all_present` sentinel green).
+- `cargo test -p corvid-cli --bin corvid jobs_explain` — 3 passed
+  (pending-suggestion hint updated to mention `--source`).
+- `cargo test -p corvid-cli --test docs_drift_gate` — 1 passed
+  (every fenced `corvid` block in user guides still parses).
+- `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` — exit 1
+  with exactly the two documented deliberate-fail fixtures
+  (`native_drops_effect.cor`, `tier_disagree.cor`).
+
+---
+
 ## 2026-05-04 - Close 42H reference app hardening
 
 - Closed the reference app hardening pass for all six reference apps:

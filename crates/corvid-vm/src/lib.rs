@@ -22,6 +22,7 @@ pub mod cycle_collector;
 pub mod env;
 pub mod errors;
 pub mod interp;
+pub mod jobs;
 pub mod repl_display;
 pub mod schema;
 pub mod step;
@@ -36,6 +37,7 @@ pub use interp::{
     run_all_tests, run_all_tests_with_options, run_test, SnapshotOptions, TestAssertionExecution,
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
 };
+pub use jobs::{into_pool_executor, DefaultJobRuntimeExecutor, JobRuntimeExecutor};
 pub use repl_display::render_value;
 pub use schema::schema_for;
 pub use step::{

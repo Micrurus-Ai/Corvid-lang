@@ -1146,18 +1146,28 @@ fn jobs_dlq_inspects_dead_lettered_jobs() {
     assert!(stdout.contains("replay_key:replay:email:d1"), "{stdout}");
 }
 
-/// Slice 38K integration: `corvid jobs run --workers=N
-/// --max-runtime-ms=...` drains every queued job through the
-/// no-op default executor and reports the per-outcome counters.
-/// Exercises the binary end-to-end (multi-worker pool spawned
-/// from the CLI; each worker leases, runs, completes; the
-/// command exits 0 with the expected counters).
+/// Slice 38K + 35V2-P38-C-1 integration: `corvid jobs run --source <path>.cor
+/// --workers=N --max-runtime-ms=...` compiles the supplied source, wires
+/// the resulting agents into the WorkerPool executor, drains every queued
+/// job through the real Runtime, and reports the per-outcome counters.
+/// Exercises the binary end-to-end through the new --source wiring (no
+/// more no-op default — that path was a silent integrity hazard).
 #[test]
 fn jobs_run_multi_worker_drains_pending_jobs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = dir.path().join("jobs-38k.sqlite");
+    let source_path = dir.path().join("jobs.cor");
+    std::fs::write(
+        &source_path,
+        r#"
+agent noop() -> String:
+    return "ok"
+"#,
+    )
+    .expect("write jobs.cor");
 
-    // Enqueue 8 jobs so 4 workers each have ~2 to claim.
+    // Enqueue 8 jobs so 4 workers each have ~2 to claim. Payload is the
+    // empty JSON array — the `noop` agent takes no arguments.
     for i in 0..8 {
         let enqueue = Command::new(corvid_bin())
             .args([
@@ -1168,7 +1178,7 @@ fn jobs_run_multi_worker_drains_pending_jobs() {
                 "--task",
                 "noop",
                 "--payload",
-                &format!("{{\"i\":{i}}}"),
+                "[]",
                 "--max-retries",
                 "1",
                 "--budget-usd",
@@ -1187,14 +1197,14 @@ fn jobs_run_multi_worker_drains_pending_jobs() {
         );
     }
 
-    // Run a 4-worker pool with a finite max-runtime so the test
-    // doesn't hang. The default no-op executor succeeds every job.
     let run = Command::new(corvid_bin())
         .args([
             "jobs",
             "run",
             "--state",
             state.to_str().unwrap(),
+            "--source",
+            source_path.to_str().unwrap(),
             "--workers",
             "4",
             "--lease-ttl-ms",
@@ -1214,11 +1224,57 @@ fn jobs_run_multi_worker_drains_pending_jobs() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("workers: 4"), "{stdout}");
     assert!(stdout.contains("lease_ttl_ms: 5000"), "{stdout}");
-    // The default no-op executor succeeds every job. With 8 jobs
-    // and 4 workers, the result line reports succeeded=8.
+    assert!(
+        stdout.contains(&format!("source: {}", source_path.display())),
+        "{stdout}"
+    );
+    // All 8 jobs run the real `noop` agent through the interpreter and
+    // succeed.
     assert!(
         stdout.contains("succeeded=8"),
         "expected all 8 to succeed: {stdout}",
     );
     assert!(stdout.contains("failed=0"), "{stdout}");
+}
+
+/// Slice 35V2-P38-C-1 error-path: `corvid jobs run` without `--source`
+/// must error with a helpful message that points at the smoke-test
+/// affordance (`corvid jobs run-one`). Catches the no-source silent
+/// integrity hazard the previous default behavior allowed.
+#[test]
+fn jobs_run_without_source_errors_with_helpful_message() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = dir.path().join("jobs-noargs.sqlite");
+    let run = Command::new(corvid_bin())
+        .args([
+            "jobs",
+            "run",
+            "--state",
+            state.to_str().unwrap(),
+            "--workers",
+            "1",
+            "--max-runtime-ms",
+            "100",
+        ])
+        .output()
+        .expect("run jobs run");
+    assert!(
+        !run.status.success(),
+        "jobs run without --source must fail; stdout={} stderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        combined.contains("--source"),
+        "error message must mention --source: {combined}"
+    );
+    assert!(
+        combined.contains("corvid jobs run-one"),
+        "error message must point at the smoke-test affordance: {combined}"
+    );
 }

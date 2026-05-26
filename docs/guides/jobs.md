@@ -19,7 +19,7 @@ budgets, replay) instead of two.
 
 A durable job runner with:
 
-- Multi-worker async pool (`corvid jobs run --workers=N`).
+- Multi-worker async pool (`corvid jobs run --source <path>.cor --workers=N`).
 - Lease-based exclusivity (no two workers run the same job).
 - Idempotency keys (no double-side-effect under concurrent retry).
 - Retry / backoff / dead-letter queue (configured per enqueue, not as
@@ -100,11 +100,15 @@ schedule "0 8 * * *" zone "America/New_York" -> daily_brief("user_123") uses ema
 ## Running the runner
 
 ```sh
-corvid jobs run --queue=default --workers=4
+corvid jobs run --source app.cor --queue=default --workers=4
 ```
 
-The runner polls the queue, leases jobs, executes them with the
-configured concurrency, and handles retries and DLQ.
+The runner polls the queue, leases jobs, compiles the supplied source
+to resolve agent bodies, executes them with the configured concurrency,
+and handles retries and DLQ. `--source` is required: a production
+`corvid jobs run` without compiled source would mark jobs `succeeded`
+without doing any work — a silent durable-state lie. For test-mode job
+lifecycle without executing agent bodies, use `corvid jobs run-one`.
 
 ## Configuring retries, idempotency, and concurrency
 
@@ -187,7 +191,7 @@ table). Build your jobs assuming this guarantee.
 
 ```sh
 # kill -9 the worker process mid-step
-# restart `corvid jobs run`
+# restart `corvid jobs run --source app.cor`
 # the job's lease expires, the next worker takes the lease, the run
 # resumes from the last step checkpoint
 ```

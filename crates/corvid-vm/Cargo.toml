@@ -16,6 +16,7 @@ corvid-prompt-format = { workspace = true }
 serde_json = { workspace = true }
 async-recursion = "1"
 async-trait = "0.1"
+sha2 = "0.10"
 tokio = { workspace = true }
 
 [dev-dependencies]

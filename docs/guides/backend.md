@@ -106,7 +106,7 @@ the shape before running `corvid build` themselves.
 |---|---|
 | Auth + sessions + API keys | [`auth.md`](./auth.md) — `corvid auth migrate` + `corvid auth keys issue/revoke/rotate` |
 | Persistence + migrations | [`persistence.md`](./persistence.md) — `corvid migrate up/down/status` |
-| Background jobs + cron | [`jobs.md`](./jobs.md) — `corvid jobs run --workers=N` |
+| Background jobs + cron | [`jobs.md`](./jobs.md) — `corvid jobs run --source <path>.cor --workers=N` |
 | Observability + traces + evals | [`observability.md`](./observability.md) — `corvid observe list/show/explain` |
 | Connectors (Gmail / Slack / etc.) | [`connectors.md`](./connectors.md) |
 | Deploy + signed attestation | the deploy + release CLI; see `corvid deploy package` + `corvid release` |

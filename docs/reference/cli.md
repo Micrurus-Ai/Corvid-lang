@@ -59,7 +59,7 @@ corvid bench compare python|js         # published-archive comparison
 ## Jobs (Phase 38)
 
 ```sh
-corvid jobs run --queue=default --workers=4
+corvid jobs run --source app.cor --queue=default --workers=4    # --source is required
 corvid jobs schedule list
 corvid jobs inspect <id>
 corvid jobs explain <id>                # AI-assisted root-cause from typed trace

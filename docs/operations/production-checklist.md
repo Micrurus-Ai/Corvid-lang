@@ -69,8 +69,8 @@
 
 ## After you deploy
 
-- [ ] First `corvid jobs run` worker pool stabilized at expected
-      throughput.
+- [ ] First `corvid jobs run --source <path>.cor` worker pool stabilized
+      at expected throughput.
 - [ ] First batch of `corvid eval --swap-model` runs against a
       production-shaped traffic sample.
 - [ ] First `await_approval` round-trip exercised with a real operator.

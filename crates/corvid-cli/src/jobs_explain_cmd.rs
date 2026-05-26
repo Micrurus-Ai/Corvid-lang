@@ -183,7 +183,7 @@ fn render_headline(job: &QueueJob, position: &str) -> String {
 fn suggest_next_steps(job: &QueueJob, position: &str) -> Vec<String> {
     match position {
         "pending" => vec![
-            "if no worker is leasing, confirm `corvid jobs run --workers N` is active".to_string(),
+            "if no worker is leasing, confirm `corvid jobs run --source <path>.cor --workers N` is active".to_string(),
             "check `corvid jobs limit list` for a concurrency limit that may be blocking lease"
                 .to_string(),
         ],
