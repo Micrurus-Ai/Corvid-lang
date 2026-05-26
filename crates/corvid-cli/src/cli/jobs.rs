@@ -102,6 +102,35 @@ pub enum JobsCommand {
         #[arg(long, default_value = "0")]
         max_runtime_ms: u64,
     },
+    /// Replay a recorded `@replayable` job by its `job_id`. Resolves
+    /// the trace at `<trace_dir>/<job_id>.jsonl` (per slice
+    /// `35V2-P38-C-2`'s emission path), compiles the supplied source,
+    /// and re-runs the agent against a runtime in replay mode
+    /// (byte-identical reproduction). Replay does NOT re-issue real
+    /// LLM / HTTP / DB calls — recorded results are substituted.
+    Replay {
+        /// Compiled Corvid source whose `agent` declarations supply
+        /// the agent body the trace was recorded against. Required
+        /// for the same reason `corvid jobs run` requires it: the
+        /// agent body has to be re-compiled to drive the replay.
+        #[arg(long, value_name = "PATH")]
+        source: PathBuf,
+        /// Job id whose trace to replay.
+        #[arg(long, value_name = "JOB_ID")]
+        job: String,
+        /// Directory where per-job traces live. Default
+        /// `target/trace/jobs`, matching `DefaultJobRuntimeExecutor`'s
+        /// default `trace_dir` from slice C-2.
+        #[arg(long, value_name = "PATH", default_value = "target/trace/jobs")]
+        trace_dir: PathBuf,
+        /// Optional queue state file. When provided, the command
+        /// checks the job exists in the queue before attempting to
+        /// load the trace — turning a "job id typo" into a clearer
+        /// error than the file-not-found path. When omitted, replay
+        /// proceeds straight from the trace file.
+        #[arg(long, value_name = "PATH")]
+        state: Option<PathBuf>,
+    },
     /// Inspect one job and its operational metadata.
     Inspect {
         #[arg(long, value_name = "PATH", default_value = "target/corvid-jobs.sqlite")]

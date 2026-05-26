@@ -544,6 +544,12 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 idle_poll_ms,
                 max_runtime_ms,
             ),
+            JobsCommand::Replay {
+                source,
+                job,
+                trace_dir,
+                state,
+            } => cmd_jobs_replay(&source, &job, &trace_dir, state.as_deref()),
             JobsCommand::Inspect { state, job } => cmd_jobs_inspect(&state, &job),
             JobsCommand::Retry { state, job } => cmd_jobs_retry(&state, &job),
             JobsCommand::Cancel { state, job } => cmd_jobs_cancel(&state, &job),

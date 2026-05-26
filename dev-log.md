@@ -4,6 +4,48 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-27 - Slice 35V2-P38-C-3 — `replay_job` entry + `corvid jobs replay` CLI
+
+- Added `corvid_driver::replay_job_from_source(source, job_id, trace_dir, base_builder)`
+  — a thin wrapper over the existing Phase 21
+  `run_replay_from_source_with_builder_async` that resolves the trace
+  at `<trace_dir>/<job_id>.jsonl` (deterministic from `job_id` per
+  C-2's design) and dispatches in `ReplayMode::Plain`. Errors with a
+  helpful diagnostic when the trace is missing — names the trace
+  path, points at `@replayable` as the most common cause, and
+  reminds the operator to check `corvid jobs inspect` for a job-id
+  typo.
+- Added `JobsCommand::Replay` to the CLI surface
+  (`crates/corvid-cli/src/cli/jobs.rs`) with args `--source`,
+  `--job`, optional `--trace-dir` (default `target/trace/jobs`), and
+  optional `--state` (queue DB for the operator-friendly existence
+  check). `cmd_jobs_replay` (`crates/corvid-cli/src/commands/jobs.rs`)
+  optionally verifies the job exists in the queue, builds a
+  `RuntimeBuilder` with `StdinApprover`, and calls
+  `replay_job_from_source`. Prints `agent`, `result: ok|error`, and
+  the recorded value as JSON.
+- No new IR or runtime changes. The replay infrastructure already
+  exists in `corvid-runtime::replay` (Phase 21) — C-3 is a routing
+  layer that bridges the queue's `job_id` to the existing trace-path
+  surface. Quarantine wrappers (C-4 / C-5) layer onto this entry
+  later.
+
+Validation:
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-cli --test c3_replay_integration` — 2 passed
+  (positive: enqueue → run → replay reproduces `"ok"` return;
+  adversarial: missing trace emits a helpful error naming `@replayable`).
+- `cargo test -p corvid-cli --test c2_trace_integration` — 2 passed
+  (no C-2 regression after IR + CLI changes).
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2 passed.
+- `cargo test -p corvid-cli --test jobs jobs_run` — 2 passed.
+- `cargo test -p corvid-vm --lib jobs::` — 7 passed.
+- `cargo test -p corvid-runtime --lib worker_pool` — 3 passed.
+- `cargo test -p corvid-runtime --test durability_corpus` — 4 passed.
+- `cargo test -p corvid-guarantees phase_38` — 1 passed (sentinel).
+
+---
+
 ## 2026-05-26 - Slice 35V2-P38-C-2 — Per-job JSONL trace emission for `@replayable` durable jobs
 
 - Threaded `@replayable` through IR: added `IrAgent.is_replayable: bool`

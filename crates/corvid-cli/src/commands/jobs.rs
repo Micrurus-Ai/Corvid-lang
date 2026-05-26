@@ -202,6 +202,61 @@ pub(crate) fn cmd_jobs_run(
     Ok(0)
 }
 
+pub(crate) fn cmd_jobs_replay(
+    source: &Path,
+    job_id: &str,
+    trace_dir: &Path,
+    state: Option<&Path>,
+) -> Result<u8> {
+    use corvid_driver::replay_job_from_source;
+    use corvid_runtime::approvals::StdinApprover;
+    use corvid_runtime::Runtime;
+    use std::sync::Arc;
+
+    if let Some(state_path) = state {
+        let queue = DurableQueueRuntime::open(state_path).with_context(|| {
+            format!(
+                "failed to open jobs state file `{}` for the existence check",
+                state_path.display()
+            )
+        })?;
+        match queue.get(job_id)? {
+            Some(_) => {}
+            None => anyhow::bail!(
+                "job `{job_id}` not found in queue `{}`. Drop `--state` to replay\n\
+                 a trace file directly without the queue-side existence check.",
+                state_path.display()
+            ),
+        }
+    }
+
+    let base_builder = Runtime::builder().approver(Arc::new(StdinApprover::new()));
+    let tokio_rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime for job replay")?;
+    let outcome = tokio_rt.block_on(replay_job_from_source(
+        source, job_id, trace_dir, base_builder,
+    ))?;
+
+    println!("corvid jobs replay");
+    println!("source: {}", source.display());
+    println!("job: {job_id}");
+    println!("trace_dir: {}", trace_dir.display());
+    println!("agent: {}", outcome.agent_name);
+    if let Some(value) = outcome.result_value {
+        println!("result: ok");
+        let json = corvid_vm::value_to_json(&value);
+        let rendered = serde_json::to_string(&json).unwrap_or_else(|_| "<unrenderable>".to_string());
+        println!("value: {rendered}");
+    }
+    if let Some(err) = outcome.result_error {
+        println!("result: error");
+        println!("error: {err}");
+    }
+    Ok(0)
+}
+
 pub(crate) fn cmd_jobs_inspect(state: &Path, job_id: &str) -> Result<u8> {
     let queue = DurableQueueRuntime::open(state)?;
     let job = queue

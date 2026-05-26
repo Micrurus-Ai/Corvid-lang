@@ -96,6 +96,7 @@ mod diagnostic;
 mod law;
 mod pipeline;
 mod replay;
+mod replay_job;
 mod run;
 mod scaffold;
 mod eval_runner;
@@ -112,6 +113,7 @@ pub use replay::{
     configure_replay_mode, run_replay_from_source, run_replay_from_source_with_builder,
     run_replay_from_source_with_builder_async, ReplayMode, ReplayOutcome,
 };
+pub use replay_job::replay_job_from_source;
 pub use trace_fresh::run_fresh_from_source_async;
 pub use build::{
     build_catalog_descriptor_for_source, build_native_to_disk, build_target_to_disk,

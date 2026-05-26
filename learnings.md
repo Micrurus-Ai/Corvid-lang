@@ -4904,6 +4904,61 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-3 closed (2026-05-27) — `corvid jobs replay` replays a recorded job
+
+Once a `@replayable` durable job has run (and recorded its JSONL
+trace via C-2), `corvid jobs replay --source <path>.cor --job <job_id>`
+reproduces the execution from that trace. The CLI compiles the source,
+resolves the trace at `<trace_dir>/<job_id>.jsonl` (default
+`target/trace/jobs/`, override with `--trace-dir`), and runs the
+agent through the existing Phase 21 replay machinery in
+`ReplayMode::Plain` — byte-identical reproduction, LLM dispatch
+substitutes recorded responses, no live provider calls happen.
+
+```sh
+# Original run records the trace.
+corvid jobs enqueue --state queue.db --task daily_brief --payload '["alice"]' \
+  --max-retries 1 --budget-usd 0.10 --effect-summary brief --replay-key rk:alice
+corvid jobs run --source app.cor --state queue.db --workers 1 \
+  --lease-ttl-ms 5000 --max-runtime-ms 0
+
+# Find the job id, then replay it.
+corvid jobs replay --source app.cor --job <job_id>
+```
+
+Optional flags:
+
+- `--state <queue.db>` — sanity-check the job exists in the queue
+  before attempting replay; turns a "job id typo" into a clearer error
+  than the file-not-found path. Omit to replay a trace file directly.
+- `--trace-dir <dir>` — override the lookup directory; matches
+  `DefaultJobRuntimeExecutor::with_trace_dir(...)` at record time.
+
+Error vocabulary:
+
+- Missing trace file → helpful diagnostic naming the path and listing
+  the three most common causes: the original agent was not
+  `@replayable` (so no trace was emitted by C-2), the trace dir was
+  wiped between record and replay, or the job id is wrong.
+- Trace exists but agent name is absent from the compiled source →
+  the existing Phase 21 diagnostic ("trace's recorded agent `X` is not
+  present in compiled source") fires; possible causes are the source
+  has been renamed, the trace was recorded against a different file,
+  or the agent was removed.
+- Recorded args don't match the agent's current signature → typed
+  diagnostic naming the offending parameter.
+
+C-3 is the routing layer between the durable queue's `job_id` and the
+existing Phase 21 replay surface. Quarantine wrappers around LLM /
+HTTP / Store / IO so a replayed job genuinely cannot leak side effects
+are filed for C-4 / C-5. C-3's correctness boundary is "the replay
+entry compiles and round-trips a deterministic return value"; the
+"no real side effect escapes" boundary is C-4 / C-5's promise.
+
+Sub-slice of `35V2-P38-C-replay-quarantine`. Next: C-4 installs a
+`QuarantinedLlmAdapter` that turns unrecorded LLM calls into typed
+`QuarantineViolation` errors instead of network calls.
+
 ## 35V2-P38-C-2 closed (2026-05-26) — `@replayable` durable jobs persist JSONL traces
 
 When a `@replayable` durable job runs through `corvid jobs run --source`,
