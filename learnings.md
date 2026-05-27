@@ -4904,6 +4904,67 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-5 closed (2026-05-27) — replay quarantine extends to HTTP, store writes, file writes
+
+C-4 quarantined the LLM registry; C-5 closes the loop for the three
+other side-effect surfaces a `@replayable` agent can reach:
+
+- **HTTP** (`HttpClient::send`) — every call refused during replay,
+  including `GET`. HTTP semantics make read-vs-write distinctions
+  unreliable (a `GET` can mutate server state via headers, cookies,
+  or just by reaching a billing endpoint), so the quarantine is
+  blanket: any send is a violation.
+- **Store writes** (`StoreManager::put` / `put_record` /
+  `put_record_if_revision` / `delete` / `delete_with_policy`) —
+  refused with `surface: "store"`. Reads (`get`, `get_record`)
+  pass through; they don't escape the process. The durable job
+  queue uses raw `rusqlite` (not `StoreManager`), so the queue's
+  own checkpoint writes during replay-mode internal bookkeeping
+  are unaffected.
+- **File writes** (`IoRuntime::write_text` /
+  `write_text_with_effect`) — refused with `surface: "io"`. Reads,
+  directory listing, and line streaming pass through. The runtime's
+  JSONL trace writer uses `JsonlTraceWriter` directly, so trace
+  emission during recording or schema-header re-emit during
+  `Runtime::with_tracer` is unaffected.
+
+Differential and Mutation replay modes
+(`source.uses_live_llm() == true`) keep all four surfaces live
+because their behaviour intentionally compares recorded output
+against fresh side-effecting calls.
+
+Error vocabulary that surfaces during a misbehaving replay:
+
+```rust
+RuntimeError::QuarantineViolation { surface: "llm",   detail: "..." }
+RuntimeError::QuarantineViolation { surface: "http",  detail: "..." }
+RuntimeError::QuarantineViolation { surface: "store", detail: "..." }
+RuntimeError::QuarantineViolation { surface: "io",    detail: "..." }
+```
+
+`detail` names the call-site context — adapter + model + prompt
+for LLM, method + URL for HTTP, kind + store + key + op for store,
+path + op for IO. Operators reading the error message see exactly
+which side-effect tried to escape.
+
+A subtle design finding worth recording: the queue-internal vs
+application-tool distinction the design doc flagged as an "open
+question for C-5" (with a hypothetical `QuarantineContext` token
+as the fallback) turned out to be enforced by Rust's type system
+already. The durable queue uses `rusqlite::Connection` directly;
+the runtime's trace writer uses `JsonlTraceWriter` directly.
+Neither routes through `StoreManager` or `IoRuntime`, so the
+manager-level quarantine cannot block them. No new token type was
+needed.
+
+Sub-slice of `35V2-P38-C-replay-quarantine`. Next and final: C-6
+ships the cross-surface integration corpus, promotes
+`jobs.replayable_side_effects` to `RuntimeChecked`, adds the
+`corvid tour --topic replay-quarantine` topic + `docs/reference/inventions.md`
+row, and walks `validate_signed_claim_coverage` for `@replayable`
+jobs so a signed cdylib cannot ship the agent without the
+guarantee in its descriptor.
+
 ## 35V2-P38-C-4 closed (2026-05-27) — replay-mode LLM registry refuses live calls
 
 A runtime built in Substitute-mode replay (the default for `corvid

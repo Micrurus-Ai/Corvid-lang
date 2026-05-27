@@ -4,6 +4,71 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-27 - Slice 35V2-P38-C-5 — HTTP / Store / IO quarantine
+
+- Added `HttpClient::quarantine` + `is_quarantined` and a flag-guarded
+  short-circuit in `send` that returns
+  `RuntimeError::QuarantineViolation { surface: "http", detail }`
+  with detail naming the HTTP method + URL. All HTTP calls are
+  treated as side-effecting (no read/write split) — `GET` is just as
+  blocked as `POST` during replay.
+- Added `StoreManager::quarantine_writes` + `is_write_quarantined`.
+  Five write entry points short-circuit with `surface: "store"`,
+  detail naming the operation (`put`, `put_record`,
+  `put_record_if_revision`, `delete`, `delete_with_policy`). Reads
+  (`get`, `get_record`, `get_record_with_policy`) pass through —
+  they don't escape the process.
+- Added `IoRuntime::quarantine_writes` + `is_write_quarantined`.
+  Converted the zero-state `pub struct IoRuntime;` to
+  `pub struct IoRuntime { write_quarantined: bool }` (default false
+  via `#[derive(Default)]` so `IoRuntime::new()` callers don't
+  break). `write_text` / `write_text_with_effect` refuse with
+  `surface: "io"` detail naming the path + op; reads + list +
+  stream pass through.
+- Extended `RuntimeBuilder::build`: when entering Substitute-mode
+  replay, call all four quarantines together (`llms.quarantine_all`,
+  `http.quarantine`, `stores.quarantine_writes`,
+  `io.quarantine_writes`). Differential / Mutation modes
+  (`source.uses_live_llm() == true`) keep all four surfaces live.
+- The queue-internal vs application-tool distinction the design doc
+  flagged turned out to be enforced by construction:
+  `DurableQueueRuntime` uses raw `rusqlite` (NOT `StoreManager`),
+  and the runtime's trace writer uses `JsonlTraceWriter` (NOT
+  `IoRuntime`). No `QuarantineContext` token was needed; the
+  ownership boundary between queue-internal and application-tool
+  surfaces is already a type boundary.
+
+Validation:
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-runtime --lib -- quarantine` — 8 passed
+  (3 LLM from C-4 + 2 store + 2 HTTP + 1 IO). Detail tests assert
+  the violation message names the surface-specific context
+  (URL/method for http; kind/store/key/op for store; path/op for
+  io) so operators can trace the violation back to source.
+- `cargo test -p corvid-runtime --lib worker_pool` — 3/3 (no
+  regression).
+- `cargo test -p corvid-runtime --test durability_corpus` — 4/4
+  (38L crash-recovery + 38M DST cron stable after http/store/io
+  changes).
+- `cargo test -p corvid-guarantees phase_38` — 1/1 (sentinel).
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2/2.
+- `cargo test -p corvid-cli --test c2_trace_integration` — 2/2.
+- `cargo test -p corvid-cli --test c3_replay_integration` — 2/2
+  (replay path now exercises all four quarantine installations
+  transparently; the existing substitution behaviour is unchanged
+  because the C-3 test agent doesn't reach any of the wrapped
+  surfaces).
+- `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` —
+  exit 1 with the two documented deliberate-fail fixtures.
+
+End-to-end "no side effect escapes during replay" promise is now
+in place across all four surfaces. C-6 ships the promotion of
+`jobs.replayable_side_effects` from `OutOfScope` to
+`RuntimeChecked` + the cross-surface integration corpus + invention
+catalog row + `corvid tour --topic replay-quarantine`.
+
+---
+
 ## 2026-05-27 - Slice 35V2-P38-C-4 — LlmRegistry quarantine wrap
 
 - Added `RuntimeError::QuarantineViolation { surface, detail }` to

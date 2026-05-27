@@ -188,6 +188,17 @@ impl StorePolicySet {
 #[derive(Clone)]
 pub struct StoreManager {
     backend: Arc<dyn StoreBackend>,
+    /// Slice `35V2-P38-C-5`: when `true`, every write entry point on
+    /// this manager (`put`, `put_record`, `put_record_if_revision`,
+    /// `delete`, `delete_with_policy`) short-circuits with
+    /// `RuntimeError::QuarantineViolation { surface: "store", .. }`
+    /// instead of reaching the backend. Reads pass through unchanged
+    /// — they don't escape the process. Set by `RuntimeBuilder::build`
+    /// when the runtime enters Substitute-mode replay. The durable
+    /// job queue (`DurableQueueRuntime`) uses raw `rusqlite` and does
+    /// NOT route through `StoreManager`, so quarantining writes here
+    /// does not affect queue-internal checkpoint persistence.
+    write_quarantined: bool,
 }
 
 impl Default for StoreManager {
@@ -198,7 +209,10 @@ impl Default for StoreManager {
 
 impl StoreManager {
     pub fn new(backend: Arc<dyn StoreBackend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            write_quarantined: false,
+        }
     }
 
     pub fn memory() -> Self {
@@ -207,6 +221,36 @@ impl StoreManager {
 
     pub fn sqlite(path: impl AsRef<Path>) -> Result<Self, RuntimeError> {
         Ok(Self::new(Arc::new(SqliteStoreBackend::open(path)?)))
+    }
+
+    /// Flip write-quarantine on. `put`, `put_record`,
+    /// `put_record_if_revision`, `delete`, and `delete_with_policy`
+    /// will then refuse with `QuarantineViolation`. Reads stay open.
+    pub fn quarantine_writes(&mut self) {
+        self.write_quarantined = true;
+    }
+
+    /// True when this manager refuses application writes. Test helper.
+    pub fn is_write_quarantined(&self) -> bool {
+        self.write_quarantined
+    }
+
+    fn quarantine_violation(
+        kind: StoreKind,
+        store: &str,
+        key: &str,
+        op: &str,
+    ) -> RuntimeError {
+        RuntimeError::QuarantineViolation {
+            surface: "store".to_string(),
+            detail: format!(
+                "blocked an unrecorded `{op}` on {} `{store}/{key}` during \
+                 replay-mode quarantine. Application writes through `StoreManager` \
+                 cannot escape a replayed run; the durable job queue uses raw \
+                 SQLite and is unaffected.",
+                kind.as_str()
+            ),
+        }
     }
 
     pub fn get(
@@ -225,6 +269,9 @@ impl StoreManager {
         key: &str,
         value: Value,
     ) -> Result<(), RuntimeError> {
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(kind, store, key, "put"));
+        }
         self.backend.put(kind, store, key, value)
     }
 
@@ -274,6 +321,9 @@ impl StoreManager {
         key: &str,
         record: StoreRecord,
     ) -> Result<StoreRecord, RuntimeError> {
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(kind, store, key, "put_record"));
+        }
         self.backend.put_record(kind, store, key, record)
     }
 
@@ -285,11 +335,22 @@ impl StoreManager {
         expected_revision: u64,
         record: StoreRecord,
     ) -> Result<StoreRecord, RuntimeError> {
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(
+                kind,
+                store,
+                key,
+                "put_record_if_revision",
+            ));
+        }
         self.backend
             .put_record_if_revision(kind, store, key, expected_revision, record)
     }
 
     pub fn delete(&self, kind: StoreKind, store: &str, key: &str) -> Result<(), RuntimeError> {
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(kind, store, key, "delete"));
+        }
         self.backend.delete(kind, store, key)
     }
 
@@ -300,6 +361,14 @@ impl StoreManager {
         key: &str,
         policy: &StorePolicySet,
     ) -> Result<(), RuntimeError> {
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(
+                kind,
+                store,
+                key,
+                "delete_with_policy",
+            ));
+        }
         if policy.legal_hold {
             return Err(store_policy_violation(
                 kind,
@@ -358,6 +427,89 @@ mod tests {
     use super::*;
     use crate::provenance::ProvenanceKind;
     use serde_json::json;
+
+    /// Slice 35V2-P38-C-5 positive: a write-quarantined `StoreManager`
+    /// refuses `put` with `QuarantineViolation { surface: "store", .. }`.
+    /// Reads through `get` still work — only writes are blocked.
+    #[test]
+    fn quarantined_store_refuses_put_but_passes_through_get() {
+        let mut store = StoreManager::memory();
+        // Seed a value BEFORE quarantining so the read can find it.
+        store
+            .put(StoreKind::Session, "Conversation", "thread-1", json!({"seed": true}))
+            .expect("seed put");
+        store.quarantine_writes();
+        assert!(store.is_write_quarantined());
+
+        // get passes through.
+        let value = store
+            .get(StoreKind::Session, "Conversation", "thread-1")
+            .expect("get after quarantine");
+        assert_eq!(value, Some(json!({"seed": true})));
+
+        // put refuses.
+        let err = store
+            .put(StoreKind::Session, "Conversation", "thread-2", json!({"new": true}))
+            .expect_err("quarantined put must error");
+        match err {
+            RuntimeError::QuarantineViolation { surface, detail } => {
+                assert_eq!(surface, "store");
+                assert!(detail.contains("session"), "detail should name kind: {detail}");
+                assert!(
+                    detail.contains("Conversation/thread-2"),
+                    "detail should name store/key: {detail}"
+                );
+                assert!(detail.contains("put"), "detail should name op: {detail}");
+            }
+            other => panic!("expected store QuarantineViolation, got {other:?}"),
+        }
+    }
+
+    /// Slice 35V2-P38-C-5: each of the five write entry points
+    /// (`put`, `put_record`, `put_record_if_revision`, `delete`,
+    /// `delete_with_policy`) refuses when quarantined. Names the op
+    /// in the detail so operators can trace the violation.
+    #[test]
+    fn quarantined_store_refuses_every_write_entry_point() {
+        let mut store = StoreManager::memory();
+        store.quarantine_writes();
+
+        let record = StoreRecord::plain(json!({"x": 1}));
+        let assert_violation = |result: Result<_, RuntimeError>, expected_op: &str| match result {
+            Err(RuntimeError::QuarantineViolation { surface, detail }) => {
+                assert_eq!(surface, "store");
+                assert!(
+                    detail.contains(expected_op),
+                    "detail should name `{expected_op}`: {detail}"
+                );
+            }
+            Err(other) => panic!("expected store QuarantineViolation, got {other:?}"),
+            Ok(_) => panic!("quarantined write returned Ok"),
+        };
+
+        assert_violation(
+            store.put(StoreKind::Memory, "S", "k", json!({})).map(|_| StoreRecord::plain(json!({}))),
+            "put",
+        );
+        assert_violation(
+            store.put_record(StoreKind::Memory, "S", "k", record.clone()),
+            "put_record",
+        );
+        assert_violation(
+            store.put_record_if_revision(StoreKind::Memory, "S", "k", 0, record.clone()),
+            "put_record_if_revision",
+        );
+        assert_violation(
+            store.delete(StoreKind::Memory, "S", "k").map(|_| StoreRecord::plain(json!({}))),
+            "delete",
+        );
+        assert_violation(
+            store
+                .delete_with_policy(StoreKind::Memory, "S", "k", &StorePolicySet::default())
+                .map(|_| StoreRecord::plain(json!({}))),
+            "delete_with_policy",
+        );
+    }
 
     #[test]
     fn sqlite_store_persists_session_and_memory_values() {

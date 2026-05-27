@@ -267,17 +267,38 @@ impl RuntimeBuilder {
             recorder.emit_schema_header();
             recorder.emit_seed_read("rollout_default_seed", rollout_seed);
         }
-        // Slice 35V2-P38-C-4: quarantine every registered LLM adapter when
-        // entering a Substitute-mode replay (the default for `corvid
-        // replay` and `corvid jobs replay`). Differential mode keeps live
-        // adapters — its whole purpose is to compare recorded output
-        // against a live LLM. Mutation mode also keeps live adapters
-        // because the mutation produces a counterfactual that may
-        // legitimately reach the registry.
+        // Slices 35V2-P38-C-4 / C-5: quarantine every side-effect
+        // surface when entering a Substitute-mode replay (the default
+        // for `corvid replay` and `corvid jobs replay`). Differential
+        // mode keeps live adapters / clients — its whole purpose is
+        // to compare recorded output against live calls. Mutation
+        // mode also keeps live access because the mutation produces
+        // a counterfactual that may legitimately reach the registry.
+        //
+        // Surfaces:
+        // - C-4: `LlmRegistry::quarantine_all` wraps every adapter
+        //   so direct registry calls refuse with `QuarantineViolation`.
+        // - C-5 HTTP: `HttpClient::quarantine` flag short-circuits
+        //   `send`. Connector / tool HTTP calls during replay are
+        //   blocked.
+        // - C-5 Store: `StoreManager::quarantine_writes` short-
+        //   circuits `put` / `put_record` / `put_record_if_revision`
+        //   / `delete` / `delete_with_policy`. Reads pass through.
+        //   The durable job queue uses raw `rusqlite` and is
+        //   unaffected.
+        // - C-5 IO: `IoRuntime::quarantine_writes` short-circuits
+        //   `write_text*`. Reads pass through. Trace emission uses
+        //   `JsonlTraceWriter` directly and is unaffected.
         let mut llms = self.llms;
+        let mut http = HttpClient::new();
+        let mut stores = self.stores;
+        let mut io = IoRuntime::new();
         if let RuntimeMode::Replay(source) = &mode {
             if !source.uses_live_llm() {
                 llms.quarantine_all();
+                http.quarantine();
+                stores.quarantine_writes();
+                io.quarantine_writes();
             }
         }
         Runtime {
@@ -299,10 +320,10 @@ impl RuntimeBuilder {
             rollout_state: Arc::new(AtomicU64::new(rollout_seed)),
             calibration: CalibrationStore::default(),
             prompt_cache: PromptCache::default(),
-            stores: self.stores,
+            stores,
             usage_ledger: LlmUsageLedger::new(),
-            http: HttpClient::new(),
-            io: IoRuntime::new(),
+            http,
+            io,
             secrets: SecretRuntime::new(),
             queue: QueueRuntime::new(),
         }

@@ -44,11 +44,45 @@ pub struct TextLineStream {
 }
 
 #[derive(Clone, Default)]
-pub struct IoRuntime;
+pub struct IoRuntime {
+    /// Slice `35V2-P38-C-5`: when `true`, `write_text` and
+    /// `write_text_with_effect` short-circuit with
+    /// `RuntimeError::QuarantineViolation { surface: "io", .. }`.
+    /// Reads (`read_text`, `list_dir`, `open_line_stream`) pass
+    /// through — they don't escape the process. Set by
+    /// `RuntimeBuilder::build` when entering Substitute-mode replay.
+    /// The runtime's own JSONL trace writer uses `JsonlTraceWriter`
+    /// (not `IoRuntime`), so trace emission is unaffected.
+    write_quarantined: bool,
+}
 
 impl IoRuntime {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Flip write-quarantine on. Subsequent `write_text*` calls fail
+    /// closed with `QuarantineViolation`.
+    pub fn quarantine_writes(&mut self) {
+        self.write_quarantined = true;
+    }
+
+    /// True when this IoRuntime refuses file writes. Test helper.
+    pub fn is_write_quarantined(&self) -> bool {
+        self.write_quarantined
+    }
+
+    fn quarantine_violation(path: &Path, op: &str) -> RuntimeError {
+        RuntimeError::QuarantineViolation {
+            surface: "io".to_string(),
+            detail: format!(
+                "blocked an unrecorded `{op}` on `{}` during replay-mode \
+                 quarantine. Filesystem writes through `IoRuntime` cannot escape \
+                 a replayed run; trace emission uses its own writer and is \
+                 unaffected.",
+                path.display()
+            ),
+        }
     }
 
     pub fn join_path(&self, base: impl AsRef<Path>, child: impl AsRef<Path>) -> PathBuf {
@@ -124,6 +158,9 @@ impl IoRuntime {
         effect: FileSystemEffect,
     ) -> Result<FileWrite, RuntimeError> {
         let path = path.as_ref().to_path_buf();
+        if self.write_quarantined {
+            return Err(Self::quarantine_violation(&path, "write_text"));
+        }
         let started = Instant::now();
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|err| {
@@ -298,6 +335,47 @@ impl TextLineStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Slice 35V2-P38-C-5: a write-quarantined `IoRuntime` refuses
+    /// `write_text` with `QuarantineViolation { surface: "io", .. }`.
+    /// Reads (`read_text`) continue to work — only writes escape.
+    #[tokio::test]
+    async fn quarantined_io_refuses_write_but_passes_through_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seeded.txt");
+        let mut io = IoRuntime::new();
+        // Seed a file BEFORE quarantining so the read finds it.
+        io.write_text(&path, "seed").await.expect("seed write");
+        io.quarantine_writes();
+        assert!(io.is_write_quarantined());
+
+        // read passes through.
+        let read = io.read_text(&path).await.expect("read after quarantine");
+        assert_eq!(read.contents, "seed");
+
+        // write refuses.
+        let new_path = dir.path().join("new.txt");
+        let err = io
+            .write_text(&new_path, "should not write")
+            .await
+            .expect_err("quarantined write must error");
+        match err {
+            RuntimeError::QuarantineViolation { surface, detail } => {
+                assert_eq!(surface, "io");
+                assert!(
+                    detail.contains("new.txt"),
+                    "detail should name the path: {detail}"
+                );
+                assert!(detail.contains("write_text"), "detail should name op: {detail}");
+            }
+            other => panic!("expected io QuarantineViolation, got {other:?}"),
+        }
+        // The new file should NOT exist on disk.
+        assert!(
+            !new_path.exists(),
+            "quarantined write must not touch the filesystem: {new_path:?}"
+        );
+    }
 
     #[tokio::test]
     async fn io_runtime_writes_reads_and_lists_text_files() {

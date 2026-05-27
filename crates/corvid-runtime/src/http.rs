@@ -110,6 +110,16 @@ pub struct RecordedHttpExchange {
 #[derive(Clone)]
 pub struct HttpClient {
     client: reqwest::Client,
+    /// Slice `35V2-P38-C-5`: set to `true` by
+    /// `RuntimeBuilder::build` when entering Substitute-mode replay.
+    /// `send` short-circuits with `RuntimeError::QuarantineViolation`
+    /// so a replayed run cannot reach the network even if some caller
+    /// bypasses the runtime's trace-substitution path. Recorded HTTP
+    /// exchanges are not yet substituted at the runtime layer (filed
+    /// for post-v1.0 — connector calls today go through the
+    /// connector-runtime), so any HTTP send during replay is a
+    /// quarantine violation by construction.
+    quarantined: bool,
 }
 
 impl Default for HttpClient {
@@ -119,6 +129,7 @@ impl Default for HttpClient {
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .build()
                 .expect("reqwest client builds with default config"),
+            quarantined: false,
         }
     }
 }
@@ -128,7 +139,31 @@ impl HttpClient {
         Self::default()
     }
 
+    /// Flip into replay-quarantine mode. Subsequent `send` calls fail
+    /// closed with `RuntimeError::QuarantineViolation { surface:
+    /// "http", .. }` instead of reaching the network. Called by
+    /// `RuntimeBuilder::build` when entering Substitute-mode replay.
+    pub fn quarantine(&mut self) {
+        self.quarantined = true;
+    }
+
+    /// True when this client refuses live HTTP calls. Test helper.
+    pub fn is_quarantined(&self) -> bool {
+        self.quarantined
+    }
+
     pub async fn send(&self, request: &HttpRequest) -> Result<HttpResponse, RuntimeError> {
+        if self.quarantined {
+            return Err(RuntimeError::QuarantineViolation {
+                surface: "http".to_string(),
+                detail: format!(
+                    "blocked an unrecorded {} call to `{}` during replay-mode quarantine. \
+                     A replayed run must not reach the network; if the connector layer needs \
+                     this request, the trace did not record an equivalent exchange.",
+                    request.method, request.url
+                ),
+            });
+        }
         let started = Instant::now();
         let attempts_allowed = request.retry.max_retries.saturating_add(1);
         let mut attempt = 0;
@@ -268,6 +303,42 @@ mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Slice 35V2-P38-C-5: a quarantined `HttpClient` short-circuits
+    /// `send` with `RuntimeError::QuarantineViolation { surface:
+    /// "http", .. }` before reaching the network. No mock server is
+    /// needed — the test asserts the request never gets out.
+    #[tokio::test]
+    async fn quarantined_http_client_refuses_send_with_typed_violation() {
+        let mut client = HttpClient::new();
+        client.quarantine();
+        assert!(client.is_quarantined());
+        let req = HttpRequest::get("https://example.invalid/should-not-reach");
+        let err = client.send(&req).await.expect_err("quarantine must error");
+        match err {
+            RuntimeError::QuarantineViolation { surface, detail } => {
+                assert_eq!(surface, "http");
+                assert!(
+                    detail.contains("example.invalid/should-not-reach"),
+                    "detail should name the URL: {detail}"
+                );
+                assert!(
+                    detail.contains("GET"),
+                    "detail should name the method: {detail}"
+                );
+            }
+            other => panic!("expected http QuarantineViolation, got {other:?}"),
+        }
+    }
+
+    /// Slice 35V2-P38-C-5: a default (non-quarantined) `HttpClient`
+    /// continues to function — the flag defaults to false and the
+    /// existing tests below all rely on it.
+    #[tokio::test]
+    async fn default_http_client_is_not_quarantined() {
+        let client = HttpClient::new();
+        assert!(!client.is_quarantined());
+    }
 
     #[tokio::test]
     async fn http_client_gets_text_response() {
