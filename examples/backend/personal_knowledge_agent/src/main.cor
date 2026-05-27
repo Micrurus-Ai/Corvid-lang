@@ -1,3 +1,8 @@
+import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryPolicy, JobStateEnvelope, job_input, job_output, retry_policy, retry_policy_valid, pending_job_state, job_needs_approval, job_metadata_redacted
+import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
+import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
+import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+
 effect files_read:
     cost: $0.01
     trust: local
@@ -11,6 +16,11 @@ effect local_embed:
 effect index_write:
     cost: $0.01
     trust: local
+    data: private
+
+effect knowledge_llm:
+    cost: $0.20
+    trust: bounded
     data: private
 
 public type KnowledgeConfig:
@@ -113,6 +123,75 @@ public type KnowledgeFeedbackEval:
     promoted_to_eval: Bool
     trace_id: String
 
+public type LoginRequest:
+    tenant_id: String
+    actor_id: String
+    display_name: String
+    session_id: String
+    csrf_binding_id: String
+    trace_id: String
+
+public type ApiKeyLoginRequest:
+    tenant_id: String
+    service_actor_id: String
+    display_name: String
+    api_key_id: String
+    trace_id: String
+
+public type LoginResponse:
+    actor: Actor
+    session_ref: SessionRef
+    trace: AuthTraceContext
+    decision: AuthDecision
+    status: String
+
+public type ApiKeyLoginResponse:
+    actor: Actor
+    api_key: ApiKeyRef
+    trace: AuthTraceContext
+    decision: AuthDecision
+    status: String
+
+public type AuthStatusResponse:
+    actor: Actor
+    tenant_id: String
+    authenticated: Bool
+    permission: String
+    reason: String
+    replay_key: String
+
+public type KnowledgeJobContract:
+    job_kind: String
+    queue_name: String
+    input_schema: String
+    output_schema: String
+    max_attempts: Int
+    budget_usd: Float
+    approval_label: String
+    needs_review: Bool
+    idempotency_key: String
+    replay_key: String
+
+public type KnowledgeJobRun:
+    contract: KnowledgeJobContract
+    state: JobStateEnvelope
+    input: JobInputEnvelope
+    output: JobOutputEnvelope
+    retry_plan: JobRetryPolicy
+    effect_meta: EffectEnvelope
+    plan: PlanStep
+    action: ActionRequest
+    review: ReviewVerdict
+
+public type KnowledgeSchemaManifest:
+    service: String
+    migration_count: Int
+    table_count: Int
+    connector_count: Int
+    job_count: Int
+    approval_count: Int
+    default_mode: String
+
 public @replayable
 agent knowledge_config() -> KnowledgeConfig:
     return KnowledgeConfig("personal_knowledge_agent", "mock", "sqlite+local_index", true, "target/traces")
@@ -183,9 +262,92 @@ public @replayable
 agent feedback_eval_contract_valid(feedback: KnowledgeFeedbackEval) -> Bool:
     return feedback.accepted and feedback.promoted_to_eval and feedback.citation_count > 0 and feedback.trace_id != ""
 
+public @replayable
+agent session_login(req: LoginRequest) -> LoginResponse:
+    actor = user_actor(req.actor_id, req.tenant_id, req.display_name, "role:knowledge_member", "perm:knowledge.read:knowledge.write", req.trace_id)
+    sess = session_ref(req.session_id, actor.id, actor.tenant_id, 0, 4102444800000, 0, req.csrf_binding_id, req.trace_id)
+    trace = auth_trace_for_session(actor, sess, "auth:session:" + req.session_id)
+    decision = allow_permission(actor, trace, "knowledge.jobs.read")
+    return LoginResponse(actor, sess, trace, decision, "authenticated")
+
+public @replayable
+agent api_key_login(req: ApiKeyLoginRequest) -> ApiKeyLoginResponse:
+    actor = service_actor(req.service_actor_id, req.tenant_id, req.display_name, "scope:knowledge.jobs.write", req.trace_id)
+    key = api_key_ref(req.api_key_id, actor.id, actor.tenant_id, "scope:knowledge.jobs.write", "argon2id", 4102444800000, 0, req.trace_id)
+    trace = auth_trace_for_api_key(actor, key, "auth:api_key:" + req.api_key_id)
+    decision = allow_permission(actor, trace, "knowledge.jobs.write")
+    return ApiKeyLoginResponse(actor, key, trace, decision, "authenticated")
+
+public @replayable
+agent auth_status(actor_id: String, tenant_id: String, trace_id: String) -> AuthStatusResponse:
+    actor = user_actor(actor_id, tenant_id, "Knowledge User", "role:knowledge_member", "perm:knowledge.read", trace_id)
+    sess = session_ref("session-status", actor.id, actor.tenant_id, 0, 4102444800000, 0, "csrf-status", trace_id)
+    trace = auth_trace_for_session(actor, sess, "auth:status:" + trace_id)
+    active = session_active(sess, 1) and auth_trace_same_tenant(trace, actor)
+    decision = allow_permission(actor, trace, "knowledge.jobs.read")
+    if active:
+        return AuthStatusResponse(actor, actor.tenant_id, decision.allowed, decision.permission, decision.reason, trace.replay_key)
+    denied = deny_permission(actor, trace, "knowledge.jobs.read", "session inactive")
+    return AuthStatusResponse(actor, actor.tenant_id, false, denied.permission, denied.reason, trace.replay_key)
+
+public @replayable
+agent api_key_auth_status(actor_id: String, tenant_id: String, trace_id: String) -> AuthStatusResponse:
+    actor = service_actor(actor_id, tenant_id, "Knowledge Service", "scope:knowledge.jobs.write", trace_id)
+    key = api_key_ref("api-key-status", actor.id, actor.tenant_id, "scope:knowledge.jobs.write", "argon2id", 4102444800000, 0, trace_id)
+    trace = auth_trace_for_api_key(actor, key, "auth:api_key_status:" + trace_id)
+    active = api_key_active(key, 1) and auth_trace_same_tenant(trace, actor)
+    decision = allow_permission(actor, trace, "knowledge.jobs.write")
+    if active:
+        return AuthStatusResponse(actor, actor.tenant_id, decision.allowed, decision.permission, decision.reason, trace.replay_key)
+    denied = deny_permission(actor, trace, "knowledge.jobs.write", "api key inactive")
+    return AuthStatusResponse(actor, actor.tenant_id, false, denied.permission, denied.reason, trace.replay_key)
+
+public @replayable
+agent knowledge_contract(job_kind: String, tenant_window: String, approval_label: String, needs_review: Bool) -> KnowledgeJobContract:
+    idempotency = job_kind + ":" + tenant_window
+    replay_value = "knowledge:" + idempotency
+    return KnowledgeJobContract(job_kind, "personal_knowledge_agent", job_kind + "Input", job_kind + "Output", 5, 0.50, approval_label, needs_review, idempotency, replay_value)
+
+public @replayable
+agent knowledge_run(contract: KnowledgeJobContract, input_fingerprint: String, output_fingerprint: String, plan_id: String, action_kind: String) -> KnowledgeJobRun:
+    state = pending_job_state(contract.idempotency_key, contract.queue_name, contract.job_kind, contract.max_attempts, contract.budget_usd, contract.needs_review, contract.idempotency_key, contract.replay_key)
+    input = job_input(contract.job_kind, input_fingerprint, contract.input_schema)
+    output = job_output(output_fingerprint, contract.output_schema)
+    retry_plan = retry_policy(contract.max_attempts, "exponential_jitter", 1000, 600000, "personal_knowledge_agent.dead_letter")
+    effect_meta = effect_envelope("personal_knowledge_agent." + contract.job_kind, "workspace:" + contract.queue_name, contract.approval_label, contract.idempotency_key, contract.replay_key)
+    plan = plan_step(plan_id, "bounded knowledge job step", "personal_knowledge_agent")
+    action = action_request(action_kind, contract.idempotency_key, contract.approval_label, contract.needs_review)
+    review = review_verdict(true, "", "contract bounded by retry, budget, idempotency, and replay")
+    return KnowledgeJobRun(contract, state, input, output, retry_plan, effect_meta, plan, action, review)
+
+public @replayable
+agent nightly_reindex_job(tenant_id: String, root_id: String) -> KnowledgeJobRun uses files_read, local_embed, index_write:
+    contract = knowledge_contract("nightly_reindex", tenant_id + ":" + root_id, "", false)
+    return knowledge_run(contract, "sha256:nightly_reindex_input", "sha256:nightly_reindex_output", "reindex.plan", "rescan_corpus")
+
+public @replayable
+agent weekly_feedback_batch_job(tenant_id: String, window: String) -> KnowledgeJobRun uses knowledge_llm:
+    contract = knowledge_contract("weekly_feedback_batch", tenant_id + ":" + window, "", false)
+    return knowledge_run(contract, "sha256:feedback_batch_input", "sha256:feedback_batch_output", "feedback.plan", "promote_eval_candidates")
+
+public @replayable
+agent daily_provenance_audit_job(tenant_id: String, day: String) -> KnowledgeJobRun uses files_read:
+    contract = knowledge_contract("daily_provenance_audit", tenant_id + ":" + day, "", false)
+    return knowledge_run(contract, "sha256:provenance_audit_input", "sha256:provenance_audit_output", "audit.plan", "verify_provenance_chain")
+
+public @replayable
+agent knowledge_job_contract_valid(run: KnowledgeJobRun) -> Bool:
+    return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
+
+public @replayable
+agent knowledge_schema_manifest() -> KnowledgeSchemaManifest:
+    return KnowledgeSchemaManifest("personal_knowledge_agent", 5, 18, 3, 3, 5, "mock")
+
 server personal_knowledge_agent_api:
     route GET "/config" -> json KnowledgeConfig:
         return knowledge_config()
+    route GET "/schema" -> json KnowledgeSchemaManifest:
+        return knowledge_schema_manifest()
     route GET "/ingest/mock" -> json KnowledgeIngestionResult uses files_read, local_embed, index_write:
         return ingest_mock_document()
     route GET "/search/mock" -> json KnowledgeSearchHit uses files_read, local_embed:
@@ -194,9 +356,32 @@ server personal_knowledge_agent_api:
         return answer_with_provenance_mock()
     route GET "/feedback/eval/mock" -> json KnowledgeFeedbackEval:
         return feedback_eval_mock()
+    route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
+        return session_login(body)
+    route POST "/auth/api-key/login" body ApiKeyLoginRequest -> json ApiKeyLoginResponse:
+        return api_key_login(body)
+    route GET "/auth/status" -> json AuthStatusResponse:
+        return auth_status("user-1", "tenant-1", "trace-auth-status")
+    route GET "/auth/api-key/status" -> json AuthStatusResponse:
+        return api_key_auth_status("service-1", "tenant-1", "trace-api-key-status")
+    route GET "/jobs/nightly-reindex/mock" -> json KnowledgeJobRun uses files_read, local_embed, index_write:
+        return nightly_reindex_job("tenant-1", "notes")
+    route GET "/jobs/weekly-feedback-batch/mock" -> json KnowledgeJobRun uses knowledge_llm:
+        return weekly_feedback_batch_job("tenant-1", "business_week")
+    route GET "/jobs/daily-provenance-audit/mock" -> json KnowledgeJobRun uses files_read:
+        return daily_provenance_audit_job("tenant-1", "2026-05-27")
+
+schedule "0 2 * * *" zone "America/New_York" -> nightly_reindex_job("tenant-1", "notes") uses files_read, local_embed, index_write
+schedule "0 6 * * 1" zone "America/New_York" -> weekly_feedback_batch_job("tenant-1", "business_week") uses knowledge_llm
+schedule "0 3 * * *" zone "America/New_York" -> daily_provenance_audit_job("tenant-1", "business_day") uses files_read
 
 agent main() -> Bool:
     result = ingest_mock_document()
     answer = answer_with_provenance_mock()
     feedback = feedback_eval_mock()
-    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback)
+    auth = auth_status("user-1", "tenant-1", "trace-main-auth")
+    service_auth = api_key_auth_status("service-1", "tenant-1", "trace-main-api-key")
+    reindex = nightly_reindex_job("tenant-1", "notes")
+    fb_batch = weekly_feedback_batch_job("tenant-1", "business_week")
+    audit = daily_provenance_audit_job("tenant-1", "business_day")
+    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback) and auth.authenticated and service_auth.authenticated and knowledge_job_contract_valid(reindex) and knowledge_job_contract_valid(fb_batch) and knowledge_job_contract_valid(audit)
