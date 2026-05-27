@@ -711,28 +711,36 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "jobs.replayable_side_effects",
         kind: GuaranteeKind::Jobs,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "A job marked `@replayable` records its tool / prompt / \
-             approval / DB side-effects into the trace so a later \
-             `corvid replay <job-trace>` reproduces the run without \
-             re-issuing real side-effect calls.",
-        out_of_scope_reason:
-            "The Phase 21 replay infrastructure ships and the queue \
-             runtime persists step checkpoints, but the integration \
-             wiring that would let a recorded job trace drive a \
-             replay-mode job runner (with the LlmRegistry quarantined \
-             so a real provider call cannot leave the process) does \
-             not exist. The 35V2-P38-A audit assumed the wiring was \
-             present and only the test was missing; recon under \
-             35V2-P38-C found the wiring is the work, not the test. \
-             Filed as a v1.0 launch-readiness slice (35V2-P38-C-deferred) \
-             — promotes this row to RuntimeChecked when the wiring \
-             ships and the cross-layer assertion test joins the \
-             durability corpus.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "A job marked `@replayable` records a per-job JSONL trace \
+             (slice C-2) at `<trace_dir>/<job_id>.jsonl`, and a later \
+             `corvid jobs replay --source <path>.cor --job <job_id>` \
+             (slice C-3) drives the same agent body against a runtime \
+             in `RuntimeMode::Replay(source)` with every side-effect \
+             surface quarantined — LLM adapters wrap into \
+             `QuarantinedLlmAdapter` (slice C-4); HTTP / store writes / \
+             file writes refuse with typed `QuarantineViolation` (slice \
+             C-5). The recorded substitution path consumes recorded \
+             `LlmCall` / `LlmResult` events for matched dispatch; any \
+             call that bypasses substitution and reaches the manager \
+             layer fails closed. The durable queue uses raw rusqlite \
+             and trace emission uses JsonlTraceWriter, so neither \
+             routes through the quarantined manager types.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_passes_through_store_reads",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_passes_through_io_reads",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::live_mode_does_not_quarantine_any_surface",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::differential_replay_does_not_quarantine_llm_registry",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_llm_registry_direct_calls",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_http_client_send",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_store_writes",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_io_writes",
+        ],
     },
     // ----- Auth (Phase 39) ---------------------------------------
     Guarantee {

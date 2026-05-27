@@ -67,6 +67,13 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "jobs.lease_exclusivity",
     "jobs.durable_resume",
     "jobs.cron_dst_correct",
+    // Slice 35V2-P38-C-6: every `@replayable` agent in a signed
+    // cdylib promises that its side effects are quarantined during
+    // replay (LLM via QuarantinedLlmAdapter, plus HTTP / store /
+    // file-write refusals). The claim-coverage walker requires this
+    // id for `AgentAttribute::Replayable` and
+    // `AgentAttribute::Deterministic`.
+    "jobs.replayable_side_effects",
     "auth.api_key_at_rest_hashed",
     "auth.jwt_kid_rotation",
     "auth.oauth_pkce_required",

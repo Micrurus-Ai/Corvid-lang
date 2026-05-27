@@ -212,12 +212,15 @@ are tested in
 
 ## Replay quarantine
 
-A job that ran in production produced a typed trace. `corvid replay
-<trace>` is the read-only path — it walks the trace and shows you
-what happened. The cross-layer "replay an old job trace and quarantine
-the LlmRegistry so no real provider call leaves the process during
-replay" property is a launch-readiness item; the queue runtime
-durability and the Phase 21 replay infrastructure both ship, but
-their integration (a replay-mode job runner) lands during the v1.0
-launch-readiness window. See guarantee `jobs.replayable_side_effects`
-for the registered status.
+A job that ran in production produced a typed trace. `corvid jobs replay
+--source <path>.cor --job <job_id>` reproduces the run from the trace
+through the same queue runtime that recorded it. During the replay the
+runtime quarantines every side-effect surface — LLM adapter calls
+refuse with `QuarantineViolation { surface: "llm", .. }`, outbound HTTP
+refuses with `"http"`, application store writes refuse with `"store"`,
+and file writes refuse with `"io"`. Recorded calls substitute from the
+trace; unrecorded ones fail closed. The durable queue uses raw SQLite
+and the trace writer uses its own writer, so queue-internal bookkeeping
+and trace recording are unaffected. See guarantee
+`jobs.replayable_side_effects` (RuntimeChecked, shipped in
+audit-correction track `35V2-P38-C-replay-quarantine`).

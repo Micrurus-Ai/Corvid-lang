@@ -100,5 +100,5 @@ Python tool calls the same way it applies to LLM calls.
 | Dangerous Python tool requires approve | `approval.dangerous_call_requires_token` | Static | `crates/corvid-types/src/checker/` |
 | Lexical-scope approve enforcement | `approval.token_lexical_only` | Static | `crates/corvid-types/src/checker/` |
 | Effect rows propagate through call graph | `effect_row.body_completeness` | Static | `crates/corvid-types/src/effects.rs` |
-| Replay quarantine for tool calls | `jobs.replayable_side_effects` | OutOfScope | gated on `35V2-P38-C-deferred` (replay-quarantine cross-layer wiring) |
+| Replay quarantine for tool calls | `jobs.replayable_side_effects` | RuntimeChecked | shipped via audit-correction track `35V2-P38-C-replay-quarantine`; cross-surface corpus at `crates/corvid-runtime/tests/replay_quarantine_corpus.rs` |
 | Source-level `py.import(...)` / `module.call(...)` ergonomic surface | n/a | post-v1.0 | filed as ergonomic improvement; today Python interop enters via tool declarations |

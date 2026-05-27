@@ -111,6 +111,17 @@ fn collect_decl_contracts(decl: &Decl, claims: &mut DeclaredContractClaims) {
                 match attr {
                     AgentAttribute::Replayable { .. } | AgentAttribute::Deterministic { .. } => {
                         claims.required_ids.insert("replay.deterministic_pure_path");
+                        // Slice 35V2-P38-C-6: every `@replayable`
+                        // agent is reachable from the durable job
+                        // queue (any agent can be enqueued via
+                        // `corvid jobs enqueue`), and the replay
+                        // path quarantines its side effects. A
+                        // signed cdylib that declares `@replayable`
+                        // must therefore also declare
+                        // `jobs.replayable_side_effects` so the
+                        // recipient can audit the quarantine
+                        // promise.
+                        claims.required_ids.insert("jobs.replayable_side_effects");
                     }
                     AgentAttribute::Wrapping { .. } => claims.unsupported.push(format!(
                         "agent `{}` declares `@wrapping`, but no signed cdylib guarantee id covers wrapping arithmetic yet",

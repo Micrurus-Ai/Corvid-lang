@@ -398,6 +398,20 @@ agent classify(text: String) -> String:
 "#,
     },
     TourTopic {
+        name: "replay-quarantine",
+        title: "Replay Quarantine For Durable Jobs",
+        category: "Verification",
+        pitch: "An `@replayable` durable job records a typed JSONL trace on its first run. `corvid jobs replay --source <path>.cor --job <id>` reproduces the run from the trace — and during that replay every side-effect surface (LLM, HTTP, application store writes, file writes) refuses to escape the process. Recorded calls substitute from the trace; unrecorded ones fail closed with a typed `QuarantineViolation` naming the surface. Differential replay can opt into live LLM calls; the default closes everything.",
+        spec: "docs/phases/phase-38-replay-quarantine.md",
+        roadmap: "Phase 38 audit-correction track 35V2-P38-C-replay-quarantine",
+        test: "crates/corvid-runtime/tests/replay_quarantine_corpus.rs",
+        non_scope: "Quarantine ensures no real side effect escapes during a Substitute-mode replay; it does not verify that the original recording itself was correct, and it does not extend to surfaces the runtime does not own (e.g. raw process spawns outside `IoRuntime`).",
+        source: r#"@replayable
+agent daily_brief(user_id: String) -> String:
+    return "brief for " + user_id
+"#,
+    },
+    TourTopic {
         name: "effect-registry",
         title: "Proof-Carrying Dimension Registry",
         category: "Verification",

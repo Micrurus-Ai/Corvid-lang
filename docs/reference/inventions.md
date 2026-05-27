@@ -165,6 +165,37 @@ and verification bundles.
 Why it is unique: AI behavior changes are usually invisible. Corvid turns them
 into artifacts that can be audited and compared.
 
+### Replay Quarantine For Durable Jobs
+
+```corvid
+@replayable
+agent daily_brief(user_id: String) -> String:
+    return "brief for " + user_id
+```
+
+```sh
+# Original run records a typed JSONL trace at target/trace/jobs/<job_id>.jsonl
+corvid jobs run --source app.cor --state queue.db --workers 1 --max-runtime-ms 0
+
+# Replay reproduces the run from the trace. Every side-effect surface refuses
+# to escape — recorded calls substitute, unrecorded ones fail closed with
+# `QuarantineViolation` naming the surface (`llm`, `http`, `store`, `io`).
+corvid jobs replay --source app.cor --job <job_id>
+```
+
+`@replayable` on an agent means more than "trace recorded." During replay,
+Corvid's runtime quarantines four side-effect surfaces by construction: LLM
+adapter calls, outbound HTTP, application store writes, and filesystem writes.
+The durable job queue uses raw SQLite (not the application store) and the
+trace writer uses a dedicated writer (not the application IO surface), so the
+runtime can tell queue-internal persistence apart from application side
+effects without any runtime-mode token.
+
+Why it is unique: a "replay" in other ecosystems usually means re-running the
+program and hoping nothing leaks. Corvid's replay refuses to leak by
+construction. Differential replay is a separate, opt-in mode that intentionally
+hits a live LLM for record-vs-live comparison; the default is the closed one.
+
 ## 3. Adaptive Routing
 
 ### Typed Model Routing

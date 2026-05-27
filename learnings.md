@@ -4904,6 +4904,70 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-replay-quarantine track closed (2026-05-27) — replay-mode runtime refuses to leak any side effect
+
+`@replayable` durable jobs in Corvid have a runtime promise: no
+real LLM call, HTTP request, application store write, or
+filesystem write leaves the process during a Substitute-mode
+replay. Recorded calls substitute from the trace; unrecorded ones
+fail closed with a typed `RuntimeError::QuarantineViolation`
+naming the surface (`"llm"`, `"http"`, `"store"`, `"io"`).
+Differential mode (live LLM comparison) is the explicit opt-out.
+
+```sh
+# Record once
+corvid jobs run --source app.cor --state queue.db --workers 1 --max-runtime-ms 0
+
+# Replay reproduces the run from target/trace/jobs/<job_id>.jsonl
+# with every side-effect surface quarantined
+corvid jobs replay --source app.cor --job <job_id>
+```
+
+The registry row `jobs.replayable_side_effects` is now
+`RuntimeChecked` with 4 positive + 4 adversarial test refs into
+`crates/corvid-runtime/tests/replay_quarantine_corpus.rs`. Every
+`@replayable` agent in a signed cdylib carries the guarantee in
+its descriptor — the claim-coverage walker requires it alongside
+the existing `replay.deterministic_pure_path`.
+
+The cross-cutting engineering lesson worth recording: the audit
+that filed `35V2-P38-C-deferred` estimated "~2-4 days when it
+lands" based on the assumption that the agent-layer replay
+infrastructure could be reused trivially for jobs. Recon under the
+pre-phase chat (slice C-1's first deliverable, before any
+implementation) found the assumption wrong — the queue runtime
+and Phase 21 replay are separate layers with no `replay_job`
+wiring, no job trace emission, no quarantine wrappers on the
+side-effect manager types. Honest scope turned out to be six
+sub-slices spanning ~3 weeks across runtime + driver + CLI
+surfaces.
+
+The pattern is general: when an audit names a missing test for a
+guarantee that depends on a cross-layer integration, the test is
+usually the smallest part of the work. Recon-before-tick is the
+standing rule because audit estimates degrade fastest exactly
+when the integration depth is the question. The deferral could be
+overridden honestly (not silently ratified) only because the
+pre-phase chat caught the gap before code started.
+
+The closing design finding was equally instructive: the
+queue-internal vs application-tool distinction the design doc
+raised as an "open question for C-5" turned out to be enforced by
+Rust's type system already — the durable queue uses
+`rusqlite::Connection`, the trace writer uses
+`JsonlTraceWriter`, and neither routes through `StoreManager` or
+`IoRuntime`. The manager-level quarantine cannot block them
+because they don't pass through. No `QuarantineContext` token
+was needed; ownership boundaries already do the work.
+
+See:
+- Design brief: `docs/phases/phase-38-replay-quarantine.md`
+- Cross-surface corpus: `crates/corvid-runtime/tests/replay_quarantine_corpus.rs`
+- Tour topic: `corvid tour --topic replay-quarantine`
+- README catalog: "Replay Quarantine For Durable Jobs"
+- Inventions row: `docs/reference/inventions.md` "Replay Quarantine For Durable Jobs"
+- Audit doc + override addendum: `docs/phases/phase-38-audit-2026-05-17.md`
+
 ## 35V2-P38-C-5 closed (2026-05-27) — replay quarantine extends to HTTP, store writes, file writes
 
 C-4 quarantined the LLM registry; C-5 closes the loop for the three

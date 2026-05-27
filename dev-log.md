@@ -4,6 +4,103 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-27 - Slice 35V2-P38-C-6 — Closes the replay-quarantine track
+
+- Added `crates/corvid-runtime/tests/replay_quarantine_corpus.rs` —
+  8 cross-surface tests covering the four quarantines:
+  - Adversarial: direct LLM registry call refused with `surface: "llm"`.
+  - Adversarial: HTTP send refused with `surface: "http"` (URL named
+    in the detail).
+  - Adversarial: store write refused with `surface: "store"`.
+  - Adversarial: file write refused with `surface: "io"` (verifies
+    the filesystem was NOT touched after refusal).
+  - Positive: store reads pass through during replay.
+  - Positive: IO reads pass through during replay.
+  - Negative control: differential-replay mode (`uses_live_llm ==
+    true`) installs no quarantine on any surface.
+  - Negative control: live (non-replay) mode installs no quarantine
+    on any surface.
+- Added `Runtime::http()`, `Runtime::io()`, `Runtime::llms()`
+  read-only accessors (mirror the existing `Runtime::stores()`).
+  Used by the corpus to directly invoke each manager and assert the
+  wrap fires; production callers continue to go through
+  `Runtime::call_llm` (which routes through substitution before
+  reaching the registry).
+- Promoted `jobs.replayable_side_effects` from `OutOfScope` to
+  `RuntimeChecked` in `corvid-guarantees::GUARANTEE_REGISTRY` with
+  4 positive + 4 adversarial test refs into the new corpus.
+  Updated the row's description to name C-2 trace emission, C-3
+  replay entry, C-4 LLM quarantine, and C-5 HTTP/store/io quarantine
+  explicitly.
+- Added `jobs.replayable_side_effects` to
+  `SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`. Extended the claim-coverage
+  walker (`crates/corvid-driver/src/build/claim_coverage.rs`): every
+  `@replayable` (and `@deterministic`) agent now requires both
+  `replay.deterministic_pure_path` AND `jobs.replayable_side_effects`
+  in the signed descriptor. A signed cdylib that ships a
+  `@replayable` agent without the quarantine guarantee in its
+  descriptor cannot ship.
+- Regenerated `docs/reference/core-semantics.md` via
+  `corvid contract regen-doc`. Drift gate green.
+- Added `corvid tour --topic replay-quarantine` topic
+  (`crates/corvid-tour-catalog/src/lib.rs`) with the agent example
+  + production CLI flow. Added the matching row to
+  `docs/reference/inventions.md` under "Replay Quarantine For
+  Durable Jobs" and the corresponding entry to README.md's
+  Invention Catalog.
+- Amended `docs/guides/ffi-python.md` (the registry row no longer
+  reads "OutOfScope, gated on `35V2-P38-C-deferred`") and
+  `docs/guides/jobs.md` (the "cross-layer replay-quarantine is
+  launch-readiness" paragraph now describes the shipped behaviour
+  + `corvid jobs replay` flow).
+- Ticked Phase 38 phase-done items: Scope bullets `Durable job
+  runner with enqueue, delay, cron, ...` and `Scheduler manifest
+  visible to corvid audit`; phase-done items 2 (registry rows),
+  3 (crash-recovery), 4 (idempotency), 5 (DST), 6 (replay-quarantine
+  test). Marked the audit-correction track and all 6 sub-slices +
+  8 phase-done criteria checkboxes complete.
+
+Validation (all green, no regressions):
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-runtime --test replay_quarantine_corpus`
+  — 8/8.
+- `cargo test -p corvid-guarantees` — 28/28 (including the
+  `rendered_markdown_matches_committed_doc` drift gate after
+  regen, the `every_test_ref_resolves_to_a_real_test_function`
+  cross-reference sentinel, and the
+  `signed_cdylib_claim_ids_resolve_to_enforced_guarantees`
+  invariant).
+- `cargo test -p corvid-driver --lib build::tests` — 5/5
+  (`signed_claim_coverage_accepts_registered_contracts` now
+  exercises the new `jobs.replayable_side_effects` requirement).
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2/2.
+- `cargo test -p corvid-cli --test c2_trace_integration` — 2/2.
+- `cargo test -p corvid-cli --test c3_replay_integration` — 2/2.
+- `cargo test -p corvid-cli --test docs_drift_gate` — 1/1
+  (jobs.md / ffi-python.md amendments parse cleanly).
+- `cargo run -q -p corvid-cli -- tour --topic replay-quarantine`
+  prints the topic header + source. The REPL execution surfaces a
+  pre-existing parse quirk on `@replayable`-prefixed agents
+  affecting both the new topic AND the existing `replay-receipts`
+  topic — filed as a separate REPL hardening item, not a C-6
+  regression.
+- `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` —
+  exit 1 with exactly the two documented deliberate-fail fixtures.
+
+**Track `35V2-P38-C-replay-quarantine` closed.** Six sub-slices
+across seven commits (`a4b609b` admin → `534bffd` C-1 → `f6c64b2`
+C-2 → `879e5c5` C-3 → `7855111` C-4 → `211d675` C-5 → this commit
+C-6) landed the cross-layer quarantine. The audit's "~2-4 days when
+it lands" estimate was off by a factor of ~5; honest scope was 2
+days of recon + ~3 weeks of implementation. The recurring lesson:
+audit-estimate accuracy degrades when the audited slice describes
+the test artifact but skips the integration depth. Recon under the
+pre-phase chat caught the gap before code started, which is why the
+deferral could be overridden honestly rather than ratified by
+default.
+
+---
+
 ## 2026-05-27 - Slice 35V2-P38-C-5 — HTTP / Store / IO quarantine
 
 - Added `HttpClient::quarantine` + `is_quarantined` and a flag-guarded

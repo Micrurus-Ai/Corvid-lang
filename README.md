@@ -287,6 +287,29 @@ Roadmap: [Phase 21 and Phase 22](./ROADMAP.md)
 Proof: [bundle verification tests](./crates/corvid-cli/tests/bundle_verify.rs)
 Non-scope: Receipts are evidence of observed behavior, not full formal verification of every possible run.
 
+#### Replay Quarantine For Durable Jobs
+
+`@replayable` durable jobs record a typed JSONL trace on their first run. `corvid jobs replay --source <path>.cor --job <id>` reproduces the run from the trace, and during replay every side-effect surface refuses to escape: LLM adapter calls, outbound HTTP, application store writes, and filesystem writes. Recorded calls substitute from the trace; unrecorded ones fail closed with a typed `QuarantineViolation` naming the surface.
+
+This makes "replay didn't leak" a runtime invariant instead of a property of the test harness.
+
+```corvid
+@replayable
+agent daily_brief(user_id: String) -> String:
+    return "brief for " + user_id
+```
+
+```bash
+corvid jobs run --source app.cor --state queue.db --workers 1 --max-runtime-ms 0
+corvid jobs replay --source app.cor --job <job_id>
+```
+
+Spec: [phase-38 replay-quarantine design](./docs/phases/phase-38-replay-quarantine.md)
+Tour: `corvid tour --topic replay-quarantine`
+Roadmap: [Phase 38 audit-correction track `35V2-P38-C-replay-quarantine`](./ROADMAP.md)
+Proof: [replay quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: Quarantine ensures no real side effect escapes a Substitute-mode replay; it does not verify the original recording was correct, and it does not cover surfaces the runtime does not own (e.g. raw process spawns outside `IoRuntime`).
+
 ### Adaptive Routing
 
 #### Typed Model Routing

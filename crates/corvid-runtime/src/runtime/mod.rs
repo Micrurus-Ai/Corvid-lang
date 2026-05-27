@@ -119,6 +119,25 @@ impl Runtime {
         &self.tools
     }
 
+    /// Read-only handle to the LLM adapter registry. Mirrors
+    /// `stores()`. Used by the replay-quarantine integration corpus
+    /// (slice `35V2-P38-C-6`) to assert the wrap fires; production
+    /// callers go through `Runtime::call_llm` instead, which routes
+    /// through the substitution path before reaching the registry.
+    pub fn llms(&self) -> &LlmRegistry {
+        &self.llms
+    }
+
+    /// Read-only handle to the HTTP client. Mirrors `stores()`.
+    pub fn http(&self) -> &HttpClient {
+        &self.http
+    }
+
+    /// Read-only handle to the IO runtime. Mirrors `stores()`.
+    pub fn io(&self) -> &IoRuntime {
+        &self.io
+    }
+
     pub fn tracer(&self) -> &Tracer {
         &self.tracer
     }
