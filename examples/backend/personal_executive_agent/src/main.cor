@@ -1,8 +1,8 @@
-import "./std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryPolicy, JobStateEnvelope, job_input, job_output, retry_policy, retry_policy_valid, pending_job_state, job_needs_approval, job_metadata_redacted
-import "./std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
-import "./std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
-import "./std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
-import "./std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
+import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryPolicy, JobStateEnvelope, job_input, job_output, retry_policy, retry_policy_valid, pending_job_state, job_needs_approval, job_metadata_redacted
+import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
+import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
+import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+import "../../../../std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
 
 effect inbox_read:
     cost: $0.04
@@ -36,6 +36,11 @@ effect task_write:
 
 effect chat_write:
     cost: $0.01
+    trust: human_required
+    data: external
+
+effect calendar_share:
+    cost: $0.02
     trust: human_required
     data: external
 
@@ -164,6 +169,23 @@ public type ChatSendReceipt:
     trace_id: String
     status: String
 
+public type CalendarShareRequest:
+    tenant_id: String
+    actor_id: String
+    event_id: String
+    recipient: String
+    approval_id: String
+    trace_id: String
+
+public type CalendarShareReceipt:
+    share_id: String
+    tenant_id: String
+    event_id: String
+    recipient: String
+    approval_id: String
+    trace_id: String
+    status: String
+
 public type ExecutiveApprovalProduct:
     approval: ApprovalQueueItem
     audit: ApprovalAuditEnvelope
@@ -178,6 +200,7 @@ public type ExecutiveApprovalSurface:
     calendar_edit: ApprovalContractRef
     task_edit: ApprovalContractRef
     chat_send: ApprovalContractRef
+    calendar_share: ApprovalContractRef
     contract_count: Int
     all_external_writes_gated: Bool
 
@@ -350,6 +373,7 @@ tool send_follow_up_email(req: FollowUpSendRequest) -> FollowUpSendReceipt dange
 tool edit_calendar_event(req: CalendarEditRequest) -> CalendarEditReceipt dangerous uses calendar_write
 tool edit_task_item(req: TaskEditRequest) -> TaskEditReceipt dangerous uses task_write
 tool send_chat_message(req: ChatSendRequest) -> ChatSendReceipt dangerous uses chat_write
+tool external_calendar_share(req: CalendarShareRequest) -> CalendarShareReceipt dangerous uses calendar_share
 
 public @replayable
 agent executive_contract(job_kind: String, user_id: String, window_key: String, approval_label: String, needs_review: Bool) -> ExecutiveJobContract:
@@ -454,6 +478,10 @@ agent chat_send_approval_contract(tenant_id: String, channel_id: String, trace_i
     return approval_contract_ref("chat-send:" + channel_id, "v1", "SendChatMessage", "chat_channel", channel_id, tenant_id, "Reviewer", 0.10, "private", true, 4102444800000, "approval:chat:" + trace_id)
 
 public @replayable
+agent external_calendar_share_approval_contract(tenant_id: String, event_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("calendar-share:" + event_id, "v1", "ExternalCalendarShare", "calendar_event", event_id, tenant_id, "Admin", 0.25, "external", true, 4102444800000, "approval:calendar_share:" + trace_id)
+
+public @replayable
 agent follow_up_approval_product(auth: AuthStatusResponse, thread_id: String, trace_id: String) -> ExecutiveApprovalProduct:
     contract = follow_up_approval_contract(auth.tenant_id, thread_id, trace_id)
     item = approval_queue_item("approval:" + thread_id, auth.tenant_id, auth.actor.id, contract, "external_side_effect", trace_id)
@@ -480,6 +508,10 @@ agent execute_approved_chat_send(req: ChatSendRequest) -> ChatSendReceipt uses c
     approve SendChatMessage(req)
     return send_chat_message(req)
 
+agent execute_approved_calendar_share(req: CalendarShareRequest) -> CalendarShareReceipt uses calendar_share:
+    approve ExternalCalendarShare(req)
+    return external_calendar_share(req)
+
 public @replayable
 agent approval_product_contract_valid(product: ExecutiveApprovalProduct) -> Bool:
     return product.tenant_safe and product.auditable and product.ready_to_execute and product.review.accepted and product.action.approval_label == "SendFollowUpEmail"
@@ -490,7 +522,8 @@ agent approval_surface(auth: AuthStatusResponse, trace_id: String) -> ExecutiveA
     calendar = calendar_edit_approval_contract(auth.tenant_id, "event-1", trace_id)
     task = task_edit_approval_contract(auth.tenant_id, "task-1", trace_id)
     chat = chat_send_approval_contract(auth.tenant_id, "channel-1", trace_id)
-    return ExecutiveApprovalSurface(follow, calendar, task, chat, 5, approval_product_contract_valid(follow) and calendar.action == "EditCalendarEvent" and task.action == "EditTaskItem" and chat.action == "SendChatMessage")
+    share = external_calendar_share_approval_contract(auth.tenant_id, "event-1", trace_id)
+    return ExecutiveApprovalSurface(follow, calendar, task, chat, share, 5, approval_product_contract_valid(follow) and calendar.action == "EditCalendarEvent" and task.action == "EditTaskItem" and chat.action == "SendChatMessage" and share.action == "ExternalCalendarShare" and share.required_role == "Admin")
 
 public @replayable
 agent demo_tenant() -> ExecutiveTenant:
@@ -676,6 +709,8 @@ server personal_executive_agent_api:
         return execute_approved_task_edit(body)
     route POST "/actions/chat/send" body ChatSendRequest -> json ChatSendReceipt uses chat_write:
         return execute_approved_chat_send(body)
+    route POST "/actions/calendar/share" body CalendarShareRequest -> json CalendarShareReceipt uses calendar_share:
+        return execute_approved_calendar_share(body)
 
 schedule "0 7 * * 1-5" zone "America/New_York" -> daily_brief_job("active_users", "business_day") uses inbox_read, calendar_read, executive_llm
 schedule "0 6 * * 1-5" zone "America/New_York" -> meeting_prep_job("active_users", "business_day") uses inbox_read, calendar_read, executive_llm
@@ -694,4 +729,4 @@ agent main() -> Bool:
     triage_decision = triage_mock_inbox_thread("thread-1")
     draft_preview = draft_mock_reply("thread-1")
     durable_batch = durable_job_batch("user-1", "2026-04-29")
-    return executive_job_contract_valid(brief) and executive_job_contract_valid(prep) and executive_job_contract_valid(triage) and executive_job_contract_valid(follow) and executive_job_needs_human_before_external_send(follow) and auth.authenticated and service_auth.authenticated and approval_product_contract_valid(approval_product) and approvals.all_external_writes_gated and inbox_triage_contract_valid(triage_decision) and draft_reply_contract_valid(draft_preview) and durable_job_batch_valid(durable_batch)
+    return executive_job_contract_valid(brief) and executive_job_contract_valid(prep) and executive_job_contract_valid(triage) and executive_job_contract_valid(follow) and executive_job_needs_human_before_external_send(follow) and auth.authenticated and service_auth.authenticated and approval_product_contract_valid(approval_product) and approvals.all_external_writes_gated and approvals.calendar_share.action == "ExternalCalendarShare" and approvals.calendar_share.required_role == "Admin" and inbox_triage_contract_valid(triage_decision) and draft_reply_contract_valid(draft_preview) and durable_job_batch_valid(durable_batch)

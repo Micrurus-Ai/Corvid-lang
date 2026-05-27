@@ -1,0 +1,13 @@
+# Adversarial: an `external_calendar_share` call without a prior
+# `approve ExternalCalendarShare(...)` boundary must not compile.
+# Mirrors the existing `ungated_send.cor` pattern; targets the 5th
+# approval contract added in slice 35V2-P42-D-LR-app-maturity-PEA-3.
+#
+# Expected: `corvid check` exits with E0202 (or the typed equivalent)
+# pointing at the unguarded call site and suggesting the missing
+# `approve ExternalCalendarShare(...)` line.
+
+tool external_calendar_share(req: String) -> String dangerous
+
+agent bad() -> String:
+    return external_calendar_share("share without approval")
