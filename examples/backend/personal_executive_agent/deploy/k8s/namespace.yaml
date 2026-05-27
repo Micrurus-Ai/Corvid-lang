@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pea
+  labels:
+    app.kubernetes.io/name: personal-executive-agent
+    app.kubernetes.io/managed-by: corvid

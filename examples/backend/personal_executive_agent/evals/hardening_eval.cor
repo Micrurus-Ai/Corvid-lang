@@ -217,6 +217,28 @@ agent case_connector_default_mode_is_mock() -> Bool:
     manifest = expected_manifest()
     return manifest.default_mode == "mock"
 
+# Case 11: typed permission per dangerous tool. Mirrors the source's
+# `dangerous_tool_permissions_distinct()` which returns true when
+# the five `permission_for_*` agents return distinct strings.
+# Asserts the SAME five strings here so the eval is self-contained.
+agent case_typed_permission_per_dangerous_tool() -> Bool:
+    p_email = "executive.tool.send_follow_up_email"
+    p_cal_edit = "executive.tool.edit_calendar_event"
+    p_task = "executive.tool.edit_task_item"
+    p_chat = "executive.tool.send_chat_message"
+    p_cal_share = "executive.tool.external_calendar_share"
+    d1 = p_email != p_cal_edit
+    d2 = p_email != p_task
+    d3 = p_email != p_chat
+    d4 = p_email != p_cal_share
+    d5 = p_cal_edit != p_task
+    d6 = p_cal_edit != p_chat
+    d7 = p_cal_edit != p_cal_share
+    d8 = p_task != p_chat
+    d9 = p_task != p_cal_share
+    d10 = p_chat != p_cal_share
+    return d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10
+
 # Case 10: approval contract count meets the maturity bar AND the
 # cross-product of every approval label appears exactly once
 # (uniqueness check that catches duplicate-label drift).
@@ -252,4 +274,5 @@ eval executive_agent_per_app_maturity:
     assert case_every_job_contract_bounded()
     assert case_every_job_has_replay_key()
     assert case_connector_default_mode_is_mock()
+    assert case_typed_permission_per_dangerous_tool()
     assert case_approval_label_uniqueness()

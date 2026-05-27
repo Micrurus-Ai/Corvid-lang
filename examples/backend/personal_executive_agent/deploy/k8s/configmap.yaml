@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pea-config
+  namespace: pea
+data:
+  CORVID_ENV: "production"
+  CORVID_CONNECTOR_MODE: "mock"
+  CORVID_METRICS_LISTEN: "0.0.0.0:9090"
+  RUST_LOG: "info,corvid_runtime::queue=info,corvid_runtime::auth=warn"
+  CORVID_OTLP_ENDPOINT: "http://otel-collector.pea.svc.cluster.local:4317"

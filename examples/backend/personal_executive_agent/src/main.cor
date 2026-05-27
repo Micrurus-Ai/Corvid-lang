@@ -481,6 +481,51 @@ public @replayable
 agent external_calendar_share_approval_contract(tenant_id: String, event_id: String, trace_id: String) -> ApprovalContractRef:
     return approval_contract_ref("calendar-share:" + event_id, "v1", "ExternalCalendarShare", "calendar_event", event_id, tenant_id, "Admin", 0.25, "external", true, 4102444800000, "approval:calendar_share:" + trace_id)
 
+# Typed permission per dangerous tool. Slice 35V2-P42-D-LR-app-maturity-PEA-4
+# closes the maturity-bar requirement of "≥1 typed permission per
+# dangerous tool" by declaring one permission string per tool. The
+# runtime auth surface (Phase 39) propagates these through Actor
+# permissions; the strings here are the canonical identifiers any
+# auth check refers to.
+public @replayable
+agent permission_for_send_follow_up_email() -> String:
+    return "executive.tool.send_follow_up_email"
+
+public @replayable
+agent permission_for_edit_calendar_event() -> String:
+    return "executive.tool.edit_calendar_event"
+
+public @replayable
+agent permission_for_edit_task_item() -> String:
+    return "executive.tool.edit_task_item"
+
+public @replayable
+agent permission_for_send_chat_message() -> String:
+    return "executive.tool.send_chat_message"
+
+public @replayable
+agent permission_for_external_calendar_share() -> String:
+    return "executive.tool.external_calendar_share"
+
+public @replayable
+agent dangerous_tool_permissions_distinct() -> Bool:
+    a = permission_for_send_follow_up_email()
+    b = permission_for_edit_calendar_event()
+    c = permission_for_edit_task_item()
+    d = permission_for_send_chat_message()
+    e = permission_for_external_calendar_share()
+    ab = a != b
+    ac = a != c
+    ad = a != d
+    ae = a != e
+    bc = b != c
+    bd = b != d
+    be = b != e
+    cd = c != d
+    ce = c != e
+    de = d != e
+    return ab and ac and ad and ae and bc and bd and be and cd and ce and de
+
 public @replayable
 agent follow_up_approval_product(auth: AuthStatusResponse, thread_id: String, trace_id: String) -> ExecutiveApprovalProduct:
     contract = follow_up_approval_contract(auth.tenant_id, thread_id, trace_id)
@@ -729,4 +774,4 @@ agent main() -> Bool:
     triage_decision = triage_mock_inbox_thread("thread-1")
     draft_preview = draft_mock_reply("thread-1")
     durable_batch = durable_job_batch("user-1", "2026-04-29")
-    return executive_job_contract_valid(brief) and executive_job_contract_valid(prep) and executive_job_contract_valid(triage) and executive_job_contract_valid(follow) and executive_job_needs_human_before_external_send(follow) and auth.authenticated and service_auth.authenticated and approval_product_contract_valid(approval_product) and approvals.all_external_writes_gated and approvals.calendar_share.action == "ExternalCalendarShare" and approvals.calendar_share.required_role == "Admin" and inbox_triage_contract_valid(triage_decision) and draft_reply_contract_valid(draft_preview) and durable_job_batch_valid(durable_batch)
+    return executive_job_contract_valid(brief) and executive_job_contract_valid(prep) and executive_job_contract_valid(triage) and executive_job_contract_valid(follow) and executive_job_needs_human_before_external_send(follow) and auth.authenticated and service_auth.authenticated and approval_product_contract_valid(approval_product) and approvals.all_external_writes_gated and approvals.calendar_share.action == "ExternalCalendarShare" and approvals.calendar_share.required_role == "Admin" and dangerous_tool_permissions_distinct() and inbox_triage_contract_valid(triage_decision) and draft_reply_contract_valid(draft_preview) and durable_job_batch_valid(durable_batch)

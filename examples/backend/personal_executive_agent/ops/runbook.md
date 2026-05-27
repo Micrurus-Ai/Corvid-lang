@@ -375,13 +375,26 @@ docker compose -f deploy/docker-compose.yml down -v
 
 ### Kubernetes (production)
 
-A reference Kubernetes manifest set ships in `deploy/k8s/` (planned). The
-shape: one Deployment for the HTTP service, one Deployment for the worker
-pool (different replica count, different resource limits), one CronJob
-template per scheduled task (for environments that prefer K8s-native cron
-over Corvid's scheduler), a Secret containing the encrypted-token key + 
-provider keys, a ConfigMap for `CORVID_CONNECTOR_MODE` and feature flags,
-and a Service + Ingress for the HTTP surface.
+The reference Kubernetes manifest set ships in
+[`deploy/k8s/`](../deploy/k8s/) — six files:
+
+- `namespace.yaml` — `pea` namespace with managed-by labels.
+- `configmap.yaml` — non-secret env vars (`CORVID_ENV`,
+  `CORVID_CONNECTOR_MODE`, `CORVID_METRICS_LISTEN`, `RUST_LOG`,
+  `CORVID_OTLP_ENDPOINT`).
+- `secret.example.yaml` — template for the four runtime secrets
+  (connector-token key, API-key pepper, session signing key, CSRF
+  secret) plus `DATABASE_URL` and the optional provider keys. DO NOT
+  commit with real values — use sealed-secrets or your platform's
+  KMS-backed mechanism.
+- `deployment-api.yaml` — 2-replica Deployment for the HTTP service
+  (port 8080) with `/schema` liveness + readiness probes.
+- `deployment-worker.yaml` — 2-replica Deployment for the durable
+  job pool with 1Gi memory limit and the `--source src/main.cor`
+  argument that `corvid jobs run` requires.
+- `service.yaml` — `ClusterIP` Service for the API + headless
+  Service for worker-pool metrics scraping + PersistentVolumeClaim
+  for the shared `/data` mount.
 
 Smoke deploy from a clean cluster:
 
@@ -400,12 +413,17 @@ kubectl -n pea exec deploy/pea-api -- curl -sf http://localhost:8080/schema
 
 ### Fly.io / Render (managed PaaS)
 
-For Fly.io, the `fly.toml` template in `deploy/fly.toml` (planned) sets:
+The Fly.io manifest at [`deploy/fly.toml`](../deploy/fly.toml) ships:
 
-- Two service groups: `api` (HTTP, autoscale 1-3) and `worker` (jobs, fixed
-  count 1 in dev, 2-4 in prod).
-- A shared volume mount at `/data/pea` for the SQLite store + traces.
-- An internal DNS entry for the OTLP collector if running co-located.
+- Two process groups: `api` (HTTP, autoscale 1-3 with `min_machines_running
+  = 1`) and `worker` (durable job pool, fixed count).
+- A shared `pea_data` volume mounted at `/data` for the SQLite queue +
+  trace store.
+- `auto_start_machines = true`, force-HTTPS, request-concurrency
+  hard limit 200 / soft limit 100.
+- HTTP healthcheck against `/schema` every 10s.
+- Prometheus metrics scraped from port 9090.
+- Secrets via `fly secrets set` (never in this manifest).
 
 Deploy:
 
