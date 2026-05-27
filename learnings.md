@@ -4904,6 +4904,65 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P42-D-LR-app-maturity-PEA closed (2026-05-27) — Personal Executive Agent reaches the Phase 42 maturity bar
+
+Five-commit per-app maturity track for the PEA reference app. The
+bar at `ROADMAP.md` Phase 42 phase-done checklist (17 rows that
+apply per-app) now resolves to 12 ✅ closed, 3 deferred to
+cross-cutting launch-readiness slices (`35V2-P42-E/F/G/H-LR` +
+Phase 33M), and 2 deferred to post-v1.0 source-syntax sugar
+(`35V2-P39-I`).
+
+The closing audit lives at
+[`docs/phases/phase-42-pea-maturity-2026-05-27.md`](docs/phases/phase-42-pea-maturity-2026-05-27.md).
+Three cross-cutting engineering lessons worth recording came out
+of this track.
+
+**Lesson 1: `corvid check`'s import resolution is purely relative
+to the importing file.** No workspace-stdlib root rule exists. Three
+backend reference apps (PEA, audit_log, state_app) imported `"./std/X"`
+that resolved to a non-existent `src/std/X.cor` — every app's
+`corvid check` exited with 100+ errors. The fix is mechanical
+(`"../../../../std/X"` for backend apps at `examples/backend/<name>/src/`)
+but the deeper question is whether the compiler should support a
+workspace-stdlib root rule. Filed as post-v1.0; for now the relative
+path is the convention.
+
+**Lesson 2: The `approve` label is the tool name in CamelCase.**
+The compiler enforces snake_case → CamelCase match between a
+dangerous tool's name and the `approve <Label>(...)` label. This
+means contract names like "ExternalCalendarShare" drive the tool
+name (`external_calendar_share`), not the other way around. The
+first attempt of D-PEA-3 used the more intuitive ordering (intent →
+contract → tool) and the compiler caught it; the fix was renaming
+the tool so the label matched naturally. The lesson: when designing
+a new approval contract for a Corvid app, pick the label first and
+let the tool name fall out, not vice versa.
+
+**Lesson 3: Multi-line boolean chains don't parse; decompose into
+named intermediates.** Corvid agent bodies don't support the
+`return\n    a\n    and b\n    and c` pattern that other indentation
+-sensitive languages allow. Either everything goes on one line, or
+the chain decomposes into named bindings:
+
+```corvid
+agent case_every_approval_irreversible_and_short_expiry() -> Bool:
+    a = send_follow_up_email_approval()
+    # ... four more bindings ...
+    all_irreversible = a.irreversible and b.irreversible and c.irreversible and d.irreversible and e.irreversible
+    a_expires = a.expires_in_hours <= 24
+    # ... four more ...
+    return all_irreversible and a_expires and b_expires and c_expires and d_expires and e_expires
+```
+
+The named-intermediate pattern is what the 11 PEA eval cases use.
+It also makes the agent body more debuggable: each intermediate
+can be inspected separately when an assertion fails.
+
+The full per-app maturity work for the remaining four reference
+apps (PKA, Finance, CustomerSupport, CodeMaintenance) will each
+need their own D-LR track. PKA is next per ROADMAP order.
+
 ## 35V2-P38-C-replay-quarantine track closed (2026-05-27) — replay-mode runtime refuses to leak any side effect
 
 `@replayable` durable jobs in Corvid have a runtime promise: no

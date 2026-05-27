@@ -4,6 +4,71 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-27 - Track 35V2-P42-D-LR-app-maturity-PEA closed
+
+Five-commit per-app maturity track for the Personal Executive
+Agent reference app. Brings PEA to the Phase 42 bar (12 of 17 rows
+that apply per-PEA, with 5 deferred to cross-cutting launch-readiness
+slices or post-v1.0 source-syntax sugar).
+
+| Slice | Commit | What landed |
+|---|---|---|
+| D-PEA-1 | `5443cbd` | Operator runbook 29 → 1584 lines, 16 sections, all 8 bar-required sections present |
+| D-PEA-2 | `c52c119` | 10 → 11 real eval cases + 3 promoted fixtures; fixed pre-existing schema-invalid status values in `demo.lineage.jsonl` |
+| D-PEA-3 | `893f417` | 5th approval contract `ExternalCalendarShare` + std-import path fix; new adversarial fixture `ungated_share.cor` refuses with `E0101` |
+| D-PEA-4 | `03b4281` | `deploy/fly.toml` + 6 `deploy/k8s/*.yaml` manifests; 5 typed permissions (`permission_for_*`) per dangerous tool + distinctness check; 11th eval case |
+| D-PEA-5 | (this commit) | Per-app maturity audit doc + dev-log + learnings + ROADMAP tick |
+
+Per-app maturity rows closed: tables (12 ≥ 10), migrations (5 ≥ 5),
+auth depth (sessions + API keys + per-tenant + per-role), connectors
+(5 mock declared ≥ 3), approvals (5 ≥ 5), cron jobs (4 ≥ 3),
+retry-policy jobs (4 ≥ 3 via `executive_run`), adversarial threats
+(6 ≥ 5), operator runbook (1584 ≥ 1500), deploy manifests (3
+categories: Compose + Fly + K8s), typed permission per dangerous
+tool (5/5 distinct), evals (11 cases ≥ 10), promoted fixtures (3 ≥ 3).
+
+Deferred to cross-cutting launch-readiness (out of per-PEA scope):
+`35V2-P42-E-LR-app-deploy-smoke-ci`, `35V2-P42-F-LR-per-app-benchmark-files`,
+`35V2-P42-G-LR-per-app-claim-files`,
+`35V2-P42-H-LR-per-app-ai-helpers`, `33M-beta-feedback`.
+
+Deferred to post-v1.0 source syntax: `policy { ... }` + `batch_with`
+in approval contracts (filed as `35V2-P39-I`).
+
+Cross-cutting lessons recorded in `learnings.md`:
+
+- `corvid check`'s default import resolution is relative to the
+  importing file's directory; a workspace stdlib root rule does
+  not exist. Three backend reference apps had broken `./std/X`
+  imports that the PEA track surfaced and fixed; `audit_log` and
+  `state_app` retain the same bug pending their own maturity
+  tracks.
+- The `approve` keyword requires the label to be the snake_case →
+  CamelCase mapping of the tool name. Intent-bearing contract names
+  ("ExternalCalendarShare") drive the tool name
+  (`external_calendar_share`), not the other way around.
+- Multi-line `and` / `or` chains in agent bodies do not parse —
+  the chain has to fit on one line OR be decomposed into named
+  intermediate bindings. The latter is the cleaner pattern for
+  multi-condition assertions like the 11 eval cases in
+  `hardening_eval.cor`.
+
+Validation across the track (final state):
+- `cargo check --workspace` clean.
+- `corvid check src/main.cor` clean.
+- `corvid check adversarial/ungated_send.cor` → `E0101` (gate fires).
+- `corvid check adversarial/ungated_share.cor` → `E0101` (gate fires).
+- `corvid eval evals/hardening_eval.cor` → `11/11 passed`.
+- `corvid eval promote` ran clean against all 3 traces.
+
+Next ROADMAP slice in order:
+`35V2-P42-D-LR-app-maturity-PKA` — Personal Knowledge Agent. PKA
+sits at a 7-line runbook + 0-2 approvals + 2 placeholder evals +
+same `./std/X` import bug as PEA had pre-D-PEA-3. Expect ~3-5 days
+similar to PEA's ~3 days; PKA is further from the bar.
+
+---
+
 ## 2026-05-27 - Slice 35V2-P38-C-6 — Closes the replay-quarantine track
 
 - Added `crates/corvid-runtime/tests/replay_quarantine_corpus.rs` —
