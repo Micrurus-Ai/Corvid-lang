@@ -1,0 +1,145 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "pea-meeting-prep",
+  "fixture_hash": "sha256:cf07819cd3cd5baf",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "job-meeting-prep",
+    "calendar-read",
+    "packet-assemble"
+  ],
+  "expected_guarantee_ids": [
+    "connector-read",
+    "durable-job",
+    "llm-bounded"
+  ],
+  "expected_effect_ids": [
+    "calendar_read",
+    "executive_llm",
+    "inbox_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:40e677bbb4da>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:2e475d81b5a8>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:504b4a8286eb>",
+    "<redacted:prompt_hash:sha256:8544d10b9af2>"
+  ],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-meeting-prep",
+      "span_id": "job-meeting-prep",
+      "parent_span_id": "",
+      "kind": "job",
+      "name": "meeting_prep_job",
+      "status": "ok",
+      "started_ms": 1700000120000,
+      "ended_ms": 1700000124500,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:a0e7e0856105>",
+      "replay_key": "<redacted:replay:sha256:40e677bbb4da>",
+      "idempotency_key": "<redacted:idempotency:sha256:9da88e5369e7>",
+      "guarantee_id": "durable-job",
+      "effect_ids": [
+        "inbox_read",
+        "calendar_read",
+        "executive_llm"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.55,
+      "tokens_in": 1024,
+      "tokens_out": 320,
+      "confidence": 0.89,
+      "latency_ms": 4500,
+      "model_id": "mock-executive",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:2e475d81b5a8>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:8544d10b9af2>",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c870d6d987cb>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:40973fcf1ebf>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-meeting-prep",
+      "span_id": "calendar-read",
+      "parent_span_id": "job-meeting-prep",
+      "kind": "tool",
+      "name": "calendar_read",
+      "status": "ok",
+      "started_ms": 1700000120100,
+      "ended_ms": 1700000120400,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:a0e7e0856105>",
+      "replay_key": "<redacted:replay:sha256:40e677bbb4da>",
+      "idempotency_key": "<redacted:idempotency:sha256:5a2bc1a004e9>",
+      "guarantee_id": "connector-read",
+      "effect_ids": [
+        "calendar_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 300,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:55a374826be8>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:dd9a7babbcb5>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-meeting-prep",
+      "span_id": "packet-assemble",
+      "parent_span_id": "job-meeting-prep",
+      "kind": "prompt",
+      "name": "executive_llm",
+      "status": "ok",
+      "started_ms": 1700000120500,
+      "ended_ms": 1700000124000,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:a0e7e0856105>",
+      "replay_key": "<redacted:replay:sha256:40e677bbb4da>",
+      "idempotency_key": "<redacted:idempotency:sha256:91a17c0d456e>",
+      "guarantee_id": "llm-bounded",
+      "effect_ids": [
+        "executive_llm"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.55,
+      "tokens_in": 1024,
+      "tokens_out": 320,
+      "confidence": 0.89,
+      "latency_ms": 3500,
+      "model_id": "mock-executive",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:2e475d81b5a8>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:504b4a8286eb>",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:ddfdbecbe850>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:6abf26976124>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

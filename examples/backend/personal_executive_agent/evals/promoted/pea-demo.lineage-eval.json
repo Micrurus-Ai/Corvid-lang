@@ -1,0 +1,153 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "pea-demo",
+  "fixture_hash": "sha256:6f7647d14ed8a940",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "route-triage",
+    "job-follow-up",
+    "approval-send"
+  ],
+  "expected_guarantee_ids": [
+    "approval-free-read",
+    "durable-job",
+    "human-approval"
+  ],
+  "expected_effect_ids": [
+    "executive_llm",
+    "inbox_read",
+    "send_email",
+    "task_write"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:5191eb8cb0df>",
+    "<redacted:replay:sha256:b631c9812541>",
+    "<redacted:replay:sha256:efa52cd5ae9f>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:2e475d81b5a8>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:927917dea2ab>",
+    "<redacted:prompt_hash:sha256:b6f49a898edb>"
+  ],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-demo",
+      "span_id": "route-triage",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "GET /inbox/triage/mock",
+      "status": "ok",
+      "started_ms": 1700000000000,
+      "ended_ms": 1700000000025,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:8a7c91a57815>",
+      "replay_key": "<redacted:replay:sha256:5191eb8cb0df>",
+      "idempotency_key": "<redacted:idempotency:sha256:fec21b1bb67c>",
+      "guarantee_id": "approval-free-read",
+      "effect_ids": [
+        "inbox_read",
+        "executive_llm",
+        "task_write"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.39,
+      "tokens_in": 512,
+      "tokens_out": 128,
+      "confidence": 0.91,
+      "latency_ms": 25,
+      "model_id": "mock-executive",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:2e475d81b5a8>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:927917dea2ab>",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:91b2cab731e5>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:47f261426010>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-demo",
+      "span_id": "job-follow-up",
+      "parent_span_id": "route-triage",
+      "kind": "job",
+      "name": "follow_up_job",
+      "status": "pending_review",
+      "started_ms": 1700000000100,
+      "ended_ms": 1700000000140,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:afc780af6226>",
+      "replay_key": "<redacted:replay:sha256:b631c9812541>",
+      "idempotency_key": "<redacted:idempotency:sha256:0e53256185c0>",
+      "guarantee_id": "durable-job",
+      "effect_ids": [
+        "inbox_read",
+        "executive_llm",
+        "send_email",
+        "task_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:ffaf274ff98a>",
+      "data_classes": [
+        "private",
+        "external"
+      ],
+      "cost_usd": 0.38,
+      "tokens_in": 640,
+      "tokens_out": 180,
+      "confidence": 0.88,
+      "latency_ms": 40,
+      "model_id": "mock-executive",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:2e475d81b5a8>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:b6f49a898edb>",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:cf15ecaf7f21>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:c582e712eef5>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "pea-demo",
+      "span_id": "approval-send",
+      "parent_span_id": "job-follow-up",
+      "kind": "approval",
+      "name": "SendFollowUpEmail",
+      "status": "pending_review",
+      "started_ms": 1700000000150,
+      "ended_ms": 1700000000155,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:1ef1fbcd1fee>",
+      "replay_key": "<redacted:replay:sha256:efa52cd5ae9f>",
+      "idempotency_key": "<redacted:idempotency:sha256:ffaf274ff98a>",
+      "guarantee_id": "human-approval",
+      "effect_ids": [
+        "send_email"
+      ],
+      "approval_id": "<redacted:approval:sha256:ffaf274ff98a>",
+      "data_classes": [
+        "private",
+        "external"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 5,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c0837cdfe936>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:f76b758db575>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}
