@@ -2,6 +2,7 @@ import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryP
 import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
 import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
 import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+import "../../../../std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
 
 effect files_read:
     cost: $0.01
@@ -22,6 +23,31 @@ effect knowledge_llm:
     cost: $0.20
     trust: bounded
     data: private
+
+effect chat_share:
+    cost: $0.01
+    trust: human_required
+    data: external
+
+effect email_share:
+    cost: $0.02
+    trust: human_required
+    data: external
+
+effect kb_publish:
+    cost: $0.02
+    trust: human_required
+    data: external
+
+effect corpus_export:
+    cost: $0.05
+    trust: human_required
+    data: external
+
+effect cross_tenant_share:
+    cost: $0.03
+    trust: human_required
+    data: external
 
 public type KnowledgeConfig:
     service: String
@@ -192,6 +218,97 @@ public type KnowledgeSchemaManifest:
     approval_count: Int
     default_mode: String
 
+public type ShareAnswerToChatRequest:
+    tenant_id: String
+    actor_id: String
+    answer_fingerprint: String
+    channel_id: String
+    approval_id: String
+    trace_id: String
+
+public type ShareAnswerToChatReceipt:
+    message_id: String
+    tenant_id: String
+    channel_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type ShareAnswerViaEmailRequest:
+    tenant_id: String
+    actor_id: String
+    answer_fingerprint: String
+    recipient: String
+    approval_id: String
+    trace_id: String
+
+public type ShareAnswerViaEmailReceipt:
+    message_id: String
+    tenant_id: String
+    recipient: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type PublishAuthoritativeAnswerRequest:
+    tenant_id: String
+    actor_id: String
+    answer_fingerprint: String
+    knowledge_base_id: String
+    approval_id: String
+    trace_id: String
+
+public type PublishAuthoritativeAnswerReceipt:
+    publication_id: String
+    tenant_id: String
+    knowledge_base_id: String
+    answer_fingerprint: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type ExportTenantCorpusRequest:
+    tenant_id: String
+    actor_id: String
+    export_destination: String
+    redaction_policy_hash: String
+    approval_id: String
+    trace_id: String
+
+public type ExportTenantCorpusReceipt:
+    export_id: String
+    tenant_id: String
+    export_destination: String
+    document_count: Int
+    chunk_count: Int
+    redaction_policy_hash: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type CrossTenantIndexShareRequest:
+    source_tenant_id: String
+    target_tenant_id: String
+    actor_id: String
+    index_id: String
+    approval_id: String
+    trace_id: String
+
+public type CrossTenantIndexShareReceipt:
+    share_id: String
+    source_tenant_id: String
+    target_tenant_id: String
+    index_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+tool share_answer_to_chat(req: ShareAnswerToChatRequest) -> ShareAnswerToChatReceipt dangerous uses chat_share
+tool share_answer_via_email(req: ShareAnswerViaEmailRequest) -> ShareAnswerViaEmailReceipt dangerous uses email_share
+tool publish_authoritative_answer(req: PublishAuthoritativeAnswerRequest) -> PublishAuthoritativeAnswerReceipt dangerous uses kb_publish
+tool export_tenant_corpus(req: ExportTenantCorpusRequest) -> ExportTenantCorpusReceipt dangerous uses corpus_export
+tool cross_tenant_index_share(req: CrossTenantIndexShareRequest) -> CrossTenantIndexShareReceipt dangerous uses cross_tenant_share
+
 public @replayable
 agent knowledge_config() -> KnowledgeConfig:
     return KnowledgeConfig("personal_knowledge_agent", "mock", "sqlite+local_index", true, "target/traces")
@@ -340,6 +457,60 @@ agent knowledge_job_contract_valid(run: KnowledgeJobRun) -> Bool:
     return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
 
 public @replayable
+agent share_answer_to_chat_approval_contract(tenant_id: String, channel_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("share-chat:" + channel_id, "v1", "ShareAnswerToChat", "chat_channel", channel_id, tenant_id, "Reviewer", 0.05, "external", true, 4102444800000, "approval:share_chat:" + trace_id)
+
+public @replayable
+agent share_answer_via_email_approval_contract(tenant_id: String, recipient: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("share-email:" + recipient, "v1", "ShareAnswerViaEmail", "email_recipient", recipient, tenant_id, "Reviewer", 0.05, "external", true, 4102444800000, "approval:share_email:" + trace_id)
+
+public @replayable
+agent publish_authoritative_answer_approval_contract(tenant_id: String, knowledge_base_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("publish-answer:" + knowledge_base_id, "v1", "PublishAuthoritativeAnswer", "knowledge_base", knowledge_base_id, tenant_id, "Reviewer", 0.10, "external", true, 4102444800000, "approval:publish_answer:" + trace_id)
+
+public @replayable
+agent export_tenant_corpus_approval_contract(tenant_id: String, export_destination: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("export-corpus:" + export_destination, "v1", "ExportTenantCorpus", "export_target", export_destination, tenant_id, "Admin", 0.25, "external", true, 4102444800000, "approval:export_corpus:" + trace_id)
+
+public @replayable
+agent cross_tenant_index_share_approval_contract(source_tenant_id: String, target_tenant_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("cross-tenant-share:" + target_tenant_id, "v1", "CrossTenantIndexShare", "tenant_index_share", target_tenant_id, source_tenant_id, "Admin", 0.25, "external", true, 4102444800000, "approval:cross_tenant_share:" + trace_id)
+
+agent execute_approved_share_answer_to_chat(req: ShareAnswerToChatRequest) -> ShareAnswerToChatReceipt uses chat_share:
+    approve ShareAnswerToChat(req)
+    return share_answer_to_chat(req)
+
+agent execute_approved_share_answer_via_email(req: ShareAnswerViaEmailRequest) -> ShareAnswerViaEmailReceipt uses email_share:
+    approve ShareAnswerViaEmail(req)
+    return share_answer_via_email(req)
+
+agent execute_approved_publish_authoritative_answer(req: PublishAuthoritativeAnswerRequest) -> PublishAuthoritativeAnswerReceipt uses kb_publish:
+    approve PublishAuthoritativeAnswer(req)
+    return publish_authoritative_answer(req)
+
+agent execute_approved_export_tenant_corpus(req: ExportTenantCorpusRequest) -> ExportTenantCorpusReceipt uses corpus_export:
+    approve ExportTenantCorpus(req)
+    return export_tenant_corpus(req)
+
+agent execute_approved_cross_tenant_index_share(req: CrossTenantIndexShareRequest) -> CrossTenantIndexShareReceipt uses cross_tenant_share:
+    approve CrossTenantIndexShare(req)
+    return cross_tenant_index_share(req)
+
+public @replayable
+agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
+    a = share_answer_to_chat_approval_contract(tenant_id, "channel-1", trace_id)
+    b = share_answer_via_email_approval_contract(tenant_id, "team@example.com", trace_id)
+    c = publish_authoritative_answer_approval_contract(tenant_id, "kb-1", trace_id)
+    d = export_tenant_corpus_approval_contract(tenant_id, "s3://backups/pka-export", trace_id)
+    e = cross_tenant_index_share_approval_contract(tenant_id, "tenant-2", trace_id)
+    chat_ok = a.action == "ShareAnswerToChat" and a.required_role == "Reviewer" and a.data_class == "external"
+    email_ok = b.action == "ShareAnswerViaEmail" and b.required_role == "Reviewer" and b.data_class == "external"
+    publish_ok = c.action == "PublishAuthoritativeAnswer" and c.required_role == "Reviewer" and c.data_class == "external"
+    export_ok = d.action == "ExportTenantCorpus" and d.required_role == "Admin" and d.data_class == "external"
+    cross_ok = e.action == "CrossTenantIndexShare" and e.required_role == "Admin" and e.data_class == "external"
+    return chat_ok and email_ok and publish_ok and export_ok and cross_ok
+
+public @replayable
 agent knowledge_schema_manifest() -> KnowledgeSchemaManifest:
     return KnowledgeSchemaManifest("personal_knowledge_agent", 5, 18, 3, 3, 5, "mock")
 
@@ -370,6 +541,16 @@ server personal_knowledge_agent_api:
         return weekly_feedback_batch_job("tenant-1", "business_week")
     route GET "/jobs/daily-provenance-audit/mock" -> json KnowledgeJobRun uses files_read:
         return daily_provenance_audit_job("tenant-1", "2026-05-27")
+    route POST "/actions/share/chat" body ShareAnswerToChatRequest -> json ShareAnswerToChatReceipt uses chat_share:
+        return execute_approved_share_answer_to_chat(body)
+    route POST "/actions/share/email" body ShareAnswerViaEmailRequest -> json ShareAnswerViaEmailReceipt uses email_share:
+        return execute_approved_share_answer_via_email(body)
+    route POST "/actions/publish/authoritative" body PublishAuthoritativeAnswerRequest -> json PublishAuthoritativeAnswerReceipt uses kb_publish:
+        return execute_approved_publish_authoritative_answer(body)
+    route POST "/actions/export/corpus" body ExportTenantCorpusRequest -> json ExportTenantCorpusReceipt uses corpus_export:
+        return execute_approved_export_tenant_corpus(body)
+    route POST "/actions/share/cross-tenant" body CrossTenantIndexShareRequest -> json CrossTenantIndexShareReceipt uses cross_tenant_share:
+        return execute_approved_cross_tenant_index_share(body)
 
 schedule "0 2 * * *" zone "America/New_York" -> nightly_reindex_job("tenant-1", "notes") uses files_read, local_embed, index_write
 schedule "0 6 * * 1" zone "America/New_York" -> weekly_feedback_batch_job("tenant-1", "business_week") uses knowledge_llm
@@ -384,4 +565,5 @@ agent main() -> Bool:
     reindex = nightly_reindex_job("tenant-1", "notes")
     fb_batch = weekly_feedback_batch_job("tenant-1", "business_week")
     audit = daily_provenance_audit_job("tenant-1", "business_day")
-    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback) and auth.authenticated and service_auth.authenticated and knowledge_job_contract_valid(reindex) and knowledge_job_contract_valid(fb_batch) and knowledge_job_contract_valid(audit)
+    approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
+    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback) and auth.authenticated and service_auth.authenticated and knowledge_job_contract_valid(reindex) and knowledge_job_contract_valid(fb_batch) and knowledge_job_contract_valid(audit) and approvals_ok

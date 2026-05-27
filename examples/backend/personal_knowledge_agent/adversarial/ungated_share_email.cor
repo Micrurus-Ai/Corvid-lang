@@ -1,0 +1,9 @@
+# Adversarial: a `share_answer_via_email` call without a prior
+# `approve ShareAnswerViaEmail(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-PKA-2.
+# Expected: `corvid check` exits with E0101.
+
+tool share_answer_via_email(req: String) -> String dangerous
+
+agent bad() -> String:
+    return share_answer_via_email("share without approval")
