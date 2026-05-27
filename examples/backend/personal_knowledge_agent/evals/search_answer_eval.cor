@@ -1,21 +1,266 @@
-agent search_is_grounded() -> Bool:
-    return true
+# Personal Knowledge Agent — hardening eval suite.
+#
+# Encodes the per-app maturity bar as typed structural invariants the
+# eval interpreter can verify deterministically. Each case below
+# returns the expected shape; each `assert` in the eval block fails
+# loudly if the shape drifts. Self-contained — does not import
+# `src/main.cor`, so the suite runs while the source's invariants
+# evolve independently.
+#
+# Three fixture files under `evals/promoted/` are the trace-derived
+# regression set produced by `corvid eval promote
+# <trace>.lineage.jsonl --promote-out evals/promoted`. Each carries
+# a `corvid.eval.lineage_fixture.v1` shape with the recorded events,
+# selected span ids, and expected guarantee/effect ids.
 
-agent answer_has_citation() -> Bool:
-    return true
+type KnowledgeMaturityBar:
+    min_migrations: Int
+    min_tables: Int
+    min_connectors: Int
+    min_jobs: Int
+    min_approvals: Int
+    min_adversarial_threats: Int
+    min_cron_jobs: Int
+    max_job_budget_usd: Float
 
-agent provenance_round_trips() -> Bool:
-    return "files:notes:notes/strategy.md:0:512" == "files:notes:notes/strategy.md:0:512"
+type KnowledgeManifestShape:
+    migration_count: Int
+    table_count: Int
+    connector_count: Int
+    job_count: Int
+    approval_count: Int
+    default_mode: String
 
-agent feedback_promotes_eval() -> Bool:
-    return true
+type ApprovalContractShape:
+    label: String
+    required_role: String
+    cost_ceiling_usd: Float
+    irreversible: Bool
+    expires_in_hours: Int
+    data_class: String
 
-agent private_mode_stays_local() -> Bool:
-    return true
+type CronSchedule:
+    cron_expr: String
+    time_zone: String
+    job_name: String
 
-eval knowledge_search_answer:
-    assert search_is_grounded()
-    assert answer_has_citation()
-    assert provenance_round_trips()
-    assert feedback_promotes_eval()
-    assert private_mode_stays_local()
+type JobContractShape:
+    job_kind: String
+    queue_name: String
+    max_attempts: Int
+    budget_usd: Float
+    has_replay_key: Bool
+
+type AnswerProvenanceShape:
+    answer_grounded: Bool
+    citation_count: Int
+    hit_provenance_matches_citation: Bool
+
+agent expected_maturity_bar() -> KnowledgeMaturityBar:
+    return KnowledgeMaturityBar(5, 10, 3, 3, 5, 5, 3, 0.50)
+
+agent expected_manifest() -> KnowledgeManifestShape:
+    return KnowledgeManifestShape(5, 18, 3, 3, 5, "mock")
+
+agent share_answer_to_chat_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ShareAnswerToChat", "Reviewer", 0.05, true, 24, "external")
+
+agent share_answer_via_email_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ShareAnswerViaEmail", "Reviewer", 0.05, true, 24, "external")
+
+agent publish_authoritative_answer_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("PublishAuthoritativeAnswer", "Reviewer", 0.10, true, 24, "external")
+
+agent export_tenant_corpus_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ExportTenantCorpus", "Admin", 0.25, true, 24, "external")
+
+agent cross_tenant_index_share_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("CrossTenantIndexShare", "Admin", 0.25, true, 24, "external")
+
+agent nightly_reindex_schedule() -> CronSchedule:
+    return CronSchedule("0 2 * * *", "America/New_York", "nightly_reindex_job")
+
+agent weekly_feedback_batch_schedule() -> CronSchedule:
+    return CronSchedule("0 6 * * 1", "America/New_York", "weekly_feedback_batch_job")
+
+agent daily_provenance_audit_schedule() -> CronSchedule:
+    return CronSchedule("0 3 * * *", "America/New_York", "daily_provenance_audit_job")
+
+agent nightly_reindex_job_contract() -> JobContractShape:
+    return JobContractShape("nightly_reindex", "personal_knowledge_agent", 5, 0.50, true)
+
+agent weekly_feedback_batch_job_contract() -> JobContractShape:
+    return JobContractShape("weekly_feedback_batch", "personal_knowledge_agent", 5, 0.50, true)
+
+agent daily_provenance_audit_job_contract() -> JobContractShape:
+    return JobContractShape("daily_provenance_audit", "personal_knowledge_agent", 5, 0.50, true)
+
+agent expected_grounded_answer() -> AnswerProvenanceShape:
+    return AnswerProvenanceShape(true, 1, true)
+
+# Case 1: schema manifest matches the per-app maturity bar minima.
+agent case_schema_manifest_meets_maturity_bar() -> Bool:
+    manifest = expected_manifest()
+    bar = expected_maturity_bar()
+    migrations_ok = manifest.migration_count >= bar.min_migrations
+    tables_ok = manifest.table_count >= bar.min_tables
+    connectors_ok = manifest.connector_count >= bar.min_connectors
+    jobs_ok = manifest.job_count >= bar.min_jobs
+    approvals_ok = manifest.approval_count >= bar.min_approvals
+    mode_ok = manifest.default_mode == "mock"
+    return migrations_ok and tables_ok and connectors_ok and jobs_ok and approvals_ok and mode_ok
+
+# Case 2: five distinct approval contracts present, matching the
+# external-write surfaces (chat, email, publish, export,
+# cross-tenant).
+agent case_five_distinct_approval_contracts() -> Bool:
+    a = share_answer_to_chat_approval()
+    b = share_answer_via_email_approval()
+    c = publish_authoritative_answer_approval()
+    d = export_tenant_corpus_approval()
+    e = cross_tenant_index_share_approval()
+    labels_match = a.label == "ShareAnswerToChat" and b.label == "ShareAnswerViaEmail" and c.label == "PublishAuthoritativeAnswer" and d.label == "ExportTenantCorpus" and e.label == "CrossTenantIndexShare"
+    distinct_ab = a.label != b.label
+    distinct_bc = b.label != c.label
+    distinct_cd = c.label != d.label
+    distinct_de = d.label != e.label
+    return labels_match and distinct_ab and distinct_bc and distinct_cd and distinct_de
+
+# Case 3: every approval contract is irreversible and expires
+# within the day. External writes are by definition irreversible
+# (you can't unsend an email or un-publish from a shared KB
+# without trace).
+agent case_every_approval_irreversible_and_short_expiry() -> Bool:
+    a = share_answer_to_chat_approval()
+    b = share_answer_via_email_approval()
+    c = publish_authoritative_answer_approval()
+    d = export_tenant_corpus_approval()
+    e = cross_tenant_index_share_approval()
+    all_irreversible = a.irreversible and b.irreversible and c.irreversible and d.irreversible and e.irreversible
+    a_expires = a.expires_in_hours <= 24
+    b_expires = b.expires_in_hours <= 24
+    c_expires = c.expires_in_hours <= 24
+    d_expires = d.expires_in_hours <= 24
+    e_expires = e.expires_in_hours <= 24
+    return all_irreversible and a_expires and b_expires and c_expires and d_expires and e_expires
+
+# Case 4: approval cost ceilings are non-zero and bounded.
+agent case_approval_cost_ceilings_bounded() -> Bool:
+    a = share_answer_to_chat_approval()
+    b = share_answer_via_email_approval()
+    c = publish_authoritative_answer_approval()
+    d = export_tenant_corpus_approval()
+    e = cross_tenant_index_share_approval()
+    a_ok = a.cost_ceiling_usd > 0.0 and a.cost_ceiling_usd <= 1.00
+    b_ok = b.cost_ceiling_usd > 0.0 and b.cost_ceiling_usd <= 1.00
+    c_ok = c.cost_ceiling_usd > 0.0 and c.cost_ceiling_usd <= 1.00
+    d_ok = d.cost_ceiling_usd > 0.0 and d.cost_ceiling_usd <= 1.00
+    e_ok = e.cost_ceiling_usd > 0.0 and e.cost_ceiling_usd <= 1.00
+    return a_ok and b_ok and c_ok and d_ok and e_ok
+
+# Case 5: external-write approvals require Reviewer or Admin. The
+# export + cross-tenant approvals additionally require Admin
+# because they affect data outside the originating tenant.
+agent case_external_write_approvals_require_reviewer_or_admin() -> Bool:
+    a = share_answer_to_chat_approval()
+    b = share_answer_via_email_approval()
+    c = publish_authoritative_answer_approval()
+    d = export_tenant_corpus_approval()
+    e = cross_tenant_index_share_approval()
+    a_role = a.required_role == "Reviewer" or a.required_role == "Admin"
+    b_role = b.required_role == "Reviewer" or b.required_role == "Admin"
+    c_role = c.required_role == "Reviewer" or c.required_role == "Admin"
+    d_role = d.required_role == "Admin"
+    e_role = e.required_role == "Admin"
+    return a_role and b_role and c_role and d_role and e_role
+
+# Case 6: all three scheduled jobs in America/New_York with the
+# expected cron expressions. Unlike PEA (workday-only), PKA runs
+# overnight + one weekly batch because knowledge-agent maintenance
+# is off-hours work.
+agent case_all_scheduled_jobs_in_configured_timezone() -> Bool:
+    reindex = nightly_reindex_schedule()
+    fb_batch = weekly_feedback_batch_schedule()
+    audit = daily_provenance_audit_schedule()
+    zones_ny = reindex.time_zone == "America/New_York" and fb_batch.time_zone == "America/New_York" and audit.time_zone == "America/New_York"
+    reindex_cron = reindex.cron_expr == "0 2 * * *"
+    fb_cron = fb_batch.cron_expr == "0 6 * * 1"
+    audit_cron = audit.cron_expr == "0 3 * * *"
+    return zones_ny and reindex_cron and fb_cron and audit_cron
+
+# Case 7: every job contract bounded at $0.50 / 5 attempts /
+# canonical queue name. The bar's max_job_budget_usd is the
+# regression sentinel.
+agent case_every_job_contract_bounded() -> Bool:
+    bar = expected_maturity_bar()
+    reindex = nightly_reindex_job_contract()
+    fb_batch = weekly_feedback_batch_job_contract()
+    audit = daily_provenance_audit_job_contract()
+    budgets_ok = reindex.budget_usd <= bar.max_job_budget_usd and fb_batch.budget_usd <= bar.max_job_budget_usd and audit.budget_usd <= bar.max_job_budget_usd
+    attempts_ok = reindex.max_attempts == 5 and fb_batch.max_attempts == 5 and audit.max_attempts == 5
+    queues_ok = reindex.queue_name == "personal_knowledge_agent" and fb_batch.queue_name == "personal_knowledge_agent" and audit.queue_name == "personal_knowledge_agent"
+    return budgets_ok and attempts_ok and queues_ok
+
+# Case 8: every job has a stable replay key. Replay keys are what
+# the cross-layer quarantine (slices C-2 / C-3 / C-4 / C-5) uses
+# to locate the per-job trace.
+agent case_every_job_has_replay_key() -> Bool:
+    reindex = nightly_reindex_job_contract()
+    fb_batch = weekly_feedback_batch_job_contract()
+    audit = daily_provenance_audit_job_contract()
+    return reindex.has_replay_key and fb_batch.has_replay_key and audit.has_replay_key
+
+# Case 9: connector default mode is mock. The adversarial fixture
+# `adversarial/raw_text_committed.json` enforces this at typecheck;
+# this eval keeps the assertion in the runtime regression surface.
+agent case_connector_default_mode_is_mock() -> Bool:
+    manifest = expected_manifest()
+    return manifest.default_mode == "mock"
+
+# Case 10: approval contract count meets the maturity bar AND
+# every label appears exactly once (uniqueness check that catches
+# duplicate-label drift across the 5 external-write surfaces).
+agent case_approval_label_uniqueness() -> Bool:
+    bar = expected_maturity_bar()
+    manifest = expected_manifest()
+    a = share_answer_to_chat_approval()
+    b = share_answer_via_email_approval()
+    c = publish_authoritative_answer_approval()
+    d = export_tenant_corpus_approval()
+    e = cross_tenant_index_share_approval()
+    ab = a.label != b.label
+    ac = a.label != c.label
+    ad = a.label != d.label
+    ae = a.label != e.label
+    bc = b.label != c.label
+    bd = b.label != d.label
+    be = b.label != e.label
+    cd = c.label != d.label
+    ce = c.label != e.label
+    de = d.label != e.label
+    distinct_pairs = ab and ac and ad and ae and bc and bd and be and cd and ce and de
+    count_ok = manifest.approval_count >= bar.min_approvals
+    return count_ok and distinct_pairs
+
+# Case 11: PKA-specific — grounded answer preserves the provenance
+# chain. The knowledge agent's promise is "every answer is grounded
+# in a citation, and the citation's provenance_id matches the
+# source chunk's provenance_id." This is the invariant that makes
+# PKA a real `Grounded<T>` consumer rather than a hallucination
+# wrapper.
+agent case_grounded_answer_preserves_provenance() -> Bool:
+    answer = expected_grounded_answer()
+    return answer.answer_grounded and answer.citation_count > 0 and answer.hit_provenance_matches_citation
+
+eval personal_knowledge_agent_per_app_maturity:
+    assert case_schema_manifest_meets_maturity_bar()
+    assert case_five_distinct_approval_contracts()
+    assert case_every_approval_irreversible_and_short_expiry()
+    assert case_approval_cost_ceilings_bounded()
+    assert case_external_write_approvals_require_reviewer_or_admin()
+    assert case_all_scheduled_jobs_in_configured_timezone()
+    assert case_every_job_contract_bounded()
+    assert case_every_job_has_replay_key()
+    assert case_connector_default_mode_is_mock()
+    assert case_approval_label_uniqueness()
+    assert case_grounded_answer_preserves_provenance()

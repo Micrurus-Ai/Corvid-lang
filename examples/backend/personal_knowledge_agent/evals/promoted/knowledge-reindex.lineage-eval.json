@@ -1,0 +1,145 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "knowledge-reindex",
+  "fixture_hash": "sha256:09a8d4a6a27c2cc6",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "job-reindex",
+    "files-scan",
+    "embed-delta"
+  ],
+  "expected_guarantee_ids": [
+    "connector-read",
+    "durable-job",
+    "local-embedding"
+  ],
+  "expected_effect_ids": [
+    "files_read",
+    "index_write",
+    "local_embed"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:22e1d204ae31>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:f26f6c40b227>",
+    "<redacted:model_fingerprint:sha256:fdd300764374>"
+  ],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [
+    "<redacted:retrieval_index_hash:sha256:bd25b392571f>"
+  ],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-reindex",
+      "span_id": "job-reindex",
+      "parent_span_id": "",
+      "kind": "job",
+      "name": "nightly_reindex_job",
+      "status": "ok",
+      "started_ms": 1700000060000,
+      "ended_ms": 1700000064500,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:51a30789985a>",
+      "replay_key": "<redacted:replay:sha256:22e1d204ae31>",
+      "idempotency_key": "<redacted:idempotency:sha256:be1ec2ee101c>",
+      "guarantee_id": "durable-job",
+      "effect_ids": [
+        "files_read",
+        "local_embed",
+        "index_write"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.34,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.95,
+      "latency_ms": 4500,
+      "model_id": "local-bge-small-en",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:f26f6c40b227>",
+      "prompt_hash": "",
+      "retrieval_index_hash": "<redacted:retrieval_index_hash:sha256:bd25b392571f>",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:4ed733887be0>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:abd9ac835e6f>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-reindex",
+      "span_id": "files-scan",
+      "parent_span_id": "job-reindex",
+      "kind": "tool",
+      "name": "files_read",
+      "status": "ok",
+      "started_ms": 1700000060100,
+      "ended_ms": 1700000061800,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:51a30789985a>",
+      "replay_key": "<redacted:replay:sha256:22e1d204ae31>",
+      "idempotency_key": "<redacted:idempotency:sha256:43a29a1b378b>",
+      "guarantee_id": "connector-read",
+      "effect_ids": [
+        "files_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 1700,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:f6446d1e230f>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:8a7d54dd4251>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-reindex",
+      "span_id": "embed-delta",
+      "parent_span_id": "job-reindex",
+      "kind": "tool",
+      "name": "local_embed",
+      "status": "ok",
+      "started_ms": 1700000061900,
+      "ended_ms": 1700000064300,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:51a30789985a>",
+      "replay_key": "<redacted:replay:sha256:22e1d204ae31>",
+      "idempotency_key": "<redacted:idempotency:sha256:178d0debdb16>",
+      "guarantee_id": "local-embedding",
+      "effect_ids": [
+        "local_embed"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.34,
+      "tokens_in": 2048,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 2400,
+      "model_id": "bge-small-en",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:fdd300764374>",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:8a7d54dd4251>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:152ee60a2d90>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

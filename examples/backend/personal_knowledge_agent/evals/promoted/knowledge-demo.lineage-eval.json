@@ -1,0 +1,109 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "knowledge-demo",
+  "fixture_hash": "sha256:4bb07b0a73335a9e",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 2,
+  "selected_span_ids": [
+    "search",
+    "answer"
+  ],
+  "expected_guarantee_ids": [
+    "grounded-search",
+    "provenance-answer"
+  ],
+  "expected_effect_ids": [
+    "files_read",
+    "local_embed"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:54350a9876f3>",
+    "<redacted:replay:sha256:f7a862fb8ad4>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:2ce562f6b300>",
+    "<redacted:model_fingerprint:sha256:f26f6c40b227>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:6e51146fce18>"
+  ],
+  "retrieval_index_hashes": [
+    "<redacted:retrieval_index_hash:sha256:3376bb79c250>"
+  ],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-demo",
+      "span_id": "search",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "GET /search/mock",
+      "status": "ok",
+      "started_ms": 1700000000000,
+      "ended_ms": 1700000000018,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:1ade7a1c912f>",
+      "replay_key": "<redacted:replay:sha256:54350a9876f3>",
+      "idempotency_key": "<redacted:idempotency:sha256:54350a9876f3>",
+      "guarantee_id": "grounded-search",
+      "effect_ids": [
+        "files_read",
+        "local_embed"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.03,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.93,
+      "latency_ms": 18,
+      "model_id": "local-bge-small-en",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:f26f6c40b227>",
+      "prompt_hash": "",
+      "retrieval_index_hash": "<redacted:retrieval_index_hash:sha256:3376bb79c250>",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c637e5bacb79>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:1bf6ba8e1104>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-demo",
+      "span_id": "answer",
+      "parent_span_id": "search",
+      "kind": "route",
+      "name": "GET /answer/mock",
+      "status": "ok",
+      "started_ms": 1700000000020,
+      "ended_ms": 1700000000044,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:3cb10ff8e306>",
+      "replay_key": "<redacted:replay:sha256:f7a862fb8ad4>",
+      "idempotency_key": "<redacted:idempotency:sha256:f7a862fb8ad4>",
+      "guarantee_id": "provenance-answer",
+      "effect_ids": [
+        "files_read",
+        "local_embed"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "private"
+      ],
+      "cost_usd": 0.03,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.93,
+      "latency_ms": 24,
+      "model_id": "local-answer",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:2ce562f6b300>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:6e51146fce18>",
+      "retrieval_index_hash": "<redacted:retrieval_index_hash:sha256:3376bb79c250>",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c637e5bacb79>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:51717568c5bc>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "knowledge-cross-share",
+  "fixture_hash": "sha256:af01e6639ee6a325",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "route-share",
+    "approval-cross",
+    "audit-cross"
+  ],
+  "expected_guarantee_ids": [
+    "approval-pending",
+    "audit-event",
+    "human-approval"
+  ],
+  "expected_effect_ids": [
+    "cross_tenant_share"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:24a34acfd3d6>",
+    "<redacted:replay:sha256:7325534d77e8>",
+    "<redacted:replay:sha256:fe69c051e3db>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-cross-share",
+      "span_id": "route-share",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "POST /actions/share/cross-tenant",
+      "status": "pending_review",
+      "started_ms": 1700000120000,
+      "ended_ms": 1700000120030,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:7651f130142c>",
+      "replay_key": "<redacted:replay:sha256:7325534d77e8>",
+      "idempotency_key": "<redacted:idempotency:sha256:4a2e08c80172>",
+      "guarantee_id": "approval-pending",
+      "effect_ids": [
+        "cross_tenant_share"
+      ],
+      "approval_id": "<redacted:approval:sha256:17bd4f901143>",
+      "data_classes": [
+        "external"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 30,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:795fd8399649>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-cross-share",
+      "span_id": "approval-cross",
+      "parent_span_id": "route-share",
+      "kind": "approval",
+      "name": "CrossTenantIndexShare",
+      "status": "pending_review",
+      "started_ms": 1700000120040,
+      "ended_ms": 1700000120045,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:7651f130142c>",
+      "replay_key": "<redacted:replay:sha256:24a34acfd3d6>",
+      "idempotency_key": "<redacted:idempotency:sha256:17bd4f901143>",
+      "guarantee_id": "human-approval",
+      "effect_ids": [
+        "cross_tenant_share"
+      ],
+      "approval_id": "<redacted:approval:sha256:17bd4f901143>",
+      "data_classes": [
+        "external"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 5,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c0837cdfe936>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "knowledge-cross-share",
+      "span_id": "audit-cross",
+      "parent_span_id": "approval-cross",
+      "kind": "agent",
+      "name": "approval_audit",
+      "status": "ok",
+      "started_ms": 1700000120100,
+      "ended_ms": 1700000120110,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:bbc5e661e106>",
+      "request_id": "<redacted:request:sha256:7651f130142c>",
+      "replay_key": "<redacted:replay:sha256:fe69c051e3db>",
+      "idempotency_key": "<redacted:idempotency:sha256:d9077cb1f787>",
+      "guarantee_id": "audit-event",
+      "effect_ids": [],
+      "approval_id": "<redacted:approval:sha256:17bd4f901143>",
+      "data_classes": [
+        "external"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 10,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:b288f3397621>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:e161abc0e9ce>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}
