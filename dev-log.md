@@ -4,6 +4,65 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-27 - Slice 35V2-P38-C-4 — LlmRegistry quarantine wrap
+
+- Added `RuntimeError::QuarantineViolation { surface, detail }` to
+  `corvid-runtime-core/src/errors.rs`. Distinct from
+  `ReplayDivergence` (substitution-mismatch case) so tests can tell
+  the bypass-attempt case apart from the existing
+  recorded-event-mismatch case.
+- Added `QuarantinedLlmAdapter` (`crates/corvid-runtime/src/llm/quarantine.rs`)
+  that implements `LlmAdapter` by wrapping an inner adapter. `name()`
+  and `handles(model)` delegate so registry dispatch is unchanged;
+  `call(&req)` returns the new typed violation with detail naming
+  the adapter, model, and prompt.
+- Added `LlmRegistry::quarantine_all()` that replaces every
+  registered adapter with its quarantined wrap. Wired into
+  `RuntimeBuilder::build`: when the final mode is
+  `RuntimeMode::Replay(source)` and `!source.uses_live_llm()` (the
+  Substitute mode that `corvid jobs replay` and `corvid replay`
+  default to), `quarantine_all()` runs once before storing the
+  registry on the Runtime. Differential and Mutation modes skip the
+  wrap because their behavior intentionally reaches a live LLM.
+- Defense-in-depth on top of the existing
+  `Runtime::call_llm_ref → ReplaySource::replay_llm_call`
+  substitution. The interpreter path already intercepts unrecorded
+  LLM calls and returns `ReplayDivergence` before the adapter is
+  ever called; the wrap closes the registry-layer hole for any
+  future caller that grabs an adapter directly from the registry
+  without going through `Runtime::call_llm_ref`.
+
+Validation:
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-runtime --lib quarantine` — 3 passed
+  (wrap returns typed violation; `quarantine_all` covers every
+  registered adapter; late-registered adapters NOT covered, contract
+  lock for future redesign decisions).
+- `cargo test -p corvid-runtime --lib llm::` — 31 passed (no
+  regression across the LLM module suite, including all provider
+  adapter tests).
+- `cargo test -p corvid-runtime --lib worker_pool` — 3 passed.
+- `cargo test -p corvid-runtime --test durability_corpus` — 4 passed
+  (38L crash-recovery + 38M DST cron still green after the LLM
+  module + builder changes).
+- `cargo test -p corvid-guarantees phase_38` — 1 passed (sentinel).
+- `cargo test -p corvid-cli --test c3_replay_integration` — 2 passed
+  (no C-3 regression; the C-4 quarantine wrap is now installed every
+  time `replay_job_from_source` builds its runtime, transparently).
+- `cargo test -p corvid-cli --test c2_trace_integration` — 2 passed.
+- `cargo test -p corvid-cli --test c1_executor_integration` — 2 passed.
+- `cargo test -p corvid-cli --test jobs` — 13 passed (no CLI
+  regression; the build-time conditional in `RuntimeBuilder::build`
+  is dead-code for live-mode runtimes that the CLI exercises here).
+- `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` —
+  exit 1 with the two documented deliberate-fail fixtures.
+
+Adversarial integration test (mock-LLM counter unchanged through
+replay) lands in C-6 alongside the broader test corpus and the
+registry-row promotion.
+
+---
+
 ## 2026-05-27 - Slice 35V2-P38-C-3 — `replay_job` entry + `corvid jobs replay` CLI
 
 - Added `corvid_driver::replay_job_from_source(source, job_id, trace_dir, base_builder)`

@@ -15,6 +15,9 @@ pub mod mock;
 pub mod ollama;
 pub mod openai;
 pub mod openai_compat;
+pub mod quarantine;
+
+pub use quarantine::QuarantinedLlmAdapter;
 
 use crate::calibration::CalibrationObservation;
 use crate::errors::RuntimeError;
@@ -211,6 +214,28 @@ impl LlmRegistry {
 
     pub fn register(&mut self, adapter: Arc<dyn LlmAdapter>) {
         self.adapters.push(adapter);
+    }
+
+    /// Replace every registered adapter with a `QuarantinedLlmAdapter`
+    /// wrap of itself. Dispatch order, model-prefix matching, and
+    /// health tracking are unchanged; only the `call` path now refuses
+    /// live provider invocations with `RuntimeError::QuarantineViolation`.
+    /// Called by `RuntimeBuilder::build` when entering a Substitute-mode
+    /// replay (slice `35V2-P38-C-4`). Idempotent in behavior — wrapping
+    /// an already-quarantined adapter still refuses live calls; the
+    /// surface only ever calls this once during build, so re-wrapping
+    /// is not a concern in practice.
+    pub fn quarantine_all(&mut self) {
+        let wrapped: Vec<Arc<dyn LlmAdapter>> = self
+            .adapters
+            .iter()
+            .cloned()
+            .map(|inner| {
+                let wrap: Arc<dyn LlmAdapter> = Arc::new(QuarantinedLlmAdapter::wrap(inner));
+                wrap
+            })
+            .collect();
+        self.adapters = wrapped;
     }
 
     /// Dispatch `req` to the first adapter whose `handles` returns true.

@@ -4904,6 +4904,62 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P38-C-4 closed (2026-05-27) — replay-mode LLM registry refuses live calls
+
+A runtime built in Substitute-mode replay (the default for `corvid
+jobs replay` and `corvid replay`) wraps every registered LLM adapter
+in a `QuarantinedLlmAdapter` at build time. The wrap delegates
+`name()` and `handles(model)` to the inner adapter so the registry's
+dispatch order is unchanged; only the `.call(&req)` path refuses,
+returning a typed `RuntimeError::QuarantineViolation { surface:
+"llm", detail }` whose detail names the adapter, model, and prompt.
+
+This is defense-in-depth on top of the existing replay
+infrastructure. The normal interpreter dispatch path
+(`Runtime::call_llm_ref → ReplaySource::replay_llm_call`) already
+intercepts every recorded `LlmCall` and substitutes the recorded
+`LlmResult`; a recorded-event mismatch surfaces as
+`ReplayDivergence`. The C-4 wrap closes the registry-layer hole for
+any future caller that grabs an adapter directly from
+`LlmRegistry::call(&req)` without going through `call_llm_ref`. The
+two error variants are distinct so test corpora can tell them apart:
+
+- `ReplayDivergence` — the substitution path caught an unrecorded or
+  mismatched call.
+- `QuarantineViolation { surface: "llm", .. }` — the adapter wrap
+  caught a direct registry call that bypassed substitution.
+
+Differential mode (the live-LLM-against-recorded-baseline comparison
+that `corvid replay --swap-model` exercises) and Mutation mode (the
+counterfactual step replacement) both skip the wrap: their behaviour
+intentionally reaches the registry, and `source.uses_live_llm()`
+returns true so `RuntimeBuilder::build` does NOT call
+`quarantine_all` for those modes.
+
+Behaviour the operator observes:
+
+```sh
+# Original record (writes target/trace/jobs/<job_id>.jsonl)
+corvid jobs run --source app.cor --state queue.db --workers 1 --max-runtime-ms 0
+
+# Replay — every LLM call comes from the trace, none touch the network
+corvid jobs replay --source app.cor --job <job_id>
+
+# Differential replay — LLM swap intentionally hits the new model
+corvid replay <trace.jsonl> --source app.cor --swap-model claude-haiku
+```
+
+The quarantine wrap is invisible in the success path (substitution
+intercepts first). It surfaces when an operator misroutes an adapter,
+adds a future code path that bypasses the runtime's LLM dispatch, or
+otherwise reaches the registry directly during a Substitute-mode
+replay.
+
+Sub-slice of `35V2-P38-C-replay-quarantine`. Next: C-5 applies the
+same pattern to `HttpClient`, `StoreManager`, and `IoRuntime` so
+HTTP requests, DB writes, and file IO during replay also fail closed
+with typed `QuarantineViolation` errors.
+
 ## 35V2-P38-C-3 closed (2026-05-27) — `corvid jobs replay` replays a recorded job
 
 Once a `@replayable` durable job has run (and recorded its JSONL

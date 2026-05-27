@@ -267,9 +267,22 @@ impl RuntimeBuilder {
             recorder.emit_schema_header();
             recorder.emit_seed_read("rollout_default_seed", rollout_seed);
         }
+        // Slice 35V2-P38-C-4: quarantine every registered LLM adapter when
+        // entering a Substitute-mode replay (the default for `corvid
+        // replay` and `corvid jobs replay`). Differential mode keeps live
+        // adapters — its whole purpose is to compare recorded output
+        // against a live LLM. Mutation mode also keeps live adapters
+        // because the mutation produces a counterfactual that may
+        // legitimately reach the registry.
+        let mut llms = self.llms;
+        if let RuntimeMode::Replay(source) = &mode {
+            if !source.uses_live_llm() {
+                llms.quarantine_all();
+            }
+        }
         Runtime {
             tools: self.tools,
-            llms: self.llms,
+            llms,
             approver: self
                 .approver
                 .unwrap_or_else(|| Arc::new(StdinApprover::new())),

@@ -127,6 +127,20 @@ pub enum RuntimeError {
         replay_writer: String,
     },
 
+    /// A replay-mode runtime caught a side-effect call that bypassed the
+    /// recorded-event substitution path. `surface` names the quarantined
+    /// component (`"llm"` for slice `35V2-P38-C-4`; `"http"`, `"store"`,
+    /// `"io"` follow in `35V2-P38-C-5`). `detail` carries human-readable
+    /// context (adapter name, model, URL, file path) so the operator can
+    /// trace the violation back to source. Surfaces this rather than
+    /// `Other(...)` so the bypass case is testable and distinguishable
+    /// from a `ReplayDivergence` (the substitution-mismatch case the
+    /// interpreter path already produces today).
+    QuarantineViolation {
+        surface: String,
+        detail: String,
+    },
+
     /// Catch-all. Prefer adding a dedicated variant.
     Other(String),
 }
@@ -250,6 +264,10 @@ impl fmt::Display for RuntimeError {
             } => write!(
                 f,
                 "cross-tier replay is not supported in v1: trace writer `{recorded_writer}` cannot replay on `{replay_writer}`"
+            ),
+            Self::QuarantineViolation { surface, detail } => write!(
+                f,
+                "replay-mode quarantine ({surface}) blocked an unrecorded side-effect: {detail}"
             ),
             Self::Other(msg) => f.write_str(msg),
         }
