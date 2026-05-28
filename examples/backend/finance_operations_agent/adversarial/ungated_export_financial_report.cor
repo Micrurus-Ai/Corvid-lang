@@ -1,0 +1,9 @@
+# Adversarial: an `export_financial_report` call without a prior
+# `approve ExportFinancialReport(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-Finance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool export_financial_report(req: String) -> String dangerous
+
+agent bad() -> String:
+    return export_financial_report("export financial report without approval")

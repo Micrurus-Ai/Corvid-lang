@@ -1,0 +1,9 @@
+# Adversarial: a `schedule_recurring_payment` call without a prior
+# `approve ScheduleRecurringPayment(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-Finance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool schedule_recurring_payment(req: String) -> String dangerous
+
+agent bad() -> String:
+    return schedule_recurring_payment("schedule recurring payment without approval")

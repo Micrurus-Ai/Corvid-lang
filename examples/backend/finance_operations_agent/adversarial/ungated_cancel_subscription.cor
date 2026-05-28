@@ -1,0 +1,9 @@
+# Adversarial: a `cancel_subscription` call without a prior
+# `approve CancelSubscription(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-Finance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool cancel_subscription(req: String) -> String dangerous
+
+agent bad() -> String:
+    return cancel_subscription("cancel subscription without approval")

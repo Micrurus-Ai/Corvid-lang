@@ -1,0 +1,9 @@
+# Adversarial: a `dispute_transaction` call without a prior
+# `approve DisputeTransaction(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-Finance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool dispute_transaction(req: String) -> String dangerous
+
+agent bad() -> String:
+    return dispute_transaction("dispute transaction without approval")

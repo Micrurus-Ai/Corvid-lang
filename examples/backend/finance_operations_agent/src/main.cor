@@ -2,6 +2,7 @@ import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryP
 import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
 import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
 import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+import "../../../../std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
 
 effect finance_read:
     cost: $0.01
@@ -15,6 +16,26 @@ effect finance_ai:
 
 effect payment_write:
     cost: $0.02
+    trust: human_required
+    data: financial
+
+effect subscription_write:
+    cost: $0.01
+    trust: human_required
+    data: financial
+
+effect dispute_write:
+    cost: $0.01
+    trust: human_required
+    data: financial
+
+effect report_export:
+    cost: $0.05
+    trust: human_required
+    data: financial
+
+effect recurring_payment_write:
+    cost: $0.03
     trust: human_required
     data: financial
 
@@ -192,7 +213,83 @@ public type FinanceApprovalAuditSurface:
     execute_without_approval: Bool
     non_advice: Bool
 
+public type CancelSubscriptionRequest:
+    tenant_id: String
+    actor_id: String
+    subscription_id: String
+    reason_fingerprint: String
+    approval_id: String
+    trace_id: String
+
+public type CancelSubscriptionReceipt:
+    cancellation_id: String
+    tenant_id: String
+    subscription_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type DisputeTransactionRequest:
+    tenant_id: String
+    actor_id: String
+    account_id: String
+    transaction_fingerprint: String
+    dispute_reason: String
+    approval_id: String
+    trace_id: String
+
+public type DisputeTransactionReceipt:
+    dispute_id: String
+    tenant_id: String
+    account_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type ExportFinancialReportRequest:
+    tenant_id: String
+    actor_id: String
+    report_kind: String
+    export_destination: String
+    redaction_policy_hash: String
+    approval_id: String
+    trace_id: String
+
+public type ExportFinancialReportReceipt:
+    export_id: String
+    tenant_id: String
+    report_kind: String
+    export_destination: String
+    redaction_policy_hash: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type ScheduleRecurringPaymentRequest:
+    tenant_id: String
+    actor_id: String
+    source_account_id: String
+    payee_fingerprint: String
+    amount_cents: Int
+    currency: String
+    cadence: String
+    approval_id: String
+    trace_id: String
+
+public type ScheduleRecurringPaymentReceipt:
+    schedule_id: String
+    tenant_id: String
+    source_account_id: String
+    cadence: String
+    approval_id: String
+    trace_id: String
+    status: String
+
 tool submit_payment_intent(req: PaymentIntentRequest) -> PaymentIntentReceipt dangerous uses payment_write
+tool cancel_subscription(req: CancelSubscriptionRequest) -> CancelSubscriptionReceipt dangerous uses subscription_write
+tool dispute_transaction(req: DisputeTransactionRequest) -> DisputeTransactionReceipt dangerous uses dispute_write
+tool export_financial_report(req: ExportFinancialReportRequest) -> ExportFinancialReportReceipt dangerous uses report_export
+tool schedule_recurring_payment(req: ScheduleRecurringPaymentRequest) -> ScheduleRecurringPaymentReceipt dangerous uses recurring_payment_write
 
 public @replayable
 agent finance_config() -> FinanceConfig:
@@ -277,7 +374,7 @@ agent finance_job_contract_valid(run: FinanceJobRun) -> Bool:
 
 public @replayable
 agent finance_schema_manifest() -> FinanceSchemaManifest:
-    return FinanceSchemaManifest("finance_operations_agent", 4, 19, 3, 3, 1, "mock", true)
+    return FinanceSchemaManifest("finance_operations_agent", 5, 23, 3, 3, 5, "mock", true)
 
 public @replayable
 agent demo_account() -> FinanceAccount uses finance_read:
@@ -334,6 +431,63 @@ public @replayable
 agent payment_approval_surface_valid(surface: FinanceApprovalAuditSurface) -> Bool:
     return surface.ready_for_approval and not surface.execute_without_approval and surface.non_advice and surface.intent.status == "approval_pending"
 
+# Developer-authored approval flow. Each contract below is the
+# developer's explicit choice — role, cost ceiling, data class,
+# irreversibility, and expiry are all declared in source, not handed
+# to an opaque built-in. Corvid's job is to give the developer this
+# control and then compiler-enforce the `approve <Label>` gate; it
+# never decides the flow for them. Every surface executes a decision a
+# human with the right role made — none of them advises.
+public @replayable
+agent submit_payment_intent_approval_contract(tenant_id: String, payee: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("submit-payment:" + payee, "v1", "SubmitPaymentIntent", "payee", payee, tenant_id, "Admin", 0.25, "financial", true, 4102444800000, "approval:submit_payment:" + trace_id)
+
+public @replayable
+agent cancel_subscription_approval_contract(tenant_id: String, subscription_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("cancel-subscription:" + subscription_id, "v1", "CancelSubscription", "subscription", subscription_id, tenant_id, "Reviewer", 0.05, "financial", false, 4102444800000, "approval:cancel_subscription:" + trace_id)
+
+public @replayable
+agent dispute_transaction_approval_contract(tenant_id: String, account_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("dispute-transaction:" + account_id, "v1", "DisputeTransaction", "transaction", account_id, tenant_id, "Reviewer", 0.05, "financial", false, 4102444800000, "approval:dispute_transaction:" + trace_id)
+
+public @replayable
+agent export_financial_report_approval_contract(tenant_id: String, export_destination: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("export-report:" + export_destination, "v1", "ExportFinancialReport", "export_target", export_destination, tenant_id, "Admin", 0.25, "financial", true, 4102444800000, "approval:export_report:" + trace_id)
+
+public @replayable
+agent schedule_recurring_payment_approval_contract(tenant_id: String, payee: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("schedule-recurring:" + payee, "v1", "ScheduleRecurringPayment", "payee", payee, tenant_id, "Admin", 0.25, "financial", true, 4102444800000, "approval:schedule_recurring:" + trace_id)
+
+agent execute_approved_cancel_subscription(req: CancelSubscriptionRequest) -> CancelSubscriptionReceipt uses subscription_write:
+    approve CancelSubscription(req)
+    return cancel_subscription(req)
+
+agent execute_approved_dispute_transaction(req: DisputeTransactionRequest) -> DisputeTransactionReceipt uses dispute_write:
+    approve DisputeTransaction(req)
+    return dispute_transaction(req)
+
+agent execute_approved_export_financial_report(req: ExportFinancialReportRequest) -> ExportFinancialReportReceipt uses report_export:
+    approve ExportFinancialReport(req)
+    return export_financial_report(req)
+
+agent execute_approved_schedule_recurring_payment(req: ScheduleRecurringPaymentRequest) -> ScheduleRecurringPaymentReceipt uses recurring_payment_write:
+    approve ScheduleRecurringPayment(req)
+    return schedule_recurring_payment(req)
+
+public @replayable
+agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
+    a = submit_payment_intent_approval_contract(tenant_id, "payee-1", trace_id)
+    b = cancel_subscription_approval_contract(tenant_id, "sub-1", trace_id)
+    c = dispute_transaction_approval_contract(tenant_id, "acct-1", trace_id)
+    d = export_financial_report_approval_contract(tenant_id, "s3://finance-exports/report", trace_id)
+    e = schedule_recurring_payment_approval_contract(tenant_id, "payee-1", trace_id)
+    payment_ok = a.action == "SubmitPaymentIntent" and a.required_role == "Admin" and a.data_class == "financial" and a.irreversible
+    cancel_ok = b.action == "CancelSubscription" and b.required_role == "Reviewer" and b.data_class == "financial"
+    dispute_ok = c.action == "DisputeTransaction" and c.required_role == "Reviewer" and c.data_class == "financial"
+    export_ok = d.action == "ExportFinancialReport" and d.required_role == "Admin" and d.data_class == "financial" and d.irreversible
+    recurring_ok = e.action == "ScheduleRecurringPayment" and e.required_role == "Admin" and e.data_class == "financial" and e.irreversible
+    return payment_ok and cancel_ok and dispute_ok and export_ok and recurring_ok
+
 server finance_operations_agent_api:
     route GET "/config" -> json FinanceConfig:
         return finance_config()
@@ -345,6 +499,14 @@ server finance_operations_agent_api:
         return payment_approval_surface()
     route POST "/payments/intents/submit" body PaymentIntentRequest -> json PaymentIntentReceipt uses payment_write:
         return execute_approved_payment_intent(body)
+    route POST "/subscriptions/cancel" body CancelSubscriptionRequest -> json CancelSubscriptionReceipt uses subscription_write:
+        return execute_approved_cancel_subscription(body)
+    route POST "/transactions/dispute" body DisputeTransactionRequest -> json DisputeTransactionReceipt uses dispute_write:
+        return execute_approved_dispute_transaction(body)
+    route POST "/reports/export" body ExportFinancialReportRequest -> json ExportFinancialReportReceipt uses report_export:
+        return execute_approved_export_financial_report(body)
+    route POST "/payments/recurring/schedule" body ScheduleRecurringPaymentRequest -> json ScheduleRecurringPaymentReceipt uses recurring_payment_write:
+        return execute_approved_schedule_recurring_payment(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)
     route POST "/auth/api-key/login" body ApiKeyLoginRequest -> json ApiKeyLoginResponse:
@@ -372,4 +534,5 @@ agent main() -> Bool:
     balance_sync = nightly_balance_sync_job("tenant-1", "mock_bank")
     anomaly_scan = weekly_anomaly_scan_job("tenant-1", "business_week")
     renewal_check = daily_subscription_renewal_check_job("tenant-1", "business_day")
-    return readonly_snapshot_valid(snapshot) and payment_approval_surface_valid(payment) and auth.authenticated and service_auth.authenticated and finance_job_contract_valid(balance_sync) and finance_job_contract_valid(anomaly_scan) and finance_job_contract_valid(renewal_check)
+    approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
+    return readonly_snapshot_valid(snapshot) and payment_approval_surface_valid(payment) and auth.authenticated and service_auth.authenticated and finance_job_contract_valid(balance_sync) and finance_job_contract_valid(anomaly_scan) and finance_job_contract_valid(renewal_check) and approvals_ok
