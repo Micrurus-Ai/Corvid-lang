@@ -161,6 +161,52 @@ agent read(r: t.Receipt) -> String:
     }
 
     #[test]
+    fn imported_struct_def_id_keys_the_ir_types_layout_table() {
+        // Slice G0-1: the imported-struct *type* must carry the same
+        // cross-module-remapped DefId that keys `ir.types` (where
+        // `lower_with_modules` appends the imported type's field
+        // layout). Before the remap the type carried the original
+        // per-module id, missed the table, and native codegen could not
+        // resolve the struct's layout.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("types.cor"),
+            "\
+public type Receipt:
+    id: String
+",
+        )
+        .unwrap();
+        let main_src = "\
+import \"./types\" as t
+
+agent read(r: t.Receipt) -> String:
+    return r.id
+";
+        let main_path = tmp.path().join("main.cor");
+        std::fs::write(&main_path, main_src).unwrap();
+
+        let ir = compile_to_ir_with_config_at_path(main_src, &main_path, None)
+            .expect("file-backed compile should resolve imported struct");
+        let read = ir.agents.iter().find(|agent| agent.name == "read").unwrap();
+        let imported = match &read.params[0].ty {
+            corvid_types::Type::ImportedStruct(imported) => imported,
+            other => panic!("expected imported struct param, got {other:?}"),
+        };
+        assert!(
+            ir.types
+                .iter()
+                .any(|ty| ty.id == imported.def_id && ty.name == "Receipt"),
+            "imported-struct def_id {:?} must key an ir.types layout entry; ir.types = {:?}",
+            imported.def_id,
+            ir.types
+                .iter()
+                .map(|t| (t.id, t.name.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn compile_to_ir_at_path_reports_private_imported_type() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(

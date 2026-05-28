@@ -145,6 +145,26 @@ impl<'a> Lowerer<'a> {
             .unwrap_or(target.def_id)
     }
 
+    /// The root-file type resolvers return an imported-struct *type*
+    /// carrying the original per-module `DefId`, but the merged
+    /// `ir.types` layout table — and imported-struct *construction*
+    /// (`remap_imported_target`) — are keyed by the cross-module-remapped
+    /// id from `build_imported_def_ids`. Translate the type's id to the
+    /// remapped one so the type, its construction, and its layout all
+    /// agree. Consumers that read the struct *name* are unaffected.
+    fn remap_imported_struct_type(&self, ty: Type) -> Type {
+        let Type::ImportedStruct(mut imported) = ty else {
+            return ty;
+        };
+        if let Some(remapped) = self.imported_def_ids.get(&ImportedDefKey {
+            module_path: imported.module_path.clone(),
+            def_id: imported.def_id,
+        }) {
+            imported.def_id = *remapped;
+        }
+        Type::ImportedStruct(imported)
+    }
+
     /// Scan the file's effect declarations for `trust: autonomous_if_confident(T)`
     /// dimension values and populate the confidence_gates table.
     fn populate_confidence_gates(&mut self, file: &File) {
@@ -1384,6 +1404,7 @@ impl<'a> Lowerer<'a> {
                                 .and_then(|resolution| {
                                     resolve_root_lifted_type_ref(resolution, &name.name)
                                 })
+                                .map(|ty| self.remap_imported_struct_type(ty))
                                 .unwrap_or(Type::Unknown);
                         }
                         Type::Struct(self.remap_def_id(id))
@@ -1409,6 +1430,7 @@ impl<'a> Lowerer<'a> {
                     .and_then(|resolution| {
                         resolve_root_imported_type_ref(resolution, &alias.name, &name.name)
                     })
+                    .map(|ty| self.remap_imported_struct_type(ty))
                     .unwrap_or(Type::Unknown),
             },
             TypeRef::Generic { name, args, .. } => match name.name.as_str() {
