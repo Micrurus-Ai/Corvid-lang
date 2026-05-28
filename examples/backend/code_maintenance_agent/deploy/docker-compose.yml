@@ -6,8 +6,10 @@ services:
       dockerfile: examples/backend/code_maintenance_agent/deploy/Dockerfile
     command:
       - corvid
-      - run
+      - serve
       - examples/backend/code_maintenance_agent/src/main.cor
+      - --listen
+      - 0.0.0.0:8080
     environment:
       CORVID_APP_ENV: local
       CORVID_CONNECTOR_MODE: mock

@@ -19,8 +19,7 @@ non-goal, not a disclaimer.
 Every procedure below is grounded in surfaces the app actually ships.
 The schema manifest at [`src/main.cor`](../src/main.cor) declares the
 canonical counts (5 migrations / 23 tables / 3 connectors / 3 durable
-jobs / 5 approval contracts / non-advice) and `corvid run
---target=server` exposes the routes that drive each procedure.
+jobs / 5 approval contracts / non-advice) and `corvid serve` exposes the routes that drive each procedure.
 
 ## Table of contents
 
@@ -133,8 +132,7 @@ This list is load-bearing — it is the non-advice posture made explicit:
 ### Process layout
 
 The Finance agent runs as a single Corvid server binary plus a SQLite
-or Postgres backing store. The binary is built from `src/main.cor` via
-`corvid build --target=server`. In production the binary is wrapped in
+or Postgres backing store. The app is served by `corvid serve` (the interpreter-backed HTTP server). In production the binary is wrapped in
 a distroless OCI image; the same binary serves all HTTP routes, runs
 the durable-job pool, the scheduler, the OTLP exporter, and the metrics
 endpoint.
@@ -249,10 +247,10 @@ export CORVID_REQUIRE_APPROVALS=true     # default; fail closed on every dangero
 corvid check src/main.cor
 corvid migrate --database-url=$CORVID_DATABASE_URL --dir=migrations
 corvid seeds load seeds/demo.sql
-corvid run --target=server --bind=127.0.0.1:8087
+corvid serve src/main.cor --listen 127.0.0.1:8087
 ```
 
-If everything is wired correctly, `corvid run` exposes the routes on
+If everything is wired correctly, `corvid serve` exposes the routes on
 port 8087. `GET /config` returns the
 `FinanceConfig("finance_operations_agent", "mock", false, true)`
 envelope — note `regulated_advice = false`.

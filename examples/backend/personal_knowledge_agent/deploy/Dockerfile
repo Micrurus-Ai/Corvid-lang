@@ -9,4 +9,4 @@ COPY --from=build /workspace/target/release/corvid /usr/local/bin/corvid
 COPY examples/backend/personal_knowledge_agent examples/backend/personal_knowledge_agent
 COPY std std
 EXPOSE 8080
-CMD ["corvid", "run", "examples/backend/personal_knowledge_agent/src/main.cor"]
+CMD ["corvid", "serve", "examples/backend/personal_knowledge_agent/src/main.cor", "--listen", "0.0.0.0:8080"]

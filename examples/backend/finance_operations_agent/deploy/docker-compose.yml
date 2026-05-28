@@ -6,8 +6,10 @@ services:
       dockerfile: examples/backend/finance_operations_agent/deploy/Dockerfile
     command:
       - corvid
-      - run
+      - serve
       - examples/backend/finance_operations_agent/src/main.cor
+      - --listen
+      - 0.0.0.0:8080
     environment:
       CORVID_APP_ENV: local
       CORVID_CONNECTOR_MODE: mock

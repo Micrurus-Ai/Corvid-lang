@@ -37,8 +37,8 @@ primary_region = "iad"
   destination = "/data"
 
 [processes]
-  api = "/usr/local/bin/corvid run --target=server src/main.cor --listen 0.0.0.0:8080"
-  worker = "/usr/local/bin/corvid jobs run --source src/main.cor --state /data/finance.sqlite --workers 2 --lease-ttl-ms 60000 --max-runtime-ms 0"
+  api = "/usr/local/bin/corvid serve examples/backend/finance_operations_agent/src/main.cor --listen 0.0.0.0:8080"
+  worker = "/usr/local/bin/corvid jobs run --source examples/backend/finance_operations_agent/src/main.cor --state /data/finance.sqlite --workers 2 --lease-ttl-ms 60000 --max-runtime-ms 0"
 
 [[services]]
   processes = ["api"]

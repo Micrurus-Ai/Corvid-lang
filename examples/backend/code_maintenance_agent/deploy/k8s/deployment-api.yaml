@@ -29,9 +29,8 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             - /usr/local/bin/corvid
-            - run
-            - --target=server
-            - src/main.cor
+            - serve
+            - examples/backend/code_maintenance_agent/src/main.cor
             - --listen
             - 0.0.0.0:8080
           ports:

@@ -18,8 +18,7 @@ grounded in a failed `CiSignal`; the triage contract fails without it.
 Every procedure below is grounded in surfaces the app actually ships.
 The schema manifest at [`src/main.cor`](../src/main.cor) declares the
 canonical counts (5 migrations / 21 tables / 3 connectors / 3 durable
-jobs / 5 approval contracts / writes-require-approval) and `corvid run
---target=server` exposes the routes that drive each procedure.
+jobs / 5 approval contracts / writes-require-approval) and `corvid serve` exposes the routes that drive each procedure.
 
 ## Table of contents
 
@@ -120,8 +119,7 @@ contracts are reversible proposals (comment, patch, PR).
 The Code Maintenance agent runs as a single Corvid server binary plus a
 SQLite or Postgres backing store. The binary is built from `src/main.cor`
 via `corvid build --target=server`. In production it is wrapped in a
-distroless OCI image; the same binary serves all HTTP routes, runs the
-durable-job pool, the scheduler, the OTLP exporter, and the metrics
+distroless OCI image; `corvid serve` serves all HTTP routes and a `corvid jobs run` worker process runs the durable-job pool, the scheduler, the OTLP exporter, and the metrics
 endpoint.
 
 ```
@@ -258,10 +256,10 @@ export CORVID_REQUIRE_APPROVALS=true     # default; fail closed on every dangero
 corvid check src/main.cor
 corvid migrate --database-url=$CORVID_DATABASE_URL --dir=migrations
 corvid seeds load seeds/demo.sql
-corvid run --target=server --bind=127.0.0.1:8089
+corvid serve src/main.cor --listen 127.0.0.1:8089
 ```
 
-If everything is wired correctly, `corvid run` exposes the routes on
+If everything is wired correctly, `corvid serve` exposes the routes on
 port 8089. `GET /config` returns the
 `CodeConfig("code_maintenance_agent", "mock", true)` envelope — note
 `writes_require_approval = true`.

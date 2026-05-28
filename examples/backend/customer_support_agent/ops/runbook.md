@@ -17,8 +17,7 @@ answers from policy, and a human approves the send.
 Every procedure below is grounded in surfaces the app actually ships.
 The schema manifest at [`src/main.cor`](../src/main.cor) declares the
 canonical counts (5 migrations / 20 tables / 3 connectors / 3 durable
-jobs / 5 approval contracts / policy-grounded) and `corvid run
---target=server` exposes the routes that drive each procedure.
+jobs / 5 approval contracts / policy-grounded) and `corvid serve` exposes the routes that drive each procedure.
 
 ## Table of contents
 
@@ -257,10 +256,10 @@ export CORVID_REQUIRE_APPROVALS=true     # default; fail closed on every dangero
 corvid check src/main.cor
 corvid migrate --database-url=$CORVID_DATABASE_URL --dir=migrations
 corvid seeds load seeds/demo.sql
-corvid run --target=server --bind=127.0.0.1:8088
+corvid serve src/main.cor --listen 127.0.0.1:8088
 ```
 
-If everything is wired correctly, `corvid run` exposes the routes on
+If everything is wired correctly, `corvid serve` exposes the routes on
 port 8088. `GET /config` returns the
 `SupportConfig("customer_support_agent", "mock", true)` envelope — note
 `policy_required = true`.

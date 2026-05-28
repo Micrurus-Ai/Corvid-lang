@@ -32,7 +32,7 @@ spec:
             - jobs
             - run
             - --source
-            - src/main.cor
+            - examples/backend/personal_knowledge_agent/src/main.cor
             - --state
             - /data/pka.sqlite
             - --workers

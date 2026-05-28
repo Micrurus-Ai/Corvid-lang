@@ -11,7 +11,7 @@ export, cross-tenant index share) behind a typed approval contract.
 Every procedure below is grounded in surfaces the app actually ships. The
 schema manifest at [`src/main.cor`](../src/main.cor) declares the canonical
 counts (5 migrations / 18 tables / 3 connectors / 3 durable jobs / 5
-approval contracts) and `corvid run --target=server` exposes the routes
+approval contracts) and `corvid serve` exposes the routes
 that drive each procedure.
 
 ## Table of contents
@@ -226,10 +226,10 @@ export CORVID_REQUIRE_APPROVALS=true     # default; fail closed on every dangero
 corvid check src/main.cor
 corvid migrate --database-url=sqlite:target/pka.db --dir=migrations
 corvid seeds load seeds/demo.sql
-corvid run --target=server --bind=127.0.0.1:8086
+corvid serve src/main.cor --listen 127.0.0.1:8086
 ```
 
-If everything is wired correctly, `corvid run` exposes the routes listed
+If everything is wired correctly, `corvid serve` exposes the routes listed
 in §1 on port 8086. `GET /config` should return the
 `KnowledgeConfig("personal_knowledge_agent", "mock",
 "sqlite+local_index", true, "target/traces")` envelope.

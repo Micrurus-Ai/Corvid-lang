@@ -10,7 +10,7 @@ contract.
 Every procedure below is grounded in surfaces the app actually ships. The
 schema manifest at [`src/main.cor`](../src/main.cor) declares the canonical
 counts (5 migrations / 12 tables / 5 connectors / 4 durable jobs / 5
-approval contracts) and `corvid run --target=server` exposes the routes
+approval contracts) and `corvid serve` exposes the routes
 that drive each procedure.
 
 ## Table of contents
@@ -88,10 +88,8 @@ A fifth approval contract is filed (per the maturity bar) for the
 ### Process layout
 
 The PEA runs as a single Corvid server binary plus a SQLite or Postgres
-backing store. The binary is built from `src/main.cor` via
-`corvid build --target=server`. In production the binary is wrapped in a
-distroless OCI image; the same binary serves all HTTP routes, runs the
-durable-job pool, the scheduler, the OTLP exporter, and the metrics
+backing store. The app is served by `corvid serve` (the interpreter-backed HTTP server). In production the binary is wrapped in a
+distroless OCI image; `corvid serve` serves all HTTP routes and a `corvid jobs run` worker process runs the durable-job pool, the scheduler, the OTLP exporter, and the metrics
 endpoint.
 
 ```
@@ -104,7 +102,7 @@ endpoint.
              | lease + execute via Runtime
              v
 +---------------------------+      +-----------------------------+
-|   corvid run server       |<---->|   SQLite or Postgres store  |
+|   corvid serve            |<---->|   SQLite or Postgres store  |
 |   (HTTP routes from       |      |   - queue_jobs              |
 |    main.cor)              |      |   - queue_job_checkpoints   |
 +------+--------------------+      |   - approvals               |
@@ -242,7 +240,7 @@ sqlite3 data/pea.sqlite < seeds/demo.sql
 corvid eval evals/hardening_eval.cor
 
 # 5. Boot the server.
-corvid run --target=server src/main.cor
+corvid serve src/main.cor
 
 # 6. Smoke check in another shell.
 curl http://127.0.0.1:8080/schema
