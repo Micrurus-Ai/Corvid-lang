@@ -4904,6 +4904,53 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P42-D-LR-app-maturity-Finance closed (2026-05-28) — Finance Operations Agent reaches the Phase 42 maturity bar
+
+Six-commit per-app maturity track for the Finance agent, the third
+through the bar after PEA and PKA. Fourteen rows ✅ close; the same 5
+cross-cutting + 2 post-v1.0-syntax rows defer. Closing audit:
+[`docs/phases/phase-42-finance-maturity-2026-05-28.md`](docs/phases/phase-42-finance-maturity-2026-05-28.md).
+
+Finance reconfirmed the three lessons the PKA track recorded (the
+≥1500 runbook bar is met with coverage not padding; per-app surface
+changes must update `reference_apps.rs` assertions in the same slice —
+here the migration count 2→4→5 and the finance_% table count 7→11; and
+manifests/runbooks must use the real `corvid deploy` env-var names).
+Two new lessons came out of Finance specifically.
+
+**Lesson 1: a reference app's approval flow is the developer's design
+surface, not a fixed menu.** The user's directive when asked which 5
+approval surfaces Finance should ship was "give the developer the power
+to decide how he wants it to flow." The right reading was not "pick any
+5" but "make the flow visibly the developer's choice." So the five
+Finance contracts deliberately differ: `SubmitPaymentIntent` /
+`ExportFinancialReport` / `ScheduleRecurringPayment` are Admin +
+irreversible (money or data leaves); `CancelSubscription` /
+`DisputeTransaction` are Reviewer + reversible. The role and
+irreversibility gradient is authored in source — Corvid enforces the
+`approve <Label>` boundary but never decides the gradient. The eval
+encodes this as `case_irreversibility_matches_developer_intent` and
+`case_role_gradient_matches_blast_radius` rather than PKA's blanket
+"all irreversible" assertion. The takeaway for the remaining apps: when
+a reference app demonstrates approvals, vary the contracts to show the
+developer's control, don't clone one shape five times.
+
+**Lesson 2: a regulated-domain posture is enforced structurally, not by
+disclaimer.** Finance's non-advice posture is not a sentence in a doc —
+it is the absence of any advisory tool plus the fact that the three
+cron jobs (`nightly_balance_sync`, `weekly_anomaly_scan`,
+`daily_subscription_renewal_check`) carry only read/observe effects and
+cannot reach a `dangerous` write tool. The scheduler can wake the agent
+up but can never authorize a payment, because every money movement
+requires a human `approve` the compiler enforces. The eval's case 11
+(`non_advice_posture_preserved`) and the runbook's incident B
+(non-advice drift) keep this in the regression + ops surface. The
+lesson: when an app has a domain constraint (non-advice, HIPAA,
+no-autonomous-action), express it as the shape of the surface — what
+tools exist, what effects the jobs carry — so the compiler and the
+trace log can prove it, rather than relying on a policy that could be
+edited away.
+
 ## 35V2-P42-D-LR-app-maturity-PKA closed (2026-05-28) — Personal Knowledge Agent reaches the Phase 42 maturity bar
 
 Six-commit per-app maturity track for the PKA reference app, the

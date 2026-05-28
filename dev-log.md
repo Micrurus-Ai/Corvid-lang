@@ -4,6 +4,62 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-Finance closed
+
+Six-commit per-app maturity track for the Finance Operations Agent, the
+third app through the bar (after PEA + PKA). Fourteen rows ✅ close; the
+same 5 cross-cutting + 2 post-v1.0-syntax rows defer. Audit:
+`docs/phases/phase-42-finance-maturity-2026-05-28.md`.
+
+Finance started furthest from the bar of any app — no std imports, 1
+dangerous tool, 0 cron jobs, 4 placeholder evals, 7-line runbook — and
+carries a strict non-advice / regulated-domain posture the track had to
+preserve. Per the user's directive that the developer holds the power
+to decide the approval flow, the 5 contracts are developer-authored
+with a deliberate role/irreversibility gradient (Admin + irreversible
+for money/data egress; Reviewer + reversible for cancel/dispute).
+
+| Slice | Commit | What landed |
+|---|---|---|
+| D-Fin-1 | `837d96f` | std imports + auth surface + 3 cron jobs + migrations 0003/0004 (19 tables / 4 migrations) |
+| D-Fin-2 | `6eb020d` | 4 more approval surfaces (cancel/dispute/export/recurring) + 0005 migration + 4 adversarial gates (5 threats total) |
+| D-Fin-3 | `ee9f836` | 11 eval cases (incl. non-advice + role-gradient) + 3 promoted fixtures |
+| D-Fin-4 | `eb704fc` | operator runbook 7 → 1512 lines |
+| D-Fin-5 | `0ca7365` | deploy manifests (Compose + Fly + K8s) + 5 typed permissions |
+| D-Fin-6 | (this commit) | audit doc + dev-log + learnings + ROADMAP tick |
+
+Per-app rows closed: tables (23 ≥ 10), migrations (5 ≥ 5), auth depth,
+connectors (3 mock ≥ 3), approvals (5 ≥ 5), cron jobs (3 ≥ 3),
+retry-policy jobs (3 via `finance_run`), adversarial threats (5 ≥ 5),
+runbook (1512 ≥ 1500), deploy manifests (3 categories), typed
+permission per dangerous tool (5/5 distinct), evals (11 ≥ 10), promoted
+fixtures (3 ≥ 3), SIGKILL survival (runtime gate, P38).
+
+Deferred (same as PEA/PKA): cross-cutting `35V2-P42-E/F/G/H-LR` +
+`33M-beta-feedback`; post-v1.0 `policy { ... }` + `batch_with`
+(`35V2-P39-I`).
+
+Finance-specific lesson recorded in learnings: a reference app's
+approval flow is the developer's design surface, not a fixed menu — the
+five Finance contracts deliberately differ in role, ceiling, and
+reversibility to show Corvid gives the developer that control. And the
+non-advice posture is structural (no advisory tool exists; the three
+cron jobs cannot move money), not a disclaimer.
+
+Validation (final state):
+- `corvid check src/main.cor` clean.
+- all 4 `adversarial/ungated_*.cor` → `E0101`; `autonomous_payment.json`
+  is the fifth threat.
+- `corvid eval evals/payment_audit_eval.cor` → `11/11 passed`.
+- `cargo test -p corvid-cli --test reference_apps finance_operations`
+  → 2 passed.
+- runbook 1512 lines, sections 1-17.
+
+Next ROADMAP slice in order:
+`35V2-P42-D-LR-app-maturity-CustomerSupport` — Customer Support Agent.
+
+---
+
 ## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-PKA closed
 
 Six-commit per-app maturity track for the Personal Knowledge Agent
