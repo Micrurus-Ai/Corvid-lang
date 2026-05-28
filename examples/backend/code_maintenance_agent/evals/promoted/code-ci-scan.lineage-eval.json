@@ -1,0 +1,98 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "code-ci-scan",
+  "fixture_hash": "sha256:e454e2f07841c081",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 2,
+  "selected_span_ids": [
+    "job-ci-scan",
+    "ci-poll"
+  ],
+  "expected_guarantee_ids": [
+    "connector-read",
+    "durable-job"
+  ],
+  "expected_effect_ids": [
+    "ci_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:9751da8f47a5>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-ci-scan",
+      "span_id": "job-ci-scan",
+      "parent_span_id": "",
+      "kind": "job",
+      "name": "hourly_ci_signal_scan_job",
+      "status": "ok",
+      "started_ms": 1700000060000,
+      "ended_ms": 1700000061400,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:266ff5f617ec>",
+      "request_id": "<redacted:request:sha256:edae44200fe4>",
+      "replay_key": "<redacted:replay:sha256:9751da8f47a5>",
+      "idempotency_key": "<redacted:idempotency:sha256:b394c3a04314>",
+      "guarantee_id": "durable-job",
+      "effect_ids": [
+        "ci_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.01,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 1400,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c844a407a79b>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:867681dba0b7>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-ci-scan",
+      "span_id": "ci-poll",
+      "parent_span_id": "job-ci-scan",
+      "kind": "tool",
+      "name": "ci_read",
+      "status": "ok",
+      "started_ms": 1700000060100,
+      "ended_ms": 1700000061200,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:266ff5f617ec>",
+      "request_id": "<redacted:request:sha256:edae44200fe4>",
+      "replay_key": "<redacted:replay:sha256:9751da8f47a5>",
+      "idempotency_key": "<redacted:idempotency:sha256:ca47484aab07>",
+      "guarantee_id": "connector-read",
+      "effect_ids": [
+        "ci_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.01,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 1100,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:00259d2afdbc>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:d6ba1d866b73>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

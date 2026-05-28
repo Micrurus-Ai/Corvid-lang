@@ -1,0 +1,70 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "code-demo",
+  "fixture_hash": "sha256:dbcb24fb5fbee689",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 1,
+  "selected_span_ids": [
+    "triage"
+  ],
+  "expected_guarantee_ids": [
+    "ci-aware-risk"
+  ],
+  "expected_effect_ids": [
+    "ci_read",
+    "code_ai",
+    "repo_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:359f7a44af39>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:0c41c2954ce6>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:f4e296bdfbfc>"
+  ],
+  "retrieval_index_hashes": [
+    "<redacted:retrieval_index_hash:sha256:43646f5396d2>"
+  ],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-demo",
+      "span_id": "triage",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "GET /issues/triage/mock",
+      "status": "ok",
+      "started_ms": 1700000000000,
+      "ended_ms": 1700000000022,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:2edb6280f1e2>",
+      "request_id": "<redacted:request:sha256:f031a5d724b5>",
+      "replay_key": "<redacted:replay:sha256:359f7a44af39>",
+      "idempotency_key": "<redacted:idempotency:sha256:359f7a44af39>",
+      "guarantee_id": "ci-aware-risk",
+      "effect_ids": [
+        "repo_read",
+        "ci_read",
+        "code_ai"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.1,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.87,
+      "latency_ms": 22,
+      "model_id": "mock-code",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:0c41c2954ce6>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:f4e296bdfbfc>",
+      "retrieval_index_hash": "<redacted:retrieval_index_hash:sha256:43646f5396d2>",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:3ffd6594b8fc>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:075ea37f2d93>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

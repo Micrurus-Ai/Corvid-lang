@@ -1,0 +1,136 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "code-merge-pr",
+  "fixture_hash": "sha256:402c61c9c8f680ff",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "route-merge",
+    "approval-merge",
+    "audit-merge"
+  ],
+  "expected_guarantee_ids": [
+    "approval-pending",
+    "audit-event",
+    "human-approval"
+  ],
+  "expected_effect_ids": [
+    "merge_write"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:4f53dfcce1ae>",
+    "<redacted:replay:sha256:736d1001393b>",
+    "<redacted:replay:sha256:7cea92a94669>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-merge-pr",
+      "span_id": "route-merge",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "POST /pull-requests/merge",
+      "status": "pending_review",
+      "started_ms": 1700000120000,
+      "ended_ms": 1700000120030,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:2edb6280f1e2>",
+      "request_id": "<redacted:request:sha256:c499ae9a0365>",
+      "replay_key": "<redacted:replay:sha256:7cea92a94669>",
+      "idempotency_key": "<redacted:idempotency:sha256:d2706f6243a1>",
+      "guarantee_id": "approval-pending",
+      "effect_ids": [
+        "merge_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:00b76947beb3>",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 30,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:ba78824d81b1>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-merge-pr",
+      "span_id": "approval-merge",
+      "parent_span_id": "route-merge",
+      "kind": "approval",
+      "name": "MergePullRequest",
+      "status": "pending_review",
+      "started_ms": 1700000120040,
+      "ended_ms": 1700000120045,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:2edb6280f1e2>",
+      "request_id": "<redacted:request:sha256:c499ae9a0365>",
+      "replay_key": "<redacted:replay:sha256:4f53dfcce1ae>",
+      "idempotency_key": "<redacted:idempotency:sha256:00b76947beb3>",
+      "guarantee_id": "human-approval",
+      "effect_ids": [
+        "merge_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:00b76947beb3>",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 5,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c0837cdfe936>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "code-merge-pr",
+      "span_id": "audit-merge",
+      "parent_span_id": "approval-merge",
+      "kind": "agent",
+      "name": "merge_audit",
+      "status": "ok",
+      "started_ms": 1700000120100,
+      "ended_ms": 1700000120110,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:bbc5e661e106>",
+      "request_id": "<redacted:request:sha256:c499ae9a0365>",
+      "replay_key": "<redacted:replay:sha256:736d1001393b>",
+      "idempotency_key": "<redacted:idempotency:sha256:66f31fa1ab04>",
+      "guarantee_id": "audit-event",
+      "effect_ids": [],
+      "approval_id": "<redacted:approval:sha256:00b76947beb3>",
+      "data_classes": [
+        "code"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 10,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:b288f3397621>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:e161abc0e9ce>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}
