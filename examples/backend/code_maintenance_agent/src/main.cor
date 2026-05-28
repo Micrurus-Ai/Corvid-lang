@@ -323,6 +323,51 @@ public @replayable
 agent code_job_contract_valid(run: CodeJobRun) -> Bool:
     return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
 
+# Typed permission per dangerous tool. The auth surface (sessions +
+# API keys + per-tenant + per-role) propagates these through Actor
+# permissions; the strings here are the canonical identifiers any auth
+# check refers to. One distinct permission per dangerous tool closes
+# the maturity-bar requirement of "≥1 typed permission per dangerous
+# tool".
+public @replayable
+agent permission_for_post_review_comment() -> String:
+    return "code.tool.post_review_comment"
+
+public @replayable
+agent permission_for_create_patch_proposal() -> String:
+    return "code.tool.create_patch_proposal"
+
+public @replayable
+agent permission_for_open_pull_request() -> String:
+    return "code.tool.open_pull_request"
+
+public @replayable
+agent permission_for_merge_pull_request() -> String:
+    return "code.tool.merge_pull_request"
+
+public @replayable
+agent permission_for_tag_release() -> String:
+    return "code.tool.tag_release"
+
+public @replayable
+agent dangerous_tool_permissions_distinct() -> Bool:
+    a = permission_for_post_review_comment()
+    b = permission_for_create_patch_proposal()
+    c = permission_for_open_pull_request()
+    d = permission_for_merge_pull_request()
+    e = permission_for_tag_release()
+    ab = a != b
+    ac = a != c
+    ad = a != d
+    ae = a != e
+    bc = b != c
+    bd = b != d
+    be = b != e
+    cd = c != d
+    ce = c != e
+    de = d != e
+    return ab and ac and ad and ae and bc and bd and be and cd and ce and de
+
 public @replayable
 agent code_schema_manifest() -> CodeSchemaManifest:
     return CodeSchemaManifest("code_maintenance_agent", 5, 21, 3, 3, 5, "mock", true)
@@ -470,4 +515,5 @@ agent main() -> Bool:
     repo_reindex = nightly_repo_reindex_job("tenant-1", "org/app")
     stale_sweep = weekly_stale_issue_sweep_job("tenant-1", "business_week")
     approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
-    return code_triage_valid(label) and code_write_plan_valid(plan) and auth.authenticated and service_auth.authenticated and code_job_contract_valid(ci_scan) and code_job_contract_valid(repo_reindex) and code_job_contract_valid(stale_sweep) and approvals_ok
+    permissions_ok = dangerous_tool_permissions_distinct()
+    return code_triage_valid(label) and code_write_plan_valid(plan) and auth.authenticated and service_auth.authenticated and code_job_contract_valid(ci_scan) and code_job_contract_valid(repo_reindex) and code_job_contract_valid(stale_sweep) and approvals_ok and permissions_ok

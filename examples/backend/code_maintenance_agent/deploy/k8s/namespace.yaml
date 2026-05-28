@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: code
+  labels:
+    app.kubernetes.io/name: code-maintenance-agent
+    app.kubernetes.io/managed-by: corvid

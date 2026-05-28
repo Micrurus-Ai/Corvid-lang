@@ -1,0 +1,23 @@
+services:
+  code-maintenance-agent:
+    image: corvid/code-maintenance-agent:local
+    build:
+      context: ../../..
+      dockerfile: examples/backend/code_maintenance_agent/deploy/Dockerfile
+    command:
+      - corvid
+      - run
+      - examples/backend/code_maintenance_agent/src/main.cor
+    environment:
+      CORVID_APP_ENV: local
+      CORVID_CONNECTOR_MODE: mock
+      CORVID_DATABASE_URL: sqlite:/data/code_maintenance_agent.db
+      CORVID_TRACE_DIR: /data/traces
+      CORVID_REQUIRE_APPROVALS: "true"
+    ports:
+      - "8089:8080"
+    volumes:
+      - code-maintenance-agent-data:/data
+
+volumes:
+  code-maintenance-agent-data:
