@@ -1,0 +1,88 @@
+# Fly.io manifest for the Personal Knowledge Agent reference app.
+#
+# Slice 35V2-P42-D-LR-app-maturity-PKA-5 — Fly.io is the PaaS target
+# of the three deployment categories the per-app maturity bar requires
+# (Docker Compose + PaaS + K8s, each smoke-deployable from a clean
+# clone).
+#
+# Two service groups: `api` (HTTP routes from src/main.cor; autoscale
+# 1-3) and `worker` (durable job pool running nightly_reindex,
+# weekly_feedback_batch, daily_provenance_audit). They share a volume
+# mount at /data so the SQLite queue + index + trace store stay
+# coherent across replicas.
+
+app = "personal-knowledge-agent"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  CORVID_APP_ENV = "production"
+  CORVID_CONNECTOR_MODE = "mock"
+  CORVID_LOCAL_ONLY = "true"
+  CORVID_REQUIRE_APPROVALS = "true"
+  CORVID_TRACE_DIR = "/data/traces"
+  CORVID_METRICS_LISTEN = "0.0.0.0:9090"
+  RUST_LOG = "info,corvid_runtime::queue=info,corvid_runtime::auth=warn"
+  # Secrets (CORVID_CONNECTOR_TOKEN_KEY, CORVID_API_KEY_PEPPER,
+  # CORVID_SESSION_SIGNING_KEY, CORVID_CSRF_SECRET) are set via
+  # `fly secrets set` — they NEVER appear in this manifest.
+
+[[mounts]]
+  source = "pka_data"
+  destination = "/data"
+
+[processes]
+  api = "/usr/local/bin/corvid run --target=server src/main.cor --listen 0.0.0.0:8080"
+  worker = "/usr/local/bin/corvid jobs run --source src/main.cor --state /data/pka.sqlite --workers 2 --lease-ttl-ms 60000 --max-runtime-ms 0"
+
+[[services]]
+  processes = ["api"]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[services.http_checks]]
+    interval = "10s"
+    grace_period = "30s"
+    method = "get"
+    path = "/schema"
+    protocol = "http"
+    timeout = "5s"
+    tls_skip_verify = false
+
+[[services]]
+  processes = ["worker"]
+  internal_port = 9090
+  protocol = "tcp"
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    grace_period = "30s"
+    timeout = "3s"
+
+[metrics]
+  port = 9090
+  path = "/metrics"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["api", "worker"]

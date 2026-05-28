@@ -510,6 +510,50 @@ agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
     cross_ok = e.action == "CrossTenantIndexShare" and e.required_role == "Admin" and e.data_class == "external"
     return chat_ok and email_ok and publish_ok and export_ok and cross_ok
 
+# Typed permission per dangerous tool. The auth surface (sessions +
+# API keys + per-tenant + per-role) propagates these through Actor
+# permissions; the strings here are the canonical identifiers any auth
+# check refers to. One distinct permission per dangerous tool closes the
+# maturity-bar requirement of "≥1 typed permission per dangerous tool".
+public @replayable
+agent permission_for_share_answer_to_chat() -> String:
+    return "knowledge.tool.share_answer_to_chat"
+
+public @replayable
+agent permission_for_share_answer_via_email() -> String:
+    return "knowledge.tool.share_answer_via_email"
+
+public @replayable
+agent permission_for_publish_authoritative_answer() -> String:
+    return "knowledge.tool.publish_authoritative_answer"
+
+public @replayable
+agent permission_for_export_tenant_corpus() -> String:
+    return "knowledge.tool.export_tenant_corpus"
+
+public @replayable
+agent permission_for_cross_tenant_index_share() -> String:
+    return "knowledge.tool.cross_tenant_index_share"
+
+public @replayable
+agent dangerous_tool_permissions_distinct() -> Bool:
+    a = permission_for_share_answer_to_chat()
+    b = permission_for_share_answer_via_email()
+    c = permission_for_publish_authoritative_answer()
+    d = permission_for_export_tenant_corpus()
+    e = permission_for_cross_tenant_index_share()
+    ab = a != b
+    ac = a != c
+    ad = a != d
+    ae = a != e
+    bc = b != c
+    bd = b != d
+    be = b != e
+    cd = c != d
+    ce = c != e
+    de = d != e
+    return ab and ac and ad and ae and bc and bd and be and cd and ce and de
+
 public @replayable
 agent knowledge_schema_manifest() -> KnowledgeSchemaManifest:
     return KnowledgeSchemaManifest("personal_knowledge_agent", 5, 18, 3, 3, 5, "mock")
@@ -566,4 +610,5 @@ agent main() -> Bool:
     fb_batch = weekly_feedback_batch_job("tenant-1", "business_week")
     audit = daily_provenance_audit_job("tenant-1", "business_day")
     approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
-    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback) and auth.authenticated and service_auth.authenticated and knowledge_job_contract_valid(reindex) and knowledge_job_contract_valid(fb_batch) and knowledge_job_contract_valid(audit) and approvals_ok
+    permissions_ok = dangerous_tool_permissions_distinct()
+    return ingestion_contract_valid(result) and answer_contract_valid(answer) and feedback_eval_contract_valid(feedback) and auth.authenticated and service_auth.authenticated and knowledge_job_contract_valid(reindex) and knowledge_job_contract_valid(fb_batch) and knowledge_job_contract_valid(audit) and approvals_ok and permissions_ok

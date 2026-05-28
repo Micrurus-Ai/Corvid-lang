@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pka-config
+  namespace: pka
+data:
+  CORVID_APP_ENV: "production"
+  CORVID_CONNECTOR_MODE: "mock"
+  CORVID_LOCAL_ONLY: "true"
+  CORVID_REQUIRE_APPROVALS: "true"
+  CORVID_TRACE_DIR: "/data/traces"
+  CORVID_METRICS_LISTEN: "0.0.0.0:9090"
+  RUST_LOG: "info,corvid_runtime::queue=info,corvid_runtime::auth=warn"
+  CORVID_OTLP_ENDPOINT: "http://otel-collector.pka.svc.cluster.local:4317"

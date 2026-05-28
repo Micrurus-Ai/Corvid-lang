@@ -322,7 +322,7 @@ fn personal_knowledge_agent_ingestion_is_private_and_provenanced() {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .expect("enable foreign keys");
-    execute_sql_dir(&conn, &app.join("migrations"), 3);
+    execute_sql_dir(&conn, &app.join("migrations"), 5);
     let seed_sql = fs::read_to_string(app.join("seeds").join("demo.sql")).expect("read seed sql");
     conn.execute_batch(&seed_sql).expect("execute seed sql");
 
@@ -387,7 +387,7 @@ fn personal_knowledge_agent_search_answers_are_grounded_and_evaluated() {
         String::from_utf8_lossy(&eval_out.stderr)
     );
     let eval_stdout = String::from_utf8_lossy(&eval_out.stdout);
-    assert!(eval_stdout.contains("values: 5/5 passed"), "{eval_stdout}");
+    assert!(eval_stdout.contains("values: 11/11 passed"), "{eval_stdout}");
 
     let search_text = fs::read_to_string(app.join("mocks").join("search_results.json"))
         .expect("read search mock");

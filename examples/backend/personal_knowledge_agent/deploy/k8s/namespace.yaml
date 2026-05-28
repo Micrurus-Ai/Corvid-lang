@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pka
+  labels:
+    app.kubernetes.io/name: personal-knowledge-agent
+    app.kubernetes.io/managed-by: corvid

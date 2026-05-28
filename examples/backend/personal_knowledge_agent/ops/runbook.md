@@ -207,7 +207,8 @@ mock mode — they fail closed when approval is missing.
 
 - Corvid toolchain installed (`corvid --version` reports a tag in the
   `35V2` series).
-- SQLite 3.40+ (default) or Postgres 14+ (if `CORVID_STORAGE_MODE=postgres`).
+- SQLite 3.40+ (default) or Postgres 14+ (set `CORVID_DATABASE_URL` to a
+  `postgres://` URL to use Postgres).
 - A writable `target/` directory in the workspace root.
 - ~2 GB of free disk for the local embedding model cache.
 
@@ -216,11 +217,13 @@ mock mode — they fail closed when approval is missing.
 ```
 # from the repo root
 cd examples/backend/personal_knowledge_agent
-export CORVID_CONNECTOR_MODE=mock     # default; keeps everything offline
-export CORVID_STORAGE_MODE=sqlite     # default; uses target/pka.db
-export CORVID_LOCAL_ONLY=true         # default; refuses any network call
+export CORVID_APP_ENV=local              # local | staging | production
+export CORVID_CONNECTOR_MODE=mock        # default; keeps everything offline
+export CORVID_DATABASE_URL=sqlite:target/pka.db
+export CORVID_LOCAL_ONLY=true            # default; refuses any network call
+export CORVID_REQUIRE_APPROVALS=true     # default; fail closed on every dangerous tool
 corvid check src/main.cor
-corvid migrate --target=sqlite --dir=migrations
+corvid migrate --database-url=sqlite:target/pka.db --dir=migrations
 corvid seeds load seeds/demo.sql
 corvid run --target=server --bind=127.0.0.1:8086
 ```
@@ -320,7 +323,8 @@ diff a release against the deployed surface.
 `deploy/k8s/` defines the canonical Kubernetes deployment in 6 files:
 
 - `deployment.yaml` — 2-replica `Deployment` with the PKA image,
-  liveness probe on `/healthz`, readiness probe on `/readyz`.
+  liveness and readiness probes on `GET /schema` (a no-effect route
+  that returns the schema manifest).
 - `service.yaml` — `ClusterIP` service exposing port `8086`.
 - `ingress.yaml` — ingress class agnostic; TLS host required.
 - `configmap.yaml` — non-secret env (mode, log level, OTLP endpoint).
@@ -389,12 +393,15 @@ PKA stores four classes of secrets:
   key. Read at boot; never logged.
 - **Connector tokens** — per-tenant OAuth tokens for file sources
   (Google Drive, SharePoint, S3 IAM role ARN). Stored *only* in the
-  `connector_tokens` table (encrypted with the master encryption key)
+  `connector_tokens` table (encrypted with the connector-token key)
   and never in env.
-- **Master encryption key** — 32-byte AES key used to encrypt
-  connector tokens at rest. Stored in the secret manager (Vault, AWS
+- **Connector-token key** — 32-byte AES key used to encrypt connector
+  OAuth tokens at rest. Stored in the secret manager (Vault, AWS
   Secrets Manager, Kubernetes Secret) and injected as
-  `CORVID_MASTER_ENCRYPTION_KEY` env at boot.
+  `CORVID_CONNECTOR_TOKEN_KEY` env at boot. PKA also carries the
+  standard auth-surface secrets `CORVID_API_KEY_PEPPER` (Argon2id
+  pepper for API-key hashing), `CORVID_SESSION_SIGNING_KEY`, and
+  `CORVID_CSRF_SECRET`.
 
 ### Where to store them
 
@@ -417,12 +424,17 @@ PKA stores four classes of secrets:
 - **Connector tokens** — refresh on the connector's own expiry. Treat a
   refresh failure as a connector-level failure (§12), not a service
   outage.
-- **Master encryption key** — rotate annually or on suspected
-  compromise. Rotation runs `corvid keys rotate
-  --table=connector_tokens --old-key=<old> --new-key=<new>` which
-  decrypts each token row with the old key and re-encrypts with the
-  new. The rotation runs under a maintenance window because the
-  HTTP listener is paused for the duration.
+- **Connector-token key** — rotate annually or on suspected
+  compromise. Rotation runs `corvid auth keys rotate --kind
+  connector-token --old-key=<old> --new-key=<new>` which decrypts each
+  token row with the old key and re-encrypts with the new. The rotation
+  runs under a maintenance window because the HTTP listener is paused
+  for the duration.
+- **API-key pepper / session signing / CSRF secret** — the auth surface
+  secrets rotate on the standard cadence: pepper rotation invalidates
+  existing API keys (coordinate with tenants), session signing rotates
+  every 30 days with a 15-minute grace, CSRF secret rotates immediately
+  with old tokens rejected on the safe side.
 
 ### What never gets logged
 
@@ -443,7 +455,7 @@ and an operator alert fires (§9).
 ### Applying migrations
 
 ```
-corvid migrate --target=<sqlite|postgres> --dir=migrations
+corvid migrate --database-url=$CORVID_DATABASE_URL --dir=migrations
 ```
 
 Migrations are idempotent: every migration begins with the schema-version
@@ -474,7 +486,7 @@ includes the schema version and the file hash of every migration. To
 detect drift:
 
 ```
-corvid migrate --check --target=<sqlite|postgres> --dir=migrations
+corvid migrate --check --database-url=$CORVID_DATABASE_URL --dir=migrations
 ```
 
 This command compares the DB's `schema_version` table to the
@@ -795,10 +807,10 @@ field is checked at every approval request and refuses mismatches.
 
 ### Rolling back a connector mode switch
 
-If `CORVID_CONNECTOR_MODE` was flipped from `mock` to `live` in error,
+If `CORVID_CONNECTOR_MODE` was flipped from `mock` to `real` in error,
 flip it back. The runtime re-reads connector mode on every connector
 call, so the change takes effect immediately — there is no need to
-restart the binary. The trace span for any in-flight `live` call still
+restart the binary. The trace span for any in-flight `real` call still
 records the live attempt; review those spans for any external write
 that escaped before the flip-back.
 
@@ -814,9 +826,9 @@ PKA's three connectors (`files_connector`, `local_embed_connector`,
 - `mock` (default) — deterministic fixtures, no network. Used by
   `corvid eval`, `corvid tour`, smoke suites, and any environment
   where reproducibility matters more than fidelity.
-- `live` — real provider calls (Google Drive, S3, SharePoint, local FS).
+- `real` — real provider calls (Google Drive, S3, SharePoint, local FS).
   Requires a valid connector token per tenant (§5).
-- `record` — proxies to `live` but writes the raw response to a fixture
+- `record` — proxies to `real` but writes the raw response to a fixture
   file under `target/recordings/`. Used to capture a new replay
   fixture against a real provider.
 - `replay` — reads from `target/recordings/` instead of the live
@@ -827,13 +839,13 @@ PKA's three connectors (`files_connector`, `local_embed_connector`,
 
 ```
 # in the deploy environment
-export CORVID_CONNECTOR_MODE=live
-corvid ops show | jq '.connector_mode'   # must print "live"
+export CORVID_CONNECTOR_MODE=real
+corvid ops show | jq '.connector_mode'   # must print "real"
 ```
 
 Mode changes are *not* logged to `audit_events` (mode is a deploy-time
 concern, not a per-request decision); they appear in `corvid ops show`
-and the boot log. A mode change to `live` without per-tenant tokens
+and the boot log. A mode change to `real` without per-tenant tokens
 configured is a configuration error and causes all `files_read` calls
 to fail closed.
 
@@ -846,7 +858,7 @@ corvid connectors token list --tenant=<id>
 corvid connectors token revoke --tenant=<id> --connector=files
 ```
 
-Tokens are encrypted at rest with the master encryption key (§5).
+Tokens are encrypted at rest with the connector-token key (§5).
 Revoking a token is immediate — the next `files_read` call for that
 tenant fails closed.
 
@@ -1087,12 +1099,13 @@ done
 Re-ingest is full, not incremental, because the content-hash diff
 basis is gone. Plan for a multi-hour rebuild on large tenants.
 
-### Loss of the master encryption key
+### Loss of the connector-token key
 
-The master encryption key encrypts connector tokens. If lost,
-connector tokens are unrecoverable but the index, embeddings, and
-audit trail are intact (they are not encrypted at the application
-layer — they rely on DB and object-storage encryption at rest).
+The connector-token key (`CORVID_CONNECTOR_TOKEN_KEY`) encrypts
+connector OAuth tokens. If lost, connector tokens are unrecoverable but
+the index, embeddings, and audit trail are intact (they are not
+encrypted at the application layer — they rely on DB and object-storage
+encryption at rest).
 
 Recovery: rotate the key (§5), force every tenant to re-mint their
 connector tokens. This is a multi-day operation across all tenants.
@@ -1219,16 +1232,20 @@ PKA ships three promoted fixtures under
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CORVID_CONNECTOR_MODE` | `mock` | Connector mode (mock/live/record/replay) |
-| `CORVID_STORAGE_MODE` | `sqlite` | DB backend (sqlite/postgres) |
+| `CORVID_APP_ENV` | `local` | Environment (local / staging / production) |
+| `CORVID_CONNECTOR_MODE` | `mock` | Connector mode (mock / replay / real / record) |
 | `CORVID_LOCAL_ONLY` | `true` | If true, refuses any network call |
-| `CORVID_DB_URL` | `target/pka.db` | DB connection string |
-| `CORVID_OBJECT_STORE_URL` | `target/object-store` | Object-storage URL |
-| `CORVID_MASTER_ENCRYPTION_KEY` | — | AES-256 key for connector-token encryption |
+| `CORVID_REQUIRE_APPROVALS` | `true` | If true, every dangerous tool fails closed without approval |
+| `CORVID_DATABASE_URL` | `sqlite:target/pka.db` | DB connection string (sqlite: or postgres:) |
+| `CORVID_FILES_ROOTS` | `notes=./notes` | Registered source roots (name=path, comma-separated) |
+| `CORVID_CONNECTOR_TOKEN_KEY` | — | AES-256 key for connector-token encryption |
+| `CORVID_API_KEY_PEPPER` | — | Argon2id pepper for API-key hashing |
+| `CORVID_SESSION_SIGNING_KEY` | — | Session signing key (30-day rotation) |
+| `CORVID_CSRF_SECRET` | — | CSRF double-submit secret |
 | `CORVID_OTLP_ENDPOINT` | — | OTLP exporter target |
-| `CORVID_METRICS_BIND` | `0.0.0.0:9486` | Prometheus `/metrics` bind |
+| `CORVID_METRICS_LISTEN` | `0.0.0.0:9090` | Prometheus `/metrics` bind |
 | `CORVID_TRACE_DIR` | `target/traces` | Trace JSONL output directory |
-| `CORVID_REDACTION_POLICY_HASH` | computed at boot | Active redaction policy hash |
+| `RUST_LOG` | `info` | Log filter |
 
 ### Source map
 

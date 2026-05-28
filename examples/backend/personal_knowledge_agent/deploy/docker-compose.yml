@@ -1,0 +1,24 @@
+services:
+  personal-knowledge-agent:
+    image: corvid/personal-knowledge-agent:local
+    build:
+      context: ../../..
+      dockerfile: examples/backend/personal_knowledge_agent/deploy/Dockerfile
+    command:
+      - corvid
+      - run
+      - examples/backend/personal_knowledge_agent/src/main.cor
+    environment:
+      CORVID_APP_ENV: local
+      CORVID_CONNECTOR_MODE: mock
+      CORVID_DATABASE_URL: sqlite:/data/personal_knowledge_agent.db
+      CORVID_TRACE_DIR: /data/traces
+      CORVID_LOCAL_ONLY: "true"
+      CORVID_REQUIRE_APPROVALS: "true"
+    ports:
+      - "8086:8080"
+    volumes:
+      - personal-knowledge-agent-data:/data
+
+volumes:
+  personal-knowledge-agent-data:
