@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: finance
+  labels:
+    app.kubernetes.io/name: finance-operations-agent
+    app.kubernetes.io/managed-by: corvid

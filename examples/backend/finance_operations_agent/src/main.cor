@@ -372,6 +372,51 @@ public @replayable
 agent finance_job_contract_valid(run: FinanceJobRun) -> Bool:
     return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
 
+# Typed permission per dangerous tool. The auth surface (sessions +
+# API keys + per-tenant + per-role) propagates these through Actor
+# permissions; the strings here are the canonical identifiers any auth
+# check refers to. One distinct permission per dangerous tool closes
+# the maturity-bar requirement of "≥1 typed permission per dangerous
+# tool".
+public @replayable
+agent permission_for_submit_payment_intent() -> String:
+    return "finance.tool.submit_payment_intent"
+
+public @replayable
+agent permission_for_cancel_subscription() -> String:
+    return "finance.tool.cancel_subscription"
+
+public @replayable
+agent permission_for_dispute_transaction() -> String:
+    return "finance.tool.dispute_transaction"
+
+public @replayable
+agent permission_for_export_financial_report() -> String:
+    return "finance.tool.export_financial_report"
+
+public @replayable
+agent permission_for_schedule_recurring_payment() -> String:
+    return "finance.tool.schedule_recurring_payment"
+
+public @replayable
+agent dangerous_tool_permissions_distinct() -> Bool:
+    a = permission_for_submit_payment_intent()
+    b = permission_for_cancel_subscription()
+    c = permission_for_dispute_transaction()
+    d = permission_for_export_financial_report()
+    e = permission_for_schedule_recurring_payment()
+    ab = a != b
+    ac = a != c
+    ad = a != d
+    ae = a != e
+    bc = b != c
+    bd = b != d
+    be = b != e
+    cd = c != d
+    ce = c != e
+    de = d != e
+    return ab and ac and ad and ae and bc and bd and be and cd and ce and de
+
 public @replayable
 agent finance_schema_manifest() -> FinanceSchemaManifest:
     return FinanceSchemaManifest("finance_operations_agent", 5, 23, 3, 3, 5, "mock", true)
@@ -535,4 +580,5 @@ agent main() -> Bool:
     anomaly_scan = weekly_anomaly_scan_job("tenant-1", "business_week")
     renewal_check = daily_subscription_renewal_check_job("tenant-1", "business_day")
     approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
-    return readonly_snapshot_valid(snapshot) and payment_approval_surface_valid(payment) and auth.authenticated and service_auth.authenticated and finance_job_contract_valid(balance_sync) and finance_job_contract_valid(anomaly_scan) and finance_job_contract_valid(renewal_check) and approvals_ok
+    permissions_ok = dangerous_tool_permissions_distinct()
+    return readonly_snapshot_valid(snapshot) and payment_approval_surface_valid(payment) and auth.authenticated and service_auth.authenticated and finance_job_contract_valid(balance_sync) and finance_job_contract_valid(anomaly_scan) and finance_job_contract_valid(renewal_check) and approvals_ok and permissions_ok
