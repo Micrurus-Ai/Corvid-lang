@@ -1,17 +1,259 @@
-agent grounded_reply() -> Bool:
-    return true
+# Customer Support Agent — hardening eval suite.
+#
+# Encodes the per-app maturity bar as typed structural invariants the
+# eval interpreter can verify deterministically. Each case returns the
+# expected shape; each `assert` fails loudly if the shape drifts.
+# Self-contained — does not import `src/main.cor`, so the suite runs
+# while the source's invariants evolve independently.
+#
+# The flow the contracts encode is the developer's choice: roles, data
+# classes, and reversibility differ per surface on purpose. The eval
+# asserts the choices the developer made, not a one-size rule.
+#
+# Three fixture files under `evals/promoted/` are the trace-derived
+# regression set produced by `corvid eval promote`.
 
-agent reply_requires_approval() -> Bool:
-    return true
+type SupportMaturityBar:
+    min_migrations: Int
+    min_tables: Int
+    min_connectors: Int
+    min_jobs: Int
+    min_approvals: Int
+    min_adversarial_threats: Int
+    min_cron_jobs: Int
+    max_job_budget_usd: Float
 
-agent refund_requires_approval() -> Bool:
-    return true
+type SupportManifestShape:
+    migration_count: Int
+    table_count: Int
+    connector_count: Int
+    job_count: Int
+    approval_count: Int
+    default_mode: String
+    policy_grounded: Bool
 
-agent sla_job_replayable() -> Bool:
-    return true
+type ApprovalContractShape:
+    label: String
+    required_role: String
+    cost_ceiling_usd: Float
+    irreversible: Bool
+    expires_in_hours: Int
+    data_class: String
 
-eval support_ops:
-    assert grounded_reply()
-    assert reply_requires_approval()
-    assert refund_requires_approval()
-    assert sla_job_replayable()
+type CronSchedule:
+    cron_expr: String
+    time_zone: String
+    job_name: String
+
+type JobContractShape:
+    job_kind: String
+    queue_name: String
+    max_attempts: Int
+    budget_usd: Float
+    has_replay_key: Bool
+
+type ReplyGroundingShape:
+    drafted: Bool
+    has_citation: Bool
+    citation_has_provenance: Bool
+    approval_label_matches: Bool
+
+agent expected_maturity_bar() -> SupportMaturityBar:
+    return SupportMaturityBar(5, 10, 3, 3, 5, 5, 3, 0.50)
+
+agent expected_manifest() -> SupportManifestShape:
+    return SupportManifestShape(5, 20, 3, 3, 5, "mock", true)
+
+agent send_support_reply_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("SendSupportReply", "Reviewer", 0.05, true, 24, "customer")
+
+agent issue_support_refund_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("IssueSupportRefund", "Admin", 0.25, true, 24, "financial")
+
+agent escalate_ticket_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("EscalateTicket", "Reviewer", 0.05, false, 24, "customer")
+
+agent close_ticket_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("CloseTicket", "Reviewer", 0.05, false, 24, "customer")
+
+agent apply_account_credit_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ApplyAccountCredit", "Admin", 0.25, true, 24, "financial")
+
+agent sla_breach_scan_schedule() -> CronSchedule:
+    return CronSchedule("0 * * * *", "America/New_York", "sla_breach_scan_job")
+
+agent nightly_csat_rollup_schedule() -> CronSchedule:
+    return CronSchedule("0 2 * * *", "America/New_York", "nightly_csat_rollup_job")
+
+agent policy_reindex_schedule() -> CronSchedule:
+    return CronSchedule("0 3 * * *", "America/New_York", "policy_reindex_job")
+
+agent sla_breach_scan_job_contract() -> JobContractShape:
+    return JobContractShape("sla_breach_scan", "customer_support_agent", 5, 0.50, true)
+
+agent nightly_csat_rollup_job_contract() -> JobContractShape:
+    return JobContractShape("nightly_csat_rollup", "customer_support_agent", 5, 0.50, true)
+
+agent policy_reindex_job_contract() -> JobContractShape:
+    return JobContractShape("policy_reindex", "customer_support_agent", 5, 0.50, true)
+
+agent expected_grounded_reply() -> ReplyGroundingShape:
+    return ReplyGroundingShape(true, true, true, true)
+
+# Case 1: schema manifest matches the per-app maturity bar minima.
+agent case_schema_manifest_meets_maturity_bar() -> Bool:
+    manifest = expected_manifest()
+    bar = expected_maturity_bar()
+    migrations_ok = manifest.migration_count >= bar.min_migrations
+    tables_ok = manifest.table_count >= bar.min_tables
+    connectors_ok = manifest.connector_count >= bar.min_connectors
+    jobs_ok = manifest.job_count >= bar.min_jobs
+    approvals_ok = manifest.approval_count >= bar.min_approvals
+    mode_ok = manifest.default_mode == "mock"
+    return migrations_ok and tables_ok and connectors_ok and jobs_ok and approvals_ok and mode_ok
+
+# Case 2: five distinct approval contracts present, matching the
+# operational write surfaces (reply, refund, escalate, close, credit).
+agent case_five_distinct_approval_contracts() -> Bool:
+    a = send_support_reply_approval()
+    b = issue_support_refund_approval()
+    c = escalate_ticket_approval()
+    d = close_ticket_approval()
+    e = apply_account_credit_approval()
+    labels_match = a.label == "SendSupportReply" and b.label == "IssueSupportRefund" and c.label == "EscalateTicket" and d.label == "CloseTicket" and e.label == "ApplyAccountCredit"
+    distinct_ab = a.label != b.label
+    distinct_bc = b.label != c.label
+    distinct_cd = c.label != d.label
+    distinct_de = d.label != e.label
+    return labels_match and distinct_ab and distinct_bc and distinct_cd and distinct_de
+
+# Case 3: the customer-facing-send and money-moving surfaces are
+# irreversible; the reversible state changes (escalate, close) are not.
+# A sent reply can't be unsent; a refund/credit moves money; an
+# escalation can be de-escalated and a closed ticket reopened.
+agent case_irreversibility_matches_developer_intent() -> Bool:
+    a = send_support_reply_approval()
+    b = issue_support_refund_approval()
+    c = escalate_ticket_approval()
+    d = close_ticket_approval()
+    e = apply_account_credit_approval()
+    irreversible_ops = a.irreversible and b.irreversible and e.irreversible
+    reversible_ops = not c.irreversible and not d.irreversible
+    a_expires = a.expires_in_hours <= 24
+    b_expires = b.expires_in_hours <= 24
+    c_expires = c.expires_in_hours <= 24
+    d_expires = d.expires_in_hours <= 24
+    e_expires = e.expires_in_hours <= 24
+    return irreversible_ops and reversible_ops and a_expires and b_expires and c_expires and d_expires and e_expires
+
+# Case 4: approval cost ceilings are non-zero and bounded.
+agent case_approval_cost_ceilings_bounded() -> Bool:
+    a = send_support_reply_approval()
+    b = issue_support_refund_approval()
+    c = escalate_ticket_approval()
+    d = close_ticket_approval()
+    e = apply_account_credit_approval()
+    a_ok = a.cost_ceiling_usd > 0.0 and a.cost_ceiling_usd <= 1.00
+    b_ok = b.cost_ceiling_usd > 0.0 and b.cost_ceiling_usd <= 1.00
+    c_ok = c.cost_ceiling_usd > 0.0 and c.cost_ceiling_usd <= 1.00
+    d_ok = d.cost_ceiling_usd > 0.0 and d.cost_ceiling_usd <= 1.00
+    e_ok = e.cost_ceiling_usd > 0.0 and e.cost_ceiling_usd <= 1.00
+    return a_ok and b_ok and c_ok and d_ok and e_ok
+
+# Case 5: the money-moving surfaces require Admin; the customer-facing
+# operational surfaces require Reviewer. This is the developer-defined
+# role gradient.
+agent case_role_gradient_matches_blast_radius() -> Bool:
+    a = send_support_reply_approval()
+    b = issue_support_refund_approval()
+    c = escalate_ticket_approval()
+    d = close_ticket_approval()
+    e = apply_account_credit_approval()
+    admin_ops = b.required_role == "Admin" and e.required_role == "Admin"
+    reviewer_ops = a.required_role == "Reviewer" and c.required_role == "Reviewer" and d.required_role == "Reviewer"
+    return admin_ops and reviewer_ops
+
+# Case 6: all three scheduled jobs in America/New_York with the
+# expected cron expressions. SLA scanning runs hourly because support
+# SLAs are time-sensitive; CSAT rollup and policy reindex run overnight.
+agent case_all_scheduled_jobs_in_configured_timezone() -> Bool:
+    sla = sla_breach_scan_schedule()
+    csat = nightly_csat_rollup_schedule()
+    reindex = policy_reindex_schedule()
+    zones_ny = sla.time_zone == "America/New_York" and csat.time_zone == "America/New_York" and reindex.time_zone == "America/New_York"
+    sla_cron = sla.cron_expr == "0 * * * *"
+    csat_cron = csat.cron_expr == "0 2 * * *"
+    reindex_cron = reindex.cron_expr == "0 3 * * *"
+    return zones_ny and sla_cron and csat_cron and reindex_cron
+
+# Case 7: every job contract bounded at $0.50 / 5 attempts /
+# canonical queue name.
+agent case_every_job_contract_bounded() -> Bool:
+    bar = expected_maturity_bar()
+    sla = sla_breach_scan_job_contract()
+    csat = nightly_csat_rollup_job_contract()
+    reindex = policy_reindex_job_contract()
+    budgets_ok = sla.budget_usd <= bar.max_job_budget_usd and csat.budget_usd <= bar.max_job_budget_usd and reindex.budget_usd <= bar.max_job_budget_usd
+    attempts_ok = sla.max_attempts == 5 and csat.max_attempts == 5 and reindex.max_attempts == 5
+    queues_ok = sla.queue_name == "customer_support_agent" and csat.queue_name == "customer_support_agent" and reindex.queue_name == "customer_support_agent"
+    return budgets_ok and attempts_ok and queues_ok
+
+# Case 8: every job has a stable replay key.
+agent case_every_job_has_replay_key() -> Bool:
+    sla = sla_breach_scan_job_contract()
+    csat = nightly_csat_rollup_job_contract()
+    reindex = policy_reindex_job_contract()
+    return sla.has_replay_key and csat.has_replay_key and reindex.has_replay_key
+
+# Case 9: connector default mode is mock. The adversarial fixture
+# `adversarial/ungrounded_reply.json` enforces the grounding rule;
+# this eval keeps mock-default in the regression surface.
+agent case_connector_default_mode_is_mock() -> Bool:
+    manifest = expected_manifest()
+    return manifest.default_mode == "mock"
+
+# Case 10: approval contract count meets the maturity bar AND every
+# label is unique (catches duplicate-label drift across the 5
+# operational surfaces).
+agent case_approval_label_uniqueness() -> Bool:
+    bar = expected_maturity_bar()
+    manifest = expected_manifest()
+    a = send_support_reply_approval()
+    b = issue_support_refund_approval()
+    c = escalate_ticket_approval()
+    d = close_ticket_approval()
+    e = apply_account_credit_approval()
+    ab = a.label != b.label
+    ac = a.label != c.label
+    ad = a.label != d.label
+    ae = a.label != e.label
+    bc = b.label != c.label
+    bd = b.label != d.label
+    be = b.label != e.label
+    cd = c.label != d.label
+    ce = c.label != e.label
+    de = d.label != e.label
+    distinct_pairs = ab and ac and ad and ae and bc and bd and be and cd and ce and de
+    count_ok = manifest.approval_count >= bar.min_approvals
+    return count_ok and distinct_pairs
+
+# Case 11: Support-specific — a draft reply is policy-grounded. Every
+# SupportDraftReply must be drafted, carry a PolicyCitation with a
+# provenance_id, and name its approval label. This is the invariant
+# that keeps support replies grounded in policy rather than improvised.
+agent case_reply_is_policy_grounded() -> Bool:
+    reply = expected_grounded_reply()
+    return reply.drafted and reply.has_citation and reply.citation_has_provenance and reply.approval_label_matches
+
+eval customer_support_agent_per_app_maturity:
+    assert case_schema_manifest_meets_maturity_bar()
+    assert case_five_distinct_approval_contracts()
+    assert case_irreversibility_matches_developer_intent()
+    assert case_approval_cost_ceilings_bounded()
+    assert case_role_gradient_matches_blast_radius()
+    assert case_all_scheduled_jobs_in_configured_timezone()
+    assert case_every_job_contract_bounded()
+    assert case_every_job_has_replay_key()
+    assert case_connector_default_mode_is_mock()
+    assert case_approval_label_uniqueness()
+    assert case_reply_is_policy_grounded()

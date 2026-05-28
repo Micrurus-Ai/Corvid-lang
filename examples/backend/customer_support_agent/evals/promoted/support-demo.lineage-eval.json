@@ -1,0 +1,70 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "support-demo",
+  "fixture_hash": "sha256:2cad802c223ccf06",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 1,
+  "selected_span_ids": [
+    "triage"
+  ],
+  "expected_guarantee_ids": [
+    "policy-grounded-reply"
+  ],
+  "expected_effect_ids": [
+    "policy_search",
+    "support_ai",
+    "ticket_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:704704a37b20>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:fa5a31893707>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:d1b2e344d816>"
+  ],
+  "retrieval_index_hashes": [
+    "<redacted:retrieval_index_hash:sha256:1f365f3f88d8>"
+  ],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "support-demo",
+      "span_id": "triage",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "GET /tickets/triage/mock",
+      "status": "ok",
+      "started_ms": 1700000000000,
+      "ended_ms": 1700000000020,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:6ff3b3bd11c4>",
+      "request_id": "<redacted:request:sha256:ec8771112cb2>",
+      "replay_key": "<redacted:replay:sha256:704704a37b20>",
+      "idempotency_key": "<redacted:idempotency:sha256:704704a37b20>",
+      "guarantee_id": "policy-grounded-reply",
+      "effect_ids": [
+        "ticket_read",
+        "policy_search",
+        "support_ai"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "customer"
+      ],
+      "cost_usd": 0.08,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.9,
+      "latency_ms": 20,
+      "model_id": "mock-support",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:fa5a31893707>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:d1b2e344d816>",
+      "retrieval_index_hash": "<redacted:retrieval_index_hash:sha256:1f365f3f88d8>",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:bbee7c888900>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:70de2c715143>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

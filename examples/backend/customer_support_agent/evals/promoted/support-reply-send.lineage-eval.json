@@ -1,0 +1,136 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "support-reply-send",
+  "fixture_hash": "sha256:62801b2d950a0738",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "route-reply",
+    "approval-reply",
+    "audit-reply"
+  ],
+  "expected_guarantee_ids": [
+    "approval-pending",
+    "audit-event",
+    "human-approval"
+  ],
+  "expected_effect_ids": [
+    "support_write"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:01d8a21fda06>",
+    "<redacted:replay:sha256:4b3e20dec2e8>",
+    "<redacted:replay:sha256:d88b80fea0c2>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "support-reply-send",
+      "span_id": "route-reply",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "POST /replies/send",
+      "status": "pending_review",
+      "started_ms": 1700000120000,
+      "ended_ms": 1700000120030,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:6ff3b3bd11c4>",
+      "request_id": "<redacted:request:sha256:210adf49aa91>",
+      "replay_key": "<redacted:replay:sha256:4b3e20dec2e8>",
+      "idempotency_key": "<redacted:idempotency:sha256:4b961c39cffa>",
+      "guarantee_id": "approval-pending",
+      "effect_ids": [
+        "support_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:b3892d529861>",
+      "data_classes": [
+        "customer"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 30,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c938869be42c>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "support-reply-send",
+      "span_id": "approval-reply",
+      "parent_span_id": "route-reply",
+      "kind": "approval",
+      "name": "SendSupportReply",
+      "status": "pending_review",
+      "started_ms": 1700000120040,
+      "ended_ms": 1700000120045,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:6ff3b3bd11c4>",
+      "request_id": "<redacted:request:sha256:210adf49aa91>",
+      "replay_key": "<redacted:replay:sha256:01d8a21fda06>",
+      "idempotency_key": "<redacted:idempotency:sha256:b3892d529861>",
+      "guarantee_id": "human-approval",
+      "effect_ids": [
+        "support_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:b3892d529861>",
+      "data_classes": [
+        "customer"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 5,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c0837cdfe936>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "support-reply-send",
+      "span_id": "audit-reply",
+      "parent_span_id": "approval-reply",
+      "kind": "agent",
+      "name": "reply_audit",
+      "status": "ok",
+      "started_ms": 1700000120100,
+      "ended_ms": 1700000120110,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:bbc5e661e106>",
+      "request_id": "<redacted:request:sha256:210adf49aa91>",
+      "replay_key": "<redacted:replay:sha256:d88b80fea0c2>",
+      "idempotency_key": "<redacted:idempotency:sha256:cbb4e06a27e5>",
+      "guarantee_id": "audit-event",
+      "effect_ids": [],
+      "approval_id": "<redacted:approval:sha256:b3892d529861>",
+      "data_classes": [
+        "customer"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 10,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:b288f3397621>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:e161abc0e9ce>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}
