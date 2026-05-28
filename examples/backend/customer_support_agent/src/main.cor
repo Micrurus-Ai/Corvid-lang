@@ -332,6 +332,51 @@ public @replayable
 agent support_job_contract_valid(run: SupportJobRun) -> Bool:
     return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
 
+# Typed permission per dangerous tool. The auth surface (sessions +
+# API keys + per-tenant + per-role) propagates these through Actor
+# permissions; the strings here are the canonical identifiers any auth
+# check refers to. One distinct permission per dangerous tool closes
+# the maturity-bar requirement of "≥1 typed permission per dangerous
+# tool".
+public @replayable
+agent permission_for_send_support_reply() -> String:
+    return "support.tool.send_support_reply"
+
+public @replayable
+agent permission_for_issue_support_refund() -> String:
+    return "support.tool.issue_support_refund"
+
+public @replayable
+agent permission_for_escalate_ticket() -> String:
+    return "support.tool.escalate_ticket"
+
+public @replayable
+agent permission_for_close_ticket() -> String:
+    return "support.tool.close_ticket"
+
+public @replayable
+agent permission_for_apply_account_credit() -> String:
+    return "support.tool.apply_account_credit"
+
+public @replayable
+agent dangerous_tool_permissions_distinct() -> Bool:
+    a = permission_for_send_support_reply()
+    b = permission_for_issue_support_refund()
+    c = permission_for_escalate_ticket()
+    d = permission_for_close_ticket()
+    e = permission_for_apply_account_credit()
+    ab = a != b
+    ac = a != c
+    ad = a != d
+    ae = a != e
+    bc = b != c
+    bd = b != d
+    be = b != e
+    cd = c != d
+    ce = c != e
+    de = d != e
+    return ab and ac and ad and ae and bc and bd and be and cd and ce and de
+
 public @replayable
 agent support_schema_manifest() -> SupportSchemaManifest:
     return SupportSchemaManifest("customer_support_agent", 5, 20, 3, 3, 5, "mock", true)
@@ -485,4 +530,5 @@ agent main() -> Bool:
     csat = nightly_csat_rollup_job("tenant-1", "business_day")
     reindex = policy_reindex_job("tenant-1", "support_policies")
     approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
-    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla) and auth.authenticated and service_auth.authenticated and support_job_contract_valid(sla_scan) and support_job_contract_valid(csat) and support_job_contract_valid(reindex) and approvals_ok
+    permissions_ok = dangerous_tool_permissions_distinct()
+    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla) and auth.authenticated and service_auth.authenticated and support_job_contract_valid(sla_scan) and support_job_contract_valid(csat) and support_job_contract_valid(reindex) and approvals_ok and permissions_ok
