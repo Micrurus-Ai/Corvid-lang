@@ -4,6 +4,63 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-CodeMaintenance closed — ALL FIVE per-app tracks now done
+
+Six-commit per-app maturity track for the Code Maintenance Agent, the
+fifth and final app through the bar (after PEA, PKA, Finance, Support).
+Fourteen rows ✅ close; the same 5 cross-cutting + 2 post-v1.0-syntax
+rows defer. Audit:
+`docs/phases/phase-42-codemaintenance-maturity-2026-05-28.md`.
+
+With this track closed, **all five reference apps sit at the Phase 42
+per-app maturity bar.** Posture: writes require approval + CI-aware risk
+triage (a high-severity label is grounded in a failed CiSignal). The 5
+contracts are developer-authored with a role/reversibility gradient
+(Admin + irreversible for merge/release; Reviewer for the reversible
+comment/patch/PR).
+
+| Slice | Commit | What landed |
+|---|---|---|
+| D-CM-1 | `40e27d7` | std imports + auth surface + 3 cron jobs + migrations 0003/0004 (18 tables / 4 migrations) |
+| D-CM-2 | `ee4f041` | 3 more approval surfaces (PR open/merge/release tag) + 0005 migration + 5 adversarial gates (6 threats) |
+| D-CM-3 | `0ccaef1` | 11 eval cases (incl. CI-grounded triage) + 3 promoted fixtures |
+| D-CM-4 | `2b04526` | operator runbook 7 → 1500 lines |
+| D-CM-5 | `95cac11` | deploy manifests (Compose + Fly + K8s) + 5 typed permissions |
+| D-CM-6 | (this commit) | audit doc + dev-log + learnings + ROADMAP tick |
+
+Per-app rows closed: tables (21 ≥ 10), migrations (5 ≥ 5), auth depth,
+connectors (3 mock ≥ 3), approvals (5 ≥ 5), cron jobs (3 ≥ 3),
+retry-policy jobs (3 via `code_run`), adversarial threats (6 ≥ 5),
+runbook (1500 ≥ 1500), deploy manifests (3 categories), typed
+permission per dangerous tool (5/5 distinct), evals (11 ≥ 10), promoted
+fixtures (3 ≥ 3), SIGKILL survival (runtime gate, P38).
+
+Applied the CustomerSupport `Grounded*`-type lesson proactively: the
+CI-triage eval shape is named `CiTriageShape`, not `GroundedTriageShape`,
+so it never trips the E0209 grounded-return checker.
+
+All five per-app tracks (PEA / PKA / Finance / Support / CodeMaintenance)
+are now closed. The remaining Phase 42 tail is the cross-cutting
+launch-readiness slices that apply to all apps at once:
+`35V2-P42-E-LR-app-deploy-smoke-ci` (CI smoke-deploy),
+`35V2-P42-F-LR-per-app-benchmark-files`,
+`35V2-P42-G-LR-per-app-claim-files`,
+`35V2-P42-H-LR-per-app-ai-helpers`, and `33M-beta-feedback`.
+
+Validation (final state):
+- `corvid check src/main.cor` clean.
+- all 5 `adversarial/ungated_*.cor` → `E0101`; `raw_patch_committed.json`
+  is the sixth threat.
+- `corvid eval evals/write_approval_eval.cor` → `11/11 passed`.
+- `cargo test -p corvid-cli --test reference_apps code_maintenance`
+  → 2 passed.
+- runbook 1500 lines, sections 1-17.
+
+Next ROADMAP slice in order: the cross-cutting per-app launch-readiness
+slices begin with `35V2-P42-E-LR-app-deploy-smoke-ci`.
+
+---
+
 ## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-CustomerSupport closed
 
 Six-commit per-app maturity track for the Customer Support Agent, the

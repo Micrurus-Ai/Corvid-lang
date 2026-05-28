@@ -4904,6 +4904,45 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P42-D-LR-app-maturity-CodeMaintenance closed (2026-05-28) — Code Maintenance Agent reaches the bar; ALL FIVE reference apps now at Phase 42 maturity
+
+Six-commit per-app maturity track for the Code Maintenance Agent, the
+fifth and final app. Fourteen rows ✅ close; the same 5 cross-cutting +
+2 post-v1.0-syntax rows defer. Closing audit:
+[`docs/phases/phase-42-codemaintenance-maturity-2026-05-28.md`](docs/phases/phase-42-codemaintenance-maturity-2026-05-28.md).
+
+With this track closed, **all five reference apps (PEA, PKA, Finance,
+Customer Support, Code Maintenance) sit at the Phase 42 per-app maturity
+bar.** Each ships auth, 3 cron jobs, 5 developer-authored approval
+contracts with a domain-appropriate role/reversibility gradient, 11
+eval cases, 3 promoted fixtures, ≥5 adversarial threats, a ≥1500-line
+runbook, 3 deploy-manifest categories, and 5 typed permissions.
+
+Code Maintenance reconfirmed every prior lesson and reused them
+proactively rather than re-learning: the runbook hit ≥1500 with
+coverage (pipeline walkthrough, CI-signal lifecycle, worked
+failing-CI-to-merge example, glossary), the same-slice mock/test
+discipline moved `write_plan.json` + two assertions when approvals went
+2→5, the manifests used real env-var names, and — the CustomerSupport
+`Grounded*` lesson applied up front — the CI-triage eval type was named
+`CiTriageShape` from the start so it never tripped E0209.
+
+**Cross-track lesson: the five-app per-app maturity programme converged
+on one repeatable shape.** Every app went from a no-imports demo to the
+bar through the identical 6-slice arc (foundations → 5 approval surfaces
++ gates → 11 evals + 3 fixtures → ≥1500 runbook → deploy + typed
+permissions → audit/docs/ROADMAP). What differed per app was *only* the
+domain posture expressed structurally — PEA's external-calendar share,
+PKA's grounding + cross-tenant isolation, Finance's non-advice, Support's
+policy-grounded replies, Code's CI-aware triage + writes-require-approval.
+The invariant across all five: the domain constraint is enforced by the
+*shape of the surface* (what tools exist, what effects the cron jobs
+carry, what the eval asserts), not by a disclaimer — so the compiler and
+the trace log can prove it. The five `D-LR-app-maturity-*` tracks are
+done; the remaining Phase 42 tail is the cross-cutting
+`35V2-P42-E/F/G/H-LR` + `33M-beta-feedback` slices that touch all apps
+at once.
+
 ## 35V2-P42-D-LR-app-maturity-CustomerSupport closed (2026-05-28) — Customer Support Agent reaches the Phase 42 maturity bar
 
 Six-commit per-app maturity track for the Support agent, the fourth
