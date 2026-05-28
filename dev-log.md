@@ -4,6 +4,82 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-PKA closed
+
+Six-commit per-app maturity track for the Personal Knowledge Agent
+reference app. Brings PKA to the Phase 42 bar (14 of the rows that
+apply per-PKA, with the same 5 cross-cutting + 2 post-v1.0-syntax rows
+deferred as PEA). Audit: `docs/phases/phase-42-pka-maturity-2026-05-28.md`.
+
+The track was reshaped mid-flight after the positioning call that
+Corvid is the general language for AI, not a docs/RAG niche — so PKA
+ships real external-write surfaces (chat, email, KB publish, corpus
+export, cross-tenant index share) behind typed approvals, not a
+private/local-only demo that dodges the approval bar.
+
+| Slice | Commit | What landed |
+|---|---|---|
+| D-PKA-1 | `b69826f` | Source foundations: std-import fix, auth surface, 3 cron jobs, migrations `0004_auth` + `0005_approvals_and_durable_jobs` (→ 18 tables / 5 migrations) |
+| D-PKA-2 | `1fc1462` | 5 external-write surfaces (chat/email/publish/export/cross-tenant) with typed approvals + 5 `ungated_*` adversarial gates |
+| D-PKA-3 | `9f33032` | 11 real eval cases + 3 promoted fixtures (`knowledge-demo`, `knowledge-reindex`, `knowledge-cross-share`) |
+| D-PKA-4 | `fd6e729` | Operator runbook 7 → 1243 lines, 16 sections |
+| D-PKA-5 | `980795f` | Deploy manifests (Compose + Fly + K8s) + 5 typed permissions; reconciled runbook to real env-var names; fixed 2 stale `reference_apps` assertions |
+| D-PKA-6 | (this commit) | Maturity audit doc + runbook 1243 → 1506 (≥1500 bar) + dev-log + learnings + ROADMAP tick |
+
+Per-app rows closed: tables (18 ≥ 10), migrations (5 ≥ 5), auth depth
+(sessions + API keys + per-tenant + per-role), connectors (3 mock ≥ 3),
+approvals (5 ≥ 5), cron jobs (3 ≥ 3), retry-policy jobs (3 ≥ 3 via
+`knowledge_run`), adversarial threats (6 ≥ 5), operator runbook (1506
+≥ 1500), deploy manifests (3 categories), typed permission per
+dangerous tool (5/5 distinct), evals (11 ≥ 10), promoted fixtures (3 ≥ 3),
+SIGKILL survival (runtime gate, P38).
+
+Deferred (same as PEA): cross-cutting `35V2-P42-E/F/G/H-LR` +
+`33M-beta-feedback`; post-v1.0 syntax `policy { ... }` + `batch_with`
+(`35V2-P39-I`).
+
+New this track vs. PEA:
+
+- The ≥1500-line runbook bar is a hard threshold, not a heuristic.
+  D-PKA-4's first pass landed at 1243 lines; rather than pad, D-PKA-6
+  added the operationally real coverage the first pass left thin —
+  tenant lifecycle (onboarding/offboarding/isolation), provenance-audit
+  internals (the citation-chain walk + break→remediation table), 3 more
+  incident scenarios (embedding-model roll, cross-tenant leak, index
+  corruption), capacity planning, and approval decision trees — to 1506.
+- Reference-app tests carry per-app count assertions (`reference_apps.rs`:
+  migration count, eval case count) that go stale the moment a slice
+  changes the surface. D-PKA-1/D-PKA-3 changed PKA's migration count
+  (3 → 5) and eval count (5 → 11) without updating the asserts; D-PKA-5
+  caught and fixed both. Lesson recorded: a per-app surface change must
+  update `reference_apps.rs` in the same slice.
+- The deploy manifests must use the real env-var names `corvid deploy`
+  emits (`CORVID_APP_ENV`, `CORVID_DATABASE_URL`,
+  `CORVID_CONNECTOR_TOKEN_KEY`, `CORVID_METRICS_LISTEN`,
+  `CORVID_REQUIRE_APPROVALS`) and the real connector modes
+  (`mock|replay|real|record`), not invented names. D-PKA-4's first
+  runbook draft invented several; D-PKA-5 reconciled runbook + manifests
+  to the scaffold's contract.
+
+Validation (final state):
+- `corvid check src/main.cor` clean.
+- All 5 `adversarial/ungated_*.cor` → `E0101` (gates fire).
+- `corvid eval evals/search_answer_eval.cor` → `11/11 passed`.
+- `cargo test -p corvid-cli --test reference_apps personal_knowledge`
+  → 2 passed.
+- Runbook 1506 lines, sections 1-17 sequential.
+- The 12 unrelated `reference_apps` failures (Phase 43 release/upgrade/
+  claim-audit/market-readiness doc tests) are pre-existing — verified
+  to fail identically on the committed tree with PKA changes stashed.
+  Out of Phase 42 scope.
+
+Next ROADMAP slice in order: `35V2-P42-D-LR-app-maturity-Finance` —
+Finance Operations Agent. Sits far from the bar (7-line runbook, 0-2
+approvals, placeholder evals) and additionally carries a strict
+non-advice / regulated-domain posture its maturity track must preserve.
+
+---
+
 ## 2026-05-27 - Track 35V2-P42-D-LR-app-maturity-PEA closed
 
 Five-commit per-app maturity track for the Personal Executive

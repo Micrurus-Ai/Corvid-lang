@@ -4904,6 +4904,70 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P42-D-LR-app-maturity-PKA closed (2026-05-28) — Personal Knowledge Agent reaches the Phase 42 maturity bar
+
+Six-commit per-app maturity track for the PKA reference app, the
+second app through the bar after PEA. Fourteen rows ✅ close; the same
+5 cross-cutting + 2 post-v1.0-syntax rows defer as PEA. Closing audit:
+[`docs/phases/phase-42-pka-maturity-2026-05-28.md`](docs/phases/phase-42-pka-maturity-2026-05-28.md).
+
+The track was reshaped after the positioning call that **Corvid is the
+general language for AI, not a docs/RAG niche.** PKA's original shape
+was a private/local-only ingest+search demo that had no external-write
+surfaces and so trivially "passed" the approval bar by having nothing
+to approve. The reshape gave PKA five real external-write surfaces —
+share-to-chat, share-via-email, publish-authoritative-answer,
+export-tenant-corpus, cross-tenant-index-share — each `dangerous` and
+behind a typed approval. The lesson for the remaining apps: a reference
+app that dodges the approval bar by having no dangerous surface is not
+meeting the bar, it is avoiding it. A real team agent writes outward.
+
+Three lessons worth recording beyond the three from the PEA track
+(import resolution, approve-label = tool-name-in-CamelCase, multi-line
+boolean decomposition — all reconfirmed here).
+
+**Lesson 1: the ≥1500-line runbook bar is a threshold, not a
+heuristic — but the answer is coverage, not padding.** D-PKA-4's first
+runbook pass landed at 1243 lines and felt "done" — every bar-required
+section was present. It was still 257 lines under the explicit bar.
+The honest close was not to inflate prose but to add the operationally
+real coverage the first pass had left thin: tenant lifecycle
+(onboarding/offboarding/isolation), the provenance-audit citation-chain
+algorithm with a break→remediation table, three more incident runbooks
+(embedding-model roll, cross-tenant leak, index corruption), capacity
+planning thresholds, and per-approval decision trees. All of it is
+content a real PKA operator needs. The line bar is a proxy for "did you
+actually cover the operational surface" — meet it by covering more, not
+by writing longer.
+
+**Lesson 2: per-app surface changes must update `reference_apps.rs` in
+the same slice.** The reference-app test suite carries per-app count
+assertions: `execute_sql_dir(.., 3)` asserts the migration count, and
+`assert!(stdout.contains("values: 5/5 passed"))` asserts the eval case
+count. D-PKA-1 changed the migration count 3 → 5 and D-PKA-3 changed
+the eval count 5 → 11, but neither updated the assert — so `cargo test
+-p corvid-cli --test reference_apps` went red and stayed red across
+three commits. D-PKA-5 caught and fixed both. The rule: when a slice
+changes an app's table/migration/eval/approval count, grep
+`reference_apps.rs` for that app and update the assertions in the same
+commit, or CI breaks silently until someone runs the suite.
+
+**Lesson 3: deploy manifests and runbooks must use the env-var names
+`corvid deploy` actually emits.** The canonical names live in
+`crates/corvid-cli/src/deploy_cmd.rs` (`CORVID_APP_ENV`,
+`CORVID_CONNECTOR_MODE`, `CORVID_DATABASE_URL`, `CORVID_TRACE_DIR`,
+`CORVID_REQUIRE_APPROVALS`) plus the auth-surface secrets PEA uses
+(`CORVID_CONNECTOR_TOKEN_KEY`, `CORVID_API_KEY_PEPPER`,
+`CORVID_SESSION_SIGNING_KEY`, `CORVID_CSRF_SECRET`, `CORVID_METRICS_LISTEN`).
+The connector modes are `mock | replay | real | record` (from
+`corvid-connector-runtime/src/test_kit.rs`), not "live". D-PKA-4's first
+runbook draft invented `CORVID_STORAGE_MODE`, `CORVID_DB_URL`,
+`CORVID_MASTER_ENCRYPTION_KEY`, `CORVID_METRICS_BIND`, and a "live"
+mode — none of which the runtime reads. D-PKA-5 reconciled the runbook
+and all the new manifests to the real contract. When authoring app ops
+docs, copy the env-var names from the deploy scaffold, do not invent
+plausible-sounding ones.
+
 ## 35V2-P42-D-LR-app-maturity-PEA closed (2026-05-27) — Personal Executive Agent reaches the Phase 42 maturity bar
 
 Five-commit per-app maturity track for the PEA reference app. The

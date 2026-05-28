@@ -29,9 +29,10 @@ that drive each procedure.
 11. [Rollback procedures](#11-rollback-procedures)
 12. [Connector mode operations](#12-connector-mode-operations)
 13. [Approval queue operations](#13-approval-queue-operations)
-14. [Durable jobs and cron operations](#14-durable-jobs-and-cron-operations)
-15. [Disaster recovery](#15-disaster-recovery)
-16. [Appendix — reference data](#16-appendix--reference-data)
+14. [Tenant lifecycle operations](#14-tenant-lifecycle-operations)
+15. [Durable jobs and cron operations](#15-durable-jobs-and-cron-operations)
+16. [Disaster recovery](#16-disaster-recovery)
+17. [Appendix — reference data](#17-appendix--reference-data)
 
 ---
 
@@ -101,7 +102,7 @@ job.
 - Availability: 99.9 % monthly for `GET /answer/*` and `GET /search/*`;
   99.5 % for `POST /actions/*` (lower because they are approval-gated).
 - Latency (p99): `/search/*` < 600 ms, `/answer/*` < 1500 ms, `/ingest/*`
-  < 5 s for a single source under 1 MB. Jobs are async — see §14 for
+  < 5 s for a single source under 1 MB. Jobs are async — see §15 for
   durable job SLOs.
 - Provenance correctness: 100 % of `KnowledgeAnswer` rows pass
   `daily_provenance_audit`. Any miss is an Sev-2 incident.
@@ -630,6 +631,10 @@ them.
 - `pka_redaction_policy_mismatch_total` — counter (must stay at 0).
 - `pka_replay_quarantine_violations_total{surface}` — counter (must
   stay at 0 outside of intentional fuzz tests).
+- `pka_cross_tenant_isolation_failures_total` — counter (must stay at
+  0; incremented by `corvid tenants verify-isolation` and the
+  `daily_provenance_audit` job when an answer cites a cross-tenant
+  chunk without a live share receipt).
 - `pka_index_chunks{tenant,root}` — gauge.
 - `pka_embedding_cache_hit_ratio` — gauge.
 
@@ -640,6 +645,7 @@ them.
 | `pka_provenance_audit_misses_total > 0` | any miss in 24 h | Sev-2 | Quarantine the affected `KnowledgeAnswer`, page on-call |
 | `pka_redaction_policy_mismatch_total > 0` | any mismatch | Sev-2 | Page on-call; freeze deploys until the policy hash is reconciled |
 | `pka_replay_quarantine_violations_total > 0` | any non-test violation | Sev-1 | Page security on-call; pull the trace for the violating surface |
+| `pka_cross_tenant_isolation_failures_total > 0` | any failure | Sev-1 | Incident G (§10); page security, quarantine affected answers, notify both tenants |
 | `pka_approval_pending_age_seconds{label="CrossTenantIndexShare"} > 3600` | pending > 1 h | Sev-3 | Page the admin on-call to review the pending share |
 | `pka_approval_pending_age_seconds{label="ExportTenantCorpus"} > 7200` | pending > 2 h | Sev-3 | Page the admin on-call |
 | `pka_job_runs_total{kind="nightly_reindex",status="failed"} >= 2` | 2 failures in a row | Sev-3 | Inspect the latest `queue_jobs` row for the kind; re-enqueue manually after fix |
@@ -769,6 +775,82 @@ non-replayable surface.
   non-determinism in the replay key) and re-run the replay.
 - Until fixed, do not promote any fixture that exercises that path —
   promotion would freeze the violation into the eval corpus.
+
+#### F. Embedding model roll changed answer rankings
+
+A new embedding model (e.g. `bge-small-en` → `bge-base-en`) changes
+vector geometry. Old vectors and new vectors are not comparable, so a
+partial roll produces nonsense rankings.
+
+**Diagnose:**
+
+1. `SELECT model_name, COUNT(*) FROM knowledge_embeddings GROUP BY
+   model_name;` — if more than one model name appears for a tenant's
+   active index, the roll is partial.
+2. Check `pka_embedding_cache_hit_ratio` — a model roll drops it to
+   near zero because every chunk needs re-embedding.
+
+**Recover:**
+
+- A model roll is a planned maintenance event, never an in-place flip.
+  Roll forward by re-embedding every chunk for the tenant under the new
+  model (`corvid jobs run --kind=rebuild_index` with the new model env),
+  then atomically swap the index alias once 100 % of chunks carry the
+  new `model_name`.
+- If a roll was started and abandoned, roll it back: delete the
+  partial new-model embeddings (`DELETE FROM knowledge_embeddings WHERE
+  model_name = '<new>' AND tenant_id = '<id>'`) and confirm the index
+  alias still points at the old-model index. The old embeddings were
+  never deleted (rebuilds write to a shadow index), so this is safe.
+
+#### G. Suspected cross-tenant data leak in an answer
+
+A `KnowledgeAnswer` for tenant A cites a chunk owned by tenant B. This
+is the highest-severity correctness failure PKA can have.
+
+**Diagnose:**
+
+1. Resolve the answer's `provenance_id` to its `KnowledgeChunk` and read
+   the chunk's `tenant_id`.
+2. Compare to the answer's `tenant_id`. A mismatch is a confirmed leak.
+3. Pull every span on the answer's `trace_id`. The leak almost always
+   traces to a search request whose tenant filter was dropped, or a
+   `CrossTenantIndexShare` that was approved but should not have been.
+
+**Recover:**
+
+- Sev-1. Page security on-call immediately.
+- Quarantine the answer and every answer sharing its retrieval index
+  hash.
+- If the leak came through a `CrossTenantIndexShare`, revoke the share
+  receipt and run `daily_provenance_audit` for both tenants.
+- If the leak came through a dropped tenant filter, this is a code
+  defect — freeze deploys, write a regression eval that reproduces the
+  cross-tenant retrieval, and do not unfreeze until it is red→green.
+- Notify both tenants per the data-handling agreement regardless of
+  blast radius.
+
+#### H. Index corruption — search returns errors or empty hits
+
+**Diagnose:**
+
+1. `GET /search/mock` against the affected tenant — if it returns an
+   `index_rebuilding` envelope, a rebuild is already in flight (no
+   action). If it returns an error, the index is corrupt.
+2. Compare `pka_index_chunks{tenant,root}` to `SELECT COUNT(*) FROM
+   knowledge_chunks WHERE tenant_id = '<id>'`. A large divergence means
+   the index lost entries the DB still has.
+
+**Recover:**
+
+- The index is rebuildable from `knowledge_chunks` +
+  `knowledge_embeddings` (§7). Run `corvid jobs run --kind=rebuild_index
+  --tenant=<id> --root=<id>`. Search for that tenant returns
+  `index_rebuilding` until the rebuild completes (~5 min for 10k
+  sources).
+- If the DB rows themselves are gone, this is a data-loss incident, not
+  a corruption incident — go to §16 (catastrophic index loss requires a
+  full re-ingest, not a rebuild).
 
 ---
 
@@ -948,6 +1030,33 @@ approval within 24 h. The co-sign is recorded as a separate
 `daily_provenance_audit` job revokes any receipt whose co-sign is
 missing past the 24 h window — the revocation is itself logged.
 
+### Decision tree — `ExportTenantCorpus`
+
+1. Is the requester an `Admin` of the *source* tenant? No → deny.
+2. Does the export destination appear in the tenant's data-handling
+   agreement (bucket owner, region, encryption, retention)? No → deny.
+3. Is the destination bucket owned by the tenant (not a third party)?
+   No → deny unless the agreement explicitly names the third party.
+4. Has a second admin co-signed, or will one within 24 h? No co-sign
+   path → deny.
+5. All yes → approve. The receipt is auto-revoked if the co-sign does
+   not land within 24 h.
+
+### Decision tree — `CrossTenantIndexShare`
+
+This is the highest-blast-radius contract; default to deny on any doubt.
+
+1. Is the requester an `Admin` of the *source* tenant? No → deny.
+2. Does a signed data-sharing agreement exist between source and target
+   tenants? No → deny.
+3. Has the *target* tenant's admin accepted the share (the co-sign must
+   come from the target, not the source)? No → deny.
+4. Is the share scoped to a specific `index_id`, not "all indexes"?
+   No → deny and ask for a scoped request.
+5. All yes → approve. Immediately after approval, run `corvid tenants
+   verify-isolation` for both tenants to confirm the crossing matches
+   the receipt and nothing else leaked.
+
 ### Pending queue SLOs
 
 - `ShareAnswerToChat` / `ShareAnswerViaEmail` — pending more than 1 h
@@ -959,7 +1068,82 @@ missing past the 24 h window — the revocation is itself logged.
 
 ---
 
-## 14. Durable jobs and cron operations
+## 14. Tenant lifecycle operations
+
+PKA is multi-tenant: every source, document, chunk, embedding, answer,
+approval, and audit event carries a `tenant_id`, and the only effect
+that may cross a tenant boundary is `cross_tenant_share` behind the
+`CrossTenantIndexShare` approval. Tenant onboarding and offboarding are
+the operations that touch the most tables at once, so they get their
+own playbook.
+
+### Onboarding a tenant
+
+1. **Create the tenant row.** `corvid tenants create --id=<id>
+   --name=<display>`. This writes one row to `tenants` and is the
+   foreign-key anchor for everything else; do it first.
+2. **Create roles and the first admin.** Every tenant needs at least
+   one `Admin` (for `ExportTenantCorpus` / `CrossTenantIndexShare`
+   co-signs) and one `Reviewer` (for the day-to-day publish flows).
+   `corvid auth role grant --tenant=<id> --actor=<actor> --role=Admin`.
+3. **Register source roots.** `corvid sources register --tenant=<id>
+   --root=<name> --connector=files --path=<uri>`. Each root is the unit
+   that `nightly_reindex` scans and the unit a rebuild operates on.
+4. **Mint connector tokens** (only if running `real` connector mode —
+   §12). In `mock` mode this step is skipped.
+5. **Run the first ingest.** `corvid jobs run --kind=nightly_reindex
+   --tenant=<id> --root=<name>` for each root. The first run is a full
+   ingest, not a diff, so size the maintenance window accordingly
+   (see §17 capacity table).
+6. **Verify provenance.** `corvid jobs run --kind=daily_provenance_audit
+   --tenant=<id> --day=<today>` and confirm zero misses. A fresh tenant
+   must pass the audit before its answers are served.
+
+### Offboarding a tenant
+
+Offboarding is a hard delete with a mandatory legal-hold check. It is
+irreversible — treat it like a `DROP`.
+
+1. **Check for a legal hold.** `corvid tenants hold status --tenant=<id>`.
+   If a hold is active, STOP — deletion is blocked until legal clears it.
+2. **Revoke all sessions and API keys.** `corvid auth revoke-all
+   --tenant=<id>`. No new requests can authenticate after this.
+3. **Disable the tenant's schedules.** The three cron jobs are
+   per-tenant; pause them so no job re-creates rows mid-delete.
+4. **Export if contractually required.** Some contracts require a final
+   corpus export to the tenant before deletion — that is an
+   `ExportTenantCorpus` approval (Admin + co-sign), not an ad-hoc dump.
+5. **Hard delete.** `corvid tenants delete --tenant=<id> --confirm`.
+   This cascades through `knowledge_*`, `sessions`, `api_keys`,
+   `user_roles`, and the index partition. The cascade order is enforced
+   by foreign keys — do not delete tables out of order by hand.
+6. **Retain the audit trail.** `approvals` and `audit_events` rows are
+   NOT deleted by offboarding — they are retained for 1 year (§7)
+   subject to the data-retention policy. The delete tombstones the
+   tenant row but preserves the immutable audit history.
+7. **Purge object storage.** Raw bytes in object storage are deleted
+   separately (they are content-addressed and may be shared across
+   versions); run `corvid tenants purge-objects --tenant=<id>` and
+   confirm the bucket prefix is empty.
+
+### Verifying tenant isolation
+
+Run periodically and after any `CrossTenantIndexShare`:
+
+```
+# every chunk's tenant_id must match its document's and source's
+corvid tenants verify-isolation --tenant=<id>
+```
+
+The command asserts that no `knowledge_chunk` for tenant A resolves to
+a `knowledge_source` owned by tenant B, that no answer cites a
+cross-tenant chunk except through a live `CrossTenantIndexShare`
+receipt, and that every index partition is single-tenant. A failure is
+incident G (§10) — Sev-1.
+
+---
+
+## 15. Durable jobs and cron operations
 
 ### The three jobs
 
@@ -1034,9 +1218,45 @@ Disabling pauses the schedule but does not affect in-flight jobs. The
 `audit_events` row for the disable is required for compliance; the CLI
 writes one automatically.
 
+### Provenance audit internals
+
+`daily_provenance_audit` is PKA's integrity gate, so operators need to
+know exactly what it checks. For every `KnowledgeAnswer` written in the
+audit window it walks the citation chain:
+
+1. **Answer → hit.** The answer's `provenance_id` must equal its
+   `hit.citation.provenance_id`. A mismatch means the answer was
+   assembled from a citation it does not actually ground on.
+2. **Citation → chunk.** The citation's `chunk_id` must resolve to a
+   live `knowledge_chunks` row, and that chunk's `provenance_id` must
+   equal the citation's. A miss here means the chunk was re-indexed or
+   deleted after the answer was served.
+3. **Chunk → document → source.** The chunk's `source_id` and
+   `document_id` must resolve to live rows whose `content_hash` values
+   still agree. A divergence means the underlying source changed but
+   the answer was not invalidated.
+4. **Tenant containment.** Every row in the chain must carry the same
+   `tenant_id` as the answer, unless a live `CrossTenantIndexShare`
+   receipt authorises the crossing. A violation increments
+   `pka_cross_tenant_isolation_failures_total` and is incident G.
+
+Each break type maps to a specific remediation:
+
+| Break | Meaning | Remediation |
+|---|---|---|
+| Answer→hit mismatch | Assembly bug | Code defect — freeze, write a regression eval, fix |
+| Citation→chunk miss | Chunk re-indexed/deleted | Re-run `nightly_reindex` for the root, invalidate the cached answer |
+| Content-hash divergence | Source changed | Mark the answer stale; the next query re-grounds against the new content |
+| Tenant containment | Cross-tenant leak | Sev-1 incident G — quarantine, revoke any share, notify both tenants |
+
+The audit writes one trace span per flagged answer (`kind=eval`,
+`status=failed`) naming the `provenance_id` and the break type, so the
+on-call can triage from the trace alone. A clean run writes a single
+summary span (`kind=eval`, `status=ok`) with the answer count scanned.
+
 ---
 
-## 15. Disaster recovery
+## 16. Disaster recovery
 
 ### Catastrophic DB loss
 
@@ -1120,7 +1340,7 @@ Test the recovery quarterly in staging.
 
 ---
 
-## 16. Appendix — reference data
+## 17. Appendix — reference data
 
 ### Schema manifest
 
@@ -1138,6 +1358,32 @@ Test the recovery quarterly in staging.
   `PublishAuthoritativeAnswer`, `ExportTenantCorpus`,
   `CrossTenantIndexShare`.
 - Default mode: `mock`.
+
+### Capacity planning
+
+These thresholds size the VM, the maintenance window, and the
+shard/scale-out decision. They are per tenant per root unless noted.
+
+| Corpus size (sources) | Index footprint | Full ingest time | `nightly_reindex` (diff) | Action |
+|---|---|---|---|---|
+| < 1k | < 50 MB | < 30 s | < 10 s | Single replica, `shared-cpu-1x` |
+| 1k – 10k | 50 – 500 MB | 2 – 5 min | < 1 min | Default; `shared-cpu-2x`, 2 GB RAM |
+| 10k – 50k | 0.5 – 2.5 GB | 5 – 20 min | 1 – 3 min | Partition the index by root |
+| 50k – 200k | 2.5 – 10 GB | 20 – 90 min | 3 – 10 min | Shard roots across worker replicas; move index to pgvector or a dedicated vector store |
+| > 200k | > 10 GB | multi-hour | > 10 min | Dedicated ingest pipeline; do not run full ingest in the request path |
+
+Other limits:
+
+- **Embedding throughput** — the local `bge-small-en` model embeds
+  ~200 chunks/s on `shared-cpu-2x`. A full re-embed of a 50k-source
+  corpus (≈250k chunks) is ~20 min CPU-bound; scale workers to
+  parallelise across roots.
+- **DB sizing** — `knowledge_chunks` + `knowledge_embeddings` dominate.
+  Budget ~2 KB/chunk of metadata (vectors live in the index, not the
+  row). 1M chunks ≈ 2 GB of DB.
+- **`daily_provenance_audit`** — scans every answer row in the past 24
+  h. Stays under the 60 s SLO up to ~100k answers/day/tenant. Past
+  that, partition the audit by hour.
 
 ### Effect catalog
 
