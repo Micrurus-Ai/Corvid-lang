@@ -302,10 +302,13 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
         Type::Float => Ok(F64),
         Type::String => Ok(I64),
         Type::Struct(_) => Ok(I64),
-        Type::ImportedStruct(_) => Err(CodegenError::not_supported(
-            "imported struct lowering in native codegen - cross-file native layout metadata lands after lang-cor-imports-basic driver integration",
-            span,
-        )),
+        // Imported structs are refcounted heap handles exactly like
+        // file-local structs (width I64). Their field layout now lives in
+        // the merged `ir.types` table under the same cross-module-remapped
+        // DefId the type carries (see corvid-ir slice G0-1), so the
+        // construction / field-access / glue machinery resolves them the
+        // same way it resolves local structs.
+        Type::ImportedStruct(_) => Ok(I64),
         Type::List(_) => Ok(I64),
         Type::Weak(_, _) => Ok(I64),
         Type::Result(_, _) if is_native_result_type(ty) => Ok(I64),
@@ -455,4 +458,36 @@ pub(super) fn define_agent(
         &format!("agent `{}`", agent.name),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use corvid_types::types::ImportedStructType;
+
+    /// Slice G0-2: a `pub extern "c"`-free agent that mentions an
+    /// imported struct in its signature must lower to the same handle
+    /// width as a file-local struct, not be rejected. Cross-file field
+    /// layout now lives in the merged `ir.types` table (corvid-ir slice
+    /// G0-1), so there is no longer a reason to reject the type here.
+    #[test]
+    fn cl_type_for_treats_imported_struct_like_local_struct() {
+        let span = corvid_ast::Span::new(0, 0);
+        let local = cl_type_for(&Type::Struct(DefId(3)), span)
+            .expect("local struct lowers to a handle");
+        let imported = cl_type_for(
+            &Type::ImportedStruct(ImportedStructType {
+                module_path: "std/auth.cor".to_string(),
+                def_id: DefId(42),
+                name: "Actor".to_string(),
+            }),
+            span,
+        )
+        .expect("imported struct lowers to a handle (G0-2)");
+        assert_eq!(
+            imported, local,
+            "imported struct must lower identically to a local struct"
+        );
+        assert_eq!(imported, I64);
+    }
 }
