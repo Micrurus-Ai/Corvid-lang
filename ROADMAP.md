@@ -2815,6 +2815,30 @@ All per-app maturity items below were verified 2026-05-17 by `docs/phases/phase-
 - [ ] 42I1-external-trial-one        One external developer runs an app locally and feedback is triaged.
 - [ ] 42I2-external-trial-close      Feedback closes as code/docs/tests or explicit non-scope.
 
+**Launch-readiness LR track sequence (Phase 42 tail):**
+
+Per-app maturity (`D-LR`) — one track per reference app, all closed:
+
+- [x] `35V2-P42-D-LR-app-maturity-PEA`             closed 2026-05-27 (`docs/phases/phase-42-pea-maturity-2026-05-27.md`)
+- [x] `35V2-P42-D-LR-app-maturity-PKA`             closed 2026-05-28 (`docs/phases/phase-42-pka-maturity-2026-05-28.md`)
+- [x] `35V2-P42-D-LR-app-maturity-Finance`         closed 2026-05-28 (`docs/phases/phase-42-finance-maturity-2026-05-28.md`)
+- [x] `35V2-P42-D-LR-app-maturity-CustomerSupport` closed 2026-05-28 (`docs/phases/phase-42-customersupport-maturity-2026-05-28.md`)
+- [x] `35V2-P42-D-LR-app-maturity-CodeMaintenance` closed 2026-05-28 (`docs/phases/phase-42-codemaintenance-maturity-2026-05-28.md`)
+
+Serve capability (`E0`) — **inserted 2026-05-28 before `E-LR`**. Reason: the per-app deploy manifests invoke `corvid run --target=server src/main.cor --listen`, but the CLI has no HTTP-serve path (`corvid run` targets are `auto`/`native`/`interpreter` only; `build --target=server` emits an axum scaffold but server blocks are not lowered to IR, so routes aren't dispatched). A true "smoke-deploys in CI" (`E-LR`) requires the app to actually serve its routes. Per the no-shortcuts mandate we build the serve capability rather than fake the smoke. GET-first MVP:
+
+- [ ] `35V2-P42-E0-serve-1`  Lower `server` blocks to IR (`IrServer`/`IrRoute` on `IrFile`; resolve + typecheck handler agent calls).
+- [ ] `35V2-P42-E0-serve-2`  Generated-server per-route dispatch for zero-arg `GET` routes (`/schema`, `/config`, mock GETs) via `call_agent(name, "[]")`.
+- [ ] `35V2-P42-E0-serve-3`  `corvid serve --listen host:port` CLI command; reconcile all 5 apps' manifests + runbooks to the real command.
+- [ ] `35V2-P42-E0-serve-4`  Struct-body dispatch for `POST` routes (extend `call_agent`/typed dispatch to accept a single struct body).
+
+Cross-cutting (apply to all five apps at once), in order after `E0`:
+
+- [ ] `35V2-P42-E-LR-app-deploy-smoke-ci`       CI smoke-deploy: `docker compose up` → curl `/schema` + mock routes → assert envelopes → down; plus `kubeconform` / `fly config validate` on the manifests.
+- [ ] `35V2-P42-F-LR-per-app-benchmark-files`   `benches/comparisons/<app>.md` per app (FastAPI/LangChain or Next.js+Vercel-AI-SDK line-by-line).
+- [ ] `35V2-P42-G-LR-per-app-claim-files`       `apps/<name>/CLAIM.md` from `corvid claim --explain` per app.
+- [ ] `35V2-P42-H-LR-per-app-ai-helpers`        Three per-app AI helpers (assistive boot summary, adversarial-test refresh, generative PR description).
+
 ### Phase 43 — Packaging, deployment, and market readiness (~6-8 weeks)
 
 **Goal.** Corvid is ready to go online as a product for developers and maintainers: installable, deployable, operable, documented, and honest under scrutiny.
