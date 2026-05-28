@@ -4,6 +4,63 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-CustomerSupport closed
+
+Six-commit per-app maturity track for the Customer Support Agent, the
+fourth app through the bar (after PEA, PKA, Finance). Fourteen rows ✅
+close; the same 5 cross-cutting + 2 post-v1.0-syntax rows defer. Audit:
+`docs/phases/phase-42-customersupport-maturity-2026-05-28.md`.
+
+Support started closer to the bar than Finance (it already had 2
+approvals + a policy-grounded triage/draft flow) but still had no std
+imports, no auth surface, 0 real cron jobs, 1 adversarial fixture, a
+7-line runbook. Posture: policy-grounded replies (every customer-facing
+draft cites policy). The 5 contracts are developer-authored with a
+role/reversibility gradient (Admin + irreversible for refund/credit;
+Reviewer for reply + the reversible escalate/close).
+
+| Slice | Commit | What landed |
+|---|---|---|
+| D-CS-1 | `a7fb012` | std imports + auth surface + 3 cron jobs + migrations 0003/0004 (17 tables / 4 migrations) |
+| D-CS-2 | `f65b1ca` | 3 more approval surfaces (escalate/close/credit) + 0005 migration + 5 adversarial gates (6 threats total) |
+| D-CS-3 | `f6c4d15` | 11 eval cases (incl. policy-grounding + gradients) + 3 promoted fixtures |
+| D-CS-4 | `de0ebef` | operator runbook 7 → 1500 lines |
+| D-CS-5 | `c9c9966` | deploy manifests (Compose + Fly + K8s) + 5 typed permissions |
+| D-CS-6 | (this commit) | audit doc + dev-log + learnings + ROADMAP tick |
+
+Per-app rows closed: tables (20 ≥ 10), migrations (5 ≥ 5), auth depth,
+connectors (3 mock ≥ 3), approvals (5 ≥ 5), cron jobs (3 ≥ 3),
+retry-policy jobs (3 via `support_run`), adversarial threats (6 ≥ 5),
+runbook (1500 ≥ 1500), deploy manifests (3 categories), typed
+permission per dangerous tool (5/5 distinct), evals (11 ≥ 10), promoted
+fixtures (3 ≥ 3), SIGKILL survival (runtime gate, P38).
+
+Deferred (same as PEA/PKA/Finance): cross-cutting `35V2-P42-E/F/G/H-LR`
++ `33M-beta-feedback`; post-v1.0 `policy { ... }` + `batch_with`
+(`35V2-P39-I`).
+
+New lesson recorded in learnings: a type whose name begins with
+`Grounded` (e.g. `GroundedReplyShape`) trips the E0209 grounded-return
+checker — it reads as the `Grounded<T>` builtin. The CS eval's
+grounding-shape type was named `ReplyGroundingShape` to avoid it. Also
+reconfirmed: when a slice grows the approval count, the eval dashboard
+value, the mock fixture, AND the reference-test assertion all move in
+the same slice (here 2 → 5, plus migration 4 → 5).
+
+Validation (final state):
+- `corvid check src/main.cor` clean.
+- all 5 `adversarial/ungated_*.cor` → `E0101`; `ungrounded_reply.json`
+  is the sixth threat.
+- `corvid eval evals/support_ops_eval.cor` → `11/11 passed`.
+- `cargo test -p corvid-cli --test reference_apps customer_support`
+  → 2 passed.
+- runbook 1500 lines, sections 1-17.
+
+Next ROADMAP slice in order — the final per-app track:
+`35V2-P42-D-LR-app-maturity-CodeMaintenance` — Code Maintenance Agent.
+
+---
+
 ## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-Finance closed
 
 Six-commit per-app maturity track for the Finance Operations Agent, the

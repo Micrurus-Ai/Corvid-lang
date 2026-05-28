@@ -4904,6 +4904,40 @@ remains filed at `35V2-P39-H-LR-approvals-policy-suggest-helper`
 sources for the proposed policy clause, so it's a bigger slice
 than the assistive helper.
 
+## 35V2-P42-D-LR-app-maturity-CustomerSupport closed (2026-05-28) — Customer Support Agent reaches the Phase 42 maturity bar
+
+Six-commit per-app maturity track for the Support agent, the fourth
+through the bar (after PEA, PKA, Finance). Fourteen rows ✅ close; the
+same 5 cross-cutting + 2 post-v1.0-syntax rows defer. Closing audit:
+[`docs/phases/phase-42-customersupport-maturity-2026-05-28.md`](docs/phases/phase-42-customersupport-maturity-2026-05-28.md).
+
+Support reconfirmed the established lessons (≥1500 runbook met with
+coverage not padding; per-app surface changes update `reference_apps.rs`
+in the same slice; manifests use real `corvid deploy` env-var names;
+approval flows are developer-authored with a deliberate gradient). One
+new compiler lesson came out of the eval work.
+
+**Lesson: a type name beginning with `Grounded` trips the E0209
+grounded-return checker.** The support eval needed a shape to assert
+"the draft reply is policy-grounded." The first name, `GroundedReplyShape`,
+made `corvid eval` fail with `E0209 ungrounded return` — the checker
+reads a return type whose name starts with `Grounded` as the
+`Grounded<T>` builtin and demands a proven grounded source the plain
+struct does not have. Renaming the type to `ReplyGroundingShape` (the
+grounding word not leading) compiled clean. The takeaway: `Grounded` is
+effectively a reserved prefix for the grounding system; do not name
+ordinary structs `Grounded*`. (PKA's equivalent type was
+`AnswerProvenanceShape` and Finance's was a `NonAdvicePosture` — neither
+used the prefix, so neither hit this; Support hit it because "grounded"
+is the natural word for its posture.)
+
+Also reconfirmed the same-slice mock/test discipline at a new surface:
+when D-CS-2 grew approvals 2 → 5, four things moved in lockstep in the
+one commit — the source `support_eval_dashboard` value, the
+`mocks/approvals_sla.json` fixture, the `reference_apps` approval-count
+assertion, and (because 0005 was added) the migration-count assertion
+(4 → 5). Missing any one would have left the suite red.
+
 ## 35V2-P42-D-LR-app-maturity-Finance closed (2026-05-28) — Finance Operations Agent reaches the Phase 42 maturity bar
 
 Six-commit per-app maturity track for the Finance agent, the third
