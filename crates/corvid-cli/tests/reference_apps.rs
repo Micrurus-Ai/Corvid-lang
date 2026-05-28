@@ -617,7 +617,7 @@ fn code_maintenance_agent_ingests_and_triages_ci_aware_risk() {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .expect("enable foreign keys");
-    execute_sql_dir(&conn, &app.join("migrations"), 4);
+    execute_sql_dir(&conn, &app.join("migrations"), 5);
     let seed_sql = fs::read_to_string(app.join("seeds").join("demo.sql")).expect("read seed sql");
     conn.execute_batch(&seed_sql).expect("execute seed sql");
 
@@ -660,7 +660,7 @@ fn code_maintenance_agent_write_actions_require_approval() {
         fs::read_to_string(app.join("mocks").join("write_plan.json")).expect("read write mock");
     let mock: Value = serde_json::from_str(&mock_text).expect("parse write mock");
     assert_eq!(mock["writes_gated"].as_bool(), Some(true));
-    assert_eq!(mock["approvals"].as_array().expect("approvals").len(), 2);
+    assert_eq!(mock["approvals"].as_array().expect("approvals").len(), 5);
     assert_eq!(mock["plan"]["approval_count"].as_i64(), Some(2));
 
     let eval_out = Command::new(corvid_bin())

@@ -11,6 +11,21 @@
       "label": "CreatePatchProposal",
       "route": "POST /patches/propose",
       "audit_required": true
+    },
+    {
+      "label": "OpenPullRequest",
+      "route": "POST /pull-requests/open",
+      "audit_required": true
+    },
+    {
+      "label": "MergePullRequest",
+      "route": "POST /pull-requests/merge",
+      "audit_required": true
+    },
+    {
+      "label": "TagRelease",
+      "route": "POST /releases/tag",
+      "audit_required": true
     }
   ],
   "plan": {

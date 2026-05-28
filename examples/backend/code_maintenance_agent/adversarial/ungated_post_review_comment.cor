@@ -1,0 +1,9 @@
+# Adversarial: a `post_review_comment` call without a prior
+# `approve PostReviewComment(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-CodeMaintenance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool post_review_comment(req: String) -> String dangerous
+
+agent bad() -> String:
+    return post_review_comment("post review comment without approval")

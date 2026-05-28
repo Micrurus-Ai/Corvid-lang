@@ -1,0 +1,9 @@
+# Adversarial: a `create_patch_proposal` call without a prior
+# `approve CreatePatchProposal(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-CodeMaintenance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool create_patch_proposal(req: String) -> String dangerous
+
+agent bad() -> String:
+    return create_patch_proposal("create patch proposal without approval")

@@ -2,6 +2,7 @@ import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryP
 import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
 import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
 import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+import "../../../../std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
 
 effect repo_read:
     cost: $0.01
@@ -20,6 +21,21 @@ effect code_ai:
 
 effect code_write:
     cost: $0.02
+    trust: human_required
+    data: code
+
+effect pr_write:
+    cost: $0.02
+    trust: human_required
+    data: code
+
+effect merge_write:
+    cost: $0.03
+    trust: human_required
+    data: code
+
+effect release_write:
+    cost: $0.03
     trust: human_required
     data: code
 
@@ -165,8 +181,66 @@ public type CodeWritePlan:
     approval_count: Int
     writes_gated: Bool
 
+public type OpenPullRequestRequest:
+    tenant_id: String
+    actor_id: String
+    repo_id: String
+    branch_fingerprint: String
+    patch_fingerprint: String
+    approval_id: String
+    trace_id: String
+
+public type OpenPullRequestReceipt:
+    pull_request_id: String
+    tenant_id: String
+    repo_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type MergePullRequestRequest:
+    tenant_id: String
+    actor_id: String
+    repo_id: String
+    pull_request_id: String
+    merge_strategy: String
+    approval_id: String
+    trace_id: String
+
+public type MergePullRequestReceipt:
+    merge_id: String
+    tenant_id: String
+    repo_id: String
+    pull_request_id: String
+    merge_commit_sha: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type TagReleaseRequest:
+    tenant_id: String
+    actor_id: String
+    repo_id: String
+    tag_fingerprint: String
+    commit_sha: String
+    approval_id: String
+    trace_id: String
+
+public type TagReleaseReceipt:
+    release_id: String
+    tenant_id: String
+    repo_id: String
+    tag_fingerprint: String
+    commit_sha: String
+    approval_id: String
+    trace_id: String
+    status: String
+
 tool post_review_comment(req: ReviewCommentRequest) -> ReviewCommentReceipt dangerous uses code_write
 tool create_patch_proposal(req: PatchProposalRequest) -> PatchProposalReceipt dangerous uses code_write
+tool open_pull_request(req: OpenPullRequestRequest) -> OpenPullRequestReceipt dangerous uses pr_write
+tool merge_pull_request(req: MergePullRequestRequest) -> MergePullRequestReceipt dangerous uses merge_write
+tool tag_release(req: TagReleaseRequest) -> TagReleaseReceipt dangerous uses release_write
 
 public @replayable
 agent code_config() -> CodeConfig:
@@ -251,7 +325,7 @@ agent code_job_contract_valid(run: CodeJobRun) -> Bool:
 
 public @replayable
 agent code_schema_manifest() -> CodeSchemaManifest:
-    return CodeSchemaManifest("code_maintenance_agent", 4, 18, 3, 3, 2, "mock", true)
+    return CodeSchemaManifest("code_maintenance_agent", 5, 21, 3, 3, 5, "mock", true)
 
 public @replayable
 agent demo_repo() -> RepoSnapshot uses repo_read:
@@ -294,6 +368,59 @@ public @replayable
 agent code_write_plan_valid(plan: CodeWritePlan) -> Bool:
     return plan.writes_gated and plan.approval_count == 2 and plan.patch_fingerprint != "" and plan.review_comment_fingerprint != ""
 
+# Developer-authored approval flow. Each contract below is the
+# developer's explicit choice — role, cost ceiling, data class,
+# irreversibility, and expiry are declared in source. Review comments
+# and patch proposals are reversible proposals; merging a PR or tagging
+# a release changes the mainline / published state and is irreversible.
+# Corvid enforces the `approve <Label>` boundary; it never decides the
+# flow.
+public @replayable
+agent post_review_comment_approval_contract(tenant_id: String, issue_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("review-comment:" + issue_id, "v1", "PostReviewComment", "issue", issue_id, tenant_id, "Reviewer", 0.05, "code", false, 4102444800000, "approval:review_comment:" + trace_id)
+
+public @replayable
+agent create_patch_proposal_approval_contract(tenant_id: String, repo_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("patch-proposal:" + repo_id, "v1", "CreatePatchProposal", "repo", repo_id, tenant_id, "Reviewer", 0.05, "code", false, 4102444800000, "approval:patch_proposal:" + trace_id)
+
+public @replayable
+agent open_pull_request_approval_contract(tenant_id: String, repo_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("open-pr:" + repo_id, "v1", "OpenPullRequest", "repo", repo_id, tenant_id, "Reviewer", 0.05, "code", false, 4102444800000, "approval:open_pr:" + trace_id)
+
+public @replayable
+agent merge_pull_request_approval_contract(tenant_id: String, repo_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("merge-pr:" + repo_id, "v1", "MergePullRequest", "repo", repo_id, tenant_id, "Admin", 0.25, "code", true, 4102444800000, "approval:merge_pr:" + trace_id)
+
+public @replayable
+agent tag_release_approval_contract(tenant_id: String, repo_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("tag-release:" + repo_id, "v1", "TagRelease", "repo", repo_id, tenant_id, "Admin", 0.25, "code", true, 4102444800000, "approval:tag_release:" + trace_id)
+
+agent execute_approved_open_pull_request(req: OpenPullRequestRequest) -> OpenPullRequestReceipt uses pr_write:
+    approve OpenPullRequest(req)
+    return open_pull_request(req)
+
+agent execute_approved_merge_pull_request(req: MergePullRequestRequest) -> MergePullRequestReceipt uses merge_write:
+    approve MergePullRequest(req)
+    return merge_pull_request(req)
+
+agent execute_approved_tag_release(req: TagReleaseRequest) -> TagReleaseReceipt uses release_write:
+    approve TagRelease(req)
+    return tag_release(req)
+
+public @replayable
+agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
+    a = post_review_comment_approval_contract(tenant_id, "issue-1", trace_id)
+    b = create_patch_proposal_approval_contract(tenant_id, "repo-1", trace_id)
+    c = open_pull_request_approval_contract(tenant_id, "repo-1", trace_id)
+    d = merge_pull_request_approval_contract(tenant_id, "repo-1", trace_id)
+    e = tag_release_approval_contract(tenant_id, "repo-1", trace_id)
+    comment_ok = a.action == "PostReviewComment" and a.required_role == "Reviewer" and a.data_class == "code"
+    patch_ok = b.action == "CreatePatchProposal" and b.required_role == "Reviewer" and b.data_class == "code"
+    pr_ok = c.action == "OpenPullRequest" and c.required_role == "Reviewer" and c.data_class == "code"
+    merge_ok = d.action == "MergePullRequest" and d.required_role == "Admin" and d.data_class == "code" and d.irreversible
+    release_ok = e.action == "TagRelease" and e.required_role == "Admin" and e.data_class == "code" and e.irreversible
+    return comment_ok and patch_ok and pr_ok and merge_ok and release_ok
+
 server code_maintenance_agent_api:
     route GET "/config" -> json CodeConfig:
         return code_config()
@@ -309,6 +436,12 @@ server code_maintenance_agent_api:
         return execute_approved_review_comment(body)
     route POST "/patches/propose" body PatchProposalRequest -> json PatchProposalReceipt uses code_write:
         return execute_approved_patch_proposal(body)
+    route POST "/pull-requests/open" body OpenPullRequestRequest -> json OpenPullRequestReceipt uses pr_write:
+        return execute_approved_open_pull_request(body)
+    route POST "/pull-requests/merge" body MergePullRequestRequest -> json MergePullRequestReceipt uses merge_write:
+        return execute_approved_merge_pull_request(body)
+    route POST "/releases/tag" body TagReleaseRequest -> json TagReleaseReceipt uses release_write:
+        return execute_approved_tag_release(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)
     route POST "/auth/api-key/login" body ApiKeyLoginRequest -> json ApiKeyLoginResponse:
@@ -336,4 +469,5 @@ agent main() -> Bool:
     ci_scan = hourly_ci_signal_scan_job("tenant-1", "business_hour")
     repo_reindex = nightly_repo_reindex_job("tenant-1", "org/app")
     stale_sweep = weekly_stale_issue_sweep_job("tenant-1", "business_week")
-    return code_triage_valid(label) and code_write_plan_valid(plan) and auth.authenticated and service_auth.authenticated and code_job_contract_valid(ci_scan) and code_job_contract_valid(repo_reindex) and code_job_contract_valid(stale_sweep)
+    approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
+    return code_triage_valid(label) and code_write_plan_valid(plan) and auth.authenticated and service_auth.authenticated and code_job_contract_valid(ci_scan) and code_job_contract_valid(repo_reindex) and code_job_contract_valid(stale_sweep) and approvals_ok

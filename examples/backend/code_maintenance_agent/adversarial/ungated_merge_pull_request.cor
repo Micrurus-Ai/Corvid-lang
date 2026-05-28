@@ -1,0 +1,9 @@
+# Adversarial: a `merge_pull_request` call without a prior
+# `approve MergePullRequest(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-CodeMaintenance-2.
+# Expected: `corvid check` exits with E0101.
+
+tool merge_pull_request(req: String) -> String dangerous
+
+agent bad() -> String:
+    return merge_pull_request("merge pull request without approval")
