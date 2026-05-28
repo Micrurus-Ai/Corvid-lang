@@ -529,7 +529,7 @@ fn customer_support_agent_triage_and_drafts_are_policy_grounded() {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .expect("enable foreign keys");
-    execute_sql_dir(&conn, &app.join("migrations"), 4);
+    execute_sql_dir(&conn, &app.join("migrations"), 5);
     let seed_sql = fs::read_to_string(app.join("seeds").join("demo.sql")).expect("read seed sql");
     conn.execute_batch(&seed_sql).expect("execute seed sql");
 
@@ -574,7 +574,7 @@ fn customer_support_agent_approvals_sla_and_eval_dashboard_work() {
     let mock_text = fs::read_to_string(app.join("mocks").join("approvals_sla.json"))
         .expect("read support approval mock");
     let mock: Value = serde_json::from_str(&mock_text).expect("parse support approval mock");
-    assert_eq!(mock["approvals"].as_array().expect("approvals").len(), 2);
+    assert_eq!(mock["approvals"].as_array().expect("approvals").len(), 5);
     assert_eq!(
         mock["sla_jobs"][0]["replay_key"].as_str(),
         Some("support:sla:ticket-1")

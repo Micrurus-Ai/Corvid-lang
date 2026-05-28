@@ -2,6 +2,7 @@ import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryP
 import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
 import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
 import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+import "../../../../std/approvals" use ApprovalContractRef, ApprovalQueueItem, ApprovalAuditEnvelope, approval_contract_ref, approval_queue_item, approval_audit_envelope, approval_pending, approval_same_tenant, approval_not_expired, approval_redacted
 
 effect ticket_read:
     cost: $0.01
@@ -24,6 +25,21 @@ effect support_write:
     data: customer
 
 effect refund_write:
+    cost: $0.02
+    trust: human_required
+    data: financial
+
+effect escalate_write:
+    cost: $0.01
+    trust: human_required
+    data: customer
+
+effect ticket_write:
+    cost: $0.01
+    trust: human_required
+    data: customer
+
+effect credit_write:
     cost: $0.02
     trust: human_required
     data: financial
@@ -175,8 +191,65 @@ public type SupportEvalDashboard:
     sla_jobs: Int
     eval_passes: Int
 
+public type EscalateTicketRequest:
+    tenant_id: String
+    actor_id: String
+    ticket_id: String
+    escalation_tier: String
+    reason_fingerprint: String
+    approval_id: String
+    trace_id: String
+
+public type EscalateTicketReceipt:
+    escalation_id: String
+    tenant_id: String
+    ticket_id: String
+    escalation_tier: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type CloseTicketRequest:
+    tenant_id: String
+    actor_id: String
+    ticket_id: String
+    resolution_fingerprint: String
+    approval_id: String
+    trace_id: String
+
+public type CloseTicketReceipt:
+    closure_id: String
+    tenant_id: String
+    ticket_id: String
+    approval_id: String
+    trace_id: String
+    status: String
+
+public type ApplyAccountCreditRequest:
+    tenant_id: String
+    actor_id: String
+    customer_fingerprint: String
+    amount_cents: Int
+    currency: String
+    reason_fingerprint: String
+    approval_id: String
+    trace_id: String
+
+public type ApplyAccountCreditReceipt:
+    credit_id: String
+    tenant_id: String
+    customer_fingerprint: String
+    amount_cents: Int
+    currency: String
+    approval_id: String
+    trace_id: String
+    status: String
+
 tool send_support_reply(req: SupportReplySendRequest) -> SupportReplySendReceipt dangerous uses support_write
 tool issue_support_refund(req: SupportRefundRequest) -> SupportRefundReceipt dangerous uses refund_write
+tool escalate_ticket(req: EscalateTicketRequest) -> EscalateTicketReceipt dangerous uses escalate_write
+tool close_ticket(req: CloseTicketRequest) -> CloseTicketReceipt dangerous uses ticket_write
+tool apply_account_credit(req: ApplyAccountCreditRequest) -> ApplyAccountCreditReceipt dangerous uses credit_write
 
 public @replayable
 agent support_config() -> SupportConfig:
@@ -261,7 +334,7 @@ agent support_job_contract_valid(run: SupportJobRun) -> Bool:
 
 public @replayable
 agent support_schema_manifest() -> SupportSchemaManifest:
-    return SupportSchemaManifest("customer_support_agent", 4, 17, 3, 3, 2, "mock", true)
+    return SupportSchemaManifest("customer_support_agent", 5, 20, 3, 3, 5, "mock", true)
 
 public @replayable
 agent demo_ticket() -> SupportTicket uses ticket_read:
@@ -294,6 +367,59 @@ agent execute_approved_support_refund(req: SupportRefundRequest) -> SupportRefun
     approve IssueSupportRefund(req)
     return issue_support_refund(req)
 
+# Developer-authored approval flow. Each contract below is the
+# developer's explicit choice — role, cost ceiling, data class,
+# irreversibility, and expiry are declared in source. Customer-facing
+# replies must be policy-grounded (the SupportDraftReply carries the
+# citation); the approval contracts gate the act of sending or changing
+# state. Corvid enforces the `approve <Label>` boundary; it never
+# decides the flow.
+public @replayable
+agent send_support_reply_approval_contract(tenant_id: String, ticket_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("send-reply:" + ticket_id, "v1", "SendSupportReply", "ticket", ticket_id, tenant_id, "Reviewer", 0.05, "customer", true, 4102444800000, "approval:send_reply:" + trace_id)
+
+public @replayable
+agent issue_support_refund_approval_contract(tenant_id: String, ticket_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("issue-refund:" + ticket_id, "v1", "IssueSupportRefund", "ticket", ticket_id, tenant_id, "Admin", 0.25, "financial", true, 4102444800000, "approval:issue_refund:" + trace_id)
+
+public @replayable
+agent escalate_ticket_approval_contract(tenant_id: String, ticket_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("escalate-ticket:" + ticket_id, "v1", "EscalateTicket", "ticket", ticket_id, tenant_id, "Reviewer", 0.05, "customer", false, 4102444800000, "approval:escalate_ticket:" + trace_id)
+
+public @replayable
+agent close_ticket_approval_contract(tenant_id: String, ticket_id: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("close-ticket:" + ticket_id, "v1", "CloseTicket", "ticket", ticket_id, tenant_id, "Reviewer", 0.05, "customer", false, 4102444800000, "approval:close_ticket:" + trace_id)
+
+public @replayable
+agent apply_account_credit_approval_contract(tenant_id: String, customer_fingerprint: String, trace_id: String) -> ApprovalContractRef:
+    return approval_contract_ref("apply-credit:" + customer_fingerprint, "v1", "ApplyAccountCredit", "customer", customer_fingerprint, tenant_id, "Admin", 0.25, "financial", true, 4102444800000, "approval:apply_credit:" + trace_id)
+
+agent execute_approved_escalate_ticket(req: EscalateTicketRequest) -> EscalateTicketReceipt uses escalate_write:
+    approve EscalateTicket(req)
+    return escalate_ticket(req)
+
+agent execute_approved_close_ticket(req: CloseTicketRequest) -> CloseTicketReceipt uses ticket_write:
+    approve CloseTicket(req)
+    return close_ticket(req)
+
+agent execute_approved_apply_account_credit(req: ApplyAccountCreditRequest) -> ApplyAccountCreditReceipt uses credit_write:
+    approve ApplyAccountCredit(req)
+    return apply_account_credit(req)
+
+public @replayable
+agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
+    a = send_support_reply_approval_contract(tenant_id, "ticket-1", trace_id)
+    b = issue_support_refund_approval_contract(tenant_id, "ticket-1", trace_id)
+    c = escalate_ticket_approval_contract(tenant_id, "ticket-1", trace_id)
+    d = close_ticket_approval_contract(tenant_id, "ticket-1", trace_id)
+    e = apply_account_credit_approval_contract(tenant_id, "sha256:customer-demo", trace_id)
+    reply_ok = a.action == "SendSupportReply" and a.required_role == "Reviewer" and a.data_class == "customer" and a.irreversible
+    refund_ok = b.action == "IssueSupportRefund" and b.required_role == "Admin" and b.data_class == "financial" and b.irreversible
+    escalate_ok = c.action == "EscalateTicket" and c.required_role == "Reviewer" and c.data_class == "customer"
+    close_ok = d.action == "CloseTicket" and d.required_role == "Reviewer" and d.data_class == "customer"
+    credit_ok = e.action == "ApplyAccountCredit" and e.required_role == "Admin" and e.data_class == "financial" and e.irreversible
+    return reply_ok and refund_ok and escalate_ok and close_ok and credit_ok
+
 public @replayable
 agent support_sla_job() -> SupportSlaJob:
     ticket = demo_ticket()
@@ -301,11 +427,11 @@ agent support_sla_job() -> SupportSlaJob:
 
 public @replayable
 agent support_eval_dashboard() -> SupportEvalDashboard:
-    return SupportEvalDashboard(1, 2, 1, 4)
+    return SupportEvalDashboard(1, 5, 1, 4)
 
 public @replayable
 agent support_ops_contract_valid(dashboard: SupportEvalDashboard, sla: SupportSlaJob) -> Bool:
-    return dashboard.grounded_replies >= 1 and dashboard.approval_gated_writes == 2 and dashboard.sla_jobs == 1 and sla.replay_key == "support:sla:ticket-1"
+    return dashboard.grounded_replies >= 1 and dashboard.approval_gated_writes == 5 and dashboard.sla_jobs == 1 and sla.replay_key == "support:sla:ticket-1"
 
 server customer_support_agent_api:
     route GET "/config" -> json SupportConfig:
@@ -324,6 +450,12 @@ server customer_support_agent_api:
         return execute_approved_support_reply(body)
     route POST "/refunds/issue" body SupportRefundRequest -> json SupportRefundReceipt uses refund_write:
         return execute_approved_support_refund(body)
+    route POST "/tickets/escalate" body EscalateTicketRequest -> json EscalateTicketReceipt uses escalate_write:
+        return execute_approved_escalate_ticket(body)
+    route POST "/tickets/close" body CloseTicketRequest -> json CloseTicketReceipt uses ticket_write:
+        return execute_approved_close_ticket(body)
+    route POST "/credits/apply" body ApplyAccountCreditRequest -> json ApplyAccountCreditReceipt uses credit_write:
+        return execute_approved_apply_account_credit(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)
     route POST "/auth/api-key/login" body ApiKeyLoginRequest -> json ApiKeyLoginResponse:
@@ -352,4 +484,5 @@ agent main() -> Bool:
     sla_scan = sla_breach_scan_job("tenant-1", "business_hour")
     csat = nightly_csat_rollup_job("tenant-1", "business_day")
     reindex = policy_reindex_job("tenant-1", "support_policies")
-    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla) and auth.authenticated and service_auth.authenticated and support_job_contract_valid(sla_scan) and support_job_contract_valid(csat) and support_job_contract_valid(reindex)
+    approvals_ok = approval_surface_valid("tenant-1", "trace-main-approvals")
+    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla) and auth.authenticated and service_auth.authenticated and support_job_contract_valid(sla_scan) and support_job_contract_valid(csat) and support_job_contract_valid(reindex) and approvals_ok

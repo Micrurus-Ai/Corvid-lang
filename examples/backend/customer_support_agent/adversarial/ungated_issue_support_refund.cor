@@ -1,0 +1,9 @@
+# Adversarial: an `issue_support_refund` call without a prior
+# `approve IssueSupportRefund(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-CustomerSupport-2.
+# Expected: `corvid check` exits with E0101.
+
+tool issue_support_refund(req: String) -> String dangerous
+
+agent bad() -> String:
+    return issue_support_refund("issue refund without approval")

@@ -10,6 +10,21 @@
       "label": "IssueSupportRefund",
       "route": "POST /refunds/issue",
       "audit_required": true
+    },
+    {
+      "label": "EscalateTicket",
+      "route": "POST /tickets/escalate",
+      "audit_required": true
+    },
+    {
+      "label": "CloseTicket",
+      "route": "POST /tickets/close",
+      "audit_required": true
+    },
+    {
+      "label": "ApplyAccountCredit",
+      "route": "POST /credits/apply",
+      "audit_required": true
     }
   ],
   "sla_jobs": [
@@ -22,7 +37,7 @@
   ],
   "eval_dashboard": {
     "grounded_replies": 1,
-    "approval_gated_writes": 2,
+    "approval_gated_writes": 5,
     "sla_jobs": 1,
     "eval_passes": 4
   }

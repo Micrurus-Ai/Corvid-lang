@@ -1,0 +1,9 @@
+# Adversarial: an `escalate_ticket` call without a prior
+# `approve EscalateTicket(...)` boundary must not compile.
+# Slice 35V2-P42-D-LR-app-maturity-CustomerSupport-2.
+# Expected: `corvid check` exits with E0101.
+
+tool escalate_ticket(req: String) -> String dangerous
+
+agent bad() -> String:
+    return escalate_ticket("escalate ticket without approval")
