@@ -112,6 +112,19 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         with_tools_lib: Option<PathBuf>,
     },
+    /// Serve a Corvid app's `server` block over HTTP. Loads the app,
+    /// builds the same interpreter runtime `corvid run` uses, and
+    /// dispatches each route to its handler agent. GET routes whose
+    /// handler is a direct agent call with literal arguments are
+    /// served; other shapes return 501 until later serve slices.
+    Serve {
+        /// Source file. Defaults to `src/main.cor` in a Corvid project.
+        file: Option<PathBuf>,
+        /// Address to bind, `host:port`. Honors `CORVID_HOST`/`CORVID_PORT`
+        /// when unset.
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        listen: String,
+    },
     /// Run verification suites.
     ///
     /// Targets:

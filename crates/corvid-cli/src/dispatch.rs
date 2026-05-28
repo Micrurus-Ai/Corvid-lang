@@ -51,6 +51,7 @@ use crate::package_cmd::{
 };
 use crate::project_source::resolve_project_source;
 use crate::run_cmd::cmd_run;
+use crate::serve_cmd::cmd_serve;
 use crate::verify_cmd::cmd_verify;
 use crate::{
     abi_cmd, approver_cmd, audit_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
@@ -102,6 +103,10 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         }) => {
             let file = resolve_project_source(file)?;
             cmd_run(&file, &target, with_tools_lib.as_deref())
+        }
+        Some(Command::Serve { file, listen }) => {
+            let file = resolve_project_source(file)?;
+            cmd_serve(&file, &listen)
         }
         Some(Command::Test {
             target,

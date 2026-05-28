@@ -17,6 +17,7 @@ corvid-bind = { workspace = true }
 corvid-connector-runtime = { workspace = true }
 corvid-driver = { workspace = true }
 corvid-guarantees = { workspace = true }
+corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-syntax = { workspace = true }
 corvid-differential-verify = { workspace = true }
@@ -33,7 +34,8 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 tempfile = { workspace = true }
 time = { version = "0.3", features = ["parsing", "formatting"] }
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "signal"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "signal", "net"] }
+axum = "0.7"
 rayon = { workspace = true }
 libloading = "0.8"
 sha2 = "0.10"
