@@ -592,6 +592,11 @@ pub(super) fn lower_expr(
         IrExprKind::FieldAccess { target, field } => {
             let def_id = match &target.ty {
                 Type::Struct(id) => *id,
+                // Imported structs key the same `ir_types` layout table;
+                // the type carries the cross-module-remapped DefId (set in
+                // corvid-ir lowering, slices G0-1 + the lower_expr remap),
+                // so the same field-offset machinery applies.
+                Type::ImportedStruct(imported) => imported.def_id,
                 other => {
                     return Err(CodegenError::cranelift(
                         format!(

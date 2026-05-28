@@ -823,7 +823,16 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_expr(&self, e: &Expr) -> IrExpr {
-        let ty = self.types.get(&e.span()).cloned().unwrap_or(Type::Unknown);
+        // Expression types come from the checker (`checked.types`),
+        // which records imported structs under their original
+        // per-module DefId. Remap to the cross-module id so every
+        // imported-struct *type* in the IR — signatures (G0-1) and
+        // expression types alike — keys the merged `ir.types` layout
+        // table. Without this, native field access would index the
+        // table with the wrong id.
+        let ty = self.remap_imported_struct_type(
+            self.types.get(&e.span()).cloned().unwrap_or(Type::Unknown),
+        );
         let kind = match e {
             Expr::Literal { value, .. } => IrExprKind::Literal(match value {
                 Literal::Int(n) => IrLiteral::Int(*n),

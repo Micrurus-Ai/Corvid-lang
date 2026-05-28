@@ -10,6 +10,20 @@ fn write_project(src: &str, stem: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, source_path)
 }
 
+fn write_module_project(
+    module_src: &str,
+    module_stem: &str,
+    main_src: &str,
+) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    std::fs::write(src_dir.join(format!("{module_stem}.cor")), module_src).expect("write module");
+    let main_path = src_dir.join("main.cor");
+    std::fs::write(&main_path, main_src).expect("write main");
+    (dir, main_path)
+}
+
 fn run_corvid(args: &[&str], cwd: &Path) -> std::process::Output {
     let exe = env!("CARGO_BIN_EXE_corvid");
     Command::new(exe)
@@ -63,6 +77,63 @@ agent refund_bot(ticket_id: String, amount: Float) -> Bool:
     decision = classify(ticket_id)
     return decision != None and amount > 10.0
 "#;
+
+// A module exporting a struct, plus a `main` that imports it, takes
+// the imported struct as an agent parameter, and reads its fields. This
+// is the reference-app shape (agents pass std types like `Actor` /
+// `ApprovalContractRef` around). The `pub extern "c"` entrypoint is a
+// separate scalar agent — the cdylib gate only needs one, and lowering
+// compiles every agent (including the unreferenced `describe`).
+const IMPORTED_TYPES_SRC: &str = r#"
+public type Receipt:
+    id: String
+    amount: Int
+"#;
+
+const IMPORTED_STRUCT_MAIN_SRC: &str = r#"
+import "./types" as t
+
+agent describe(r: t.Receipt) -> String:
+    return r.id
+
+pub extern "c"
+agent entry(note: String) -> String:
+    return note
+"#;
+
+#[test]
+fn cli_build_cdylib_succeeds_with_imported_struct_field_access() {
+    // Slice G0 (imported-struct native codegen): an agent that accepts
+    // an imported struct and reads its fields must compile + link as a
+    // cdylib. Previously failed with "native codegen does not yet
+    // support: imported struct".
+    let (_dir, source_path) =
+        write_module_project(IMPORTED_TYPES_SRC, "types", IMPORTED_STRUCT_MAIN_SRC);
+    let output = run_corvid(
+        &[
+            "build",
+            source_path.to_str().expect("utf8 source path"),
+            "--target=cdylib",
+        ],
+        source_path.parent().unwrap(),
+    );
+
+    assert!(
+        output.status.success(),
+        "imported-struct cdylib build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lib_path = source_path
+        .parent()
+        .and_then(Path::parent)
+        .expect("project root")
+        .join("target")
+        .join("release")
+        .join(shared_library_name("main"));
+    assert!(lib_path.exists(), "missing shared library: {}", lib_path.display());
+}
 
 #[test]
 fn cli_build_cdylib_target_succeeds_on_scalar_agent() {
