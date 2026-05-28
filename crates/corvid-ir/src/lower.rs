@@ -12,9 +12,9 @@ use crate::imports::{
 use crate::types::*;
 use corvid_ast::{
     AgentAttribute, AgentDecl, BinaryOp, Block, Decl, Effect, EvalAssert, EvalDecl, Expr,
-    ExtendMethodKind, ExternAbi, File, FixtureDecl, Ident, ImportDecl, ImportSource, Literal,
-    MockDecl, Param, PromptDecl, ReplayArm, ReplayPattern, Span, Stmt, TestDecl, ToolArgPattern,
-    ToolDecl, TypeDecl, TypeRef, UnaryOp,
+    ExtendMethodKind, ExternAbi, File, FixtureDecl, HttpRouteDecl, Ident, ImportDecl, ImportSource,
+    Literal, MockDecl, Param, PromptDecl, ReplayArm, ReplayPattern, ServerDecl, Span, Stmt,
+    TestDecl, ToolArgPattern, ToolDecl, TypeDecl, TypeRef, UnaryOp,
 };
 use corvid_resolve::{
     resolver::MethodEntry, Binding, BuiltIn, DeclKind, DefId, LocalId, ModuleResolution, Resolved,
@@ -175,6 +175,7 @@ impl<'a> Lowerer<'a> {
         let mut tests = Vec::new();
         let mut fixtures = Vec::new();
         let mut mocks = Vec::new();
+        let mut servers = Vec::new();
 
         for decl in &file.decls {
             match decl {
@@ -196,11 +197,7 @@ impl<'a> Lowerer<'a> {
                     // capability requirements; slice C adds the
                     // route table.
                 }
-                Decl::Server(_) => {
-                    // Phase 36C: server route bodies typecheck, but
-                    // HTTP dispatch IR is introduced in a later
-                    // backend-runtime slice.
-                }
+                Decl::Server(s) => servers.push(self.lower_server(s)),
                 Decl::Schedule(_) => {
                     // Phase 38D2: schedules are static audit/runtime
                     // manifests. They do not lower into executable IR
@@ -248,6 +245,48 @@ impl<'a> Lowerer<'a> {
             tests,
             fixtures,
             mocks,
+            servers,
+        }
+    }
+
+    fn lower_server(&self, s: &ServerDecl) -> IrServer {
+        let id = self
+            .symbols
+            .lookup_def(&s.name.name)
+            .expect("server missing from symbol table");
+        IrServer {
+            id: self.remap_def_id(id),
+            name: s.name.name.clone(),
+            routes: s.routes.iter().map(|r| self.lower_route(r)).collect(),
+            span: s.span,
+        }
+    }
+
+    fn lower_route(&self, r: &HttpRouteDecl) -> IrRoute {
+        IrRoute {
+            method: r.method,
+            path: r.path.clone(),
+            path_params: r
+                .path_params
+                .iter()
+                .map(|p| IrRoutePathParam {
+                    name: p.name.name.clone(),
+                    ty: self.type_ref_to_type(&p.ty),
+                    span: p.span,
+                })
+                .collect(),
+            query_ty: r.query_ty.as_ref().map(|t| self.type_ref_to_type(t)),
+            body_ty: r.body_ty.as_ref().map(|t| self.type_ref_to_type(t)),
+            response_kind: r.response.kind,
+            response_ty: self.type_ref_to_type(&r.response.ty),
+            effect_names: r
+                .effect_row
+                .effects
+                .iter()
+                .map(|e| e.name.name.clone())
+                .collect(),
+            body: self.lower_block(&r.body),
+            span: r.span,
         }
     }
 

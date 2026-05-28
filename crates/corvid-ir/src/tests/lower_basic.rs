@@ -321,3 +321,83 @@ agent hash_step(n: Int) -> Int:
         other => panic!("expected WrappingUnOp, got {other:?}"),
     }
 }
+
+#[test]
+fn lowers_server_block_into_ir_routes() {
+    let src = "\
+public type Manifest:
+    name: String
+
+public type Req:
+    id: String
+
+public type Resp:
+    id: String
+
+agent make_manifest() -> Manifest:
+    return Manifest(\"svc\")
+
+agent handle(req: Req) -> Resp:
+    return Resp(req.id)
+
+server demo_api:
+    route GET \"/schema\" -> json Manifest:
+        return make_manifest()
+    route POST \"/do\" body Req -> json Resp:
+        return handle(body)
+";
+    let ir = lower_src(src);
+    assert_eq!(ir.servers.len(), 1, "expected one server block");
+    let server = &ir.servers[0];
+    assert_eq!(server.name, "demo_api");
+    assert_eq!(server.routes.len(), 2);
+
+    // GET /schema -> json Manifest: return make_manifest()
+    let get = &server.routes[0];
+    assert_eq!(get.method, corvid_ast::HttpMethod::Get);
+    assert_eq!(get.path, "/schema");
+    assert!(get.body_ty.is_none(), "GET route has no body type");
+    let get_ret = get
+        .body
+        .stmts
+        .iter()
+        .find_map(|s| match s {
+            IrStmt::Return { value: Some(v), .. } => Some(v),
+            _ => None,
+        })
+        .expect("GET handler return");
+    match &get_ret.kind {
+        IrExprKind::Call { callee_name, args, .. } => {
+            assert_eq!(callee_name, "make_manifest");
+            assert!(args.is_empty(), "zero-arg GET handler");
+        }
+        other => panic!("expected Call, got {other:?}"),
+    }
+
+    // POST /do body Req -> json Resp: return handle(body)
+    let post = &server.routes[1];
+    assert_eq!(post.method, corvid_ast::HttpMethod::Post);
+    assert_eq!(post.path, "/do");
+    assert!(post.body_ty.is_some(), "POST route declares a body type");
+    let post_ret = post
+        .body
+        .stmts
+        .iter()
+        .find_map(|s| match s {
+            IrStmt::Return { value: Some(v), .. } => Some(v),
+            _ => None,
+        })
+        .expect("POST handler return");
+    match &post_ret.kind {
+        IrExprKind::Call { callee_name, args, .. } => {
+            assert_eq!(callee_name, "handle");
+            assert_eq!(args.len(), 1, "POST handler passes the body");
+            assert!(
+                matches!(&args[0].kind, IrExprKind::Local { name, .. } if name == "body"),
+                "POST handler arg is the `body` binding, got {:?}",
+                args[0].kind
+            );
+        }
+        other => panic!("expected Call, got {other:?}"),
+    }
+}

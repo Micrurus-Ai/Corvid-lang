@@ -395,6 +395,7 @@ mod tests {
             tests: vec![],
             fixtures: vec![],
             mocks: vec![],
+            servers: vec![],
         };
 
         assert!(matches!(

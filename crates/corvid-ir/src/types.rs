@@ -3,7 +3,9 @@
 //! A flatter, normalized form of the typed AST. References are already
 //! resolved to `DefId`/`LocalId`; every expression carries its `Type`.
 
-use corvid_ast::{Backoff, BackpressurePolicy, BinaryOp, Effect, Span, UnaryOp};
+use corvid_ast::{
+    Backoff, BackpressurePolicy, BinaryOp, Effect, HttpMethod, RouteResponseKind, Span, UnaryOp,
+};
 use corvid_resolve::{DefId, LocalId};
 use corvid_types::Type;
 
@@ -19,6 +21,49 @@ pub struct IrFile {
     pub tests: Vec<IrTest>,
     pub fixtures: Vec<IrFixture>,
     pub mocks: Vec<IrMock>,
+    /// `server` blocks lowered to IR (Phase 35V2-P42-E0). Each route
+    /// carries its method/path/types and the lowered handler body, so
+    /// the HTTP-serve layer can register routes and dispatch to the
+    /// handler agent.
+    pub servers: Vec<IrServer>,
+}
+
+/// A `server` block lowered to IR.
+#[derive(Debug, Clone)]
+pub struct IrServer {
+    pub id: DefId,
+    pub name: String,
+    pub routes: Vec<IrRoute>,
+    pub span: Span,
+}
+
+/// One `route METHOD "path" ... -> RESPONSE: BODY` entry.
+#[derive(Debug, Clone)]
+pub struct IrRoute {
+    pub method: HttpMethod,
+    pub path: String,
+    pub path_params: Vec<IrRoutePathParam>,
+    /// Resolved type of the `query` binding, when the route declares one.
+    pub query_ty: Option<Type>,
+    /// Resolved type of the `body` binding, when the route declares one.
+    pub body_ty: Option<Type>,
+    pub response_kind: RouteResponseKind,
+    pub response_ty: Type,
+    /// Names of the effects the route's handler declares (`uses ...`).
+    pub effect_names: Vec<String>,
+    /// The lowered handler body. The `path`/`query`/`body` bindings the
+    /// resolver introduced are referenced by `IrExprKind::Local` inside
+    /// this block.
+    pub body: IrBlock,
+    pub span: Span,
+}
+
+/// A typed `{name}` path parameter on a route.
+#[derive(Debug, Clone)]
+pub struct IrRoutePathParam {
+    pub name: String,
+    pub ty: Type,
+    pub span: Span,
 }
 
 /// `import python "..." as alias`.
