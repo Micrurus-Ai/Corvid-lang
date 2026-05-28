@@ -85,3 +85,36 @@ fn deploy_manifests_invoke_corvid_serve_with_full_path() {
         }
     }
 }
+
+/// Slice 35V2-P42-F-LR: every reference app has a per-app comparison
+/// file under benches/comparisons/ with the required skeleton sections.
+#[test]
+fn each_reference_app_has_a_benchmark_comparison_file() {
+    use std::fs;
+    for app in APPS {
+        let path = repo_root()
+            .join("benches")
+            .join("comparisons")
+            .join(format!("{app}.md"));
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{app}: read {}: {e}", path.display()));
+        for section in [
+            "## Headline",
+            "## Reproduce",
+            "## Governance line count",
+            "## What Corvid wins on",
+            "## What Corvid does not claim",
+        ] {
+            assert!(
+                text.contains(section),
+                "{app}: comparison file missing `{section}`"
+            );
+        }
+        // Honesty rule: baseline cells are explicitly bounty-open, not
+        // fabricated numbers.
+        assert!(
+            text.contains("bounty-open"),
+            "{app}: comparison file must mark unmeasured baselines `bounty-open`"
+        );
+    }
+}

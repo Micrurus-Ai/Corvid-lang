@@ -45,10 +45,19 @@ Each file follows the same skeleton:
 - [`connectors.md`](./connectors.md) — Phase 41 reference comparison:
   connector implementation cost vs raw SDK use in Python / TypeScript.
 
+Per-app comparisons (Phase 42 `35V2-P42-F-LR-per-app-benchmark-files`),
+one per reference app — Corvid governance-line counts are real
+(countable from each `src/main.cor`); the Python / TypeScript baseline
+cells are `bounty-open` per the honesty rules below:
+
+- [`personal_executive_agent.md`](./personal_executive_agent.md)
+- [`personal_knowledge_agent.md`](./personal_knowledge_agent.md)
+- [`finance_operations_agent.md`](./finance_operations_agent.md)
+- [`customer_support_agent.md`](./customer_support_agent.md)
+- [`code_maintenance_agent.md`](./code_maintenance_agent.md)
+
 Each file is the *minimum* publishable artifact for the corresponding
-phase-done bullet. Per-app comparisons (Phase 42's
-`benches/comparisons/<app>.md` requirement) live alongside these and
-are added as each reference app lands.
+phase-done bullet.
 
 ## Honesty rules
 
