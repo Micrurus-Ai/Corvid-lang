@@ -1,0 +1,98 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "finance-balance-sync",
+  "fixture_hash": "sha256:1f5905e58ae039d0",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 2,
+  "selected_span_ids": [
+    "job-balance-sync",
+    "balance-fetch"
+  ],
+  "expected_guarantee_ids": [
+    "connector-read",
+    "durable-job"
+  ],
+  "expected_effect_ids": [
+    "finance_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:a7e05778e66e>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-balance-sync",
+      "span_id": "job-balance-sync",
+      "parent_span_id": "",
+      "kind": "job",
+      "name": "nightly_balance_sync_job",
+      "status": "ok",
+      "started_ms": 1700000060000,
+      "ended_ms": 1700000062200,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:266ff5f617ec>",
+      "request_id": "<redacted:request:sha256:440c5963f2d3>",
+      "replay_key": "<redacted:replay:sha256:a7e05778e66e>",
+      "idempotency_key": "<redacted:idempotency:sha256:2bff9909a785>",
+      "guarantee_id": "durable-job",
+      "effect_ids": [
+        "finance_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.01,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 2200,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:6f03d934e582>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:310bd3cb01a3>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-balance-sync",
+      "span_id": "balance-fetch",
+      "parent_span_id": "job-balance-sync",
+      "kind": "tool",
+      "name": "finance_read",
+      "status": "ok",
+      "started_ms": 1700000060100,
+      "ended_ms": 1700000061900,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:266ff5f617ec>",
+      "request_id": "<redacted:request:sha256:440c5963f2d3>",
+      "replay_key": "<redacted:replay:sha256:a7e05778e66e>",
+      "idempotency_key": "<redacted:idempotency:sha256:e745683c0588>",
+      "guarantee_id": "connector-read",
+      "effect_ids": [
+        "finance_read"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.01,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 1800,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:23fcea0df8c0>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:8f0d80bd3aae>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

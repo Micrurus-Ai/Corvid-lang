@@ -1,0 +1,136 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "finance-payment-intent",
+  "fixture_hash": "sha256:f41233f27b2e7b1f",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 3,
+  "selected_span_ids": [
+    "route-payment",
+    "approval-payment",
+    "audit-payment"
+  ],
+  "expected_guarantee_ids": [
+    "approval-pending",
+    "audit-event",
+    "human-approval"
+  ],
+  "expected_effect_ids": [
+    "payment_write"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:a464afd6d8dd>",
+    "<redacted:replay:sha256:abb2dc657050>",
+    "<redacted:replay:sha256:cb2d58904b03>"
+  ],
+  "model_fingerprints": [],
+  "prompt_hashes": [],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-payment-intent",
+      "span_id": "route-payment",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "POST /payments/intents/submit",
+      "status": "pending_review",
+      "started_ms": 1700000120000,
+      "ended_ms": 1700000120030,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:802fd5e0d468>",
+      "replay_key": "<redacted:replay:sha256:cb2d58904b03>",
+      "idempotency_key": "<redacted:idempotency:sha256:d54b212cafaf>",
+      "guarantee_id": "approval-pending",
+      "effect_ids": [
+        "payment_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:6562aaee9d32>",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 30,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:df911ced5acf>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-payment-intent",
+      "span_id": "approval-payment",
+      "parent_span_id": "route-payment",
+      "kind": "approval",
+      "name": "SubmitPaymentIntent",
+      "status": "pending_review",
+      "started_ms": 1700000120040,
+      "ended_ms": 1700000120045,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:802fd5e0d468>",
+      "replay_key": "<redacted:replay:sha256:abb2dc657050>",
+      "idempotency_key": "<redacted:idempotency:sha256:6562aaee9d32>",
+      "guarantee_id": "human-approval",
+      "effect_ids": [
+        "payment_write"
+      ],
+      "approval_id": "<redacted:approval:sha256:6562aaee9d32>",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 5,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:c0837cdfe936>",
+      "output_fingerprint": "",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    },
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-payment-intent",
+      "span_id": "audit-payment",
+      "parent_span_id": "approval-payment",
+      "kind": "agent",
+      "name": "payment_audit",
+      "status": "ok",
+      "started_ms": 1700000120100,
+      "ended_ms": 1700000120110,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:bbc5e661e106>",
+      "request_id": "<redacted:request:sha256:802fd5e0d468>",
+      "replay_key": "<redacted:replay:sha256:a464afd6d8dd>",
+      "idempotency_key": "<redacted:idempotency:sha256:39fbdfb046ac>",
+      "guarantee_id": "audit-event",
+      "effect_ids": [],
+      "approval_id": "<redacted:approval:sha256:6562aaee9d32>",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 1.0,
+      "latency_ms": 10,
+      "model_id": "",
+      "model_fingerprint": "",
+      "prompt_hash": "",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:b288f3397621>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:e161abc0e9ce>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

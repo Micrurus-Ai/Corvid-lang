@@ -1,0 +1,66 @@
+{
+  "schema": "corvid.eval.lineage_fixture.v1",
+  "trace_id": "finance-demo",
+  "fixture_hash": "sha256:abc9bc57d90134df",
+  "redaction_policy_hash": "sha256:2e1721ba902a584f",
+  "source_event_count": 1,
+  "selected_span_ids": [
+    "readonly"
+  ],
+  "expected_guarantee_ids": [
+    "non-advice-readonly"
+  ],
+  "expected_effect_ids": [
+    "finance_ai",
+    "finance_read"
+  ],
+  "replay_keys": [
+    "<redacted:replay:sha256:160de6a34529>"
+  ],
+  "model_fingerprints": [
+    "<redacted:model_fingerprint:sha256:6b0f7e10bf09>"
+  ],
+  "prompt_hashes": [
+    "<redacted:prompt_hash:sha256:a9c59d099fb3>"
+  ],
+  "retrieval_index_hashes": [],
+  "events": [
+    {
+      "schema": "corvid.trace.lineage.v1",
+      "trace_id": "finance-demo",
+      "span_id": "readonly",
+      "parent_span_id": "",
+      "kind": "route",
+      "name": "GET /readonly/snapshot/mock",
+      "status": "ok",
+      "started_ms": 1700000000000,
+      "ended_ms": 1700000000015,
+      "tenant_id": "<redacted:tenant:sha256:0a96abb33b07>",
+      "actor_id": "<redacted:actor:sha256:c6c289e49e9c>",
+      "request_id": "<redacted:request:sha256:e312d9e27dce>",
+      "replay_key": "<redacted:replay:sha256:160de6a34529>",
+      "idempotency_key": "<redacted:idempotency:sha256:160de6a34529>",
+      "guarantee_id": "non-advice-readonly",
+      "effect_ids": [
+        "finance_read",
+        "finance_ai"
+      ],
+      "approval_id": "",
+      "data_classes": [
+        "financial"
+      ],
+      "cost_usd": 0.06,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "confidence": 0.86,
+      "latency_ms": 15,
+      "model_id": "mock-finance",
+      "model_fingerprint": "<redacted:model_fingerprint:sha256:6b0f7e10bf09>",
+      "prompt_hash": "<redacted:prompt_hash:sha256:a9c59d099fb3>",
+      "retrieval_index_hash": "",
+      "input_fingerprint": "<redacted:input_fingerprint:sha256:65a7eeaf112b>",
+      "output_fingerprint": "<redacted:output_fingerprint:sha256:1f0bb2d48f10>",
+      "redaction_policy_hash": "sha256:2e1721ba902a584f"
+    }
+  ]
+}

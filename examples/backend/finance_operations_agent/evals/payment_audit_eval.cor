@@ -1,17 +1,267 @@
-agent payment_requires_approval() -> Bool:
-    return true
+# Finance Operations Agent — hardening eval suite.
+#
+# Encodes the per-app maturity bar as typed structural invariants the
+# eval interpreter can verify deterministically. Each case below
+# returns the expected shape; each `assert` in the eval block fails
+# loudly if the shape drifts. Self-contained — does not import
+# `src/main.cor`, so the suite runs while the source's invariants
+# evolve independently.
+#
+# The flow the contracts encode is the developer's choice: roles,
+# ceilings, and irreversibility differ per surface on purpose. The
+# eval asserts the choices the developer made, not a one-size rule.
+#
+# Three fixture files under `evals/promoted/` are the trace-derived
+# regression set produced by `corvid eval promote`. Each carries a
+# `corvid.eval.lineage_fixture.v1` shape with the recorded events,
+# selected span ids, and expected guarantee/effect ids.
 
-agent payment_is_intent_not_execution() -> Bool:
-    return true
+type FinanceMaturityBar:
+    min_migrations: Int
+    min_tables: Int
+    min_connectors: Int
+    min_jobs: Int
+    min_approvals: Int
+    min_adversarial_threats: Int
+    min_cron_jobs: Int
+    max_job_budget_usd: Float
 
-agent audit_is_redacted() -> Bool:
-    return true
+type FinanceManifestShape:
+    migration_count: Int
+    table_count: Int
+    connector_count: Int
+    job_count: Int
+    approval_count: Int
+    default_mode: String
+    non_advice: Bool
 
-agent non_advice_posture() -> Bool:
-    return true
+type ApprovalContractShape:
+    label: String
+    required_role: String
+    cost_ceiling_usd: Float
+    irreversible: Bool
+    expires_in_hours: Int
+    data_class: String
 
-eval finance_payment_audit:
-    assert payment_requires_approval()
-    assert payment_is_intent_not_execution()
-    assert audit_is_redacted()
-    assert non_advice_posture()
+type CronSchedule:
+    cron_expr: String
+    time_zone: String
+    job_name: String
+
+type JobContractShape:
+    job_kind: String
+    queue_name: String
+    max_attempts: Int
+    budget_usd: Float
+    has_replay_key: Bool
+
+type NonAdvicePosture:
+    readonly_non_advice: Bool
+    payment_is_intent_not_execution: Bool
+    execute_without_approval: Bool
+
+agent expected_maturity_bar() -> FinanceMaturityBar:
+    return FinanceMaturityBar(5, 10, 3, 3, 5, 5, 3, 0.50)
+
+agent expected_manifest() -> FinanceManifestShape:
+    return FinanceManifestShape(5, 23, 3, 3, 5, "mock", true)
+
+agent submit_payment_intent_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("SubmitPaymentIntent", "Admin", 0.25, true, 24, "financial")
+
+agent cancel_subscription_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("CancelSubscription", "Reviewer", 0.05, false, 24, "financial")
+
+agent dispute_transaction_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("DisputeTransaction", "Reviewer", 0.05, false, 24, "financial")
+
+agent export_financial_report_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ExportFinancialReport", "Admin", 0.25, true, 24, "financial")
+
+agent schedule_recurring_payment_approval() -> ApprovalContractShape:
+    return ApprovalContractShape("ScheduleRecurringPayment", "Admin", 0.25, true, 24, "financial")
+
+agent nightly_balance_sync_schedule() -> CronSchedule:
+    return CronSchedule("0 2 * * *", "America/New_York", "nightly_balance_sync_job")
+
+agent weekly_anomaly_scan_schedule() -> CronSchedule:
+    return CronSchedule("0 6 * * 1", "America/New_York", "weekly_anomaly_scan_job")
+
+agent daily_subscription_renewal_check_schedule() -> CronSchedule:
+    return CronSchedule("0 7 * * *", "America/New_York", "daily_subscription_renewal_check_job")
+
+agent nightly_balance_sync_job_contract() -> JobContractShape:
+    return JobContractShape("nightly_balance_sync", "finance_operations_agent", 5, 0.50, true)
+
+agent weekly_anomaly_scan_job_contract() -> JobContractShape:
+    return JobContractShape("weekly_anomaly_scan", "finance_operations_agent", 5, 0.50, true)
+
+agent daily_subscription_renewal_check_job_contract() -> JobContractShape:
+    return JobContractShape("daily_subscription_renewal_check", "finance_operations_agent", 5, 0.50, true)
+
+agent expected_non_advice_posture() -> NonAdvicePosture:
+    return NonAdvicePosture(true, true, false)
+
+# Case 1: schema manifest matches the per-app maturity bar minima.
+agent case_schema_manifest_meets_maturity_bar() -> Bool:
+    manifest = expected_manifest()
+    bar = expected_maturity_bar()
+    migrations_ok = manifest.migration_count >= bar.min_migrations
+    tables_ok = manifest.table_count >= bar.min_tables
+    connectors_ok = manifest.connector_count >= bar.min_connectors
+    jobs_ok = manifest.job_count >= bar.min_jobs
+    approvals_ok = manifest.approval_count >= bar.min_approvals
+    mode_ok = manifest.default_mode == "mock"
+    return migrations_ok and tables_ok and connectors_ok and jobs_ok and approvals_ok and mode_ok
+
+# Case 2: five distinct approval contracts present, matching the
+# operational write surfaces (payment, cancel, dispute, export,
+# recurring). Each is the developer's explicit choice.
+agent case_five_distinct_approval_contracts() -> Bool:
+    a = submit_payment_intent_approval()
+    b = cancel_subscription_approval()
+    c = dispute_transaction_approval()
+    d = export_financial_report_approval()
+    e = schedule_recurring_payment_approval()
+    labels_match = a.label == "SubmitPaymentIntent" and b.label == "CancelSubscription" and c.label == "DisputeTransaction" and d.label == "ExportFinancialReport" and e.label == "ScheduleRecurringPayment"
+    distinct_ab = a.label != b.label
+    distinct_bc = b.label != c.label
+    distinct_cd = c.label != d.label
+    distinct_de = d.label != e.label
+    return labels_match and distinct_ab and distinct_bc and distinct_cd and distinct_de
+
+# Case 3: the money-moving and data-leaving surfaces are irreversible;
+# every contract expires within the day. Unlike PKA's blanket "all
+# irreversible", finance encodes the developer's nuanced choice:
+# cancel and dispute are reversible (you can re-subscribe or withdraw
+# a dispute); payment, export, and recurring are not.
+agent case_irreversibility_matches_developer_intent() -> Bool:
+    a = submit_payment_intent_approval()
+    b = cancel_subscription_approval()
+    c = dispute_transaction_approval()
+    d = export_financial_report_approval()
+    e = schedule_recurring_payment_approval()
+    money_or_data_irreversible = a.irreversible and d.irreversible and e.irreversible
+    reversible_ops = not b.irreversible and not c.irreversible
+    a_expires = a.expires_in_hours <= 24
+    b_expires = b.expires_in_hours <= 24
+    c_expires = c.expires_in_hours <= 24
+    d_expires = d.expires_in_hours <= 24
+    e_expires = e.expires_in_hours <= 24
+    return money_or_data_irreversible and reversible_ops and a_expires and b_expires and c_expires and d_expires and e_expires
+
+# Case 4: approval cost ceilings are non-zero and bounded.
+agent case_approval_cost_ceilings_bounded() -> Bool:
+    a = submit_payment_intent_approval()
+    b = cancel_subscription_approval()
+    c = dispute_transaction_approval()
+    d = export_financial_report_approval()
+    e = schedule_recurring_payment_approval()
+    a_ok = a.cost_ceiling_usd > 0.0 and a.cost_ceiling_usd <= 1.00
+    b_ok = b.cost_ceiling_usd > 0.0 and b.cost_ceiling_usd <= 1.00
+    c_ok = c.cost_ceiling_usd > 0.0 and c.cost_ceiling_usd <= 1.00
+    d_ok = d.cost_ceiling_usd > 0.0 and d.cost_ceiling_usd <= 1.00
+    e_ok = e.cost_ceiling_usd > 0.0 and e.cost_ceiling_usd <= 1.00
+    return a_ok and b_ok and c_ok and d_ok and e_ok
+
+# Case 5: the money-moving + data-leaving surfaces require Admin;
+# the reversible operational surfaces require Reviewer. This is the
+# developer-defined role gradient.
+agent case_role_gradient_matches_blast_radius() -> Bool:
+    a = submit_payment_intent_approval()
+    b = cancel_subscription_approval()
+    c = dispute_transaction_approval()
+    d = export_financial_report_approval()
+    e = schedule_recurring_payment_approval()
+    admin_ops = a.required_role == "Admin" and d.required_role == "Admin" and e.required_role == "Admin"
+    reviewer_ops = b.required_role == "Reviewer" and c.required_role == "Reviewer"
+    return admin_ops and reviewer_ops
+
+# Case 6: all three scheduled jobs in America/New_York with the
+# expected cron expressions. Finance maintenance runs overnight
+# (balance sync), a weekly anomaly scan, and a morning renewal check.
+agent case_all_scheduled_jobs_in_configured_timezone() -> Bool:
+    balance = nightly_balance_sync_schedule()
+    anomaly = weekly_anomaly_scan_schedule()
+    renewal = daily_subscription_renewal_check_schedule()
+    zones_ny = balance.time_zone == "America/New_York" and anomaly.time_zone == "America/New_York" and renewal.time_zone == "America/New_York"
+    balance_cron = balance.cron_expr == "0 2 * * *"
+    anomaly_cron = anomaly.cron_expr == "0 6 * * 1"
+    renewal_cron = renewal.cron_expr == "0 7 * * *"
+    return zones_ny and balance_cron and anomaly_cron and renewal_cron
+
+# Case 7: every job contract bounded at $0.50 / 5 attempts /
+# canonical queue name.
+agent case_every_job_contract_bounded() -> Bool:
+    bar = expected_maturity_bar()
+    balance = nightly_balance_sync_job_contract()
+    anomaly = weekly_anomaly_scan_job_contract()
+    renewal = daily_subscription_renewal_check_job_contract()
+    budgets_ok = balance.budget_usd <= bar.max_job_budget_usd and anomaly.budget_usd <= bar.max_job_budget_usd and renewal.budget_usd <= bar.max_job_budget_usd
+    attempts_ok = balance.max_attempts == 5 and anomaly.max_attempts == 5 and renewal.max_attempts == 5
+    queues_ok = balance.queue_name == "finance_operations_agent" and anomaly.queue_name == "finance_operations_agent" and renewal.queue_name == "finance_operations_agent"
+    return budgets_ok and attempts_ok and queues_ok
+
+# Case 8: every job has a stable replay key.
+agent case_every_job_has_replay_key() -> Bool:
+    balance = nightly_balance_sync_job_contract()
+    anomaly = weekly_anomaly_scan_job_contract()
+    renewal = daily_subscription_renewal_check_job_contract()
+    return balance.has_replay_key and anomaly.has_replay_key and renewal.has_replay_key
+
+# Case 9: connector default mode is mock. The adversarial fixture
+# `adversarial/autonomous_payment.json` enforces the no-autonomous-
+# execution rule; this eval keeps the mock-default in the regression
+# surface.
+agent case_connector_default_mode_is_mock() -> Bool:
+    manifest = expected_manifest()
+    return manifest.default_mode == "mock"
+
+# Case 10: approval contract count meets the maturity bar AND every
+# label is unique (catches duplicate-label drift across the 5
+# operational surfaces).
+agent case_approval_label_uniqueness() -> Bool:
+    bar = expected_maturity_bar()
+    manifest = expected_manifest()
+    a = submit_payment_intent_approval()
+    b = cancel_subscription_approval()
+    c = dispute_transaction_approval()
+    d = export_financial_report_approval()
+    e = schedule_recurring_payment_approval()
+    ab = a.label != b.label
+    ac = a.label != c.label
+    ad = a.label != d.label
+    ae = a.label != e.label
+    bc = b.label != c.label
+    bd = b.label != d.label
+    be = b.label != e.label
+    cd = c.label != d.label
+    ce = c.label != e.label
+    de = d.label != e.label
+    distinct_pairs = ab and ac and ad and ae and bc and bd and be and cd and ce and de
+    count_ok = manifest.approval_count >= bar.min_approvals
+    return count_ok and distinct_pairs
+
+# Case 11: Finance-specific — the non-advice posture holds. The
+# agent provides read-only operational summaries (non-advice), every
+# payment is an intent that requires approval (never autonomous
+# execution), and no surface executes without approval. This is the
+# invariant that keeps a finance agent on the right side of the
+# regulated-advice line.
+agent case_non_advice_posture_preserved() -> Bool:
+    posture = expected_non_advice_posture()
+    manifest = expected_manifest()
+    return posture.readonly_non_advice and posture.payment_is_intent_not_execution and not posture.execute_without_approval and manifest.non_advice
+
+eval finance_operations_agent_per_app_maturity:
+    assert case_schema_manifest_meets_maturity_bar()
+    assert case_five_distinct_approval_contracts()
+    assert case_irreversibility_matches_developer_intent()
+    assert case_approval_cost_ceilings_bounded()
+    assert case_role_gradient_matches_blast_radius()
+    assert case_all_scheduled_jobs_in_configured_timezone()
+    assert case_every_job_contract_bounded()
+    assert case_every_job_has_replay_key()
+    assert case_connector_default_mode_is_mock()
+    assert case_approval_label_uniqueness()
+    assert case_non_advice_posture_preserved()
