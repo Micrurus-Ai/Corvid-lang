@@ -7729,3 +7729,39 @@ Realistic estimate: 6-8 weeks of focused work to v1.0 cut, plus
 wall-clock to v1.0.
 
 Next: 43L registry rows + presence sentinel.
+
+## 2026-05-28 — cdylib ABI emit: cross-module struct name resolution
+
+`corvid build --target=cdylib` panicked on all five reference
+apps (`index out of bounds` in `corvid-resolve` `scope.rs`)
+whenever an app struct field referenced an imported type via the
+module-qualified form (`alias.Type`, e.g. `auth.Actor`).
+
+Root cause: `resolve_module_qualified_type_ref` lowers such a
+field to `Type::Struct(<remapped cross-module DefId>)` — an id
+that `build_imported_def_ids` allocates at `max(root DefId)+1`,
+so it is deliberately out of range for the root file's symbol
+table. The ABI emitter's `lookup_name` then indexed that table
+with the out-of-range id and panicked. The IR is
+self-describing: `lower_with_modules` appends every imported
+module type to `ir.types` under the *same* remapped id, so the
+fix resolves struct names from an IR-derived `DefId -> name` map
+(authoritative, covers imported types), falling back to the
+in-range symbol table and finally a synthetic `Struct#N` name.
+No IR semantics changed — the change is confined to ABI emission
+(`type_description.rs` plus a `names` thread through `emit.rs` /
+`approval_contract.rs`).
+
+After the fix all five apps reach a graceful diagnostic
+(`library targets require at least one pub extern "c" agent`)
+instead of panicking — which is exactly the next thing G-LR
+needs surfaced: each app must export a C-ABI entrypoint before
+it can build as a signed cdylib for `corvid claim --explain`.
+
+Two regression tests in `type_description.rs`: an out-of-range
+id resolves from the IR map (the bug case), and an absent id
+degrades to a synthetic name rather than panicking.
+
+Next: G-LR design fork — give each reference app a
+`pub extern "c"` entrypoint so it builds as a cdylib, then emit
+per-app `CLAIM.md`.

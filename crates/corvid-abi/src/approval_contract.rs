@@ -2,7 +2,7 @@ use crate::effect_emit::emit_effects_from_effect_names;
 use crate::schema::{
     AbiApprovalContract, AbiApprovalLabel, AbiApprovalSite, AbiDeclaredAt, AbiParam, AbiSourceSpan,
 };
-use crate::type_description::emit_type_description;
+use crate::type_description::{emit_type_description, StructNames};
 use corvid_ast::{Block, Decl, Effect, Expr, File, Stmt, ToolDecl};
 use corvid_resolve::Resolved;
 use corvid_types::EffectRegistry;
@@ -20,6 +20,7 @@ pub fn analyze_agent_approval_contract(
     resolved: &Resolved,
     registry: &EffectRegistry,
     agent: &corvid_ast::AgentDecl,
+    names: &StructNames,
 ) -> ApprovalAnalysis {
     let tools = tool_map(file);
     let mut labels = Vec::new();
@@ -31,6 +32,7 @@ pub fn analyze_agent_approval_contract(
         &tools,
         &mut labels,
         &mut dangerous_targets,
+        names,
     );
     ApprovalAnalysis {
         contract: AbiApprovalContract {
@@ -71,6 +73,7 @@ fn collect_contract_from_block(
     tools: &HashMap<String, &ToolDecl>,
     labels: &mut Vec<AbiApprovalLabel>,
     dangerous_targets: &mut BTreeSet<String>,
+    names: &StructNames,
 ) {
     for stmt in &block.stmts {
         match stmt {
@@ -99,6 +102,7 @@ fn collect_contract_from_block(
                                     ty: emit_type_description(
                                         &crate::emit::resolve_typeref_to_type(&param.ty, resolved),
                                         resolved,
+                                        names,
                                     ),
                                     ownership: None,
                                 })
@@ -140,6 +144,7 @@ fn collect_contract_from_block(
                     tools,
                     labels,
                     dangerous_targets,
+                    names,
                 );
                 if let Some(else_block) = else_block {
                     collect_contract_from_block(
@@ -149,6 +154,7 @@ fn collect_contract_from_block(
                         tools,
                         labels,
                         dangerous_targets,
+                        names,
                     );
                 }
             }
@@ -160,6 +166,7 @@ fn collect_contract_from_block(
                     tools,
                     labels,
                     dangerous_targets,
+                    names,
                 );
             }
             _ => {}

@@ -6103,3 +6103,35 @@ session rotation, batch data-class equiv — wait, that's not
 right, let me recount from the AI-helper class specifically):
 3 — drift_narration_grounded, release.notes_grounded,
 claim.audit_explain_failures_grounded.
+
+## Cross-module DefId spaces and ABI name resolution (2026-05-28)
+
+A DefId is only meaningful inside the symbol table it was
+allocated in. Imported modules each have their own per-file
+DefId space; `lower_with_modules` lifts imported declarations
+into the root IR by *remapping* their ids to fresh values above
+the root file's range (`build_imported_def_ids` starts at
+`max(root DefId)+1`). So a `Type::Struct(def_id)` produced for a
+module-qualified field (`alias.Type`) carries an id that is
+**valid in the IR but out of range for the root file's symbol
+table**.
+
+The lesson: when a downstream consumer (here, ABI emission)
+needs a name for a type, resolve it from the IR, not from a
+symbol table that may not cover imported ids. The IR is
+self-describing — every `IrType` carries both its remapped `id`
+and its `name`, and `lower_with_modules` appends imported types
+to `ir.types` under that same remapped id — so a
+`{ir_type.id -> ir_type.name}` map is the authoritative source.
+Indexing the symbol table directly (`symbols.get(def_id)`) is a
+latent panic any time the id originated cross-module. Guard such
+lookups with a bounds check and a graceful fallback so a missing
+entry degrades to a synthetic name instead of crashing emission.
+
+This is also a reminder that two "valid-looking" id spaces can
+diverge silently: the bug only surfaced at cdylib-build time
+because that is the only path that both (a) lowers with modules
+and (b) emits the ABI. `cargo check` and single-file tests never
+exercised the cross-module id reaching the emitter, so the
+regression test constructs the out-of-range case directly rather
+than relying on a single-file fixture to reproduce it.

@@ -9,7 +9,7 @@ use crate::schema::{
     AbiClaimGuarantee, CorvidAbi,
 };
 use crate::tool_contract::emit_tool_contract;
-use crate::type_description::emit_type_description;
+use crate::type_description::{emit_type_description, StructNames};
 use corvid_ast::{
     AgentAttribute, Decl, DimensionValue, File, OwnershipAnnotation, OwnershipMode, PromptDecl,
     Span, StoreDecl, ToolDecl, TypeRef, WeakEffectRow,
@@ -69,6 +69,17 @@ pub fn emit_abi(
         })
         .collect::<HashMap<_, _>>();
 
+    // Authoritative struct-name map: `lower_with_modules` appends
+    // imported module types under remapped cross-module `DefId`s, which
+    // are out of range for the root file's symbol table. Resolving
+    // struct names from the IR avoids an out-of-bounds panic when an
+    // app field references an imported type (e.g. `auth.Actor`).
+    let type_names: StructNames = ir
+        .types
+        .iter()
+        .map(|ty| (ty.id, ty.name.clone()))
+        .collect();
+
     let exported_agent_ids = collect_exported_agent_closure(ir, &agent_map);
 
     let agents = ir
@@ -84,6 +95,7 @@ pub fn emit_abi(
                 &summaries,
                 &prompt_map,
                 opts,
+                &type_names,
             )
         })
         .collect();
@@ -97,6 +109,7 @@ pub fn emit_abi(
                 resolved,
                 registry,
                 ast_prompts.get(&prompt.name).copied(),
+                &type_names,
             )
         })
         .collect();
@@ -104,7 +117,15 @@ pub fn emit_abi(
     let tools = ir
         .tools
         .iter()
-        .map(|tool| emit_tool(tool, resolved, registry, tool_map.get(&tool.name).copied()))
+        .map(|tool| {
+            emit_tool(
+                tool,
+                resolved,
+                registry,
+                tool_map.get(&tool.name).copied(),
+                &type_names,
+            )
+        })
         .collect();
 
     let types = ir
@@ -118,7 +139,7 @@ pub fn emit_abi(
                 .iter()
                 .map(|field| AbiField {
                     name: field.name.clone(),
-                    r#type: emit_type_description(&field.ty, resolved),
+                    r#type: emit_type_description(&field.ty, resolved, &type_names),
                 })
                 .collect(),
         })
@@ -128,7 +149,7 @@ pub fn emit_abi(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Store(store) => Some(emit_store(store, resolved)),
+            Decl::Store(store) => Some(emit_store(store, resolved, &type_names)),
             _ => None,
         })
         .collect();
@@ -162,13 +183,17 @@ fn emit_claim_guarantees() -> Vec<AbiClaimGuarantee> {
         .collect()
 }
 
-fn emit_store(store: &StoreDecl, resolved: &Resolved) -> AbiStore {
+fn emit_store(store: &StoreDecl, resolved: &Resolved, names: &StructNames) -> AbiStore {
     let fields = store
         .fields
         .iter()
         .map(|field| AbiField {
             name: field.name.name.clone(),
-            r#type: emit_type_description(&resolve_typeref_to_type(&field.ty, resolved), resolved),
+            r#type: emit_type_description(
+                &resolve_typeref_to_type(&field.ty, resolved),
+                resolved,
+                names,
+            ),
         })
         .collect::<Vec<_>>();
     AbiStore {
@@ -292,16 +317,17 @@ fn emit_agent(
     summaries: &HashMap<corvid_resolve::DefId, corvid_types::AgentEffectSummary>,
     prompt_map: &HashMap<corvid_resolve::DefId, &IrPrompt>,
     opts: &EmitOptions<'_>,
+    names: &StructNames,
 ) -> AbiAgent {
     let ast_agent = file.decls.iter().find_map(|decl| match decl {
         Decl::Agent(ast_agent) if ast_agent.name.name == agent.name => Some(ast_agent),
         _ => None,
     });
     let Some(ast_agent) = ast_agent else {
-        return emit_ir_only_agent(agent, resolved);
+        return emit_ir_only_agent(agent, resolved, names);
     };
     let summary = summaries.get(&agent.id);
-    let approval = analyze_agent_approval_contract(file, resolved, registry, ast_agent);
+    let approval = analyze_agent_approval_contract(file, resolved, registry, ast_agent, names);
     let effects = summary
         .map(|summary| emit_effects_from_composed(&summary.composed))
         .unwrap_or_default();
@@ -323,7 +349,11 @@ fn emit_agent(
             .iter()
             .map(|param| AbiParam {
                 name: param.name.name.clone(),
-                ty: emit_type_description(&resolve_typeref_to_type(&param.ty, resolved), resolved),
+                ty: emit_type_description(
+                    &resolve_typeref_to_type(&param.ty, resolved),
+                    resolved,
+                    names,
+                ),
                 ownership: if ast_agent.extern_abi.is_some() {
                     Some(emit_param_ownership(
                         &param.ty,
@@ -335,7 +365,7 @@ fn emit_agent(
                 },
             })
             .collect(),
-        return_type: emit_type_description(&declared_return_ty, resolved),
+        return_type: emit_type_description(&declared_return_ty, resolved, names),
         return_ownership: if ast_agent.extern_abi.is_some() {
             Some(emit_return_ownership(
                 &ast_agent.return_ty,
@@ -360,7 +390,7 @@ fn emit_agent(
     }
 }
 
-fn emit_ir_only_agent(agent: &IrAgent, resolved: &Resolved) -> AbiAgent {
+fn emit_ir_only_agent(agent: &IrAgent, resolved: &Resolved, names: &StructNames) -> AbiAgent {
     AbiAgent {
         name: agent.name.clone(),
         symbol: format!("corvid_agent_{}", agent.name),
@@ -371,11 +401,11 @@ fn emit_ir_only_agent(agent: &IrAgent, resolved: &Resolved) -> AbiAgent {
             .iter()
             .map(|param| AbiParam {
                 name: param.name.clone(),
-                ty: emit_type_description(&param.ty, resolved),
+                ty: emit_type_description(&param.ty, resolved, names),
                 ownership: None,
             })
             .collect(),
-        return_type: emit_type_description(&agent.return_ty, resolved),
+        return_type: emit_type_description(&agent.return_ty, resolved, names),
         return_ownership: None,
         effects: AbiEffects::default(),
         attributes: AbiAttributes {
@@ -405,6 +435,7 @@ fn emit_prompt(
     resolved: &Resolved,
     registry: &EffectRegistry,
     ast_prompt: Option<&PromptDecl>,
+    names: &StructNames,
 ) -> AbiPrompt {
     AbiPrompt {
         name: prompt.name.clone(),
@@ -419,6 +450,7 @@ fn emit_prompt(
                         ty: emit_type_description(
                             &resolve_typeref_to_type(&param.ty, resolved),
                             resolved,
+                            names,
                         ),
                         ownership: None,
                     })
@@ -430,7 +462,7 @@ fn emit_prompt(
                     .iter()
                     .map(|param| AbiParam {
                         name: param.name.clone(),
-                        ty: emit_type_description(&param.ty, resolved),
+                        ty: emit_type_description(&param.ty, resolved, names),
                         ownership: None,
                     })
                     .collect()
@@ -440,9 +472,10 @@ fn emit_prompt(
                 emit_type_description(
                     &resolve_typeref_to_type(&prompt.return_ty, resolved),
                     resolved,
+                    names,
                 )
             })
-            .unwrap_or_else(|| emit_type_description(&prompt.return_ty, resolved)),
+            .unwrap_or_else(|| emit_type_description(&prompt.return_ty, resolved, names)),
         effects: emit_effects_from_effect_names(&prompt.effect_names, registry),
         required_capability: prompt.capability_required.clone(),
         dispatch: emit_prompt_dispatch(prompt),
@@ -468,6 +501,7 @@ fn emit_tool(
     resolved: &Resolved,
     registry: &EffectRegistry,
     ast_tool: Option<&ToolDecl>,
+    names: &StructNames,
 ) -> AbiTool {
     AbiTool {
         name: tool.name.clone(),
@@ -482,6 +516,7 @@ fn emit_tool(
                         ty: emit_type_description(
                             &resolve_typeref_to_type(&param.ty, resolved),
                             resolved,
+                            names,
                         ),
                         ownership: None,
                     })
@@ -492,7 +527,7 @@ fn emit_tool(
                     .iter()
                     .map(|param| AbiParam {
                         name: param.name.clone(),
-                        ty: emit_type_description(&param.ty, resolved),
+                        ty: emit_type_description(&param.ty, resolved, names),
                         ownership: None,
                     })
                     .collect()
@@ -502,9 +537,10 @@ fn emit_tool(
                 emit_type_description(
                     &resolve_typeref_to_type(&tool_decl.return_ty, resolved),
                     resolved,
+                    names,
                 )
             })
-            .unwrap_or_else(|| emit_type_description(&tool.return_ty, resolved)),
+            .unwrap_or_else(|| emit_type_description(&tool.return_ty, resolved, names)),
         effects: emit_effects_from_effect_names(&tool.effect_names, registry),
         dangerous: ast_tool
             .map(|tool| tool.effect == corvid_ast::Effect::Dangerous)
