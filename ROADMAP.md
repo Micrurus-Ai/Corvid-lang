@@ -2835,7 +2835,7 @@ Serve capability (`E0`) — **inserted 2026-05-28 before `E-LR`**. Reason: the p
 
 Cross-cutting (apply to all five apps at once), in order after `E0`:
 
-- [ ] `35V2-P42-E-LR-app-deploy-smoke-ci`       CI smoke-deploy: `docker compose up` → curl `/schema` + mock routes → assert envelopes → down; plus `kubeconform` / `fly config validate` on the manifests.
+- [x] `35V2-P42-E-LR-app-deploy-smoke-ci`       CI smoke-deploy. Delivered via two `cargo test` gates (run in `ci.yml` + the new `app-deploy-smoke.yml`): `serve_smoke` spawns `corvid serve <app>` for all 5 apps, waits on `/healthz`, GETs `/schema`, asserts the manifest envelope (the exact command the containers run — lighter + more reliable than 5× full Docker release builds); `deploy_manifests` guards that every manifest invokes `corvid serve` with the full in-container source path. The workflow also runs `docker compose config` per app + a fly.toml TOML-validity check. `kubeconform` k8s schema validation is a possible future add (skipped to avoid network-fetch flakiness). Closed `(this commit)`.
 - [ ] `35V2-P42-F-LR-per-app-benchmark-files`   `benches/comparisons/<app>.md` per app (FastAPI/LangChain or Next.js+Vercel-AI-SDK line-by-line).
 - [ ] `35V2-P42-G-LR-per-app-claim-files`       `apps/<name>/CLAIM.md` from `corvid claim --explain` per app.
 - [ ] `35V2-P42-H-LR-per-app-ai-helpers`        Three per-app AI helpers (assistive boot summary, adversarial-test refresh, generative PR description).

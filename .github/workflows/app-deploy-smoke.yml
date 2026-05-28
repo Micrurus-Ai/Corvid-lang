@@ -1,0 +1,73 @@
+name: app-deploy-smoke
+
+# Slice 35V2-P42-E-LR-app-deploy-smoke-ci. Two gates for the five
+# reference apps' deploy story:
+#   1. serve-smoke — `corvid serve <app>` actually serves each app's
+#      /schema route over HTTP (the exact command the containers run),
+#      plus a guard that the manifests invoke `corvid serve` with the
+#      full in-container source path.
+#   2. manifest-validation — the Docker Compose manifests parse/merge
+#      cleanly (`docker compose config`) and the fly.toml files are
+#      well-formed TOML.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  serve-smoke:
+    name: corvid serve smoke (5 reference apps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # Spawns `corvid serve` per app, waits for /healthz, GETs /schema,
+      # asserts the manifest envelope. Also runs the manifest-shape guard.
+      - name: serve smoke + manifest shape
+        run: cargo test -p corvid-cli --test serve_smoke --test deploy_manifests -- --nocapture
+
+  manifest-validation:
+    name: deploy manifests are well-formed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose config (each app)
+        run: |
+          set -euo pipefail
+          for a in personal_executive_agent personal_knowledge_agent finance_operations_agent customer_support_agent code_maintenance_agent; do
+            echo "== $a =="
+            docker compose -f "examples/backend/$a/deploy/docker-compose.yml" config -q
+          done
+
+      - name: fly.toml well-formed
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, tomllib
+          for f in sorted(glob.glob("examples/backend/*/deploy/fly.toml")):
+              with open(f, "rb") as fh:
+                  cfg = tomllib.load(fh)
+              api = cfg["processes"]["api"]
+              assert "corvid serve" in api, f"{f}: api process is not `corvid serve`: {api}"
+              print("ok", f)
+          PY
