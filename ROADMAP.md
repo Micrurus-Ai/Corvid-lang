@@ -2827,10 +2827,11 @@ Per-app maturity (`D-LR`) — one track per reference app, all closed:
 
 Serve capability (`E0`) — **inserted 2026-05-28 before `E-LR`**. Reason: the per-app deploy manifests invoke `corvid run --target=server src/main.cor --listen`, but the CLI has no HTTP-serve path (`corvid run` targets are `auto`/`native`/`interpreter` only; `build --target=server` emits an axum scaffold but server blocks are not lowered to IR, so routes aren't dispatched). A true "smoke-deploys in CI" (`E-LR`) requires the app to actually serve its routes. Per the no-shortcuts mandate we build the serve capability rather than fake the smoke. GET-first MVP:
 
-- [ ] `35V2-P42-E0-serve-1`  Lower `server` blocks to IR (`IrServer`/`IrRoute` on `IrFile`; resolve + typecheck handler agent calls).
-- [ ] `35V2-P42-E0-serve-2`  Generated-server per-route dispatch for zero-arg `GET` routes (`/schema`, `/config`, mock GETs) via `call_agent(name, "[]")`.
-- [ ] `35V2-P42-E0-serve-3`  `corvid serve --listen host:port` CLI command; reconcile all 5 apps' manifests + runbooks to the real command.
-- [ ] `35V2-P42-E0-serve-4`  Struct-body dispatch for `POST` routes (extend `call_agent`/typed dispatch to accept a single struct body).
+- [x] `35V2-P42-E0-serve-1`  Lower `server` blocks to IR (`IrServer`/`IrRoute` on `IrFile`). Closed `9824965`.
+- [x] `35V2-P42-E0-serve-2`  `corvid serve --listen` + in-process interpreter dispatch for literal-arg `GET` routes (`/schema`, `/config`, mock GETs, auth-status) via `run_ir_with_runtime`. Chose in-process serve over the subprocess-template; `/healthz`+`/readyz` added. Closed `9c2faf6`.
+- [x] `35V2-P42-E0-serve-3`  Reconcile all 5 apps' manifests + runbooks to `corvid serve` (+ fixed a pre-existing relative-path bug in fly/k8s). Closed `c06b843`.
+- [x] `35V2-P42-E0-serve-4`  Struct-body dispatch for `POST` routes: deserialize the request JSON into the route's body type (`json_to_value`) and run the handler; approval-gated writes deny-by-default → `403 approval_required` (serve has no interactive approver). Closed `(this commit)`.
+- [ ] `35V2-P42-E0-serve-5`  HTTP approval queue (developer-facing end state): a `POST` to an approval-gated route creates a pending approval (the `approvals` flow) and returns `202` + approval id; a reviewer/queue executes it. Replaces E0-4's `403` with the async-approval model. Filed 2026-05-28 because Corvid's `approve` is synchronous, so this is a real execution-model addition, not a tweak.
 
 Cross-cutting (apply to all five apps at once), in order after `E0`:
 
