@@ -529,7 +529,7 @@ fn customer_support_agent_triage_and_drafts_are_policy_grounded() {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .expect("enable foreign keys");
-    execute_sql_dir(&conn, &app.join("migrations"), 2);
+    execute_sql_dir(&conn, &app.join("migrations"), 4);
     let seed_sql = fs::read_to_string(app.join("seeds").join("demo.sql")).expect("read seed sql");
     conn.execute_batch(&seed_sql).expect("execute seed sql");
 

@@ -1,3 +1,8 @@
+import "../../../../std/jobs" use JobInputEnvelope, JobOutputEnvelope, JobRetryPolicy, JobStateEnvelope, job_input, job_output, retry_policy, retry_policy_valid, pending_job_state, job_needs_approval, job_metadata_redacted
+import "../../../../std/effects" use EffectEnvelope, effect_envelope, replay_safe, approval_required
+import "../../../../std/agent" use PlanStep, ActionRequest, ReviewVerdict, plan_step, action_request, review_verdict
+import "../../../../std/auth" use Actor, SessionRef, ApiKeyRef, AuthTraceContext, AuthDecision, user_actor, service_actor, session_ref, api_key_ref, auth_trace_for_session, auth_trace_for_api_key, allow_permission, deny_permission, session_active, api_key_active, auth_trace_same_tenant
+
 effect ticket_read:
     cost: $0.01
     trust: workspace
@@ -27,6 +32,76 @@ public type SupportConfig:
     service: String
     connector_mode: String
     policy_required: Bool
+
+public type LoginRequest:
+    tenant_id: String
+    actor_id: String
+    display_name: String
+    session_id: String
+    csrf_binding_id: String
+    trace_id: String
+
+public type ApiKeyLoginRequest:
+    tenant_id: String
+    service_actor_id: String
+    display_name: String
+    api_key_id: String
+    trace_id: String
+
+public type LoginResponse:
+    actor: Actor
+    session_ref: SessionRef
+    trace: AuthTraceContext
+    decision: AuthDecision
+    status: String
+
+public type ApiKeyLoginResponse:
+    actor: Actor
+    api_key: ApiKeyRef
+    trace: AuthTraceContext
+    decision: AuthDecision
+    status: String
+
+public type AuthStatusResponse:
+    actor: Actor
+    tenant_id: String
+    authenticated: Bool
+    permission: String
+    reason: String
+    replay_key: String
+
+public type SupportJobContract:
+    job_kind: String
+    queue_name: String
+    input_schema: String
+    output_schema: String
+    max_attempts: Int
+    budget_usd: Float
+    approval_label: String
+    needs_review: Bool
+    idempotency_key: String
+    replay_key: String
+
+public type SupportJobRun:
+    contract: SupportJobContract
+    state: JobStateEnvelope
+    input: JobInputEnvelope
+    output: JobOutputEnvelope
+    retry_plan: JobRetryPolicy
+    effect_meta: EffectEnvelope
+    plan: PlanStep
+    action: ActionRequest
+    review: ReviewVerdict
+
+public type SupportSchemaManifest:
+    service: String
+    migration_count: Int
+    table_count: Int
+    connector_count: Int
+    job_count: Int
+    approval_count: Int
+    default_mode: String
+    policy_grounded: Bool
 
 public type SupportTicket:
     id: String
@@ -108,6 +183,87 @@ agent support_config() -> SupportConfig:
     return SupportConfig("customer_support_agent", "mock", true)
 
 public @replayable
+agent session_login(req: LoginRequest) -> LoginResponse:
+    actor = user_actor(req.actor_id, req.tenant_id, req.display_name, "role:support_agent", "perm:support.read:support.operate", req.trace_id)
+    sess = session_ref(req.session_id, actor.id, actor.tenant_id, 0, 4102444800000, 0, req.csrf_binding_id, req.trace_id)
+    trace = auth_trace_for_session(actor, sess, "auth:session:" + req.session_id)
+    decision = allow_permission(actor, trace, "support.tickets.read")
+    return LoginResponse(actor, sess, trace, decision, "authenticated")
+
+public @replayable
+agent api_key_login(req: ApiKeyLoginRequest) -> ApiKeyLoginResponse:
+    actor = service_actor(req.service_actor_id, req.tenant_id, req.display_name, "scope:support.jobs.run", req.trace_id)
+    key = api_key_ref(req.api_key_id, actor.id, actor.tenant_id, "scope:support.jobs.run", "argon2id", 4102444800000, 0, req.trace_id)
+    trace = auth_trace_for_api_key(actor, key, "auth:api_key:" + req.api_key_id)
+    decision = allow_permission(actor, trace, "support.jobs.run")
+    return ApiKeyLoginResponse(actor, key, trace, decision, "authenticated")
+
+public @replayable
+agent auth_status(actor_id: String, tenant_id: String, trace_id: String) -> AuthStatusResponse:
+    actor = user_actor(actor_id, tenant_id, "Support Agent", "role:support_agent", "perm:support.read", trace_id)
+    sess = session_ref("session-status", actor.id, actor.tenant_id, 0, 4102444800000, 0, "csrf-status", trace_id)
+    trace = auth_trace_for_session(actor, sess, "auth:status:" + trace_id)
+    active = session_active(sess, 1) and auth_trace_same_tenant(trace, actor)
+    decision = allow_permission(actor, trace, "support.tickets.read")
+    if active:
+        return AuthStatusResponse(actor, actor.tenant_id, decision.allowed, decision.permission, decision.reason, trace.replay_key)
+    denied = deny_permission(actor, trace, "support.tickets.read", "session inactive")
+    return AuthStatusResponse(actor, actor.tenant_id, false, denied.permission, denied.reason, trace.replay_key)
+
+public @replayable
+agent api_key_auth_status(actor_id: String, tenant_id: String, trace_id: String) -> AuthStatusResponse:
+    actor = service_actor(actor_id, tenant_id, "Support Service", "scope:support.jobs.run", trace_id)
+    key = api_key_ref("api-key-status", actor.id, actor.tenant_id, "scope:support.jobs.run", "argon2id", 4102444800000, 0, trace_id)
+    trace = auth_trace_for_api_key(actor, key, "auth:api_key_status:" + trace_id)
+    active = api_key_active(key, 1) and auth_trace_same_tenant(trace, actor)
+    decision = allow_permission(actor, trace, "support.jobs.run")
+    if active:
+        return AuthStatusResponse(actor, actor.tenant_id, decision.allowed, decision.permission, decision.reason, trace.replay_key)
+    denied = deny_permission(actor, trace, "support.jobs.run", "api key inactive")
+    return AuthStatusResponse(actor, actor.tenant_id, false, denied.permission, denied.reason, trace.replay_key)
+
+public @replayable
+agent support_contract(job_kind: String, tenant_window: String, approval_label: String, needs_review: Bool) -> SupportJobContract:
+    idempotency = job_kind + ":" + tenant_window
+    replay_value = "support:" + idempotency
+    return SupportJobContract(job_kind, "customer_support_agent", job_kind + "Input", job_kind + "Output", 5, 0.50, approval_label, needs_review, idempotency, replay_value)
+
+public @replayable
+agent support_run(contract: SupportJobContract, input_fingerprint: String, output_fingerprint: String, plan_id: String, action_kind: String) -> SupportJobRun:
+    state = pending_job_state(contract.idempotency_key, contract.queue_name, contract.job_kind, contract.max_attempts, contract.budget_usd, contract.needs_review, contract.idempotency_key, contract.replay_key)
+    input = job_input(contract.job_kind, input_fingerprint, contract.input_schema)
+    output = job_output(output_fingerprint, contract.output_schema)
+    retry_plan = retry_policy(contract.max_attempts, "exponential_jitter", 1000, 600000, "customer_support_agent.dead_letter")
+    effect_meta = effect_envelope("customer_support_agent." + contract.job_kind, "workspace:" + contract.queue_name, contract.approval_label, contract.idempotency_key, contract.replay_key)
+    plan = plan_step(plan_id, "bounded support operations job step", "customer_support_agent")
+    action = action_request(action_kind, contract.idempotency_key, contract.approval_label, contract.needs_review)
+    review = review_verdict(true, "", "contract bounded by retry, budget, idempotency, and replay")
+    return SupportJobRun(contract, state, input, output, retry_plan, effect_meta, plan, action, review)
+
+public @replayable
+agent sla_breach_scan_job(tenant_id: String, window: String) -> SupportJobRun uses ticket_read:
+    contract = support_contract("sla_breach_scan", tenant_id + ":" + window, "", false)
+    return support_run(contract, "sha256:sla_breach_scan_input", "sha256:sla_breach_scan_output", "sla_scan.plan", "flag_tickets_nearing_breach")
+
+public @replayable
+agent nightly_csat_rollup_job(tenant_id: String, day: String) -> SupportJobRun uses ticket_read:
+    contract = support_contract("nightly_csat_rollup", tenant_id + ":" + day, "", false)
+    return support_run(contract, "sha256:csat_rollup_input", "sha256:csat_rollup_output", "csat_rollup.plan", "aggregate_satisfaction")
+
+public @replayable
+agent policy_reindex_job(tenant_id: String, corpus: String) -> SupportJobRun uses policy_search:
+    contract = support_contract("policy_reindex", tenant_id + ":" + corpus, "", false)
+    return support_run(contract, "sha256:policy_reindex_input", "sha256:policy_reindex_output", "policy_reindex.plan", "refresh_policy_corpus")
+
+public @replayable
+agent support_job_contract_valid(run: SupportJobRun) -> Bool:
+    return retry_policy_valid(run.retry_plan) and job_metadata_redacted(run.input, run.output) and replay_safe(run.effect_meta) and run.state.budget_usd <= run.contract.budget_usd and run.state.idempotency_key == run.contract.idempotency_key
+
+public @replayable
+agent support_schema_manifest() -> SupportSchemaManifest:
+    return SupportSchemaManifest("customer_support_agent", 4, 17, 3, 3, 2, "mock", true)
+
+public @replayable
 agent demo_ticket() -> SupportTicket uses ticket_read:
     return SupportTicket("ticket-1", "tenant-1", "sha256:customer-demo", "sha256:subject-demo", "high", "open")
 
@@ -154,6 +310,8 @@ agent support_ops_contract_valid(dashboard: SupportEvalDashboard, sla: SupportSl
 server customer_support_agent_api:
     route GET "/config" -> json SupportConfig:
         return support_config()
+    route GET "/schema" -> json SupportSchemaManifest:
+        return support_schema_manifest()
     route GET "/tickets/triage/mock" -> json SupportTriage uses ticket_read, policy_search, support_ai:
         return triage_ticket_mock()
     route GET "/replies/draft/mock" -> json SupportDraftReply uses ticket_read, policy_search, support_ai:
@@ -166,9 +324,32 @@ server customer_support_agent_api:
         return execute_approved_support_reply(body)
     route POST "/refunds/issue" body SupportRefundRequest -> json SupportRefundReceipt uses refund_write:
         return execute_approved_support_refund(body)
+    route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
+        return session_login(body)
+    route POST "/auth/api-key/login" body ApiKeyLoginRequest -> json ApiKeyLoginResponse:
+        return api_key_login(body)
+    route GET "/auth/status" -> json AuthStatusResponse:
+        return auth_status("user-1", "tenant-1", "trace-auth-status")
+    route GET "/auth/api-key/status" -> json AuthStatusResponse:
+        return api_key_auth_status("service-1", "tenant-1", "trace-api-key-status")
+    route GET "/jobs/sla-breach-scan/mock" -> json SupportJobRun uses ticket_read:
+        return sla_breach_scan_job("tenant-1", "business_hour")
+    route GET "/jobs/nightly-csat-rollup/mock" -> json SupportJobRun uses ticket_read:
+        return nightly_csat_rollup_job("tenant-1", "2026-05-28")
+    route GET "/jobs/policy-reindex/mock" -> json SupportJobRun uses policy_search:
+        return policy_reindex_job("tenant-1", "support_policies")
+
+schedule "0 * * * *" zone "America/New_York" -> sla_breach_scan_job("tenant-1", "business_hour") uses ticket_read
+schedule "0 2 * * *" zone "America/New_York" -> nightly_csat_rollup_job("tenant-1", "business_day") uses ticket_read
+schedule "0 3 * * *" zone "America/New_York" -> policy_reindex_job("tenant-1", "support_policies") uses policy_search
 
 agent main() -> Bool:
     reply = draft_policy_grounded_reply_mock()
     dashboard = support_eval_dashboard()
     sla = support_sla_job()
-    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla)
+    auth = auth_status("user-1", "tenant-1", "trace-main-auth")
+    service_auth = api_key_auth_status("service-1", "tenant-1", "trace-main-api-key")
+    sla_scan = sla_breach_scan_job("tenant-1", "business_hour")
+    csat = nightly_csat_rollup_job("tenant-1", "business_day")
+    reindex = policy_reindex_job("tenant-1", "support_policies")
+    return support_triage_contract_valid(reply) and support_ops_contract_valid(dashboard, sla) and auth.authenticated and service_auth.authenticated and support_job_contract_valid(sla_scan) and support_job_contract_valid(csat) and support_job_contract_valid(reindex)
