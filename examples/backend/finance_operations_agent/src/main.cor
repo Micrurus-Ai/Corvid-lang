@@ -571,6 +571,14 @@ schedule "0 2 * * *" zone "America/New_York" -> nightly_balance_sync_job("tenant
 schedule "0 6 * * 1" zone "America/New_York" -> weekly_anomaly_scan_job("tenant-1", "business_week") uses finance_read, finance_ai
 schedule "0 7 * * *" zone "America/New_York" -> daily_subscription_renewal_check_job("tenant-1", "business_day") uses finance_read
 
+# Directly-embeddable C-ABI entrypoint (see PKA). The full struct-typed
+# surface (auth / jobs / approvals / dispute) rides the catalog ABI.
+@budget($1.00)
+pub extern "c"
+agent categorize(account_ref: String) -> String:
+    budget = demo_budget()
+    return "finance:" + account_ref + ":" + budget.category + ":" + budget.status
+
 agent main() -> Bool:
     snapshot = readonly_snapshot()
     payment = payment_approval_surface()

@@ -506,6 +506,14 @@ schedule "0 * * * *" zone "America/New_York" -> hourly_ci_signal_scan_job("tenan
 schedule "0 2 * * *" zone "America/New_York" -> nightly_repo_reindex_job("tenant-1", "org/app") uses repo_read
 schedule "0 6 * * 1" zone "America/New_York" -> weekly_stale_issue_sweep_job("tenant-1", "business_week") uses repo_read
 
+# Directly-embeddable C-ABI entrypoint (see PKA). The full struct-typed
+# surface (auth / jobs / approvals / review-write) rides the catalog ABI.
+@budget($1.00)
+pub extern "c"
+agent triage(summary: String) -> String:
+    label = triage_issue_mock()
+    return "code:" + summary + ":" + label.category + ":" + label.severity
+
 agent main() -> Bool:
     label = triage_issue_mock()
     plan = code_write_plan_mock()

@@ -520,6 +520,14 @@ schedule "0 * * * *" zone "America/New_York" -> sla_breach_scan_job("tenant-1", 
 schedule "0 2 * * *" zone "America/New_York" -> nightly_csat_rollup_job("tenant-1", "business_day") uses ticket_read
 schedule "0 3 * * *" zone "America/New_York" -> policy_reindex_job("tenant-1", "support_policies") uses policy_search
 
+# Directly-embeddable C-ABI entrypoint (see PKA). The full struct-typed
+# surface (auth / jobs / approvals / reply-send) rides the catalog ABI.
+@budget($1.00)
+pub extern "c"
+agent triage(message: String) -> String:
+    t = triage_ticket_mock()
+    return "support:" + message + ":" + t.category + ":" + t.priority
+
 agent main() -> Bool:
     reply = draft_policy_grounded_reply_mock()
     dashboard = support_eval_dashboard()

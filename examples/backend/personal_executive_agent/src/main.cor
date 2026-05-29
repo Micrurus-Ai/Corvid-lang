@@ -762,6 +762,15 @@ schedule "0 6 * * 1-5" zone "America/New_York" -> meeting_prep_job("active_users
 schedule "*/10 8-18 * * 1-5" zone "America/New_York" -> email_triage_job("active_users", "workday_window") uses inbox_read, executive_llm, task_write
 schedule "*/15 8-18 * * 1-5" zone "America/New_York" -> follow_up_job("active_users", "open_threads") uses inbox_read, executive_llm, send_email, task_write
 
+# Directly-embeddable C-ABI entrypoint (see PKA). Genuinely routes the
+# input `thread_id` through the triage flow. The full struct-typed
+# surface (auth / jobs / approvals / send-email) rides the catalog ABI.
+@budget($1.00)
+pub extern "c"
+agent triage(thread_id: String) -> String:
+    decision = triage_mock_inbox_thread(thread_id)
+    return "executive:" + thread_id + ":" + decision.signal.urgency
+
 agent main() -> Bool:
     brief = daily_brief_job("user-1", "2026-04-29")
     prep = meeting_prep_job("user-1", "2026-04-29")

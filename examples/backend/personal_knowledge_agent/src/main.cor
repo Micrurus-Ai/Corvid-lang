@@ -600,6 +600,17 @@ schedule "0 2 * * *" zone "America/New_York" -> nightly_reindex_job("tenant-1", 
 schedule "0 6 * * 1" zone "America/New_York" -> weekly_feedback_batch_job("tenant-1", "business_week") uses knowledge_llm
 schedule "0 3 * * *" zone "America/New_York" -> daily_provenance_audit_job("tenant-1", "business_day") uses files_read
 
+# Directly-embeddable C-ABI entrypoint. A host loads the cdylib and
+# calls `ask` for a provenance-keyed answer; the richer struct-typed
+# agents (auth / jobs / approvals + the KnowledgeAnswer surface) stay
+# reachable through the always-exported catalog ABI (corvid_call_agent),
+# so one scalar export unlocks the whole typed surface to a host.
+@budget($1.00)
+pub extern "c"
+agent ask(question: String) -> String:
+    answer = answer_with_provenance_mock()
+    return "knowledge:answer:" + question + ":" + answer.answer_fingerprint
+
 agent main() -> Bool:
     result = ingest_mock_document()
     answer = answer_with_provenance_mock()
