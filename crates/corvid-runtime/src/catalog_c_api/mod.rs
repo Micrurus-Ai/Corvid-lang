@@ -4,6 +4,7 @@ mod approval_bridge;
 mod catalog_exports;
 mod grounded_bridge;
 mod invoke_matrix;
+mod tool_bridge;
 pub use approval_bridge::{
     corvid_approval_predicate_json, corvid_clear_approver, corvid_evaluate_approval_predicate,
     corvid_mark_preapproved_request, corvid_record_host_event, corvid_register_approver,
@@ -16,6 +17,9 @@ pub(crate) use approval_bridge::{
 pub use catalog_exports::{
     corvid_agent_signature_json, corvid_call_agent, corvid_find_agents_where, corvid_free_result,
     corvid_list_agents, corvid_pre_flight,
+};
+pub use tool_bridge::{
+    corvid_clear_tools, corvid_invoke_tool, corvid_register_tool, CorvidToolFn,
 };
 pub use grounded_bridge::{
     corvid_begin_direct_observation, corvid_finish_direct_observation, corvid_grounded_attest_bool,
