@@ -66,6 +66,61 @@ agent refund_bot(ticket: Ticket) -> Bool:
     return true
 "#;
 
+// A `dangerous` tool with no `.cor` body, called by an agent, plus a
+// scalar `pub extern "c"` entrypoint. Before host-registered tool
+// dispatch (G0-tools), a cdylib build failed at link with
+// `unresolved external symbol __corvid_tool_use_tool` because codegen
+// emitted a direct call to the (nonexistent) wrapper symbol. Under
+// target-conditional dispatch, a library target routes tool calls
+// through the runtime registry instead, so it links without the tool
+// implementation baked in — a host registers it at load.
+const TOOL_USING_SRC: &str = r#"
+effect act:
+    cost: $0.01
+    trust: human_required
+    data: external
+
+tool use_tool(x: String) -> String dangerous uses act
+
+agent run_it(x: String) -> String uses act:
+    approve UseTool(x)
+    return use_tool(x)
+
+pub extern "c"
+agent entry(note: String) -> String:
+    return note
+"#;
+
+#[test]
+fn cli_build_cdylib_links_tool_using_program_via_registry() {
+    let (_dir, source_path) = write_project(TOOL_USING_SRC, "toolprog");
+    let output = run_corvid(
+        &[
+            "build",
+            source_path.to_str().expect("utf8 source path"),
+            "--target=cdylib",
+        ],
+        source_path.parent().unwrap(),
+    );
+
+    assert!(
+        output.status.success(),
+        "tool-using cdylib failed to link — registry dispatch should remove the link-time \
+         `__corvid_tool_*` dependency: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lib_path = source_path
+        .parent()
+        .and_then(Path::parent)
+        .expect("project root")
+        .join("target")
+        .join("release")
+        .join(shared_library_name("toolprog"));
+    assert!(lib_path.exists(), "missing shared library: {}", lib_path.display());
+}
+
 const DESCRIPTOR_SRC: &str = r#"
 agent classify(ticket_id: String) -> Option<String>:
     if ticket_id == "vip":

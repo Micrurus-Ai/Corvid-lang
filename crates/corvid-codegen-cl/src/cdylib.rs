@@ -65,6 +65,10 @@ pub fn build_library_to_disk(
         None,
         embedded_descriptor,
         embedded_attestation,
+        // Library target: dispatch tool calls through the runtime
+        // registry so the cdylib/staticlib links without the host's
+        // tools (the host registers them at load).
+        true,
     )?;
 
     match build_target {
@@ -133,6 +137,11 @@ fn exported_symbols(ir: &IrFile, has_attestation: bool) -> Vec<String> {
             "corvid_mark_preapproved_request",
             "corvid_approval_predicate_json",
             "corvid_evaluate_approval_predicate",
+            // Host-registered tools (G0-tools): a host loading the cdylib
+            // registers tool implementations through these, which the
+            // codegen-emitted tool calls dispatch to.
+            "corvid_register_tool",
+            "corvid_clear_tools",
         ]
         .into_iter()
         .map(str::to_string),

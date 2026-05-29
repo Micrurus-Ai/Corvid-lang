@@ -298,10 +298,14 @@ pub(super) fn lower_expr(
                     ));
                 }
 
-                // Declare or re-use the wrapper-symbol import.
-                let wrapper_id = {
+                // Native binaries call the linked `__corvid_tool_<name>`
+                // wrapper directly; library targets dispatch through the
+                // runtime registry (below) and emit no such import.
+                let wrapper_id = if runtime.tools_via_registry {
+                    None
+                } else {
                     let mut cache = runtime.tool_wrapper_ids.borrow_mut();
-                    if let Some(id) = cache.get(def_id) {
+                    let id = if let Some(id) = cache.get(def_id) {
                         *id
                     } else {
                         let mut sig = module.make_signature();
@@ -317,15 +321,14 @@ pub(super) fn lower_expr(
                             .declare_function(&symbol, Linkage::Import, &sig)
                             .map_err(|e| {
                                 CodegenError::cranelift(
-                                    format!(
-                                        "declare tool wrapper `{symbol}`: {e}"
-                                    ),
+                                    format!("declare tool wrapper `{symbol}`: {e}"),
                                     expr.span,
                                 )
                             })?;
                         cache.insert(*def_id, id);
                         id
-                    }
+                    };
+                    Some(id)
                 };
 
                 // Tool-call ABI: refcount lifecycle matches
@@ -376,6 +379,19 @@ pub(super) fn lower_expr(
                 if let Some(result_ty) = result_ty {
                     builder.append_block_param(join_b, result_ty);
                 }
+                // A struct-returning tool under registry dispatch
+                // records/replays its result as JSON (the dispatch and
+                // replay bridges return a JSON string the per-struct
+                // decoder turns into a struct handle).
+                let registry_struct_def_id = if runtime.tools_via_registry {
+                    match &expr.ty {
+                        Type::Struct(id) => Some(*id),
+                        Type::ImportedStruct(imported) => Some(imported.def_id),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let replay_cond = builder.ins().icmp_imm(IntCC::NotEqual, runtime_is_replay, 0);
                 builder
                     .ins()
@@ -383,6 +399,29 @@ pub(super) fn lower_expr(
 
                 builder.switch_to_block(replay_b);
                 builder.seal_block(replay_b);
+                if let Some(struct_def_id) = registry_struct_def_id {
+                    // Replay a struct-returning tool: read the recorded
+                    // JSON string and decode it into a struct handle.
+                    let decoder_fid =
+                        lookup_or_emit_struct_decoder(module, runtime, struct_def_id, expr.span)?;
+                    let replay_ref =
+                        module.declare_func_in_func(runtime.replay_tool_call_string, builder.func);
+                    let replay_call = builder.ins().call(
+                        replay_ref,
+                        &[
+                            tool_name_val,
+                            trace_payload.type_tags,
+                            trace_payload.count,
+                            trace_payload.values_ptr,
+                        ],
+                    );
+                    let json_str = builder.inst_results(replay_call)[0];
+                    let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
+                    let decode_call = builder.ins().call(decoder_ref, &[json_str]);
+                    let struct_ptr = builder.inst_results(decode_call)[0];
+                    emit_release(builder, module, runtime, json_str);
+                    builder.ins().jump(join_b, &[struct_ptr]);
+                } else {
                 let replay_func = match &expr.ty {
                     Type::Nothing => runtime.replay_tool_call_nothing,
                     Type::Int => runtime.replay_tool_call_int,
@@ -446,6 +485,7 @@ pub(super) fn lower_expr(
                     };
                     builder.ins().jump(join_b, &[replay_value]);
                 }
+                }
 
                 builder.switch_to_block(live_b);
                 builder.seal_block(live_b);
@@ -461,61 +501,177 @@ pub(super) fn lower_expr(
                     ],
                 );
 
-                let fref = module.declare_func_in_func(wrapper_id, builder.func);
-                let call = builder.ins().call(fref, &arg_vals);
-                let result_vals: Vec<ClValue> =
-                    builder.inst_results(call).iter().copied().collect();
-                let trace_result_ref = match &expr.ty {
-                    Type::Nothing => Some(runtime.trace_tool_result_null),
-                    Type::Int => Some(runtime.trace_tool_result_int),
-                    Type::Bool => Some(runtime.trace_tool_result_bool),
-                    Type::Float => Some(runtime.trace_tool_result_float),
-                    Type::String => Some(runtime.trace_tool_result_string),
-                    Type::Grounded(inner) => match &**inner {
+                if runtime.tools_via_registry {
+                    // Library target: dispatch through the runtime tool
+                    // registry; no link-time `__corvid_tool_<name>` symbol.
+                    let invoke_func = match &expr.ty {
+                        Type::Nothing => runtime.invoke_tool_nothing,
+                        Type::Int => runtime.invoke_tool_int,
+                        Type::Bool => runtime.invoke_tool_bool,
+                        Type::Float => runtime.invoke_tool_float,
+                        Type::String => runtime.invoke_tool_string,
+                        Type::Struct(_) | Type::ImportedStruct(_) => runtime.invoke_tool_struct,
+                        Type::Grounded(inner) => match &**inner {
+                            Type::Int => runtime.invoke_tool_int,
+                            Type::Bool => runtime.invoke_tool_bool,
+                            Type::Float => runtime.invoke_tool_float,
+                            Type::String => runtime.invoke_tool_string,
+                            _ => {
+                                return Err(CodegenError::not_supported(
+                                    format!(
+                                        "native dispatch for tool `{}` with return type `{}` is not implemented yet",
+                                        tool.name,
+                                        expr.ty.display_name()
+                                    ),
+                                    expr.span,
+                                ))
+                            }
+                        },
+                        _ => {
+                            return Err(CodegenError::not_supported(
+                                format!(
+                                    "native dispatch for tool `{}` with return type `{}` is not implemented yet",
+                                    tool.name,
+                                    expr.ty.display_name()
+                                ),
+                                expr.span,
+                            ))
+                        }
+                    };
+                    let invoke_ref = module.declare_func_in_func(invoke_func, builder.func);
+                    let invoke_call = builder.ins().call(
+                        invoke_ref,
+                        &[
+                            tool_name_val,
+                            trace_payload.type_tags,
+                            trace_payload.count,
+                            trace_payload.values_ptr,
+                        ],
+                    );
+                    if matches!(expr.ty, Type::Nothing) {
+                        let trace_ref = module
+                            .declare_func_in_func(runtime.trace_tool_result_null, builder.func);
+                        builder.ins().call(trace_ref, &[tool_name_val]);
+                        builder.ins().jump(join_b, &[]);
+                    } else if let Some(struct_def_id) = registry_struct_def_id {
+                        // Record the result JSON for replay, then decode
+                        // it into a struct handle. Recorder + decoder both
+                        // borrow the JSON; release the owned (+1) string.
+                        let json_str = builder.inst_results(invoke_call)[0];
+                        let trace_ref = module
+                            .declare_func_in_func(runtime.trace_tool_result_string, builder.func);
+                        builder.ins().call(trace_ref, &[tool_name_val, json_str]);
+                        let decoder_fid = lookup_or_emit_struct_decoder(
+                            module,
+                            runtime,
+                            struct_def_id,
+                            expr.span,
+                        )?;
+                        let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
+                        let decode_call = builder.ins().call(decoder_ref, &[json_str]);
+                        let struct_ptr = builder.inst_results(decode_call)[0];
+                        emit_release(builder, module, runtime, json_str);
+                        builder.ins().jump(join_b, &[struct_ptr]);
+                    } else {
+                        let result_val = builder.inst_results(invoke_call)[0];
+                        let trace_result_ref = match &expr.ty {
+                            Type::Int => Some(runtime.trace_tool_result_int),
+                            Type::Bool => Some(runtime.trace_tool_result_bool),
+                            Type::Float => Some(runtime.trace_tool_result_float),
+                            Type::String => Some(runtime.trace_tool_result_string),
+                            Type::Grounded(inner) => match &**inner {
+                                Type::Int => Some(runtime.trace_tool_result_int),
+                                Type::Bool => Some(runtime.trace_tool_result_bool),
+                                Type::Float => Some(runtime.trace_tool_result_float),
+                                Type::String => Some(runtime.trace_tool_result_string),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(trace_func) = trace_result_ref {
+                            let trace_result_call =
+                                module.declare_func_in_func(trace_func, builder.func);
+                            builder
+                                .ins()
+                                .call(trace_result_call, &[tool_name_val, result_val]);
+                        }
+                        let live_result = if matches!(expr.ty, Type::Grounded(_)) {
+                            emit_grounded_value_attestation(
+                                builder,
+                                module,
+                                runtime,
+                                result_val,
+                                &expr.ty,
+                                &tool.name,
+                                1.0,
+                                expr.span,
+                            )?
+                        } else {
+                            result_val
+                        };
+                        builder.ins().jump(join_b, &[live_result]);
+                    }
+                } else {
+                    // Native binary: direct call to the linked tool wrapper.
+                    let wrapper_id =
+                        wrapper_id.expect("native build declares the tool wrapper import");
+                    let fref = module.declare_func_in_func(wrapper_id, builder.func);
+                    let call = builder.ins().call(fref, &arg_vals);
+                    let result_vals: Vec<ClValue> =
+                        builder.inst_results(call).iter().copied().collect();
+                    let trace_result_ref = match &expr.ty {
+                        Type::Nothing => Some(runtime.trace_tool_result_null),
                         Type::Int => Some(runtime.trace_tool_result_int),
                         Type::Bool => Some(runtime.trace_tool_result_bool),
                         Type::Float => Some(runtime.trace_tool_result_float),
                         Type::String => Some(runtime.trace_tool_result_string),
+                        Type::Grounded(inner) => match &**inner {
+                            Type::Int => Some(runtime.trace_tool_result_int),
+                            Type::Bool => Some(runtime.trace_tool_result_bool),
+                            Type::Float => Some(runtime.trace_tool_result_float),
+                            Type::String => Some(runtime.trace_tool_result_string),
+                            _ => None,
+                        },
                         _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(trace_func) = trace_result_ref {
-                    let trace_result_call = module.declare_func_in_func(trace_func, builder.func);
-                    let trace_args = if matches!(expr.ty, Type::Nothing) {
-                        vec![tool_name_val]
-                    } else {
-                        vec![tool_name_val, result_vals[0]]
                     };
-                    builder.ins().call(trace_result_call, &trace_args);
-                }
-                let live_result = if matches!(expr.ty, Type::Grounded(_)) {
-                    emit_grounded_value_attestation(
-                        builder,
-                        module,
-                        runtime,
-                        result_vals[0],
-                        &expr.ty,
-                        &tool.name,
-                        1.0,
-                        expr.span,
-                    )?
-                } else {
-                    result_vals[0]
-                };
-                if matches!(expr.ty, Type::Nothing) {
-                    builder.ins().jump(join_b, &[]);
-                } else if result_vals.len() == 1 {
-                    builder.ins().jump(join_b, &[live_result]);
-                } else {
-                    return Err(CodegenError::cranelift(
-                        format!(
-                            "tool `{callee_name}` wrapper returned {} values; expected 1 for type `{}`",
-                            result_vals.len(),
-                            expr.ty.display_name()
-                        ),
-                        expr.span,
-                    ));
+                    if let Some(trace_func) = trace_result_ref {
+                        let trace_result_call =
+                            module.declare_func_in_func(trace_func, builder.func);
+                        let trace_args = if matches!(expr.ty, Type::Nothing) {
+                            vec![tool_name_val]
+                        } else {
+                            vec![tool_name_val, result_vals[0]]
+                        };
+                        builder.ins().call(trace_result_call, &trace_args);
+                    }
+                    let live_result = if matches!(expr.ty, Type::Grounded(_)) {
+                        emit_grounded_value_attestation(
+                            builder,
+                            module,
+                            runtime,
+                            result_vals[0],
+                            &expr.ty,
+                            &tool.name,
+                            1.0,
+                            expr.span,
+                        )?
+                    } else {
+                        result_vals[0]
+                    };
+                    if matches!(expr.ty, Type::Nothing) {
+                        builder.ins().jump(join_b, &[]);
+                    } else if result_vals.len() == 1 {
+                        builder.ins().jump(join_b, &[live_result]);
+                    } else {
+                        return Err(CodegenError::cranelift(
+                            format!(
+                                "tool `{callee_name}` wrapper returned {} values; expected 1 for type `{}`",
+                                result_vals.len(),
+                                expr.ty.display_name()
+                            ),
+                            expr.span,
+                        ));
+                    }
                 }
 
                 builder.switch_to_block(join_b);

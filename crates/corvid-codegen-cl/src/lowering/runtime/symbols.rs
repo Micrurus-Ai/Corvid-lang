@@ -75,6 +75,18 @@ pub(in crate::lowering) const REPLAY_TOOL_CALL_FLOAT_SYMBOL: &str = "corvid_repl
 pub(in crate::lowering) const REPLAY_TOOL_CALL_STRING_SYMBOL: &str =
     "corvid_replay_tool_call_string";
 
+// Live host-registered tool dispatch (library targets only): the
+// cdylib/staticlib calls these instead of a link-time
+// `__corvid_tool_<name>` symbol. A host registers the implementation at
+// load via `corvid_register_tool` (or a linked `#[tool]` lib
+// self-registers at `corvid_runtime_init`).
+pub(in crate::lowering) const INVOKE_TOOL_NOTHING_SYMBOL: &str = "corvid_invoke_tool_nothing";
+pub(in crate::lowering) const INVOKE_TOOL_INT_SYMBOL: &str = "corvid_invoke_tool_int";
+pub(in crate::lowering) const INVOKE_TOOL_BOOL_SYMBOL: &str = "corvid_invoke_tool_bool";
+pub(in crate::lowering) const INVOKE_TOOL_FLOAT_SYMBOL: &str = "corvid_invoke_tool_float";
+pub(in crate::lowering) const INVOKE_TOOL_STRING_SYMBOL: &str = "corvid_invoke_tool_string";
+pub(in crate::lowering) const INVOKE_TOOL_STRUCT_SYMBOL: &str = "corvid_invoke_tool_struct";
+
 // JSON encoder primitives backing the trace-payload `'j'` slot. The
 // Cranelift codegen walks each non-scalar tool/prompt/approve argument
 // type, appends its JSON representation to a buffer via these calls,

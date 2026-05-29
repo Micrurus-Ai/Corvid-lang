@@ -47,6 +47,10 @@ pub fn compile_to_object(
     entry_agent_name: Option<&str>,
     embedded_descriptor: Option<&[u8]>,
     embedded_attestation: Option<&[u8]>,
+    // True for library targets (cdylib/staticlib): tool calls dispatch
+    // through the runtime registry so the binary links without the
+    // host's tools. False for native binaries (linked tool wrappers).
+    tools_via_registry: bool,
 ) -> Result<(), CodegenError> {
     // Run the ownership analysis pass before codegen.
     // Output is a transformed IrFile with borrow_sig populated on
@@ -56,7 +60,8 @@ pub fn compile_to_object(
     let (ir_analyzed, _summaries) = ownership::analyze(ir.clone());
 
     let mut module = module::make_host_object_module(module_name)?;
-    let _func_ids = lowering::lower_file(&ir_analyzed, &mut module, entry_agent_name)?;
+    let _func_ids =
+        lowering::lower_file(&ir_analyzed, &mut module, entry_agent_name, tools_via_registry)?;
     if let Some(bytes) = embedded_descriptor {
         define_embedded_descriptor(&mut module, bytes)?;
     }
@@ -144,7 +149,9 @@ pub fn build_native_to_disk(
         .tempdir()
         .map_err(|e| CodegenError::io(format!("tempdir: {e}")))?;
     let object_path = obj_dir.path().join(format!("{module_name}.o"));
-    compile_to_object(ir, module_name, &object_path, Some(&entry.name), None, None)?;
+    // Native binary: tools are linked in via `extra_tool_libs`, so
+    // dispatch calls the typed `__corvid_tool_<name>` wrapper directly.
+    compile_to_object(ir, module_name, &object_path, Some(&entry.name), None, None, false)?;
     link::link_binary(&object_path, &entry.name, &out_bin, extra_tool_libs)?;
     Ok(out_bin)
 }

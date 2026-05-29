@@ -78,6 +78,8 @@ use crate::catalog_c_api::{
     corvid_pre_flight as _corvid_pre_flight_marker,
     corvid_register_approver as _corvid_register_approver_marker,
     corvid_register_approver_from_source as _corvid_register_approver_from_source_marker,
+    corvid_register_tool as _corvid_register_tool_marker,
+    corvid_clear_tools as _corvid_clear_tools_marker,
 }; // keep the catalog C-API surface referenced for cdylib/staticlib linking
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -171,6 +173,13 @@ fn _depends_on_ffi_bridge() {
             *const std::ffi::c_char,
             usize,
         ) -> crate::approver_bridge::CorvidPredicateResult;
+    let _ = _corvid_register_tool_marker
+        as unsafe extern "C" fn(
+            *const std::ffi::c_char,
+            Option<crate::catalog_c_api::CorvidToolFn>,
+            *mut std::ffi::c_void,
+        );
+    let _ = _corvid_clear_tools_marker as extern "C" fn();
 }
 
 // ------------------------------------------------------------

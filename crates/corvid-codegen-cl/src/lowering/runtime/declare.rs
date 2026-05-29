@@ -339,6 +339,46 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             )
         })?;
 
+    // Live host-registered tool dispatch (library targets): same
+    // signature shape as the replay family (tool, arg_types, argc,
+    // args_ptr).
+    let invoke_tool_nothing_sig = make_replay_tool_sig(module, None);
+    let invoke_tool_nothing_id = module
+        .declare_function(INVOKE_TOOL_NOTHING_SYMBOL, Linkage::Import, &invoke_tool_nothing_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_nothing: {e}"), Span::new(0, 0))
+        })?;
+    let invoke_tool_int_sig = make_replay_tool_sig(module, Some(I64));
+    let invoke_tool_int_id = module
+        .declare_function(INVOKE_TOOL_INT_SYMBOL, Linkage::Import, &invoke_tool_int_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_int: {e}"), Span::new(0, 0))
+        })?;
+    let invoke_tool_bool_sig = make_replay_tool_sig(module, Some(I8));
+    let invoke_tool_bool_id = module
+        .declare_function(INVOKE_TOOL_BOOL_SYMBOL, Linkage::Import, &invoke_tool_bool_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_bool: {e}"), Span::new(0, 0))
+        })?;
+    let invoke_tool_float_sig = make_replay_tool_sig(module, Some(F64));
+    let invoke_tool_float_id = module
+        .declare_function(INVOKE_TOOL_FLOAT_SYMBOL, Linkage::Import, &invoke_tool_float_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_float: {e}"), Span::new(0, 0))
+        })?;
+    let invoke_tool_string_sig = make_replay_tool_sig(module, Some(I64));
+    let invoke_tool_string_id = module
+        .declare_function(INVOKE_TOOL_STRING_SYMBOL, Linkage::Import, &invoke_tool_string_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_string: {e}"), Span::new(0, 0))
+        })?;
+    let invoke_tool_struct_sig = make_replay_tool_sig(module, Some(I64));
+    let invoke_tool_struct_id = module
+        .declare_function(INVOKE_TOOL_STRUCT_SYMBOL, Linkage::Import, &invoke_tool_struct_sig)
+        .map_err(|e| {
+            CodegenError::cranelift(format!("declare invoke_tool_struct: {e}"), Span::new(0, 0))
+        })?;
+
     let mut runtime_init_sig = module.make_signature();
     runtime_init_sig.returns.push(AbiParam::new(I32));
     let runtime_init_id = module
@@ -1143,6 +1183,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         replay_tool_call_bool: replay_tool_call_bool_id,
         replay_tool_call_float: replay_tool_call_float_id,
         replay_tool_call_string: replay_tool_call_string_id,
+        invoke_tool_nothing: invoke_tool_nothing_id,
+        invoke_tool_int: invoke_tool_int_id,
+        invoke_tool_bool: invoke_tool_bool_id,
+        invoke_tool_float: invoke_tool_float_id,
+        invoke_tool_string: invoke_tool_string_id,
+        invoke_tool_struct: invoke_tool_struct_id,
         runtime_init: runtime_init_id,
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
@@ -1213,6 +1259,9 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
             .map(|v| v != "0" && v != "false")
             .unwrap_or(true),
+        // Default to the native (link-time wrapper) dispatch; `lower_file`
+        // sets this true for library targets (cdylib/staticlib).
+        tools_via_registry: false,
         struct_destructors: HashMap::new(),
         struct_traces: HashMap::new(),
         struct_typeinfos: HashMap::new(),

@@ -56,6 +56,15 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub replay_tool_call_bool: FuncId,
     pub replay_tool_call_float: FuncId,
     pub replay_tool_call_string: FuncId,
+    // Live host-registered tool dispatch (library targets): the
+    // cdylib/staticlib calls these instead of a link-time
+    // `__corvid_tool_<name>` symbol.
+    pub invoke_tool_nothing: FuncId,
+    pub invoke_tool_int: FuncId,
+    pub invoke_tool_bool: FuncId,
+    pub invoke_tool_float: FuncId,
+    pub invoke_tool_string: FuncId,
+    pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
@@ -140,6 +149,15 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// (pass is active); set to false to fall back to pre-17b-1b.6c
     /// behavior for A/B debugging.
     pub dup_drop_enabled: bool,
+    /// When true (library targets: cdylib/staticlib), a tool call is
+    /// dispatched through the runtime registry
+    /// (`corvid_invoke_tool_<type>`) so the binary links without the
+    /// host's tools and they are provided at load. When false (native
+    /// binaries), a tool call is a direct typed call to the linked
+    /// `__corvid_tool_<name>` wrapper. The two deployment models supply
+    /// tools differently (load-time host registration vs link-time
+    /// staticlib), so each uses the dispatch that fits.
+    pub tools_via_registry: bool,
     /// Per-struct-type destructors generated in `lower_file` for
     /// structs with at least one refcounted field. Missing entries
     /// mean the struct has no refcounted fields (typeinfo.destroy_fn

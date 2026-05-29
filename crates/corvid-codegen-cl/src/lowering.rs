@@ -54,6 +54,7 @@ pub fn lower_file(
     ir: &IrFile,
     module: &mut ObjectModule,
     entry_agent_name: Option<&str>,
+    tools_via_registry: bool,
 ) -> Result<HashMap<String, FuncId>, CodegenError> {
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut func_ids_by_def: HashMap<DefId, FuncId> = HashMap::new();
@@ -72,6 +73,9 @@ pub fn lower_file(
     // return `i64` (pointers / integers); we use I64 across the board
     // so the calling convention is uniform.
     let mut runtime = declare_runtime_funcs(module, overflow_func_id)?;
+    // Library targets (cdylib/staticlib) dispatch tool calls through the
+    // runtime registry; native binaries call the linked tool wrapper.
+    runtime.tools_via_registry = tools_via_registry;
 
     // Populate the IR type registry so lowering functions can resolve
     // field offsets and constructor arities without threading `&IrFile`.
