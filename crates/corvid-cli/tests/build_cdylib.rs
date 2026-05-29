@@ -91,6 +91,67 @@ agent entry(note: String) -> String:
     return note
 "#;
 
+// An imported module that BOTH defines a struct AND has an agent that
+// reads its fields. `lower_with_modules` appends the module agent to the
+// cdylib's IR, so codegen lowers `describe_receipt`'s `r.id` access on a
+// struct local to the module. The module's checker uses its own DefId
+// space, so that expression type is `Struct(<module-local id>)` while
+// `ir.types` is keyed by the cross-module-remapped id — codegen failed
+// with "struct metadata missing for field access to `id`" until
+// `lower_expr` remapped module-local struct types too.
+const MODULE_FIELD_ACCESS_TYPES_SRC: &str = r#"
+public type Receipt:
+    id: String
+    amount: Int
+
+public agent describe_receipt(r: Receipt) -> String:
+    return r.id
+"#;
+
+const MODULE_FIELD_ACCESS_MAIN_SRC: &str = r#"
+import "./types" as t
+
+agent run(r: t.Receipt) -> String:
+    return t.describe_receipt(r)
+
+pub extern "c"
+agent entry(note: String) -> String:
+    return note
+"#;
+
+#[test]
+fn cli_build_cdylib_links_module_agent_field_access() {
+    let (_dir, source_path) = write_module_project(
+        MODULE_FIELD_ACCESS_TYPES_SRC,
+        "types",
+        MODULE_FIELD_ACCESS_MAIN_SRC,
+    );
+    let output = run_corvid(
+        &[
+            "build",
+            source_path.to_str().expect("utf8 source path"),
+            "--target=cdylib",
+        ],
+        source_path.parent().unwrap(),
+    );
+
+    assert!(
+        output.status.success(),
+        "module-agent field-access cdylib failed to build: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lib_path = source_path
+        .parent()
+        .and_then(Path::parent)
+        .expect("project root")
+        .join("target")
+        .join("release")
+        .join(shared_library_name("main"));
+    assert!(lib_path.exists(), "missing shared library: {}", lib_path.display());
+}
+
 #[test]
 fn cli_build_cdylib_links_tool_using_program_via_registry() {
     let (_dir, source_path) = write_project(TOOL_USING_SRC, "toolprog");
