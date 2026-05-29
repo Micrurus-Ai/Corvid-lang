@@ -140,13 +140,24 @@ pub extern "C" fn corvid_runtime_init() -> i32 {
 
     BRIDGE.store(ptr, Ordering::Release);
 
-    let mut count: i64 = 0;
-    for _meta in iter_registered_tools() {
-        count += 1;
-    }
-    record_registered_tool_count(count);
+    record_registered_tool_count(register_all_inventoried_tools());
 
     0
+}
+
+/// Self-register every linked `#[tool]` into the runtime tool registry
+/// so native codegen can dispatch a tool call through
+/// `corvid_invoke_tool_*` (the unified, host-registration path) rather
+/// than a link-time `__corvid_tool_<name>` symbol. Returns the count for
+/// the diagnostics gauge. Called from both the standard and embedded
+/// init paths; idempotent re-registration is harmless (insert-by-name).
+fn register_all_inventoried_tools() -> i64 {
+    let mut count: i64 = 0;
+    for meta in iter_registered_tools() {
+        crate::catalog_c_api::register_inventoried_tool(meta.name, meta.json_dispatch);
+        count += 1;
+    }
+    count
 }
 
 /// Idempotent runtime init for embedded cdylib/staticlib calls.
@@ -165,7 +176,11 @@ pub extern "C" fn corvid_runtime_embed_init_default() -> i32 {
         Ordering::AcqRel,
         Ordering::Acquire,
     ) {
-        Ok(_) => 0,
+        Ok(_) => {
+            // Won the race to install the bridge: register linked tools.
+            record_registered_tool_count(register_all_inventoried_tools());
+            0
+        }
         Err(_) => {
             // SAFETY: compare_exchange failure means we still own `ptr`.
             unsafe {

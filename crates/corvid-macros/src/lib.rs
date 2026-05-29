@@ -89,6 +89,10 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
     let mut wrapper_params: Vec<TokenStream2> = Vec::new();
     let mut arg_conversions: Vec<TokenStream2> = Vec::new();
     let mut call_args: Vec<TokenStream2> = Vec::new();
+    // (arg name, native type) pairs for the JSON-dispatch wrapper, which
+    // deserializes each arg from the JSON args array via serde rather
+    // than the typed C ABI.
+    let mut json_args: Vec<(syn::Ident, Type)> = Vec::new();
 
     for (idx, input) in f.sig.inputs.iter().enumerate() {
         let (arg_name, native_ty) = match input {
@@ -128,6 +132,7 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
                 ::corvid_runtime::abi::FromCorvidAbi::from_corvid_abi(#arg_name);
         });
         call_args.push(quote! { #arg_name });
+        json_args.push((arg_name.clone(), native_ty.clone()));
 
         // `idx` unused today; kept to make future arity-diagnostics
         // straightforward.
@@ -162,6 +167,47 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         }
     };
 
+    // JSON-dispatch wrapper: the call args arrive as a JSON array, each
+    // is deserialized to its native type via serde, and the result is
+    // serialized back to JSON. This is the callable the runtime
+    // registers into the tool registry at init (G0-tools-3) so codegen
+    // can dispatch a tool call through `corvid_invoke_tool_*` instead of
+    // the link-time `__corvid_tool_<name>` symbol — the same mechanism a
+    // host uses to provide tools to an embedded cdylib.
+    let json_wrapper_ident = format_ident!("__corvid_tool_json_{}", mangle_tool_name(&tool_name));
+    let json_arg_decodes: Vec<TokenStream2> = json_args
+        .iter()
+        .enumerate()
+        .map(|(idx, (arg_name, native_ty))| {
+            quote! {
+                let #arg_name: #native_ty = ::corvid_runtime::serde_json::from_value(
+                    __args_arr
+                        .get(#idx)
+                        .cloned()
+                        .unwrap_or(::corvid_runtime::serde_json::Value::Null),
+                )
+                .expect(concat!(
+                    "#[tool] `", #tool_name,
+                    "`: failed to deserialize argument `", stringify!(#arg_name), "` from JSON"
+                ));
+            }
+        })
+        .collect();
+    let json_call_args: Vec<TokenStream2> = json_args.iter().map(|(n, _)| quote! { #n }).collect();
+    let json_result = if return_is_unit {
+        quote! {
+            __handle.block_on(async { #fn_ident(#(#json_call_args),*).await });
+            ::corvid_runtime::serde_json::Value::Null
+        }
+    } else {
+        quote! {
+            let __result = __handle.block_on(async { #fn_ident(#(#json_call_args),*).await });
+            ::corvid_runtime::serde_json::to_value(&__result).expect(concat!(
+                "#[tool] `", #tool_name, "`: failed to serialize result to JSON"
+            ))
+        }
+    };
+
     let expanded = quote! {
         // 1. The user's async fn, unchanged.
         #f
@@ -179,14 +225,43 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
             #call_expr
         }
 
+        // 2b. JSON-dispatch wrapper (registered into the tool registry
+        //     at init; see `ToolMetadata.json_dispatch`).
+        #[no_mangle]
+        pub unsafe extern "C" fn #json_wrapper_ident(
+            __args_ptr: *const ::std::ffi::c_char,
+            __args_len: usize,
+            _user_data: *mut ::std::ffi::c_void,
+        ) -> *mut ::std::ffi::c_char {
+            let __handle = ::corvid_runtime::ffi_bridge::tokio_handle();
+            let __bytes = ::std::slice::from_raw_parts(__args_ptr as *const u8, __args_len);
+            let __args_arr: ::std::vec::Vec<::corvid_runtime::serde_json::Value> =
+                ::corvid_runtime::serde_json::from_slice::<::corvid_runtime::serde_json::Value>(__bytes)
+                    .ok()
+                    .and_then(|v| match v {
+                        ::corvid_runtime::serde_json::Value::Array(items) => ::std::option::Option::Some(items),
+                        _ => ::std::option::Option::None,
+                    })
+                    .unwrap_or_default();
+            #(#json_arg_decodes)*
+            let __result_value = { #json_result };
+            let __result_json = ::corvid_runtime::serde_json::to_string(&__result_value)
+                .unwrap_or_else(|_| ::std::string::String::from("null"));
+            ::std::ffi::CString::new(__result_json)
+                .expect("#[tool] result JSON contained an interior NUL")
+                .into_raw()
+        }
+
         // 3. Metadata registration. `corvid_runtime_init` collects
-        //    every entry at startup to build the effect-policy table.
-        //    Never on the dispatch hot path.
+        //    every entry at startup to build the effect-policy table
+        //    and to self-register each tool's `json_dispatch` into the
+        //    runtime tool registry. Never on the dispatch hot path.
         ::corvid_runtime::inventory::submit! {
             ::corvid_runtime::ToolMetadata {
                 name: #tool_name,
                 symbol: #wrapper_symbol,
                 arity: #arity,
+                json_dispatch: #json_wrapper_ident,
             }
         }
     };

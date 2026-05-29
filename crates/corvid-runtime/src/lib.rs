@@ -116,10 +116,14 @@ pub mod usage;
 pub use abi::{
     registered_tool_count, CorvidGroundedBoolReturn, CorvidGroundedFloatReturn,
     CorvidGroundedHandle, CorvidGroundedIntReturn, CorvidGroundedStringReturn,
-    CorvidObservationHandle, CorvidString, ToolMetadata, CORVID_NULL_GROUNDED_HANDLE,
-    CORVID_NULL_OBSERVATION_HANDLE,
+    CorvidObservationHandle, CorvidString, CorvidToolJsonFn, ToolMetadata,
+    CORVID_NULL_GROUNDED_HANDLE, CORVID_NULL_OBSERVATION_HANDLE,
 };
 pub use inventory;
+// Re-exported so the `#[tool]` macro's generated JSON-dispatch wrapper
+// can marshal args/results without the user crate adding a serde_json
+// dependency of its own.
+pub use serde_json;
 
 /// Path to the C-runtime staticlib (`corvid_c_runtime.lib` / `.a`)
 /// that corvid-runtime's build.rs compiled. Used by corvid-codegen-cl's

@@ -81,6 +81,20 @@ pub extern "C" fn corvid_clear_tools() {
     registry().lock().unwrap().clear();
 }
 
+/// Register a `#[tool]`-provided JSON dispatcher under `name`. Called
+/// from `corvid_runtime_init` for every inventoried tool so a linked
+/// `#[tool]` lib self-registers under the unified dispatch model
+/// (`CorvidToolJsonFn` and `CorvidToolFn` are the same fn-pointer type).
+pub(crate) fn register_inventoried_tool(name: &str, dispatch: crate::abi::CorvidToolJsonFn) {
+    registry().lock().unwrap().insert(
+        name.to_string(),
+        ToolRegistration {
+            callback: dispatch,
+            user_data: 0,
+        },
+    );
+}
+
 /// Invoke the tool registered under `name`, forwarding the JSON args to
 /// its callback and returning the callback's owned JSON result. Returns
 /// null when no tool is registered under `name` (the caller surfaces a
@@ -336,6 +350,25 @@ mod tests {
         // Unregistered: None (the typed family turns this into a clear
         // "tool not registered" panic at the live call site).
         assert_eq!(dispatch_registered_tool("missing", "[]"), None);
+        corvid_clear_tools();
+    }
+
+    #[test]
+    fn inventoried_tool_registers_and_dispatches() {
+        // The init-path helper registers a `#[tool]`'s JSON dispatcher
+        // (CorvidToolJsonFn) the same way a host's `corvid_register_tool`
+        // would, and `corvid_invoke_tool` then dispatches to it.
+        corvid_clear_tools();
+        register_inventoried_tool("double", echo_tool);
+        let name = CString::new("double").unwrap();
+        let args = CString::new("[\"x\"]").unwrap();
+        let result_ptr =
+            unsafe { corvid_invoke_tool(name.as_ptr(), args.as_ptr(), args.as_bytes().len()) };
+        assert!(!result_ptr.is_null(), "inventoried tool must dispatch");
+        let result = unsafe { CString::from_raw(result_ptr) }
+            .into_string()
+            .unwrap();
+        assert_eq!(result, "{\"echo\":[\"x\"]}");
         corvid_clear_tools();
     }
 }

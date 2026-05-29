@@ -21,6 +21,7 @@ pub use catalog_exports::{
 pub use tool_bridge::{
     corvid_clear_tools, corvid_invoke_tool, corvid_register_tool, CorvidToolFn,
 };
+pub(crate) use tool_bridge::register_inventoried_tool;
 pub use grounded_bridge::{
     corvid_begin_direct_observation, corvid_finish_direct_observation, corvid_grounded_attest_bool,
     corvid_grounded_attest_float, corvid_grounded_attest_int, corvid_grounded_attest_string,

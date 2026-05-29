@@ -436,23 +436,42 @@ impl IntoCorvidAbi<CorvidString> for &str {
 // policy table and the tracer's tool-name registry.
 // ------------------------------------------------------------
 
+/// JSON-marshalled tool dispatch callback emitted by `#[tool]`.
+///
+/// Receives the call args as a UTF-8 JSON array (`[arg0, arg1, ...]`)
+/// and returns the result as a `CString::into_raw`-allocated JSON C
+/// string the caller reclaims. This is the value `corvid_runtime_init`
+/// registers into the runtime tool registry so codegen can dispatch a
+/// tool call through `corvid_invoke_tool_*` rather than a link-time
+/// `__corvid_tool_<name>` symbol — the same way the host registers
+/// tools for an embedded cdylib. Structurally identical to
+/// `catalog_c_api`'s `CorvidToolFn`.
+pub type CorvidToolJsonFn = unsafe extern "C" fn(
+    *const std::ffi::c_char,
+    usize,
+    *mut std::ffi::c_void,
+) -> *mut std::ffi::c_char;
+
 /// Metadata about a `#[tool]` function. One entry per attribute
 /// invocation, collected at link time via the `inventory` crate.
 ///
-/// The actual dispatch is not through this struct — codegen emits
-/// direct calls by symbol name. This struct exists only for runtime
-/// observability + policy lookup.
+/// `corvid_runtime_init` walks these to build the effect-policy table
+/// and to self-register each tool's `json_dispatch` into the runtime
+/// tool registry.
 #[derive(Debug, Clone, Copy)]
 pub struct ToolMetadata {
     /// Corvid-source name the tool is registered under.
     pub name: &'static str,
-    /// Linker-visible symbol of the `#[no_mangle]` wrapper fn the
-    /// macro emits. Codegen looks up by this symbol when lowering
-    /// `IrCallKind::Tool`.
+    /// Linker-visible symbol of the typed `#[no_mangle]` wrapper fn the
+    /// macro emits (the historical direct-call path).
     pub symbol: &'static str,
     /// Number of parameters. Cross-checked against the Corvid
     /// declaration at runtime-init to catch macro-vs-source drift.
     pub arity: usize,
+    /// JSON-dispatch wrapper the macro emits alongside the typed one.
+    /// Registered into the runtime tool registry at init so a linked
+    /// `#[tool]` lib self-registers under the unified dispatch model.
+    pub json_dispatch: CorvidToolJsonFn,
 }
 
 // Alloc-aware counter of registered tools — used by diagnostics to
