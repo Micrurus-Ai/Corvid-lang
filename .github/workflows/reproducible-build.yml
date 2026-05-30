@@ -51,6 +51,28 @@ jobs:
           echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> $GITHUB_ENV
           echo "value=$SOURCE_DATE_EPOCH" >> $GITHUB_OUTPUT
 
+      # Pin host-dependent absolute paths so they don't leak into
+      # the resulting binary's debug info / strings. Without these,
+      # rustc embeds the full CARGO_TARGET_DIR path
+      # (`/home/runner/.../target-build-1` vs `target-build-2`) and
+      # cc-rs embeds OUT_DIR paths (also CARGO_TARGET_DIR-derived)
+      # into the produced binary, making the two builds in this
+      # workflow differ by exactly the digit `1` vs `2` even when
+      # the source, lockfile, toolchain, and SOURCE_DATE_EPOCH are
+      # identical. The remap-prefix flags rewrite those paths to a
+      # stable sentinel at compile/assemble time. `RUSTFLAGS` covers
+      # rustc; `CFLAGS`/`CXXFLAGS` with `-ffile-prefix-map` cover
+      # any C/C++ compilation cc-rs drives (corvid-runtime's
+      # `build.rs` calls `cc::Build` for the C runtime files).
+      - name: Set path-remap flags for reproducibility
+        run: |
+          WORKSPACE_DIR="$PWD"
+          {
+            echo "RUSTFLAGS=--remap-path-prefix=$WORKSPACE_DIR=/source --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$WORKSPACE_DIR/target-build-1=/source/target --remap-path-prefix=$WORKSPACE_DIR/target-build-2=/source/target"
+            echo "CFLAGS=-ffile-prefix-map=$WORKSPACE_DIR=/source -ffile-prefix-map=$HOME/.cargo=/cargo -ffile-prefix-map=$WORKSPACE_DIR/target-build-1=/source/target -ffile-prefix-map=$WORKSPACE_DIR/target-build-2=/source/target"
+            echo "CXXFLAGS=-ffile-prefix-map=$WORKSPACE_DIR=/source -ffile-prefix-map=$HOME/.cargo=/cargo -ffile-prefix-map=$WORKSPACE_DIR/target-build-1=/source/target -ffile-prefix-map=$WORKSPACE_DIR/target-build-2=/source/target"
+          } >> $GITHUB_ENV
+
       - name: Build #1 (clean)
         env:
           CARGO_TARGET_DIR: target-build-1
