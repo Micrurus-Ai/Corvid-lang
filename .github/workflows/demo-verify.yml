@@ -61,26 +61,59 @@ jobs:
           cargo test -p corvid-cli --test bundle_rebuild 2>&1
           EXIT=$?
           if [ $EXIT -ne 0 ]; then
-            echo "::group::Post-mortem diagnostics for bundle_rebuild"
-            echo "exit code: $EXIT"
-            echo "--- /tmp/cores contents ---"
+            # Print diagnostics directly (no `::group::` so the
+            # content stays visible in the collapsed-by-default
+            # GH Actions log view).
+            echo ""
+            echo "================================================================================"
+            echo "POST-MORTEM DIAGNOSTICS FOR bundle_rebuild (exit=$EXIT)"
+            echo "================================================================================"
+            echo ""
+            echo "[/tmp/cores contents]"
             ls -la /tmp/cores/ 2>/dev/null || echo "(no /tmp/cores dir)"
-            echo "--- dmesg tail (segfault / abort signals) ---"
+            echo ""
+            echo "[dmesg tail — kernel-side segfault/abort signal records]"
             sudo dmesg | tail -100 2>/dev/null || true
-            echo "--- corvid binary info ---"
+            echo ""
+            echo "[corvid binary info]"
             file target/debug/corvid 2>/dev/null || echo "(corvid binary not present)"
+            echo ""
             # If we got a core file, print the signal that caused
             # the dump via `file` (the kernel records this in the
-            # core's ELF header) and the immediate crash address
-            # via the first `nm`-resolved symbol near it. A full
-            # backtrace needs gdb; the uploaded artifact lets a
-            # follow-up step run gdb locally if desired.
-            for core in /tmp/cores/core.*; do
+            # core's ELF header) and dump every gdb-readable
+            # field. A full backtrace needs gdb; the uploaded
+            # artifact lets a follow-up step run gdb locally if
+            # desired.
+            CORE_FOUND=0
+            for core in /tmp/cores/core.* /tmp/cores/core; do
               [ -f "$core" ] || continue
-              echo "--- core $core ---"
+              CORE_FOUND=1
+              echo "[core $core]"
               file "$core" 2>/dev/null || true
+              echo ""
+              # Run gdb non-interactively to dump the crash
+              # backtrace if gdb is available on the runner.
+              if command -v gdb >/dev/null 2>&1; then
+                echo "[gdb backtrace for $core]"
+                gdb --batch -ex "bt full" -ex "info threads" -ex "thread apply all bt" target/debug/corvid "$core" 2>&1 | head -200 || true
+                echo ""
+              fi
             done
-            echo "::endgroup::"
+            if [ "$CORE_FOUND" -eq 0 ]; then
+              echo "[no core files generated]"
+              echo "core_pattern: $(cat /proc/sys/kernel/core_pattern 2>/dev/null)"
+              echo "ulimit -c:    $(ulimit -c)"
+              # The crash may be in a child process that the test
+              # spawned (`corvid` itself, not the test binary).
+              # Cores would land under /tmp/cores when our pattern
+              # is honored. If RLIMIT_CORE wasn't inherited, no
+              # core was produced — the dmesg output is still the
+              # primary signal.
+              echo ""
+            fi
+            echo "================================================================================"
+            echo "END POST-MORTEM"
+            echo "================================================================================"
           fi
           exit $EXIT
 
