@@ -664,6 +664,17 @@ def main() -> int:
         ctypes.byref(approval),
     )
     if status != 0:
+        # Print the runtime's typed-error payload before exiting so
+        # `bundle_verify` diagnostics surface WHY the call failed
+        # (RuntimeError = 6) rather than just the bare exit code.
+        # `corvid_call_agent` always populates `result` with a JSON
+        # error body on non-zero status.
+        if result.value:
+            err_payload = ctypes.string_at(result, result_len.value).decode("utf-8", errors="replace")
+            sys.stderr.write(f"corvid_call_agent status={{status}} payload={{err_payload}}\n")
+        else:
+            sys.stderr.write(f"corvid_call_agent status={{status}} (no payload)\n")
+        sys.stderr.flush()
         raise SystemExit(status)
     payload = ctypes.string_at(result, result_len.value).decode("utf-8")
     if observation.value:
