@@ -417,11 +417,40 @@ unsafe fn replay_library_trace(library_path: &Path, trace_path: &Path) -> Result
     drop(model_guard);
     drop(trace_guard);
 
-    Ok(ReplayOutput {
+    let output = ReplayOutput {
         agent,
         result_json,
         observation_present: observation_handle != 0,
-    })
+    };
+
+    // Explicitly drop the function-pointer symbols before
+    // forgetting the library so the borrows end. `observation_release`
+    // was already consumed by the `if let Some(release) = ...` above.
+    drop(call_agent);
+    drop(free_result);
+
+    // Leak the library handle entirely. The previous attempt at
+    // `RTLD_NODELETE` alone was not sufficient: even with the
+    // mapping pinned, the `dlclose` codepath in glibc's
+    // `_dl_close_worker` walks every thread's TLS destructor
+    // list and may mark destructor function pointers for the
+    // closing DSO as cleared (via PTR_MANGLE'd NULL stores), so
+    // a later `__call_tls_dtors` on the corvid-cli worker
+    // thread crashes when iterating those entries (the GDB
+    // backtrace from the bundle_rebuild Linux CI coredump
+    // confirmed exactly this: `__GI___call_tls_dtors () at
+    // cxa_thread_atexit_impl.c:156`, ip=0, in the corvid-cli
+    // worker after RTLD_NODELETE landed).
+    //
+    // By `std::mem::forget`ing the Library handle, `dlclose` is
+    // never invoked by us at all, so glibc's destructor-clearing
+    // codepath never runs. The OS reclaims the mapping at
+    // process exit. The downside is a one-time leak per
+    // `bundle verify --rebuild` invocation; corvid CLI is not a
+    // long-running daemon, so accumulation isn't a concern.
+    std::mem::forget(library);
+
+    Ok(output)
 }
 
 fn last_run_started(events: &[TraceEvent]) -> Result<(String, Vec<serde_json::Value>)> {
