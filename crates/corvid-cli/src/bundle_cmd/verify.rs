@@ -325,8 +325,50 @@ unsafe fn replay_library_trace(library_path: &Path, trace_path: &Path) -> Result
         EnvGuard::set(&[("CORVID_MODEL", Some(std::ffi::OsStr::new(model)))])
     });
 
-    let library = libloading::Library::new(library_path)
-        .with_context(|| format!("load rebuilt library `{}`", library_path.display()))?;
+    // `libloading::Library::new` calls `dlopen(path, RTLD_LAZY)` by
+    // default. When this `Library` value drops at the end of the
+    // function, libloading calls `dlclose`, which unmaps the
+    // cdylib. That unmap invalidates every TLS destructor the
+    // cdylib's Rust code registered via `__cxa_thread_atexit_impl`
+    // (the destructor function pointers live in the cdylib's
+    // `.text` section). Tokio worker threads the cdylib spawned
+    // are still alive at that point; when they later exit,
+    // glibc's `__call_tls_dtors` jumps to those now-dangling
+    // pointers and the process dies with SIGSEGV at ip=0 inside
+    // `__call_tls_dtors` (cxa_thread_atexit_impl.c:156).
+    //
+    // The standard fix is `RTLD_NODELETE` — the cdylib stays
+    // mapped after `dlclose`, so its TLS destructor pointers
+    // remain valid for the process lifetime. The OS reclaims the
+    // mapping at process exit. We use `libloading::os::unix::Library::open`
+    // with explicit flags on Unix; on Windows DLLs handle TLS
+    // teardown at the OS level and the default flags are fine.
+    let library = {
+        #[cfg(unix)]
+        {
+            // RTLD_LAZY = 0x1, RTLD_NODELETE = 0x1000 on every
+            // glibc + musl we ship to. libloading doesn't expose
+            // the constants through `os::unix`, so we pass the
+            // raw bitmask.
+            const RTLD_LAZY: std::os::raw::c_int = 0x1;
+            const RTLD_NODELETE: std::os::raw::c_int = 0x1000;
+            let lib = unsafe {
+                libloading::os::unix::Library::open(
+                    Some(library_path),
+                    RTLD_LAZY | RTLD_NODELETE,
+                )
+            }
+            .with_context(|| {
+                format!("load rebuilt library `{}`", library_path.display())
+            })?;
+            libloading::Library::from(lib)
+        }
+        #[cfg(not(unix))]
+        {
+            libloading::Library::new(library_path)
+                .with_context(|| format!("load rebuilt library `{}`", library_path.display()))?
+        }
+    };
     let call_agent: libloading::Symbol<CorvidCallAgentFn> = library
         .get(b"corvid_call_agent")
         .context("resolve corvid_call_agent")?;
