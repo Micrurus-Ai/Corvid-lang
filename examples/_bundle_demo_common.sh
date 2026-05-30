@@ -95,10 +95,28 @@ expect_success_stdout_contains() {
   local stdout_file stderr_file
   stdout_file="$(mktemp)"
   stderr_file="$(mktemp)"
-  run_corvid "$@" >"$stdout_file" 2>"$stderr_file"
+  # NOTE: the previous formulation was `run_corvid "$@" >"$stdout_file"
+  # 2>"$stderr_file"` without checking the exit code. Under `set -e`,
+  # a non-zero exit from corvid (e.g. `bundle verify` returning
+  # `BundleHashMismatch`) aborted the script with both captured files
+  # still on disk and NEVER displayed — the test runner saw an empty
+  # stdout/stderr panic. Wrapping in `if ! ... ; then ...` checks the
+  # exit code AND dumps the captured output so the test surfaces the
+  # actual failure.
+  if ! run_corvid "$@" >"$stdout_file" 2>"$stderr_file"; then
+    echo "expected success, got non-zero exit from \`corvid $*\`:" >&2
+    echo "--- stdout ---" >&2
+    cat "$stdout_file" >&2 || true
+    echo "--- stderr ---" >&2
+    cat "$stderr_file" >&2 || true
+    rm -f "$stdout_file" "$stderr_file"
+    exit 1
+  fi
   if ! grep -Fq "$needle" "$stdout_file"; then
     echo "stdout did not contain expected marker: $needle" >&2
+    echo "--- stdout ---" >&2
     cat "$stdout_file" >&2 || true
+    echo "--- stderr ---" >&2
     cat "$stderr_file" >&2 || true
     rm -f "$stdout_file" "$stderr_file"
     exit 1
