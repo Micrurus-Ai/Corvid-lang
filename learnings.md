@@ -6135,3 +6135,54 @@ and (b) emits the ABI. `cargo check` and single-file tests never
 exercised the cross-module id reaching the emitter, so the
 regression test constructs the out-of-range case directly rather
 than relying on a single-file fixture to reproduce it.
+
+## 35V2-P42-H-LR-1 app boot summary (2026-05-30)
+
+`corvid app boot-summary <source.cor>` ships the first sub-slice
+of the Phase-42 per-app AI helpers umbrella. The helper is a
+deterministic typed classifier over the app's ABI descriptor —
+no LLM call, no network hop, no runtime probing. It lowers the
+supplied source through the standard frontend pipeline, builds
+the descriptor in-process (via `corvid_driver::
+build_catalog_descriptor_for_source`), and renders a typed
+`BootSummary` (surface counts, flagship `pub extern "c"`
+entrypoints, approval gates, enforced guarantees,
+dangerous-surface counts, stores-writeable flag, descriptor
+sha256). Every derived field is paired with a `BootSource` entry
+naming the descriptor field that supplied the value — the
+Grounded<T> sources posture the drift narrator
+(`connector.drift_narration_grounded`) established for Phase 41.
+
+The defining design move was the rejection of an LLM
+dependency. Corvid has no `LlmProvider` / `ModelProvider`
+abstraction in the codebase; introducing one would be a
+foundational phase, not an H-LR helper. So a "fully implemented,
+no shortcuts" helper here means: a real, runnable, replay-stable
+typed transform over typed data, with every derivation traced
+to a source. When the LLM-provider substrate later lands, the
+helper's typed contract stays unchanged — only the rendering
+side opts into richer narration.
+
+Replay stability matters operationally: a boot summary that's
+byte-stable across runs can be embedded in CI gates that compare
+summaries across builds and fail the gate on drift. This is the
+same posture the drift narrator uses, and the same property the
+descriptor itself has (the descriptor sha256 the boot summary
+reports is the same hash the signed CLAIM.md carries — verified
+against PKA, the in-process and cdylib-embedded paths produce
+the same bytes).
+
+A new `GuaranteeKind::App` variant was introduced to keep the
+registry's ID-prefix invariant honest as the per-app helper
+cluster grows. Every existing guarantee ID prefix matches its
+kind slug (`connector.X` → Connector, `abi_descriptor.X` →
+AbiDescriptor); naming H-LR helpers `app.X` and then routing
+them through `AbiDescriptor` or `Platform` would have broken
+that invariant. The principled move was a new kind. Two future
+H-LR sub-slices (adversarial-refresh, pr-describe) will share
+the same kind.
+
+The CLI dispatch arm threads `()` to `0u8` because `run` returns
+`Result<u8>` (a typed exit code). The helper itself returns
+`Result<()>` and lets the dispatcher translate success — a small
+pattern worth keeping consistent across the per-app helpers.

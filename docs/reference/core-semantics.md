@@ -87,6 +87,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `platform.host_kernel_compromise` | platform | out_of_scope | platform |
 | `platform.signing_key_compromise` | platform | out_of_scope | platform |
 | `platform.toolchain_compromise` | platform | out_of_scope | platform |
+| `app.boot_summary_grounded` | app | runtime_checked | runtime |
 | `package.hosted_registry_available` | platform | out_of_scope | platform |
 
 ## Detail
@@ -1089,6 +1090,25 @@ Every claim listed in `docs/meta/launch-claim-audit.md` points at either a runna
 
 - `crates/corvid-cli/src/claim_cmd.rs::explain_failures_off_preserves_legacy_finding_shape`
 - `crates/corvid-cli/src/claim_cmd.rs::explain_failures_on_clean_inventory_yields_zero_findings`
+
+### Per-app helpers
+
+#### `app.boot_summary_grounded`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid app boot-summary <source.cor>` lowers the supplied Corvid source through the standard frontend pipeline, builds the ABI descriptor in-process, and renders a typed `BootSummary` (surface counts, flagship `pub extern "c"` entrypoints, approval gates, enforced guarantees, dangerous-surface counts, stores-writeable flag, descriptor sha256). Every derived field is paired with a `BootSource` entry naming the descriptor field that supplied the value, mirroring the Grounded<T> sources posture that `connector.drift_narration_grounded` uses for the drift narrator. Replay-stable: two invocations on the same source produce byte-identical output. The first sub-slice of `35V2-P42-H-LR-per-app-ai-helpers` to ship; `adversarial-refresh` and `pr-describe` remain filed under the umbrella as the next slices.
+
+**Positive tests:**
+
+- `crates/corvid-abi/src/boot_summary.rs::boot_summary_grounds_every_derived_field_to_a_descriptor_source`
+- `crates/corvid-cli/src/app_cmd.rs::boot_summary_for_minimal_app_renders_grounded_block`
+
+**Adversarial tests:**
+
+- `crates/corvid-abi/src/boot_summary.rs::boot_summary_empty_surface_descriptor_returns_grounded_summary_not_sourceless`
+- `crates/corvid-abi/src/boot_summary.rs::render_boot_summary_is_byte_identical_across_two_invocations`
+- `crates/corvid-cli/src/app_cmd.rs::boot_summary_for_unparseable_source_returns_typed_error_not_panic`
 
 ### Platform — explicit non-defenses
 

@@ -52,6 +52,12 @@ pub enum GuaranteeKind {
     Ops,
     /// Phase 43: `corvid claim audit` runnable-artifacts rule.
     Claim,
+    /// Phase 42 launch-readiness: per-app assistive helpers under
+    /// `corvid app *` — boot summary, adversarial-test refresh,
+    /// PR description. Each is a deterministic typed classifier
+    /// over the app's ABI descriptor with Grounded<T>-shaped
+    /// sources, filed under `35V2-P42-H-LR-per-app-ai-helpers`.
+    App,
     Platform,
 }
 
@@ -81,6 +87,7 @@ impl GuaranteeKind {
             GuaranteeKind::Upgrade => "upgrade",
             GuaranteeKind::Ops => "ops",
             GuaranteeKind::Claim => "claim",
+            GuaranteeKind::App => "app",
             GuaranteeKind::Platform => "platform",
         }
     }
@@ -105,6 +112,7 @@ impl GuaranteeKind {
         GuaranteeKind::Upgrade,
         GuaranteeKind::Ops,
         GuaranteeKind::Claim,
+        GuaranteeKind::App,
         GuaranteeKind::Platform,
     ];
 }

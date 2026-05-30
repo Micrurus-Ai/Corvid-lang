@@ -19,6 +19,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 pub use super::abi::AbiCommand;
+pub use super::app::AppCommand;
 pub use super::approvals::ApprovalsCommand;
 pub use super::approver::{ApproverCardFormat, ApproverCommand};
 pub use super::auth::{AuthCommand, AuthKeysCommand};
@@ -717,6 +718,14 @@ pub enum Command {
     Approvals {
         #[command(subcommand)]
         command: ApprovalsCommand,
+    },
+    /// Per-app assistive helpers — deterministic typed classifiers
+    /// over a Corvid app's ABI descriptor (boot summary, etc.).
+    /// Filed under the Phase-42 launch-readiness umbrella
+    /// `35V2-P42-H-LR-per-app-ai-helpers`.
+    App {
+        #[command(subcommand)]
+        command: AppCommand,
     },
     /// Inspect the runtime's human-review queue. Reads
     /// `ReviewQueueRecord` JSONL captured by the host backend and

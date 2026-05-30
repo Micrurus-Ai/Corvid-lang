@@ -1,5 +1,6 @@
 mod approval_contract;
 mod attestation;
+pub mod boot_summary;
 mod canonical_hash;
 mod effect_emit;
 mod embedded;
@@ -11,6 +12,11 @@ mod signing;
 mod tool_contract;
 mod type_description;
 
+pub use boot_summary::{
+    boot_summary_from_descriptor, render_boot_summary, BootApprovalGate, BootEnforcedGuarantee,
+    BootFlagshipEntrypoint, BootSource, BootSummary, BootSurfaceCounts,
+    GUARANTEE_ID_APP_BOOT_SUMMARY_GROUNDED,
+};
 pub use attestation::{
     attestation_to_embedded_bytes, parse_embedded_attestation_bytes, EmbeddedAttestationError,
     EmbeddedAttestationSection, CORVID_ABI_ATTESTATION_PAYLOAD_TYPE,

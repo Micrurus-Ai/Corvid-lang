@@ -31,8 +31,8 @@ use crate::cli::migrate::MigrateCommand;
 use crate::cli::observe::ObserveCommand;
 use crate::cli::package::PackageCommand;
 use crate::cli::root::{
-    AbiCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand, BenchCommand,
-    BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
+    AbiCommand, AppCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand,
+    BenchCommand, BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
     ConnectorsOauthCommand, ContractCommand, DeployCommand, OpsCommand, ReceiptCommand,
     ReleaseCommand, ReviewQueueCommand, TraceCommand, UpgradeCommand,
 };
@@ -762,6 +762,11 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Connectors { command }) => cmd_connectors(command),
         Some(Command::Auth { command }) => cmd_auth(command),
         Some(Command::Approvals { command }) => cmd_approvals(command),
+        Some(Command::App { command }) => match command {
+            AppCommand::BootSummary { file } => {
+                crate::app_cmd::run_boot_summary(&file).map(|_| 0)
+            }
+        },
         Some(Command::ReviewQueue { command }) => match command {
             ReviewQueueCommand::List {
                 records,

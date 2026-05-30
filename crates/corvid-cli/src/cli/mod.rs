@@ -13,6 +13,7 @@
 //! follow as the dispatch tree is extracted.
 
 pub mod abi;
+pub mod app;
 pub mod approvals;
 pub mod approver;
 pub mod auth;
@@ -37,6 +38,8 @@ pub mod upgrade;
 
 #[allow(unused_imports)]
 pub use abi::*;
+#[allow(unused_imports)]
+pub use app::*;
 #[allow(unused_imports)]
 pub use approvals::*;
 #[allow(unused_imports)]

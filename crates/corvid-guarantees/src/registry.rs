@@ -1726,6 +1726,39 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         adversarial_test_refs: &[],
     },
     Guarantee {
+        id: "app.boot_summary_grounded",
+        kind: GuaranteeKind::App,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid app boot-summary <source.cor>` lowers the \
+             supplied Corvid source through the standard frontend \
+             pipeline, builds the ABI descriptor in-process, and \
+             renders a typed `BootSummary` (surface counts, \
+             flagship `pub extern \"c\"` entrypoints, approval \
+             gates, enforced guarantees, dangerous-surface counts, \
+             stores-writeable flag, descriptor sha256). Every \
+             derived field is paired with a `BootSource` entry \
+             naming the descriptor field that supplied the value, \
+             mirroring the Grounded<T> sources posture that \
+             `connector.drift_narration_grounded` uses for the \
+             drift narrator. Replay-stable: two invocations on \
+             the same source produce byte-identical output. The \
+             first sub-slice of `35V2-P42-H-LR-per-app-ai-helpers` \
+             to ship; `adversarial-refresh` and `pr-describe` \
+             remain filed under the umbrella as the next slices.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-abi/src/boot_summary.rs::boot_summary_grounds_every_derived_field_to_a_descriptor_source",
+            "crates/corvid-cli/src/app_cmd.rs::boot_summary_for_minimal_app_renders_grounded_block",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-abi/src/boot_summary.rs::boot_summary_empty_surface_descriptor_returns_grounded_summary_not_sourceless",
+            "crates/corvid-abi/src/boot_summary.rs::render_boot_summary_is_byte_identical_across_two_invocations",
+            "crates/corvid-cli/src/app_cmd.rs::boot_summary_for_unparseable_source_returns_typed_error_not_panic",
+        ],
+    },
+    Guarantee {
         id: "package.hosted_registry_available",
         kind: GuaranteeKind::Platform,
         class: GuaranteeClass::OutOfScope,

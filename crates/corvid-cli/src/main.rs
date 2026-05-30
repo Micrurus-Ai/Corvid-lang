@@ -29,6 +29,7 @@
 //!   corvid claim --explain <lib>  explain the guarantees claimed by a cdylib
 
 mod abi_cmd;
+mod app_cmd;
 mod approvals_cmd;
 mod approver_cmd;
 mod audit_cmd;

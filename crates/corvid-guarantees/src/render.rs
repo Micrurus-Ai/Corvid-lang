@@ -161,6 +161,7 @@ fn kind_heading(kind: GuaranteeKind) -> &'static str {
         GuaranteeKind::Upgrade => "Upgrade compatibility",
         GuaranteeKind::Ops => "Live ops introspection",
         GuaranteeKind::Claim => "Claim audit",
+        GuaranteeKind::App => "Per-app helpers",
         GuaranteeKind::Platform => "Platform — explicit non-defenses",
     }
 }
