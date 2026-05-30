@@ -17,6 +17,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub-hosted ubuntu-latest runners ship with ~14 GB free on
+      # the root partition. `cargo test --workspace --lib --tests`
+      # builds ~80 debug test binaries; each links ~250 rlibs plus
+      # the corvid-runtime staticlib. Combined with the cache restore
+      # below, this has repeatedly exhausted the disk during link,
+      # surfacing as `rust-lld` SIGBUS (signal 7, Bus error) inside
+      # LLVM's own mmap-backed write path. The pre-installed Android
+      # SDK, .NET, GHC/Haskell, and CodeQL tooling are not used by
+      # any Corvid CI step — purging them frees ~30 GB without
+      # touching anything we depend on. Cheaper than upgrading to a
+      # paid larger runner and keeps the build matrix on the free
+      # tier.
+      - name: Free disk space on runner
+        run: |
+          set -euo pipefail
+          echo "=== before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"/Ruby \
+                      "$AGENT_TOOLSDIRECTORY"/Java_Adopt_jdk \
+                      "$AGENT_TOOLSDIRECTORY"/PyPy || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "=== after cleanup ==="
+          df -h /
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

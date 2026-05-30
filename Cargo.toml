@@ -117,3 +117,13 @@ codegen-units = 1
 
 [profile.dev]
 opt-level = 0
+# Thin debug info to line tables only. Preserves panic backtrace
+# symbolication (file:line in stack frames) while dropping the
+# DWARF DIE tree that explodes object-file size — `cargo test
+# --workspace` links ~250 rlibs into ~80 test binaries, and full
+# debuginfo + the staticlib was repeatedly exhausting the ~14 GB
+# GitHub-hosted runner disk during link, surfacing as `rust-lld`
+# SIGBUS during write. Local debugger users who need richer
+# variable info can override per-shell with
+# `RUSTFLAGS='-C debuginfo=2'`.
+debug = "line-tables-only"
