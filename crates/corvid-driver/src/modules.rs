@@ -724,22 +724,29 @@ fn dfs_collect(
     in_progress: &mut Vec<PathBuf>,
     errors: &mut Vec<ModuleLoadError>,
 ) {
-    let canonical = target.key();
+    // The path as produced by `resolve_import_path` — `parent/module.cor`
+    // joined textually, without `..` / `.` resolution. We use this for
+    // cycle detection and for the "already loaded" check via
+    // `paths_equivalent` (which canonicalizes on demand to handle the
+    // non-canonical case).
+    let raw_key = target.key();
 
     // Cycle? The DFS stack contains an earlier occurrence of this
     // path. Emit a cycle error listing the path from the earlier
     // occurrence to here.
-    if let Some(idx) = in_progress.iter().position(|p| paths_equivalent(p, &canonical)) {
+    if let Some(idx) = in_progress.iter().position(|p| paths_equivalent(p, &raw_key)) {
         let mut cycle: Vec<PathBuf> = in_progress[idx..].to_vec();
-        cycle.push(canonical);
+        cycle.push(raw_key);
         errors.push(ModuleLoadError::Cycle { cycle });
         return;
     }
 
     // Already fully loaded? Not a cycle, just a repeated visit
     // (A imports B and C, both of which import D; D only loads
-    // once).
-    if loaded.contains_key(&canonical) {
+    // once). Compare via `paths_equivalent` because `loaded`'s keys
+    // are canonicalized (see the `canonical` computation below) but
+    // `raw_key` here is not.
+    if loaded.keys().any(|p| paths_equivalent(p, &raw_key)) {
         return;
     }
 
@@ -753,6 +760,33 @@ fn dfs_collect(
             return;
         }
     };
+    // The file successfully loaded — now we can canonicalize the
+    // path (`canonicalize_or_input` requires the file to exist for
+    // it to actually resolve `..` and `.` segments and symlinks).
+    // Storing the canonical form as the `loaded` key is essential
+    // for cross-module call dispatch: `typecheck_imported_modules`
+    // (corvid-driver/src/pipeline/mod.rs) calls
+    // `build_module_resolution` AGAIN with each imported module's
+    // path as root, and that nested call canonicalizes its root.
+    // The `ImportedCallTarget.module_path` produced by the nested
+    // typecheck uses canonical paths; if the outer `all_modules`
+    // keys (and therefore `build_imported_def_ids`'s map keys)
+    // were non-canonical, the lookup at lowering time would miss
+    // and the call would fall back to its original (unmapped)
+    // `DefId`, producing `agent <name> is missing from the IR`
+    // errors at runtime.
+    //
+    // This is the bug that was making `rag_qa_bot` fail on Linux
+    // CI but pass on Windows — Linux's `canonicalize` aggressively
+    // resolves `..` segments while the Windows path comparison
+    // happens to match string-equal-with-`..` against the
+    // non-canonical key.
+    let canonical = canonicalize_or_input(&raw_key);
+    let canonical_target = match &target {
+        ImportTarget::Local(_) => ImportTarget::local(canonical.clone()),
+        _ => target.clone(),
+    };
+
     if let Some(expected_hash) = expected_hash {
         let actual = sha256_hex(&bytes);
         if actual != expected_hash.hex {
@@ -798,12 +832,15 @@ fn dfs_collect(
         // carry valid imports we want to check for cycles and load.
     }
 
-    // Push, recurse into our own Corvid imports, pop.
+    // Push, recurse into our own Corvid imports, pop. Children's
+    // `resolve_child_target` walks relative to the *canonical*
+    // parent path, so children's paths stay consistent with the
+    // outer keying.
     in_progress.push(canonical.clone());
     for import in corvid_imports(&file) {
-        match resolve_child_target(&target, import, package_lock) {
+        match resolve_child_target(&canonical_target, import, package_lock) {
             Ok(child) => dfs_collect(
-                &target,
+                &canonical_target,
                 child.target,
                 &import.module,
                 child.content_hash.as_ref(),
@@ -817,7 +854,7 @@ fn dfs_collect(
     }
     in_progress.pop();
 
-    // Mark fully loaded.
+    // Mark fully loaded under the canonical key.
     loaded.insert(canonical, file);
 }
 
