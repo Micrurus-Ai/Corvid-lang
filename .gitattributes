@@ -19,3 +19,16 @@ examples/**/bindings_rust/** text eol=lf
 examples/**/verify.sh        text eol=lf
 examples/**/corvid-bundle.toml text eol=lf
 examples/_bundle_demo_common.sh text eol=lf
+
+# Lock LF on Corvid source files and recorded traces. Prompt
+# templates inside a `.cor` source are rendered verbatim into the
+# trace's `rendered` field at recording time, and the replay
+# engine compares that field against the live render byte-for-
+# byte (after timestamp/line-ending normalization). When a
+# recording was made on a Linux host (LF) and a replay runs on a
+# Windows working tree with CRLF, the comparison's CRLF→LF
+# normalization handles the difference at compare time, but
+# locking LF on disk avoids the slop entirely and keeps the
+# committed traces stable across platforms.
+*.cor   text eol=lf
+*.jsonl text eol=lf

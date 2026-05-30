@@ -501,9 +501,23 @@ impl ReplaySource {
 
     fn rendered_matches_grounded_timestamp(expected: Option<&str>, actual: &str) -> bool {
         expected.is_some_and(|expected| {
-            expected == actual
-                || Self::normalize_grounded_timestamps_in_str(expected)
-                    == Self::normalize_grounded_timestamps_in_str(actual)
+            let normalize = |s: &str| {
+                // Normalize CRLF → LF before comparing. A Corvid source
+                // file checked out on Windows with `core.autocrlf=true`
+                // contains `\r\n`; the same file on Linux contains
+                // `\n`. The recorded trace's `rendered` field reflects
+                // whichever line endings the recording host saw, and
+                // the live replay reflects the *replay host*'s line
+                // endings. Without this normalization an LF-recorded
+                // trace can never match a CRLF-rendered live string,
+                // even though the prompt is semantically identical.
+                // The `.gitattributes` rule that forces `*.cor text
+                // eol=lf` is the long-term fix; this normalization is
+                // belt-and-braces for hosts that still have CRLF
+                // copies in their working tree.
+                Self::normalize_grounded_timestamps_in_str(&s.replace("\r\n", "\n"))
+            };
+            expected == actual || normalize(expected) == normalize(actual)
         })
     }
 
