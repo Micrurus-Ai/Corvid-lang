@@ -15,7 +15,10 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use corvid_abi::{boot_summary_from_descriptor, descriptor_from_json, render_boot_summary};
+use corvid_abi::{
+    adversarial_refresh_from_descriptor, boot_summary_from_descriptor, descriptor_from_json,
+    render_adversarial_refresh, render_boot_summary,
+};
 use corvid_driver::build_catalog_descriptor_for_source;
 
 /// Anchor for the boot-summary launch-readiness row. The CLI's
@@ -30,6 +33,11 @@ use corvid_driver::build_catalog_descriptor_for_source;
 pub const GUARANTEE_ID_APP_BOOT_SUMMARY_GROUNDED: &str =
     corvid_abi::GUARANTEE_ID_APP_BOOT_SUMMARY_GROUNDED;
 
+/// Anchor for the adversarial-refresh launch-readiness row.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_APP_ADVERSARIAL_REFRESH_GROUNDED: &str =
+    corvid_abi::GUARANTEE_ID_APP_ADVERSARIAL_REFRESH_GROUNDED;
+
 /// Runs `corvid app boot-summary <source.cor>`. Lowers the
 /// source file in-process to an ABI descriptor and prints the
 /// typed boot summary. Returns a typed error rather than
@@ -40,6 +48,21 @@ pub fn run_boot_summary(source_path: &Path) -> Result<()> {
         .with_context(|| format!("parse descriptor for `{}`", source_path.display()))?;
     let summary = boot_summary_from_descriptor(&descriptor);
     let rendered = render_boot_summary(&summary);
+    print!("{rendered}");
+    Ok(())
+}
+
+/// Runs `corvid app adversarial-refresh <source.cor>`. Lowers
+/// the source to a descriptor and prints a typed walker over
+/// every surface element with one suggestion per (element,
+/// threat) pair. Same diagnostics posture as boot-summary:
+/// typed error rather than panic for unparseable sources.
+pub fn run_adversarial_refresh(source_path: &Path) -> Result<()> {
+    let descriptor_json = build_descriptor_json(source_path)?;
+    let descriptor = descriptor_from_json(&descriptor_json)
+        .with_context(|| format!("parse descriptor for `{}`", source_path.display()))?;
+    let report = adversarial_refresh_from_descriptor(&descriptor);
+    let rendered = render_adversarial_refresh(&report);
     print!("{rendered}");
     Ok(())
 }
@@ -111,6 +134,57 @@ mod tests {
         let src = dir.path().join("broken.cor");
         fs::write(&src, "this is not corvid syntax !!!").expect("write source");
         let err = run_boot_summary(&src).expect_err("must reject unparseable source");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("broken.cor"),
+            "error must name the offending file, got: {msg}"
+        );
+    }
+
+    /// Positive: a source with a `pub extern "c"` agent
+    /// produces adversarial suggestions for that agent, and the
+    /// rendered output names every suggestion's fixture name +
+    /// its surface element. The output contains the
+    /// `report_sources:` block — the contract that
+    /// `app.adversarial_refresh_grounded` promotes.
+    #[test]
+    fn adversarial_refresh_for_extern_agent_renders_grounded_suggestions() {
+        let dir = tempdir().expect("tempdir");
+        let src = dir.path().join("main.cor");
+        fs::write(
+            &src,
+            "@budget($1.00)\npub extern \"c\"\nagent ask(question: String) -> String:\n    return \"hello-\" + question\n",
+        )
+        .expect("write source");
+
+        let descriptor_json = build_descriptor_json(&src).expect("descriptor");
+        let descriptor = descriptor_from_json(&descriptor_json).expect("parse descriptor");
+        let report = adversarial_refresh_from_descriptor(&descriptor);
+        assert!(report.coverage_counts.agent_suggestions >= 2);
+        for s in &report.suggestions {
+            assert!(
+                !s.sources.is_empty(),
+                "suggestion {} has empty sources",
+                s.suggested_fixture_name
+            );
+        }
+        let rendered = render_adversarial_refresh(&report);
+        assert!(rendered.contains("Corvid app adversarial-refresh report"));
+        assert!(rendered.contains("coverage_counts:"));
+        assert!(rendered.contains("report_sources:"));
+        assert!(rendered.contains("ask_malformed_payload_refused"));
+        assert!(rendered.contains("ask_unauthorised_caller_refused"));
+    }
+
+    /// Adversarial: a source that fails to compile must surface
+    /// a typed error naming the file, NOT panic. Same posture
+    /// as boot-summary.
+    #[test]
+    fn adversarial_refresh_for_unparseable_source_returns_typed_error_not_panic() {
+        let dir = tempdir().expect("tempdir");
+        let src = dir.path().join("broken.cor");
+        fs::write(&src, "definitely not corvid").expect("write source");
+        let err = run_adversarial_refresh(&src).expect_err("must reject unparseable source");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("broken.cor"),

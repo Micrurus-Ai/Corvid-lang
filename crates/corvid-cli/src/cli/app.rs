@@ -28,4 +28,24 @@ pub enum AppCommand {
         /// Corvid source file to summarise.
         file: PathBuf,
     },
+    /// Walk the app's ABI surface and suggest the canonical
+    /// adversarial fixtures every surface element should have.
+    ///
+    /// Lowers the supplied `.cor` source through the standard
+    /// pipeline, builds the ABI descriptor in-process, and emits
+    /// one `AdversarialSuggestion` per (surface_element,
+    /// threat_category) pair: cross-tenant variants for every
+    /// dangerous tool and writeable store, role-bypass + expired
+    /// reuse for every approval site, replay-without-token for
+    /// every `@replayable` agent, malformed-payload + role-bypass
+    /// for every `pub extern "c"` agent. Each suggestion carries
+    /// Grounded<T>-shaped `sources` back-referencing the
+    /// descriptor element it came from.
+    ///
+    /// Deterministic + replay-stable. Promotes
+    /// `app.adversarial_refresh_grounded` to runtime-checked.
+    AdversarialRefresh {
+        /// Corvid source file to walk.
+        file: PathBuf,
+    },
 }

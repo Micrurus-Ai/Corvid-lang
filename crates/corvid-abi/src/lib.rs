@@ -1,3 +1,4 @@
+pub mod adversarial_refresh;
 mod approval_contract;
 mod attestation;
 pub mod boot_summary;
@@ -12,6 +13,11 @@ mod signing;
 mod tool_contract;
 mod type_description;
 
+pub use adversarial_refresh::{
+    adversarial_refresh_from_descriptor, render_adversarial_refresh, AdversarialCoverageCounts,
+    AdversarialRefreshReport, AdversarialSuggestion, RefreshSource, SurfaceKind, ThreatCategory,
+    GUARANTEE_ID_APP_ADVERSARIAL_REFRESH_GROUNDED,
+};
 pub use boot_summary::{
     boot_summary_from_descriptor, render_boot_summary, BootApprovalGate, BootEnforcedGuarantee,
     BootFlagshipEntrypoint, BootSource, BootSummary, BootSurfaceCounts,

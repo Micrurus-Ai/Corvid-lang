@@ -1726,6 +1726,56 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         adversarial_test_refs: &[],
     },
     Guarantee {
+        id: "app.adversarial_refresh_grounded",
+        kind: GuaranteeKind::App,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "`corvid app adversarial-refresh <source.cor>` \
+             walks every surface element in the app's ABI \
+             descriptor and emits one typed \
+             `AdversarialSuggestion` per (surface_element, \
+             threat_category) pair. Threat categories include \
+             `CrossTenant`, `MissingBudget`, `ApprovalBypass`, \
+             `UnauthorisedCaller`, `ReplayWithoutToken`, \
+             `WriteWithoutApproval`, `RoleBypass`, \
+             `ExpiredApprovalReuse`, `DataClassDrift`, and \
+             `MalformedPayload`. Per-surface coverage: every \
+             approval site gets cross-tenant + role-bypass + \
+             expired-approval-reuse suggestions, plus \
+             data-class-drift when dangerous_targets is \
+             non-empty; every `dangerous: true` tool gets \
+             cross-tenant + approval-bypass + missing-budget; \
+             every `pub extern \"c\"` agent gets \
+             malformed-payload + unauthorised-caller, plus \
+             replay-without-token when `@replayable`; every \
+             writeable store gets cross-tenant-write + \
+             write-without-approval. Each suggestion carries a \
+             non-empty `sources` array back-referencing the \
+             descriptor field it was derived from. Suggestions \
+             are sorted deterministically (kind → name → \
+             threat) so two runs on the same descriptor produce \
+             byte-identical reports. Deterministic + LLM-free; \
+             the helper's purpose is to make every surface \
+             element's adversarial coverage requirements visible \
+             so no surface ships without its named adversarial \
+             counterpart. The second sub-slice of \
+             `35V2-P42-H-LR-per-app-ai-helpers` to ship.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-abi/src/adversarial_refresh.rs::every_suggestion_carries_non_empty_sources",
+            "crates/corvid-cli/src/app_cmd.rs::adversarial_refresh_for_extern_agent_renders_grounded_suggestions",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-abi/src/adversarial_refresh.rs::empty_surface_descriptor_produces_empty_report_not_sourceless",
+            "crates/corvid-abi/src/adversarial_refresh.rs::render_adversarial_refresh_is_byte_identical_across_two_invocations",
+            "crates/corvid-abi/src/adversarial_refresh.rs::non_dangerous_tools_get_no_suggestions",
+            "crates/corvid-abi/src/adversarial_refresh.rs::read_only_stores_get_no_write_suggestions",
+            "crates/corvid-abi/src/adversarial_refresh.rs::replayable_agents_get_replay_without_token_suggestion_non_replayable_do_not",
+            "crates/corvid-cli/src/app_cmd.rs::adversarial_refresh_for_unparseable_source_returns_typed_error_not_panic",
+        ],
+    },
+    Guarantee {
         id: "app.boot_summary_grounded",
         kind: GuaranteeKind::App,
         class: GuaranteeClass::RuntimeChecked,

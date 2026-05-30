@@ -6186,3 +6186,56 @@ The CLI dispatch arm threads `()` to `0u8` because `run` returns
 `Result<u8>` (a typed exit code). The helper itself returns
 `Result<()>` and lets the dispatcher translate success — a small
 pattern worth keeping consistent across the per-app helpers.
+
+## 35V2-P42-H-LR-2 app adversarial-refresh (2026-05-30)
+
+`corvid app adversarial-refresh <source.cor>` ships the second
+sub-slice of the per-app AI helpers umbrella. Same deterministic
+typed-classifier posture as boot-summary: walks the ABI
+descriptor in-process, emits typed suggestions with Grounded<T>
+sources, replay-stable.
+
+The defining design move was the threat-category taxonomy. The
+existing connector threat corpus (`t1` through `t7`) is
+provider-shaped; app surfaces have a different attack surface
+geometry. The 10 categories that landed (CrossTenant,
+MissingBudget, ApprovalBypass, UnauthorisedCaller,
+ReplayWithoutToken, WriteWithoutApproval, RoleBypass,
+ExpiredApprovalReuse, DataClassDrift, MalformedPayload) cover
+every named attack the reference apps already test by hand. The
+walker is opinionated about which categories attach to which
+surface kinds: only `dangerous: true` tools get suggestions
+(non-dangerous tools are already constrained by their type
+signature), only writeable stores get write-targeted suggestions
+(read-only caches don't have a write attack surface), only
+`pub extern "c"` agents get unauthorised-caller suggestions
+(internal agents are unreachable from a host). This keeps the
+suggestion list short and high-signal — an operator who runs
+the helper against an app with N dangerous tools, M `pub extern
+"c"` agents, K writeable stores, and L approval sites sees
+exactly `3N + 2M (+ 1 if any replayable) + 2K + 3L (+ 1 per
+approval with dangerous_targets)` suggestions, every one
+actionable.
+
+A secondary lesson: snake_case conversion needs to split on
+camelCase boundaries. The first attempt did not — `ExportTenantCorpus`
+became `exporttenantcorpus_cross_tenant_refused`, which is
+unreadable. The corrected walker inserts an underscore before
+each uppercase letter that follows a lowercase or digit. The
+inline test
+`render_adversarial_refresh_is_byte_identical_across_two_invocations`
+asserts the named approval surfaces (`ExportTenantCorpus`,
+`ShareAnswerToChat`) produce the expected snake_case fixture
+names, locking in the convention.
+
+The suggestion-ordering choice — sort by `surface_kind` slug →
+`surface_name` → `threat` slug — was the third design move. An
+operator triaging the output wants all approval-site suggestions
+together, then all tool suggestions, then all agent suggestions,
+then all store suggestions; within each kind, alphabetical by
+surface name so they can grep; within each surface element,
+alphabetical by threat slug so the same threat category appears
+in the same position across surfaces. Two runs on the same
+descriptor produce byte-identical output, which is what makes
+the report safe to embed in CI gates that diff helper output
+across builds.
