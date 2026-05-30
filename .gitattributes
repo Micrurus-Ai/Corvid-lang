@@ -3,3 +3,19 @@
 install/*.sh        text eol=lf
 install/*.ps1       text eol=lf
 .github/workflows/* text eol=lf
+
+# Lock LF on example-bundle inputs. `corvid bundle verify` hashes
+# every file under `bindings_rust/` (and the `verify.sh` /
+# `corvid-bundle.toml` companions) byte-for-byte; if Git checks
+# any of them out with CRLF on one host and LF on another, the
+# recorded sha256 in `corvid-bundle.toml` matches on one platform
+# and silently mismatches on the other. The Linux CI failure on
+# `failing_rebuild` (BundleHashMismatch: bindings_rust expected
+# `cb895287…` but found `17f7d62c…`) was exactly this — a
+# CRLF-on-Windows recorded hash that no Linux checkout could
+# match. Forcing LF here makes the recorded hashes
+# platform-independent, the way they were always meant to be.
+examples/**/bindings_rust/** text eol=lf
+examples/**/verify.sh        text eol=lf
+examples/**/corvid-bundle.toml text eol=lf
+examples/_bundle_demo_common.sh text eol=lf

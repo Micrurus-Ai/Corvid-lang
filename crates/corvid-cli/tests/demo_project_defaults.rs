@@ -546,6 +546,7 @@ fn rag_qa_bot_runs_with_mock_retrieval_and_llm() {
         .env("CORVID_TEST_MOCK_TOOLS", RAG_QA_MOCK_TOOLS)
         .env("CORVID_TEST_MOCK_LLM", "1")
         .env("CORVID_TEST_MOCK_LLM_RESPONSE", RAG_QA_MOCK_CONTEXT)
+        .env("CORVID_MODEL", "mock-1")
         .current_dir(&app)
         .output()
         .expect("run rag qa demo");
@@ -571,6 +572,7 @@ fn rag_qa_bot_corvid_tests_pass_with_mock_retrieval_and_llm() {
             .env("CORVID_TEST_MOCK_TOOLS", RAG_QA_MOCK_TOOLS)
             .env("CORVID_TEST_MOCK_LLM", "1")
             .env("CORVID_TEST_MOCK_LLM_RESPONSE", RAG_QA_MOCK_CONTEXT)
+            .env("CORVID_MODEL", "mock-1")
             .current_dir(&repo)
             .output()
             .unwrap_or_else(|err| panic!("run rag qa test {suite}: {err}"));
@@ -599,6 +601,7 @@ fn rag_qa_bot_eval_harness_passes_with_mock_retrieval_and_llm() {
         .env("CORVID_TEST_MOCK_TOOLS", RAG_QA_MOCK_TOOLS)
         .env("CORVID_TEST_MOCK_LLM", "1")
         .env("CORVID_TEST_MOCK_LLM_RESPONSE", RAG_QA_MOCK_CONTEXT)
+        .env("CORVID_MODEL", "mock-1")
         .current_dir(repo)
         .output()
         .expect("run rag qa eval");
@@ -878,6 +881,7 @@ fn code_review_agent_runs_with_mock_github_and_llm() {
         .env("CORVID_TEST_MOCK_TOOLS", CODE_REVIEW_MOCK_TOOLS)
         .env("CORVID_TEST_MOCK_LLM", "1")
         .env("CORVID_TEST_MOCK_LLM_REPLIES", CODE_REVIEW_MOCK_LLM)
+        .env("CORVID_MODEL", "mock-1")
         .current_dir(&app)
         .output()
         .expect("run code review demo");
@@ -913,6 +917,7 @@ fn code_review_agent_corvid_tests_pass_with_mock_github_and_llm() {
             .env("CORVID_TEST_MOCK_TOOLS", tools)
             .env("CORVID_TEST_MOCK_LLM", "1")
             .env("CORVID_TEST_MOCK_LLM_REPLIES", llm)
+            .env("CORVID_MODEL", "mock-1")
             .current_dir(&repo)
             .output()
             .unwrap_or_else(|err| panic!("run code review test {suite}: {err}"));
@@ -941,6 +946,7 @@ fn code_review_agent_eval_harness_passes_with_mock_github_and_llm() {
         .env("CORVID_TEST_MOCK_TOOLS", CODE_REVIEW_EVAL_MOCK_TOOLS)
         .env("CORVID_TEST_MOCK_LLM", "1")
         .env("CORVID_TEST_MOCK_LLM_REPLIES", CODE_REVIEW_EVAL_MOCK_LLM)
+        .env("CORVID_MODEL", "mock-1")
         .current_dir(repo)
         .output()
         .expect("run code review eval");
