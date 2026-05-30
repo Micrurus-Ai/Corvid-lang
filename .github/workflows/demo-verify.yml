@@ -84,6 +84,15 @@ jobs:
             # field. A full backtrace needs gdb; the uploaded
             # artifact lets a follow-up step run gdb locally if
             # desired.
+            # Ensure gdb is available on the runner (it should be
+            # pre-installed on ubuntu-latest but make it explicit).
+            if ! command -v gdb >/dev/null 2>&1; then
+              echo "[installing gdb]"
+              sudo apt-get -qq install -y gdb 2>&1 | tail -3 || true
+            fi
+            echo "[gdb version]"
+            gdb --version 2>&1 | head -1 || echo "(gdb still missing)"
+            echo ""
             CORE_FOUND=0
             for core in /tmp/cores/core.* /tmp/cores/core; do
               [ -f "$core" ] || continue
@@ -91,13 +100,20 @@ jobs:
               echo "[core $core]"
               file "$core" 2>/dev/null || true
               echo ""
-              # Run gdb non-interactively to dump the crash
-              # backtrace if gdb is available on the runner.
-              if command -v gdb >/dev/null 2>&1; then
-                echo "[gdb backtrace for $core]"
-                gdb --batch -ex "bt full" -ex "info threads" -ex "thread apply all bt" target/debug/corvid "$core" 2>&1 | head -200 || true
-                echo ""
-              fi
+              # Run gdb non-interactively. Dump the crashing
+              # thread's full backtrace + all threads + the
+              # disassembly around the IP. Capped at 400 lines.
+              echo "[gdb crashed-thread bt + all-threads bt for $core]"
+              gdb --batch \
+                  -ex "set pagination off" \
+                  -ex "set logging redirect on" \
+                  -ex "thread" \
+                  -ex "bt full" \
+                  -ex "info threads" \
+                  -ex "thread apply all bt 30" \
+                  -ex "disassemble \$pc, +32" \
+                  target/debug/corvid "$core" 2>&1 | head -400 || true
+              echo ""
             done
             if [ "$CORE_FOUND" -eq 0 ]; then
               echo "[no core files generated]"
