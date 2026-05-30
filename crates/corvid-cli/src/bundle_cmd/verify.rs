@@ -203,7 +203,7 @@ fn verify_rebuild(loaded: &LoadedManifest) -> Result<()> {
     compare_dirs("bindings_python", &loaded.bindings_python_dir(), &rebuilt_python_dir)?;
 
     for trace in &loaded.manifest.traces {
-        let result = unsafe { replay_library_trace(&rebuilt_library, &loaded.resolve(&trace.path)) }?;
+        let result = replay_library_trace(&rebuilt_library, &loaded.resolve(&trace.path))?;
         if result.agent != trace.expected_agent {
             bail!(
                 "BundleReplayMismatch: trace `{}` replayed agent `{}` instead of `{}`",
@@ -297,13 +297,34 @@ type CorvidCallAgentFn = unsafe extern "C" fn(
 type CorvidFreeResultFn = unsafe extern "C" fn(*mut c_char);
 type CorvidObservationReleaseFn = unsafe extern "C" fn(u64);
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ReplayOutput {
     agent: String,
     result_json: String,
     observation_present: bool,
 }
 
-unsafe fn replay_library_trace(library_path: &Path, trace_path: &Path) -> Result<ReplayOutput> {
+/// In-process replay used by the `__replay-trace` subprocess.
+///
+/// SAFETY: This function dlopens a freshly-built cdylib and calls
+/// its `corvid_call_agent` symbol. On glibc, the cdylib's Rust
+/// runtime registers thread-local destructors against the calling
+/// thread (i.e. this subprocess's main worker thread) via
+/// `__cxa_thread_atexit_impl`. When the calling thread later
+/// exits, `__call_tls_dtors` jumps to those destructor function
+/// pointers — which can crash with SIGSEGV at `ip=0` even when
+/// the cdylib mapping is preserved via `RTLD_NODELETE`.
+///
+/// That's exactly why this function runs in a SUBPROCESS via
+/// `__replay-trace` rather than directly in the corvid CLI
+/// process. The subprocess may crash during teardown, but it
+/// has already printed its JSON result to stdout by then; the
+/// parent reads the JSON regardless of the subprocess's exit
+/// code (see `replay_library_trace` below for the parent side).
+unsafe fn replay_library_trace_in_process(
+    library_path: &Path,
+    trace_path: &Path,
+) -> Result<ReplayOutput> {
     let events = read_events_from_path(trace_path)
         .with_context(|| format!("read trace `{}`", trace_path.display()))?;
     validate_supported_schema(&events)
@@ -451,6 +472,97 @@ unsafe fn replay_library_trace(library_path: &Path, trace_path: &Path) -> Result
     std::mem::forget(library);
 
     Ok(output)
+}
+
+/// Parent-side replay: spawn `corvid bundle __replay-trace --library
+/// <path> --trace <path>` as a subprocess and read its single-line
+/// JSON output. The subprocess does the dlopen + call_agent
+/// in-process (via `replay_library_trace_in_process`), prints a
+/// `ReplayOutput`-shaped JSON line, then exits.
+///
+/// The subprocess may crash during its own teardown — the exact
+/// failure pattern was a long-standing `bundle_rebuild` Linux CI
+/// failure, diagnosed via gdb backtrace as a NULL function pointer
+/// inside glibc's `__call_tls_dtors` when the calling thread
+/// runs Rust TLS destructors registered by the cdylib's runtime.
+/// We tolerate the subprocess crashing by reading its stdout
+/// first and only consulting the exit status if no JSON line
+/// landed. The parent corvid process never dlopens anything, so
+/// it never accumulates the dangling-TLS-destructor state.
+fn replay_library_trace(library_path: &Path, trace_path: &Path) -> Result<ReplayOutput> {
+    let corvid_exe =
+        std::env::current_exe().context("locate current corvid binary for subprocess spawn")?;
+    let library_str = library_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("library path is not valid UTF-8"))?;
+    let trace_str = trace_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("trace path is not valid UTF-8"))?;
+    let output = std::process::Command::new(&corvid_exe)
+        .args([
+            "bundle",
+            "__replay-trace",
+            "--library",
+            library_str,
+            "--trace",
+            trace_str,
+        ])
+        .output()
+        .with_context(|| {
+            format!(
+                "spawn `corvid bundle __replay-trace` subprocess (binary `{}`)",
+                corvid_exe.display()
+            )
+        })?;
+
+    // First, try to extract a single JSON line from stdout. The
+    // subprocess prints exactly one JSON object on its first line
+    // and flushes BEFORE returning from main_impl, so the line is
+    // present even when the subprocess later crashes in
+    // `__call_tls_dtors` during thread teardown.
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    for line in stdout_str.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(replay) = serde_json::from_str::<ReplayOutput>(line) {
+            return Ok(replay);
+        }
+    }
+
+    // No JSON found. Use the subprocess's exit status + stderr
+    // to surface the actual error.
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+    bail!(
+        "subprocess `corvid bundle __replay-trace --library {} --trace {}` produced no \
+         JSON output. status={:?} stdout={} stderr={}",
+        library_str,
+        trace_str,
+        output.status.code(),
+        stdout_str,
+        stderr_str
+    );
+}
+
+/// Subprocess entry point: dispatched by `corvid bundle
+/// __replay-trace --library <path> --trace <path>`. Runs the
+/// in-process replay, prints the result as a single-line JSON
+/// object on stdout, flushes stdout, and returns. The function
+/// returns even if the in-process replay errors — the error is
+/// formatted into stderr and the subprocess exits non-zero so the
+/// parent's JSON parser falls through to the error path.
+pub fn run_replay_trace_subprocess(library: &Path, trace: &Path) -> Result<u8> {
+    use std::io::Write as _;
+
+    let output = unsafe { replay_library_trace_in_process(library, trace) }?;
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer(&mut handle, &output)
+        .context("serialise replay output JSON to stdout")?;
+    writeln!(handle).context("write trailing newline to stdout")?;
+    handle.flush().context("flush stdout before returning")?;
+    Ok(0)
 }
 
 fn last_run_started(events: &[TraceEvent]) -> Result<(String, Vec<serde_json::Value>)> {

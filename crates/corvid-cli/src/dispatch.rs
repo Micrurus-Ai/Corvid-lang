@@ -254,6 +254,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 json,
             } => bundle_cmd::run_query(&path, &delta, predecessor.as_deref(), json),
             BundleCommand::Lineage { path, json } => bundle_cmd::run_lineage(&path, json),
+            BundleCommand::ReplayTrace { library, trace } => {
+                bundle_cmd::run_replay_trace_subprocess(&library, &trace)
+            }
         },
         Some(Command::Approver { command }) => match command {
             ApproverCommand::Check {

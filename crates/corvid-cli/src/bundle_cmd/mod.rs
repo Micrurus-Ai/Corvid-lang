@@ -14,4 +14,5 @@ pub use explain::run_explain;
 pub use lineage::run_lineage;
 pub use query::run_query;
 pub use report::run_report;
+pub use verify::run_replay_trace_subprocess;
 pub use verify::run_verify;
