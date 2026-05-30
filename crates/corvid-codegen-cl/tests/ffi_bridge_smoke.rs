@@ -16,7 +16,6 @@
 //! both verify end-to-end compilation + linking + execution, just
 //! from different entry points.
 
-use std::path::PathBuf;
 use std::process::Command;
 
 /// Source of the smoke-test C program. Inlined so the test is
@@ -127,9 +126,6 @@ fn ffi_bridge_init_probe_shutdown() {
     // The smoke test links just the staticlib — no separate C source
     // compile needed.
 
-    // Locate the staticlib — same path link.rs computes at runtime.
-    let staticlib_dir =
-        std::path::Path::new(env!("CORVID_STATICLIB_DIR")).to_path_buf();
     let compiler = cc::Build::new()
         .opt_level(2)
         .cargo_metadata(false)
@@ -150,10 +146,34 @@ fn ffi_bridge_init_probe_shutdown() {
         cmd.env(k, v);
     }
 
-    let staticlib_path = build_staticlib_path(&staticlib_dir, compiler.is_like_msvc());
+    // Locate the staticlib via the same canonical runtime-discovery
+    // path that `link.rs` / `cdylib.rs` use in production. Earlier
+    // revisions of this test read the staticlib directory through a
+    // compile-time env! macro, which (a) embedded an absolute
+    // build-host path into the test binary — the same anti-pattern
+    // the reproducibility test locks down for `link.rs` / `cdylib.rs`
+    // — and (b) hard-failed to compile on any CI host where the var
+    // wasn't pre-exported (Linux CI was failing exactly that way).
+    // The runtime discovery walks up from `current_exe()` and finds
+    // the staticlib next to the test binary's parent dir, matching
+    // the resolution every shipped corvid binary performs.
+    let staticlib_name = if compiler.is_like_msvc() {
+        "corvid_runtime.lib"
+    } else {
+        "libcorvid_runtime.a"
+    };
+    let staticlib_path = corvid_codegen_cl::staticlib_discovery::discover_staticlib(staticlib_name)
+        .map(|loc| loc.path)
+        .unwrap_or_else(|| {
+            panic!(
+                "discover_staticlib found no `{staticlib_name}` via any strategy \
+                 (override env var, dir env var, walk-up from current_exe, sibling \
+                 lib dirs). Run `cargo build -p corvid-runtime --release` first."
+            )
+        });
     assert!(
         staticlib_path.exists(),
-        "staticlib missing at `{}`; run `cargo build -p corvid-runtime --release` first",
+        "staticlib at discovered path `{}` does not exist",
         staticlib_path.display()
     );
 
@@ -232,10 +252,3 @@ fn ffi_bridge_init_probe_shutdown() {
     );
 }
 
-fn build_staticlib_path(dir: &std::path::Path, msvc: bool) -> PathBuf {
-    if msvc {
-        dir.join("corvid_runtime.lib")
-    } else {
-        dir.join("libcorvid_runtime.a")
-    }
-}

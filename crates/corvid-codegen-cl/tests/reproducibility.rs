@@ -74,17 +74,27 @@ fn build_script_emits_no_corvid_staticlib_dir_env_var() {
     );
 }
 
-/// Positive: neither `link.rs` nor `cdylib.rs` reads
+/// Positive: no source file in `corvid-codegen-cl` (production
+/// sources `link.rs` / `cdylib.rs` AND the in-crate integration
+/// tests `ffi_bridge_smoke.rs` / `reproducibility.rs` itself) reads
 /// `CORVID_STATICLIB_DIR` via `env!()`. That macro embeds the
-/// build-time value into the binary as a string literal; the
-/// fix routes through runtime discovery instead. This test
+/// build-time value into the resulting binary as a string literal;
+/// the fix routes through runtime discovery instead. This test
 /// locks the regression: if a future refactor reintroduces
 /// `env!("CORVID_STATICLIB_DIR")` it fails immediately.
+///
+/// The test files are scanned in addition to the production
+/// sources because the test binary itself ships through Cargo's
+/// build pipeline — a stray `env!()` in a test crashes the
+/// compile (the exact failure that brought this regression
+/// scan in), and embedding host paths in test binaries pollutes
+/// any test-artifact uploads with developer paths.
 #[test]
 fn link_and_cdylib_do_not_read_corvid_staticlib_dir_via_env_macro() {
     for source_rel in &[
         "crates/corvid-codegen-cl/src/link.rs",
         "crates/corvid-codegen-cl/src/cdylib.rs",
+        "crates/corvid-codegen-cl/tests/ffi_bridge_smoke.rs",
     ] {
         let body = read_repo_relative(source_rel);
         assert!(

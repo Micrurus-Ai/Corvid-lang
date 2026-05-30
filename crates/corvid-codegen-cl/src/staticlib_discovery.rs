@@ -56,14 +56,24 @@ use std::path::{Path, PathBuf};
 /// Resolution outcome — successful path + which strategy it came
 /// from, so callers can include the strategy in error messages
 /// if the file later fails to open.
+///
+/// `pub` because the in-crate integration test
+/// `tests/ffi_bridge_smoke.rs` resolves the staticlib through the
+/// same canonical path that `link.rs` / `cdylib.rs` use. Centralising
+/// the resolution prevents the test from duplicating the walk
+/// (which would diverge over time) and reduces the surface area
+/// where `env!("CORVID_STATICLIB_DIR")` could leak back in —
+/// `env!` embeds the build-time value as a string literal and
+/// breaks the bit-identical-rebuild contract the reproducibility
+/// test locks down.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StaticlibLocation {
+pub struct StaticlibLocation {
     pub path: PathBuf,
     pub strategy: ResolutionStrategy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResolutionStrategy {
+pub enum ResolutionStrategy {
     OverrideEnvVar,
     DirEnvVar,
     WalkExeAncestors,
@@ -72,12 +82,12 @@ pub(crate) enum ResolutionStrategy {
 
 impl ResolutionStrategy {
     // The `description` method only has callers in this file's
-    // `#[cfg(test)]` module, so `pub(crate)` triggers a dead-code
-    // warning even though the unit tests
+    // `#[cfg(test)]` module, so without the attribute pub triggers a
+    // dead-code warning even though the unit tests
     // (`resolution_strategy_descriptions_are_stable`) lock the
     // returned strings down as a stable error-message contract.
     #[allow(dead_code)]
-    pub(crate) fn description(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
             ResolutionStrategy::OverrideEnvVar => "CORVID_RUNTIME_STATICLIB_OVERRIDE",
             ResolutionStrategy::DirEnvVar => "CORVID_STATICLIB_DIR",
@@ -93,7 +103,7 @@ impl ResolutionStrategy {
 /// platform-specific filename (`corvid_runtime.lib` on MSVC,
 /// `libcorvid_runtime.a` on Unix). Returns `None` if no strategy
 /// finds it.
-pub(crate) fn discover_staticlib(staticlib_name: &str) -> Option<StaticlibLocation> {
+pub fn discover_staticlib(staticlib_name: &str) -> Option<StaticlibLocation> {
     // Override env var: takes a full path to a *file*.
     if let Some(override_path) = std::env::var_os("CORVID_RUNTIME_STATICLIB_OVERRIDE") {
         let path = PathBuf::from(override_path);
