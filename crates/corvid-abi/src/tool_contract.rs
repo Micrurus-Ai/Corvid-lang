@@ -77,10 +77,46 @@ fn generated_approval_contract(
         .iter()
         .filter_map(|effect_ref| registry.get(effect_ref.name.name.as_str()))
         .collect::<Vec<_>>();
-    let target_resource = contract
-        .domain_effects
-        .iter()
-        .find_map(|effect| effect.target.clone())
+    // `target_resource` names the actual thing the approval is about
+    // — the resource being modified, not the channel doing the
+    // modification. When a tool's effect declares both `money: <field>`
+    // and `external: <vendor>` (e.g. `charge_card` has
+    // `money: amount`, `external: stripe`), the resource is the
+    // amount and the vendor is incidental.
+    //
+    // The previous formulation just took the first
+    // `domain_effects.target` it found. `domain_effects` is
+    // populated by iterating `EffectProfile.dimensions`, which is a
+    // `HashMap` (effects.rs:60). HashMap iteration uses
+    // `RandomState`, so the order of the pushed effects — and thus
+    // which target won here — flipped per process. CI hit a seed
+    // where `external: stripe` came before `money: amount` and the
+    // contract test failed; local runs and most other CI runs hit
+    // the opposite seed and passed. The right fix is a deterministic
+    // preference, not coin-flipping on iteration order.
+    let pick_target = |kind: &str| {
+        contract
+            .domain_effects
+            .iter()
+            .filter(|effect| effect.kind == kind)
+            .find_map(|effect| effect.target.clone())
+    };
+    let target_resource = pick_target("money")
+        .or_else(|| pick_target("data"))
+        .or_else(|| {
+            // Any other kind that carries a target, as a last
+            // resort. Deterministic by virtue of `Vec` iteration
+            // order being insertion order — push_domain_effect
+            // appends, and the calling order across effects is
+            // determined by `tool.effect_row.effects` (source
+            // order), so equal-priority kinds resolve stably.
+            contract
+                .domain_effects
+                .iter()
+                .filter(|effect| !matches!(effect.kind.as_str(), "external" | "irreversible"))
+                .find_map(|effect| effect.target.clone())
+        })
+        .or_else(|| pick_target("external"))
         .or_else(|| tool.params.first().map(|param| param.name.name.clone()))
         .unwrap_or_else(|| tool.name.name.clone());
     let max_cost_usd = profiles
