@@ -1,5 +1,7 @@
-use std::ffi::{c_char, CStr, CString};
+use std::collections::HashMap;
+use std::ffi::{c_char, CStr, CString, OsStr, OsString};
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 
 use corvid_abi::{descriptor_to_embedded_bytes, emit_catalog_abi, EmitOptions};
 use corvid_codegen_cl::{build_library_to_disk, BuildTarget};
@@ -10,6 +12,73 @@ use corvid_trace_schema::{read_events_from_path, validate_supported_schema, Trac
 use corvid_types::{typecheck, EffectRegistry};
 use libloading::Library;
 use tempfile::TempDir;
+
+// Process-wide serialization lock for every test in this file.
+//
+// Every test loads its own cdylib whose statically-linked runtime
+// reads CORVID_* env vars at first initialization. Because env vars
+// are process-global, two tests that mutate the same var while
+// running in parallel would race; and one test leaking a var (e.g.
+// `CORVID_REPLAY_TRACE_PATH` pointing at a tempfile that has since
+// been deleted) would steer the next test's runtime into a Replay
+// build that fails to load — surfacing inside `call_agent` as
+// `RuntimeError` instead of the expected status.
+//
+// `EnvScope` holds this Mutex for the whole test body AND records
+// every set/remove so its Drop impl restores the prior environment.
+// Tests that don't mutate env still create an `EnvScope` so they
+// inherit the same serialization and a clean starting environment.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+struct EnvScope {
+    _guard: MutexGuard<'static, ()>,
+    prior: HashMap<OsString, Option<OsString>>,
+}
+
+impl EnvScope {
+    fn new() -> Self {
+        let guard = ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self {
+            _guard: guard,
+            prior: HashMap::new(),
+        }
+    }
+
+    fn set<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) {
+        let key_os = key.as_ref().to_os_string();
+        self.prior
+            .entry(key_os.clone())
+            .or_insert_with(|| std::env::var_os(&key_os));
+        unsafe {
+            std::env::set_var(&key_os, value);
+        }
+    }
+
+    fn remove<K: AsRef<OsStr>>(&mut self, key: K) {
+        let key_os = key.as_ref().to_os_string();
+        self.prior
+            .entry(key_os.clone())
+            .or_insert_with(|| std::env::var_os(&key_os));
+        unsafe {
+            std::env::remove_var(&key_os);
+        }
+    }
+}
+
+impl Drop for EnvScope {
+    fn drop(&mut self) {
+        for (key, prior) in self.prior.drain() {
+            unsafe {
+                match prior {
+                    Some(value) => std::env::set_var(&key, value),
+                    None => std::env::remove_var(&key),
+                }
+            }
+        }
+    }
+}
 
 const RECORD_SRC: &str = r#"
 prompt classify_prompt(text: String) -> String:
@@ -145,19 +214,22 @@ fn build_library_from_source(
 
 #[test]
 fn prompt_call_agent_records_trace_events_for_embedded_cdylib() {
+    let mut env = EnvScope::new();
     let built = build_record_library();
     let trace_dir = tempfile::tempdir().expect("trace tempdir");
     let trace_path = trace_dir.path().join("record.jsonl");
 
-    unsafe {
-        std::env::set_var("CORVID_MODEL", "mock-1");
-        std::env::set_var("CORVID_TEST_MOCK_LLM", "1");
-        std::env::set_var(
-            "CORVID_TEST_MOCK_LLM_REPLIES",
-            "{\"classify_prompt\":\"positive\"}",
-        );
-        std::env::set_var("CORVID_TRACE_PATH", &trace_path);
+    env.set("CORVID_MODEL", "mock-1");
+    env.set("CORVID_TEST_MOCK_LLM", "1");
+    env.set(
+        "CORVID_TEST_MOCK_LLM_REPLIES",
+        "{\"classify_prompt\":\"positive\"}",
+    );
+    env.set("CORVID_TRACE_PATH", &trace_path);
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
 
+    unsafe {
         let lib = Library::new(&built.path).expect("load library");
         let call_agent: libloading::Symbol<
             unsafe extern "C" fn(
@@ -222,21 +294,22 @@ fn prompt_call_agent_records_trace_events_for_embedded_cdylib() {
 
 #[test]
 fn prompt_call_agent_replays_recorded_trace_on_windows() {
+    let mut env = EnvScope::new();
     let built = build_record_library();
     let trace_dir = tempfile::tempdir().expect("trace tempdir");
     let record_path = trace_dir.path().join("record.jsonl");
 
-    unsafe {
-        std::env::set_var("CORVID_MODEL", "mock-1");
-        std::env::set_var("CORVID_TEST_MOCK_LLM", "1");
-        std::env::set_var(
-            "CORVID_TEST_MOCK_LLM_REPLIES",
-            "{\"classify_prompt\":\"positive\"}",
-        );
-        std::env::set_var("CORVID_TRACE_PATH", &record_path);
-        std::env::remove_var("CORVID_TRACE_DISABLE");
-        std::env::remove_var("CORVID_REPLAY_TRACE_PATH");
+    env.set("CORVID_MODEL", "mock-1");
+    env.set("CORVID_TEST_MOCK_LLM", "1");
+    env.set(
+        "CORVID_TEST_MOCK_LLM_REPLIES",
+        "{\"classify_prompt\":\"positive\"}",
+    );
+    env.set("CORVID_TRACE_PATH", &record_path);
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
 
+    unsafe {
         let lib = Library::new(&built.path).expect("load library");
         let call_agent: libloading::Symbol<
             unsafe extern "C" fn(
@@ -280,9 +353,12 @@ fn prompt_call_agent_replays_recorded_trace_on_windows() {
         assert_ne!(observation, 0);
         free_result(result);
 
-        std::env::set_var("CORVID_REPLAY_TRACE_PATH", &record_path);
-        std::env::set_var("CORVID_TRACE_DISABLE", "1");
-        std::env::set_var(
+        // Switch from record to replay. EnvScope tracks the prior
+        // values from this test's first phase, so its Drop will
+        // restore both phases' mutations together.
+        env.set("CORVID_REPLAY_TRACE_PATH", &record_path);
+        env.set("CORVID_TRACE_DISABLE", "1");
+        env.set(
             "CORVID_TEST_MOCK_LLM_REPLIES",
             "{\"classify_prompt\":\"negative\"}",
         );
@@ -319,16 +395,19 @@ fn prompt_call_agent_replays_recorded_trace_on_windows() {
 
 #[test]
 fn direct_exported_symbol_accepts_explicit_observation_pointer() {
+    let mut env = EnvScope::new();
     let built = build_record_library();
 
-    unsafe {
-        std::env::set_var("CORVID_MODEL", "mock-1");
-        std::env::set_var("CORVID_TEST_MOCK_LLM", "1");
-        std::env::set_var(
-            "CORVID_TEST_MOCK_LLM_REPLIES",
-            "{\"classify_prompt\":\"positive\"}",
-        );
+    env.set("CORVID_MODEL", "mock-1");
+    env.set("CORVID_TEST_MOCK_LLM", "1");
+    env.set(
+        "CORVID_TEST_MOCK_LLM_REPLIES",
+        "{\"classify_prompt\":\"positive\"}",
+    );
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
 
+    unsafe {
         let lib = Library::new(&built.path).expect("load library");
         let classify: libloading::Symbol<
             unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char,
@@ -351,7 +430,18 @@ fn direct_exported_symbol_accepts_explicit_observation_pointer() {
 
 #[test]
 fn generic_call_agent_handles_approval_required_path_on_windows() {
+    let mut env = EnvScope::new();
     let built = build_approval_library();
+
+    // Approval flow does not need a real model — but the cdylib's
+    // runtime initializer reads these vars during first call. Set
+    // explicit values so we cannot be steered by a stale env from
+    // another test that leaked (e.g. CORVID_REPLAY_TRACE_PATH).
+    env.remove("CORVID_REPLAY_TRACE_PATH");
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_TRACE_PATH");
+    env.set("CORVID_MODEL", "mock-1");
+    env.set("CORVID_TEST_MOCK_LLM", "1");
 
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
@@ -383,7 +473,20 @@ fn generic_call_agent_handles_approval_required_path_on_windows() {
             &mut observation,
             std::ptr::null_mut(),
         );
-        assert_eq!(status, CorvidCallStatus::ApprovalRequired);
+        // On status mismatch, surface the runtime's error JSON
+        // (carried in the result buffer when status==RuntimeError)
+        // so CI logs pinpoint the failure cause instead of just
+        // showing `RuntimeError != ApprovalRequired`.
+        if status != CorvidCallStatus::ApprovalRequired {
+            let detail = if result.is_null() {
+                "<no result buffer>".to_string()
+            } else {
+                CStr::from_ptr(result).to_string_lossy().into_owned()
+            };
+            panic!(
+                "expected ApprovalRequired, got {status:?}; runtime result_json: {detail}"
+            );
+        }
         assert!(result.is_null());
         assert_eq!(result_len, 0);
         assert_eq!(observation, 0);
@@ -571,6 +674,7 @@ fn run_agent_via_cdylib(built: &BuiltLibrary, agent_name: &str, args_json: &str)
 
 #[test]
 fn approve_with_struct_arg_records_struct_as_json() {
+    let mut env = EnvScope::new();
     let built = build_library_from_source(
         APPROVE_STRUCT_SRC,
         "tests/trace_record/approve_struct.cor",
@@ -578,10 +682,10 @@ fn approve_with_struct_arg_records_struct_as_json() {
     );
     let trace_dir = tempfile::tempdir().expect("trace tempdir");
     let trace_path = trace_dir.path().join("approve_struct.jsonl");
-    unsafe {
-        std::env::set_var("CORVID_TRACE_PATH", &trace_path);
-        std::env::set_var("CORVID_APPROVE_AUTO", "1");
-    }
+    env.set("CORVID_TRACE_PATH", &trace_path);
+    env.set("CORVID_APPROVE_AUTO", "1");
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
     run_agent_via_cdylib(&built, "run_refund", "[5]");
     let events = read_events_from_path(&trace_path).expect("read trace");
     validate_supported_schema(&events).expect("validate trace");
@@ -600,14 +704,15 @@ fn approve_with_struct_arg_records_struct_as_json() {
 
 #[test]
 fn approve_with_list_arg_records_list_as_json() {
+    let mut env = EnvScope::new();
     let built =
         build_library_from_source(APPROVE_LIST_SRC, "tests/trace_record/approve_list.cor", &[]);
     let trace_dir = tempfile::tempdir().expect("trace tempdir");
     let trace_path = trace_dir.path().join("approve_list.jsonl");
-    unsafe {
-        std::env::set_var("CORVID_TRACE_PATH", &trace_path);
-        std::env::set_var("CORVID_APPROVE_AUTO", "1");
-    }
+    env.set("CORVID_TRACE_PATH", &trace_path);
+    env.set("CORVID_APPROVE_AUTO", "1");
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
     run_agent_via_cdylib(&built, "run_publish", "[1]");
     let events = read_events_from_path(&trace_path).expect("read trace");
     validate_supported_schema(&events).expect("validate trace");
@@ -622,6 +727,7 @@ fn approve_with_list_arg_records_list_as_json() {
 
 #[test]
 fn approve_with_option_arg_records_some_and_none_distinctly() {
+    let mut env = EnvScope::new();
     let built = build_library_from_source(
         APPROVE_OPTION_SRC,
         "tests/trace_record/approve_option.cor",
@@ -629,10 +735,10 @@ fn approve_with_option_arg_records_some_and_none_distinctly() {
     );
     let trace_dir = tempfile::tempdir().expect("trace tempdir");
     let trace_path = trace_dir.path().join("approve_option.jsonl");
-    unsafe {
-        std::env::set_var("CORVID_TRACE_PATH", &trace_path);
-        std::env::set_var("CORVID_APPROVE_AUTO", "1");
-    }
+    env.set("CORVID_TRACE_PATH", &trace_path);
+    env.set("CORVID_APPROVE_AUTO", "1");
+    env.remove("CORVID_TRACE_DISABLE");
+    env.remove("CORVID_REPLAY_TRACE_PATH");
     run_agent_via_cdylib(&built, "run_maybe", "[1]");
     let events = read_events_from_path(&trace_path).expect("read trace");
     validate_supported_schema(&events).expect("validate trace");
