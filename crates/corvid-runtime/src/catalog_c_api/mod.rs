@@ -231,28 +231,53 @@ pub(crate) unsafe fn resolve_current_library_symbol(
 #[cfg(unix)]
 fn current_library_unix() -> &'static libloading::os::unix::Library {
     use std::sync::OnceLock;
-    static CURRENT_LIB: OnceLock<libloading::os::unix::Library> = OnceLock::new();
+    // The OnceLock holds a `&'static Library` rather than an owned
+    // `Library`. `Box::leak` below converts a heap-owned `Library`
+    // to a `&'static` reference, which means the underlying
+    // libloading handle is never dropped. That's deliberate:
+    //
+    // Dropping `libloading::os::unix::Library` calls `dlclose`. On
+    // glibc, `dlclose` on a handle returned by `dlopen(<path-to-
+    // already-loaded-library>, RTLD_NOW)` runs shared-object
+    // destructors in the closing thread, interleaved with the
+    // host process's own atexit chain. When the cdylib is in fact
+    // the main process itself (corvid CLI calling its own
+    // staticlib symbols) OR a cdylib loaded by a host (e.g.
+    // python3 → classify.so), this double-destruction interferes
+    // with Tokio's runtime shutdown and produces a non-zero exit
+    // or signal kill *after* the main work has succeeded. The
+    // local `corvid bundle verify --rebuild` happy-path on Linux
+    // CI demonstrated this exactly: `bundle OK: ...` printed to
+    // stdout, empty stderr, exit non-zero.
+    //
+    // The Library is a process-lifetime resource — the OS
+    // reclaims the underlying mappings on process exit. Leaking
+    // the handle so `dlclose` is never called is the standard
+    // pattern for "globally-initialised, never-freed" shared
+    // library handles (cf. `tracing_subscriber`'s global
+    // dispatcher, `rustls`'s default crypto provider, etc.).
+    static CURRENT_LIB: OnceLock<&'static libloading::os::unix::Library> = OnceLock::new();
 
     CURRENT_LIB.get_or_init(|| {
-        // Prefer opening the cdylib by the path that `dladdr`
-        // resolves for an in-crate anchor. This is the path that
-        // works when we're hosted in another process (e.g.
+        // Prefer opening the library by the path `dladdr` resolves
+        // for an in-crate anchor. This is the path that works when
+        // we're hosted in another process (e.g.
         // `python3 ctypes.CDLL("classify.so")`).
-        if let Ok(path) = current_library_path() {
-            // RTLD_NOW = 0x2 on every glibc + musl + macOS we
-            // ship to. libloading doesn't expose the constant
-            // through `os::unix`, so we pass the raw value.
+        let lib = if let Ok(path) = current_library_path() {
+            // RTLD_NOW = 0x2 on every glibc + musl + macOS we ship
+            // to. libloading doesn't expose the constant through
+            // `os::unix`, so we pass the raw value.
             const RTLD_NOW: std::os::raw::c_int = 2;
-            if let Ok(lib) =
-                unsafe { libloading::os::unix::Library::open(Some(&path), RTLD_NOW) }
-            {
-                return lib;
-            }
-        }
-        // Fallback: `dlopen(NULL)` — the main-program handle.
-        // Works for native-binary builds where the agent symbols
-        // are dynamically exported from the binary.
-        libloading::os::unix::Library::this()
+            unsafe { libloading::os::unix::Library::open(Some(&path), RTLD_NOW) }
+                .unwrap_or_else(|_| libloading::os::unix::Library::this())
+        } else {
+            // Fallback: `dlopen(NULL)` — the main-program handle.
+            // Works for native-binary builds where the agent
+            // symbols are dynamically exported from the binary
+            // via `--export-dynamic`.
+            libloading::os::unix::Library::this()
+        };
+        Box::leak(Box::new(lib))
     })
 }
 
