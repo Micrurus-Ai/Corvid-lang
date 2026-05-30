@@ -39,8 +39,60 @@ jobs:
       - name: cargo test -p corvid-cli --test bundle_integration
         run: cargo test -p corvid-cli --test bundle_integration
 
+      # Enable coredumps and signal traps for the bundle_rebuild
+      # step so a Linux-specific crash (the failure pattern we've
+      # observed: `bundle OK` printed, then SIGABRT / SIGSEGV with
+      # empty stderr because the signal fires in destructor / atexit
+      # code after stdout has flushed) leaves a binary-analysable
+      # artifact. Without this, the crash is invisible.
+      - name: Configure coredumps for bundle_rebuild
+        run: |
+          set -e
+          sudo bash -c 'echo /tmp/cores/core.%e.%p.%t > /proc/sys/kernel/core_pattern'
+          sudo mkdir -p /tmp/cores
+          sudo chmod 1777 /tmp/cores
+          # Verify the runner kernel honors the new pattern.
+          cat /proc/sys/kernel/core_pattern
+
       - name: cargo test -p corvid-cli --test bundle_rebuild
-        run: cargo test -p corvid-cli --test bundle_rebuild
+        run: |
+          ulimit -c unlimited
+          set +e
+          cargo test -p corvid-cli --test bundle_rebuild 2>&1
+          EXIT=$?
+          if [ $EXIT -ne 0 ]; then
+            echo "::group::Post-mortem diagnostics for bundle_rebuild"
+            echo "exit code: $EXIT"
+            echo "--- /tmp/cores contents ---"
+            ls -la /tmp/cores/ 2>/dev/null || echo "(no /tmp/cores dir)"
+            echo "--- dmesg tail (segfault / abort signals) ---"
+            sudo dmesg | tail -100 2>/dev/null || true
+            echo "--- corvid binary info ---"
+            file target/debug/corvid 2>/dev/null || echo "(corvid binary not present)"
+            # If we got a core file, print the signal that caused
+            # the dump via `file` (the kernel records this in the
+            # core's ELF header) and the immediate crash address
+            # via the first `nm`-resolved symbol near it. A full
+            # backtrace needs gdb; the uploaded artifact lets a
+            # follow-up step run gdb locally if desired.
+            for core in /tmp/cores/core.*; do
+              [ -f "$core" ] || continue
+              echo "--- core $core ---"
+              file "$core" 2>/dev/null || true
+            done
+            echo "::endgroup::"
+          fi
+          exit $EXIT
+
+      - name: Upload bundle_rebuild coredumps on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-rebuild-coredumps
+          path: |
+            /tmp/cores/
+            target/debug/corvid
+          if-no-files-found: ignore
 
       - name: cargo test -p corvid-cli --test bundle_query
         run: cargo test -p corvid-cli --test bundle_query
