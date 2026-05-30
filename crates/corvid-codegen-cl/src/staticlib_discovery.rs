@@ -71,6 +71,12 @@ pub(crate) enum ResolutionStrategy {
 }
 
 impl ResolutionStrategy {
+    // The `description` method only has callers in this file's
+    // `#[cfg(test)]` module, so `pub(crate)` triggers a dead-code
+    // warning even though the unit tests
+    // (`resolution_strategy_descriptions_are_stable`) lock the
+    // returned strings down as a stable error-message contract.
+    #[allow(dead_code)]
     pub(crate) fn description(self) -> &'static str {
         match self {
             ResolutionStrategy::OverrideEnvVar => "CORVID_RUNTIME_STATICLIB_OVERRIDE",

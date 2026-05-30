@@ -36,7 +36,9 @@ pub(crate) use invoke_matrix::build_scalar_invoker;
 use crate::catalog::{descriptor_hash, descriptor_json_ptr};
 use crate::errors::RuntimeError;
 use corvid_abi::{read_embedded_section_from_library, EmbeddedDescriptorSection};
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, c_void};
+#[cfg(windows)]
+use std::ffi::CString;
 use std::path::PathBuf;
 use std::ptr;
 
