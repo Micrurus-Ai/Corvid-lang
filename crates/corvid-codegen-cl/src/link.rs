@@ -80,22 +80,18 @@ pub fn link_binary(
             }
             path
         } else {
-            let staticlib_dir = std::path::Path::new(env!("CORVID_STATICLIB_DIR"));
             let runtime_lib_name = if compiler.is_like_msvc() {
                 "corvid_runtime.lib"
             } else {
                 "libcorvid_runtime.a"
             };
-            let primary = staticlib_dir.join(runtime_lib_name);
-            let fallback = staticlib_dir
-                .parent()
-                .map(|parent| parent.join("release").join(runtime_lib_name));
-            if primary.exists() {
-                primary
-            } else if let Some(fallback) = fallback.filter(|path| path.exists()) {
-                fallback
-            } else {
-                return Err(CodegenError::link(missing_staticlib_diagnostic(&primary)));
+            match crate::staticlib_discovery::discover_staticlib(runtime_lib_name) {
+                Some(location) => location.path,
+                None => {
+                    return Err(CodegenError::link(missing_staticlib_diagnostic(
+                        std::path::Path::new(runtime_lib_name),
+                    )));
+                }
             }
         };
 
@@ -220,9 +216,11 @@ pub fn binary_path_for(out_dir: &Path, stem: &str) -> PathBuf {
 ///
 /// Pulled out as a free function so the format string lives in one
 /// place and is unit-testable without exercising the entire link
-/// pipeline. (`env!("CORVID_STATICLIB_DIR")` resolves at compile time
-/// of `corvid-codegen-cl`, so the fallback-not-found branch can't be
-/// triggered from a runtime test environment — the message itself can.)
+/// pipeline. The staticlib path is now resolved at runtime through
+/// `staticlib_discovery::discover_staticlib`, so the not-found
+/// branch is reachable from any environment where the discovery
+/// strategies all miss — including a stripped install with no
+/// `CORVID_RUNTIME_STATICLIB_OVERRIDE` set.
 pub(crate) fn missing_staticlib_diagnostic(primary: &Path) -> String {
     format!(
         "corvid-runtime staticlib missing at `{}`.\n\

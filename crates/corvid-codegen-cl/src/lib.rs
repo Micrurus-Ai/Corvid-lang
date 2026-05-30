@@ -28,6 +28,7 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod scope_reduce;
+mod staticlib_discovery;
 pub mod target;
 
 pub use errors::{CodegenError, CodegenErrorKind};

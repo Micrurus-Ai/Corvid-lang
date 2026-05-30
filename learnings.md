@@ -6295,3 +6295,64 @@ RuntimeChecked guarantee row under `GuaranteeKind::App`. Phase
 - ✅ G-LR (per-app CLAIM.md)
 - ✅ **H-LR (per-app AI helpers)** — this commit
 - ⏳ Phase 33M (external reviewer signoff — last)
+
+## 35V2-P43-deploy-reproducible-build promoted (2026-05-30)
+
+`deploy.reproducible_build` moved from `OutOfScope` to
+`RuntimeChecked`. The promotion was *not* mechanical despite
+the registry comment claiming it would be — the
+reproducible-build CI workflow had been failing on every push
+to `main` since it landed, and the row's `out_of_scope_reason`
+explicitly said the promotion would happen "once that first
+run lands green (or we close the determinism gap it surfaces)."
+The fix lives in the second clause: a real determinism gap.
+
+The leak was `crates/corvid-codegen-cl/build.rs` emitting
+`cargo:rustc-env=CORVID_STATICLIB_DIR=<absolute target dir>`,
+which `link.rs` and `cdylib.rs` then read through `env!()`.
+That macro embeds the build-time value into the binary's
+read-only data section as a string literal. The CI workflow
+runs two `cargo build -p corvid-cli --release` invocations with
+`CARGO_TARGET_DIR=target-build-1` and `CARGO_TARGET_DIR=
+target-build-2` — the embedded string differs between the two
+builds, so SHA-256 diverges even though source, lockfile,
+toolchain, and `SOURCE_DATE_EPOCH` are identical.
+
+The fix routes the staticlib lookup through a new
+`staticlib_discovery::discover_staticlib` function that resolves
+at runtime. Resolution order: `CORVID_RUNTIME_STATICLIB_OVERRIDE`
+(file override, already supported for tests) → new
+`CORVID_STATICLIB_DIR` runtime env var (explicit dir override) →
+walk up from `current_exe()` ancestors (covers `cargo run`,
+`cargo test`, and shipped installs where the staticlib lives
+next to the binary) → documented sibling-`lib/` layouts for
+FHS-style installs. The build script no longer emits any
+host-dependent strings. As a side benefit, shipped binaries
+distributed via `corvid release build` no longer leak a
+developer's `/home/runner/work/Corvid-lang/...` host path into
+the binary's strings — that was never useful to end users.
+
+Two structural traps worth keeping for any future
+"compile-time-bake-vs-runtime-discover" debate:
+
+1. `env!("X")` is friendlier ergonomically than runtime
+   discovery, but it bakes `X`'s value into the binary as a
+   string literal. Anything that varies across builds (target
+   dir, manifest dir, source paths, timestamps from build.rs)
+   becomes a reproducibility leak as soon as it appears in a
+   `cargo:rustc-env=`. The right default is runtime discovery
+   with an explicit env var override.
+2. Doc comments that mention a previously-removed symbol
+   (`env!("CORVID_STATICLIB_DIR")` in `link.rs:219`) tripped my
+   first structural regression test, which grepped for the bare
+   identifier. Tighten patterns to the actual emission/usage
+   syntax (`cargo:rustc-env=CORVID_STATICLIB_DIR` and
+   `env!("CORVID_STATICLIB_DIR")`), not the bare name — doc
+   comments that explain *why* the historical path was removed
+   are valuable and should not be rewritten away.
+
+The production-grade oracle remains
+`.github/workflows/reproducible-build.yml`. The structural
+tests in `crates/corvid-codegen-cl/tests/reproducibility.rs`
+lock the regression in place locally so a future refactor that
+reintroduces the bake fails before reaching CI.

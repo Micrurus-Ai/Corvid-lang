@@ -75,7 +75,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `eval.drift_attribution` | observability | runtime_checked | runtime |
 | `eval.promotion_signed_lineage` | observability | runtime_checked | runtime |
 | `review_queue.cost_of_being_wrong_ranking` | observability | runtime_checked | runtime |
-| `deploy.reproducible_build` | deploy | out_of_scope | platform |
+| `deploy.reproducible_build` | deploy | runtime_checked | platform |
 | `deploy.attestation_chain` | deploy | runtime_checked | platform |
 | `deploy.sbom_completeness` | deploy | runtime_checked | platform |
 | `release.signed_artifact` | release | runtime_checked | platform |
@@ -950,12 +950,22 @@ Redacting the same lineage event twice with the same `LineageRedactionPolicy` yi
 ### Deploy packaging
 
 #### `deploy.reproducible_build`
-- **class**: out_of_scope
+- **class**: runtime_checked
 - **phase**: platform
 
-Building the same `corvid deploy package` input twice on two different hosts produces bit-identical signed artifacts (binary + SBOM + DSSE attestation envelope). A second build that differs is a build-environment leak — timestamps, hostnames, paths — and the verification CI must reject it.
+Building the same `corvid deploy package` input twice on the same host with two different `CARGO_TARGET_DIR` values produces bit-identical signed artifacts (binary + SBOM + DSSE attestation envelope). A second build that differs is a build-environment leak — embedded timestamps, hostnames, paths baked at compile time — and the verification CI rejects it. The original determinism gap that kept this row OutOfScope until 2026-05-30 was a `cargo:rustc-env=CORVID_STATICLIB_DIR=<absolute target dir>` emission from `crates/corvid-codegen-cl/build.rs` that `link.rs` and `cdylib.rs` read through `env!()`, baking the host's `target-build-1` / `target-build-2` path into the corvid binary's read-only data section. Closed by routing the staticlib lookup through `crate::staticlib_discovery::discover_staticlib` at runtime (`current_exe()`-relative resolution with an explicit `CORVID_STATICLIB_DIR` override env var); the build script no longer emits any host-dependent strings. The production-grade oracle remains `.github/workflows/reproducible-build.yml` running on every push to `main`; structural test refs below lock the regression in place locally.
 
-> **Why out of scope:** Slice 43R landed the reproducible-build CI workflow at `.github/workflows/reproducible-build.yml`. The workflow builds the corvid CLI twice on Ubuntu 22.04 with SOURCE_DATE_EPOCH pinned to the commit time and two separate target directories, SHA-256s the outputs, and fails if the hashes differ. The workflow has not yet completed a green run on `main` — until that first run lands green (or we close the determinism gap it surfaces), the row stays OutOfScope. Promotion is mechanical at that point: change class to RuntimeChecked + add the workflow run URL as the test reference. Cross-platform (Ubuntu / macOS / Windows) and cross-host reproducibility are explicit non-scope for this row — they need deterministic-toolchain work beyond the v1.0 surface.
+**Positive tests:**
+
+- `crates/corvid-codegen-cl/tests/reproducibility.rs::build_script_emits_no_corvid_staticlib_dir_env_var`
+- `crates/corvid-codegen-cl/tests/reproducibility.rs::link_and_cdylib_do_not_read_corvid_staticlib_dir_via_env_macro`
+- `crates/corvid-codegen-cl/tests/reproducibility.rs::staticlib_discovery_module_is_wired_into_consumers`
+
+**Adversarial tests:**
+
+- `crates/corvid-codegen-cl/tests/reproducibility.rs::reproducible_build_workflow_file_exists_and_diffs_two_target_dirs`
+- `crates/corvid-codegen-cl/src/staticlib_discovery.rs::override_env_var_pointing_at_missing_file_falls_through`
+- `crates/corvid-codegen-cl/src/staticlib_discovery.rs::resolution_strategy_descriptions_are_stable`
 
 #### `deploy.attestation_chain`
 - **class**: runtime_checked

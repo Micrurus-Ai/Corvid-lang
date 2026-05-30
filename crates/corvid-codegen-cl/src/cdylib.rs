@@ -316,13 +316,29 @@ fn runtime_staticlib_path(compiler: &cc::Tool) -> Result<PathBuf, CodegenError> 
         }
         return Ok(path);
     }
-    let staticlib_dir = Path::new(env!("CORVID_STATICLIB_DIR"));
-    let runtime_staticlib_path = if compiler.is_like_msvc() {
-        staticlib_dir.join("corvid_runtime.lib")
+    let runtime_lib_name = if compiler.is_like_msvc() {
+        "corvid_runtime.lib"
     } else {
-        staticlib_dir.join("libcorvid_runtime.a")
+        "libcorvid_runtime.a"
     };
-    build_runtime_staticlib(staticlib_dir, &runtime_staticlib_path)?;
+    // Fast path: the staticlib is already on disk in a location we
+    // can discover. Skips the dev-mode auto-build entirely when it
+    // isn't needed.
+    if let Some(location) = crate::staticlib_discovery::discover_staticlib(runtime_lib_name) {
+        return Ok(location.path);
+    }
+    // Slow path: no staticlib on disk. Fall back to the dev-mode
+    // auto-build, writing into the canonical Cargo
+    // `target/<profile>/` layout discovered from `current_exe()`.
+    let staticlib_dir = crate::staticlib_discovery::guess_dev_target_profile_dir()
+        .ok_or_else(|| CodegenError::link(
+            "could not locate `corvid-runtime` staticlib and no `target/<profile>/` \
+             directory derivable from the running binary's path. Set \
+             `CORVID_STATICLIB_DIR` to the directory containing the staticlib \
+             or `CORVID_RUNTIME_STATICLIB_OVERRIDE` to its full path."
+        ))?;
+    let runtime_staticlib_path = staticlib_dir.join(runtime_lib_name);
+    build_runtime_staticlib(&staticlib_dir, &runtime_staticlib_path)?;
     if !runtime_staticlib_path.exists() {
         return Err(CodegenError::link(format!(
             "corvid-runtime staticlib missing at `{}` after auto-build.",
