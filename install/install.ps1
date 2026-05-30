@@ -131,6 +131,18 @@ $env:PATH = "$bin;$env:PATH"
 [Environment]::SetEnvironmentVariable('CORVID_HOME', $Root, 'User')
 $env:CORVID_HOME = $Root
 
+# GitHub Actions: each step starts a fresh shell that does not
+# inherit our updates to the user PATH or $env:PATH. Appending to
+# $env:GITHUB_PATH / $env:GITHUB_ENV is how a step makes PATH and
+# environment variables visible to the rest of the job.
+if ($env:GITHUB_PATH -and (Test-Path $env:GITHUB_PATH)) {
+    Add-Content -Path $env:GITHUB_PATH -Value $bin
+    Ok "Appended $bin to `$env:GITHUB_PATH for subsequent steps"
+}
+if ($env:GITHUB_ENV -and (Test-Path $env:GITHUB_ENV)) {
+    Add-Content -Path $env:GITHUB_ENV -Value "CORVID_HOME=$Root"
+}
+
 # --- verify ---------------------------------------------------------------
 $exe = Join-Path $bin 'corvid.exe'
 if (Test-Path $exe) {

@@ -138,6 +138,19 @@ case ":${PATH-}:" in
         ;;
 esac
 
+# GitHub Actions: each step starts a fresh non-interactive shell that
+# does not source ~/.profile / ~/.bashrc / ~/.zshrc, so writing to
+# those files (above) does not propagate PATH to the next step.
+# Appending to $GITHUB_PATH / $GITHUB_ENV is how a step makes PATH
+# and env vars visible to the rest of the job.
+if [ -n "${GITHUB_PATH-}" ] && [ -w "${GITHUB_PATH}" ]; then
+    printf '%s\n' "$bin" >> "$GITHUB_PATH"
+    ok "Appended $bin to \$GITHUB_PATH for subsequent steps"
+fi
+if [ -n "${GITHUB_ENV-}" ] && [ -w "${GITHUB_ENV}" ]; then
+    printf 'CORVID_HOME=%s\n' "$ROOT" >> "$GITHUB_ENV"
+fi
+
 export CORVID_HOME="$ROOT"
 export PATH="$bin:$PATH"
 
