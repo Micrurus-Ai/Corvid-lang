@@ -48,4 +48,25 @@ pub enum AppCommand {
         /// Corvid source file to walk.
         file: PathBuf,
     },
+    /// Diff two Corvid app surfaces and render a typed PR
+    /// description. Lowers both sources to ABI descriptors
+    /// in-process and emits typed sections (Breaking, Additive,
+    /// Informational) covering agents, tools, approval gates,
+    /// types, stores, claim guarantees, and ABI / compiler
+    /// versions. Every bullet carries Grounded<T>-shaped
+    /// `sources` back-referencing the descriptor field that
+    /// diverged. Reviewer reads Breaking sections first.
+    ///
+    /// Deterministic + replay-stable. Promotes
+    /// `app.pr_describe_grounded` to runtime-checked.
+    PrDescribe {
+        /// The base-side Corvid source (typically the
+        /// merge target — `main`).
+        #[arg(long, value_name = "FILE")]
+        base: PathBuf,
+        /// The head-side Corvid source (typically the
+        /// branch being merged).
+        #[arg(long, value_name = "FILE")]
+        head: PathBuf,
+    },
 }

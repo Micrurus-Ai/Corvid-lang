@@ -769,6 +769,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             AppCommand::AdversarialRefresh { file } => {
                 crate::app_cmd::run_adversarial_refresh(&file).map(|_| 0)
             }
+            AppCommand::PrDescribe { base, head } => {
+                crate::app_cmd::run_pr_describe(&base, &head).map(|_| 0)
+            }
         },
         Some(Command::ReviewQueue { command }) => match command {
             ReviewQueueCommand::List {

@@ -3,6 +3,7 @@ mod approval_contract;
 mod attestation;
 pub mod boot_summary;
 mod canonical_hash;
+pub mod pr_describe;
 mod effect_emit;
 mod embedded;
 mod emit;
@@ -22,6 +23,10 @@ pub use boot_summary::{
     boot_summary_from_descriptor, render_boot_summary, BootApprovalGate, BootEnforcedGuarantee,
     BootFlagshipEntrypoint, BootSource, BootSummary, BootSurfaceCounts,
     GUARANTEE_ID_APP_BOOT_SUMMARY_GROUNDED,
+};
+pub use pr_describe::{
+    pr_describe_from_descriptors, render_pr_description, DiffSource, PrBullet, PrChangeCounts,
+    PrDescription, PrSection, PrSeverity, GUARANTEE_ID_APP_PR_DESCRIBE_GROUNDED,
 };
 pub use attestation::{
     attestation_to_embedded_bytes, parse_embedded_attestation_bytes, EmbeddedAttestationError,

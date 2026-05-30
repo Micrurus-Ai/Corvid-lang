@@ -6239,3 +6239,59 @@ in the same position across surfaces. Two runs on the same
 descriptor produce byte-identical output, which is what makes
 the report safe to embed in CI gates that diff helper output
 across builds.
+
+## 35V2-P42-H-LR-3 app pr-describe — H-LR umbrella closed (2026-05-30)
+
+`corvid app pr-describe --base <base.cor> --head <head.cor>`
+ships the third sub-slice and closes the Phase-42 per-app AI
+helpers umbrella. The helper lowers both Corvid sources to ABI
+descriptors in-process and renders a typed `PrDescription`
+ordered Breaking → Additive → Informational.
+
+The defining design move was deciding *what to flag breaking*.
+The boring cases (removed agents/tools/approvals/stores/types,
+schema-version bumps, claim-guarantee removals) are
+unambiguous. The interesting cases are the silent-relaxations
+the helper exists to catch:
+- `pub extern "c"` revoked on a same-name agent → Breaking,
+  because hosts that called the exported symbol now fail to
+  link, even though the agent name still exists in the source.
+- Approval-tier weakening (e.g. `human_required` → `operator`,
+  `operator` → `autonomous`) on a same-label approval site →
+  Breaking, because the policy contract just got loosened
+  without removing the gate.
+- Field count drops on a same-name type → Breaking, because
+  downstream consumers that read the missing field will break
+  even though the type name is unchanged.
+
+These three are the kind of changes a reviewer needs surfaced
+in plain English on top of the PR description, because reading
+the source diff alone obscures them — the source might just
+say "delete one line" but the consequence reaches every host
+that linked the symbol.
+
+The renderer choice — sort sections by severity then heading,
+then bullets in insertion order — keeps the most consequential
+changes on screen first. Two runs on the same `(base, head)`
+descriptors produce byte-identical output, locking down the
+CI-gate-friendly property.
+
+A small implementation note worth keeping for future helpers:
+the `push_section_if_non_empty` predicate suppresses empty
+sections entirely. Without it, every report would render every
+heading even when there's nothing to say, which would noise the
+output. Empty inputs collapse to "no descriptor-surface
+changes between base and head" — one line, no false-positive
+sections.
+
+With H-LR-3 shipped, the H-LR umbrella closes. All three per-
+app helpers (boot-summary, adversarial-refresh, pr-describe)
+ship as deterministic typed classifiers, each promoting a new
+RuntimeChecked guarantee row under `GuaranteeKind::App`. Phase
+42's launch-readiness tail now stands at:
+
+- ✅ E-LR (CI smoke-deploy)
+- ✅ F-LR (benchmark files)
+- ✅ G-LR (per-app CLAIM.md)
+- ✅ **H-LR (per-app AI helpers)** — this commit
+- ⏳ Phase 33M (external reviewer signoff — last)

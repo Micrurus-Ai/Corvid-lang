@@ -87,6 +87,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `platform.host_kernel_compromise` | platform | out_of_scope | platform |
 | `platform.signing_key_compromise` | platform | out_of_scope | platform |
 | `platform.toolchain_compromise` | platform | out_of_scope | platform |
+| `app.pr_describe_grounded` | app | runtime_checked | runtime |
 | `app.adversarial_refresh_grounded` | app | runtime_checked | runtime |
 | `app.boot_summary_grounded` | app | runtime_checked | runtime |
 | `package.hosted_registry_available` | platform | out_of_scope | platform |
@@ -1093,6 +1094,25 @@ Every claim listed in `docs/meta/launch-claim-audit.md` points at either a runna
 - `crates/corvid-cli/src/claim_cmd.rs::explain_failures_on_clean_inventory_yields_zero_findings`
 
 ### Per-app helpers
+
+#### `app.pr_describe_grounded`
+- **class**: runtime_checked
+- **phase**: runtime
+
+`corvid app pr-describe --base <base.cor> --head <head.cor>` lowers both sources to ABI descriptors in-process and renders a typed `PrDescription` summarising what the change set means for the app's claim surface. Emits typed sections (`Breaking`, `Additive`, `Informational`) over agents, tools, approval gates, types, stores, claim guarantees, and ABI / compiler versions. Every bullet carries a non-empty `sources` array back-referencing the descriptor field that diverged. Sections are sorted by severity (Breaking → Additive → Informational) then alphabetically by heading so the reviewer reads the most consequential changes first. The walker catches the subtle cases the helper exists to surface: removed agents/tools/approvals are flagged Breaking; `pub extern "c"` revoked or approval-tier weakened (operator → autonomous, human_required → anything else) is Breaking; field count drops on a same-name type is Breaking. Replay-stable: two invocations on the same `(base, head)` pair produce byte-identical output. Deterministic + LLM-free; the helper's "generative" framing describes its purpose (generating PR-description text) not an LLM round-trip. The third sub-slice of `35V2-P42-H-LR-per-app-ai-helpers` to ship; the umbrella closes with it.
+
+**Positive tests:**
+
+- `crates/corvid-abi/src/pr_describe.rs::pr_describe_emits_bullets_grounded_to_descriptor_fields`
+- `crates/corvid-cli/src/app_cmd.rs::pr_describe_renders_added_agent_in_additive_section_with_grounded_sources`
+
+**Adversarial tests:**
+
+- `crates/corvid-abi/src/pr_describe.rs::no_change_case_produces_typed_grounded_description`
+- `crates/corvid-abi/src/pr_describe.rs::breaking_section_precedes_additive_in_rendered_output`
+- `crates/corvid-abi/src/pr_describe.rs::approval_tier_weakening_is_flagged_breaking`
+- `crates/corvid-abi/src/pr_describe.rs::render_pr_description_is_byte_identical_across_two_invocations`
+- `crates/corvid-cli/src/app_cmd.rs::pr_describe_with_unparseable_base_returns_typed_error_not_panic`
 
 #### `app.adversarial_refresh_grounded`
 - **class**: runtime_checked

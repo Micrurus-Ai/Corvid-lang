@@ -17,7 +17,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use corvid_abi::{
     adversarial_refresh_from_descriptor, boot_summary_from_descriptor, descriptor_from_json,
-    render_adversarial_refresh, render_boot_summary,
+    pr_describe_from_descriptors, render_adversarial_refresh, render_boot_summary,
+    render_pr_description,
 };
 use corvid_driver::build_catalog_descriptor_for_source;
 
@@ -37,6 +38,11 @@ pub const GUARANTEE_ID_APP_BOOT_SUMMARY_GROUNDED: &str =
 #[allow(dead_code)]
 pub const GUARANTEE_ID_APP_ADVERSARIAL_REFRESH_GROUNDED: &str =
     corvid_abi::GUARANTEE_ID_APP_ADVERSARIAL_REFRESH_GROUNDED;
+
+/// Anchor for the pr-describe launch-readiness row.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_APP_PR_DESCRIBE_GROUNDED: &str =
+    corvid_abi::GUARANTEE_ID_APP_PR_DESCRIBE_GROUNDED;
 
 /// Runs `corvid app boot-summary <source.cor>`. Lowers the
 /// source file in-process to an ABI descriptor and prints the
@@ -63,6 +69,24 @@ pub fn run_adversarial_refresh(source_path: &Path) -> Result<()> {
         .with_context(|| format!("parse descriptor for `{}`", source_path.display()))?;
     let report = adversarial_refresh_from_descriptor(&descriptor);
     let rendered = render_adversarial_refresh(&report);
+    print!("{rendered}");
+    Ok(())
+}
+
+/// Runs `corvid app pr-describe --base <base.cor>
+/// --head <head.cor>`. Lowers both sources to descriptors and
+/// prints a typed PR description ordered Breaking → Additive →
+/// Informational. Both sides are subject to the same
+/// typed-error-not-panic posture.
+pub fn run_pr_describe(base_path: &Path, head_path: &Path) -> Result<()> {
+    let base_json = build_descriptor_json(base_path)?;
+    let head_json = build_descriptor_json(head_path)?;
+    let base = descriptor_from_json(&base_json)
+        .with_context(|| format!("parse base descriptor for `{}`", base_path.display()))?;
+    let head = descriptor_from_json(&head_json)
+        .with_context(|| format!("parse head descriptor for `{}`", head_path.display()))?;
+    let description = pr_describe_from_descriptors(&base, &head);
+    let rendered = render_pr_description(&description);
     print!("{rendered}");
     Ok(())
 }
@@ -189,6 +213,63 @@ mod tests {
         assert!(
             msg.contains("broken.cor"),
             "error must name the offending file, got: {msg}"
+        );
+    }
+
+    /// Positive: base→head diff with one new agent renders a
+    /// PR description whose `additive` section names the new
+    /// agent + every emitted bullet carries non-empty sources.
+    #[test]
+    fn pr_describe_renders_added_agent_in_additive_section_with_grounded_sources() {
+        let dir = tempdir().expect("tempdir");
+        let base_src = dir.path().join("base.cor");
+        let head_src = dir.path().join("head.cor");
+        fs::write(
+            &base_src,
+            "@budget($1.00)\npub extern \"c\"\nagent ask(q: String) -> String:\n    return \"a-\" + q\n",
+        )
+        .expect("write base");
+        fs::write(
+            &head_src,
+            "@budget($1.00)\npub extern \"c\"\nagent ask(q: String) -> String:\n    return \"a-\" + q\n\n@budget($1.00)\npub extern \"c\"\nagent triage(t: String) -> String:\n    return \"t-\" + t\n",
+        )
+        .expect("write head");
+
+        let base_json = build_descriptor_json(&base_src).expect("base descriptor");
+        let head_json = build_descriptor_json(&head_src).expect("head descriptor");
+        let base = descriptor_from_json(&base_json).expect("parse base");
+        let head = descriptor_from_json(&head_json).expect("parse head");
+        let description = pr_describe_from_descriptors(&base, &head);
+        assert!(description.change_counts.additive >= 1);
+        for section in &description.sections {
+            for bullet in &section.bullets {
+                assert!(
+                    !bullet.sources.is_empty(),
+                    "bullet `{}` has empty sources",
+                    bullet.text
+                );
+            }
+        }
+        let rendered = render_pr_description(&description);
+        assert!(rendered.contains("triage"));
+        assert!(rendered.contains("change_counts:"));
+        assert!(rendered.contains("## sources"));
+    }
+
+    /// Adversarial: either side failing to compile must surface
+    /// a typed error naming the offending file, NOT panic.
+    #[test]
+    fn pr_describe_with_unparseable_base_returns_typed_error_not_panic() {
+        let dir = tempdir().expect("tempdir");
+        let base_src = dir.path().join("broken_base.cor");
+        let head_src = dir.path().join("ok_head.cor");
+        fs::write(&base_src, "this is not corvid").expect("write base");
+        fs::write(&head_src, "agent ask() -> Int:\n    return 42\n").expect("write head");
+        let err = run_pr_describe(&base_src, &head_src).expect_err("must reject broken base");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("broken_base.cor"),
+            "error must name the offending base file, got: {msg}"
         );
     }
 }
