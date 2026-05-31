@@ -341,7 +341,19 @@ fn cli_build_cdylib_with_header_flag_writes_header_alongside_lib() {
     assert!(header_path.exists(), "missing header: {}", header_path.display());
 
     let header = std::fs::read_to_string(&header_path).expect("read header");
-    assert!(header.contains("bool refund_bot(const char* ticket_id, double amount);"));
+    // The header emitter appends an explicit `uint64_t*
+    // out_observation_handle` out-parameter to every extern "c"
+    // agent so callers from C can correlate the call with the
+    // runtime's observation handle without a second
+    // introspection round-trip. The pre-observation-handle
+    // signature `bool refund_bot(…, double amount);` is gone —
+    // see `corvid-c-header/src/lib.rs:57-61`.
+    assert!(
+        header.contains(
+            "bool refund_bot(const char* ticket_id, double amount, uint64_t* out_observation_handle);"
+        ),
+        "header missing observation-handle signature: {header}"
+    );
 }
 
 #[test]
@@ -358,7 +370,15 @@ fn cli_build_cdylib_fails_cleanly_on_non_scalar_signature() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Phase 22-B"), "stderr missing 22-B hint: {stderr}");
+    // The error help text used to say "Phase 22-B". It was
+    // reworded to "Phase 22 FFI slices" — both the unit tests in
+    // `corvid-types/src/tests.rs` and the production message in
+    // `corvid-types/src/errors/error_kind.rs` track the current
+    // phrasing. Assert the stable substring `Phase 22` so a
+    // future rewording that keeps the phase reference but drops
+    // the "FFI" word doesn't break this test for the wrong
+    // reason.
+    assert!(stderr.contains("Phase 22"), "stderr missing Phase 22 hint: {stderr}");
     assert!(
         stderr.contains("unsupported ABI type") || stderr.contains("struct") || stderr.contains("Ticket"),
         "stderr missing offender detail: {stderr}"
