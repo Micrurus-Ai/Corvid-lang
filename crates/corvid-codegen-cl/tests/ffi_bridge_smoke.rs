@@ -177,8 +177,15 @@ fn ffi_bridge_init_probe_shutdown() {
         staticlib_path.display()
     );
 
-    let c_runtime_lib =
-        std::path::Path::new(corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH);
+    // No separate `corvid_c_runtime.lib` arg: `corvid_runtime`'s
+    // staticlib output (the file we just discovered above)
+    // already bundles every native library `cc::Build::compile()`
+    // produces under it. Previously this test passed the C runtime
+    // lib through `corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH`,
+    // but that constant was retired (it embedded an absolute
+    // build-host path that broke bit-identical rebuilds — see
+    // `corvid-runtime/build.rs`). The bundled staticlib carries
+    // the same objects, so the explicit lib arg is redundant.
 
     if compiler.is_like_msvc() {
         cmd.arg("/std:c11")
@@ -190,7 +197,6 @@ fn ffi_bridge_init_probe_shutdown() {
             .arg(&c_path)
             .arg(format!("/Fe:{}", out_bin.display()))
             .arg(&staticlib_path)
-            .arg(c_runtime_lib)
             .arg("/link")
             .arg("bcrypt.lib")
             .arg("advapi32.lib")
@@ -204,7 +210,6 @@ fn ffi_bridge_init_probe_shutdown() {
         cmd.arg("-std=c11")
             .arg(&c_path)
             .arg(&staticlib_path)
-            .arg(c_runtime_lib)
             .arg("-lpthread")
             .arg("-ldl")
             .arg("-lm")

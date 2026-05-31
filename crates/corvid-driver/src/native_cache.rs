@@ -78,15 +78,24 @@ pub fn cache_key(source: &str) -> String {
     feed_bytes(source.as_bytes(), &mut h);
     feed_bytes(b"|cl=", &mut h);
     feed_bytes(env!("CARGO_PKG_VERSION").as_bytes(), &mut h);
-    // Fold the native support library payload into the key so entry.c,
-    // alloc.c, verify.c, and the other native support files invalidate
-    // cached binaries even when the library path stays fixed.
-    feed_bytes(b"|runtime-path=", &mut h);
-    feed_bytes(corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH.as_bytes(), &mut h);
-    feed_bytes(b"|runtime-bytes=", &mut h);
-    let runtime_bytes =
-        std::fs::read(corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH).unwrap_or_default();
-    feed_bytes(&runtime_bytes, &mut h);
+    // Fold the native support sources into the key so edits to
+    // entry.c, alloc.c, verify.c, and the other native support
+    // files invalidate cached binaries. The previous formulation
+    // hashed `C_RUNTIME_LIB_PATH` (an absolute path the build
+    // script wrote with `OUT_DIR` baked in) plus the compiled
+    // staticlib's bytes from disk. The path string broke
+    // bit-identical rebuilds across `CARGO_TARGET_DIR` choices —
+    // see `reproducible-build.yml`. Hashing the C source bytes
+    // directly via `SOURCE_FILE_BYTES` (provided by
+    // `corvid-runtime` through `include_bytes!`) covers the same
+    // invalidation property without embedding any host path.
+    feed_bytes(b"|runtime-sources=", &mut h);
+    for chunk in corvid_runtime::c_runtime::SOURCE_FILE_BYTES {
+        feed_bytes(chunk, &mut h);
+        // Separator so concatenated source content cannot
+        // collide with a different split across files.
+        feed_bytes(b"\x00|file=", &mut h);
+    }
     format!("{h:016x}")
 }
 

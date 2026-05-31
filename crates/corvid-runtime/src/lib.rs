@@ -125,13 +125,45 @@ pub use inventory;
 // dependency of its own.
 pub use serde_json;
 
-/// Path to the C-runtime staticlib (`corvid_c_runtime.lib` / `.a`)
-/// that corvid-runtime's build.rs compiled. Used by corvid-codegen-cl's
-/// `link.rs` when assembling a Corvid binary outside the cargo
-/// link-step machinery (cargo's `rustc-link-lib=static=...` only flows
-/// through cargo-managed builds).
+/// C runtime source fingerprint. Used by the native-tier compile
+/// cache (`corvid-driver::native_cache`) to invalidate cached
+/// Corvid binaries when any of the C support files change.
+///
+/// The previous formulation read the compiled staticlib's bytes
+/// off disk via a `C_RUNTIME_LIB_PATH` constant that the build
+/// script wrote with the absolute `OUT_DIR` path embedded in it.
+/// That absolute path broke bit-identical rebuilds — two builds
+/// with different `CARGO_TARGET_DIR` values produced two
+/// different embedded paths, even with `--remap-path-prefix`
+/// applied to rustc (the remap doesn't touch string literals in
+/// build-script-generated source). Embedding the C source bytes
+/// directly through `include_bytes!` covers the same
+/// invalidation property — any edit to alloc.c / strings.c /
+/// etc. changes the fingerprint and busts the cache — while
+/// staying deterministic across host paths.
+///
+/// The not-covered axes (host toolchain version, libc version)
+/// match the cache's existing documented escape hatch (`cargo
+/// clean` or `rm -rf target/cache/native/`).
 pub mod c_runtime {
-    include!(concat!(env!("OUT_DIR"), "/c_runtime_path.rs"));
+    /// Concatenable byte slices, one per C source file
+    /// `corvid-runtime`'s build.rs compiles into the
+    /// `corvid_c_runtime` staticlib. Order matches the build
+    /// script's `build.file(...)` order, so any reordering of
+    /// the build inputs also invalidates the cache.
+    pub const SOURCE_FILE_BYTES: &[&[u8]] = &[
+        include_bytes!("../runtime/alloc.c"),
+        include_bytes!("../runtime/strings.c"),
+        include_bytes!("../runtime/lists.c"),
+        include_bytes!("../runtime/entry.c"),
+        include_bytes!("../runtime/shim.c"),
+        include_bytes!("../runtime/weak.c"),
+        include_bytes!("../runtime/stack_maps.c"),
+        include_bytes!("../runtime/stack_maps_fallback.c"),
+        include_bytes!("../runtime/collector.c"),
+        include_bytes!("../runtime/verify.c"),
+        include_bytes!("../runtime/json.c"),
+    ];
 }
 
 pub use adversarial::{contradiction_flag, trace_text};

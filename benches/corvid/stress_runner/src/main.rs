@@ -281,55 +281,17 @@ fn ensure_runtime_staticlib(root: &Path) -> Result<()> {
             )
         })?;
     }
-    let expected_c_runtime = PathBuf::from(corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH);
-    let produced_c_runtime = latest_named_file(
-        &root.join("target").join("release").join("build"),
-        if cfg!(windows) {
-            "corvid_c_runtime.lib"
-        } else {
-            "libcorvid_c_runtime.a"
-        },
-    )?;
-    if produced_c_runtime.exists() {
-        if let Some(parent) = expected_c_runtime.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(&produced_c_runtime, &expected_c_runtime).with_context(|| {
-            format!(
-                "copy c runtime staticlib `{}` -> `{}`",
-                produced_c_runtime.display(),
-                expected_c_runtime.display()
-            )
-        })?;
-    }
+    // The previous version of this harness also copied the
+    // compiled `corvid_c_runtime` staticlib to wherever
+    // `corvid_runtime::c_runtime::C_RUNTIME_LIB_PATH` pointed.
+    // That constant was retired (it embedded an absolute
+    // build-host path that broke bit-identical rebuilds — see
+    // `corvid-runtime/build.rs`), and the consumer that used it
+    // (`corvid-driver::native_cache`) now fingerprints the C
+    // sources via `include_bytes!` instead of reading the
+    // compiled lib at runtime. The copy step is therefore no
+    // longer needed.
     Ok(())
-}
-
-fn latest_named_file(root: &Path, name: &str) -> Result<PathBuf> {
-    fn walk(dir: &Path, name: &str, best: &mut Option<(std::time::SystemTime, PathBuf)>) -> Result<()> {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, name, best)?;
-                continue;
-            }
-            if path.file_name().and_then(|n| n.to_str()) != Some(name) {
-                continue;
-            }
-            let modified = entry.metadata()?.modified()?;
-            match best {
-                Some((best_modified, _)) if modified <= *best_modified => {}
-                _ => *best = Some((modified, path)),
-            }
-        }
-        Ok(())
-    }
-
-    let mut best = None;
-    walk(root, name, &mut best)?;
-    best.map(|(_, path)| path)
-        .with_context(|| format!("locate `{}` under `{}`", name, root.display()))
 }
 
 fn load_list(item_count: usize) -> String {

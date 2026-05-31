@@ -44,35 +44,28 @@ fn main() {
 
     build.compile("corvid_c_runtime");
 
-    // Expose the path to the C-runtime staticlib so downstream
-    // crates (corvid-codegen-cl's link.rs, corvid-codegen-cl's
-    // ffi_bridge_smoke test) can pass it to the linker when
-    // assembling a binary that uses corvid-runtime via static
-    // linking. Rust's normal `cargo:rustc-link-lib=static=...`
-    // directive only auto-links into Rust executable / dylib
-    // targets — staticlib consumers (compiled Corvid binaries
-    // linked outside cargo) need to know the path explicitly.
-    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR set by cargo");
-    let lib_name = if cfg!(target_env = "msvc") {
-        "corvid_c_runtime.lib"
-    } else {
-        "libcorvid_c_runtime.a"
-    };
-    let lib_path = std::path::Path::new(&out_dir).join(lib_name);
-    let path_rs = std::path::Path::new(&out_dir).join("c_runtime_path.rs");
-    std::fs::write(
-        &path_rs,
-        format!(
-            "/// Absolute path to the `corvid_c_runtime` staticlib produced by\n\
-             /// `corvid-runtime`'s build.rs. Downstream crates that build\n\
-             /// non-cargo binaries linking against `corvid-runtime` must add\n\
-             /// this path to their linker invocation; `cargo:rustc-link-lib`\n\
-             /// only flows through cargo-managed link steps.\n\
-             pub const C_RUNTIME_LIB_PATH: &str = {:?};\n",
-            lib_path.to_string_lossy()
-        ),
-    )
-    .expect("write c_runtime_path.rs");
+    // Historically this script wrote `OUT_DIR/c_runtime_path.rs`
+    // containing `pub const C_RUNTIME_LIB_PATH: &str = "<absolute
+    // OUT_DIR>/libcorvid_c_runtime.a"`. That constant got embedded
+    // into the resulting binary's `.rodata` and broke bit-identical
+    // rebuilds: two builds with different `CARGO_TARGET_DIR`
+    // values (the `reproducible-build.yml` workflow uses
+    // `target-build-1` and `target-build-2` on purpose) ended up
+    // with two different absolute paths in their compiled output,
+    // differing by exactly one byte. `--remap-path-prefix` only
+    // remaps rustc's internal path tracking (debuginfo, error
+    // messages, `file!()` macro expansion) — it does NOT rewrite
+    // string literals in build-script-generated source files.
+    //
+    // The constant has been retired. Downstream consumers now
+    // either (a) hash the C source files via `include_bytes!` at
+    // their own compile time for cache-invalidation (e.g.
+    // `corvid-driver::native_cache`), or (b) discover the
+    // staticlib at runtime via `corvid-codegen-cl`'s
+    // `staticlib_discovery` walk-up (e.g.
+    // `corvid-codegen-cl/tests/ffi_bridge_smoke.rs`). Both
+    // patterns produce byte-identical binaries across
+    // `CARGO_TARGET_DIR` choices.
 
     // Cargo rebuilds when any C source changes.
     println!("cargo:rerun-if-changed=runtime/alloc.c");
