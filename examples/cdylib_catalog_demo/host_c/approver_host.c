@@ -91,6 +91,18 @@ static void clear_env_var(const char* key) {
 }
 
 static void set_demo_env(void) {
+    /* Clear potentially-leaked replay-mode env vars from a prior
+     * test in the same process (cargo test runs every #[test] in
+     * the same test binary, sharing process env). If CORVID_REPLAY_TRACE_PATH
+     * or CORVID_TRACE_DISABLE survived from a sibling test, the
+     * cdylib's runtime initializer would build a Replay-mode
+     * runtime against a now-deleted tempfile and surface the
+     * failure as RuntimeError rather than the expected
+     * accept/reject/fail-closed outcomes this demo asserts. Mirror
+     * the discipline `corvid-runtime`'s EnvScope guard applies in
+     * Rust tests. */
+    clear_env_var("CORVID_REPLAY_TRACE_PATH");
+    clear_env_var("CORVID_TRACE_DISABLE");
     set_env_var("CORVID_MODEL", "mock-1");
     set_env_var("CORVID_TEST_MOCK_LLM", "1");
     set_env_var(
