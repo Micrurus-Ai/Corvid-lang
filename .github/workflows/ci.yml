@@ -63,8 +63,101 @@ jobs:
       - name: cargo check --workspace
         run: cargo check --workspace --all-targets
 
+      # Enable coredumps + post-mortem backtrace capture for the
+      # workspace test step. The `cdylib_catalog_demo_filter_host_narrows_catalog`
+      # test was crashing silently on Linux — empty stdout, empty
+      # stderr, signal-killed inside the loaded cdylib's
+      # `grounded_tag → grounded_echo` Grounded<String> tool
+      # dispatch — and the only way to find the root cause is a
+      # real gdb backtrace from a core file. Mirror the
+      # bundle_rebuild infrastructure that earlier today pinned
+      # the bundle_rebuild TLS-destructor crash. If the workspace
+      # tests pass, this section is invisible; if anything in
+      # the workspace crashes with a signal, the next run gets
+      # the diagnostic data needed to fix it.
+      - name: Configure coredumps for workspace tests
+        run: |
+          set -e
+          sudo bash -c 'echo /tmp/cores/core.%e.%p.%t > /proc/sys/kernel/core_pattern'
+          sudo mkdir -p /tmp/cores
+          sudo chmod 1777 /tmp/cores
+          cat /proc/sys/kernel/core_pattern
+
       - name: cargo test --workspace
-        run: cargo test --workspace --lib --tests
+        run: |
+          ulimit -c unlimited
+          set +e
+          cargo test --workspace --lib --tests 2>&1
+          EXIT=$?
+          if [ $EXIT -ne 0 ]; then
+            echo ""
+            echo "================================================================================"
+            echo "POST-MORTEM DIAGNOSTICS FOR cargo test --workspace (exit=$EXIT)"
+            echo "================================================================================"
+            echo ""
+            echo "[/tmp/cores contents]"
+            ls -la /tmp/cores/ 2>/dev/null || echo "(no /tmp/cores dir)"
+            echo ""
+            echo "[dmesg tail — kernel-side segfault/abort signal records]"
+            sudo dmesg | tail -100 2>/dev/null || true
+            echo ""
+            if ! command -v gdb >/dev/null 2>&1; then
+              echo "[installing gdb]"
+              sudo apt-get -qq install -y gdb 2>&1 | tail -3 || true
+            fi
+            echo "[gdb version]"
+            gdb --version 2>&1 | head -1 || echo "(gdb still missing)"
+            echo ""
+            CORE_FOUND=0
+            for core in /tmp/cores/core.* /tmp/cores/core; do
+              [ -f "$core" ] || continue
+              CORE_FOUND=1
+              echo "[core $core]"
+              file "$core" 2>/dev/null || true
+              # Try to locate the crashed binary by parsing the
+              # core's recorded executable path. For test
+              # binaries the path is under target/debug/deps/.
+              EXEC_PATH=$(gdb --batch -ex "core $core" -ex "info proc mappings" 2>/dev/null \
+                | grep -oE '/home/runner/.*/(target|examples)/[^ ]+' \
+                | head -1)
+              if [ -z "$EXEC_PATH" ]; then
+                # Fallback: extract from the core's `file` output
+                # (kernel records "execfn: <path>" on Linux).
+                EXEC_PATH=$(file "$core" 2>/dev/null \
+                  | grep -oE "execfn: '[^']+'" \
+                  | sed -E "s/execfn: '([^']+)'/\\1/")
+              fi
+              echo "[derived exec path: ${EXEC_PATH:-<unknown>}]"
+              echo "[gdb crashed-thread bt + all-threads bt for $core]"
+              gdb --batch \
+                  -ex "set pagination off" \
+                  -ex "thread" \
+                  -ex "bt full" \
+                  -ex "info threads" \
+                  -ex "thread apply all bt 30" \
+                  -ex "disassemble \$pc, +32" \
+                  "${EXEC_PATH:-target/debug/corvid}" "$core" 2>&1 | head -400 || true
+              echo ""
+            done
+            if [ "$CORE_FOUND" -eq 0 ]; then
+              echo "[no core files generated]"
+              echo "core_pattern: $(cat /proc/sys/kernel/core_pattern 2>/dev/null)"
+              echo "ulimit -c:    $(ulimit -c)"
+            fi
+            echo "================================================================================"
+            echo "END POST-MORTEM"
+            echo "================================================================================"
+          fi
+          exit $EXIT
+
+      - name: Upload workspace-test coredumps on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-test-coredumps
+          path: /tmp/cores/
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Routing/report slices extend the shared trace schema. Keep a
       # narrow replay test in CI so new metadata-only events stay

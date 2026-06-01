@@ -130,6 +130,17 @@ static void* load_symbol(void* library, const char* name) {
 #endif
 
 int main(int argc, char** argv) {
+    /* stdout is block-buffered when redirected to a pipe (the
+     * normal mode under `Command::output()` in the integration
+     * test harness). A crash mid-flow swallows every printf
+     * since the last full block, masking which stage failed.
+     * Disable buffering so each printf hits the pipe
+     * synchronously and the harness sees the host's exact
+     * progress even when the process aborts. The cost is
+     * negligible — the demo prints fewer than a hundred lines
+     * total. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     const char* filter_arg = NULL;
     if (argc != 3 && argc != 4) {
         fprintf(stderr, "usage: %s <library> <expected_hash_hex> [--filter=<json>]\n", argv[0]);
