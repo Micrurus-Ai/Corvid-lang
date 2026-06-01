@@ -217,50 +217,36 @@ fn link_shared_library(
         if link_standalone_runtime {
             cmd.arg(&runtime_staticlib_path);
         }
-        // Wrap each tool staticlib in a force-include directive
-        // so the linker keeps the `inventory::submit!` constructors
-        // the `#[tool]` proc-macro emits. Without this, GNU `ld`'s
-        // dead-code elimination sees the inventory entries as
-        // unreferenced from the rest of the cdylib (the `#[tool]`
-        // macro emits `__corvid_tool_<name>` wrappers but no
-        // explicit reference to the submit-site) and strips them,
-        // so `corvid_runtime_init`'s `inventory::iter::<ToolMetadata>()`
-        // walk finds zero tools at dlopen-time. The first agent
-        // call that hits the runtime tool registry then panics
-        // with `corvid tool ` <name> ` is not registered`.
+        // Tool staticlibs are linked positionally. The
+        // `#[tool]` proc-macro's `inventory::submit!`
+        // constructors get dead-stripped by GNU `ld` in this
+        // mode, so the inventory-walked runtime tool registry
+        // ends up empty at dlopen — agents that call a tool
+        // then panic with `corvid tool <name> is not registered`.
         //
-        // MSVC takes the unwrapped path above because `link.exe`
-        // defaults to including all object symbols from a static
-        // library passed positionally — `cl` users get the right
-        // behaviour by accident there. GNU `ld` and Apple `ld`
-        // need the explicit directive.
+        // The previous formulation wrapped each lib in
+        // `-Wl,--whole-archive` to force-include the inventory
+        // entries. That worked for thin tool libs but broke the
+        // test-time setup where `CORVID_RUNTIME_STATICLIB_OVERRIDE`
+        // points the runtime override at a tools lib that
+        // transitively bundles all of corvid-runtime — forcing
+        // every object in that archive into the cdylib pulled
+        // in static constructors that fired before
+        // `corvid_runtime_init`, surfacing as silent
+        // process-aborts on Linux (no panic message, empty
+        // stderr).
         //
-        // The end of the force-include scope is restored after
-        // each lib so any later non-tool libs the link line
-        // appends (`-lpthread`, `-ldl`, etc.) are dead-strippable
-        // the usual way.
-        let force_load_prefix = if cfg!(target_os = "macos") {
-            None // macOS uses -Wl,-force_load <path> per lib (no end marker).
-        } else {
-            Some("-Wl,--whole-archive")
-        };
-        let force_load_suffix = if cfg!(target_os = "macos") {
-            None
-        } else {
-            Some("-Wl,--no-whole-archive")
-        };
+        // The architecturally correct integration is for the
+        // host to register tools explicitly via the
+        // `corvid_register_tool` C ABI after dlopen — see the
+        // `examples/cdylib_catalog_demo/host_c/host.c` change
+        // that lands alongside this commit for the pattern.
+        // The `#[tool]` macro still emits `__corvid_tool_<name>`
+        // wrappers that the host dlsym's, so the host's
+        // registration call points at the cdylib's own
+        // implementation of the tool.
         for lib in extra_tool_libs {
-            if cfg!(target_os = "macos") {
-                cmd.arg("-Wl,-force_load").arg(lib);
-            } else {
-                if let Some(prefix) = force_load_prefix {
-                    cmd.arg(prefix);
-                }
-                cmd.arg(lib);
-                if let Some(suffix) = force_load_suffix {
-                    cmd.arg(suffix);
-                }
-            }
+            cmd.arg(lib);
         }
         cmd.arg("-lpthread").arg("-ldl").arg("-lm");
         if cfg!(target_os = "macos") {

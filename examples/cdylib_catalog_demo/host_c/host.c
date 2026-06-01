@@ -42,6 +42,18 @@ typedef uint64_t (*corvid_observation_tokens_out_fn)(uint64_t handle);
 typedef bool (*corvid_observation_exceeded_bound_fn)(uint64_t handle);
 typedef void (*corvid_observation_release_fn)(uint64_t handle);
 
+/* Tool registration ABI. The cdylib agent `grounded_tag` calls
+ * the `grounded_echo` tool through the runtime tool registry, so
+ * the host must register the tool callback before invoking the
+ * agent or `corvid_invoke_tool_*` will panic with `corvid tool
+ * <name> is not registered`. The `#[tool]` proc-macro emits two
+ * symbols per tool: `__corvid_tool_<name>` (typed C ABI) and
+ * `__corvid_tool_json_<mangled-name>` (JSON-arg dispatcher
+ * matching `CorvidToolFn`). The runtime registry takes the JSON
+ * dispatcher. */
+typedef char* (*corvid_tool_fn)(const char* args_json, size_t args_len, void* user_data);
+typedef void (*corvid_register_tool_fn)(const char* name, corvid_tool_fn fn_ptr, void* user_data);
+
 static int decode_hex_64(const char* hex, uint8_t out[32]) {
     size_t len = strlen(hex);
     if (len != 64) {
@@ -162,15 +174,29 @@ int main(int argc, char** argv) {
     void (*corvid_free_string_fn)(const char*) =
         (void (*)(const char*))load_symbol(library, "corvid_free_string");
 
+    corvid_register_tool_fn corvid_register_tool =
+        (corvid_register_tool_fn)load_symbol(library, "corvid_register_tool");
+    corvid_tool_fn grounded_echo_json =
+        (corvid_tool_fn)load_symbol(library, "__corvid_tool_json_grounded_echo");
+
     if (!corvid_abi_verify || !corvid_list_agents || !corvid_find_agents_where || !corvid_pre_flight ||
         !corvid_call_agent || !corvid_free_result || !corvid_grounded_sources ||
         !corvid_grounded_confidence || !corvid_grounded_release || !corvid_observation_cost_usd ||
         !corvid_observation_latency_ms || !corvid_observation_tokens_in || !corvid_observation_tokens_out ||
         !corvid_observation_exceeded_bound || !corvid_observation_release || !grounded_tag_fn ||
-        !corvid_free_string_fn) {
+        !corvid_free_string_fn || !corvid_register_tool || !grounded_echo_json) {
         fprintf(stderr, "required catalog symbol missing\n");
         return 1;
     }
+
+    /* Wire the JSON-dispatch wrapper for `grounded_echo` into the
+     * cdylib's runtime tool registry BEFORE invoking any agent
+     * that calls it. `grounded_tag` (called below) bodies a
+     * `grounded_echo(tag)` call which the codegen lowers to
+     * `corvid_invoke_tool_string("grounded_echo", ...)` — that
+     * lookup needs the registry entry to point at the cdylib's
+     * own JSON-dispatch wrapper. */
+    corvid_register_tool("grounded_echo", grounded_echo_json, NULL);
 
     uint8_t expected_hash[32];
     if (!decode_hex_64(argv[2], expected_hash)) {
