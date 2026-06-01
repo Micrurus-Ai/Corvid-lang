@@ -31,6 +31,35 @@ typedef CorvidApproverLoadStatus (*corvid_register_approver_from_source_fn)(
     char** out_error_message);
 typedef void (*corvid_clear_approver_fn)(void);
 
+/* Tool registration ABI. The cdylib agent `issue_tag` calls the
+ * `echo_string` tool through the runtime tool registry, so the
+ * host must register a callback for that tool before invoking
+ * the agent or `corvid_invoke_tool_*` panics with `corvid tool
+ * echo_string is not registered`. */
+typedef char* (*corvid_tool_fn)(const char* args_json, size_t args_len, void* user_data);
+typedef void (*corvid_register_tool_fn)(const char* name, corvid_tool_fn fn_ptr, void* user_data);
+
+/* Echo the first string arg back as a JSON-encoded value.
+ * Matches the Rust `echo_string` tool's behaviour (return the
+ * input unchanged). The runtime reclaims the buffer via
+ * `CString::from_raw` after dispatching; on the linux-gnu target
+ * this demo runs on, that pairs with the system allocator that
+ * libc's `malloc` uses. */
+static char* host_echo_string_tool(const char* args_json, size_t args_len, void* user_data) {
+    (void)user_data;
+    if (args_len < 2 || args_json[0] != '[' || args_json[args_len - 1] != ']') {
+        return NULL;
+    }
+    size_t inner_len = args_len - 2;
+    char* result = (char*)malloc(inner_len + 1);
+    if (result == NULL) {
+        return NULL;
+    }
+    memcpy(result, args_json + 1, inner_len);
+    result[inner_len] = '\0';
+    return result;
+}
+
 #if defined(_WIN32)
 static FARPROC load_symbol(HMODULE library, const char* name) {
     return GetProcAddress(library, name);
@@ -225,6 +254,7 @@ int main(int argc, char** argv) {
     corvid_observation_release_fn corvid_observation_release;
     corvid_register_approver_from_source_fn corvid_register_approver_from_source;
     corvid_clear_approver_fn corvid_clear_approver;
+    corvid_register_tool_fn corvid_register_tool;
     uint8_t expected_hash[32];
     size_t agent_count;
     CorvidAgentHandle* agents;
@@ -285,12 +315,26 @@ int main(int argc, char** argv) {
         (corvid_register_approver_from_source_fn)load_symbol(library, "corvid_register_approver_from_source");
     corvid_clear_approver =
         (corvid_clear_approver_fn)load_symbol(library, "corvid_clear_approver");
+    corvid_register_tool =
+        (corvid_register_tool_fn)load_symbol(library, "corvid_register_tool");
     if (!corvid_abi_verify || !corvid_list_agents || !corvid_pre_flight ||
         !corvid_call_agent || !corvid_free_result || !corvid_observation_release ||
-        !corvid_register_approver_from_source || !corvid_clear_approver) {
+        !corvid_register_approver_from_source || !corvid_clear_approver ||
+        !corvid_register_tool) {
         fprintf(stderr, "required approval-bridge symbol missing\n");
         return 1;
     }
+
+    /* Register a host-provided callback for `echo_string` before
+     * invoking `issue_tag` (whose body calls `echo_string(tag)`).
+     * Without this the agent dispatch panics on the unregistered
+     * tool. See `host.c` for the architectural rationale — the
+     * Rust-side JSON-dispatch wrapper is dead-stripped by GNU
+     * `ld`, and `--whole-archive` on the test-tools staticlib
+     * causes other init-time issues, so the host provides its
+     * own implementation matching the Rust tool's
+     * return-the-input semantics. */
+    corvid_register_tool("echo_string", host_echo_string_tool, NULL);
 
     printf("verified_before=%d\n", corvid_abi_verify(expected_hash));
 

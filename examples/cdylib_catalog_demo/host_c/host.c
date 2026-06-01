@@ -44,15 +44,35 @@ typedef void (*corvid_observation_release_fn)(uint64_t handle);
 
 /* Tool registration ABI. The cdylib agent `grounded_tag` calls
  * the `grounded_echo` tool through the runtime tool registry, so
- * the host must register the tool callback before invoking the
- * agent or `corvid_invoke_tool_*` will panic with `corvid tool
- * <name> is not registered`. The `#[tool]` proc-macro emits two
- * symbols per tool: `__corvid_tool_<name>` (typed C ABI) and
- * `__corvid_tool_json_<mangled-name>` (JSON-arg dispatcher
- * matching `CorvidToolFn`). The runtime registry takes the JSON
- * dispatcher. */
+ * the host must register a callback for that tool before
+ * invoking the agent or `corvid_invoke_tool_*` will panic with
+ * `corvid tool <name> is not registered`. */
 typedef char* (*corvid_tool_fn)(const char* args_json, size_t args_len, void* user_data);
 typedef void (*corvid_register_tool_fn)(const char* name, corvid_tool_fn fn_ptr, void* user_data);
+
+/* Tool callback: echo the first string arg back as a JSON-encoded
+ * value. Matches the Rust tool's behaviour (`async fn(s: String) ->
+ * String { s }`). Input `args_json` is a JSON array such as
+ * `["catalog-proof"]`; the first element is itself a JSON-encoded
+ * string (`"catalog-proof"`). The runtime expects a freshly-
+ * allocated NUL-terminated JSON value as the return; it reclaims
+ * the buffer via `CString::from_raw` after dispatching, so a
+ * libc-malloc'd buffer paired with the system allocator is safe
+ * on the linux-gnu target this demo runs on. */
+static char* host_echo_string_tool(const char* args_json, size_t args_len, void* user_data) {
+    (void)user_data;
+    if (args_len < 2 || args_json[0] != '[' || args_json[args_len - 1] != ']') {
+        return NULL;
+    }
+    size_t inner_len = args_len - 2;
+    char* result = (char*)malloc(inner_len + 1);
+    if (result == NULL) {
+        return NULL;
+    }
+    memcpy(result, args_json + 1, inner_len);
+    result[inner_len] = '\0';
+    return result;
+}
 
 static int decode_hex_64(const char* hex, uint8_t out[32]) {
     size_t len = strlen(hex);
@@ -176,27 +196,39 @@ int main(int argc, char** argv) {
 
     corvid_register_tool_fn corvid_register_tool =
         (corvid_register_tool_fn)load_symbol(library, "corvid_register_tool");
-    corvid_tool_fn grounded_echo_json =
-        (corvid_tool_fn)load_symbol(library, "__corvid_tool_json_grounded_echo");
 
     if (!corvid_abi_verify || !corvid_list_agents || !corvid_find_agents_where || !corvid_pre_flight ||
         !corvid_call_agent || !corvid_free_result || !corvid_grounded_sources ||
         !corvid_grounded_confidence || !corvid_grounded_release || !corvid_observation_cost_usd ||
         !corvid_observation_latency_ms || !corvid_observation_tokens_in || !corvid_observation_tokens_out ||
         !corvid_observation_exceeded_bound || !corvid_observation_release || !grounded_tag_fn ||
-        !corvid_free_string_fn || !corvid_register_tool || !grounded_echo_json) {
+        !corvid_free_string_fn || !corvid_register_tool) {
         fprintf(stderr, "required catalog symbol missing\n");
         return 1;
     }
 
-    /* Wire the JSON-dispatch wrapper for `grounded_echo` into the
-     * cdylib's runtime tool registry BEFORE invoking any agent
-     * that calls it. `grounded_tag` (called below) bodies a
+    /* Wire the host-provided callback for `grounded_echo` into
+     * the cdylib's runtime tool registry BEFORE invoking any
+     * agent that uses it. `grounded_tag` (called below) bodies a
      * `grounded_echo(tag)` call which the codegen lowers to
      * `corvid_invoke_tool_string("grounded_echo", ...)` — that
-     * lookup needs the registry entry to point at the cdylib's
-     * own JSON-dispatch wrapper. */
-    corvid_register_tool("grounded_echo", grounded_echo_json, NULL);
+     * lookup needs the registry entry to point at a callable
+     * with the `CorvidToolFn` signature.
+     *
+     * Why a host-side C stub rather than dlsym'ing the cdylib's
+     * own Rust-side `__corvid_tool_json_grounded_echo` wrapper:
+     * GNU `ld` dead-strips that wrapper from the cdylib (no
+     * static reference from the codegen-emitted object pulls it
+     * in, and `--whole-archive` on the tools staticlib creates
+     * other init-time issues — see the cdylib link path's doc
+     * comment). The host-provided callback below mirrors what
+     * the Rust tool implementation does (return the input as
+     * JSON-encoded string), which matches the test's
+     * `grounded_result=catalog-proof` assertion. This is also
+     * how an external C application embedding the corvid cdylib
+     * would integrate: register its OWN tool implementations
+     * against the cdylib's runtime registry. */
+    corvid_register_tool("grounded_echo", host_echo_string_tool, NULL);
 
     uint8_t expected_hash[32];
     if (!decode_hex_64(argv[2], expected_hash)) {
