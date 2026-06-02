@@ -200,8 +200,36 @@ int main(int argc, char** argv) {
         (corvid_observation_exceeded_bound_fn)load_symbol(library, "corvid_observation_exceeded_bound");
     corvid_observation_release_fn corvid_observation_release =
         (corvid_observation_release_fn)load_symbol(library, "corvid_observation_release");
-    const char* (*grounded_tag_fn)(const char*, uint64_t*) =
-        (const char* (*)(const char*, uint64_t*))load_symbol(library, "grounded_tag");
+    /* Signature: const char* grounded_tag(
+     *     const char* tag,
+     *     uint64_t* out_grounded_handle,
+     *     uint64_t* out_observation_handle
+     * );
+     *
+     * The auto-generated `lib_classify.h` appends BOTH out-params
+     * (`uint64_t* out_grounded_handle` for the Grounded<String>
+     * return AND `uint64_t* out_observation_handle` for the
+     * per-call observation handle every extern-c agent gets — see
+     * `corvid-c-header/src/lib.rs:50-61`). Earlier revisions
+     * declared only `(const char*, uint64_t*)` — two args — and
+     * relied on `&grounded_handle` to be the second argument and
+     * the wrapper's third out-arg to land on whatever garbage
+     * happened to be in `rdx` from the previous call site. On
+     * Linux x86_64 the SysV ABI passes that uninitialised
+     * register through unchanged, and the cdylib's wrapper
+     * dereferenced it to write the observation handle — usually
+     * a pointer back into the cdylib's own `.rodata` since the
+     * register most often last held a string literal address.
+     * That write to read-only memory was the silent SIGSEGV we
+     * chased through six prior commits; the coredump+gdb
+     * post-mortem step in `ci.yml` finally surfaced it as
+     *
+     *     segfault at <rodata-addr> in libclassify.so
+     *     mov %rax, (%r14)        ; %r14 = clobbered out-ptr
+     *     error 7                 ; USER_MODE | WRITE | PROT
+     */
+    const char* (*grounded_tag_fn)(const char*, uint64_t*, uint64_t*) =
+        (const char* (*)(const char*, uint64_t*, uint64_t*))load_symbol(library, "grounded_tag");
     void (*corvid_free_string_fn)(const char*) =
         (void (*)(const char*))load_symbol(library, "corvid_free_string");
 
@@ -336,7 +364,10 @@ int main(int argc, char** argv) {
 
     {
         uint64_t grounded_handle = CORVID_NULL_GROUNDED_HANDLE;
-        const char* grounded_value = grounded_tag_fn("catalog-proof", &grounded_handle);
+        uint64_t grounded_observation = CORVID_NULL_OBSERVATION_HANDLE;
+        const char* grounded_value =
+            grounded_tag_fn("catalog-proof", &grounded_handle, &grounded_observation);
+        corvid_observation_release(grounded_observation);
         const char* sources[4] = {0};
         int32_t source_count = corvid_grounded_sources(grounded_handle, sources, 4);
         double grounded_conf = corvid_grounded_confidence(grounded_handle);
