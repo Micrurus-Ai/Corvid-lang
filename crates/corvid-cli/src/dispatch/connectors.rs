@@ -154,7 +154,19 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
             } else {
                 println!("{:<12} {:<7} DIAGNOSTICS", "NAME", "VALID");
                 for e in &entries {
-                    let status = if e.valid { "âœ“" } else { "âœ—" };
+                    // U+2713 CHECK MARK / U+2717 BALLOT X. The
+                    // previous literals were mojibake: the UTF-8
+                    // bytes of these glyphs interpreted as
+                    // Windows-1252 (`â` `œ` `“` / `—`) and
+                    // re-saved as UTF-8 by an editor that
+                    // assumed the wrong source encoding. Rust
+                    // string literals are UTF-8, so a re-encoded
+                    // mojibake literal stays mojibake all the
+                    // way to stdout — the `check_passes_default_manifests`
+                    // test asserts on the real checkmark and was
+                    // failing because the binary was emitting
+                    // the round-tripped garbage instead.
+                    let status = if e.valid { "\u{2713}" } else { "\u{2717}" };
                     println!("{:<12} {:<7} {}", e.name, status, e.diagnostics.join("; "));
                 }
             }
