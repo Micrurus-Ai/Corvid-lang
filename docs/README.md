@@ -74,10 +74,10 @@ provider routing, local model fallback, audit log per decision.
 
 ## [Operations](operations/) — running Corvid in production
 
+- [**Developer production guide**](developer-production-guide.md) — the canonical "ship Corvid in production" walk-through
 - [Production checklist](operations/production-checklist.md)
 - [Receipts and signed builds](operations/receipts-and-signing.md)
 - [Operator runbooks](operations/operator-runbooks.md)
-- [Production guide](operations/production-guide.md)
 - [Observability conformance](operations/observability-conformance.md)
 - [CI](operations/ci.md)
 
