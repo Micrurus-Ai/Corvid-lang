@@ -118,7 +118,7 @@ The point of this table is that *neither* the maintainer cutting a release *nor*
 ## See also
 
 - [`docs/developer-production-guide.md`](developer-production-guide.md) — what downstream developers should expect from a stable Corvid release.
-- [`docs/operations/operator-runbooks.md`](operations/operator-runbooks.md) — on-call procedures, key rotation steps, rollback.
+- [`docs/maintainer-runbooks.md`](maintainer-runbooks.md) — release checklist, security advisory process, CI gates, benchmarks, claim review, rollback.
 - [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md) — DSSE attestation chain and key publication.
 - [`docs/operations/production-checklist.md`](operations/production-checklist.md) — pre-merge checklist that gates whether a commit is releasable at all.
 - [`docs/reference/inventions.md`](reference/inventions.md) — the catalog every launch claim cross-references.

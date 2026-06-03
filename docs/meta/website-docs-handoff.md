@@ -103,11 +103,12 @@ docs/
 ├── migration/
 │   ├── from-python.md
 │   └── README.md
+├── developer-production-guide.md   ← promoted from docs/operations/
+├── maintainer-runbooks.md          ← promoted from docs/operations/
+├── release-policy.md               ← promoted from docs/meta/
 ├── operations/
 │   ├── production-checklist.md
 │   ├── receipts-and-signing.md
-│   ├── operator-runbooks.md
-│   ├── production-guide.md
 │   ├── observability-conformance.md
 │   ├── ci.md
 │   └── README.md

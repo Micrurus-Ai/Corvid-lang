@@ -171,7 +171,7 @@ This is the cost of having a language that knows what `dangerous` means. It's al
 - [`docs/guides/observability.md`](guides/observability.md) — trace event schema, OTLP export, redaction layer.
 - [`docs/guides/persistence.md`](guides/persistence.md) — typed stores, migrations, store policies.
 - [`docs/guides/jobs.md`](guides/jobs.md) — durable schedules, job replay, jitter policy.
-- [`docs/operations/operator-runbooks.md`](operations/operator-runbooks.md) — on-call procedures, key rotation, rollback.
+- [`docs/maintainer-runbooks.md`](maintainer-runbooks.md) — on-call procedures, release checklist, key rotation, rollback.
 - [`docs/operations/production-checklist.md`](operations/production-checklist.md) — pre-merge checklist (operator-facing companion to this one).
 - [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md) — DSSE attestation chain and key publication.
 - [`docs/reference/inventions.md`](reference/inventions.md) — what each Corvid invention promises and how to prove it.
