@@ -147,6 +147,31 @@ fn normalize_trace(path: &Path) -> Vec<serde_json::Value> {
         .unwrap()
         .into_iter()
         .map(|event| normalize_value(serde_json::to_value(event).unwrap()))
+        // The `host_event` family — `llm.usage`, `connector.call`,
+        // `cost.budget`, etc. — carries TELEMETRY about how a step
+        // was serviced (token counts, cost-USD, adapter id) rather
+        // than the step itself. The test contract this normaliser
+        // serves is "the agent's decision trajectory is byte-
+        // identical for steps before the mutation point" — calls,
+        // results, run lifecycle, seed reads — not the runtime's
+        // observation surface around those steps. The runtime's
+        // live LLM path emits `llm.usage` host events at
+        // `corvid-runtime/src/runtime/llm_dispatch.rs:306-322`;
+        // those events show up in mutation-replay traces but not
+        // in the original-record trace (the env-mock-llm adapter
+        // path skips them during recording — see the dispatch
+        // module comment for the rationale). Filtering them here
+        // keeps the byte-identity assertion focused on the
+        // decision events the replay protocol actually
+        // round-trips, without softening the agent-decision
+        // invariant the test is named after.
+        .filter(|event| {
+            event
+                .as_object()
+                .and_then(|map| map.get("kind"))
+                .and_then(|kind| kind.as_str())
+                != Some("host_event")
+        })
         .collect()
 }
 
