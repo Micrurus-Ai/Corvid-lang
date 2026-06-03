@@ -70,7 +70,7 @@ pub fn run_release(channel: &str, version: Option<&str>, out: &Path) -> Result<(
         binary_sha256,
         checksum_file: "SHA256SUMS.txt",
         changelog: changelog_name,
-        policy: "docs/meta/release-policy.md",
+        policy: "docs/release-policy.md",
     };
     let manifest_json =
         serde_json::to_string_pretty(&manifest).context("serialize release manifest")?;
@@ -173,7 +173,7 @@ Channel: {channel}
 
 ## Compatibility
 
-This release follows `docs/meta/release-policy.md`. Any breaking change must appear in the upgrade report and migration guide.
+This release follows `docs/release-policy.md`. Any breaking change must appear in the upgrade report and migration guide.
 "#
     )
 }

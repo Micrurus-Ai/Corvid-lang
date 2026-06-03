@@ -31,7 +31,7 @@ Security contact and incident-response ownership must be present in the stable r
 
 ## Compatibility Policy
 
-Compatibility follows `docs/meta/release-policy.md`.
+Compatibility follows [`docs/release-policy.md`](../release-policy.md).
 
 - Source syntax, stdlib APIs, ABI attestation, receipt verification, trace schemas, migration state, connector manifests, and stable CLI flags are public contracts.
 - Breaking changes need an upgrade rule, migration note, changelog entry, and maintainer signoff.

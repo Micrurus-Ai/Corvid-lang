@@ -103,7 +103,7 @@ provider routing, local model fallback, audit log per decision.
 ## [Meta](meta/) — project-level docs
 
 - [Project conventions](meta/conventions.md)
-- [Release policy](meta/release-policy.md)
+- [**Release policy**](release-policy.md) — channels, SemVer scope, breaking-change rules, signoff
 - [Upgrade migrations](meta/upgrade-migrations.md)
 - [Beta program](meta/beta-program.md)
 - [Launch claim audit](meta/launch-claim-audit.md)

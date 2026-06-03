@@ -2,6 +2,10 @@
 
 This policy defines how Corvid ships nightly, beta, and stable releases. It is a maintainer contract: a release is not publishable unless the channel rules, SemVer rules, signed artifacts, migration notes, and claim review all pass.
 
+**Audience.** Two readers should be able to use this document without external context: a Corvid maintainer cutting a release, and a downstream developer or organization deciding whether to depend on Corvid for production. The first uses it as a checklist; the second uses it as the public contract for what changing-and-not-changing means at each channel.
+
+**Position.** The policy is intentionally narrow on what is promised and broad on what is enforced. Every rule below is paired with a CI gate, a CLI command, or a signed artifact field that catches violations before the release publishes — the [How this is enforced](#how-this-is-enforced) section at the end names each one.
+
 ## Channels
 
 ### Nightly
@@ -92,3 +96,29 @@ Stable release signoff requires:
 - one maintainer responsible for compatibility and migration review.
 
 The same person may hold more than one role, but each role must be recorded in the release manifest.
+
+## How this is enforced
+
+Every rule above is paired with a machine-checked gate so a violation surfaces before the artifact ships, not after. The toolchain treats this section as the source of truth for what the release pipeline actually does.
+
+| Rule | Enforcement |
+|---|---|
+| Channel format + cadence | `corvid release <channel>` rejects malformed version strings and refuses to publish a second nightly per UTC day from the same commit. |
+| Required artifacts present | `corvid release` writes `release-manifest.json` with every required field; the publish step verifies the manifest before push. |
+| `SHA256SUMS.txt` covers every artifact | `corvid release` regenerates the file from the on-disk artifact set; mismatches fail the release. |
+| Signed binaries (DSSE attestation) | `corvid receipt verify-abi <artifact>` is run by CI against the published artifact set; an unverified attestation is a release blocker. |
+| SemVer covers the listed contracts | `corvid upgrade --check` consults the guarantee registry and refuses to advance the version when a stable contract has weakened. The breakage rule for each contract is encoded in the registry under `crates/corvid-guarantees/`. |
+| Breaking changes have an upgrade rule + migration note + accepted/rejected fixtures | `corvid claim audit` cross-references the migration directory; missing fixtures fail the audit. |
+| Release blockers | CI's release job fails closed when any of the listed conditions hold (missing artifacts, audit failures, open release-blocking advisories, migration drift). |
+| Key rotation | Release keys are pinned in the release manifest; the publisher rejects a manifest whose key id does not match the signing key. Rotation notes live alongside the previous and new keys in the receipts pipeline (see [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md)). |
+| Maintainer signoff | The release manifest carries one signoff field per role. The publisher refuses a stable release when any role is unfilled. |
+
+The point of this table is that *neither* the maintainer cutting a release *nor* the downstream developer reading the policy has to trust that someone is doing the right thing — the right thing is the only thing the tooling will let happen.
+
+## See also
+
+- [`docs/developer-production-guide.md`](developer-production-guide.md) — what downstream developers should expect from a stable Corvid release.
+- [`docs/operations/operator-runbooks.md`](operations/operator-runbooks.md) — on-call procedures, key rotation steps, rollback.
+- [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md) — DSSE attestation chain and key publication.
+- [`docs/operations/production-checklist.md`](operations/production-checklist.md) — pre-merge checklist that gates whether a commit is releasable at all.
+- [`docs/reference/inventions.md`](reference/inventions.md) — the catalog every launch claim cross-references.
