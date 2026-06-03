@@ -106,8 +106,8 @@ provider routing, local model fallback, audit log per decision.
 - [**Release policy**](release-policy.md) — channels, SemVer scope, breaking-change rules, signoff
 - [Upgrade migrations](meta/upgrade-migrations.md)
 - [Beta program](meta/beta-program.md)
-- [Launch claim audit](meta/launch-claim-audit.md)
-- [Claim inventory](meta/claim-inventory.md)
+- [**Claim inventory**](claim-inventory.md) — the rules every public Corvid claim follows + how the audit is wired
+- [Launch claim audit](meta/launch-claim-audit.md) — the inventory data table consumed by `corvid claim audit`
 - [Launch rehearsal](meta/launch-rehearsal.md)
 - [v1.0 demo script](meta/v1.0-demo-script.md)
 - [AI benchmarks](meta/ai-benchmarks.md)

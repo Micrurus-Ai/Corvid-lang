@@ -106,6 +106,7 @@ docs/
 ├── developer-production-guide.md   ← promoted from docs/operations/
 ├── maintainer-runbooks.md          ← promoted from docs/operations/
 ├── release-policy.md               ← promoted from docs/meta/
+├── claim-inventory.md              ← promoted from docs/meta/
 ├── operations/
 │   ├── production-checklist.md
 │   ├── receipts-and-signing.md
@@ -134,8 +135,7 @@ docs/
 │   ├── release-policy.md
 │   ├── upgrade-migrations.md
 │   ├── beta-program.md
-│   ├── launch-claim-audit.md
-│   ├── claim-inventory.md
+│   ├── launch-claim-audit.md       ← data table (consumed by `corvid claim audit`)
 │   ├── launch-rehearsal.md
 │   ├── v1.0-demo-script.md
 │   ├── ai-benchmarks.md
