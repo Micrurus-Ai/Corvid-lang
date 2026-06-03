@@ -378,6 +378,55 @@ fn cdylib_grounded_string_return_exposes_attestation_handle() {
             .get(b"corvid_free_string")
             .expect("resolve corvid_free_string");
 
+        // The cdylib agent dispatches `grounded_echo` through
+        // the runtime tool registry (target-conditional dispatch
+        // shipped in `dfd98eb`), so the host must register a
+        // callback for the tool BEFORE invoking the agent or the
+        // cdylib panics at `corvid_invoke_tool_*` with
+        // `corvid tool grounded_echo is not registered`. The
+        // proc-macro-emitted Rust wrappers in the cdylib itself
+        // are dead-stripped by the linker (see the cdylib link
+        // path's doc comment for why), so the test provides its
+        // own implementation matching the Rust tool's
+        // return-the-input semantics. Same architectural shape
+        // as the C-host integration in
+        // `examples/cdylib_catalog_demo/host_c/host.c`.
+        type CorvidToolFn = unsafe extern "C" fn(
+            args_json: *const c_char,
+            args_len: usize,
+            user_data: *mut std::ffi::c_void,
+        ) -> *mut c_char;
+        unsafe extern "C" fn echo_first_string_arg(
+            args_json: *const c_char,
+            args_len: usize,
+            _user_data: *mut std::ffi::c_void,
+        ) -> *mut c_char {
+            let bytes = std::slice::from_raw_parts(args_json as *const u8, args_len);
+            if bytes.len() < 2 || bytes[0] != b'[' || bytes[bytes.len() - 1] != b']' {
+                return std::ptr::null_mut();
+            }
+            let inner = bytes[1..bytes.len() - 1].to_vec();
+            match CString::new(inner) {
+                Ok(cstr) => cstr.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        let register_tool: libloading::Symbol<
+            unsafe extern "C" fn(
+                *const c_char,
+                Option<CorvidToolFn>,
+                *mut std::ffi::c_void,
+            ),
+        > = lib
+            .get(b"corvid_register_tool")
+            .expect("resolve corvid_register_tool");
+        let tool_name = CString::new("grounded_echo").unwrap();
+        register_tool(
+            tool_name.as_ptr(),
+            Some(echo_first_string_arg),
+            std::ptr::null_mut(),
+        );
+
         let input = CString::new("lookup-me").unwrap();
         let mut handle = 0u64;
         let mut observation = 0u64;
