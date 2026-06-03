@@ -294,30 +294,61 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build CLI
-        run: cargo build -p corvid-cli --release
-
+      # ORDER MATTERS — build corvid-runtime BEFORE corvid-cli.
+      #
       # `corvid verify --corpus tests/corpus` (below) compiles each
       # corpus fixture to a native binary, which means the native
       # codegen path needs `libcorvid_runtime.a` on disk to link
-      # against. `cargo build -p corvid-cli --release` only pulls
-      # corvid-runtime in as an `rlib` dependency — it does NOT
-      # build the `staticlib` crate-type output, even though
-      # `crates/corvid-runtime/Cargo.toml` declares
-      # `crate-type = ["lib", "staticlib"]`. Before commit
-      # `3f77ec1` (which retired `C_RUNTIME_LIB_PATH` for
-      # reproducible-build reasons), the path was embedded in
-      # corvid-cli's `.rodata` so the verify step could find a
-      # staticlib that may not exist at the expected location; the
+      # against. `crates/corvid-runtime/Cargo.toml` declares
+      # `crate-type = ["lib", "staticlib"]`, but cargo only emits
+      # ALL crate-type outputs when the crate is the build TARGET
+      # of the cargo invocation, not when it's pulled in as a
+      # dependency. If `cargo build -p corvid-cli --release` runs
+      # first, corvid-runtime gets compiled as an rlib dep of the
+      # cli — only the rlib and the cli's binary are emitted, the
+      # staticlib output is not produced. A later
+      # `cargo build -p corvid-runtime --release` then short-
+      # circuits on cargo's incremental-rebuild fingerprint
+      # ("crate is up-to-date, sources unchanged") and never
+      # re-runs the link step, so the staticlib STILL doesn't land
+      # on disk — which is what bit us in the prior CI attempt at
+      # `da560f6`. The fingerprint cargo tracks is per-crate, not
+      # per-crate-type-output, so once the rlib is "fresh" the
+      # staticlib emission stays skipped.
+      #
+      # The reliable fix is to make corvid-runtime the build TARGET
+      # first, so cargo emits both rlib AND staticlib in the same
+      # link step. The subsequent CLI build then reuses the cached
+      # rlib for the dependency edge and only compiles the cli
+      # crate's own translation units.
+      #
+      # Before commit `3f77ec1` (which retired
+      # `C_RUNTIME_LIB_PATH` for reproducible-build reasons —
+      # the build-script-emitted absolute path differed between
+      # `target-build-1` and `target-build-2` invocations and
+      # broke bit-identical rebuilds), the staticlib's absolute
+      # path was embedded in corvid-cli's `.rodata` via an
+      # `include!`-ed constant, and the verify step could find a
+      # staticlib that may not have been freshly built. The
       # retirement closed that loop, and the discovery code at
-      # `corvid-codegen-cl/src/staticlib_discovery.rs` now relies
-      # on the staticlib actually being present on disk under
-      # `target/release/`. Building corvid-runtime explicitly here
-      # produces `target/release/libcorvid_runtime.a` which the
-      # `WalkExeAncestors` strategy locates by walking up from
-      # `./target/release/corvid`.
-      - name: Build corvid-runtime staticlib for verify step
+      # `crates/corvid-codegen-cl/src/staticlib_discovery.rs`
+      # now relies on the staticlib actually being present on
+      # disk — either at the `WalkExeAncestors` location
+      # (`target/release/` walking up from
+      # `./target/release/corvid`) or via the explicit
+      # `CORVID_RUNTIME_STATICLIB_OVERRIDE` /
+      # `CORVID_STATICLIB_DIR` env vars.
+      - name: Build corvid-runtime staticlib (must precede CLI build)
         run: cargo build -p corvid-runtime --release
+
+      - name: Build CLI
+        run: cargo build -p corvid-cli --release
+
+      # Sanity check — fail loudly here rather than in the verify
+      # step's opaque linker error if the staticlib didn't land.
+      - name: Assert corvid-runtime staticlib is on disk
+        run: |
+          ls -la target/release/libcorvid_runtime.a
 
       # Invention #6 + #7: every built-in dimension and every custom
       # dimension declared in the project's corvid.toml must satisfy
