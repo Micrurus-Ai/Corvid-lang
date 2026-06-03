@@ -297,6 +297,28 @@ jobs:
       - name: Build CLI
         run: cargo build -p corvid-cli --release
 
+      # `corvid verify --corpus tests/corpus` (below) compiles each
+      # corpus fixture to a native binary, which means the native
+      # codegen path needs `libcorvid_runtime.a` on disk to link
+      # against. `cargo build -p corvid-cli --release` only pulls
+      # corvid-runtime in as an `rlib` dependency — it does NOT
+      # build the `staticlib` crate-type output, even though
+      # `crates/corvid-runtime/Cargo.toml` declares
+      # `crate-type = ["lib", "staticlib"]`. Before commit
+      # `3f77ec1` (which retired `C_RUNTIME_LIB_PATH` for
+      # reproducible-build reasons), the path was embedded in
+      # corvid-cli's `.rodata` so the verify step could find a
+      # staticlib that may not exist at the expected location; the
+      # retirement closed that loop, and the discovery code at
+      # `corvid-codegen-cl/src/staticlib_discovery.rs` now relies
+      # on the staticlib actually being present on disk under
+      # `target/release/`. Building corvid-runtime explicitly here
+      # produces `target/release/libcorvid_runtime.a` which the
+      # `WalkExeAncestors` strategy locates by walking up from
+      # `./target/release/corvid`.
+      - name: Build corvid-runtime staticlib for verify step
+        run: cargo build -p corvid-runtime --release
+
       # Invention #6 + #7: every built-in dimension and every custom
       # dimension declared in the project's corvid.toml must satisfy
       # its archetype's algebraic laws.
