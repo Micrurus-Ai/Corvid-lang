@@ -147,9 +147,41 @@ impl Approver for AcceptApprover {
     }
 }
 
+/// Host-provided echo tool. Returns the first element of the JSON
+/// arg array verbatim. The Rust tools in `corvid-test-tools` are
+/// `async fn(s: String) -> String { s }`; this stub matches their
+/// behaviour without depending on the cdylib re-exporting its
+/// own Rust-side tool wrappers (GNU ld dead-strips those — see
+/// the cdylib link path's doc comment for why the host always
+/// provides its own implementations).
+unsafe extern "C" fn echo_first_string_arg(
+    args_json: *const std::ffi::c_char,
+    args_len: usize,
+    _user_data: *mut std::ffi::c_void,
+) -> *mut std::ffi::c_char {
+    let args = std::slice::from_raw_parts(args_json as *const u8, args_len);
+    if args.len() < 2 || args[0] != b'[' || args[args.len() - 1] != b']' {
+        return std::ptr::null_mut();
+    }
+    let inner = args[1..args.len() - 1].to_vec();
+    match std::ffi::CString::new(inner) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let library_path = std::env::args().nth(1).expect("usage: smoke <library>");
     let client = Client::load(&library_path)?;
+
+    // The cdylib's agent bodies dispatch tool calls through the
+    // runtime tool registry. Register host callbacks for the
+    // tools that `issue_tag` and `grounded_tag` invoke BEFORE
+    // calling those agents; otherwise the cdylib panics inside
+    // `corvid_invoke_tool_*` with `corvid tool <name> is not
+    // registered`.
+    client.register_tool("echo_string", echo_first_string_arg)?;
+    client.register_tool("grounded_echo", echo_first_string_arg)?;
 
     let (classification, observation) = client.classify("I loved the support experience")?;
     println!("classification={classification} exceeded={}", observation.exceeded_bound());
@@ -180,9 +212,11 @@ fn write_python_smoke(package_dir: &Path) -> PathBuf {
         &script,
         r#"from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import sys
 
-from classify import ApprovalDecision, ApprovalRequest, Client, TrustTier
+from classify import ApprovalDecision, ApprovalRequest, Client, CorvidToolFn, TrustTier
 
 
 class AcceptApprover:
@@ -190,9 +224,65 @@ class AcceptApprover:
         return ApprovalDecision.ACCEPT
 
 
+# Resolve the system C allocator. On linux-gnu, Rust's default
+# global allocator IS libc malloc/free, so a buffer the callback
+# below `libc.malloc`'s is reclaimed cleanly by the cdylib's
+# `CString::from_raw` → `Box::dealloc` → libc `free`. On Windows
+# Rust uses HeapAlloc/HeapFree, NOT the CRT — a `msvcrt.malloc`'d
+# buffer would crash inside Rust's dealloc. This demo's CI target
+# is linux-gnu where the match is correct; the Windows path is
+# wired up so the test at least loads on developer hosts and the
+# failure surfaces as a tool-dispatch error rather than a
+# `FileNotFoundError: libc.so.6` import-time crash.
+if sys.platform == "win32":
+    _LIBC = ctypes.CDLL("msvcrt")
+else:
+    _LIBC_PATH = ctypes.util.find_library("c") or "libc.so.6"
+    _LIBC = ctypes.CDLL(_LIBC_PATH)
+_LIBC.malloc.restype = ctypes.c_void_p
+_LIBC.malloc.argtypes = [ctypes.c_size_t]
+
+
+def _echo_first_string_arg(args_json, args_len, _user_data):
+    """Echo the first JSON-encoded string arg back to the caller.
+
+    Matches the Rust `echo_string` / `grounded_echo` tools'
+    semantics (return the input unchanged). `args_json` arrives
+    as `b'["catalog-proof"]'` — we copy the content between the
+    outer brackets (`b'"catalog-proof"'`) into a fresh
+    libc-malloc'd buffer and return the pointer; the cdylib's
+    runtime takes ownership via `CString::from_raw`.
+    """
+    buf = ctypes.string_at(args_json, args_len)
+    if len(buf) < 2 or buf[0:1] != b"[" or buf[-1:] != b"]":
+        return None
+    inner = buf[1:-1]
+    n = len(inner)
+    p = _LIBC.malloc(n + 1)
+    if not p:
+        return None
+    ctypes.memmove(p, inner, n)
+    ctypes.cast(p, ctypes.POINTER(ctypes.c_ubyte))[n] = 0
+    return p
+
+
+# CFUNCTYPE wrappers must outlive every cdylib agent invocation
+# that might dispatch the callback. Keep them at module scope so
+# Python's GC cannot reclaim them between `register_tool` and the
+# agent call that triggers the dispatch.
+_ECHO_TOOL = CorvidToolFn(_echo_first_string_arg)
+
+
 def main() -> int:
     library_path = sys.argv[1]
     client = Client(library_path)
+
+    # Register the echo callback for both tools the demo agents
+    # invoke. The same implementation services both — they are
+    # both `String -> String` echo tools in the underlying Rust
+    # `corvid-test-tools` crate.
+    client.register_tool("echo_string", _ECHO_TOOL)
+    client.register_tool("grounded_echo", _ECHO_TOOL)
 
     classification, observation = client.classify("I loved the support experience")
     print(f"classification={classification} exceeded={observation.exceeded_bound()}")

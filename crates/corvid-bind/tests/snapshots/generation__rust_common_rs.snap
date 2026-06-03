@@ -163,6 +163,22 @@ pub trait Approver {
     fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision;
 }
 
+/// Host-provided tool implementation. Signature mirrors the
+/// `corvid-runtime` `CorvidToolFn` C ABI:
+///   - `args_json` / `args_len` carry the call arguments as a UTF-8
+///     JSON array, borrowed for the duration of the call.
+///   - The callback returns a freshly-allocated null-terminated JSON
+///     C string the runtime reclaims via `CString::from_raw` after
+///     dispatching, or `null` to signal failure.
+///   - `user_data` is the opaque pointer the host supplied at
+///     registration (currently always `null`; reserved for future
+///     stateful callbacks).
+pub type CorvidToolFn = unsafe extern "C" fn(
+    args_json: *const c_char,
+    args_len: usize,
+    user_data: *mut std::ffi::c_void,
+) -> *mut c_char;
+
 #[derive(Debug, Clone)]
 pub struct Client {
     pub(crate) library: Arc<Library>,
@@ -181,6 +197,33 @@ impl Client {
 
     pub fn catalog(&self) -> crate::catalog::Catalog<'_> {
         crate::catalog::Catalog::new(self)
+    }
+
+    /// Register a host-provided callback for a tool the cdylib's
+    /// agents call. The cdylib's runtime tool registry routes any
+    /// `tool foo(...)` call from an agent body through whichever
+    /// `CorvidToolFn` the host registered under that name, so the
+    /// host MUST call this before invoking an agent whose body
+    /// uses the tool — otherwise the cdylib panics inside
+    /// `corvid_invoke_tool_*` with `corvid tool <name> is not
+    /// registered`. The proc-macro-emitted Rust tool wrappers in
+    /// the cdylib itself are dead-stripped by the linker, so they
+    /// are not available for the host to dlsym; the host always
+    /// provides its own callback. Mirrors the `corvid_register_tool`
+    /// C ABI in `corvid-runtime`'s `tool_bridge` module.
+    pub fn register_tool(&self, name: &str, callback: CorvidToolFn) -> CorvidResult<()> {
+        unsafe {
+            let symbol: Symbol<
+                unsafe extern "C" fn(*const c_char, Option<CorvidToolFn>, *mut std::ffi::c_void),
+            > = self
+                .library
+                .get(b"corvid_register_tool")
+                .map_err(|err| CorvidError::Load(err.to_string()))?;
+            let name_c =
+                CString::new(name).map_err(|err| CorvidError::BadArgs(err.to_string()))?;
+            symbol(name_c.as_ptr(), Some(callback), std::ptr::null_mut());
+            Ok(())
+        }
     }
 
     pub(crate) fn verify_descriptor_hash(&self) -> CorvidResult<()> {

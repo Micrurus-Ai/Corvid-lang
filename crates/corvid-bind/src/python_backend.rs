@@ -91,7 +91,7 @@ fn render_init_py(context: &BindingContext) -> String {
     ));
     out.push_str("from .common import (\n");
     out.push_str("    ApprovalDecision,\n    ApprovalRequest,\n    Approver,\n    CallError,\n    Client,\n");
-    out.push_str("    CorvidError,\n    DescriptorDriftError,\n    Grounded,\n    GroundedProvenance,\n    Observation,\n    TrustTier,\n    Weak,\n");
+    out.push_str("    CorvidError,\n    CorvidToolFn,\n    DescriptorDriftError,\n    Grounded,\n    GroundedProvenance,\n    Observation,\n    TrustTier,\n    Weak,\n");
     out.push_str(")\n");
     out.push_str("from .catalog import AgentInfo, Catalog, CatalogQuery, Reversibility\n");
     out.push_str("from .types import *\n");
@@ -124,6 +124,24 @@ from pathlib import Path
 from typing import Any, ClassVar, Generic, Optional, Protocol, TypeVar
 
 DESCRIPTOR_HASH_HEX = "{hash}"
+
+# Host-provided tool callback type. Signature mirrors the
+# `corvid-runtime` `CorvidToolFn` C ABI:
+#   - `args_json` / `args_len` carry the call args as a UTF-8 JSON
+#     array, borrowed for the call duration.
+#   - The callback returns a freshly-allocated null-terminated JSON
+#     C string the runtime reclaims via the global `free()` after
+#     dispatching (a `libc.malloc`-allocated buffer is the
+#     simplest match on linux-gnu), or `None`/`0` to signal
+#     failure.
+#   - `user_data` is the opaque pointer the host supplied at
+#     registration (currently always `None`).
+CorvidToolFn = ctypes.CFUNCTYPE(
+    ctypes.c_void_p,
+    ctypes.c_char_p,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+)
 
 
 class TrustTier(enum.Enum):
@@ -379,6 +397,28 @@ class Client:
         from .catalog import Catalog
 
         return Catalog(self)
+
+    def register_tool(self, name: str, callback) -> None:
+        """Register a host-provided tool callback.
+
+        The cdylib's agent bodies dispatch `tool foo(...)` calls
+        through the runtime tool registry — the host MUST register
+        a callback for each tool an agent will invoke before
+        calling that agent. The proc-macro-emitted Rust tool
+        wrappers in the cdylib itself are dead-stripped by the
+        linker, so the host always provides its own
+        implementation.
+
+        `callback` is a `ctypes.CFUNCTYPE` instance matching
+        `CorvidToolFn`. The host MUST keep a strong reference to
+        the callback object for as long as the agent might invoke
+        the tool — ctypes does not retain CFUNCTYPE wrappers,
+        and the cdylib stores the bare function pointer.
+        """
+        fn = self._library.corvid_register_tool
+        fn.argtypes = [ctypes.c_char_p, CorvidToolFn, ctypes.c_void_p]
+        fn.restype = None
+        fn(name.encode("utf-8"), callback, None)
 
     def _probe_json_agent(
         self,

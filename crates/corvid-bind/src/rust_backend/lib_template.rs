@@ -36,8 +36,8 @@ pub(super) fn render_lib_rs(context: &BindingContext) -> String {
     );
     out.push_str("pub use common::{\n");
     out.push_str("    ApprovalDecision, ApprovalRequest, Approver, CallStatus, Client, CorvidError,\n");
-    out.push_str("    CorvidResult, DescriptorDrift, Grounded, GroundedProvenance, Observation,\n");
-    out.push_str("    TrustTier, Weak, DESCRIPTOR_HASH_HEX,\n");
+    out.push_str("    CorvidResult, CorvidToolFn, DescriptorDrift, Grounded, GroundedProvenance,\n");
+    out.push_str("    Observation, TrustTier, Weak, DESCRIPTOR_HASH_HEX,\n");
     out.push_str("};\n");
     out.push_str("pub use types::*;\n");
     for agent in context
