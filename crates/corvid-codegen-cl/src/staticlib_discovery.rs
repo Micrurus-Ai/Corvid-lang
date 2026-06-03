@@ -202,16 +202,43 @@ pub(crate) fn guess_dev_target_profile_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// `discover_staticlib` reads two process-global env vars
+    /// (`CORVID_RUNTIME_STATICLIB_OVERRIDE` and
+    /// `CORVID_STATICLIB_DIR`), and the four tests below each set
+    /// or clear those vars to exercise a specific resolution
+    /// strategy. Cargo defaults to running unit tests on N parallel
+    /// threads, so without serialization two tests can interleave —
+    /// e.g. test A removes `CORVID_RUNTIME_STATICLIB_OVERRIDE`,
+    /// test B sets it to `/nonexistent/...`, test A's
+    /// `discover_staticlib` call then observes B's override and
+    /// resolves to `OverrideEnvVar` instead of `DirEnvVar`,
+    /// failing the assertion in
+    /// `dir_env_var_resolves_when_file_exists_in_named_dir`.
+    ///
+    /// Same shape as the `trace_record` `EnvScope` fix in commit
+    /// `489dae2`: serialize every test that touches process-global
+    /// env vars behind a single module-scope `Mutex<()>` and take
+    /// the guard as the first line of the test. Poisoning is
+    /// recovered (an earlier panic should not silently disable
+    /// every test that runs after it).
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     /// Override env var takes precedence over every other strategy.
     /// This is the production override path tests rely on; we lock
     /// it down explicitly.
     #[test]
     fn override_env_var_wins_when_path_exists() {
+        let _g = env_guard();
         let temp = std::env::temp_dir().join("corvid_staticlib_override_test.lib");
         std::fs::write(&temp, b"stub").unwrap();
-        // SAFETY: tests in this crate are single-threaded; we
-        // restore the env var after the assertion.
         std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &temp);
         std::env::remove_var("CORVID_STATICLIB_DIR");
         let resolved = discover_staticlib("corvid_runtime.lib");
@@ -227,6 +254,7 @@ mod tests {
     /// the path explicitly.
     #[test]
     fn dir_env_var_resolves_when_file_exists_in_named_dir() {
+        let _g = env_guard();
         let dir = std::env::temp_dir().join("corvid_staticlib_dir_test");
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("corvid_runtime.lib");
@@ -247,6 +275,7 @@ mod tests {
     /// open.
     #[test]
     fn override_env_var_pointing_at_missing_file_falls_through() {
+        let _g = env_guard();
         std::env::set_var(
             "CORVID_RUNTIME_STATICLIB_OVERRIDE",
             "/nonexistent/path/to/corvid_runtime.lib",
