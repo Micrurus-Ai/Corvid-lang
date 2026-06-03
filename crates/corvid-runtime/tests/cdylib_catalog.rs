@@ -155,6 +155,73 @@ unsafe extern "C" fn reject_approver(
     CorvidApprovalDecision::Reject as i32
 }
 
+/// `CorvidToolFn` signature is `(args_json, args_len, user_data) -> *mut
+/// c_char`. The runtime registry dispatch for `tool echo_string(value:
+/// String) -> String` calls this with `args_json = b"[\"vip\"]"` and
+/// expects a JSON-encoded `String` result back. Parsing the inner string
+/// out of the outer JSON array and re-emitting it as a CString gives
+/// echo semantics: the runtime parses the returned `"vip"` as a JSON
+/// string `vip`, which the agent forwards as its own String return.
+///
+/// Hand-written host callbacks are how cdylib builds bridge tool calls
+/// to host code after the target-conditional dispatch swap (commit
+/// `dfd98eb`) — the previous direct-dispatch path through
+/// `__corvid_tool_json_echo_string` got dead-stripped by GNU ld, so
+/// the runtime now routes every tool call through `corvid_register_tool`
+/// and the host MUST register a callback before invoking any agent
+/// that reaches the tool. Same architectural shape as the C-host echo
+/// stub in `examples/cdylib_catalog_demo/host_c/host.c` and the
+/// `echo_first_string_arg` helper in
+/// `crates/corvid-codegen-cl/tests/cdylib_emission.rs`.
+unsafe extern "C" fn host_echo_string_arg(
+    args_json: *const c_char,
+    args_len: usize,
+    _user_data: *mut std::ffi::c_void,
+) -> *mut c_char {
+    let bytes = std::slice::from_raw_parts(args_json as *const u8, args_len);
+    if bytes.len() < 2 || bytes[0] != b'[' || bytes[bytes.len() - 1] != b']' {
+        return std::ptr::null_mut();
+    }
+    let inner = bytes[1..bytes.len() - 1].to_vec();
+    match CString::new(inner) {
+        Ok(cstr) => cstr.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+type CorvidToolFn = unsafe extern "C" fn(
+    args_json: *const c_char,
+    args_len: usize,
+    user_data: *mut std::ffi::c_void,
+) -> *mut c_char;
+
+/// Resolve `corvid_register_tool` from a loaded cdylib and register the
+/// `host_echo_string_arg` callback for the `echo_string` tool. Tests
+/// that reach the `return echo_string(value)` line of
+/// `maybe_dangerous` (i.e. invoke it with `flag=true` AND get past the
+/// approval gate) MUST call this before the invocation — otherwise the
+/// runtime panics at `catalog_c_api/tool_bridge.rs:179` with `corvid
+/// tool 'echo_string' is not registered`, and because the panic
+/// originates inside a C-ABI callback the unwind aborts the test
+/// binary instead of failing just the one test.
+unsafe fn register_echo_string_callback(lib: &Library) {
+    let register_tool: libloading::Symbol<
+        unsafe extern "C" fn(
+            *const c_char,
+            Option<CorvidToolFn>,
+            *mut std::ffi::c_void,
+        ),
+    > = lib
+        .get(b"corvid_register_tool")
+        .expect("resolve corvid_register_tool");
+    let tool_name = CString::new("echo_string").unwrap();
+    register_tool(
+        tool_name.as_ptr(),
+        Some(host_echo_string_arg),
+        std::ptr::null_mut(),
+    );
+}
+
 fn write_approver_source(dir: &TempDir, source: &str) -> PathBuf {
     let path = dir.path().join("approver.cor");
     std::fs::write(&path, source).expect("write approver source");
@@ -435,6 +502,7 @@ fn corvid_mark_preapproved_request_allows_direct_dangerous_call_without_callback
     let built = build_catalog_library();
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
+        register_echo_string_callback(&lib);
         let mark_preapproved: libloading::Symbol<
             unsafe extern "C" fn(*const c_char, *const c_char, usize) -> bool,
         > = lib
@@ -578,6 +646,7 @@ agent approve_site(site: ApprovalSite, args: ApprovalArgs, ctx: ApprovalContext)
         );
 
         let lib = Library::new(&built.path).expect("load library");
+        register_echo_string_callback(&lib);
         let register_source: libloading::Symbol<
             unsafe extern "C" fn(*const c_char, f64, *mut *mut c_char) -> CorvidApproverLoadStatus,
         > = lib
