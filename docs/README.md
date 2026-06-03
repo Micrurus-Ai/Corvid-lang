@@ -105,10 +105,12 @@ provider routing, local model fallback, audit log per decision.
 - [Project conventions](meta/conventions.md)
 - [**Release policy**](release-policy.md) — channels, SemVer scope, breaking-change rules, signoff
 - [Upgrade migrations](meta/upgrade-migrations.md)
-- [Beta program](meta/beta-program.md)
+- [**Beta program**](beta-program.md) — intake, scope, closure criteria, and the participant + closure issue templates
 - [**Claim inventory**](claim-inventory.md) — the rules every public Corvid claim follows + how the audit is wired
 - [Launch claim audit](meta/launch-claim-audit.md) — the inventory data table consumed by `corvid claim audit`
-- [Launch rehearsal](meta/launch-rehearsal.md)
+- [**Launch rehearsal**](launch-rehearsal.md) — pre-launch dry-run, generated release files, incident contacts, rollback
+- [**Phase 43 market-readiness brief**](phase-43-market-readiness.md) — launch gates, release channels, support posture, security process, beta criteria, non-scope
+- [**External trial packets**](external-trials/) — Phase 42 trial packet + feedback triage
 - [v1.0 demo script](meta/v1.0-demo-script.md)
 - [AI benchmarks](meta/ai-benchmarks.md)
 - [Reference apps launch status](meta/reference-apps-launch-status.md)

@@ -462,6 +462,24 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             ReleaseCommand::Notes { from, to, out } => {
                 release_cmd::run_release_notes(&from, &to, out.as_deref()).map(|_| 0)
             }
+            ReleaseCommand::Nightly { version, out } => {
+                let out = out.unwrap_or_else(|| {
+                    PathBuf::from("target").join("release").join("nightly")
+                });
+                release_cmd::run_release("nightly", version.as_deref(), &out).map(|_| 0)
+            }
+            ReleaseCommand::Beta { version, out } => {
+                let out = out.unwrap_or_else(|| {
+                    PathBuf::from("target").join("release").join("beta")
+                });
+                release_cmd::run_release("beta", version.as_deref(), &out).map(|_| 0)
+            }
+            ReleaseCommand::Stable { version, out } => {
+                let out = out.unwrap_or_else(|| {
+                    PathBuf::from("target").join("release").join("stable")
+                });
+                release_cmd::run_release("stable", version.as_deref(), &out).map(|_| 0)
+            }
         },
         Some(Command::Upgrade { command }) => match command {
             UpgradeCommand::Check {

@@ -8,7 +8,12 @@ pub enum ReleaseCommand {
     /// `corvid release <channel> <version>` shape became
     /// `corvid release build <channel> <version>` in slice
     /// `35V2-P43-T-LR-release-notes` to make room for sibling
-    /// subcommands.
+    /// subcommands. The direct-channel forms `corvid release
+    /// nightly|beta|stable <version>` are aliases of
+    /// `corvid release build <channel> <version>` — they match
+    /// the launch-rehearsal smoke-command shape published in
+    /// `docs/launch-rehearsal.md` and the reference_apps
+    /// integration test that gates Phase 43.
     Build {
         /// Release channel: nightly, beta, or stable.
         channel: String,
@@ -16,6 +21,24 @@ pub enum ReleaseCommand {
         /// requires `-beta.`, stable is plain SemVer.
         version: Option<String>,
         /// Output directory for generated release artifacts.
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
+    /// Alias for `corvid release build nightly <version>`.
+    Nightly {
+        version: Option<String>,
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
+    /// Alias for `corvid release build beta <version>`.
+    Beta {
+        version: Option<String>,
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
+    /// Alias for `corvid release build stable <version>`.
+    Stable {
+        version: Option<String>,
         #[arg(long, value_name = "DIR")]
         out: Option<PathBuf>,
     },

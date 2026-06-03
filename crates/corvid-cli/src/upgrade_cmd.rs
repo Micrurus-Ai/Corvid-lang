@@ -89,14 +89,30 @@ pub fn run_check(
     };
 
     if json {
-        let report = UpgradeCheckReport {
-            findings: &findings,
-            claim_regressions: &claim_regressions,
-        };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).context("serialize upgrade findings")?
-        );
+        // Output shape contract: when no `--claims-current` /
+        // `--claims-target` flags are supplied, emit just the
+        // findings array. The launch-readiness integration
+        // tests (`upgrade_command_reports_and_applies_*` in
+        // `crates/corvid-cli/tests/reference_apps.rs`) consume
+        // this shape directly. When claim-regression flags ARE
+        // supplied, emit the full report object so the claim
+        // regressions are surfaced alongside the findings.
+        if claims_current.is_none() && claims_target.is_none() {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&findings)
+                    .context("serialize upgrade findings array")?
+            );
+        } else {
+            let report = UpgradeCheckReport {
+                findings: &findings,
+                claim_regressions: &claim_regressions,
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).context("serialize upgrade findings")?
+            );
+        }
     } else {
         render_findings(&findings);
         render_claim_regressions(&claim_regressions);

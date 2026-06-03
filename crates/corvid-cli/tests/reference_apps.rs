@@ -282,12 +282,47 @@ fn personal_executive_agent_hardening_bundle_runs_and_covers_risks() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
-    assert!(stdout.contains("values: 10/10 passed"), "{stdout}");
+    // The hardening eval's value-check count grows as the per-
+    // app maturity bar adds invariants. The launch-readiness
+    // contract is "at least 10 value checks pass with zero
+    // failing" — not exact-equality on the count, which would
+    // soft-fail every time we added a check to the eval. Parse
+    // the `values: N/M passed` line and assert both bounds
+    // mechanically.
+    let line = stdout
+        .lines()
+        .find(|line| line.contains("values:") && line.contains("passed"))
+        .unwrap_or_else(|| panic!("missing `values:` line in hardening eval output:\n{stdout}"));
+    let counts = line
+        .split("values:")
+        .nth(1)
+        .and_then(|tail| tail.split("passed").next())
+        .and_then(|fraction| {
+            let fraction = fraction.trim();
+            let (passed, total) = fraction.split_once('/')?;
+            Some((passed.trim().parse::<u32>().ok()?, total.trim().parse::<u32>().ok()?))
+        })
+        .unwrap_or_else(|| panic!("could not parse values fraction from `{line}`"));
+    assert!(
+        counts.0 >= 10 && counts.0 == counts.1,
+        "hardening eval must pass >= 10 values with 0 failing; got {}/{}",
+        counts.0,
+        counts.1
+    );
 
+    // Same growth contract as the value-check count above: the
+    // adversarial fixture set adds cases as new risk classes are
+    // covered, so the launch-readiness floor is "at least 5
+    // adversarial cases on disk" rather than exact equality. A
+    // future maintainer adding a sixth case shouldn't trip this
+    // assertion for the wrong reason.
     let adversarial = fs::read_dir(app.join("adversarial"))
         .expect("read adversarial dir")
         .count();
-    assert_eq!(adversarial, 5, "expected five adversarial cases");
+    assert!(
+        adversarial >= 5,
+        "expected at least five adversarial cases; got {adversarial}"
+    );
 
     let trace = fs::read_to_string(app.join("traces").join("demo.lineage.jsonl"))
         .expect("read trace fixture");

@@ -107,6 +107,12 @@ docs/
 ├── maintainer-runbooks.md          ← promoted from docs/operations/
 ├── release-policy.md               ← promoted from docs/meta/
 ├── claim-inventory.md              ← promoted from docs/meta/
+├── beta-program.md                 ← promoted from docs/meta/
+├── launch-rehearsal.md             ← promoted from docs/meta/
+├── phase-43-market-readiness.md    ← promoted from docs/phases/
+├── external-trials/                ← promoted from docs/phases/external-trials/
+│   ├── phase-42-trial-one.md
+│   └── phase-42-feedback-triage.md
 ├── operations/
 │   ├── production-checklist.md
 │   ├── receipts-and-signing.md
@@ -136,7 +142,6 @@ docs/
 │   ├── upgrade-migrations.md
 │   ├── beta-program.md
 │   ├── launch-claim-audit.md       ← data table (consumed by `corvid claim audit`)
-│   ├── launch-rehearsal.md
 │   ├── v1.0-demo-script.md
 │   ├── ai-benchmarks.md
 │   ├── reference-apps-launch-status.md

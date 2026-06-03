@@ -2885,7 +2885,7 @@ Host-registered tools (the embeddable-kernel model). The deeper wall behind the 
 
 **Slice checklist:**
 
-- [x] 43A-market-readiness-brief     `docs/phases/phase-43-market-readiness.md` defines launch gates, release channels, support posture, security process, beta criteria, and non-scope.
+- [x] 43A-market-readiness-brief     `docs/phase-43-market-readiness.md` defines launch gates, release channels, support posture, security process, beta criteria, and non-scope.
 - [x] 43B-deploy-package             `corvid deploy package` emits Dockerfile, OCI metadata, health/readiness config, migration runner, env schema, and signed build attestation.
 - [x] 43C-deployment-manifests       Docker Compose, single-service PaaS, Kubernetes, and systemd manifests work for at least one reference app.
 - [x] 43D-release-channels           Nightly, beta, and stable release channels are documented and wired to SemVer/stability policy.
