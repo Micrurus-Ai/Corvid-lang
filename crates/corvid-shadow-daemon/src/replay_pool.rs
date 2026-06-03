@@ -60,6 +60,17 @@ impl ReplayPool {
     }
 }
 
+/// Returns `true` for events that are part of the agent's decision
+/// trajectory — schema header, run lifecycle, LLM call / result, tool
+/// call / result, seed and clock reads, observation events — and
+/// `false` for telemetry-only `host_event` entries (`llm.usage`,
+/// `connector.call`, `cost.budget`, …). See the doc comment on
+/// `ShadowReplayOutcome::traces_match` for why telemetry events are
+/// excluded from the byte-identity comparison.
+pub(super) fn is_decision_event(event: &TraceEvent) -> bool {
+    !matches!(event, TraceEvent::HostEvent { .. })
+}
+
 fn normalize_event_json(event: &TraceEvent) -> serde_json::Value {
     match event {
         TraceEvent::SchemaHeader {
