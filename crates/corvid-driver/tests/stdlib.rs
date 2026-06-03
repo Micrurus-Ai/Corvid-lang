@@ -832,6 +832,38 @@ fn backend_state_app_example_typechecks() {
 
 #[test]
 fn backend_personal_executive_agent_jobs_typecheck() {
+    // The `personal_executive_agent` example lives at
+    // `examples/backend/personal_executive_agent/src/main.cor` and
+    // imports `../../../../std/jobs`, `../../../../std/effects`,
+    // `../../../../std/agent`, `../../../../std/auth`,
+    // `../../../../std/approvals` — four levels up, then into
+    // `std/`. The other backend-example typecheck tests above
+    // (audit_log, state_app, …) stage their `main.cor` directly
+    // under `tmpdir/main.cor` because their imports use
+    // `./std/<module>` — a shallow relative form that resolves
+    // against a single sibling `std/` directory. The personal-
+    // executive-agent example deliberately uses the deeper
+    // `../../../../std/…` form to mirror how a real downstream
+    // crate would import the stdlib from a nested source
+    // layout, so staging it flat puts the resolved
+    // `../../../../std/jobs.cor` path OUTSIDE the tmpdir and
+    // the importer can't find it.
+    //
+    // Replicate the example's on-disk depth inside the
+    // tempdir so the relative-path semantics the example
+    // ships with are exercised end-to-end:
+    //
+    //   tmpdir/
+    //     std/
+    //       jobs.cor, effects.cor, agent.cor, auth.cor,
+    //       approvals.cor
+    //     examples/backend/personal_executive_agent/src/
+    //       main.cor   ← staged source; `../../../../std/jobs`
+    //                    from here resolves back to `tmpdir/std/`
+    //
+    // The transitive `import "./effects"` inside the other std
+    // modules resolves within `tmpdir/std/` because all five
+    // std files are copied side-by-side.
     let dir = tempfile::tempdir().unwrap();
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -842,13 +874,20 @@ fn backend_personal_executive_agent_jobs_typecheck() {
         fs::copy(repo.join("std").join(module), dir.path().join("std").join(module))
             .unwrap_or_else(|e| panic!("copy std/{module}: {e}"));
     }
+    let staged_src_dir = dir
+        .path()
+        .join("examples")
+        .join("backend")
+        .join("personal_executive_agent")
+        .join("src");
+    fs::create_dir_all(&staged_src_dir).unwrap();
     let source_path = repo
         .join("examples")
         .join("backend")
         .join("personal_executive_agent")
         .join("src")
         .join("main.cor");
-    let staged_path = dir.path().join("main.cor");
+    let staged_path = staged_src_dir.join("main.cor");
     fs::copy(&source_path, &staged_path).unwrap();
     let source = fs::read_to_string(&staged_path).expect("personal executive agent example");
 
