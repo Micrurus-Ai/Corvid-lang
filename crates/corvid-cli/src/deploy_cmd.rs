@@ -771,23 +771,47 @@ mod tests {
     #[test]
     fn deploy_dockerfile_uses_distroless_runtime_base() {
         let dockerfile = render_dockerfile("test_app");
-        // The runtime stage must be a distroless image.
+
+        // The Dockerfile is multi-stage: one or more builder stages
+        // (each `FROM <image> AS <name>`) followed by the runtime
+        // stage (the final `FROM <image>` with NO `AS` suffix).
+        // The fat-base ban applies only to the runtime stage —
+        // builder stages legitimately use `debian:bookworm-slim`
+        // to run `curl` + `tar` because distroless has no shell.
+        // Locate the runtime stage as the last `FROM ...` line
+        // that doesn't have an `AS` clause.
+        let runtime_from = dockerfile
+            .lines()
+            .filter(|line| line.starts_with("FROM "))
+            .filter(|line| !line.contains(" AS "))
+            .next_back()
+            .unwrap_or_else(|| {
+                panic!(
+                    "no runtime FROM line (a `FROM <image>` without ` AS `) \
+                     found; got:\n{dockerfile}"
+                )
+            });
+
         assert!(
-            dockerfile.contains("FROM gcr.io/distroless/"),
-            "runtime stage must use distroless base; got:\n{dockerfile}"
+            runtime_from.contains("gcr.io/distroless/"),
+            "runtime stage must use distroless base; got runtime FROM line:\n  \
+             {runtime_from}\nfull Dockerfile:\n{dockerfile}"
         );
-        // Adversarial guard: catch the common fat-base substitutions.
+        // Adversarial guard: catch the common fat-base substitutions
+        // ON THE RUNTIME STAGE ONLY. A builder stage using debian
+        // is fine and intentional.
         for fat_base in &[
-            "FROM debian:",
-            "FROM debian ",
-            "FROM ubuntu:",
-            "FROM ubuntu ",
-            "FROM alpine:",
-            "FROM alpine ",
+            "debian:",
+            "debian ",
+            "ubuntu:",
+            "ubuntu ",
+            "alpine:",
+            "alpine ",
         ] {
             assert!(
-                !dockerfile.contains(fat_base),
-                "runtime stage must not use fat base `{fat_base}`; got:\n{dockerfile}"
+                !runtime_from.contains(fat_base),
+                "runtime stage must not use fat base `{fat_base}`; got \
+                 runtime FROM line:\n  {runtime_from}\nfull Dockerfile:\n{dockerfile}"
             );
         }
         // HEALTHCHECK must survive the base swap (uses absolute
