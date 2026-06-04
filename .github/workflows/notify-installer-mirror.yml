@@ -1,0 +1,28 @@
+# Purpose: instant cross-repo dispatch on canonical install-file changes,
+# so Micrurus-Ai/corvid-installer mirrors install.sh / install.ps1 / release.yml within seconds.
+# Source of truth: docs/meta/corvid-installer-sync-reply-2026-06-04.md (maintainer's reply).
+# Safety fallback: the daily-schedule sync at corvid-installer/.github/workflows/sync-installers.yml
+# continues to handle correctness even if this dispatch path is misconfigured or fails.
+# Required repo secret: INSTALLER_SYNC_TOKEN (fine-grained PAT, Contents: write on Micrurus-Ai/corvid-installer ONLY).
+name: notify-installer-mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install/install.sh"
+      - "install/install.ps1"
+      - ".github/workflows/release.yml"
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch corvid-installer sync
+        env:
+          GH_TOKEN: ${{ secrets.INSTALLER_SYNC_TOKEN }}
+        run: |
+          gh api repos/Micrurus-Ai/corvid-installer/dispatches \
+            -f event_type=corvid-lang-install-changed
