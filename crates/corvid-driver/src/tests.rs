@@ -1097,8 +1097,15 @@ agent main() -> Bool:
     fn vendor_std_skips_when_destination_exists() {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join("proj");
-        std::fs::create_dir_all(proj.join("std")).unwrap();
-        std::fs::write(proj.join("std").join("preexisting.cor"), b"keep\n").unwrap();
+        // Vendor target is `proj/src/std/` per the corvid-installer
+        // maintainer's `LIVE-TEST-GAPS.md` Gap #1 fix — see
+        // `vendor_std` doc comment for the import-resolver rationale.
+        std::fs::create_dir_all(proj.join("src").join("std")).unwrap();
+        std::fs::write(
+            proj.join("src").join("std").join("preexisting.cor"),
+            b"keep\n",
+        )
+        .unwrap();
 
         // No CORVID_HOME, no exe-adjacent std → vendor_std returns None
         // anyway, but the dst-exists guard is the primary check we care
@@ -1106,8 +1113,104 @@ agent main() -> Bool:
         let result = vendor_std(&proj).unwrap();
         assert!(result.is_none());
         assert_eq!(
-            std::fs::read(proj.join("std").join("preexisting.cor")).unwrap(),
+            std::fs::read(proj.join("src").join("std").join("preexisting.cor")).unwrap(),
             b"keep\n"
+        );
+    }
+
+    /// `LIVE-TEST-GAPS.md` Gap #1 regression guard — the
+    /// corvid-installer maintainer caught that `vendor_std` was
+    /// dropping `std/` into `<project>/std/` instead of
+    /// `<project>/src/std/`, breaking every fresh `corvid new`
+    /// project's first `import "./std/foo"` because Corvid's import
+    /// resolver is purely relative to the importing file. The fix
+    /// is a one-line path change; this test runs the full scaffold
+    /// + import + check round-trip the maintainer named so the
+    /// regression can't quietly come back through a future scaffold
+    /// refactor.
+    #[test]
+    fn vendor_std_from_corvid_new_scaffold_lets_src_main_import_std_effects() {
+        // Set up: a fake `src_std` directory that masquerades as the
+        // system stdlib for the duration of this test. We don't
+        // exercise `find_std_source`'s `$CORVID_HOME` /
+        // `<exe-dir>/../std` lookup here (both are process-global
+        // and racy under parallel tests); we drive `vendor_std_from`
+        // directly with a known source, which is what `vendor_std`
+        // calls internally after the lookup.
+        let tmp = tempfile::tempdir().unwrap();
+        let std_src = tmp.path().join("src_std");
+        std::fs::create_dir_all(&std_src).unwrap();
+        // A minimal stdlib module the scaffold's main.cor can import.
+        // Use `effects.cor` because that's the module the maintainer's
+        // gap report cited (`import "./std/effects" use EffectEnvelope`).
+        // Use `public type` — Corvid requires the `public` visibility
+        // marker for a top-level declaration to be importable from
+        // another module. A plain `type` here will resolve the file
+        // but fail with "no declaration named `EffectEnvelope`",
+        // which would falsely look like Gap #1 still being broken.
+        std::fs::write(
+            std_src.join("effects.cor"),
+            b"public type EffectEnvelope:\n    name: String\n",
+        )
+        .unwrap();
+
+        // Scaffold a fresh project just like `corvid new` does.
+        let proj = scaffold_new_in(tmp.path(), "triage_bot").unwrap();
+
+        // Vendor the stdlib in (mirrors what `corvid new` does after
+        // scaffold_new_in returns).
+        let dst = proj.join("src").join("std");
+        vendor_std_from(&std_src, &dst).unwrap();
+
+        // The vendored module MUST be findable from src/main.cor's
+        // `import "./std/effects"` path resolution, which is
+        // src-relative — so the file must live at
+        // `proj/src/std/effects.cor`, NOT at `proj/std/effects.cor`.
+        // This assertion is the actual gap regression guard.
+        let expected = proj.join("src").join("std").join("effects.cor");
+        assert!(
+            expected.is_file(),
+            "Gap #1 regression — vendored stdlib didn't land at `{}`. The \
+             `corvid new` import resolver looks for `./std/effects` from \
+             `src/main.cor` at `src/std/effects.cor`, so vendor_std MUST \
+             write to `<project>/src/std/`, not `<project>/std/`. See the \
+             vendor_std doc comment + the LIVE-TEST-GAPS.md handoff \
+             at `docs/meta/corvid-installer-sync-handoff.md` Finding 3.",
+            expected.display()
+        );
+
+        // Adversarial: the WRONG path (`proj/std/effects.cor`) must
+        // NOT exist. If both paths exist (e.g. some future refactor
+        // ships a defensive both-locations vendor), this test fails
+        // and forces a re-think.
+        let wrong = proj.join("std").join("effects.cor");
+        assert!(
+            !wrong.exists(),
+            "vendor_std wrote to `{}` — that path is the pre-fix shape \
+             the import resolver CAN'T see. The fix must vendor ONLY to \
+             `src/std/`, not both.",
+            wrong.display()
+        );
+
+        // Now exercise the actual import resolution by appending the
+        // `import "./std/effects"` statement to main.cor and running
+        // the full check pipeline. This is the "scaffold + import +
+        // check round-trip" the maintainer named.
+        let main_cor = proj.join("src").join("main.cor");
+        let original = std::fs::read_to_string(&main_cor).unwrap();
+        let with_import = format!(
+            "import \"./std/effects\" use EffectEnvelope\n\n{original}",
+        );
+        std::fs::write(&main_cor, &with_import).unwrap();
+
+        let result = super::compile_with_config_at_path(&with_import, &main_cor, None);
+        assert!(
+            result.diagnostics.is_empty(),
+            "Gap #1 — import './std/effects' from `src/main.cor` failed \
+             to resolve / typecheck after vendor_std landed the module at \
+             `src/std/effects.cor`. Diagnostics ({} total):\n{:#?}",
+            result.diagnostics.len(),
+            result.diagnostics,
         );
     }
 

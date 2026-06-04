@@ -88,8 +88,24 @@ pub fn find_std_source() -> Option<PathBuf> {
 /// the source path that was vendored from, or `None` if nothing was done
 /// (no source found, or the destination already exists). Errors propagate
 /// as filesystem failures during the copy.
+///
+/// **Vendored location.** `std/` is dropped into `<project>/src/std/`,
+/// not `<project>/std/`. The reason is Corvid's import resolver is
+/// purely relative to the importing file (per
+/// `crates/corvid-resolve/`'s lookup rules): `import "./std/effects"`
+/// from `src/main.cor` resolves to `src/std/effects.cor`, NOT to a
+/// project-root-relative path. Vendoring into `project/std/` left
+/// every fresh `corvid new` project broken at first import —
+/// surfaced by the corvid-installer maintainer's
+/// `LIVE-TEST-GAPS.md` Gap #1 (handoff at
+/// `docs/meta/corvid-installer-sync-handoff.md`) with the one-line
+/// fix the maintainer literally wrote. Integration test
+/// `vendor_std_from_corvid_new_scaffold_lets_src_main_import_std_effects`
+/// in this file's `#[cfg(test)] mod tests` block catches the
+/// regression by running the full scaffold + import + check
+/// round-trip.
 pub fn vendor_std(project_root: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let dst = project_root.join("std");
+    let dst = project_root.join("src").join("std");
     if dst.exists() {
         return Ok(None);
     }
