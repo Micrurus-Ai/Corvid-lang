@@ -1,12 +1,22 @@
 name: app-deploy-smoke
 
-# Slice 35V2-P42-E-LR-app-deploy-smoke-ci. Two gates for the five
+# Slice 35V2-P42-E-LR-app-deploy-smoke-ci. Three gates for the five
 # reference apps' deploy story:
 #   1. serve-smoke — `corvid serve <app>` actually serves each app's
 #      /schema route over HTTP (the exact command the containers run),
 #      plus a guard that the manifests invoke `corvid serve` with the
-#      full in-container source path.
-#   2. manifest-validation — the Docker Compose manifests parse/merge
+#      full in-container source path. Also includes
+#      `every_reference_app_produces_a_complete_deploy_package`
+#      (v1.0 launch criterion L47): `corvid deploy package` emits all
+#      9 promised artifacts (Dockerfile, OCI metadata, env schema,
+#      health config, migrate runner, startup checks, SBOM, signed
+#      attestation, VERIFY.md) for every reference app.
+#   2. bilateral-verifier — v1.0 launch criterion L50: every Phase
+#      37-43 contract id reachable from a built cdylib reconstructs
+#      and byte-matches against its source through the descriptor-
+#      relevant frontend pipeline. Reuses the warm cdylib build state
+#      from job 1 so the verifier itself runs in ~14s.
+#   3. manifest-validation — the Docker Compose manifests parse/merge
 #      cleanly (`docker compose config`) and the fly.toml files are
 #      well-formed TOML.
 
@@ -41,9 +51,41 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       # Spawns `corvid serve` per app, waits for /healthz, GETs /schema,
-      # asserts the manifest envelope. Also runs the manifest-shape guard.
-      - name: serve smoke + manifest shape
+      # asserts the manifest envelope. Also runs the manifest-shape guard
+      # and the L47 deploy-package gate
+      # (`every_reference_app_produces_a_complete_deploy_package`).
+      - name: serve smoke + manifest shape + L47 deploy package gate
         run: cargo test -p corvid-cli --test serve_smoke --test deploy_manifests -- --nocapture
+
+      # The L50 step below builds a cdylib for each reference app
+      # via `corvid_driver::build_target_to_disk(BuildTarget::Cdylib)`,
+      # which needs `libcorvid_runtime.a` on disk to link against.
+      # Same constraint that bit the `effect-system-gates` workflow
+      # at commit `fcf4ce4`: cargo only emits the `staticlib`
+      # crate-type output when corvid-runtime is the build TARGET,
+      # not when it's pulled in as an rlib dep. The prior test
+      # steps don't trigger the staticlib emit because `corvid
+      # serve` / `corvid deploy package` don't link cdylibs. Build
+      # corvid-runtime explicitly here BEFORE the L50 step so the
+      # staticlib lands at `target/debug/libcorvid_runtime.a`
+      # (the L50 test uses the debug build path, not release).
+      - name: Build corvid-runtime staticlib for L50 cdylib link
+        run: cargo build -p corvid-runtime
+
+      # v1.0 launch criterion L50 — bilateral verifier green across the
+      # production-backend surface. Builds the cdylib for each of the 5
+      # reference apps, rebuilds the descriptor JSON from source
+      # through the descriptor-relevant frontend (lex / parse / resolve
+      # / typecheck / IR-lower / ABI-emit), reads the embedded
+      # CORVID_ABI_DESCRIPTOR symbol from the cdylib, asserts byte-
+      # equality of both hash and length. Marked `#[ignore]` to keep
+      # the default `cargo test --workspace` lean; this CI step
+      # invokes it explicitly via `-- --ignored` so the launch
+      # criterion is load-bearing on every push, not just verifiable
+      # on-demand. ~14s on a warm cache; reuses the cdylib build
+      # state the L47 step warmed in the previous step.
+      - name: L50 bilateral verifier (cdylib vs source descriptor match)
+        run: cargo test -p corvid-abi-verify --test reference_apps_bilateral_match -- --ignored --nocapture
 
   manifest-validation:
     name: deploy manifests are well-formed
