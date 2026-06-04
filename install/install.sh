@@ -6,7 +6,10 @@
 #
 # Env var overrides:
 #   CORVID_REPO     (default: Micrurus-Ai/Corvid-lang)
-#   CORVID_VERSION  (default: latest)
+#   CORVID_VERSION  (default: latest; also accepts `nightly` for the
+#                    most recent main-branch push, or any literal
+#                    release tag like `v0.0.1` /
+#                    `nightly-2026-06-04-d23d381`)
 #   CORVID_HOME     (default: $HOME/.corvid)
 
 set -eu
@@ -46,11 +49,58 @@ esac
 target="${arch_id}-${os_id}"
 asset="corvid-${target}.tar.gz"
 
-if [ "$VERSION" = "latest" ]; then
-    url="https://github.com/${REPO}/releases/latest/download/${asset}"
-else
-    url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
-fi
+# Resolve the release URL for three CORVID_VERSION shapes:
+#   - `latest`  → the most recent STABLE tag (the existing fast
+#                 path). Maps to GitHub's "latest" pointer which
+#                 release.yml's stable runs advance.
+#   - `nightly` → the most recent nightly-channel tag (slice
+#                 `35V2-P33-install-script-nightly`). Queries
+#                 the GitHub API for the newest tag matching
+#                 `nightly-*` and downloads from it. Nightly
+#                 releases are marked as pre-releases by
+#                 release.yml so they don't pollute the
+#                 "latest" pointer.
+#   - any other → treated as a literal release tag (e.g.
+#                 `v0.0.1` for a pinned stable, or
+#                 `nightly-2026-06-04-d23d381` for a pinned
+#                 nightly). Maps to
+#                 `releases/download/<tag>/...`.
+case "$VERSION" in
+    latest)
+        url="https://github.com/${REPO}/releases/latest/download/${asset}"
+        ;;
+    nightly)
+        step "Resolving most recent nightly release"
+        api="https://api.github.com/repos/${REPO}/releases?per_page=30"
+        # Pull the first `tag_name` whose value matches
+        # `nightly-*` from the API response. `per_page=30` gives
+        # us several days of headroom — even if every page-1
+        # entry is somehow stable, the most recent nightly is
+        # almost certainly within reach.
+        if have curl; then
+            api_body="$(curl -fsSL --proto '=https' --tlsv1.2 "$api" 2>/dev/null || true)"
+        elif have wget; then
+            api_body="$(wget -qO- "$api" 2>/dev/null || true)"
+        else
+            api_body=""
+        fi
+        # Parse `tag_name` lines without depending on `jq`
+        # (which the installer doesn't require its user to
+        # have on PATH). Match the JSON quoting GitHub uses.
+        nightly_tag="$(printf '%s\n' "$api_body" \
+            | grep -E '"tag_name"[[:space:]]*:[[:space:]]*"nightly-[^"]+"' \
+            | head -n 1 \
+            | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+        if [ -z "$nightly_tag" ]; then
+            die "no nightly release found at ${api} — release.yml may not have produced one yet, or the GitHub API rate-limited the unauthenticated request. Try `CORVID_VERSION=latest` for the most recent stable, or pin a specific nightly tag with e.g. \`CORVID_VERSION=nightly-2026-06-04-abc1234\`."
+        fi
+        ok "Resolved nightly tag: $nightly_tag"
+        url="https://github.com/${REPO}/releases/download/${nightly_tag}/${asset}"
+        ;;
+    *)
+        url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+        ;;
+esac
 
 # --- prepare install root -------------------------------------------------
 if [ -d "$ROOT" ]; then

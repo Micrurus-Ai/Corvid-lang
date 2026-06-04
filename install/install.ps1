@@ -4,9 +4,9 @@
 #   irm https://raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.ps1 | iex
 #
 # Env var overrides:
-#   $env:CORVID_REPO     = "Micrurus-Ai/Corvid-lang"   # source repo
-#   $env:CORVID_VERSION  = "latest" | "v0.1.0"         # release tag
-#   $env:CORVID_HOME     = "$env:USERPROFILE\.corvid"  # install root
+#   $env:CORVID_REPO     = "Micrurus-Ai/Corvid-lang"          # source repo
+#   $env:CORVID_VERSION  = "latest" | "nightly" | "v0.0.1"    # release tag (slice 35V2-P33-install-script-nightly)
+#   $env:CORVID_HOME     = "$env:USERPROFILE\.corvid"         # install root
 
 $ErrorActionPreference = 'Stop'
 
@@ -35,10 +35,40 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 $target    = "$arch-pc-windows-msvc"
 $assetName = "corvid-$target.zip"
 
-if ($Version -eq 'latest') {
-    $url = "https://github.com/$Repo/releases/latest/download/$assetName"
-} else {
-    $url = "https://github.com/$Repo/releases/download/$Version/$assetName"
+# Resolve the release URL for three CORVID_VERSION shapes (mirrors
+# install.sh's logic; see that script's matching block for the
+# rationale). Slice `35V2-P33-install-script-nightly`.
+#   - `latest`  → the most recent STABLE tag (GitHub's "latest"
+#                 pointer, advanced by release.yml's stable runs).
+#   - `nightly` → the most recent nightly-channel tag, resolved via
+#                 the GitHub API.
+#   - any other → treated as a literal release tag (e.g. `v0.0.1`,
+#                 or `nightly-2026-06-04-d23d381` for a pinned
+#                 nightly).
+switch ($Version) {
+    'latest' {
+        $url = "https://github.com/$Repo/releases/latest/download/$assetName"
+    }
+    'nightly' {
+        Step "Resolving most recent nightly release"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        try {
+            $apiUrl  = "https://api.github.com/repos/$Repo/releases?per_page=30"
+            $apiResp = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -ErrorAction Stop
+            $apiObj  = $apiResp.Content | ConvertFrom-Json
+        } catch {
+            throw "Could not query GitHub releases API at $apiUrl (rate-limited or offline?). Try \$env:CORVID_VERSION='latest' for the most recent stable, or pin a specific nightly tag with e.g. \$env:CORVID_VERSION='nightly-2026-06-04-abc1234'. Underlying error: $($_.Exception.Message)"
+        }
+        $nightlyRel = $apiObj | Where-Object { $_.tag_name -like 'nightly-*' } | Select-Object -First 1
+        if (-not $nightlyRel) {
+            throw "No nightly release found at $apiUrl — release.yml may not have produced one yet."
+        }
+        Ok "Resolved nightly tag: $($nightlyRel.tag_name)"
+        $url = "https://github.com/$Repo/releases/download/$($nightlyRel.tag_name)/$assetName"
+    }
+    default {
+        $url = "https://github.com/$Repo/releases/download/$Version/$assetName"
+    }
 }
 
 # --- prepare install root -------------------------------------------------
