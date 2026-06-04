@@ -37,6 +37,17 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # Build corvid-runtime FIRST so cargo emits the `staticlib`
+      # crate-type output that the cdylib link + native-tier
+      # build paths both require. Cargo only emits all crate-type
+      # outputs when the crate is the build TARGET, not when it's
+      # pulled in as a dep — the same constraint that bit
+      # `effect-system-gates` at `fcf4ce4` and `app-deploy-smoke`
+      # at `0fc9d89`. Without this step, `libcorvid_runtime.a`
+      # never lands and the install script can't ship it.
+      - name: Build corvid-runtime (must precede CLI build so staticlib lands)
+        run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-runtime
+
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli
 
@@ -45,11 +56,25 @@ jobs:
         run: |
           name="corvid-${{ matrix.target }}"
           stage="dist/$name"
-          mkdir -p "$stage/bin"
+          mkdir -p "$stage/bin" "$stage/lib"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp "target/${{ matrix.target }}/release/corvid.exe" "$stage/bin/"
           else
             cp "target/${{ matrix.target }}/release/corvid" "$stage/bin/"
+          fi
+          # Stage the runtime staticlib alongside the bin under
+          # `$stage/lib/` so post-install discovery via
+          # `staticlib_discovery::SiblingLibDir` (which checks
+          # `exe_parent.parent()/lib/<name>` = `$CORVID_HOME/lib/<name>`
+          # when the bin lives at `$CORVID_HOME/bin/corvid`) finds
+          # it without env-var setup. Slice
+          # `35V2-P33-release-archive-staticlib`. Without this the
+          # `cargo install`-shape friction the first 33M trial
+          # reviewer hit ships in every release.
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "target/${{ matrix.target }}/release/corvid_runtime.lib" "$stage/lib/"
+          else
+            cp "target/${{ matrix.target }}/release/libcorvid_runtime.a" "$stage/lib/"
           fi
           [ -d std ]            && cp -R std            "$stage/std"            || true
           [ -f LICENSE-MIT ]    && cp    LICENSE-MIT    "$stage/LICENSE-MIT"    || true
