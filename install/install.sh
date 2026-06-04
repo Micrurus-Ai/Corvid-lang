@@ -11,6 +11,10 @@
 #                    release tag like `v0.0.1` /
 #                    `nightly-2026-06-04-d23d381`)
 #   CORVID_HOME     (default: $HOME/.corvid)
+#
+# Canonical source: https://github.com/Micrurus-Ai/Corvid-lang/blob/main/install/install.sh
+# This file is also mirrored to Micrurus-Ai/corvid-installer for the
+# `iwr corvid-lang.org/install | iex` shortcut; edits MUST land here first.
 
 set -eu
 
