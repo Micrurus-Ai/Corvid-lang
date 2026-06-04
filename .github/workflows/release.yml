@@ -1,12 +1,26 @@
-# Builds prebuilt `corvid` binaries on every v*.*.* tag and uploads
-# archives to a GitHub Release. The install/ scripts download these
-# archives via the `releases/latest/download/...` URL — without this
-# workflow, the installer falls back to a slow `cargo install`.
+# Builds prebuilt `corvid` binaries on every v*.*.* tag AND on every
+# push to `main` (nightly channel, slice
+# `35V2-P33-release-nightly-channel`) and uploads archives to GitHub
+# Releases. The install/ scripts download these archives via the
+# `releases/latest/download/...` URL (stable channel, the `v*.*.*`
+# tags) or `releases/tags/nightly-YYYY-MM-DD-<sha>/...` (nightly
+# channel, the main-branch pushes). Without this workflow the
+# installer falls back to a slow `cargo install`.
+#
+# Release-channel naming follows `docs/release-policy.md` — stable
+# releases are `v<semver>` (e.g. `v0.0.1`) and nightly releases are
+# `nightly-YYYY-MM-DD-<short-sha>` (e.g. `nightly-2026-06-04-d23d381`).
+# Nightly releases are marked as pre-releases so GitHub's "latest"
+# pointer keeps pointing at the most recent stable tag — the install
+# script's fast path `releases/latest/download/...` continues to mean
+# "the most recent stable release," not "the most recent push to
+# main."
 
 name: release
 
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
   workflow_dispatch:
 
@@ -29,13 +43,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Compute the release tag + channel + prerelease flag from
+      # the workflow trigger. Three cases:
+      #   - push to a `v*.*.*` tag → stable channel; tag = the
+      #     pushed tag; prerelease = false; "latest" pointer
+      #     advances.
+      #   - push to `main` → nightly channel; tag =
+      #     `nightly-YYYY-MM-DD-<short-sha>`; prerelease = true;
+      #     "latest" pointer does NOT advance so the install
+      #     script's fast path keeps meaning "latest stable."
+      #   - `workflow_dispatch` → treats as nightly (manual
+      #     nightly cut from main).
+      # Slice `35V2-P33-release-nightly-channel`.
+      - name: Compute release tag + channel
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF:-}"
+          short_sha="$(git rev-parse --short HEAD)"
+          date_utc="$(date -u +%Y-%m-%d)"
+          if [[ "$ref" == refs/tags/v* ]]; then
+            release_tag="${ref#refs/tags/}"
+            channel="stable"
+            prerelease="false"
+          else
+            release_tag="nightly-${date_utc}-${short_sha}"
+            channel="nightly"
+            prerelease="true"
+          fi
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel"         >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease"   >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha"     >> "$GITHUB_OUTPUT"
+          echo "commit_date=$date_utc"    >> "$GITHUB_OUTPUT"
+          echo "Computed: tag=$release_tag channel=$channel prerelease=$prerelease commit_date=$date_utc"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ steps.tag.outputs.channel }}
 
       # Build corvid-runtime FIRST so cargo emits the `staticlib`
       # crate-type output that the cdylib link + native-tier
@@ -48,7 +98,17 @@ jobs:
       - name: Build corvid-runtime (must precede CLI build so staticlib lands)
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-runtime
 
+      # `CORVID_BUILD_SHA` + `CORVID_BUILD_DATE` are env-var
+      # overrides honored by `crates/corvid-cli/build.rs` (slice
+      # `35V2-P33-version-output-sha`). Setting them here lets
+      # the workflow inject canonical values rather than letting
+      # build.rs run its own `git rev-parse` (which would
+      # otherwise pick up the checkout-action's SHA strategy
+      # depending on how the runner cloned).
       - name: Build
+        env:
+          CORVID_BUILD_SHA: ${{ steps.tag.outputs.short_sha }}
+          CORVID_BUILD_DATE: ${{ steps.tag.outputs.commit_date }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli
 
       - name: Stage artifact
@@ -94,7 +154,22 @@ jobs:
           $name = "corvid-${{ matrix.target }}"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip" -Force
 
+      # Stable runs (push to `v*.*.*`) upload to the existing
+      # release for that tag and advance the "latest" pointer.
+      # Nightly runs (push to `main` or workflow_dispatch from
+      # main) create / upload to a release named
+      # `nightly-YYYY-MM-DD-<sha>`, marked as a pre-release so
+      # GitHub's "latest" pointer stays on the most recent
+      # stable. The install script's fast path
+      # `releases/latest/download/...` keeps meaning "latest
+      # stable"; the nightly channel is opt-in via
+      # `CORVID_VERSION=nightly` (slice
+      # `35V2-P33-install-script-nightly`) which resolves to
+      # `releases/tags/nightly-<date>-<sha>/download/...`.
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          name: ${{ steps.tag.outputs.release_tag }}
           files: dist/corvid-${{ matrix.target }}.${{ matrix.archive }}
