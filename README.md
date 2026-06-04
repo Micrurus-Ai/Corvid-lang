@@ -562,16 +562,34 @@ The installer downloads a prebuilt `corvid` for your OS/arch into `~/.corvid/`, 
 
 Override defaults with `CORVID_REPO`, `CORVID_VERSION` (e.g. `v0.1.0`), or `CORVID_HOME`.
 
-### Or via your package manager
+### Or via your package manager (planned, post-v1.0)
 
-```sh
-brew install Micrurus-Ai/corvid/corvid                                 # macOS / Linux
-```
+> **Status:** the install scripts above (`install/install.{sh,ps1}`)
+> are the **canonical install path** for Corvid v1.0. The package-
+> manager manifests below are tracked as Phase 33P slices in
+> [`ROADMAP.md`](./ROADMAP.md#L1923) and ship **post-v1.0** — none of
+> them is the "installer," each is additive metadata that a
+> language-installer manager's central repo consumes and routes back
+> to the GitHub Release artifacts `release.yml` produces. They're
+> filed but not built yet; running them today will report
+> "formula/manifest not found."
 
-```powershell
-scoop bucket add corvid https://github.com/Micrurus-Ai/scoop-corvid    # Windows
-scoop install corvid
-```
+| Manager | End-user command (post-v1.0) | Filed slice |
+|---|---|---|
+| Homebrew (macOS / Linux) | `brew install Micrurus-Ai/corvid/corvid` | `33P1-homebrew-tap` |
+| Scoop (Windows) | `scoop bucket add corvid https://github.com/Micrurus-Ai/scoop-corvid && scoop install corvid` | `33P2-scoop-bucket` |
+| winget (Windows) | `winget install Micrurus-Ai.Corvid` | `33P3-winget-manifest` |
+| Chocolatey (Windows) | `choco install corvid` | `33P4-chocolatey-package` |
+| AUR (Arch Linux) | `yay -S corvid-bin` (or equivalent AUR helper) | `33P5-aur-package` |
+| APT / RPM (Debian / Fedora) | `apt install corvid` / `dnf install corvid` after one-time repo add | `33P6-apt-rpm-repo` |
+
+If you want to **track or contribute** any of these,
+[`ROADMAP.md`'s Phase 33P block](./ROADMAP.md#L1923) names each
+filed slice with what it actually does. Manifest contributions are
+welcome at any time — the GitHub Release artifacts they consume
+(`release.yml`) are already shipping; the manifests are
+post-v1.0 only because Path A defers public packaging-manager
+listings until launch by deliberate design.
 
 ## Install From Source
 
