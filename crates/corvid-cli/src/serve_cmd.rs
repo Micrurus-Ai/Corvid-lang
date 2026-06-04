@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use axum::body::Bytes;
@@ -52,11 +52,34 @@ use corvid_driver::{
 };
 use corvid_ir::{IrCallKind, IrExprKind, IrFile, IrLiteral, IrRoute, IrStmt, IrType};
 use corvid_resolve::DefId;
+use corvid_runtime::approval_authorization::ApprovalActorContext;
 use corvid_runtime::approval_queue::ApprovalQueueRuntime;
+use corvid_runtime::approvals::ProgrammaticApprover;
 use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 
 use crate::serve_approval::{QueueApprover, SERVE_DEFAULT_TENANT};
+
+/// Actor id every `/__approvals/:id/{approve,deny}` transition runs
+/// under at the slice MVP boundary. Per-request reviewer auth is a
+/// follow-up; today every reviewer is the same anonymous actor.
+const SERVE_REVIEWER_ACTOR: &str = "serve-reviewer";
+/// Role the reviewer claims. Must match the `required_role` set in
+/// `serve_approval::QueueApprover` (`operator`) for the queue's
+/// `authorize_approval_transition` to accept the transition.
+const SERVE_REVIEWER_ROLE: &str = "operator";
+
+/// What the serve loop remembers about each in-flight approval so the
+/// `/__approvals/:id/approve` handler can re-execute the original
+/// agent without the client having to re-POST. Captured when an
+/// `approve` boundary surfaces `ApprovalQueued` — the dispatch handler
+/// already has the agent name + args at that point and just stashes
+/// them under the freshly-minted approval id.
+#[derive(Clone)]
+struct PendingInvocation {
+    agent: String,
+    args: Vec<Value>,
+}
 
 /// Shared, read-only serving state: the lowered app, the interpreter
 /// runtime, and the approval queue the runtime's `QueueApprover` writes
@@ -69,6 +92,12 @@ struct ServeState {
     ir: IrFile,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
+    /// `approval_id -> PendingInvocation` so the transition handler
+    /// can re-run the agent on `/approve` without the client re-
+    /// POSTing the original request. Populated by the dispatch
+    /// handlers on the queued path; drained on either `/approve`
+    /// (re-executed) or `/deny` (discarded).
+    pending_invocations: Arc<Mutex<HashMap<String, PendingInvocation>>>,
 }
 
 /// How a route's handler is invoked per request.
@@ -135,6 +164,7 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         ir,
         runtime,
         approval_queue,
+        pending_invocations: Arc::new(Mutex::new(HashMap::new())),
     });
 
     let mut app: Router<Arc<ServeState>> = Router::new()
@@ -151,6 +181,18 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         .route(
             "/__approvals/:id",
             on(MethodFilter::GET, get_approval),
+        )
+        // Transition endpoints (`serve-6`): a reviewer marks an
+        // approval granted, the server re-executes the original
+        // request and returns the result; or marks it denied and
+        // discards the pending invocation. axum 0.7 colon-capture.
+        .route(
+            "/__approvals/:id/approve",
+            on(MethodFilter::POST, approve_approval),
+        )
+        .route(
+            "/__approvals/:id/deny",
+            on(MethodFilter::POST, deny_approval),
         );
 
     for plan in plans.iter() {
@@ -209,6 +251,8 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
+        println!("  POST   /__approvals/<id>/approve   -> approve + re-execute the original request");
+        println!("  POST   /__approvals/<id>/deny      -> deny + drop the pending invocation");
         for (method, path) in &not_served {
             println!("  {method:<6} {path}  -> 501 (not served)");
         }
@@ -219,7 +263,9 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
 
 /// Run a literal-arg handler agent and serialize its result to JSON.
 async fn dispatch_literal(state: Arc<ServeState>, agent: String, args: Vec<Value>) -> Response {
-    finish(run_ir_with_runtime(&state.ir, Some(&agent), args, &state.runtime).await)
+    let outcome = run_ir_with_runtime(&state.ir, Some(&agent), args.clone(), &state.runtime).await;
+    capture_pending_invocation_if_queued(&state, &agent, &args, &outcome);
+    finish(outcome)
 }
 
 /// Deserialize the request body into the route's body type, then run the
@@ -244,7 +290,36 @@ async fn dispatch_body(
             return bad_request("invalid_body", &format!("{e:?}"));
         }
     };
-    finish(run_ir_with_runtime(&state.ir, Some(&agent), vec![body_val], &state.runtime).await)
+    let args = vec![body_val];
+    let outcome = run_ir_with_runtime(&state.ir, Some(&agent), args.clone(), &state.runtime).await;
+    capture_pending_invocation_if_queued(&state, &agent, &args, &outcome);
+    finish(outcome)
+}
+
+/// If the dispatch outcome surfaced an `ApprovalQueued` from the
+/// runtime, stash the agent name + args under that approval id so
+/// `/__approvals/:id/approve` can re-execute the original request.
+/// No-op for any other outcome (200 success, 403 deny, 500 error).
+fn capture_pending_invocation_if_queued(
+    state: &Arc<ServeState>,
+    agent: &str,
+    args: &[Value],
+    outcome: &Result<Value, RunError>,
+) {
+    let approval_id = match outcome {
+        Err(RunError::Interp(e)) => match approval_queued_id(&e.kind) {
+            Some(id) => id.to_string(),
+            None => return,
+        },
+        _ => return,
+    };
+    state.pending_invocations.lock().unwrap().insert(
+        approval_id,
+        PendingInvocation {
+            agent: agent.to_string(),
+            args: args.to_vec(),
+        },
+    );
 }
 
 /// Map a handler outcome to an HTTP response: 200 + JSON on success,
@@ -355,6 +430,216 @@ async fn list_approvals(State(state): State<Arc<ServeState>>) -> Response {
             })),
         )
             .into_response(),
+    }
+}
+
+/// `POST /__approvals/:id/approve` — slice `serve-6`. Reviewer marks the
+/// approval granted; the server transitions the queue record, looks
+/// up the pending invocation captured at queue time, re-runs the
+/// agent under an always-yes approver (the approval is already
+/// granted at this layer, so the inner `approve` boundary must pass
+/// without re-queuing), and returns the agent's result. Errors:
+/// 404 if the approval doesn't exist, 409 if already decided or no
+/// pending invocation linked, 500 if the queue transition or the
+/// re-execution itself failed.
+async fn approve_approval(
+    State(state): State<Arc<ServeState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    // Pre-check the record exists and is still pending so we can
+    // distinguish "unknown id" (404), "already decided" (409), and
+    // queue-runtime IO errors (500) — `queue.approve()` collapses
+    // these into a single Err.
+    match state.approval_queue.get(&id) {
+        Ok(Some(record)) if record.status == "pending" => {}
+        Ok(Some(record)) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "approval_already_decided",
+                    "id": id,
+                    "status": record.status,
+                })),
+            )
+                .into_response();
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "approval_queue_get_failed",
+                    "detail": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let actor = serve_reviewer_actor();
+    if let Err(e) = state.approval_queue.approve(
+        &id,
+        SERVE_DEFAULT_TENANT,
+        &actor,
+        Some("approved via /__approvals/:id/approve"),
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "approval_transition_failed",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response();
+    }
+
+    // Pop the pending invocation. If a client transitioned an approval
+    // without ever going through a serve route (e.g. via a manually-
+    // POSTed id that never existed in this serve process), the queue
+    // record is now marked approved but there's no agent to re-run.
+    // Respond with 409 so the reviewer knows the approval was
+    // recorded but no result is available.
+    let invocation = match state.pending_invocations.lock().unwrap().remove(&id) {
+        Some(inv) => inv,
+        None => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "no_pending_invocation",
+                    "id": id,
+                    "detail": "approval transitioned to `approved` but no pending invocation is linked in this serve process — re-execution is not possible. This happens when the approval id is not one this server queued.",
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Re-run the agent under a fresh runtime whose approver is
+    // `ProgrammaticApprover::always_yes()`. The granted approval
+    // lives at the HTTP/queue layer; the inner `approve` boundary
+    // must pass at this layer or the agent would re-queue forever.
+    // The IR / approval queue / pending-invocation map are all
+    // shared, so the re-execution can still hit other approval
+    // boundaries — those would re-queue normally. (Slice MVP
+    // assumes a single approve boundary per route — multi-step
+    // approval chains are a follow-up.)
+    let bypass_runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .build();
+    let outcome = run_ir_with_runtime(
+        &state.ir,
+        Some(&invocation.agent),
+        invocation.args,
+        &bypass_runtime,
+    )
+    .await;
+    match outcome {
+        Ok(value) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "approved",
+                "result": value_to_json(&value),
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "approved_execution_failed",
+                "detail": err.to_string(),
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /__approvals/:id/deny` — slice `serve-6`. Reviewer marks the
+/// approval denied; the server transitions the queue record and
+/// drops the pending invocation. No re-execution happens. 404 if
+/// the approval doesn't exist, 409 if already decided.
+async fn deny_approval(
+    State(state): State<Arc<ServeState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    match state.approval_queue.get(&id) {
+        Ok(Some(record)) if record.status == "pending" => {}
+        Ok(Some(record)) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "approval_already_decided",
+                    "id": id,
+                    "status": record.status,
+                })),
+            )
+                .into_response();
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "approval_queue_get_failed",
+                    "detail": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let actor = serve_reviewer_actor();
+    if let Err(e) = state.approval_queue.deny(
+        &id,
+        SERVE_DEFAULT_TENANT,
+        &actor,
+        Some("denied via /__approvals/:id/deny"),
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "approval_transition_failed",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response();
+    }
+
+    // Drop the pending invocation; it will never re-execute.
+    state.pending_invocations.lock().unwrap().remove(&id);
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "denied",
+            "id": id,
+        })),
+    )
+        .into_response()
+}
+
+/// Reviewer actor context the `/approve` and `/deny` transitions run
+/// under. Per-request reviewer auth is a slice follow-up; today
+/// every reviewer is the same anonymous actor distinct from the
+/// requester (the queue's `authorize_approval_transition` rejects
+/// self-approval, so requester and reviewer ids must differ — they
+/// do: `serve-anonymous` vs `serve-reviewer`).
+fn serve_reviewer_actor() -> ApprovalActorContext {
+    ApprovalActorContext {
+        actor_id: SERVE_REVIEWER_ACTOR.to_string(),
+        tenant_id: SERVE_DEFAULT_TENANT.to_string(),
+        role: SERVE_REVIEWER_ROLE.to_string(),
     }
 }
 

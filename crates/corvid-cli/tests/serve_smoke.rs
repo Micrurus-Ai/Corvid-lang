@@ -268,3 +268,185 @@ server test_serve_5_api:
         "GET /__approvals/<missing> must answer 404"
     );
 }
+
+/// Slice `serve-6` end-to-end gate: a reviewer POST-ing to
+/// `/__approvals/:id/approve` MUST transition the queued approval,
+/// re-execute the original agent, and return the agent's result;
+/// a `POST /__approvals/:id/deny` MUST mark the approval denied
+/// and drop the pending invocation without re-running anything.
+/// Both endpoints MUST 404 on unknown ids and 409 on already-
+/// decided ids.
+///
+/// Hermetic: same minimal handcrafted source as the
+/// `E0-serve-5` test but with a more interesting receipt return
+/// so the re-execution result is observable from the response.
+/// Uses port `8196` so it can't collide with the 5-app smoke
+/// (8190-8194) or the serve-5 test (8195).
+#[test]
+fn approval_transition_endpoints_approve_re_executes_and_deny_drops_pending() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type SendReq:
+    body: String
+
+type SendReceipt:
+    echoed_body: String
+    delivered: Bool
+
+effect send_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
+
+agent execute_send(req: SendReq) -> SendReceipt uses send_external:
+    approve SendMessage(req)
+    return SendReceipt(req.body, true)
+"#;
+    // NB: the `execute_send` body explicitly constructs the
+    // receipt rather than going through `send_message` (which would
+    // need a host tool registration). The dangerous-call type-
+    // checker still requires the `approve` boundary, so the queued
+    // state is exercised — only the post-approval branch differs
+    // from the E0-serve-5 test, returning a deterministic receipt
+    // the test can observe end-to-end.
+    let source = format!(
+        "{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external:\n        return execute_send(body)\n"
+    );
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8196;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port}"
+    );
+
+    // --- /approve path ---
+    let (post_status, post_body) = http_post(
+        port,
+        "/send",
+        r#"{"body":"hello, please approve"}"#,
+    )
+    .expect("POST /send failed");
+    assert_eq!(post_status, 202, "POST /send should answer 202: {post_body}");
+    let resp: serde_json::Value =
+        serde_json::from_str(&post_body).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id`")
+        .to_string();
+
+    let (approve_status, approve_body) = http_post(
+        port,
+        &format!("/__approvals/{approval_id}/approve"),
+        "",
+    )
+    .expect("POST /__approvals/<id>/approve failed");
+    assert_eq!(
+        approve_status, 200,
+        "POST /__approvals/<id>/approve must answer 200 (transition succeeded + agent re-executed). got status={approve_status} body=`{approve_body}`. \
+         If 404: the queue runtime forgot the approval id mid-test (cross-process leak?). If 409: the pending invocation wasn't captured (the dispatch-handler stash regressed). If 500: the re-execution itself errored — read the response body."
+    );
+    let approve_resp: serde_json::Value =
+        serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
+    assert_eq!(
+        approve_resp.get("status").and_then(|v| v.as_str()),
+        Some("approved")
+    );
+    let result = approve_resp
+        .get("result")
+        .expect("/approve body must carry a `result` from the re-executed agent");
+    // The agent re-executes with the original args, so the receipt
+    // body should reflect the original POST body.
+    assert_eq!(
+        result.get("echoed_body").and_then(|v| v.as_str()),
+        Some("hello, please approve"),
+        "re-executed agent's result must echo the original POST body. body={approve_body}"
+    );
+    assert_eq!(result.get("delivered").and_then(|v| v.as_bool()), Some(true));
+
+    // GET on the same id after approval → status: approved.
+    let (one_status, one_body) =
+        http_get(port, &format!("/__approvals/{approval_id}")).expect("GET fetch failed");
+    assert_eq!(one_status, 200);
+    let one: serde_json::Value = serde_json::from_str(&one_body).unwrap();
+    assert_eq!(one.get("status").and_then(|v| v.as_str()), Some("approved"));
+
+    // A second /approve must 409 (already decided).
+    let (replay_status, _) =
+        http_post(port, &format!("/__approvals/{approval_id}/approve"), "")
+            .expect("POST replay /approve failed");
+    assert_eq!(
+        replay_status, 409,
+        "a second /approve on the same id must answer 409 (already decided)"
+    );
+
+    // --- /deny path ---
+    let (post2_status, post2_body) = http_post(
+        port,
+        "/send",
+        r#"{"body":"this one will be denied"}"#,
+    )
+    .expect("second POST /send failed");
+    assert_eq!(post2_status, 202);
+    let resp2: serde_json::Value = serde_json::from_str(&post2_body).unwrap();
+    let approval_id_2 = resp2
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
+    assert_ne!(
+        approval_id, approval_id_2,
+        "second approval id must differ from the first (the QueueApprover's AtomicU64 sequence guarantees this)"
+    );
+
+    let (deny_status, deny_body) = http_post(
+        port,
+        &format!("/__approvals/{approval_id_2}/deny"),
+        "",
+    )
+    .expect("POST /deny failed");
+    assert_eq!(
+        deny_status, 200,
+        "POST /__approvals/<id>/deny must answer 200: {deny_body}"
+    );
+    let deny_resp: serde_json::Value = serde_json::from_str(&deny_body).unwrap();
+    assert_eq!(
+        deny_resp.get("status").and_then(|v| v.as_str()),
+        Some("denied")
+    );
+
+    // GET → status: denied.
+    let (denied_status, denied_body) =
+        http_get(port, &format!("/__approvals/{approval_id_2}")).expect("GET denied fetch failed");
+    assert_eq!(denied_status, 200);
+    let denied: serde_json::Value = serde_json::from_str(&denied_body).unwrap();
+    assert_eq!(
+        denied.get("status").and_then(|v| v.as_str()),
+        Some("denied")
+    );
+
+    // /approve and /deny on unknown ids → 404.
+    let (missing_approve, _) =
+        http_post(port, "/__approvals/this-id-does-not-exist/approve", "")
+            .expect("POST /approve unknown failed");
+    assert_eq!(missing_approve, 404);
+    let (missing_deny, _) =
+        http_post(port, "/__approvals/this-id-does-not-exist/deny", "")
+            .expect("POST /deny unknown failed");
+    assert_eq!(missing_deny, 404);
+}
