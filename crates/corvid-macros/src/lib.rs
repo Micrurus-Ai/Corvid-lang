@@ -83,7 +83,26 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         "__corvid_tool_{}",
         mangle_tool_name(&tool_name)
     );
-    let wrapper_symbol = wrapper_ident.to_string();
+    let wrapper_symbol_string = wrapper_ident.to_string();
+
+    // Decide up front whether the typed C-ABI wrapper is emittable.
+    //
+    // The typed wrapper takes / returns one Corvid ABI primitive per
+    // arg / return — i64 / f64 / bool / `CorvidString` — and codegen
+    // direct-calls `__corvid_tool_<name>` for native-binary targets.
+    // Struct (and list) arguments cannot be expressed at the scalar
+    // C ABI — their layout is per-type and the wrapper would have to
+    // encode/decode a JSON or refcount envelope, which is exactly
+    // what the JSON wrapper below already does. So when ANY arg or
+    // the return type is non-scalar, the typed wrapper is omitted
+    // and the tool is reachable only through the JSON wrapper /
+    // runtime registry — the cdylib dispatch path that
+    // `35V2-P42-G0-tools-2b` made target-conditional. Native-binary
+    // targets that try to direct-call a struct-signature tool will
+    // get a clean linker error (the symbol isn't emitted) rather
+    // than the wrong-ABI miscompilation that would result from
+    // forcing a scalar wrapper around a struct value.
+    let emit_typed_wrapper = signature_is_all_scalar(&f.sig)?;
 
     // Collect (native_type, abi_type, arg_name) for each parameter.
     let mut wrapper_params: Vec<TokenStream2> = Vec::new();
@@ -117,21 +136,25 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
             }
         };
 
-        let abi_ty = abi_type_for(&native_ty)?;
-        let native_ty_tokens = quote! { #native_ty };
-        wrapper_params.push(quote! { #arg_name: #abi_ty });
+        if emit_typed_wrapper {
+            // Scalar/String path — typed C-ABI wrapper compiles, so set
+            // up its arg encoding + body conversion.
+            let abi_ty = abi_type_for(&native_ty)?;
+            let native_ty_tokens = quote! { #native_ty };
+            wrapper_params.push(quote! { #arg_name: #abi_ty });
 
-        // Conversion: every Corvid ABI type implements `Into<NativeT>`
-        // (defined in `corvid_runtime::abi`). The conversion may copy
-        // (e.g. CorvidString -> String copies bytes) and may release
-        // refcounts (CorvidString into conversion releases the
-        // caller's +0 reference — per the +0 ABI the wrapper
-        // retains on entry and releases here).
-        arg_conversions.push(quote! {
-            let #arg_name: #native_ty_tokens =
-                ::corvid_runtime::abi::FromCorvidAbi::from_corvid_abi(#arg_name);
-        });
-        call_args.push(quote! { #arg_name });
+            // Conversion: every Corvid ABI type implements
+            // `FromCorvidAbi` (defined in `corvid_runtime::abi`). The
+            // conversion may copy (e.g. CorvidString -> String copies
+            // bytes) and may release refcounts (CorvidString into-
+            // conversion releases the caller's +0 reference — per the
+            // +0 ABI the wrapper retains on entry and releases here).
+            arg_conversions.push(quote! {
+                let #arg_name: #native_ty_tokens =
+                    ::corvid_runtime::abi::FromCorvidAbi::from_corvid_abi(#arg_name);
+            });
+            call_args.push(quote! { #arg_name });
+        }
         json_args.push((arg_name.clone(), native_ty.clone()));
 
         // `idx` unused today; kept to make future arity-diagnostics
@@ -146,12 +169,17 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         ReturnType::Type(_, ty) => (false, Some((**ty).clone())),
     };
 
-    let wrapper_ret_ty = match &native_ret_ty {
-        None => quote! { () },
-        Some(ty) => {
-            let abi = abi_type_for(ty)?;
-            quote! { #abi }
+    let wrapper_ret_ty = if emit_typed_wrapper {
+        match &native_ret_ty {
+            None => quote! { () },
+            Some(ty) => {
+                let abi = abi_type_for(ty)?;
+                quote! { #abi }
+            }
         }
+    } else {
+        // Unused when the typed wrapper is omitted; placeholder.
+        quote! { () }
     };
 
     let arity = f.sig.inputs.len();
@@ -208,22 +236,46 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         }
     };
 
+    // Typed C-ABI wrapper. Linker-visible symbol name is the literal
+    // `__corvid_tool_<mangled-name>`; codegen emits a direct call to
+    // this symbol on native-binary targets. Omitted entirely when the
+    // signature has any non-scalar (struct / list / custom) arg or
+    // return type — those tools dispatch only through the JSON
+    // wrapper / runtime registry under the cdylib path.
+    let typed_wrapper_tokens: TokenStream2 = if emit_typed_wrapper {
+        quote! {
+            #[no_mangle]
+            pub extern "C" fn #wrapper_ident(#(#wrapper_params),*) -> #wrapper_ret_ty {
+                // Grab the tokio handle. Panics if `corvid_runtime_init`
+                // hasn't run — contract is that main calls it first
+                // whenever `ir_uses_runtime(ir)` returned true.
+                let __handle = ::corvid_runtime::ffi_bridge::tokio_handle();
+                #(#arg_conversions)*
+                #call_expr
+            }
+        }
+    } else {
+        TokenStream2::new()
+    };
+
+    // `symbol` in the inventory entry names the typed wrapper for
+    // direct dispatch. When the typed wrapper is omitted (struct
+    // signatures), the empty-string marker signals "no typed
+    // wrapper exists; route only through `json_dispatch`."
+    let inventory_symbol_lit: TokenStream2 = if emit_typed_wrapper {
+        let s = wrapper_symbol_string.clone();
+        quote! { #s }
+    } else {
+        quote! { "" }
+    };
+
     let expanded = quote! {
         // 1. The user's async fn, unchanged.
         #f
 
-        // 2. Typed C-ABI wrapper. Linker-visible symbol name is the
-        //    literal `__corvid_tool_<mangled-name>`; codegen emits a
-        //    direct call to this symbol.
-        #[no_mangle]
-        pub extern "C" fn #wrapper_ident(#(#wrapper_params),*) -> #wrapper_ret_ty {
-            // Grab the tokio handle. Panics if `corvid_runtime_init`
-            // hasn't run — contract is that main calls it first
-            // whenever `ir_uses_runtime(ir)` returned true.
-            let __handle = ::corvid_runtime::ffi_bridge::tokio_handle();
-            #(#arg_conversions)*
-            #call_expr
-        }
+        // 2. Typed C-ABI wrapper (only when every arg + return is
+        //    scalar/String — see `emit_typed_wrapper` for the rule).
+        #typed_wrapper_tokens
 
         // 2b. JSON-dispatch wrapper (registered into the tool registry
         //     at init; see `ToolMetadata.json_dispatch`).
@@ -259,7 +311,7 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         ::corvid_runtime::inventory::submit! {
             ::corvid_runtime::ToolMetadata {
                 name: #tool_name,
-                symbol: #wrapper_symbol,
+                symbol: #inventory_symbol_lit,
                 arity: #arity,
                 json_dispatch: #json_wrapper_ident,
             }
@@ -269,9 +321,60 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
     Ok(expanded)
 }
 
+/// Return `true` when every parameter and the return type fits the
+/// scalar set the typed C-ABI wrapper can express (`i64` / `f64` /
+/// `bool` / `String`), `false` otherwise. The boundary is structural,
+/// not user-facing: a `false` result tells `expand_tool` to omit the
+/// typed wrapper and emit only the JSON wrapper + inventory entry
+/// (the cdylib registry path). Returns `Err` only on a malformed
+/// signature shape `expand_tool` would have rejected anyway (`self`
+/// receiver / non-identifier pattern); the type-vocabulary check is
+/// pure inspection and cannot fail.
+fn signature_is_all_scalar(sig: &syn::Signature) -> syn::Result<bool> {
+    for input in sig.inputs.iter() {
+        match input {
+            FnArg::Receiver(_) | FnArg::Typed(_) => {}
+        }
+        let ty = match input {
+            FnArg::Typed(pt) => &*pt.ty,
+            FnArg::Receiver(_) => continue,
+        };
+        if !is_scalar_abi_type(ty) {
+            return Ok(false);
+        }
+    }
+    if let ReturnType::Type(_, ty) = &sig.output {
+        if !is_scalar_abi_type(ty) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// True iff `ty` is one of the four types the typed C-ABI wrapper can
+/// represent: `i64` (Corvid Int), `f64` (Corvid Float), `bool` (Corvid
+/// Bool), `String` (Corvid String via `CorvidString` ABI). Anything
+/// else — `Vec<_>`, `Option<_>`, user structs, fully-qualified paths,
+/// references — falls back to the JSON wrapper. Same vocabulary that
+/// `abi_type_for` accepts; kept as a separate predicate so callers can
+/// branch without provoking a syn::Error.
+fn is_scalar_abi_type(ty: &Type) -> bool {
+    let ts = quote! { #ty }.to_string().replace(' ', "");
+    matches!(ts.as_str(), "i64" | "f64" | "bool" | "String")
+}
+
 /// Map a Rust type appearing in a `#[tool]` signature to its Corvid
-/// ABI type. Tool signatures currently support scalar types plus
-/// String; Struct and List at the tool ABI are not implemented yet.
+/// **typed C-ABI** type. Only ever called on signatures
+/// `signature_is_all_scalar` already approved, so the `Err` branch
+/// would represent a genuine macro bug rather than a user-error
+/// surface. Kept as an explicit error rather than `unreachable!()`
+/// so future contributors who add an arm to `is_scalar_abi_type`
+/// without updating this function get a compile error pointing at
+/// the missed arm, not a runtime panic.
+///
+/// Struct/list/custom signatures are not unreachable through `#[tool]`
+/// — they're supported, but route only through the JSON wrapper. See
+/// `signature_is_all_scalar` for the dispatch-shape rule.
 fn abi_type_for(ty: &Type) -> syn::Result<TokenStream2> {
     let ts = quote! { #ty }.to_string().replace(' ', "");
     match ts.as_str() {
@@ -282,7 +385,7 @@ fn abi_type_for(ty: &Type) -> syn::Result<TokenStream2> {
         other => Err(syn::Error::new_spanned(
             ty,
             format!(
-                "#[tool] signatures currently support only `i64` (Corvid Int), `f64` (Float), `bool` (Bool), and `String`. Got `{other}`. Struct/List arguments and returns are not implemented yet."
+                "internal #[tool] macro error: `abi_type_for` reached `{other}` even though `signature_is_all_scalar` filtered it out. Add the matching arm to `is_scalar_abi_type` (and this function) or report this as a `#[tool]` bug."
             ),
         )),
     }

@@ -19,3 +19,9 @@ syn         = { workspace = true }
 corvid-runtime = { workspace = true }
 tokio          = { workspace = true }
 trybuild       = "1"
+# Struct-signature #[tool] macro-expand tests (slice
+# `35V2-P42-G0-tools-3b`) declare a test struct with serde derives so
+# the JSON wrapper exercises the actual serde round-trip the struct
+# tools rely on at dispatch.
+serde          = { workspace = true, features = ["derive"] }
+serde_json     = { workspace = true }
