@@ -41,8 +41,31 @@ pub use super::review_queue::ReviewQueueCommand;
 pub use super::trace::TraceCommand;
 pub use super::upgrade::UpgradeCommand;
 
+/// Version string baked into the binary at build time. Format:
+/// `<crate-version> (<short-sha>, <commit-date>)` — e.g.
+/// `0.0.1 (e8efa23, 2026-06-04)`. The SHA + date come from
+/// `crates/corvid-cli/build.rs`'s git probe (with `unknown`
+/// fallback when no git is reachable). Slice
+/// `35V2-P33-version-output-sha` introduced this so reviewers
+/// running the friends-and-family trial can verify their binary
+/// matches the commit the prompt was written against; before
+/// this slice `--version` printed only `corvid 0.0.1` and there
+/// was no way to distinguish HEAD from a months-old install.
+pub const CORVID_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("CORVID_BUILD_SHA"),
+    ", ",
+    env!("CORVID_BUILD_DATE"),
+    ")"
+);
+
 #[derive(Parser)]
-#[command(name = "corvid", version, about = "The Corvid language compiler")]
+#[command(
+    name = "corvid",
+    version = CORVID_VERSION,
+    about = "The Corvid language compiler"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
