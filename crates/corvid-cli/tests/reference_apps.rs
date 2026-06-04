@@ -884,9 +884,49 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
     );
 
     let dockerfile = fs::read_to_string(out.join("Dockerfile")).expect("read Dockerfile");
-    assert!(dockerfile.contains("FROM rust:1.78-slim AS build"));
-    assert!(dockerfile.contains("HEALTHCHECK"));
-    assert!(dockerfile.contains("personal_executive_agent"));
+    // Post-2026-06-04 Dockerfile shape (the first 33M trial report
+    // at `docs/external-trials/33m-trial-anonymous-2026-06-04.md`
+    // surfaced the prior shape's hard-coded monorepo paths). The
+    // standalone-app layout pulls a published `corvid` binary into
+    // a distroless runtime, COPYs only the user's app sources, and
+    // CMDs into `corvid serve /app/src/main.cor` rather than
+    // `corvid run examples/backend/<app>/src/main.cor`.
+    assert!(
+        dockerfile.contains("ghcr.io/micrurus-ai/corvid"),
+        "Dockerfile should pull the published corvid image (post-2026-06-04 shape), \
+         not embed `cargo build -p corvid-cli` (the prior monorepo shape). Dockerfile:\n{dockerfile}"
+    );
+    assert!(
+        dockerfile.contains("gcr.io/distroless/cc-debian12"),
+        "Dockerfile should use a distroless runtime base"
+    );
+    assert!(
+        dockerfile.contains("HEALTHCHECK"),
+        "Dockerfile should declare a HEALTHCHECK directive"
+    );
+    assert!(
+        dockerfile.contains("personal_executive_agent"),
+        "Dockerfile should reference the app by name (in labels)"
+    );
+    // Regression guard: the prior shape's monorepo-specific paths
+    // MUST NOT reappear. If any of these reappear in render_dockerfile
+    // a standalone-app `docker build` will fail again.
+    assert!(
+        !dockerfile.contains("cargo build -p corvid-cli"),
+        "Dockerfile must NOT embed a Corvid monorepo build step — it ran fine \
+         in the monorepo and broke every standalone app. See \
+         `docs/external-trials/33m-trial-anonymous-2026-06-04.md`."
+    );
+    assert!(
+        !dockerfile.contains("COPY examples/backend/"),
+        "Dockerfile must NOT COPY monorepo example paths — those don't exist \
+         in a standalone app's working dir."
+    );
+    assert!(
+        !dockerfile.contains("COPY std std"),
+        "Dockerfile must NOT COPY a monorepo `std/` directory — std modules \
+         ship inside the published corvid image, not the app's working tree."
+    );
 
     let metadata_text = fs::read_to_string(out.join("oci-labels.json")).expect("read oci metadata");
     let metadata: Value = serde_json::from_str(&metadata_text).expect("parse oci metadata");

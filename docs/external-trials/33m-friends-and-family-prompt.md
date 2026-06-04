@@ -125,41 +125,110 @@ can see anymore:
 
 ## Build path (suggested, not required)
 
+> **Version pin.** The commands below match `corvid` at the
+> commit named in the outreach message (i.e. the v1.0 release
+> candidate). If your `corvid --version` doesn't match, the
+> CLI surface may differ — please reach out before debugging.
+> Verified end-to-end against HEAD on 2026-06-04 against the
+> first 33M trial report at
+> <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-trial-anonymous-2026-06-04.md>.
+
 ```sh
 # 1. Install + sanity check.
 curl -fsSL https://corvid-lang.org/install.sh | sh
-corvid doctor
+corvid --version  # please pin against the SHA in the outreach
+corvid doctor     # provider keys, local models, replay
+                  # storage, approvals, wasm/native toolchains,
+                  # registry lock, platform prerequisites
 
 # 2. Skim the inventions matrix so you know what's in the box.
 open https://corvid-lang.org/docs/reference/inventions
 
-# 3. Run one reference app cold so you've seen the shape.
+# 3. Clone the repo for the reference apps (you'll copy
+#    from them but build your own standalone app).
+git clone https://github.com/Micrurus-Ai/Corvid-lang.git
+cd Corvid-lang
+
+# 4. Run one reference app cold so you've seen the shape.
 corvid serve examples/backend/personal_executive_agent/src/main.cor \
   --listen 127.0.0.1:8000 &
 curl http://127.0.0.1:8000/schema
 curl -X POST http://127.0.0.1:8000/actions/follow-up/send \
-  -d '{"to":"...", "body":"..."}'  # answers 202 + approval id
+  -H 'Content-Type: application/json' \
+  -d '{"to":"...", "body":"..."}'   # answers 202 + approval id
 curl http://127.0.0.1:8000/__approvals  # lists pending
+kill %1                              # stop the reference-app serve
 
-# 4. Carve a smaller app of your own.
-corvid new my_app --template backend
+# 5. Carve a smaller standalone app of your own.
+#    `corvid new` produces a hello-world scaffold (no
+#    --template backend flag). Copy/paste from a reference
+#    app's main.cor + migrations/ as your starting point.
+cd ..
+corvid new my_app
 cd my_app
-# edit src/main.cor, add tables in migrations/, add evals/, ...
+# Edit src/main.cor — define types, effects, tools, agents,
+# and a `server` block with at least one POST route per the
+# 6 build-surfaces ask above. Add migrations/0001_*.sql
+# files for the persistence surface. Add evals/<name>.cor
+# for at least one eval case.
 
-# 5. Build, package, inspect.
-corvid build --target=cdylib src/main.cor --sign --key dev.key
-corvid claim --explain target/cdylib/main.so --key dev.pub --source src/main.cor
-corvid deploy package . --out deploy/ --cdylib target/cdylib/main.so
+# 6. Build (debug, interpreter-runnable).
+corvid check src/main.cor
+corvid serve src/main.cor --listen 127.0.0.1:8001 &
+# Stress test against 127.0.0.1:8001 — POST requests, the
+# /__approvals/* admin endpoints, etc.
+
+# 7. Build + sign as a cdylib for the deploy path.
+#    `--sign` takes the key PATH directly (no `--key` flag).
+#    Either supply the path or `--sign` will fall back to
+#    `CORVID_SIGNING_KEY` if set.
+echo "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" > dev.key
+corvid build src/main.cor --target=cdylib --sign dev.key
+ls target/release/   # main.so or main.dll depending on OS
+
+# 8. Verify the signed cdylib's claim manifest.
+corvid claim --explain target/release/main.so --source src/main.cor
+
+# 9. Render the Phase 43 deploy package.
+#    `<APP>` arg must be a NAMED directory (`.` is rejected
+#    by the impl's filename check). Use `$(pwd)` if you're
+#    in the app dir. `CORVID_DEPLOY_SIGNING_KEY` is REQUIRED
+#    — same 32-byte hex seed as the dev signing key.
+export CORVID_DEPLOY_SIGNING_KEY="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+corvid deploy package "$(pwd)" --out deploy/ --cdylib target/release/main.so
 ls deploy/
 # Dockerfile  oci-labels.json  env.schema.json  health.json
 # migrate.sh  startup-checks.md  build-attestation.dsse.json
 # sbom.spdx.json  VERIFY.md
 
-# 6. Stress-test.
-corvid jobs run --kill-after 2s some_job  # crash-recovery proof
-corvid audit my_app  # operator-summary report
-corvid claim audit --explain-failures  # nothing aspirational?
+# 10. Stress-test other surfaces.
+corvid audit src/main.cor       # operator-summary; takes a FILE, not a dir
+corvid migrate up               # apply migrations to target/corvid.sqlite
+corvid jobs enqueue --kind email-send --payload '{}'
+corvid jobs run --workers 4 --max-runtime-ms 30000  # jobs queue
+corvid claim audit --explain-failures               # nothing aspirational?
 ```
+
+**Things to know that the surface doesn't always advertise:**
+
+- `corvid run` on a multi-agent file currently asks you to
+  disambiguate with `--agent <name>`, but the parser may
+  not yet accept that flag (filed as code follow-up
+  `35V2-P33-corvid-run-agent-flag`). For the trial, prefer
+  `corvid serve` (HTTP) or `corvid build --target=cdylib`
+  (signed deploy) over `corvid run` for multi-agent apps.
+- `corvid new` produces a hello-world scaffold. If you want
+  a backend-shaped starting point, copy
+  `examples/backend/personal_executive_agent/src/main.cor`
+  + `migrations/` + `evals/` and carve it down to a small
+  app of your own.
+- A `cargo install --path crates/corvid-cli` from source
+  doesn't produce a runnable native binary because cargo
+  doesn't emit the `staticlib` output for dep crates. Use
+  the install script (`curl -fsSL
+  https://corvid-lang.org/install.sh | sh`) which ships the
+  staticlib alongside the binary. Filed as
+  `35V2-P33-install-staticlib-fallback`.
 
 ## Report template
 

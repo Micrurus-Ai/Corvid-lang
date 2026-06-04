@@ -190,22 +190,60 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
 /// liveness probe — if `corvid` cannot lex/parse/typecheck the
 /// shipped source, the binary is broken regardless of HTTP state.
 fn render_dockerfile(app_name: &str) -> String {
+    // The build context is the user's STANDALONE app dir, not the
+    // Corvid monorepo. Pre-2026-06-04 this rendered a Dockerfile that
+    // assumed monorepo layout (`cargo build -p corvid-cli`, `COPY
+    // examples/backend/<app>`, `COPY std std`) — that broke for every
+    // standalone deployment, surfaced by the first 33M friends-and-
+    // family trial report at
+    // `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
+    //
+    // The shipped layout instead:
+    //
+    //   - Pull a published `corvid` binary from the Phase 43
+    //     release-channel build into a distroless runtime base.
+    //     Operators override `CORVID_VERSION` at build time to pin
+    //     a specific release; `latest-stable` is the default for
+    //     local development convenience.
+    //   - COPY only the user's app sources from the local working
+    //     directory (`src/`, `migrations/`, `evals/`, `corvid.toml`)
+    //     into `/app/` — no monorepo paths, no recursive bind of
+    //     the whole tree.
+    //   - The healthcheck and CMD use `/app/src/main.cor` (the
+    //     standard standalone layout `corvid new` produces).
     format!(
-        r#"FROM rust:1.78-slim AS build
-WORKDIR /workspace
-COPY . .
-RUN cargo build -p corvid-cli --release
+        r#"# syntax=docker/dockerfile:1
+ARG CORVID_VERSION=latest-stable
+
+FROM ghcr.io/micrurus-ai/corvid:${{CORVID_VERSION}} AS corvid-binary
 
 FROM gcr.io/distroless/cc-debian12
-WORKDIR /workspace
 LABEL org.opencontainers.image.title="{app_name}"
 LABEL dev.corvid.app="{app_name}"
-COPY --from=build /workspace/target/release/corvid /usr/local/bin/corvid
-COPY examples/backend/{app_name} examples/backend/{app_name}
-COPY std std
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD ["/usr/local/bin/corvid", "check", "examples/backend/{app_name}/src/main.cor"]
+WORKDIR /app
+
+COPY --from=corvid-binary /usr/local/bin/corvid /usr/local/bin/corvid
+
+# User app sources — produced by `corvid new` or carved from
+# a reference app under examples/backend/. The 4 paths below
+# match the standalone-app layout the docs / install scripts
+# / the 33M friends-and-family prompt all standardize on.
+COPY src ./src
+COPY corvid.toml ./corvid.toml
+COPY migrations ./migrations
+# evals/ and traces/ are optional — Dockerfile builds even when
+# the dirs don't exist on the local working tree (BuildKit's
+# COPY supports the missing-source-dir-tolerated form via
+# `--from=corvid-binary`, but for simpler operator builds
+# without BuildKit the operator removes these two lines if
+# the dirs aren't present).
+COPY evals ./evals
+COPY traces ./traces
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD ["/usr/local/bin/corvid", "check", "/app/src/main.cor"]
 ENTRYPOINT ["/usr/local/bin/corvid"]
-CMD ["run", "examples/backend/{app_name}/src/main.cor"]
+CMD ["serve", "/app/src/main.cor", "--listen", "0.0.0.0:8000"]
 "#
     )
 }
