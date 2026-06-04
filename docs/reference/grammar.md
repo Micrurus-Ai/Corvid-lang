@@ -114,6 +114,8 @@ prompt_body       ::= (role_clause | template_line)+
 
 role_clause       ::= ('system' | 'user' | 'assistant') ':' template_expr
 
+template_line     ::= template_expr NEWLINE
+
 template_expr     ::= STRING_LITERAL ('+' (STRING_LITERAL | IDENT) )*
 ```
 
@@ -130,6 +132,14 @@ dimension_value   ::= 'true' | 'false'
                     | IDENT               # named symbol like 'fast', 'grounded'
 ```
 
+## Model declarations
+
+```ebnf
+model_decl        ::= 'model' IDENT ':' INDENT model_field+ DEDENT
+
+model_field       ::= IDENT ':' dimension_value NEWLINE
+```
+
 ## Agent declarations
 
 ```ebnf
@@ -144,6 +154,16 @@ annotation_arg    ::= IDENT ':' expr | expr
 extern_abi        ::= 'pub' 'extern' STRING_LITERAL    # e.g. pub extern "c"
 
 block             ::= stmt+
+
+arg_list          ::= expr (',' expr)*
+```
+
+## Extension blocks
+
+```ebnf
+extend_decl       ::= 'extend' IDENT ':' INDENT extend_method+ DEDENT
+
+extend_method     ::= visibility? (agent_decl | prompt_decl | tool_decl)
 ```
 
 ## Server and schedule declarations
@@ -165,6 +185,13 @@ fixture_decl      ::= 'fixture' IDENT ':' INDENT fixture_body DEDENT
 mock_decl         ::= 'mock' IDENT ':' INDENT mock_body DEDENT
 
 eval_body         ::= (assertion | stmt)+
+
+# Fixture and mock bodies share their shape with `block` today —
+# named separately here so a future fixture-/mock-specific extension
+# (custom `@fixture` annotations, mock-call expectation syntax) has a
+# place to land without renaming references throughout the doc.
+fixture_body      ::= block
+mock_body         ::= block
 
 assertion         ::= 'assert' expr NEWLINE
                     | 'assert_snapshot' STRING_LITERAL NEWLINE
@@ -251,6 +278,8 @@ pattern           ::= literal_pattern
                     | IDENT '(' pattern (',' pattern)* ')'   # sum-type variant
                     | IDENT '{' field_pattern (',' field_pattern)* (',' '..')? '}'
                     | '_'                                    # wildcard
+
+literal_pattern   ::= literal
 
 field_pattern     ::= IDENT (':' pattern)?
 

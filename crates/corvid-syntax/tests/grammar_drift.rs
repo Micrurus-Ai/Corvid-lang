@@ -1,0 +1,371 @@
+//! Slice `33J6-grammar-drift-gate` — the drift gate that keeps
+//! `docs/reference/grammar.md` consistent with the parser.
+//!
+//! ## What this gate enforces
+//!
+//! `docs/reference/grammar.md` is a hand-written EBNF derived from the
+//! parser. Hand-written derivations drift: a contributor changes the
+//! parser, the docs stay frozen, and the published grammar quietly
+//! misrepresents what the language accepts. This gate enforces two
+//! structural invariants that a drift would violate:
+//!
+//! 1. **Every RHS reference resolves.** Every lowercase identifier on
+//!    the RHS of an EBNF production must either be (a) declared as the
+//!    LHS of some other production in the same file or (b) appear on
+//!    the explicit terminal-token allow-list below. A reference that
+//!    matches neither is a typo or a stale reference — the gate names
+//!    it and points the contributor at the file to fix.
+//!
+//! 2. **Every production is reachable from `program`.** The grammar
+//!    root is `program`. Any production whose name never transitively
+//!    appears on a reachable RHS is either dead documentation (delete
+//!    it) or a missing reference site (add it). The gate names which
+//!    productions are orphaned so the contributor can decide.
+//!
+//! ## What this gate deliberately does NOT enforce
+//!
+//! - **Production names matching `parse_<name>` fns in the parser.** The
+//!   parser uses Pratt-style precedence climbing, so its expression
+//!   fns are named after the operator level rather than the EBNF
+//!   production (`parse_add` for `add_expr`, `parse_cmp` for
+//!   `cmp_expr`). A naming-substring drift gate would be flaky against
+//!   this convention. A cross-reference table from production rules
+//!   to parser fns is recorded in the grammar.md "Authoritative
+//!   source" footer and lives by social convention; the structural
+//!   gate above catches the drift this slice is named after without
+//!   constraining parser-fn naming.
+//!
+//! - **Lexical keyword set matching `TokKind::keyword_from`.** The
+//!   grammar.md "Lexical tokens" paragraph lists keywords for
+//!   reader convenience; the parser handles a few of them
+//!   contextually (`let`, `use`, `Nothing` are NOT in the lexer's
+//!   reserved set — they're parsed positionally). Asserting set-
+//!   equality would force either lexer changes or doc changes that
+//!   are out of scope for this slice. A future slice may add the
+//!   contextual-vs-reserved split to grammar.md and the keyword
+//!   equality check at the same time.
+//!
+//! ## Failure mode
+//!
+//! If a contributor adds a production reference without declaring it,
+//! this gate fails with a message like:
+//!
+//! ```text
+//! grammar.md references undeclared production `if_expr` on these
+//! lines: 214, 219. Either declare `if_expr ::= ...` or fix the typo.
+//! ```
+//!
+//! If a contributor adds a declaration but no use of it, the gate
+//! fails with a message naming the orphan:
+//!
+//! ```text
+//! grammar.md declares `unused_thing` but no other production
+//! references it transitively from `program`. Add a reference or
+//! remove the orphan.
+//! ```
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fs;
+use std::path::PathBuf;
+
+/// Terminal tokens the grammar may reference without declaration.
+/// These are lexer surfaces (uppercase tokens) or contextually-
+/// parsed keywords that the grammar lists with PascalCase / lowercase
+/// names but that don't have an EBNF production. The list is small,
+/// stable, and curated — anything outside this set must be declared
+/// as a production.
+const TERMINAL_ALLOW_LIST: &[&str] = &[
+    // Lexer-emitted tokens.
+    "IDENT",
+    "INT",
+    "FLOAT",
+    "STRING",
+    "STRING_LITERAL",
+    "NUMBER",
+    "INDENT",
+    "DEDENT",
+    "NEWLINE",
+    "EOF",
+];
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn grammar_md_path() -> PathBuf {
+    repo_root().join("docs").join("reference").join("grammar.md")
+}
+
+/// Read grammar.md and return:
+///   - the ordered set of EBNF code blocks (between fenced `\`\`\`ebnf`
+///     blocks), each carrying its starting line number for diagnostics.
+fn read_ebnf_blocks(src: &str) -> Vec<(usize, String)> {
+    let mut blocks: Vec<(usize, String)> = Vec::new();
+    let mut current: Option<(usize, Vec<String>)> = None;
+    for (i, line) in src.lines().enumerate() {
+        let lineno = i + 1; // 1-indexed for diagnostics
+        let trimmed = line.trim_start();
+        if trimmed == "```ebnf" {
+            current = Some((lineno + 1, Vec::new()));
+            continue;
+        }
+        if trimmed == "```" {
+            if let Some((start, buf)) = current.take() {
+                blocks.push((start, buf.join("\n")));
+            }
+            continue;
+        }
+        if let Some((_, buf)) = current.as_mut() {
+            buf.push(line.to_string());
+        }
+    }
+    blocks
+}
+
+/// Extract LHS declarations and RHS references from an EBNF block.
+/// Returns a Vec of `(name, line_no, kind)` where kind is either
+/// `Lhs` (declaration) or `Rhs` (reference).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SiteKind {
+    Lhs,
+    Rhs,
+}
+
+fn extract_sites(blocks: &[(usize, String)]) -> Vec<(String, usize, SiteKind)> {
+    let mut sites: Vec<(String, usize, SiteKind)> = Vec::new();
+    for (start, block) in blocks {
+        for (offset, raw_line) in block.lines().enumerate() {
+            let lineno = start + offset;
+            // Strip the inline comment introducer `#` (EBNF comment).
+            let line = match raw_line.find('#') {
+                Some(idx) => &raw_line[..idx],
+                None => raw_line,
+            };
+            // LHS detection: `name<spaces>::=` at the start of the
+            // logical line. Continuation lines (with whitespace before
+            // the identifier) are NOT declarations.
+            if let Some(eq_pos) = line.find("::=") {
+                let before = &line[..eq_pos];
+                if let Some(name) = leading_ident(before) {
+                    if line.starts_with(name) {
+                        sites.push((name.to_string(), lineno, SiteKind::Lhs));
+                    }
+                }
+                // The RHS portion of this line still contains references.
+                for ident in extract_lowercase_idents(&line[eq_pos + 3..]) {
+                    sites.push((ident, lineno, SiteKind::Rhs));
+                }
+            } else {
+                // Continuation line — every lowercase identifier is a
+                // reference.
+                for ident in extract_lowercase_idents(line) {
+                    sites.push((ident, lineno, SiteKind::Rhs));
+                }
+            }
+        }
+    }
+    sites
+}
+
+/// Return the leading identifier of `s` (sequence of `[a-z_]+` at
+/// the start, after stripping any leading whitespace).
+fn leading_ident(s: &str) -> Option<&str> {
+    let trimmed = s.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    if !(bytes[0] == b'_' || bytes[0].is_ascii_lowercase()) {
+        return None;
+    }
+    let mut end = 0;
+    while end < bytes.len() {
+        let b = bytes[end];
+        if b == b'_' || b.is_ascii_lowercase() {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        None
+    } else {
+        Some(&trimmed[..end])
+    }
+}
+
+/// Extract every lowercase EBNF identifier from a line. Strips
+/// single-quoted literals (`'foo'` — those are terminal keywords),
+/// then collects every `[a-z_]+` token. Skips bare quotes.
+fn extract_lowercase_idents(line: &str) -> Vec<String> {
+    // Strip single-quoted literals.
+    let mut cleaned = String::with_capacity(line.len());
+    let mut in_quote = false;
+    for ch in line.chars() {
+        if ch == '\'' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if in_quote {
+            continue;
+        }
+        cleaned.push(ch);
+    }
+
+    // EBNF identifiers must START with a lowercase ASCII letter and
+    // may CONTINUE with lowercase letters, underscores, or digits.
+    // Starting on `_` would falsely match the `_` inside uppercase
+    // terminal tokens like `STRING_LITERAL` (the `_` is a tokenizer
+    // boundary, not an ident).
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for ch in cleaned.chars() {
+        let is_start = ch.is_ascii_lowercase();
+        let is_continue = ch.is_ascii_lowercase() || ch == '_' || ch.is_ascii_digit();
+        if cur.is_empty() {
+            if is_start {
+                cur.push(ch);
+            }
+        } else if is_continue {
+            cur.push(ch);
+        } else {
+            out.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+#[test]
+fn grammar_md_every_rhs_reference_resolves_to_a_declared_production() {
+    let path = grammar_md_path();
+    let src = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "grammar drift gate: cannot read `{}`: {e}. The drift gate \
+             can't run without grammar.md.",
+            path.display()
+        )
+    });
+    let blocks = read_ebnf_blocks(&src);
+    let sites = extract_sites(&blocks);
+
+    let declared: BTreeSet<String> = sites
+        .iter()
+        .filter(|(_, _, k)| *k == SiteKind::Lhs)
+        .map(|(n, _, _)| n.clone())
+        .collect();
+
+    let allow: BTreeSet<&'static str> = TERMINAL_ALLOW_LIST.iter().copied().collect();
+
+    // (production -> sorted list of lines where it's referenced)
+    let mut unresolved: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (name, line, kind) in &sites {
+        if *kind != SiteKind::Rhs {
+            continue;
+        }
+        if declared.contains(name) {
+            continue;
+        }
+        if allow.contains(name.as_str()) {
+            continue;
+        }
+        unresolved.entry(name.clone()).or_default().push(*line);
+    }
+
+    if !unresolved.is_empty() {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "grammar drift gate (slice 33J6): {} undeclared RHS reference(s) in `docs/reference/grammar.md`:",
+            unresolved.len()
+        ));
+        for (name, refs) in &unresolved {
+            lines.push(format!(
+                "  - `{name}` referenced on lines {refs:?}. Either declare `{name} ::= ...` in grammar.md, fix the typo, or add `{name}` to TERMINAL_ALLOW_LIST in this test if it's a new lexer-emitted token."
+            ));
+        }
+        panic!("{}", lines.join("\n"));
+    }
+}
+
+#[test]
+fn grammar_md_every_declared_production_is_reachable_from_program() {
+    let path = grammar_md_path();
+    let src = fs::read_to_string(&path).expect("read grammar.md");
+    let blocks = read_ebnf_blocks(&src);
+    let sites = extract_sites(&blocks);
+
+    let declared: BTreeSet<String> = sites
+        .iter()
+        .filter(|(_, _, k)| *k == SiteKind::Lhs)
+        .map(|(n, _, _)| n.clone())
+        .collect();
+
+    // Build (lhs -> rhs references) map.
+    // For each LHS site, gather every RHS site that occurs AFTER it
+    // until the next LHS site (or EOF). Simpler: bucket RHS sites by
+    // the nearest preceding LHS line.
+    let mut lhs_lines: Vec<(String, usize)> = sites
+        .iter()
+        .filter(|(_, _, k)| *k == SiteKind::Lhs)
+        .map(|(n, l, _)| (n.clone(), *l))
+        .collect();
+    lhs_lines.sort_by_key(|(_, l)| *l);
+
+    let mut productions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (n, _) in &lhs_lines {
+        productions.entry(n.clone()).or_default();
+    }
+    for (name, line, kind) in &sites {
+        if *kind != SiteKind::Rhs {
+            continue;
+        }
+        // Find the nearest preceding LHS site.
+        let owner = lhs_lines
+            .iter()
+            .rev()
+            .find(|(_, l)| *l <= *line)
+            .map(|(n, _)| n.clone());
+        if let Some(owner) = owner {
+            // Only include references to OTHER declared productions
+            // (self-recursion is allowed; we just shouldn't crash on
+            // it). Terminals and unresolved references are flagged by
+            // the previous test, so here we ignore unknowns.
+            if declared.contains(name) {
+                productions.entry(owner).or_default().insert(name.clone());
+            }
+        }
+    }
+
+    // Reachability from `program` via BFS.
+    assert!(
+        declared.contains("program"),
+        "grammar.md must declare a `program` production as the grammar root"
+    );
+    let mut reached: BTreeSet<String> = BTreeSet::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    queue.push_back("program".to_string());
+    reached.insert("program".to_string());
+    while let Some(name) = queue.pop_front() {
+        if let Some(refs) = productions.get(&name) {
+            for r in refs {
+                if reached.insert(r.clone()) {
+                    queue.push_back(r.clone());
+                }
+            }
+        }
+    }
+
+    let orphans: BTreeSet<&String> = declared.difference(&reached).collect();
+    if !orphans.is_empty() {
+        let names: Vec<&String> = orphans.into_iter().collect();
+        panic!(
+            "grammar drift gate (slice 33J6): {} declared production(s) are unreachable from `program`: {:?}. \
+             Either reference them transitively from `program` (you probably forgot to mention the new production in an `alt` \
+             alternative somewhere) or delete the orphan declaration.",
+            names.len(),
+            names
+        );
+    }
+}
