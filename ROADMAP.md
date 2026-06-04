@@ -1342,7 +1342,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 - [x] L-3 and L-4 are filed against their owning phase docs (17/20 and 23 respectively) so they're not lost. Filed in the "Filed as deferrals" block above.
 - [x] Closing audit recorded in `docs/phases/phase-20l-first-impression-gaps.md` with per-gap status and shipped-line-counts. Doc exists.
 - [x] `learnings.md` updated per slice. Verified shipped.
-- [ ] Memory record `project_phase_20l_closed.md` summarises the recurring "first-impression gap" pattern (path-anchored API used in some commands but not others; codegen TODOs that ship as `object`-shaped degradations; diagnostic surface that didn't auto-detect environment) so future-session can spot similar regressions before they ship. **Pending memory recordkeeping; tracked under post-launch maintenance — not gating any other slice.**
+- [x] Memory record `project_phase_20l_closed.md` summarises the recurring "first-impression gap" pattern (path-anchored API used in some commands but not others; codegen TODOs that ship as `object`-shaped degradations; diagnostic surface that didn't auto-detect environment) so future-session can spot similar regressions before they ship. Recorded 2026-06-04 in the auto-memory store (`project_phase_20l_closed.md`) with all three failure shapes + the "how to apply" rules for each, plus a MEMORY.md index entry so future sessions discover it on load.
 
 ---
 
@@ -1378,7 +1378,7 @@ These aren't 20j/20k responsibility-rubric failures — the files are clean. The
 - [x] Closing audit recorded in `docs/phases/phase-20m-verifier-corrections.md` with per-correction status, the meta-lesson about `expected_*` diagnostic fields versus acceptance criteria, and the verifier-correction pattern documented for future external-reviewer rounds. Doc exists.
 - [x] `learnings.md` updated with the meta-lesson and the "verify the *comparison site*, not the *suggestion field*" rule. Verified shipped.
 - [x] ROADMAP.md Phase 20m entry checkboxes ticked. (This audit-update commit ticks the remaining ones.)
-- [ ] Memory record `project_phase_20m_closed.md` summarises: **Pending memory recordkeeping; tracked under post-launch maintenance — not gating any other slice.**
+- [x] Memory record `project_phase_20m_closed.md` summarises: Recorded 2026-06-04 in the auto-memory store (`project_phase_20m_closed.md`) with the three meta-lessons + the "how to apply" rules for each, plus a MEMORY.md index entry so future sessions discover it on load.
   (a) the verifier-correction pattern (gap-report → first-round fixes → verification round → corrections; cheaper each round if institutionalised);
   (b) the `expected_*` diagnostic-suggestion vs acceptance-criterion confusion that produced the L-8 doc error;
   (c) the auto-fallback UX preference (`↻ running via interpreter: …`) over actionable-error UX when the recovery path is mechanical.
