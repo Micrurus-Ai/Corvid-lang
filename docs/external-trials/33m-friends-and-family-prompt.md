@@ -3,15 +3,16 @@
 > **Slice:** `33M` (repositioned, Path A) — final 4 weeks of Phase 43.
 > **Target reviewers:** 5-10 hand-picked AI engineers.
 > **Output:** one report per reviewer, triaged through
-> [`phase-42-feedback-triage.md`](./phase-42-feedback-triage.md), closing
-> as `code` / `docs` / `test` / `non-scope`.
+> [`docs/external-trials/phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md),
+> closing as `code` / `docs` / `test` / `non-scope`.
 
 This is the copy-pasteable prompt the maintainer sends each
 hand-picked AI engineer who agrees to participate in the
 friends-and-family round. It is paired with
-[`phase-42-trial-one.md`](./phase-42-trial-one.md) which covers the
-"inspect a shipped reference app" path; **this prompt covers the
-harder path**, building a small production-shape app from scratch.
+[`docs/external-trials/phase-42-trial-one.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-trial-one.md)
+which covers the "inspect a shipped reference app" path; **this
+prompt covers the harder path**, building a small production-shape
+app from scratch.
 
 ---
 
@@ -45,17 +46,18 @@ ALWAYS need and Corvid claims to make first-class:
    `build-attestation.dsse.json` artifacts inspected.
 
 If you want a template, the 5 shipped reference apps are at
-[`examples/backend/`](../../examples/backend/). They're production-
-maturity-bar-closed — copy whichever one is closest to your
-use case, then carve it down to a 100-300-line app of your own.
-Don't try to ship a reference-app-scale 600+-line surface; we
-explicitly want the **small** end of production-shape.
+[`examples/backend/`](https://github.com/Micrurus-Ai/Corvid-lang/tree/main/examples/backend).
+They're production-maturity-bar-closed — copy whichever one is
+closest to your use case, then carve it down to a 100-300-line
+app of your own. Don't try to ship a reference-app-scale 600+
+-line surface; we explicitly want the **small** end of
+production-shape.
 
 ## What we want you to stress-test
 
 We don't need you to verify the language works as advertised —
 the proof matrix at
-[`docs/reference/inventions.md`](../reference/inventions.md#proof-matrix)
+[`docs/reference/inventions.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/inventions.md#proof-matrix)
 already cross-references every shipped invention to a test file.
 What we DO want is the friction nobody on the maintainer side
 can see anymore:
@@ -102,21 +104,23 @@ can see anymore:
 
 | What you need | Where to get it |
 |---|---|
-| Install `corvid` | [`install/`](../../install/) (Unix `.sh` + PowerShell `.ps1`) or `cargo install --path crates/corvid-cli` |
+| Install `corvid` | <https://github.com/Micrurus-Ai/Corvid-lang/tree/main/install> (Unix `.sh` + PowerShell `.ps1`) or `cargo install --path crates/corvid-cli` |
 | Environment sanity check | `corvid doctor` (verifies provider keys, local models, replay storage, approvals, wasm/native toolchains, registry lock, platform prerequisites) |
 | Runnable demos for every shipped invention | `corvid tour --list` then `corvid tour --topic <name>` |
 | Repository | <https://github.com/Micrurus-Ai/Corvid-lang> |
 | Website + docs | <https://corvid-lang.org> / <https://corvid-lang.org/docs> |
-| Reference apps (copy-and-carve template) | [`examples/backend/`](../../examples/backend/) (5 apps, each with `CLAIM.md`, deploy manifests, traces, evals) |
-| Per-app signed-cdylib claim manifests | `examples/backend/<app>/CLAIM.md` (e.g. [PEA](../../examples/backend/personal_executive_agent/CLAIM.md)) |
-| 22-row Proof Matrix for the moat inventions | [`docs/reference/inventions.md#proof-matrix`](../reference/inventions.md#proof-matrix) |
-| Core semantics reference | [`docs/reference/core-semantics.md`](../reference/core-semantics.md) |
-| Grammar (EBNF) | [`docs/reference/grammar.md`](../reference/grammar.md) |
+| Reference apps (copy-and-carve template) | <https://github.com/Micrurus-Ai/Corvid-lang/tree/main/examples/backend> (5 apps, each with `CLAIM.md`, deploy manifests, traces, evals) |
+| Per-app signed-cdylib claim manifests | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/examples/backend/personal_executive_agent/CLAIM.md> (PEA — same shape under `personal_knowledge_agent/`, `finance_operations_agent/`, `customer_support_agent/`, `code_maintenance_agent/`) |
+| 22-row Proof Matrix for the moat inventions | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/inventions.md#proof-matrix> |
+| Core semantics reference | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/core-semantics.md> |
+| Grammar (EBNF) | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/grammar.md> |
 | Tutorial / cookbook | <https://corvid-lang.org/docs/book> + <https://corvid-lang.org/docs/recipes> |
 | Backend tutorial | <https://corvid-lang.org/docs/book/14-backend-tutorial> |
 | PEA tutorial | <https://corvid-lang.org/docs/book/15-personal-executive-agent-tutorial> |
-| Roadmap | [`ROADMAP.md`](../../ROADMAP.md) |
-| Launch claim audit (every public claim with runnable evidence) | [`docs/meta/launch-claim-audit.md`](../meta/launch-claim-audit.md) |
+| Roadmap | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md> |
+| Launch claim audit (every public claim with runnable evidence) | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/meta/launch-claim-audit.md> |
+| Companion trial doc (inspect path) | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-trial-one.md> |
+| Feedback triage process | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md> |
 | Where to file the report | New GitHub issue at <https://github.com/Micrurus-Ai/Corvid-lang/issues/new> with label `friends-and-family-trial` |
 
 ## Build path (suggested, not required)
@@ -164,7 +168,7 @@ Open a GitHub issue at
 label `friends-and-family-trial` and the title `[Trial]
 <your-handle> — <one-line summary>`. The body should follow
 the
-[`phase-42-feedback-triage.md`](./phase-42-feedback-triage.md)
+[`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md)
 intake shape:
 
 ```markdown
@@ -213,7 +217,7 @@ intake shape:
 ## What happens with your report
 
 Per
-[`phase-42-feedback-triage.md`](./phase-42-feedback-triage.md),
+[`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md),
 every report disposes as one of:
 
 - `code` — fix lands with a linked commit before v1.0 cut.
@@ -224,9 +228,10 @@ every report disposes as one of:
   pointer to the post-v1.0 phase that owns it.
 
 The disposition rate is published in the v1.0 launch
-materials, per the closing criterion at [`ROADMAP.md`
-L51](../../ROADMAP.md#L51): "their feedback closes as code /
-docs / tests / explicit non-scope before the public cut."
+materials, per the closing criterion at
+[`ROADMAP.md L51`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md#L51):
+"their feedback closes as code / docs / tests / explicit
+non-scope before the public cut."
 
 You'll see your handle in the launch announcement's
 contributor list unless you ask to be anonymized.
