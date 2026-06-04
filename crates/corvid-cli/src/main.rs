@@ -65,6 +65,7 @@ mod replay;
 mod review_queue_cmd;
 mod routing_report;
 mod run_cmd;
+mod serve_approval;
 mod serve_cmd;
 mod test_from_traces;
 mod tour;

@@ -47,6 +47,33 @@ fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     Some((status, body))
 }
 
+/// Minimal HTTP/1.1 POST over a raw socket. Returns `(status, body)`.
+fn http_post(port: u16, path: &str, json_body: &str) -> Option<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .ok()?;
+    let body_bytes = json_body.as_bytes();
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body_bytes.len()
+    )
+    .ok()?;
+    stream.write_all(body_bytes).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let status: u16 = raw
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    Some((status, body))
+}
+
 /// Poll `/healthz` until it answers 200 or the deadline passes.
 fn wait_until_ready(port: u16) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -119,4 +146,125 @@ fn reference_apps_serve_their_schema_route() {
             "{app}: /schema body missing `table_count`: {body}"
         );
     }
+}
+
+/// Slice `35V2-P42-E0-serve-5` end-to-end gate: a POST to an
+/// approval-gated route MUST answer `202 Accepted` with an
+/// `approval_id`, and the admin endpoints MUST report the pending
+/// approval. This replaces the prior `E0-serve-4` `403 approval_required`
+/// behavior with the async-approval model the ROADMAP slice spec
+/// names.
+///
+/// Hermetic: spawns `corvid serve` on a minimal handcrafted source so
+/// the test is not coupled to any specific reference app's body type.
+/// Uses port `8195` so it can't collide with the 5-app smoke above
+/// (ports `8190..=8194`).
+#[test]
+fn approval_gated_post_answers_202_and_admin_endpoint_lists_the_pending_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    // Approve label `SendMessage` normalizes (snake_case) to the tool
+    // name `send_message` — verified by the checker at
+    // `crates/corvid-types/src/checker/call.rs:127` (the rule documented
+    // in 20m-A's `docs/internals/effect-spec/03-typing-rules.md` §6.1).
+    let source = r#"type SendReq:
+    body: String
+
+type SendReceipt:
+    delivered: Bool
+
+effect send_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
+
+agent execute_send(req: SendReq) -> SendReceipt uses send_external:
+    approve SendMessage(req)
+    return send_message(req)
+
+server test_serve_5_api:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+        return execute_send(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8195;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port}"
+    );
+
+    // 1. POST → 202 with approval_id.
+    let (status, body) = http_post(
+        port,
+        "/send",
+        r#"{"body":"hello reviewer, please decide"}"#,
+    )
+    .expect("POST /send failed");
+    assert_eq!(
+        status, 202,
+        "POST /send must answer 202 (not 403, not 500). got status={status} body=`{body}`. \
+         If this fails with 403, the QueueApprover wiring regressed back to ProgrammaticApprover::always_no(); \
+         if 500, the approval-queue create() leg errored — read the response body for the queue error."
+    );
+    let resp: serde_json::Value =
+        serde_json::from_str(&body).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id` string");
+    assert!(
+        !approval_id.is_empty(),
+        "approval_id must be non-empty: body={body}"
+    );
+    assert_eq!(
+        resp.get("status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "202 body must report status=`pending`: {body}"
+    );
+
+    // 2. GET /__approvals → list contains the approval id.
+    let (list_status, list_body) =
+        http_get(port, "/__approvals").expect("GET /__approvals failed");
+    assert_eq!(list_status, 200, "GET /__approvals must answer 200");
+    assert!(
+        list_body.contains(approval_id),
+        "GET /__approvals must list the just-queued approval id `{approval_id}`: {list_body}"
+    );
+
+    // 3. GET /__approvals/<id> → returns the queued record.
+    let (one_status, one_body) =
+        http_get(port, &format!("/__approvals/{approval_id}")).expect("GET /__approvals/<id> failed");
+    assert_eq!(one_status, 200, "GET /__approvals/<id> must answer 200");
+    let one: serde_json::Value =
+        serde_json::from_str(&one_body).expect("GET /__approvals/<id> body must be valid JSON");
+    assert_eq!(one.get("id").and_then(|v| v.as_str()), Some(approval_id));
+    assert_eq!(one.get("status").and_then(|v| v.as_str()), Some("pending"));
+    assert_eq!(
+        one.get("action").and_then(|v| v.as_str()),
+        Some("SendMessage"),
+        "GET /__approvals/<id> must report the approve label as `action`: {one_body}"
+    );
+
+    // 4. GET /__approvals/<unknown> → 404.
+    let (missing_status, _) = http_get(port, "/__approvals/this-id-does-not-exist-anywhere")
+        .expect("GET /__approvals/<missing> failed");
+    assert_eq!(
+        missing_status, 404,
+        "GET /__approvals/<missing> must answer 404"
+    );
 }

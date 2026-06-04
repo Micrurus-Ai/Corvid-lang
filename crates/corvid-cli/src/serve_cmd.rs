@@ -14,13 +14,21 @@
 //!   on a route declaring a body type. The request JSON is deserialized
 //!   into the body struct via `json_to_value` and passed to the handler.
 //!
-//! Approval posture: `corvid serve` has no interactive approver, so it
-//! denies by default. A body route whose handler crosses an `approve`
-//! boundary (every `execute_approved_*` does) is denied and answers
-//! `403 approval_required` — the safe, honest behavior given Corvid's
-//! synchronous `approve` semantics. Executing approval-gated writes over
-//! HTTP (create-pending-approval → 202, reviewer executes) is the
-//! developer-facing end state, filed as `35V2-P42-E0-serve-5`.
+//! Approval posture: every `approve` boundary that fires under `corvid
+//! serve` creates a pending entry in the existing `ApprovalQueueRuntime`
+//! flow (slice `35V2-P42-E0-serve-5`) and answers `202 Accepted` with
+//! `{"approval_id": "..."}` + a `Location: /__approvals/<id>` header so
+//! the client can poll `GET /__approvals/<id>` for the eventual decision.
+//! This replaces the prior deny-by-default `403 approval_required`
+//! posture from `E0-serve-4`: the 403 was safe but developer-unusable,
+//! since every approval-gated request died at the gate with no way for
+//! a reviewer to make a decision. The async-approval model lets the
+//! request proceed to a reviewer/queue out of band while the HTTP
+//! handler immediately surfaces a polling id. The synchronous `Approver`
+//! trait shape is preserved by routing the queued state through a new
+//! `RuntimeError::ApprovalQueued { approval_id }` variant (see
+//! `crate::serve_approval`); existing approver impls (StdinApprover /
+//! ProgrammaticApprover) never produce this variant and need no change.
 //!
 //! Routes that match neither shape (path params, query types) answer
 //! `501` so the gap is explicit rather than a silent `404`.
@@ -44,16 +52,23 @@ use corvid_driver::{
 };
 use corvid_ir::{IrCallKind, IrExprKind, IrFile, IrLiteral, IrRoute, IrStmt, IrType};
 use corvid_resolve::DefId;
-use corvid_runtime::approvals::ProgrammaticApprover;
+use corvid_runtime::approval_queue::ApprovalQueueRuntime;
 use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 
-/// Shared, read-only serving state: the lowered app + the interpreter
-/// runtime. Both are constructed once at startup and shared across
-/// request tasks behind an `Arc`.
+use crate::serve_approval::{QueueApprover, SERVE_DEFAULT_TENANT};
+
+/// Shared, read-only serving state: the lowered app, the interpreter
+/// runtime, and the approval queue the runtime's `QueueApprover` writes
+/// into. All three are constructed once at startup and shared across
+/// request tasks behind an `Arc`. The approval queue is also reachable
+/// directly so the admin endpoints (`GET /__approvals`,
+/// `GET /__approvals/<id>`) can list and fetch pending entries without
+/// going through the runtime.
 struct ServeState {
     ir: IrFile,
     runtime: Runtime,
+    approval_queue: Arc<ApprovalQueueRuntime>,
 }
 
 /// How a route's handler is invoked per request.
@@ -104,17 +119,39 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         .parse()
         .with_context(|| format!("invalid --listen address `{listen}` (expected host:port)"))?;
 
-    // `corvid serve` has no interactive approver, so it denies by
-    // default: approval-gated writes hit their `approve` boundary, get
-    // denied, and answer 403 (see module docs).
+    // `corvid serve` has no interactive approver; instead every
+    // `approve` boundary creates a pending entry in the in-memory
+    // approval queue via `QueueApprover` and surfaces the queued
+    // state as `RuntimeError::ApprovalQueued`. `finish` then answers
+    // 202 + approval id. See `crate::serve_approval` for the rationale.
+    let approval_queue = Arc::new(
+        ApprovalQueueRuntime::open_in_memory()
+            .context("open in-memory approval queue for `corvid serve`")?,
+    );
     let runtime = Runtime::builder()
-        .approver(Arc::new(ProgrammaticApprover::always_no()))
+        .approver(Arc::new(QueueApprover::new(approval_queue.clone())))
         .build();
-    let state = Arc::new(ServeState { ir, runtime });
+    let state = Arc::new(ServeState {
+        ir,
+        runtime,
+        approval_queue,
+    });
 
     let mut app: Router<Arc<ServeState>> = Router::new()
         .route("/healthz", on(MethodFilter::GET, || async { StatusCode::OK }))
-        .route("/readyz", on(MethodFilter::GET, || async { StatusCode::OK }));
+        .route("/readyz", on(MethodFilter::GET, || async { StatusCode::OK }))
+        // Admin endpoints (`E0-serve-5`). Read-only at the slice MVP
+        // boundary; the transition surface (POST .../approve|deny) is
+        // a follow-up. Hidden under `/__approvals` so they cannot
+        // collide with an app-declared route.
+        .route(
+            "/__approvals",
+            on(MethodFilter::GET, list_approvals),
+        )
+        .route(
+            "/__approvals/:id",
+            on(MethodFilter::GET, get_approval),
+        );
 
     for plan in plans.iter() {
         let filter = method_filter(plan.method);
@@ -164,10 +201,14 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         for plan in &plans {
             let kind = match &plan.dispatch {
                 Dispatch::Literal { agent, .. } => format!("-> {agent}"),
-                Dispatch::Body { agent, .. } => format!("-> {agent} (body; approval-gated -> 403)"),
+                Dispatch::Body { agent, .. } => {
+                    format!("-> {agent} (body; approval-gated -> 202 + queued)")
+                }
             };
             println!("  {:<6} {}  {kind}", plan.method.as_str(), plan.path);
         }
+        println!("  GET    /__approvals                -> list pending approvals");
+        println!("  GET    /__approvals/<id>           -> fetch one pending approval");
         for (method, path) in &not_served {
             println!("  {method:<6} {path}  -> 501 (not served)");
         }
@@ -207,23 +248,66 @@ async fn dispatch_body(
 }
 
 /// Map a handler outcome to an HTTP response: 200 + JSON on success,
-/// 403 when an `approve` boundary denied, 500 otherwise.
+/// 202 + `{"approval_id":"..."}` when an `approve` boundary queued
+/// (slice `E0-serve-5`), 403 when an `approve` boundary denied (kept
+/// for the case where a non-queue approver is wired in — defensive),
+/// 500 otherwise.
 fn finish(outcome: Result<Value, RunError>) -> Response {
     match outcome {
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
-        Err(RunError::Interp(e)) if is_approval_denied(&e.kind) => (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "error": "approval_required",
-                "detail": "this write is approval-gated; `corvid serve` has no interactive approver. Approve out-of-band or wait for the HTTP approval queue (E0-serve-5).",
-            })),
-        )
-            .into_response(),
+        Err(RunError::Interp(e)) => {
+            if let Some(approval_id) = approval_queued_id(&e.kind) {
+                let approval_id = approval_id.to_string();
+                return (
+                    StatusCode::ACCEPTED,
+                    [(
+                        axum::http::header::LOCATION,
+                        format!("/__approvals/{approval_id}"),
+                    )],
+                    Json(serde_json::json!({
+                        "approval_id": approval_id,
+                        "status": "pending",
+                        "poll": format!("/__approvals/{approval_id}"),
+                        "detail": "this write is approval-gated; a pending approval has been queued. Poll the `poll` URL for the decision.",
+                    })),
+                )
+                    .into_response();
+            }
+            if is_approval_denied(&e.kind) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "error": "approval_required",
+                        "detail": "this write is approval-gated and the approver denied it.",
+                    })),
+                )
+                    .into_response();
+            }
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "handler_failed",
+                    "detail": RunError::Interp(e).to_string(),
+                })),
+            )
+                .into_response()
+        }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "handler_failed", "detail": err.to_string() })),
         )
             .into_response(),
+    }
+}
+
+/// If the interpreter error carries an `ApprovalQueued` from the
+/// runtime, return the approval id so `finish` can answer 202.
+fn approval_queued_id(kind: &InterpErrorKind) -> Option<&str> {
+    match kind {
+        InterpErrorKind::Runtime(RuntimeError::ApprovalQueued { approval_id }) => {
+            Some(approval_id.as_str())
+        }
+        _ => None,
     }
 }
 
@@ -236,6 +320,77 @@ fn is_approval_denied(kind: &InterpErrorKind) -> bool {
             kind,
             InterpErrorKind::Runtime(RuntimeError::ApprovalDenied { .. })
         )
+}
+
+/// `GET /__approvals` — list pending approvals for the `corvid serve`
+/// default tenant. Read-only at the slice MVP boundary.
+async fn list_approvals(State(state): State<Arc<ServeState>>) -> Response {
+    match state.approval_queue.list_by_tenant(SERVE_DEFAULT_TENANT) {
+        Ok(records) => {
+            let entries: Vec<serde_json::Value> = records
+                .iter()
+                .filter(|r| r.status == "pending")
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.id,
+                        "action": r.action,
+                        "status": r.status,
+                        "tenant_id": r.tenant_id,
+                        "requester_actor_id": r.requester_actor_id,
+                        "created_ms": r.created_ms,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "approvals": entries })),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "approval_queue_list_failed",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /__approvals/<id>` — fetch one queued approval.
+async fn get_approval(
+    State(state): State<Arc<ServeState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    match state.approval_queue.get(&id) {
+        Ok(Some(record)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "id": record.id,
+                "action": record.action,
+                "status": record.status,
+                "tenant_id": record.tenant_id,
+                "requester_actor_id": record.requester_actor_id,
+                "created_ms": record.created_ms,
+                "updated_ms": record.updated_ms,
+            })),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "approval_queue_get_failed",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response(),
+    }
 }
 
 fn bad_request(error: &str, detail: &str) -> Response {

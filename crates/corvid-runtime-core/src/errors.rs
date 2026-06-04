@@ -52,6 +52,17 @@ pub enum RuntimeError {
     /// Approval was denied (user said no, programmatic approver returned deny).
     ApprovalDenied { action: String },
 
+    /// Approval flow returned no synchronous decision — the approver
+    /// queued the request for later out-of-band review and the agent
+    /// must not proceed in this run. The `approval_id` is the queued
+    /// item's identifier; callers route on it (e.g. `corvid serve`
+    /// answers HTTP 202 carrying this id so the client can poll
+    /// `/__approvals/<id>` for the eventual decision). Distinct from
+    /// `ApprovalDenied` because there is no decision yet — a future
+    /// reviewer or queue runtime decides; that decision lives in the
+    /// approval queue store rather than in this RuntimeError.
+    ApprovalQueued { approval_id: String },
+
     /// Approval flow failed for a non-deny reason (timeout, IO).
     ApprovalFailed(String),
 
@@ -176,6 +187,9 @@ impl fmt::Display for RuntimeError {
             ),
             Self::ApprovalDenied { action } => {
                 write!(f, "approval denied for `{action}`")
+            }
+            Self::ApprovalQueued { approval_id } => {
+                write!(f, "approval queued for review (id `{approval_id}`)")
             }
             Self::ApprovalFailed(msg) => write!(f, "approval flow failed: {msg}"),
             Self::Marshal(msg) => write!(f, "value marshalling failed: {msg}"),
