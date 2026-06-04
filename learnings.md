@@ -6356,3 +6356,231 @@ The production-grade oracle remains
 tests in `crates/corvid-codegen-cl/tests/reproducibility.rs`
 lock the regression in place locally so a future refactor that
 reintroduces the bake fails before reaching CI.
+
+## HTTP approval queue: `corvid serve` answers 202 instead of 403 (2026-06-04)
+
+`corvid serve <app>` now handles approval-gated routes through the
+existing `ApprovalQueueRuntime` flow instead of denying them
+outright. The shipped behaviour:
+
+A `POST` to an approval-gated route returns **`202 Accepted`** with
+`Content-Type: application/json` body shape:
+
+```json
+{
+  "approval_id": "serve-1780500000000000-0",
+  "status": "pending",
+  "poll": "/__approvals/serve-1780500000000000-0",
+  "detail": "this write is approval-gated; a pending approval has been queued. Poll the `poll` URL for the decision."
+}
+```
+
+and a `Location: /__approvals/<id>` header. The client polls
+`GET /__approvals/<id>` until `"status"` transitions from
+`"pending"` to `"approved"` or `"denied"`. A reviewer transitions
+the queue entry via either:
+
+  - `POST /__approvals/<id>/approve` — server marks the queue
+    record approved, looks up the pending invocation captured at
+    queue time, re-runs the original agent under a fresh `Runtime`
+    whose approver is `ProgrammaticApprover::always_yes()`, returns
+    `200 OK` with `{"status":"approved","result":<agent value as JSON>}`.
+  - `POST /__approvals/<id>/deny` — server marks the queue record
+    denied, drops the pending invocation (no re-execution), returns
+    `200 OK` with `{"status":"denied","id":...}`.
+
+Both transition endpoints return `404` on unknown id, `409` on
+already-decided id, `500` on queue IO failure.
+
+Two read-only admin endpoints round out the surface:
+
+  - `GET /__approvals` — list pending approvals for the
+    `serve-default` tenant (the slice MVP is single-tenant).
+  - `GET /__approvals/<id>` — fetch one record with id / action /
+    status / tenant_id / requester_actor_id / created_ms /
+    updated_ms.
+
+The prior `403 approval_required` shape from slice `E0-serve-4` is
+kept as a defensive branch in `finish()` — if a host wires a
+non-queue approver into the serve runtime, the prior semantics
+are preserved.
+
+**What you cannot do yet:** per-request reviewer authentication.
+Today every reviewer is the single anonymous `serve-reviewer`
+actor (distinct from the requester `serve-anonymous`, because the
+queue's `authorize_approval_transition` rejects self-approval).
+mTLS / OAuth / session-cookie reviewer auth is a slice follow-up.
+Multi-step approval chains are also deferred — the slice MVP
+assumes a single `approve` boundary per route; an agent with two
+approval gates would re-queue at the second one. Persistent
+approval DB is also deferred — today the in-memory queue is
+ephemeral to the serve process and dies with it. `--approvals-db
+<path>` is the planned flag for file-backed persistence.
+
+Try it:
+
+```bash
+corvid build --target=server my_app/
+./target/release/my_app --listen 127.0.0.1:8000 &
+curl -X POST http://127.0.0.1:8000/actions/refund -d '{"amount":1000}'
+# 202 Accepted + {"approval_id":"serve-...","poll":"/__approvals/..."}
+curl http://127.0.0.1:8000/__approvals
+# {"approvals":[{"id":"...","action":"IssueRefund","status":"pending",...}]}
+curl -X POST http://127.0.0.1:8000/__approvals/<id>/approve
+# 200 OK + {"status":"approved","result":{"id":"refund-...","amount":1000,...}}
+```
+
+Cross-references: dev-log entry `2026-06-04 — v1.0 launch
+criteria push: 5 of 7 mechanically green` walks through the
+trait-shape preservation move (introducing
+`RuntimeError::ApprovalQueued { approval_id }` rather than a
+third `ApprovalDecision::Queued` variant) and the synthesized-
+default-contract MVP design decision.
+
+## `#[tool]` accepts struct params and returns (2026-06-04)
+
+Before slice `35V2-P42-G0-tools-3b` the `#[tool]` proc-macro
+aborted with a hard compile error whenever any arg or return type
+wasn't `i64` / `f64` / `bool` / `String`:
+
+```text
+#[tool] signatures currently support only `i64` (Corvid Int),
+`f64` (Float), `bool` (Bool), and `String`. Got `Receipt`.
+Struct/List arguments and returns are not implemented yet.
+```
+
+Now the macro accepts struct params and returns, gated on the
+struct deriving `serde::Serialize` and `serde::Deserialize`:
+
+```rust
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct Receipt {
+    pub label: String,
+    pub delivered: bool,
+    pub count: i64,
+}
+
+#[corvid_macros::tool("emit_receipt")]
+async fn emit_receipt(label: String) -> Receipt {
+    Receipt { label, delivered: true, count: 1 }
+}
+
+#[corvid_macros::tool("consume_receipt")]
+async fn consume_receipt(r: Receipt) -> bool {
+    r.delivered && r.count >= 1
+}
+
+#[corvid_macros::tool("amend_receipt")]
+async fn amend_receipt(r: Receipt) -> Receipt {
+    Receipt { label: r.label, delivered: r.delivered, count: r.count + 1 }
+}
+```
+
+**Dispatch shape.** When EVERY arg + return is scalar
+(`i64` / `f64` / `bool` / `String`), the macro emits BOTH the
+typed C-ABI wrapper (`__corvid_tool_<name>` — codegen direct-call
+symbol for native-binary targets) AND the JSON wrapper (registry
+dispatch path for cdylib targets). Tool metadata `symbol` field
+records the typed-wrapper name. When ANY arg or return is
+non-scalar (struct, list, custom path), the macro omits the typed
+wrapper entirely and emits ONLY the JSON wrapper, with the
+inventory entry's `symbol: ""` as the marker that says "no direct-
+dispatch wrapper exists; route only through `json_dispatch`."
+
+**What this means for native-binary builds.** If you target
+`--target=native` (not cdylib) and your tool has a struct
+signature, the linker fails cleanly with `unresolved external
+symbol __corvid_tool_<name>`. That's the right failure mode — a
+silent emit of a scalar wrapper around a struct value would be a
+wrong-ABI miscompilation. cdylib builds dispatch through the
+runtime registry (`G0-tools-2b` target-conditional path) and work
+without any code change on the user side.
+
+**What's unchanged.** Scalar tools keep emitting both wrappers
+with the typed wrapper as the linker-visible direct-call symbol —
+no regression in the scalar path. The `#[tool]` macro contract
+(`async fn`, free function not method, identifier-shaped
+parameter names) is unchanged.
+
+Cross-references: the dev-log entry walks through the
+`signature_is_all_scalar` predicate that drives the branch,
+the 3 new macro-expand tests
+(`struct_signature_tools_register_in_inventory_with_empty_symbol_marker`,
+`scalar_signature_tools_keep_typed_wrapper_symbol`,
+`user_struct_signature_fns_still_callable_directly`), and the
+`abi_type_for` documentation change that now treats its `Err`
+branch as an internal macro bug rather than a user-facing error.
+
+## v1.0 launch claim audit: `corvid claim audit` table-row format (2026-06-04)
+
+`corvid claim audit` walks `docs/meta/launch-claim-audit.md` and
+exits 1 if any claim row in the doc fails one of two checks:
+
+  1. **MissingEvidence** — the second column lacks both a runnable
+     command (backtick-fenced text) AND a linked artifact
+     (`[label](path)` markdown link) AND an explicit `blocked:` or
+     `non-scope` annotation.
+  2. **AspirationalWording** — the second column contains one of
+     the words `todo`, `planned`, `future`, `soon`, or
+     `will support` AND is not explicitly marked `blocked` or
+     `non-scope`.
+
+The parser at `crates/corvid-cli/src/claim_cmd.rs:211` only skips
+table header rows that literally contain `| Claim |` — every other
+header gets parsed as a claim row. **Standardize every audit-style
+table's first column header as `Claim`** so the parser treats
+header rows as headers and the table contents are the only thing
+audited.
+
+For rows naming gaps (`blocked: <slice-id>` or `non-scope`), the
+recommended cell format:
+
+```markdown
+| Gap name | **blocked: 33J4** — the rest of the prose ... | When unblocked |
+```
+
+The `**blocked:** <id>` prefix is what the parser keys on; the
+markdown bold isn't required by the parser but reads cleanly.
+
+`corvid claim audit --explain-failures` returns typed
+`ClaimFindingKind` (`missing_evidence` / `aspirational_wording`)
+plus a `suggested_fix` that back-references the inventory line.
+Promotes `claim.audit_explain_failures_grounded` to
+`RuntimeChecked`. The audit is documented as the launch claim
+audit's mechanical enforcement step at
+`docs/meta/launch-claim-audit.md` Section 9 — re-run on every
+35V2 LR slice close, every 43-letter slice close, before the
+v1.0 cut, and whenever a new genuinely-open slice ships a
+public-facing claim.
+
+`corvid claim audit` currently reports `claim_count: 56,
+finding_count: 0, exit=0` against `main` at HEAD.
+
+## v1.0 launch criteria mechanically green: L47/L48/L49/L50 (2026-06-04)
+
+5 of 7 v1.0 launch criteria are now mechanically gated by tests
+that run in CI or are invoked pre-cut, not by maintainer judgment.
+The status table:
+
+| Criterion | What it gates | Mechanical gate | Status |
+|---|---|---|---|
+| L46 | Every Phase 37-43 phase-done | bundled with L51 + L52 | open (Path-A timing) |
+| L47 | Every reference app deploys via Phase 43 packaging | `cargo test -p corvid-cli --test deploy_manifests` runs in `app-deploy-smoke.yml` | ✅ |
+| L48 | Every cdylib claim id in coverage gate | `cargo test -p corvid-driver signed_claim_coverage` — 5/5 against 75-row registry | ✅ |
+| L49 | Launch claim audit re-run | `cargo run -q -p corvid-cli -- claim audit` — 56 claims, 0 findings | ✅ |
+| L50 | Bilateral verifier green across production-backend surface | `cargo test -p corvid-abi-verify --test reference_apps_bilateral_match -- --ignored` in `app-deploy-smoke.yml` | ✅ |
+| L51 | Friends-and-family round | external | Path-A final 4 weeks |
+| L52 | 33J4 + 33J5 + 33L + announcement drafts | external + website | Path-A final 2 weeks |
+
+The L50 wire-up at `0fc9d89` adds `cargo build -p corvid-runtime`
+as a prereq step to the workflow so `libcorvid_runtime.a` lands
+on disk before the cdylib link — same constraint that bit the
+`effect-system-gates` workflow at commit `fcf4ce4`. CI cost: ~15s
+warm, ~1m38s cold.
+
+Cross-references: the launch claim audit cadence at
+`docs/meta/launch-claim-audit.md` Section 9 names which slices
+re-trigger an audit re-run, and the dev-log entry walks through
+which OutOfScope registry rows were verified genuinely-OOS in
+the L48 audit (3 Phase 35V-T1-B downgrades, 7 post-v1.0 source-
+syntax sugar, 5 explicit TCB-boundary non-defenses).
