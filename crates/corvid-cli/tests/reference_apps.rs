@@ -887,18 +887,34 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
     // Post-2026-06-04 Dockerfile shape (the first 33M trial report
     // at `docs/external-trials/33m-trial-anonymous-2026-06-04.md`
     // surfaced the prior shape's hard-coded monorepo paths). The
-    // standalone-app layout pulls a published `corvid` binary into
-    // a distroless runtime, COPYs only the user's app sources, and
-    // CMDs into `corvid serve /app/src/main.cor` rather than
-    // `corvid run examples/backend/<app>/src/main.cor`.
+    // first replacement at commit 1455b6c referenced a phantom
+    // `ghcr.io/micrurus-ai/corvid` image that NO ci workflow ever
+    // publishes — self-audited within the same session before any
+    // reviewer hit it. Current shape downloads the GitHub Release
+    // tarball that `release.yml` actually produces, extracts it
+    // in a debian:bookworm-slim stage 1, then COPYs into a
+    // distroless stage 2.
     assert!(
-        dockerfile.contains("ghcr.io/micrurus-ai/corvid"),
-        "Dockerfile should pull the published corvid image (post-2026-06-04 shape), \
-         not embed `cargo build -p corvid-cli` (the prior monorepo shape). Dockerfile:\n{dockerfile}"
+        dockerfile.contains("github.com/${CORVID_REPO}/releases/"),
+        "Dockerfile must download the corvid binary from the GitHub Release \
+         tarball (the infrastructure that actually exists per release.yml). \
+         Earlier shapes referenced a phantom ghcr.io image (1455b6c) or hard-coded \
+         monorepo paths (pre-1455b6c) and both were broken. Dockerfile:\n{dockerfile}"
+    );
+    assert!(
+        dockerfile.contains("debian:bookworm-slim AS corvid-installer"),
+        "Dockerfile should use a debian:bookworm-slim stage 1 for the install (curl + tar) \
+         and a distroless stage 2 for the runtime"
     );
     assert!(
         dockerfile.contains("gcr.io/distroless/cc-debian12"),
         "Dockerfile should use a distroless runtime base"
+    );
+    assert!(
+        dockerfile.contains("CORVID_HOME=/opt/corvid"),
+        "Dockerfile must set CORVID_HOME so stdlib module resolution works inside \
+         the container (the bin is at /usr/local/bin/corvid, the std/ tree at \
+         /opt/corvid/std/)"
     );
     assert!(
         dockerfile.contains("HEALTHCHECK"),
@@ -908,9 +924,11 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
         dockerfile.contains("personal_executive_agent"),
         "Dockerfile should reference the app by name (in labels)"
     );
-    // Regression guard: the prior shape's monorepo-specific paths
-    // MUST NOT reappear. If any of these reappear in render_dockerfile
-    // a standalone-app `docker build` will fail again.
+    // Regression guard: NEITHER the prior monorepo-specific paths NOR
+    // the phantom ghcr image may reappear. Both failure modes were
+    // shipped on 2026-06-04 (the latter intra-session at commit
+    // 1455b6c, then audited + fixed in the same session before any
+    // reviewer hit it).
     assert!(
         !dockerfile.contains("cargo build -p corvid-cli"),
         "Dockerfile must NOT embed a Corvid monorepo build step — it ran fine \
@@ -926,6 +944,14 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
         !dockerfile.contains("COPY std std"),
         "Dockerfile must NOT COPY a monorepo `std/` directory — std modules \
          ship inside the published corvid image, not the app's working tree."
+    );
+    assert!(
+        !dockerfile.contains("ghcr.io/micrurus-ai/corvid"),
+        "Dockerfile must NOT reference `ghcr.io/micrurus-ai/corvid` — no ci \
+         workflow publishes that image. Every `docker build` would fail at the \
+         `FROM` step with `manifest unknown`. The shipped shape downloads the \
+         GitHub Release tarball that `release.yml` actually produces. Filed as \
+         `35V2-P33-publish-container-image` if the ghcr-path is wanted back."
     );
 
     let metadata_text = fs::read_to_string(out.join("oci-labels.json")).expect("read oci metadata");

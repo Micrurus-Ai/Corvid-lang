@@ -65,20 +65,57 @@ spent on the surfaces that ARE fixed, not on these.
 
 ## How to refresh your install
 
+Honest scope here: `corvid --version` currently prints only
+`corvid 0.0.1` (no commit SHA — filed as
+`35V2-P33-version-output-sha` to be fixed before launch), and
+the install script's fast path downloads whatever was last
+published as a GitHub Release. `1455b6c` just landed on
+`main` — no new release has been cut for it yet — so the
+install script's fast path would still give you a stale
+binary. Until a fresh release is cut, the only way to get a
+post-`1455b6c` binary is the clone-and-build path below.
+Filed as `35V2-P33-release-cut-for-trial-retry` to schedule
+the release cut.
+
 ```sh
-# 1. Discard the corvid 0.0.1 install you had.
+# 1. Discard the prior install.
 rm -f ~/.cargo/bin/corvid             # or wherever your binary was
 
-# 2. Install from the script (this ships the staticlib
-#    alongside the binary; cargo-install from source doesn't).
-curl -fsSL https://corvid-lang.org/install.sh | sh
+# 2. Clone the repo and verify you're at or after `1455b6c`.
+git clone https://github.com/Micrurus-Ai/Corvid-lang.git
+cd Corvid-lang
+git log --oneline -1                  # should show 1455b6c or later
 
-# 3. Verify the binary is post-1455b6c.
-corvid --version
-# expected: something including a SHA at or after `1455b6c`.
-# If you see a noticeably earlier SHA, please reply on the
-# same channel and we'll send a direct binary link.
+# 3. Build via the install script's source-fallback path
+#    (cargo install --path crates/corvid-cli --locked --root
+#    $HOME/.corvid). The install script handles PATH wiring
+#    and the std/ copy automatically.
+bash install/install.sh
+# When the script's `dl` step fails to download the prebuilt
+# archive for HEAD (expected — no release is cut for HEAD),
+# it falls back to building from source. Slow first build
+# (5-15 minutes — downloads many crates) but produces a
+# binary that runs HEAD.
+
+# 4. PATH check.
+which corvid                          # should point at ~/.corvid/bin/corvid
+corvid --help | head -5               # should list `serve`, `claim`,
+                                      # `deploy`, `audit` etc.
 ```
+
+**Heads-up about the source-build install path** — this is
+the same `cargo install --path crates/corvid-cli` path your
+first trial used, and it has the SAME `libcorvid_runtime.a`-
+not-shipped friction (filed as
+`35V2-P33-install-staticlib-fallback`). Native-tier builds
+(`corvid build --target=native` / `corvid run --target=native`)
+will still fail with `corvid-runtime staticlib missing` until
+that slice ships. **Use `corvid serve` (interpreter
+dispatch — works without the staticlib) and `corvid build
+--target=cdylib` (the staticlib for the cdylib link is
+built as a side-effect of the source compile in step 3) for
+the retry**. Both surfaces are what the retest ask below
+exercises.
 
 ## What we'd love you to retry (30-60 minutes, not another half-day)
 
@@ -104,15 +141,23 @@ A targeted retest of just the surfaces we fixed:
 3. **`docker build` the generated Dockerfile.** Carve down
    your preferences agent into a 100-line standalone app
    (no monorepo context), run `corvid deploy package
-   "$(pwd)" --out deploy/`, then literally `cd deploy &&
-   docker build .` against your local working directory.
-   The new Dockerfile pulls
-   `ghcr.io/micrurus-ai/corvid:${CORVID_VERSION}` into a
-   distroless runtime and COPYs your app sources — should
-   build clean from any standalone app dir. If it doesn't,
-   that's the slice
-   `35V2-P33-deploy-dockerfile-builds` will catch but we'd
-   love to know first.
+   "$(pwd)" --out deploy/`, then `cd deploy && docker
+   build .` against your local working directory. The
+   shipped Dockerfile downloads the GitHub Release tarball
+   (`corvid-x86_64-unknown-linux-gnu.tar.gz` from
+   `releases/latest/download/`) in a debian:bookworm-slim
+   stage 1, extracts it to `/opt/corvid/`, then COPYs into
+   a distroless stage 2 alongside your app sources.
+   `CMD ["serve", "/app/src/main.cor", "--listen",
+   "0.0.0.0:8000"]` — interpreter dispatch, no staticlib
+   needed in-container. **Pin a specific release at build
+   time** via `--build-arg CORVID_VERSION=v0.0.1` (or
+   whatever release tag matches what you installed in
+   step 1 above) so the in-container `corvid` matches your
+   local one. If it doesn't build clean, that's exactly
+   the diagnostic
+   `35V2-P33-deploy-dockerfile-builds` will catch but
+   we'd love to know first.
 
 That's it for the retry. If those three steps all work, the
 prompt is ready to go out to the next reviewer.
@@ -129,6 +174,55 @@ prompt is ready to go out to the next reviewer.
 - The README Status section. That's filed.
 - Any honest-moment / over-claim moments — those were
   acknowledged and refreshed in the dispositions above.
+
+## Transparency: this follow-up itself had bugs
+
+Honest disclosure — this follow-up prompt was drafted, then
+self-audited before sending. The first draft made four false
+claims that another self-audit caught and fixed in the same
+session:
+
+- **Claim:** `corvid --version` prints a SHA you can match
+  against `1455b6c`.
+  **Reality:** it prints `corvid 0.0.1` and nothing else. Filed
+  as `35V2-P33-version-output-sha`.
+- **Claim:** the install script's fast path ships the
+  staticlib.
+  **Reality:** `release.yml`'s "Stage artifact" step copies
+  `bin/corvid` + `std/` + LICENSE — no `libcorvid_runtime.a`.
+  Filed as `35V2-P33-release-archive-staticlib`.
+- **Claim:** the Dockerfile `FROM ghcr.io/micrurus-ai/corvid:
+  ${CORVID_VERSION}`.
+  **Reality:** NO ci workflow ever publishes that image; every
+  `docker build` would have failed at step 1 with `manifest
+  unknown`. Fixed in-place — the shipped Dockerfile now
+  downloads the GitHub Release tarball that `release.yml`
+  actually produces, in a `debian:bookworm-slim AS
+  corvid-installer` stage. Regression-guarded by an
+  adversarial assertion in
+  `reference_apps::deploy_package_emits_dockerfile_and_oci_metadata`.
+- **Claim:** `curl -fsSL https://corvid-lang.org/install.sh
+  \| sh` is the install path.
+  **Reality:** the install script's documented entry point is
+  the GitHub raw URL
+  (`raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.sh`);
+  the `corvid-lang.org/install.sh` URL may redirect to that
+  but the authoritative one is in the script's own header.
+
+Two of these (the SHA in `--version` + the staticlib in the
+release archive) are real CODE work scheduled before launch.
+Two (the phantom ghcr image + the install URL framing) were
+prompt-drafting carelessness fixed before sending. The
+"refresh install" path you'll actually walk above is the
+clone-and-build path — which works at HEAD but is slow and
+shares the staticlib friction your first trial surfaced.
+
+This is the second time in two passes the prompt drafter
+shipped a command list without testing every step against
+reality. The right shape going forward is "every command in
+the prompt has a corresponding `cargo test` or smoke run
+that validates it" — filed as
+`35V2-P33-prompt-commands-tested`.
 
 ## What if you find more
 

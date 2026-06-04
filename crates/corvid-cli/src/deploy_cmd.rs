@@ -198,45 +198,89 @@ fn render_dockerfile(app_name: &str) -> String {
     // family trial report at
     // `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
     //
-    // The shipped layout instead:
+    // The first replacement at commit 1455b6c referenced
+    // `ghcr.io/micrurus-ai/corvid:${CORVID_VERSION}` as the runtime
+    // base — but NO ci workflow ever publishes that image (`release.yml`
+    // only uploads tarballs to GitHub Releases), so every `docker
+    // build` failed at step 1 with `manifest unknown`. That bug was
+    // self-audited within the same session before any reviewer hit
+    // it; the shipped layout below uses the actual infrastructure
+    // that DOES exist: the GitHub Release tarball
+    // `corvid-x86_64-unknown-linux-gnu.tar.gz` that `release.yml`
+    // builds on every `v*.*.*` tag and `install/install.sh`
+    // downloads from `github.com/<repo>/releases/latest/download/...`.
     //
-    //   - Pull a published `corvid` binary from the Phase 43
-    //     release-channel build into a distroless runtime base.
-    //     Operators override `CORVID_VERSION` at build time to pin
-    //     a specific release; `latest-stable` is the default for
-    //     local development convenience.
+    // The shipped layout:
+    //
+    //   - Stage 1 (`corvid-installer`): `debian:bookworm-slim` +
+    //     curl, fetch the GitHub Release tarball matching
+    //     `CORVID_VERSION` (default `latest` = `releases/latest`),
+    //     extract to `/opt/`.
+    //   - Stage 2 (`distroless`): COPY the corvid binary + std/
+    //     dir from stage 1 into a small runtime. Set
+    //     `CORVID_HOME=/opt/corvid` so stdlib resolution works.
     //   - COPY only the user's app sources from the local working
-    //     directory (`src/`, `migrations/`, `evals/`, `corvid.toml`)
-    //     into `/app/` — no monorepo paths, no recursive bind of
-    //     the whole tree.
+    //     directory (`src/`, `corvid.toml`, `migrations/`,
+    //     `evals/`, `traces/`) into `/app/` — no monorepo paths,
+    //     no recursive bind of the whole tree.
     //   - The healthcheck and CMD use `/app/src/main.cor` (the
     //     standard standalone layout `corvid new` produces).
+    //   - CMD is `corvid serve --listen 0.0.0.0:8000` so the
+    //     container exposes the HTTP server every orchestrator
+    //     healthcheck path expects.
+    //
+    // Caveat (filed as `35V2-P33-release-archive-staticlib`): the
+    // current release tarball does NOT include `libcorvid_runtime.a`.
+    // A container that needs to RUN `corvid build --target=cdylib`
+    // at runtime would hit the missing-staticlib path. The CMD here
+    // is `corvid serve` (interpreter dispatch — does NOT need the
+    // staticlib), so the deploy-package path works without it; if a
+    // future deploy variant needs in-container codegen, the release
+    // archive must ship the staticlib alongside the binary.
     format!(
         r#"# syntax=docker/dockerfile:1
-ARG CORVID_VERSION=latest-stable
+ARG CORVID_VERSION=latest
+ARG CORVID_REPO=Micrurus-Ai/Corvid-lang
 
-FROM ghcr.io/micrurus-ai/corvid:${{CORVID_VERSION}} AS corvid-binary
+FROM debian:bookworm-slim AS corvid-installer
+ARG CORVID_VERSION
+ARG CORVID_REPO
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    target=x86_64-unknown-linux-gnu; \
+    asset=corvid-${{target}}.tar.gz; \
+    if [ "$CORVID_VERSION" = "latest" ]; then \
+      url="https://github.com/${{CORVID_REPO}}/releases/latest/download/${{asset}}"; \
+    else \
+      url="https://github.com/${{CORVID_REPO}}/releases/download/${{CORVID_VERSION}}/${{asset}}"; \
+    fi; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/corvid.tar.gz "$url"; \
+    mkdir -p /opt; \
+    tar -xzC /opt -f /tmp/corvid.tar.gz; \
+    mv "/opt/corvid-${{target}}" /opt/corvid; \
+    test -x /opt/corvid/bin/corvid
 
 FROM gcr.io/distroless/cc-debian12
 LABEL org.opencontainers.image.title="{app_name}"
 LABEL dev.corvid.app="{app_name}"
+ENV CORVID_HOME=/opt/corvid
 WORKDIR /app
 
-COPY --from=corvid-binary /usr/local/bin/corvid /usr/local/bin/corvid
+COPY --from=corvid-installer /opt/corvid/bin/corvid /usr/local/bin/corvid
+COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
 
 # User app sources — produced by `corvid new` or carved from
-# a reference app under examples/backend/. The 4 paths below
-# match the standalone-app layout the docs / install scripts
-# / the 33M friends-and-family prompt all standardize on.
+# a reference app. These five paths match the standalone-app
+# layout the docs / install scripts / the 33M friends-and-
+# family prompt all standardize on. `evals/` and `traces/`
+# are optional: if absent from the local working tree, the
+# operator removes the two COPY lines below or `touch`es
+# empty dirs before `docker build`.
 COPY src ./src
 COPY corvid.toml ./corvid.toml
 COPY migrations ./migrations
-# evals/ and traces/ are optional — Dockerfile builds even when
-# the dirs don't exist on the local working tree (BuildKit's
-# COPY supports the missing-source-dir-tolerated form via
-# `--from=corvid-binary`, but for simpler operator builds
-# without BuildKit the operator removes these two lines if
-# the dirs aren't present).
 COPY evals ./evals
 COPY traces ./traces
 
