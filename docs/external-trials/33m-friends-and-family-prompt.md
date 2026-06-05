@@ -273,16 +273,28 @@ corvid jobs run --workers 4 --max-runtime-ms 30000
   every release is honest about being pre-launch. If the
   low version number reads oddly given the surface maturity,
   that's the right signal — please flag it in your report.
-- **`corvid serve` and approval-gated tools.** A POST route
-  whose handler calls an `approve`-gated dangerous tool over
-  `corvid serve` currently has no tool-handler-loader story —
-  approving the queued action returns 500 (no handler
-  registered) and consumes the approval. Filed as 33Q1
-  (`serve --with-tools-lib`) + 33Q2 (don't consume approvals
-  on handler-failure). For now, exercise Surface 3 via
-  `corvid build --target=cdylib` + the rendered host, NOT
-  `corvid serve`, OR report the friction and move on — both
-  are useful signals.
+- **`corvid serve` and approval-gated tools.** Surface 3
+  (approval-gated dangerous tool over HTTP) now works two ways
+  on `corvid serve`:
+  - **Drop a `tools.py` next to your source** (the
+    `corvid new` scaffold writes one). Decorate your async
+    handler with `@tool("<name>")` from `corvid_runtime` and
+    `corvid serve` autoloads it via embedded Python. Fastest
+    path for trying things out.
+  - **OR `corvid serve --with-tools-cdylib <path>`** with a
+    Rust cdylib built from a crate that uses the `#[tool]`
+    proc-macro (`crate-type = ["cdylib"]`). Production-shape
+    path; no Python in the request path. Explicit flag wins
+    precedence over implicit autoload if both define the
+    same tool.
+  - Both shipped under 33Q1 ([`2d3e24f`](https://github.com/Micrurus-Ai/Corvid-lang/commit/2d3e24f),
+    [`ff49112`](https://github.com/Micrurus-Ai/Corvid-lang/commit/ff49112)).
+- **Approval-budget integrity.** A 500 from a handler under
+  `/__approvals/<id>/approve` still consumes the approval
+  today — that's filed separately as 33Q2 and remediates
+  before v1.0 cut. If you hit a transient handler failure
+  during the trial, the approval gets burned; flag it in your
+  report and move on.
 - **`@trust(...)` and `--sign` are mutually exclusive today.**
   `corvid build --sign` rejects agents that declare `@trust`
   because no `trust.*` guarantee id is in `GUARANTEE_REGISTRY`

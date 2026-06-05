@@ -4,6 +4,65 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q1 closed: `corvid serve` loads tool handlers two ways
+
+Anonymous-2026-06-04 round-2 P1.1 said Surface 3 (approval-gated
+dangerous tool over HTTP) was undemonstrable on `corvid serve`
+because the interpreter's `ToolRegistry` was default-empty with
+no operator-facing knob to populate it. Both halves of the fix
+landed today:
+
+- **33Q1a — `corvid serve --with-tools-cdylib <path>`** (`ff49112`):
+  the CLI dlopens the operator-supplied cdylib, dlsyms each
+  `__corvid_tool_<name>` symbol the `#[tool]` proc-macro emits,
+  registers the fn pointer via `corvid_register_tool` (C-ABI),
+  and bridges into the interpreter through a new public
+  `dispatch_host_tool` shim over the existing private
+  `dispatch_registered_tool`. The same `ToolRegistry` is cloned
+  into both the main runtime AND the `/__approvals/<id>/approve`
+  bypass runtime via a new `RuntimeBuilder::tool_registry` —
+  without that, fixing the main-runtime registry alone would
+  have left the regression intact at /approve. Library handle
+  is `Box::leak`ed so the cdylib stays mapped for the process
+  lifetime.
+
+- **33Q1b — `tools.py` autoloader** (`2d3e24f`): if a `tools.py`
+  sits next to source (or in the project root — the
+  `corvid new` scaffold shape), `corvid serve` embeds the system
+  Python via PyO3, imports the module, reads
+  `corvid_runtime.registry._TOOL_IMPLS`, and materializes a Rust
+  handler per `@tool("<name>")` entry. Each handler dispatches
+  on a tokio blocking thread so the GIL never stalls the async
+  serve loop; inside the GIL it calls the user's coroutine and
+  runs it via `asyncio.run(coro)`. Errors carry full Python
+  tracebacks. Enabled in corvid-cli's Cargo.toml so the shipped
+  binary always includes the autoloader; the cost is a
+  libpython runtime dep (handled cleanly because users with a
+  tools.py have Python anyway).
+
+Precedence: tools.py registers FIRST, cdylib registers SECOND,
+new `ToolRegistry::extend` overwrites same-named entries — so
+the explicit operator flag wins precedence over the implicit
+autoload (mental model: explicit beats implicit).
+
+**Why this slice needed the mid-flight scope chat.** The initial
+pre-phase chat treated tools.py + cdylib as symmetric "parity"
+paths. They aren't: cdylib statically links at compile time,
+serve needs dlopen of a CDYLIB; tools.py is Python under a
+GIL-bound bridge. Surfacing the asymmetry let us rename the
+flag (`--with-tools-cdylib`, not `--with-tools-lib`) and split
+the slice into 33Q1a + 33Q1b for responsibility hygiene
+without scope-cutting. The user's reminder ("we do the best
+for corvid, no shortcuts") rejected the offered defer.
+
+**Pattern recorded.** When a slice's pre-phase chat captured an
+optimistic symmetry and the implementation reveals an
+asymmetry, surface it and re-chat before coding the second
+half — don't ship Half A with footguns the user agreed to
+based on the symmetric framing.
+
+---
+
 ## 2026-06-05 - 42I external-developer-trial closed — anonymous-2026-06-04 trial complete, all feedback disposed
 
 Phase 42 sub-slices 42I1 + 42I2 close, leaving Phase 42 at one

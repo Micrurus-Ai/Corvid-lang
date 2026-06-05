@@ -6584,3 +6584,108 @@ re-trigger an audit re-run, and the dev-log entry walks through
 which OutOfScope registry rows were verified genuinely-OOS in
 the L48 audit (3 Phase 35V-T1-B downgrades, 7 post-v1.0 source-
 syntax sugar, 5 explicit TCB-boundary non-defenses).
+
+## `corvid serve` loads tool handlers — `tools.py` autoload + `--with-tools-cdylib` (2026-06-05)
+
+`corvid serve` now connects approval-gated dangerous tools to real
+handlers two ways. Pick whichever fits your shape; both ship in the
+v1.0 release-candidate CLI.
+
+### `tools.py` — the fast iteration path
+
+Drop a `tools.py` file next to your source (or in the project root —
+the `corvid new` scaffold writes one). Decorate each implementation:
+
+```python
+from corvid_runtime import tool
+
+@tool("send_message")
+async def send_message(req):
+    # your real impl here
+    return {"delivered": True}
+```
+
+Run `corvid serve` against your project as usual. The CLI autodetects
+`tools.py`, embeds Python via PyO3, imports the module (which runs
+the `@tool(...)` decorators), and bridges each registered coroutine
+into the runtime's tool registry. The interpreter now dispatches
+through to your coroutine on every `tool send_message(req)` call.
+
+When the same agent is invoked via the `/__approvals/<id>/approve`
+re-execution path, the registered tools persist — the bypass runtime
+inherits the same registry as the original request, so the
+"approval granted but tool missing" 500 is no longer reachable.
+
+Errors carry the full Python traceback. If `tools.py` raises at
+import time, the operator sees the traceback in the `corvid serve`
+stderr, not a confusing 500 buried in the first request.
+
+### `--with-tools-cdylib <path>` — the production path
+
+For production-shape deployments where Python isn't in the request
+path, build a Rust crate with `crate-type = ["cdylib"]` and the
+`#[tool]` proc-macro:
+
+```toml
+# Cargo.toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+corvid-runtime = "..."
+```
+
+```rust
+// src/lib.rs
+use corvid_runtime::tool;
+
+#[tool]
+async fn send_message(req: serde_json::Value) -> serde_json::Value {
+    // your real impl here
+    serde_json::json!({"delivered": true})
+}
+```
+
+`cargo build --release` produces `target/release/lib<crate>.{so,dylib,dll}`.
+Run `corvid serve src/main.cor --with-tools-cdylib target/release/libtools.so`
+and the CLI dlopens the cdylib, dlsyms each `__corvid_tool_<name>`
+symbol the proc-macro emitted, registers it via the runtime's
+C-ABI tool registry, and bridges into the interpreter the same way
+the `tools.py` path does.
+
+NOTE: the flag is `--with-tools-cdylib`, NOT `--with-tools-lib`. The
+`build` family's `--with-tools-lib` accepts a STATICLIB for compile-
+time linking; the serve path runs the interpreter and needs a
+dlopen-able CDYLIB. Build your tools crate with `crate-type =
+["cdylib"]`, not `["staticlib"]`.
+
+### When both are present
+
+If a project has BOTH a `tools.py` AND the operator passes
+`--with-tools-cdylib`, the cdylib wins precedence for any name they
+share. Mental model: explicit beats implicit. The other tool names
+from each side stay registered (so you can mix Python tools and
+cdylib tools in the same app, as long as their names don't collide).
+
+### When neither is present
+
+The interpreter's existing `UnknownTool` runtime error fires at the
+first tool call. The error message names the tool that wasn't
+registered so the operator can decide which path to take. No silent
+fallback to a placeholder; no consumed approval on miss (that's
+33Q2's separate fix).
+
+### What this is NOT
+
+- Not a Python sandbox. Whatever your `tools.py` imports runs with
+  the full Python interpreter's permissions. If you import
+  `subprocess` and spawn `rm -rf /`, the runtime won't stop you.
+- Not a substitute for `corvid build --target=cdylib` + a host
+  binary for production. `corvid serve` is the demonstration /
+  development path; for production traffic, build the signed cdylib
+  and run it under a real host with proper resource isolation.
+- Not async-IO on the GIL. Each tool call serializes inside the
+  GIL via `asyncio.run(coro)` on a tokio blocking thread.
+  Throughput is bounded by your slowest tool's coroutine; if you
+  need concurrent tool dispatch, use the cdylib path or wait for
+  a future async-IO bridge.
