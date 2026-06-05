@@ -19,7 +19,8 @@ pub use catalog_exports::{
     corvid_list_agents, corvid_pre_flight,
 };
 pub use tool_bridge::{
-    corvid_clear_tools, corvid_invoke_tool, corvid_register_tool, CorvidToolFn,
+    corvid_clear_tools, corvid_invoke_tool, corvid_register_tool, dispatch_host_tool,
+    CorvidToolFn,
 };
 pub(crate) use tool_bridge::register_inventoried_tool;
 pub use grounded_bridge::{

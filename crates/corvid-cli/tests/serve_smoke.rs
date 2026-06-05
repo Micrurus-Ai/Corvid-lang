@@ -450,3 +450,203 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
             .expect("POST /deny unknown failed");
     assert_eq!(missing_deny, 404);
 }
+
+/// Build the tiny `serve_tools_fixture` cdylib at
+/// `tests/fixtures/serve_tools_fixture/` and return the path to the
+/// resulting platform-specific shared library. The fixture exports a
+/// single `__corvid_tool_echo_string` symbol matching the
+/// `CorvidToolFn` ABI — when `corvid serve --with-tools-cdylib`
+/// dlopens it, the symbol is dlsym'd, registered via
+/// `corvid_register_tool`, and bridged into the interpreter's
+/// `ToolRegistry` so an in-app `echo_string(value)` call dispatches
+/// through to the fixture's implementation.
+fn build_serve_tools_fixture() -> PathBuf {
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("serve_tools_fixture");
+    let manifest = fixture_dir.join("Cargo.toml");
+    assert!(
+        manifest.exists(),
+        "fixture manifest not found at {} — workspace layout regressed?",
+        manifest.display()
+    );
+
+    let status = Command::new(env!("CARGO"))
+        .args(["build", "--release", "--manifest-path"])
+        .arg(&manifest)
+        .status()
+        .expect("spawn cargo build for serve_tools_fixture");
+    assert!(
+        status.success(),
+        "cargo build of serve_tools_fixture cdylib failed (exit {:?})",
+        status.code()
+    );
+
+    let target_dir = fixture_dir.join("target").join("release");
+    let candidates: Vec<PathBuf> = if cfg!(target_os = "windows") {
+        vec![target_dir.join("serve_tools_fixture.dll")]
+    } else if cfg!(target_os = "macos") {
+        vec![target_dir.join("libserve_tools_fixture.dylib")]
+    } else {
+        vec![target_dir.join("libserve_tools_fixture.so")]
+    };
+    for path in &candidates {
+        if path.exists() {
+            return path.clone();
+        }
+    }
+    panic!(
+        "fixture cdylib not found at any expected path: {:?}",
+        candidates
+    );
+}
+
+/// 33Q1a end-to-end gate. The anonymous-2026-06-04 round-2 trial
+/// report P1.1 documented that `corvid serve` had no tool-handler
+/// registration mechanism: an approval-gated POST whose handler
+/// reached a tool call returned 500 `no handler registered for tool
+/// <name>` on `/approve`, AND consumed the approval anyway.
+///
+/// This test pins the fix end-to-end: a Corvid app declares a
+/// `dangerous` tool, an agent that calls it after an `approve`
+/// boundary, and a POST route bound to the agent. The fixture
+/// cdylib at `tests/fixtures/serve_tools_fixture/` implements the
+/// tool. `corvid serve --with-tools-cdylib <fixture>` dlopens the
+/// cdylib, registers `__corvid_tool_echo_string` into the runtime's
+/// C-ABI registry, and bridges it through `dispatch_host_tool` into
+/// the interpreter's `ToolRegistry`. The full round-trip:
+///
+/// 1. POST `/echo` body `{"value":"<msg>"}` → 202 + `approval_id`.
+/// 2. POST `/__approvals/<id>/approve` → 200 + body whose
+///    `result.echoed` field equals the original `<msg>`, proving
+///    the cdylib's tool was actually invoked.
+///
+/// If P1.1's "no handler registered" regression returns, the
+/// `/approve` POST in step 2 answers 500 (not 200) and this test
+/// fails loudly.
+///
+/// Port `8197` so it can't collide with the other serve tests
+/// (8190-8196).
+#[test]
+fn serve_with_tools_cdylib_dispatches_approval_gated_tool_through_fixture() {
+    let cdylib_path = build_serve_tools_fixture();
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    // The agent runs `approve EchoCall(value)` then `return echo_string(value)`.
+    // The `approve` label `EchoCall` snake_case-normalizes to `echo_call`,
+    // which is the action name we'll see on the queued approval. The tool
+    // declaration matches the fixture's `__corvid_tool_echo_string`.
+    //
+    // Note the receipt type `EchoReceipt` wraps the tool's plain `String`
+    // return so the route's `-> json EchoReceipt` shape is observable in
+    // the test as `result.echoed` — easier to assert than parsing a bare
+    // JSON string from the response body.
+    // The approve label MUST snake_case-normalize to the tool name
+    // for the dangerous-call typechecker to accept the approval — so
+    // `EchoString` (matches `echo_string`), not `EchoCall`. The
+    // label's args must also match the tool's params shape — here
+    // `value: String`, supplied as `req.value`.
+    let source = r#"type EchoReq:
+    value: String
+
+type EchoReceipt:
+    echoed: String
+
+effect echo_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool echo_string(value: String) -> String dangerous uses echo_external
+
+agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
+    approve EchoString(req.value)
+    echoed = echo_string(req.value)
+    return EchoReceipt(echoed)
+
+server test_serve_q1a_api:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+        return execute_echo(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8197;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--with-tools-cdylib")
+        .arg(&cdylib_path)
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port} \
+         (probable cause: --with-tools-cdylib loader rejected the fixture; \
+         re-run with stderr inherited to see the startup log)"
+    );
+
+    // 1. POST /echo → 202 + approval_id.
+    let probe_value = "hello from the friends-and-family round";
+    let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
+    let (post_status, post_body_resp) =
+        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+    assert_eq!(
+        post_status, 202,
+        "POST /echo must answer 202 (the approve boundary queues the call): {post_body_resp}"
+    );
+    let resp: serde_json::Value =
+        serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id`")
+        .to_string();
+
+    // 2. POST /__approvals/<id>/approve → 200 + result.echoed == probe_value.
+    //    THIS is the load-bearing assertion: without --with-tools-cdylib
+    //    wiring, /approve would answer 500 "no handler registered for
+    //    tool `echo_string`" AND drop the approval — the P1.1 regression
+    //    documented in `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
+    let (approve_status, approve_body) = http_post(
+        port,
+        &format!("/__approvals/{approval_id}/approve"),
+        "",
+    )
+    .expect("POST /__approvals/<id>/approve failed");
+    assert_eq!(
+        approve_status, 200,
+        "POST /__approvals/<id>/approve must answer 200 — the cdylib's \
+         echo_string handler must run after approval. got status={approve_status} \
+         body=`{approve_body}`. If 500 with `no handler registered for tool`: \
+         the --with-tools-cdylib wiring regressed (cdylib path not loaded, \
+         symbol name wrong, or dispatch_host_tool bridge broken). If 500 \
+         with other text: read the body — the fixture itself may have \
+         errored."
+    );
+    let approve_resp: serde_json::Value =
+        serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
+    assert_eq!(
+        approve_resp.get("status").and_then(|v| v.as_str()),
+        Some("approved"),
+        "/approve body status field must be `approved`: {approve_body}"
+    );
+    let result = approve_resp
+        .get("result")
+        .expect("/approve body must carry a `result` envelope from the re-executed agent");
+    assert_eq!(
+        result.get("echoed").and_then(|v| v.as_str()),
+        Some(probe_value),
+        "re-executed agent's `echoed` field must equal the original POST `value`, \
+         proving the fixture cdylib's __corvid_tool_echo_string was actually invoked \
+         end-to-end. body={approve_body}"
+    );
+}

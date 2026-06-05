@@ -69,6 +69,20 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Replace the builder's `ToolRegistry` wholesale.
+    ///
+    /// Use this to share a registry across multiple runtime instances
+    /// constructed from the same host configuration — for example, the
+    /// `corvid serve` slice 33Q1a wiring builds the main interpreter
+    /// runtime AND the `bypass_runtime` that re-executes after `/approve`
+    /// from the same set of cdylib-host tool handlers.
+    /// `ToolRegistry` is `Clone` (handlers are `Arc<dyn Fn ...>`), so
+    /// callers typically clone once per builder.
+    pub fn tool_registry(mut self, tools: ToolRegistry) -> Self {
+        self.tools = tools;
+        self
+    }
+
     /// Register deterministic mock tool handlers from
     /// `CORVID_TEST_MOCK_TOOLS`.
     ///

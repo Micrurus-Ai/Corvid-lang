@@ -127,6 +127,24 @@ pub unsafe extern "C" fn corvid_invoke_tool(
     callback(args_json, args_len, user_data as *mut c_void)
 }
 
+/// Public in-process bridge for host code that has registered tools via
+/// [`corvid_register_tool`] (or via a dlopened cdylib whose
+/// `__corvid_tool_<name>` symbols the host registered) and now wants to
+/// dispatch through the same path the C ABI uses, from Rust, without
+/// re-entering the C boundary. Returns `Some(result_json)` when a
+/// callback is registered for `name` and produces a result; `None` when
+/// no tool is registered or the callback fails.
+///
+/// Used by `corvid serve --with-tools-cdylib` to bridge interpreter
+/// tool calls into the host-registered C registry — the interpreter's
+/// Rust `ToolRegistry` gets a handler per declared tool whose body
+/// serializes args to JSON, calls this function, and parses the result
+/// back to a `Value`. Concrete site:
+/// `crates/corvid-cli/src/serve_cmd.rs::register_cdylib_tool_handlers`.
+pub fn dispatch_host_tool(name: &str, args_json: &str) -> Option<String> {
+    dispatch_registered_tool(name, args_json)
+}
+
 /// Shared dispatch core for the typed `corvid_invoke_tool_*` family.
 /// Looks up the registered callback for `name`, forwards `args_json`,
 /// and reclaims the callback's result string. Returns `None` when no

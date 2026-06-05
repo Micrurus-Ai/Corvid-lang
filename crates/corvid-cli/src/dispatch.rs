@@ -104,9 +104,13 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             let file = resolve_project_source(file)?;
             cmd_run(&file, &target, with_tools_lib.as_deref())
         }
-        Some(Command::Serve { file, listen }) => {
+        Some(Command::Serve {
+            file,
+            listen,
+            with_tools_cdylib,
+        }) => {
             let file = resolve_project_source(file)?;
-            cmd_serve(&file, &listen)
+            cmd_serve(&file, &listen, with_tools_cdylib.as_deref())
         }
         Some(Command::Test {
             target,

@@ -1,0 +1,24 @@
+# Test fixture for `crates/corvid-cli/tests/serve_with_tools_cdylib.rs`.
+# Builds a minimal cdylib that exposes a single `__corvid_tool_<name>`
+# symbol matching the `CorvidToolFn` ABI from
+# `crates/corvid-runtime/src/catalog_c_api/tool_bridge.rs`. The test
+# spawns `corvid serve --with-tools-cdylib <this-cdylib>` against a
+# Corvid source that declares the matching tool + an approve-gated
+# route, then verifies the round-trip end-to-end.
+#
+# `[workspace]` declared so this fixture is its own workspace root and
+# does NOT pollute the outer Corvid workspace's member list.
+
+[package]
+name = "serve_tools_fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = "1"
+
+[workspace]

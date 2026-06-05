@@ -80,7 +80,8 @@ pub use spec_site::{
 pub use corvid_runtime::{
     fresh_run_id, load_dotenv_walking, AnthropicAdapter, ApprovalDecision, ApprovalRequest,
     Approver, EnvVarMockAdapter, MockAdapter, OllamaAdapter, OpenAiAdapter, ProgrammaticApprover,
-    RedactionSet, Runtime, RuntimeBuilder, RuntimeError, StdinApprover, Tracer,
+    RedactionSet, Runtime, RuntimeBuilder, RuntimeError, StdinApprover, ToolHandler, ToolRegistry,
+    Tracer,
 };
 pub use corvid_vm::{build_struct, InterpError, InterpErrorKind, StructValue, Value};
 

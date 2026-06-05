@@ -148,6 +148,24 @@ pub enum Command {
         /// when unset.
         #[arg(long, default_value = "127.0.0.1:8080")]
         listen: String,
+        /// Path to a compiled `#[tool]` CDYLIB (`.so` / `.dylib` /
+        /// `.dll`). When provided, `corvid serve` dlopens the cdylib
+        /// at startup and registers each tool declared in the app
+        /// (via the runtime's `corvid_register_tool` C-ABI) by
+        /// resolving its `__corvid_tool_<name>` symbol against the
+        /// loaded library. Required to demonstrate approval-gated
+        /// dangerous tools over HTTP — without it, the interpreter's
+        /// tool registry stays empty and approved actions fail with
+        /// "no handler registered for tool `<name>`".
+        ///
+        /// NOTE: this is intentionally a CDYLIB, NOT the staticlib
+        /// `corvid build --with-tools-lib` accepts. The build path
+        /// statically links at compile time; the serve path runs
+        /// the interpreter and needs a dlopen-able shared library.
+        /// Build your tools crate with `crate-type = ["cdylib"]` in
+        /// its Cargo.toml.
+        #[arg(long, value_name = "PATH")]
+        with_tools_cdylib: Option<PathBuf>,
     },
     /// Run verification suites.
     ///

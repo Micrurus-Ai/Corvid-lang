@@ -34,6 +34,7 @@
 //! `501` so the gap is explicit rather than a silent `404`.
 
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -48,15 +49,17 @@ use axum::{Json, Router};
 use corvid_ast::HttpMethod;
 use corvid_driver::{
     compile_to_ir_with_config_at_path, load_corvid_config_for, render_all_pretty,
-    run_ir_with_runtime, InterpErrorKind, RunError, Runtime, RuntimeError, Value,
+    run_ir_with_runtime, InterpErrorKind, RunError, Runtime, RuntimeError, ToolRegistry, Value,
 };
 use corvid_ir::{IrCallKind, IrExprKind, IrFile, IrLiteral, IrRoute, IrStmt, IrType};
 use corvid_resolve::DefId;
 use corvid_runtime::approval_authorization::ApprovalActorContext;
 use corvid_runtime::approval_queue::ApprovalQueueRuntime;
 use corvid_runtime::approvals::ProgrammaticApprover;
+use corvid_runtime::catalog_c_api::{corvid_register_tool, dispatch_host_tool, CorvidToolFn};
 use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
+use libloading::{Library, Symbol};
 
 use crate::serve_approval::{QueueApprover, SERVE_DEFAULT_TENANT};
 
@@ -98,6 +101,15 @@ struct ServeState {
     /// handlers on the queued path; drained on either `/approve`
     /// (re-executed) or `/deny` (discarded).
     pending_invocations: Arc<Mutex<HashMap<String, PendingInvocation>>>,
+    /// Tool handlers registered at startup — typically populated by
+    /// the `--with-tools-cdylib <path>` loader, but could also carry
+    /// handlers from future loader paths (e.g. 33Q1b's tools.py
+    /// autoloader). Cloned into the `/approve` handler's
+    /// `bypass_runtime` builder so the re-executed agent sees the
+    /// same tool registry as the original request, instead of
+    /// failing with "no handler registered for tool `<name>`" — the
+    /// regression anonymous-2026-06-04 round-2 P1.1 documented.
+    host_tools: ToolRegistry,
 }
 
 /// How a route's handler is invoked per request.
@@ -117,7 +129,11 @@ struct RoutePlan {
     dispatch: Dispatch,
 }
 
-pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
+pub(crate) fn cmd_serve(
+    file: &Path,
+    listen: &str,
+    tools_cdylib: Option<&Path>,
+) -> Result<u8> {
     let source =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
     let config = load_corvid_config_for(file);
@@ -157,14 +173,37 @@ pub(crate) fn cmd_serve(file: &Path, listen: &str) -> Result<u8> {
         ApprovalQueueRuntime::open_in_memory()
             .context("open in-memory approval queue for `corvid serve`")?,
     );
+    // `--with-tools-cdylib <path>` (slice 33Q1a): dlopen the host's
+    // tools cdylib and register one Rust `ToolHandler` per declared
+    // tool that bridges to the C-ABI registry. Without this, the
+    // interpreter's tool registry stays empty and approved actions
+    // fail with "no handler registered for tool `<name>`" — exactly
+    // the regression the anonymous-2026-06-04 round-2 trial report
+    // P1.1 documented. See `register_cdylib_tool_handlers` for the
+    // dlopen + register + bridge pattern.
+    //
+    // The populated `ToolRegistry` is cloned into both the main
+    // runtime (below) and stored in `ServeState::host_tools` so the
+    // `/approve` re-execution path (`approve_approval`) can hand the
+    // same registry to its bypass runtime — without that, the bypass
+    // runtime had an empty tool registry and reproduced the P1.1
+    // regression even with the loader wired up.
+    let host_tools = if let Some(cdylib_path) = tools_cdylib {
+        register_cdylib_tool_handlers(&ir, cdylib_path)?
+    } else {
+        ToolRegistry::default()
+    };
+
     let runtime = Runtime::builder()
         .approver(Arc::new(QueueApprover::new(approval_queue.clone())))
+        .tool_registry(host_tools.clone())
         .build();
     let state = Arc::new(ServeState {
         ir,
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
+        host_tools,
     });
 
     let mut app: Router<Arc<ServeState>> = Router::new()
@@ -529,8 +568,19 @@ async fn approve_approval(
     // boundaries — those would re-queue normally. (Slice MVP
     // assumes a single approve boundary per route — multi-step
     // approval chains are a follow-up.)
+    //
+    // Tool registry is cloned from the host's startup config
+    // (`ServeState::host_tools`) so the re-executed agent sees the
+    // same `--with-tools-cdylib` handlers as the original request.
+    // Pre-33Q1a this was an empty default registry, which is the
+    // bug anonymous-2026-06-04 P1.1 hit: an approval-gated tool
+    // call answered 500 "no handler registered for tool `<name>`"
+    // on `/approve` even when the operator had passed
+    // `--with-tools-cdylib`, because the bypass runtime's
+    // registry never inherited the loaded handlers.
     let bypass_runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .tool_registry(state.host_tools.clone())
         .build();
     let outcome = run_ir_with_runtime(
         &state.ir,
@@ -705,6 +755,167 @@ fn method_filter(m: HttpMethod) -> MethodFilter {
         HttpMethod::Patch => MethodFilter::PATCH,
         HttpMethod::Delete => MethodFilter::DELETE,
     }
+}
+
+/// Load the host's tools cdylib and register one interpreter
+/// `ToolHandler` per declared tool that bridges through the runtime's
+/// C-ABI tool registry — the unblocker for slice 33Q1a's
+/// "Surface 3 (approval-gated dangerous tool) is undemonstrable over
+/// HTTP" gap surfaced by the anonymous-2026-06-04 round-2 trial.
+///
+/// **Two layers of registration** because the runtime keeps two distinct
+/// tool registries:
+///
+/// 1. **C-ABI registry** (`crates/corvid-runtime/src/catalog_c_api/tool_bridge.rs`).
+///    A global static keyed by name → fn pointer. Populated via
+///    `corvid_register_tool`. This is the registry every cdylib build
+///    targets when it self-registers, and what `corvid_invoke_tool`
+///    (the native-codegen tool-dispatch path) reads.
+/// 2. **Rust `ToolRegistry`** (`crates/corvid-runtime/src/tools.rs`).
+///    A `HashMap<String, ToolHandler>` on each `Runtime` instance, used
+///    by the *interpreter* tier (which `corvid serve` runs). We populate
+///    each app-declared tool with a Rust handler that internally calls
+///    `dispatch_host_tool` — the public Rust-callable shim over the
+///    C registry's dispatch core.
+///
+/// **Cdylib lifetime.** The loaded `Library` handle is leaked
+/// (`Box::leak`) so the cdylib stays mapped for the rest of the
+/// process. Unloading mid-serve would invalidate the fn pointers we
+/// just registered into the C registry, and the next tool invocation
+/// would crash inside `corvid_invoke_tool` with no Rust-side recovery
+/// path. The leak is one-time at startup and bounded by the cdylib's
+/// own footprint; the trade-off favours operator safety over the
+/// memory we don't reclaim on shutdown (which `corvid serve` doesn't
+/// gracefully execute today anyway — Ctrl-C tears the process down
+/// before any handle cleanup would run).
+///
+/// **Missing symbols are not fatal.** An app may declare tools that
+/// the cdylib doesn't implement (e.g. some are host-supplied
+/// elsewhere, or the cdylib is a subset). Missing tools log a startup
+/// warning and stay unregistered; the interpreter's existing
+/// `UnknownTool` error surfaces the gap at call time, which is the
+/// honest behaviour. If the operator wants startup-fail-fast
+/// semantics, the right future surface is `--require-tools-cdylib`
+/// (filed under 33Q1's slice notes; not in this commit).
+fn register_cdylib_tool_handlers(ir: &IrFile, cdylib_path: &Path) -> Result<ToolRegistry> {
+    if !cdylib_path.exists() {
+        anyhow::bail!(
+            "--with-tools-cdylib `{}` does not exist — build your tools crate first \
+             (`cargo build -p <tools-crate> --release` with `crate-type = [\"cdylib\"]` \
+             in its Cargo.toml)",
+            cdylib_path.display()
+        );
+    }
+
+    // SAFETY: dlopen / LoadLibrary on a path supplied by the operator.
+    // `libloading::Library::new` is documented unsafe because loading a
+    // shared library executes its static constructors in the host
+    // process. The operator running `corvid serve --with-tools-cdylib`
+    // explicitly chose to trust that file; that is the trust boundary.
+    let library = unsafe { Library::new(cdylib_path) }
+        .with_context(|| format!("dlopen `{}`", cdylib_path.display()))?;
+
+    let mut registry = ToolRegistry::default();
+    let mut registered_tools: Vec<String> = Vec::new();
+    let mut missing_tools: Vec<String> = Vec::new();
+
+    for tool in &ir.tools {
+        let symbol_name = format!("__corvid_tool_{}", tool.name);
+        // SAFETY: dlsym for a symbol name string. The signature
+        // `CorvidToolFn` is the ABI the `#[tool]` proc-macro emits — see
+        // `crates/corvid-runtime/src/catalog_c_api/tool_bridge.rs::CorvidToolFn`.
+        let fn_ptr: Result<Symbol<CorvidToolFn>, libloading::Error> =
+            unsafe { library.get(symbol_name.as_bytes()) };
+
+        let Ok(symbol) = fn_ptr else {
+            missing_tools.push(tool.name.clone());
+            continue;
+        };
+
+        // Copy the raw fn pointer OUT of the `Symbol<'_>` lifetime
+        // wrapper. The `Symbol` borrow's lifetime is tied to the
+        // `Library`, but we're about to leak the library anyway, so
+        // promoting to a raw `CorvidToolFn` is the cleanest fit for
+        // the C-ABI `corvid_register_tool` signature.
+        let raw_fn: CorvidToolFn = *symbol;
+
+        // Register in the C-ABI registry. `corvid_register_tool` is the
+        // CLI's statically-linked corvid-runtime entry; calling it
+        // updates the CLI process's global tool registry that
+        // `dispatch_host_tool` reads. The cdylib's own copy of the
+        // registry (it also statically links corvid-runtime) is a
+        // separate static and stays empty here — that's expected.
+        let name_c = CString::new(tool.name.clone()).with_context(|| {
+            format!(
+                "tool name `{}` contains an interior NUL byte (cannot pass to C ABI)",
+                tool.name
+            )
+        })?;
+        unsafe {
+            corvid_register_tool(name_c.as_ptr(), Some(raw_fn), std::ptr::null_mut());
+        }
+
+        // Register a Rust handler in the returned `ToolRegistry` that
+        // bridges through `dispatch_host_tool` back into the C
+        // registry we just populated. The interpreter calls
+        // `runtime.tools.call(name, args)` for every tool invocation;
+        // without this Rust handler the interpreter would still
+        // return `UnknownTool` even though the C registry has the
+        // fn pointer. Returning a `ToolRegistry` rather than mutating
+        // a `RuntimeBuilder` lets `cmd_serve` clone the same
+        // registry into both the main runtime and the `/approve`
+        // bypass runtime so the re-executed agent sees the same
+        // handler set as the original request.
+        let tool_name_owned = tool.name.clone();
+        registry.register(tool_name_owned.clone(), move |args| {
+            let tool_name = tool_name_owned.clone();
+            async move {
+                let args_json = serde_json::to_string(&args).map_err(|e| {
+                    RuntimeError::ToolFailed {
+                        tool: tool_name.clone(),
+                        message: format!("serialize args to JSON: {e}"),
+                    }
+                })?;
+                match dispatch_host_tool(&tool_name, &args_json) {
+                    Some(result_json) => {
+                        serde_json::from_str(&result_json).map_err(|e| {
+                            RuntimeError::ToolFailed {
+                                tool: tool_name.clone(),
+                                message: format!("parse host tool result JSON: {e}"),
+                            }
+                        })
+                    }
+                    None => Err(RuntimeError::UnknownTool(tool_name)),
+                }
+            }
+        });
+
+        registered_tools.push(tool.name.clone());
+    }
+
+    // Leak the library so it stays mapped for the process lifetime.
+    // See doc comment above for rationale.
+    Box::leak(Box::new(library));
+
+    eprintln!(
+        "corvid serve: linked {}/{} tool(s) from `{}`",
+        registered_tools.len(),
+        ir.tools.len(),
+        cdylib_path.display()
+    );
+    if !registered_tools.is_empty() {
+        registered_tools.sort();
+        eprintln!("  registered: {}", registered_tools.join(", "));
+    }
+    if !missing_tools.is_empty() {
+        missing_tools.sort();
+        eprintln!(
+            "  declared in app but missing from cdylib: {} (will return UnknownTool at call time)",
+            missing_tools.join(", ")
+        );
+    }
+
+    Ok(registry)
 }
 
 /// Decide how (if at all) a route can be dispatched. Returns `None` for
