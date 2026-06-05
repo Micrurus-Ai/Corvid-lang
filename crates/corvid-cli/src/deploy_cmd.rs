@@ -53,7 +53,7 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         None => None,
     };
 
-    fs::write(out.join("Dockerfile"), render_dockerfile(app_name)).context("write Dockerfile")?;
+    fs::write(out.join("Dockerfile"), render_dockerfile(app_name, app)).context("write Dockerfile")?;
 
     let source_sha256 = hex::encode(Sha256::digest(&source_bytes));
     let metadata = OciMetadata {
@@ -189,7 +189,7 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
 /// HEALTHCHECK uses `corvid check` against the app's source as the
 /// liveness probe — if `corvid` cannot lex/parse/typecheck the
 /// shipped source, the binary is broken regardless of HTTP state.
-fn render_dockerfile(app_name: &str) -> String {
+fn render_dockerfile(app_name: &str, app_root: &Path) -> String {
     // The build context is the user's STANDALONE app dir, not the
     // Corvid monorepo. Pre-2026-06-04 this rendered a Dockerfile that
     // assumed monorepo layout (`cargo build -p corvid-cli`, `COPY
@@ -237,6 +237,39 @@ fn render_dockerfile(app_name: &str) -> String {
     // staticlib), so the deploy-package path works without it; if a
     // future deploy variant needs in-container codegen, the release
     // archive must ship the staticlib alongside the binary.
+    //
+    // Slice 33Q4 (anonymous-2026-06-04 round-2 P3.a): COPY lines for
+    // optional paths (`migrations/`, `evals/`, `traces/`, `tools.py`)
+    // are emitted ONLY when the path exists in the app root at
+    // render time. Pre-33Q4 the renderer unconditionally emitted
+    // COPY lines for all five paths, which broke `docker build` for
+    // every bare `corvid new` app (which has none of the four
+    // optional paths) — the trial reviewer hit the failure at
+    // P3.a. The presence check uses `Path::is_dir` / `Path::is_file`
+    // against `app_root` rather than relying on operator post-edit;
+    // shipping a Dockerfile that needs hand-editing to build is the
+    // anti-pattern the reviewer flagged.
+    //
+    // `tools.py` is COPYed when present so the 33Q1b tools.py
+    // autoloader has its module file to import inside the container.
+    // The container's working dir is `/app`, so `tools.py` lands
+    // next to `corvid.toml` and `corvid serve src/main.cor`'s
+    // tools.py walk (`<source_parent>/tools.py` or
+    // `<source_parent_parent>/tools.py`) finds it at the project
+    // root.
+    let mut copy_lines = String::new();
+    copy_lines.push_str("COPY src ./src\n");
+    copy_lines.push_str("COPY corvid.toml ./corvid.toml\n");
+    if app_root.join("tools.py").is_file() {
+        copy_lines.push_str("COPY tools.py ./tools.py\n");
+    }
+    for optional_dir in &["migrations", "evals", "traces"] {
+        if app_root.join(optional_dir).is_dir() {
+            copy_lines.push_str(&format!("COPY {optional_dir} ./{optional_dir}\n"));
+        }
+    }
+    let copy_block = copy_lines.trim_end();
+
     format!(
         r#"# syntax=docker/dockerfile:1
 ARG CORVID_VERSION=latest
@@ -271,18 +304,12 @@ WORKDIR /app
 COPY --from=corvid-installer /opt/corvid/bin/corvid /usr/local/bin/corvid
 COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
 
-# User app sources — produced by `corvid new` or carved from
-# a reference app. These five paths match the standalone-app
-# layout the docs / install scripts / the 33M friends-and-
-# family prompt all standardize on. `evals/` and `traces/`
-# are optional: if absent from the local working tree, the
-# operator removes the two COPY lines below or `touch`es
-# empty dirs before `docker build`.
-COPY src ./src
-COPY corvid.toml ./corvid.toml
-COPY migrations ./migrations
-COPY evals ./evals
-COPY traces ./traces
+# User app sources. `src/` and `corvid.toml` are always emitted
+# because they are the structural minimum a `corvid new` app
+# produces. `tools.py`, `migrations/`, `evals/`, and `traces/`
+# are emitted ONLY when present at render time — see slice 33Q4
+# in the function's doc comment for the rationale.
+{copy_block}
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD ["/usr/local/bin/corvid", "check", "/app/src/main.cor"]
@@ -767,10 +794,25 @@ mod tests {
     /// where a contributor swaps back to a fat base (debian-slim,
     /// alpine, ubuntu) that breaks the ≤80 MB Phase-43 budget.
     /// The distroless image carries no shell + no package manager +
+    /// Build an app-root tempdir containing all four optional paths
+    /// (`migrations/`, `evals/`, `traces/`, `tools.py`) so the
+    /// presence-conditional 33Q4 renderer emits every COPY line —
+    /// the "full app" shape the existing assertions all assume.
+    fn tempdir_with_all_optional_paths() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("migrations")).expect("create migrations/");
+        std::fs::create_dir(dir.path().join("evals")).expect("create evals/");
+        std::fs::create_dir(dir.path().join("traces")).expect("create traces/");
+        std::fs::write(dir.path().join("tools.py"), b"# fixture tools.py\n")
+            .expect("write tools.py");
+        dir
+    }
+
     /// no setuid binaries, so every byte is byte the runtime needs.
     #[test]
     fn deploy_dockerfile_uses_distroless_runtime_base() {
-        let dockerfile = render_dockerfile("test_app");
+        let app_root = tempdir_with_all_optional_paths();
+        let dockerfile = render_dockerfile("test_app", app_root.path());
 
         // The Dockerfile is multi-stage: one or more builder stages
         // (each `FROM <image> AS <name>`) followed by the runtime
@@ -824,6 +866,84 @@ mod tests {
             dockerfile.contains("/usr/local/bin/corvid"),
             "HEALTHCHECK + CMD must use absolute path on distroless"
         );
+    }
+
+    /// 33Q4 acceptance — anonymous-2026-06-04 round-2 P3.a: a bare
+    /// `corvid new` app (only `src/` and `corvid.toml` exist) must
+    /// render a Dockerfile whose `COPY` block omits every optional
+    /// path that doesn't exist at render time. Pre-33Q4 the renderer
+    /// unconditionally emitted COPY lines for `migrations/`, `evals/`,
+    /// `traces/` (and never copied `tools.py`), which broke
+    /// `docker build` on the first missing-path lookup. This test
+    /// pins the fix by asserting that ONLY `src` and `corvid.toml`
+    /// COPY lines appear in the bare-app rendering.
+    #[test]
+    fn deploy_dockerfile_omits_copy_lines_for_missing_optional_paths() {
+        // Empty app root (no migrations/, no evals/, no traces/,
+        // no tools.py). Only the structural minimum `corvid new`
+        // would produce.
+        let app_root = tempfile::tempdir().expect("tempdir");
+
+        let dockerfile = render_dockerfile("test_app", app_root.path());
+
+        // Mandatory COPYs (structural minimum a `corvid new` app
+        // always has) MUST be present.
+        assert!(
+            dockerfile.contains("COPY src ./src"),
+            "Dockerfile must always emit `COPY src` — that's the \
+             structural minimum of any Corvid app. got:\n{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("COPY corvid.toml ./corvid.toml"),
+            "Dockerfile must always emit `COPY corvid.toml` — every \
+             Corvid app has one. got:\n{dockerfile}"
+        );
+
+        // Optional COPYs MUST be absent when the source path doesn't
+        // exist — the load-bearing 33Q4 assertion. If these fire,
+        // `docker build` would fail for a bare `corvid new` app and
+        // the reviewer's P3.a regression is back.
+        for missing_optional in &[
+            "COPY tools.py",
+            "COPY migrations",
+            "COPY evals",
+            "COPY traces",
+        ] {
+            assert!(
+                !dockerfile.contains(missing_optional),
+                "Dockerfile MUST NOT emit `{missing_optional}` when the \
+                 source path doesn't exist — that's the bug \
+                 anonymous-2026-06-04 P3.a reported (broken `docker \
+                 build` for bare `corvid new` apps). got:\n{dockerfile}"
+            );
+        }
+    }
+
+    /// 33Q4 paired with the omission test: when ALL optional paths
+    /// exist at render time, the Dockerfile MUST emit COPY lines for
+    /// every one of them — `tools.py` (for the 33Q1b autoloader),
+    /// `migrations/`, `evals/`, `traces/`. This proves the
+    /// presence check is bidirectional: omission is conditional on
+    /// absence, NOT on always-omit.
+    #[test]
+    fn deploy_dockerfile_emits_copy_lines_for_present_optional_paths() {
+        let app_root = tempdir_with_all_optional_paths();
+
+        let dockerfile = render_dockerfile("test_app", app_root.path());
+
+        for present_optional in &[
+            "COPY tools.py ./tools.py",
+            "COPY migrations ./migrations",
+            "COPY evals ./evals",
+            "COPY traces ./traces",
+        ] {
+            assert!(
+                dockerfile.contains(present_optional),
+                "Dockerfile must emit `{present_optional}` when the \
+                 source path EXISTS — proves the presence check isn't \
+                 always-omit. got:\n{dockerfile}"
+            );
+        }
     }
 
     /// 43M: SBOM names the app source AND the Corvid runtime as

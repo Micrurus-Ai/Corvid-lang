@@ -4,6 +4,50 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q4 closed: deploy Dockerfile COPYs only what exists
+
+Anonymous-2026-06-04 round-2 P3.a caught that the rendered
+Dockerfile unconditionally `COPY migrations`, `COPY evals`,
+`COPY traces` (and never `COPY`ed `tools.py`), so a bare
+`corvid new my_app` → `corvid deploy package` produced a
+Dockerfile that failed `docker build` at the first missing path.
+The reviewer reported having to `mkdir -p` the optional dirs
+before docker build — the kind of hand-edit-to-build trap a
+generated artifact should never set.
+
+Fix: `crates/corvid-cli/src/deploy_cmd.rs::render_dockerfile`
+now takes an `app_root: &Path` argument and probes for the four
+optional paths at render time. `src/` and `corvid.toml` stay
+structurally mandatory; `tools.py`, `migrations/`, `evals/`,
+`traces/` are emitted only when the source path exists.
+
+Two acceptance tests:
+
+- `deploy_dockerfile_omits_copy_lines_for_missing_optional_paths`
+  uses an empty tempdir (the `corvid new` shape) and asserts no
+  COPY lines for the four optional paths appear.
+- `deploy_dockerfile_emits_copy_lines_for_present_optional_paths`
+  uses a tempdir with all four present and asserts every COPY
+  line is emitted. Proves the presence check is bidirectional.
+
+The existing reference_apps integration test still passes
+because `personal_executive_agent` has all four optional paths
+on disk.
+
+`tools.py` COPY pairs with the 33Q1b autoloader so the
+container's autoload path finds the module at `/app/tools.py`
+(the project root inside the container) — the autoloader's
+walk-up-one-level rule resolves `src/main.cor` → `tools.py`.
+
+**Pattern.** When a renderer takes a string-only signature
+(`fn render_dockerfile(app_name: &str)`) and the rendered
+artifact's correctness depends on filesystem state, change the
+signature to include the path so the renderer can probe.
+Don't paper over with comments telling the operator to
+hand-edit; ship the right thing for the input you have.
+
+---
+
 ## 2026-06-05 - 33Q3 closed: `@trust(...)` is now a signable guarantee
 
 Anonymous-2026-06-04 round-2 P2 caught that `@trust(...)` and

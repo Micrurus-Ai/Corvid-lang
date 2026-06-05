@@ -215,12 +215,11 @@ ls deploy/
 # contains generated artifacts:
 #     docker build -f deploy/Dockerfile -t my_app:dev .
 #
-# Heads-up (filed as 33Q4): if your `corvid new` scaffold
-# doesn't have `migrations/`, `evals/`, or `traces/`
-# directories, the current Dockerfile's unconditional `COPY`s
-# will fail. Until the renderer ships presence-conditional
-# COPYs, `mkdir -p migrations evals traces` in the app root
-# before `docker build` is the workaround.
+# The renderer emits COPY lines only for paths that exist at
+# render time (closed under 33Q4). A bare `corvid new` scaffold
+# produces a Dockerfile with just `COPY src` + `COPY corvid.toml`;
+# add migrations/evals/traces/tools.py and re-run `corvid deploy
+# package` to pick them up.
 
 # 10. Stress-test other surfaces.
 corvid audit src/main.cor       # operator-summary; takes a FILE, not a dir
