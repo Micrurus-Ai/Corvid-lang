@@ -200,13 +200,21 @@ fn baseline_for_effect_row_compiles_clean() {
 }
 
 #[test]
-fn mutator_caller_under_reports_trust_triggers_body_completeness_guarantee() {
+fn mutator_caller_under_reports_trust_triggers_trust_constraint_enforcement_guarantee() {
     // Tighten the agent's trust constraint so the callee's
     // human_required no longer fits — the body's actual effects
     // exceed what the agent's row covers.
+    //
+    // Pre-33Q3 this was anchored on `effect_row.body_completeness`
+    // (shared with every non-cost dimension violation). 33Q3 promoted
+    // trust violations to the dedicated `trust.constraint_enforcement`
+    // id so `@trust(...)` could be a signable claim — see the
+    // diagnostic-dispatch site in `crates/corvid-types/src/checker.rs`
+    // (the `if violation.dimension == "trust" { ... } else { ... }`
+    // branch) and slice 33Q3's ROADMAP entry.
     let mutated = EFFECT_BASELINE.replace("@trust(human_required)", "@trust(autonomous)");
     let c = check(&mutated);
-    assert_guarantee_violated(&c, "effect_row.body_completeness");
+    assert_guarantee_violated(&c, "trust.constraint_enforcement");
 }
 
 // --- effect_row.caller_propagation -------------------------------
@@ -232,8 +240,11 @@ agent helper(id: String, amount: Float) -> Receipt uses transfer:
 agent outer(id: String, amount: Float) -> Receipt:
     return helper(id, amount)
 "#;
+    // Same 33Q3 diagnostic-anchor change as the test above — the
+    // outer agent's trust violation now reports under the dedicated
+    // id, not the shared body-completeness id.
     let c = check(src);
-    assert_guarantee_violated(&c, "effect_row.body_completeness");
+    assert_guarantee_violated(&c, "trust.constraint_enforcement");
 }
 
 // --- effect_row.import_boundary ----------------------------------

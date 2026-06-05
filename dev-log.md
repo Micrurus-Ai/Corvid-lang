@@ -4,6 +4,64 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q7a closed: spec honest about trust-value enforcement + drift gate
+
+Maintainer-as-reviewer-2026-06-05 P1.2 caught that the spec
+documented the trust lattice as `autonomous < supervisor_required
+< human_required` but reference apps used `bounded`, `workspace`,
+`grounded`, `local`, `readonly` — 4 of 6 actually-used values were
+NOT in the spec, and the typechecker silently accepted all of them.
+
+Discovery confirmed the spec was overclaiming: a probe
+`trust: nonsense_value_that_is_definitely_not_in_spec` typechecks
+clean. The v1.0 typechecker accepts ANY string for `trust:`/
+`data:` via `DimensionValue::Name(String)` without lattice
+membership checks.
+
+Two-track fix:
+
+- **33Q7a (this slice, ships before v1.0)**: docs honesty + soft
+  drift gate. Updated spec sections 4.2 (trust) and 4.4 (data)
+  in `docs/internals/effect-spec/04-builtin-dimensions.md` with
+  explicit "Implementation note (v1.0 honesty)" blocks naming
+  the non-enforcement. New companion doc
+  `docs/internals/effect-spec/reference-app-dimensions.md`
+  catalogs every value used in the 5 reference apps (6 trust
+  extensions + 5 data extensions). New CI gate at
+  `crates/corvid-types/tests/reference_app_dimensions_gate.rs`
+  walks every `examples/backend/*/src/main.cor`, extracts
+  `trust:`/`data:` values, asserts each is either spec-listed
+  or extension-cataloged. Three tests: trust-values-documented,
+  data-values-documented, every-listed-extension-is-actually-used
+  (adversarial — catches the reverse drift of listing without
+  using).
+- **33Q7b (post-v1.0)**: typechecker tightening. Promote the soft
+  gate to hard typechecker enforcement — non-canonical values
+  require `corvid.toml`-declared custom dimensions. Reference
+  apps move to canonical values OR declare their domain
+  extensions explicitly. Filed on ROADMAP with the cleanup
+  scope spelled out.
+
+Also fixes a 33Q3-introduced regression in
+`crates/corvid-types/tests/source_bypass_corpus.rs`: two tests
+that asserted trust-mutation violations triggered
+`effect_row.body_completeness` now expect
+`trust.constraint_enforcement` (the dedicated id 33Q3 promoted
+the diagnostic to). My 33Q3 slice gate ran `--lib` not
+`--tests`, so the integration test regression escaped. Adding
+`--tests` to the standard slice-gate command going forward.
+
+**Pattern recorded.** When a spec promises an enforced
+constraint and the implementation accepts any value, the
+spec is overclaiming. The honest fix is to either tighten
+the implementation (harder, breaks downstream uses) OR
+document what's actually enforced (softer, ships faster, can
+tighten later). For v1.0 launch readiness, ship the honest
+docs + soft drift gate now; defer the tightening to a slice
+where the cleanup scope is explicitly budgeted.
+
+---
+
 ## 2026-06-05 - 33Q6 closed: corvid_runtime Python package autodetected without pip install
 
 Maintainer-as-reviewer-2026-06-05 P1.1 caught that the

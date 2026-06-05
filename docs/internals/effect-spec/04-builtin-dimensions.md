@@ -60,11 +60,23 @@ If `cost` composed by `Max` instead of Sum, a chain of three $0.10 calls would r
 
 ### Physical meaning
 
-Authorization posture. A chain's trust level is the strictest gate any step encounters. Levels form a total order:
+Authorization posture. A chain's trust level is the strictest gate any step encounters.
+
+### Core lattice
+
+The **spec-defined** values form a total order:
 
 ```
 autonomous  <  supervisor_required  <  human_required
 ```
+
+Plus the confidence-gated variant `autonomous_if_confident(threshold)` (§4.2.4 below).
+
+### Implementation note (v1.0 honesty)
+
+The v1.0 typechecker accepts **any string** as a `trust:` value via `DimensionValue::Name(String)` — it does NOT enforce the lattice membership for the built-in `trust` dimension. Domain-specific values like `bounded`, `readonly`, `workspace`, `grounded`, `local` appear in the shipped reference apps under `examples/backend/`; they parse, compose lexicographically by name (not by lattice ordering), and do NOT participate in the approval-gate composition rules that the canonical lattice values trigger. The full catalog of reference-app values is at [`reference-app-dimensions.md`](./reference-app-dimensions.md) and a CI gate in `crates/corvid-types/tests/reference_app_dimensions_gate.rs` keeps the catalog and the apps in sync — when a reference app introduces a new value, the test fails until the value is documented.
+
+The post-v1.0 slice `33Q7b` tightens the typechecker to enforce the spec's lattice (with custom values requiring an explicit `corvid.toml` declaration); the reference apps are rewritten as part of that slice to use either canonical values or properly declared custom dimensions. Pre-tightening, treat non-canonical trust values as **annotation only** — they communicate intent to a human reader but do not produce composition guarantees.
 
 ### Composition
 
@@ -133,6 +145,8 @@ If `reversible` composed by `OR`, a chain logging to disk (`reversible: true`) t
 Data categories that flow through a chain. A chain reading financial records then medical records has touched **both** categories — not either alone. The Union accumulates.
 
 Well-known categories: `none`, `public`, `pii`, `financial`, `medical`, `grounded`. Users can declare more in `corvid.toml` if a dimension fork covers the domain (e.g. `hipaa_phi`, `gdpr_special_category`).
+
+**Implementation note (v1.0 honesty)**: the typechecker accepts any string as a `data:` value via `DimensionValue::Name(String)`. The shipped reference apps use additional domain values (`code`, `customer`, `external`, `internal`, `private`) without `corvid.toml` custom-dimension declarations; these parse and compose by set Union but the Union operates on the literal strings, not on a typed lattice. The full catalog is at [`reference-app-dimensions.md`](./reference-app-dimensions.md) (CI-gated). Post-v1.0 slice `33Q7b` tightens the typechecker to require `corvid.toml`-declared custom dimensions for non-spec values.
 
 ### Composition
 
