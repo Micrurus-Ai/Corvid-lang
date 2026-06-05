@@ -147,6 +147,7 @@ fn kind_heading(kind: GuaranteeKind) -> &'static str {
         GuaranteeKind::Grounded => "Grounded provenance",
         GuaranteeKind::Budget => "Budgets",
         GuaranteeKind::Confidence => "Confidence thresholds",
+        GuaranteeKind::Trust => "Trust constraints",
         GuaranteeKind::Replay => "Replay determinism",
         GuaranteeKind::ProvenanceTrace => "Provenance traces",
         GuaranteeKind::AbiDescriptor => "ABI descriptor",

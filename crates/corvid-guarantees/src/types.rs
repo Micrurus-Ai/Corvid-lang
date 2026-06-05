@@ -30,6 +30,15 @@ pub enum GuaranteeKind {
     Grounded,
     Budget,
     Confidence,
+    /// Trust-dimension constraint enforcement: the `@trust(...)`
+    /// annotation on an agent declares a ceiling for the trust
+    /// lattice (`autonomous < supervisor_required < human_required`)
+    /// or the confidence-gated `autonomous_if_confident(threshold)`
+    /// variant. Runtime routes dangerous calls through the
+    /// approval system when composed trust escalates above the
+    /// declared ceiling. Added 2026-06-05 under slice 33Q3 to
+    /// make `@trust` compatible with `corvid build --sign`.
+    Trust,
     Replay,
     ProvenanceTrace,
     AbiDescriptor,
@@ -73,6 +82,7 @@ impl GuaranteeKind {
             GuaranteeKind::Grounded => "grounded",
             GuaranteeKind::Budget => "budget",
             GuaranteeKind::Confidence => "confidence",
+            GuaranteeKind::Trust => "trust",
             GuaranteeKind::Replay => "replay",
             GuaranteeKind::ProvenanceTrace => "provenance_trace",
             GuaranteeKind::AbiDescriptor => "abi_descriptor",
@@ -98,6 +108,7 @@ impl GuaranteeKind {
         GuaranteeKind::Grounded,
         GuaranteeKind::Budget,
         GuaranteeKind::Confidence,
+        GuaranteeKind::Trust,
         GuaranteeKind::Replay,
         GuaranteeKind::ProvenanceTrace,
         GuaranteeKind::AbiDescriptor,

@@ -194,6 +194,22 @@ fn typecheck_with_everything(
                 ) {
                     continue;
                 }
+                // Slice 33Q3: dispatch by dimension so trust-lattice
+                // violations anchor to the dedicated
+                // `trust.constraint_enforcement` guarantee instead of
+                // sharing `effect_row.body_completeness` with every
+                // other non-cost dimension. This is what makes
+                // `@trust(...)` signable: the registry row's Static +
+                // TypeCheck classification requires a tagged
+                // diagnostic site (enforced by
+                // `every_typecheck_phase_static_guarantee_uses_with_guarantee_constructor`
+                // in `corvid-guarantees/src/lib.rs`), and this is
+                // that site.
+                let guarantee_id = if violation.dimension.as_str() == "trust" {
+                    "trust.constraint_enforcement"
+                } else {
+                    "effect_row.body_completeness"
+                };
                 c.errors.push(TypeError::with_guarantee(
                     TypeErrorKind::EffectConstraintViolation {
                         agent: summary.agent_name.clone(),
@@ -201,7 +217,7 @@ fn typecheck_with_everything(
                         message: violation.to_string(),
                     },
                     violation.span,
-                    "effect_row.body_completeness",
+                    guarantee_id,
                 ));
             }
         }

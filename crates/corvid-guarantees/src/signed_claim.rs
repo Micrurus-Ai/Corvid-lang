@@ -55,6 +55,14 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     // both perspectives.
     "budget.compile_time_ceiling",
     "confidence.min_threshold",
+    // Slice 33Q3 (2026-06-05): `@trust(<level>)` on an agent is now a
+    // signable claim. The typechecker rejects bodies that violate the
+    // declared ceiling; this id advertises that enforcement in the
+    // signed cdylib's claim manifest. See
+    // `crates/corvid-guarantees/src/registry.rs::trust.constraint_enforcement`
+    // for the row + test refs, and `collect_constraint_claims` in
+    // `corvid-driver/src/build/claim_coverage.rs` for the require-site.
+    "trust.constraint_enforcement",
     "replay.deterministic_pure_path",
     "abi_descriptor.cdylib_emission",
     "abi_descriptor.byte_determinism",

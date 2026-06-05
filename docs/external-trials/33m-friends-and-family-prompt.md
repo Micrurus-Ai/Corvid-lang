@@ -297,13 +297,13 @@ corvid jobs run --workers 4 --max-runtime-ms 30000
   field so you can see why the grant didn't take effect. Retry
   /approve to try again, or POST /__approvals/<id>/deny to
   terminate a permanently-broken approval.
-- **`@trust(...)` and `--sign` are mutually exclusive today.**
-  `corvid build --sign` rejects agents that declare `@trust`
-  because no `trust.*` guarantee id is in `GUARANTEE_REGISTRY`
-  yet. Filed as 33Q3. For the trial, either omit `@trust`
-  from agents you sign, or build the cdylib without `--sign`
-  to exercise the trust moat. Flag in your report which path
-  you took.
+- **`@trust(...)` and `--sign` work together** (closed under
+  33Q3). The signed cdylib's `claim --explain` enumerates
+  `trust.constraint_enforcement` as one of the enforced
+  guarantees when your agent declares `@trust(<level>)` or
+  `@trust(autonomous_if_confident(<threshold>))`. The
+  typechecker rejects bodies that violate the declared
+  ceiling at compile time.
 
 ## Report template
 

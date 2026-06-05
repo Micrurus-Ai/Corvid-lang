@@ -285,6 +285,18 @@ fn collect_constraint_claims(
         "min_confidence" | "confidence" => {
             claims.required_ids.insert("confidence.min_threshold");
         }
+        // Slice 33Q3 (anonymous-2026-06-04 round-2 P2): `@trust(<level>)`
+        // and `@trust(autonomous_if_confident(t))` are now signable.
+        // The typechecker rejects bodies that violate the declared
+        // trust ceiling (existing
+        // `mutation_baseline_trust_violation_exists` in
+        // `crates/corvid-types/src/tests.rs` covers the adversarial
+        // path); this require advertises that enforcement in the
+        // signed cdylib's claim manifest so `corvid build --sign`
+        // accepts the annotation and `claim --explain` enumerates it.
+        "trust" => {
+            claims.required_ids.insert("trust.constraint_enforcement");
+        }
         other => claims.unsupported.push(format!(
             "agent `{agent_name}` declares `@{other}(...)`, but no signed cdylib guarantee id covers that effect constraint yet"
         )),

@@ -4,6 +4,64 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q3 closed: `@trust(...)` is now a signable guarantee
+
+Anonymous-2026-06-04 round-2 P2 caught that `@trust(...)` and
+`corvid build --sign` were mutually exclusive. The signed-build
+gate refused the annotation with "no signed cdylib guarantee id
+covers that effect constraint yet" because `GUARANTEE_REGISTRY`
+had no `trust.*` row. The trust moat and the signed-deploy path
+were mutually exclusive — the reviewer had to delete `@trust`
+from agents they signed.
+
+Fix shape:
+
+- New `GuaranteeKind::Trust` variant with slug "trust" in
+  `corvid-guarantees/src/types.rs`, plus heading "Trust
+  constraints" in `render.rs`.
+- New `trust.constraint_enforcement` row (`Static` + `TypeCheck`)
+  in `GUARANTEE_REGISTRY`. The typechecker already rejects
+  bodies that violate the declared trust ceiling — the
+  diagnostic was previously anchored to the shared
+  `effect_row.body_completeness` id; this slice promotes it to
+  the dedicated trust id so the registry's Static-phase
+  invariant (every Static + TypeCheck row needs a tagged
+  `with_guarantee` call site) holds.
+- `SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS` now includes
+  `"trust.constraint_enforcement"`.
+- `collect_constraint_claims` in
+  `corvid-driver/src/build/claim_coverage.rs` gains a
+  `"trust"` arm that pushes the new id into the descriptor's
+  required claims. Previously it fell through to the catch-
+  all "no signed cdylib guarantee id covers..." error.
+- Typechecker dispatch in `corvid-types/src/checker.rs` now
+  emits `with_guarantee(... "trust.constraint_enforcement")`
+  for trust-dimension violations (other non-cost dimensions
+  stay on `effect_row.body_completeness`).
+- `docs/reference/core-semantics.md` regenerated to surface
+  the new row.
+
+Positive + adversarial tests in
+`corvid-driver/src/build/tests.rs`:
+- `signed_claim_coverage_accepts_trust_constrained_agent`:
+  `@trust(human_required)` + descriptor with the new id → accepted.
+- `signed_claim_coverage_rejects_trust_when_id_missing_from_descriptor`:
+  same source, descriptor without the new id → rejected with
+  the missing-claim error naming the trust id.
+
+Existing tests at `mutation_baseline_trust_violation_exists`
+and `mutation_budget_within_limit_is_ok` cited as positive +
+adversarial refs in the registry row.
+
+**Pattern recorded.** When promoting a typecheck diagnostic
+from a shared anchor (`effect_row.body_completeness`) to a
+dedicated one (`trust.constraint_enforcement`), the
+`every_typecheck_phase_static_guarantee_uses_with_guarantee_constructor`
+drift test catches missing tag sites. The fix is at the
+diagnostic-emission site, not at the registry.
+
+---
+
 ## 2026-06-05 - 33Q2 closed: `corvid serve` no longer burns approvals when handlers error
 
 Anonymous-2026-06-04 round-2 P1.2 caught an approval-budget-integrity

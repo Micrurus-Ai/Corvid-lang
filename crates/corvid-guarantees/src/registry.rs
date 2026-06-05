@@ -314,6 +314,36 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-types/src/tests.rs::effect_confidence_out_of_range_is_rejected",
         ],
     },
+    // ----- Trust --------------------------------------------------
+    Guarantee {
+        id: "trust.constraint_enforcement",
+        kind: GuaranteeKind::Trust,
+        class: GuaranteeClass::Static,
+        phase: Phase::TypeCheck,
+        description:
+            "An agent annotated `@trust(<level>)` (or \
+             `@trust(autonomous_if_confident(threshold))`) fails compile \
+             when the agent's body composes a trust dimension stricter \
+             than the declared ceiling — e.g. an `@trust(autonomous)` \
+             agent that reaches a `trust: human_required` tool without \
+             an `approve` boundary is rejected. The lattice is \
+             `autonomous < supervisor_required < human_required`; the \
+             confidence-gated variant treats `autonomous_if_confident(t)` \
+             as `autonomous` at typecheck and routes to `human_required` \
+             at runtime when composed confidence < t. Added 2026-06-05 \
+             under slice 33Q3 so `@trust` annotations participate in \
+             `corvid build --sign`'s claim coverage and surface in \
+             `claim --explain` output.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-types/src/tests.rs::mutation_budget_within_limit_is_ok",
+            "crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_accepts_trust_constrained_agent",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-types/src/tests.rs::mutation_baseline_trust_violation_exists",
+            "crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_rejects_trust_when_id_missing_from_descriptor",
+        ],
+    },
     // ----- Replay -------------------------------------------------
     Guarantee {
         id: "replay.deterministic_pure_path",

@@ -29,6 +29,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `budget.compile_time_ceiling` | budget | static | typecheck |
 | `budget.runtime_termination` | budget | out_of_scope | runtime |
 | `confidence.min_threshold` | confidence | static | typecheck |
+| `trust.constraint_enforcement` | trust | static | typecheck |
 | `replay.deterministic_pure_path` | replay | runtime_checked | runtime |
 | `replay.trace_signature` | replay | runtime_checked | runtime |
 | `provenance_trace.receipt_signature` | provenance_trace | runtime_checked | runtime |
@@ -272,6 +273,24 @@ An agent annotated `@min_confidence(X)` requires every input carrying a confiden
 
 - `crates/corvid-types/src/tests.rs::min_confidence_fires_when_composed_confidence_below_floor`
 - `crates/corvid-types/src/tests.rs::effect_confidence_out_of_range_is_rejected`
+
+### Trust constraints
+
+#### `trust.constraint_enforcement`
+- **class**: static
+- **phase**: typecheck
+
+An agent annotated `@trust(<level>)` (or `@trust(autonomous_if_confident(threshold))`) fails compile when the agent's body composes a trust dimension stricter than the declared ceiling — e.g. an `@trust(autonomous)` agent that reaches a `trust: human_required` tool without an `approve` boundary is rejected. The lattice is `autonomous < supervisor_required < human_required`; the confidence-gated variant treats `autonomous_if_confident(t)` as `autonomous` at typecheck and routes to `human_required` at runtime when composed confidence < t. Added 2026-06-05 under slice 33Q3 so `@trust` annotations participate in `corvid build --sign`'s claim coverage and surface in `claim --explain` output.
+
+**Positive tests:**
+
+- `crates/corvid-types/src/tests.rs::mutation_budget_within_limit_is_ok`
+- `crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_accepts_trust_constrained_agent`
+
+**Adversarial tests:**
+
+- `crates/corvid-types/src/tests.rs::mutation_baseline_trust_violation_exists`
+- `crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_rejects_trust_when_id_missing_from_descriptor`
 
 ### Replay determinism
 

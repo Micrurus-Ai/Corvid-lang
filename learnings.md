@@ -6758,3 +6758,50 @@ attempts and never silently consumed by a transient failure.
 - Not concurrent retries. `/approve` is sequential per
   approval id; two simultaneous retries serialize on the
   approval-queue lock.
+
+## `@trust(...)` and `corvid build --sign` work together (2026-06-05)
+
+The `@trust(<level>)` annotation on an exported agent is now a
+signable contract. `corvid build --target=cdylib --sign <key>`
+emits a DSSE-signed ABI descriptor whose `claim_guarantees`
+array includes `trust.constraint_enforcement`, and
+`corvid claim --explain <binary>` enumerates it as an enforced
+guarantee.
+
+What gets enforced:
+
+- The typechecker rejects an agent body that composes a trust
+  dimension stricter than the declared ceiling. For example, an
+  agent declared `@trust(autonomous)` that reaches a tool with
+  `trust: human_required` without an `approve` boundary fails
+  to compile.
+- The trust lattice is `autonomous < supervisor_required <
+  human_required`. The confidence-gated variant
+  `@trust(autonomous_if_confident(0.95))` is treated as
+  `autonomous` at typecheck and escalates to `human_required`
+  at runtime when composed confidence drops below the
+  threshold.
+
+What the signed claim guarantees:
+
+- The shipped cdylib advertises the `trust.constraint_enforcement`
+  guarantee in its DSSE-signed descriptor.
+- `corvid claim --explain target/release/main.so` shows the id
+  in the `enforced_guarantees:` block.
+- If the cdylib's source declared `@trust(...)` but the
+  descriptor's `claim_guarantees` array doesn't include the
+  trust id, `corvid build --sign` refuses to emit a signature
+  (the bilateral source-match gate catches this).
+
+What this is NOT:
+
+- Not a runtime budget enforcement. `@trust` is a typecheck
+  ceiling on what the agent's body can compose; runtime
+  re-evaluates trust at every dangerous-call site using the
+  confidence-gated escalation if declared.
+- Not a substitute for `approve` boundaries. `@trust(autonomous)`
+  doesn't mean "this agent has authority to call dangerous
+  tools"; it means "this agent's effective trust is at most
+  autonomous, so it can't reach human-required tools." If the
+  agent reaches a dangerous tool of any trust level, it still
+  needs an `approve` boundary.
