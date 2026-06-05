@@ -282,6 +282,10 @@ pub(crate) fn cmd_serve(
         app = app.route(path, any(not_implemented));
     }
 
+    // Clone the Arc before `with_state` moves it so the startup
+    // banner below can still see the IR for the 33Q9 approval-label
+    // check.
+    let state_for_banner = state.clone();
     let app = app.with_state(state);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -294,11 +298,35 @@ pub(crate) fn cmd_serve(
             .with_context(|| format!("bind {addr}"))?;
         println!("corvid serve: listening on http://{addr}");
         for plan in &plans {
-            let kind = match &plan.dispatch {
-                Dispatch::Literal { agent, .. } => format!("-> {agent}"),
-                Dispatch::Body { agent, .. } => {
-                    format!("-> {agent} (body; approval-gated -> 202 + queued)")
-                }
+            // Slice 33Q9: the label "approval-gated -> 202 + queued"
+            // is only accurate when the handler agent's body actually
+            // contains an `approve` boundary that the dispatch path
+            // can reach. Pre-33Q9 every `Dispatch::Body` route was
+            // unconditionally labeled approval-gated — misleading for
+            // routes whose agent has no syntactic `approve` (the
+            // route returns 200/500 directly, never 202). Filed by
+            // maintainer-as-reviewer-2026-06-05 P2.1.
+            //
+            // The check is a recursive IR walk on the handler agent's
+            // body, looking for any `IrStmt::Approve` reachable
+            // through nested `If` / `For` blocks. It's NOT a call-
+            // graph walk: an agent whose body only calls another
+            // agent that approves still gets the no-approve label.
+            // That's a conservative under-count — false negative
+            // possible but no false positive. The opposite direction
+            // is the one the trial reviewer hit.
+            let agent_name = match &plan.dispatch {
+                Dispatch::Literal { agent, .. } | Dispatch::Body { agent, .. } => agent.as_str(),
+            };
+            let approves = agent_body_contains_approve(&state_for_banner.ir, agent_name);
+            let body_suffix = match &plan.dispatch {
+                Dispatch::Body { .. } => "body",
+                Dispatch::Literal { .. } => "literal",
+            };
+            let kind = if approves {
+                format!("-> {agent_name} ({body_suffix}; approval-gated -> 202 + queued)")
+            } else {
+                format!("-> {agent_name} ({body_suffix})")
             };
             println!("  {:<6} {}  {kind}", plan.method.as_str(), plan.path);
         }
@@ -989,6 +1017,42 @@ fn register_cdylib_tool_handlers(ir: &IrFile, cdylib_path: &Path) -> Result<Tool
     }
 
     Ok(registry)
+}
+
+/// 33Q9 helper — return true when `agent_name`'s body contains any
+/// reachable `IrStmt::Approve`. Walks nested `If` / `For` blocks
+/// recursively; does NOT follow calls into other agents (a
+/// conservative under-count). Used by the serve startup banner to
+/// accurately label routes as approval-gated vs not — pre-33Q9 every
+/// body-dispatch route was labeled approval-gated regardless of
+/// what the agent actually did.
+fn agent_body_contains_approve(ir: &IrFile, agent_name: &str) -> bool {
+    let Some(agent) = ir.agents.iter().find(|a| a.name == agent_name) else {
+        return false;
+    };
+    block_contains_approve(&agent.body)
+}
+
+fn block_contains_approve(block: &corvid_ir::IrBlock) -> bool {
+    block.stmts.iter().any(stmt_contains_approve)
+}
+
+fn stmt_contains_approve(stmt: &IrStmt) -> bool {
+    match stmt {
+        IrStmt::Approve { .. } => true,
+        IrStmt::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            block_contains_approve(then_block)
+                || else_block
+                    .as_ref()
+                    .is_some_and(block_contains_approve)
+        }
+        IrStmt::For { body, .. } => block_contains_approve(body),
+        _ => false,
+    }
 }
 
 /// Decide how (if at all) a route can be dispatched. Returns `None` for

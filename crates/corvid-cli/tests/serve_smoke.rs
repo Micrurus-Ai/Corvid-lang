@@ -1153,3 +1153,129 @@ server test_serve_q2_api:
          deny is terminal"
     );
 }
+
+/// 33Q9 acceptance — maintainer-as-reviewer-2026-06-05 P2.1.
+/// `corvid serve` pre-33Q9 labeled every `Dispatch::Body` route as
+/// `approval-gated -> 202 + queued` regardless of whether the agent
+/// actually had an `approve` boundary. A reviewer planning client-
+/// side polling logic against the label would write the wrong code
+/// for half of their routes. This test pins the corrected label-
+/// per-route-shape map by writing a Corvid source with two POST
+/// routes — one whose agent approves, one whose agent doesn't —
+/// and asserting the startup banner shows distinct labels for each.
+///
+/// The test uses pipe-captured stderr (`Stdio::piped()`) and reads
+/// it after the server becomes ready. No HTTP requests needed —
+/// the assertion is purely on the printed banner.
+///
+/// Port `8201` so it can't collide with the other serve tests
+/// (8190-8200).
+#[test]
+fn serve_startup_banner_distinguishes_routes_with_and_without_approve() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    // Two POST routes:
+    // - /reset:   agent execute_reset HAS `approve EchoString(...)` — label expected: "approval-gated -> 202 + queued"
+    // - /classify: agent execute_classify has NO `approve` — label expected: just "(body)"
+    let source = r#"type EchoReq:
+    value: String
+
+type EchoReceipt:
+    echoed: String
+
+effect echo_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool echo_string(value: String) -> String dangerous uses echo_external
+
+agent execute_reset(req: EchoReq) -> EchoReceipt uses echo_external:
+    approve EchoString(req.value)
+    echoed = echo_string(req.value)
+    return EchoReceipt(echoed)
+
+agent execute_classify(req: EchoReq) -> EchoReceipt:
+    return EchoReceipt(req.value)
+
+server test_serve_q9_api:
+    route POST "/reset" body EchoReq -> json EchoReceipt uses echo_external:
+        return execute_reset(body)
+    route POST "/classify" body EchoReq -> json EchoReceipt:
+        return execute_classify(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8201;
+    let mut child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+
+    // Wait for server to be ready, then drain stdout. We use a
+    // separate var for the child so the ServedApp guard can take
+    // ownership after we've captured the banner output.
+    if !wait_until_ready(port) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("server did not become ready on :{port}");
+    }
+
+    // The banner is written to stdout (println! goes there). Take
+    // the stdout pipe and read until the marker line "GET    /__approvals"
+    // shows up — that's the last banner line printed before serve
+    // enters its main loop.
+    use std::io::{BufRead, BufReader};
+    let stdout = child.stdout.take().expect("child stdout taken");
+    let mut banner_lines: Vec<String> = Vec::new();
+    let reader = BufReader::new(stdout);
+    for line in reader.lines() {
+        let line = line.expect("read stdout line");
+        let done = line.contains("/deny");
+        banner_lines.push(line);
+        if done {
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let banner = banner_lines.join("\n");
+
+    // Assertion 1: /reset (agent with `approve`) gets the
+    // approval-gated label.
+    assert!(
+        banner.contains("POST   /reset")
+            && banner
+                .lines()
+                .any(|l| l.contains("/reset")
+                    && l.contains("approval-gated -> 202 + queued")),
+        "POST /reset MUST be labeled `approval-gated -> 202 + queued` \
+         (its agent execute_reset has an `approve` boundary). \
+         banner=\n{banner}"
+    );
+
+    // Assertion 2: /classify (agent WITHOUT `approve`) does NOT
+    // get the approval-gated label. THIS is the load-bearing 33Q9
+    // assertion — pre-33Q9 it was unconditionally labeled
+    // approval-gated even though execute_classify never queues.
+    assert!(
+        banner.contains("POST   /classify")
+            && banner
+                .lines()
+                .any(|l| l.contains("/classify")
+                    && !l.contains("approval-gated")
+                    && l.contains("(body)")),
+        "POST /classify MUST be labeled `(body)` WITHOUT \
+         `approval-gated` (its agent execute_classify has NO approve \
+         boundary). Pre-33Q9 every body-dispatch route was \
+         unconditionally labeled approval-gated — that's the \
+         regression the maintainer trial caught. banner=\n{banner}"
+    );
+}

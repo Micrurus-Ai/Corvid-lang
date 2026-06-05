@@ -4,6 +4,53 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q9 closed: serve startup banner labels routes accurately
+
+Maintainer-as-reviewer-2026-06-05 P2.1 caught that `corvid serve`
+labeled every `Dispatch::Body` route as `approval-gated -> 202 +
+queued` regardless of whether the agent had an `approve` boundary.
+A reviewer planning client-side polling logic against that label
+would write the wrong code for any route whose handler doesn't
+actually queue — and the trial app's `triage_ioc` was the
+example: no approve boundary in the agent's body, but labeled
+queueable anyway.
+
+Fix: new `agent_body_contains_approve(ir, agent_name)` helper
+in `serve_cmd.rs` recursively walks the handler agent's IR for
+any reachable `IrStmt::Approve` (through nested `If` / `For`
+blocks). The banner emits the `approval-gated` label ONLY when
+the walk finds one; otherwise routes get just `(body)` or
+`(literal)` per their dispatch shape.
+
+The walk is intentionally conservative — doesn't follow calls
+into other agents. An agent whose body only calls another
+approving agent gets the no-approve label. That's an under-count
+(false negative possible, false positive not), which matches the
+direction the trial complaint went. The opposite (over-claiming
+queueability) is the bug we shipped.
+
+Acceptance test
+`serve_startup_banner_distinguishes_routes_with_and_without_approve`
+writes a source with two POST routes (one `approve`-using, one
+not), captures the spawned server's stdout, and asserts the
+labels are distinct. Verified live on the maintainer-trial app:
+`/ioc/triage`'s `triage_ioc` is now labeled `(body)`; pre-33Q9
+it was misleadingly `(body; approval-gated -> 202 + queued)`.
+
+**Bonus correctness**: also fixed an Arc-clone shadowing issue
+where `state` was moved into `axum::with_state` before the
+banner loop could read `state.ir` — added `state_for_banner =
+state.clone()` so both have access.
+
+**Pattern recorded.** When a startup-time UI element makes
+claims about runtime behavior (which routes queue, which return
+200, which 500), validate those claims against the IR before
+emitting them. A blanket label that's right for the common case
+but wrong for the corner case is worse than no label — it
+teaches the reader the wrong mental model.
+
+---
+
 ## 2026-06-05 - 33Q7a closed: spec honest about trust-value enforcement + drift gate
 
 Maintainer-as-reviewer-2026-06-05 P1.2 caught that the spec
