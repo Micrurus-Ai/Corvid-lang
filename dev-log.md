@@ -4,6 +4,64 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 42I external-developer-trial closed — anonymous-2026-06-04 trial complete, all feedback disposed
+
+Phase 42 sub-slices 42I1 + 42I2 close, leaving Phase 42 at one
+remaining open box (L2824 external-reviewer-signoff, Path-A
+deferred to repositioned 33M).
+
+**42I1** was satisfied 2026-06-04 by the `anonymous-2026-06-04`
+trial — a hand-picked friends-and-family reviewer ran the
+build prompt at `docs/external-trials/33m-friends-and-family-prompt.md`
+end-to-end against refund_bot shape, filing a report at
+`docs/external-trials/33m-trial-anonymous-2026-06-04.md`. Five
+surface bugs found: four CLI signature mismatches in the
+suggested-build-path commands plus the Dockerfile's hard-coded
+monorepo paths.
+
+**42I2** closes today after the round of fixes:
+- CLI signatures corrected in the build prompt at `1455b6c`
+  (with a parity check that they now match the shipped CLI).
+- Dockerfile rewritten to a multi-stage shape that fetches the
+  release tarball from GitHub Releases at `e8efa23`, with
+  `crates/corvid-cli/tests/reference_apps.rs:886` adversarially
+  guarding the new shape (no ghcr.io image, no cargo build, no
+  `COPY examples/backend/`, no `COPY std std`).
+- Followup prompt at
+  `docs/external-trials/33m-friends-and-family-followup-prompt.md`
+  sent to the trial author with the retest ask.
+
+Adjacent to 42I but tracked separately: the corvid-installer
+maintainer's repo-side audit (a different shape of trial — an
+external repo maintainer running install + new-project + import
+flows, not a reference-app developer). That audit drove:
+- LIVE-TEST-GAPS Gap #1 (vendor_std landed `std/` at the wrong
+  path) fixed at `7b92e90` with the maintainer-named integration
+  test `vendor_std_from_corvid_new_scaffold_lets_src_main_import_std_effects`.
+- LIVE-TEST-GAPS Gap #2 (corvid check skipping imports) confirmed
+  already fixed at `bfe6232`.
+- LIVE-TEST-GAPS Gap #3 (Windows code-signing) filed as ROADMAP
+  slice 33P7 at `806a32b`.
+- OPEN-GAP-PROMPTS L-3/L-4/L-7 confirmed shipped under Phase 20n;
+  triage at `docs/meta/corvid-installer-sync-reply-2026-06-04.md`.
+- LANGUAGE-GAPS L-1..L-8 confirmed all shipped at HEAD; triage
+  at `docs/meta/corvid-installer-sync-language-gaps-triage-2026-06-05.md`.
+- FOLLOWUPS release-matrix shipped at `eb12802` (aarch64-linux)
+  + `e8b7344` (aarch64-windows).
+- Option-A canonical-source agreement codified at `5931c11`
+  (notify-installer-mirror.yml dispatches corvid-installer's
+  sync-installers workflow on canonical-file changes).
+
+**Pattern learned for the next external trial.** A trial yields
+two distinct artifact classes: code-shipped fixes (the 5 bugs the
+trial caught) and process-shipped agreements (Option-A
+canonical-source, auto-sync of audit docs across repos). Both
+classes need explicit close-out commits — the close-out gate isn't
+"feedback handled" but "feedback handled AND the staleness pattern
+the feedback exposed is structurally prevented for future trials."
+
+---
+
 ## 2026-05-28 - Track 35V2-P42-D-LR-app-maturity-CodeMaintenance closed — ALL FIVE per-app tracks now done
 
 Six-commit per-app maturity track for the Code Maintenance Agent, the

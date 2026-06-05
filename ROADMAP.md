@@ -2775,7 +2775,7 @@ corvid connectors verify-webhook --sig=<...>
 - [x] 42F-support-operations-agent   Support Agent backend ships ticket triage, suggested replies, policy-grounded answers, refund/escalation approvals, SLA jobs, and eval dashboard.
 - [x] 42G-code-maintenance-agent     Code Maintenance Agent backend ships repo ingestion, issue triage, review comments, patch proposals, CI-aware risk labels, and approval-gated writes.
 - [x] 42H-reference-app-hardening    Every app gets seed data, mock connector mode, replay tests, adversarial tests, real-provider env docs, security model, and operator runbook.
-- [ ] 42I-external-developer-trial   At least one external developer runs a reference app locally and files feedback before Phase 43.
+- [x] 42I-external-developer-trial   At least one external developer runs a reference app locally and files feedback before Phase 43. Closed 2026-06-05 via the `anonymous-2026-06-04` trial (refund_bot, friends-and-family round per `docs/external-trials/33m-friends-and-family-prompt.md`); the corvid-installer maintainer's repo-side audit is additional coverage that exceeds the 42I bar.
 
 **Done when:** external developers can clone the repo, run at least one full production-shaped backend app locally, inspect its approvals/traces/evals, and deploy it without writing a second backend in another language.
 
@@ -2842,8 +2842,8 @@ All per-app maturity items below were verified 2026-05-17 by `docs/phases/phase-
 - [x] 42G1-code-ingestion-triage     Code app ingests repos, triages issues, and labels CI-aware risk.
 - [x] 42G2-code-write-approval       Review comments/patch proposals/write actions require approval.
 - [x] 42H1-hardening-pack            Every app has seed data, mocks, replay tests, adversarial tests, env docs, security model, and runbook.
-- [ ] 42I1-external-trial-one        One external developer runs an app locally and feedback is triaged.
-- [ ] 42I2-external-trial-close      Feedback closes as code/docs/tests or explicit non-scope.
+- [x] 42I1-external-trial-one        One external developer runs an app locally and feedback is triaged. Closed 2026-06-04 — `anonymous-2026-06-04` ran the friends-and-family build prompt (refund_bot shape); trial report at `docs/external-trials/33m-trial-anonymous-2026-06-04.md`. Five surface bugs surfaced: 4 CLI signature mismatches in the suggested-build-path commands, plus the Dockerfile's hard-coded monorepo paths (`COPY examples/backend/...`, `COPY std std`, `cargo build -p corvid-cli`).
+- [x] 42I2-external-trial-close      Feedback closes as code/docs/tests or explicit non-scope. Closed 2026-06-05: (i) CLI signature mismatches fixed at `1455b6c` (5 commands corrected in the build prompt + parity check that they now match the shipped CLI); (ii) Dockerfile rewritten to a multi-stage shape that fetches the release tarball from GitHub Releases at `e8efa23`, with `crates/corvid-cli/tests/reference_apps.rs:886` regression-guarding the new shape (adversarial assertions: no `ghcr.io/micrurus-ai/corvid`, no `cargo build -p corvid-cli`, no `COPY examples/backend/`, no `COPY std std`); (iii) followup prompt at `docs/external-trials/33m-friends-and-family-followup-prompt.md` sent to the trial author with the retest ask. Adjacent corvid-installer maintainer audit (separate from 42I) drove the LIVE-TEST-GAPS Gap #1 fix at `7b92e90` (vendor_std to `src/std/`) and the Option-A canonical-source agreement now codified in `.github/workflows/notify-installer-mirror.yml` at `5931c11`.
 
 **Launch-readiness LR track sequence (Phase 42 tail):**
 
