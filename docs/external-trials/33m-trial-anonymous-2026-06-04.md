@@ -240,3 +240,215 @@ The hand-picked reviewer round at the actual Path-A timing
 window will now run against a corrected prompt and a
 standalone-app-buildable Dockerfile, so its findings will be
 about the LANGUAGE not the prompt + the build wrappers.
+
+---
+
+## Round 2 (2026-06-05) — verbatim
+
+The reviewer retested against `corvid 0.0.1 (5c8a0db, 2026-06-05)`
+— nightly `corvid-x86_64-pc-windows-msvc.zip` from
+`nightly-2026-06-05-5c8a0db`, installed side-by-side. Windows 11,
+x86_64, git-bash. Time spent: roughly half a day across the
+original + two retries.
+
+> Context: The rev-2026-06-05 install path works on Windows now,
+> and the five prior fixes (`corvid serve`, `new` vendoring
+> `src/std/`, `deploy --cdylib`, `sbom.spdx.json`, the
+> de-monorepo'd Dockerfile) are real and verified. This issue is
+> the **next layer**: five things that still stop a reviewer
+> from shipping the six-surface app for real. Ordered by
+> severity. Each has exact repro against the SHA above.
+
+### P1 — CODE: approval-gated dangerous route can never complete over `corvid serve`, and the approval is burned on failure
+
+The headline moat demo (approve-before-dangerous over HTTP) gets
+you the `202` and the queued approval, but approving it can
+never run the side effect, and the approval is consumed anyway.
+
+Repro (`server` block with a POST route whose handler calls a
+`dangerous` tool):
+
+```
+POST /prefs/reset  {"user_id":"u-99"}      -> 202 {"approval_id": "...","status":"pending"}
+GET  /__approvals                          -> 200 lists it (action: DeleteAllPrefs)
+POST /__approvals/<id>/approve             -> 500 {"error":"approved_execution_failed",
+                                                   "detail":"no handler registered for tool `delete_all_prefs`"}
+GET  /__approvals                          -> 200 {"approvals":[]}   # consumed despite the 500
+```
+
+- `serve --help` exposes no tool-handler option (no
+  `--with-tools-lib`), and adding the tool to `tools.py` does
+  not help — the interpreter serve path doesn't load it.
+- Two distinct asks:
+  1. Give `serve` a way to register tool handlers (a
+     `--with-tools-lib` parity flag, or load `tools.py`, or
+     document the intended mechanism). Without it, Surface 3
+     (approval-gated dangerous tool) is undemonstrable over
+     HTTP — which is the surface the trial most wants
+     exercised.
+  2. **Do not consume the approval when approved-execution
+     fails.** A 500 should leave the approval pending (or move
+     it to a retryable/failed state with the original
+     invocation intact), not silently drop it. Right now a
+     transient handler failure permanently burns a human
+     approval.
+
+### P2 — CODE/DOCS: `@trust(...)` is incompatible with `corvid build --sign`
+
+```
+corvid build src/main.cor --target=cdylib --sign dev.key
+# error: `corvid build --sign` refused ... agent `execute_reset` declares `@trust(...)`,
+#        but no signed cdylib guarantee id covers that effect constraint yet
+```
+
+`claim --explain` confirms there is no `trust` guarantee id
+among `enforced_guarantees`. So the trust moat and the signed-
+deploy path are mutually exclusive — I had to delete `@trust`
+to produce the deploy cdylib the build path asks for. Either
+register a `trust.*` guarantee id so `@trust` can be signed,
+or document that `@trust` must be omitted from cdylib-targeted
+agents (and say why).
+
+### P3 — CODE/DOCS: generated deploy Dockerfile won't `docker build` for a fresh app
+
+From `corvid deploy package "$(pwd)" --out deploy/ --cdylib ...`:
+
+- It unconditionally `COPY src`, `COPY corvid.toml`,
+  **`COPY migrations`, `COPY evals`, `COPY traces`** — but a
+  `corvid new` app has none of `migrations/`, `evals/`,
+  `traces/`, so the build fails at the first missing path.
+  (The comment hand-waves `evals`/`traces` but not
+  `migrations`; shipping a Dockerfile that needs hand-editing
+  to build is the trap.) It also never `COPY`s `tools.py`.
+- Default `ARG CORVID_VERSION=latest` → `releases/latest/
+  download/...` = **v0.1.0** (nightlies are prereleases,
+  excluded from "latest"), and **v0.1.0 has no `serve`** —
+  yet the image `CMD` is `serve …`. The default image's
+  entrypoint is a command its own binary lacks.
+- The build-path instruction `cd deploy && docker build .` is
+  wrong: the COPY paths are relative to the **app root**, but
+  `deploy/` only contains generated artifacts. Correct form is
+  `docker build -f deploy/Dockerfile .` from the app root.
+- Asks: make the optional `COPY` lines conditional (or only
+  emit them for dirs that exist); copy `tools.py` when
+  present; default `CORVID_VERSION` to a version that actually
+  has `serve` (or fail the build if `latest` lacks the `CMD`
+  subcommand); fix the documented `docker build` invocation. A
+  CI gate that `docker build`s the generated Dockerfile from a
+  bare `corvid new` app would have caught all of these (you
+  already filed `35V2-P33-deploy-dockerfile-builds` — this is
+  its acceptance test).
+
+### P4 — DOCS: `pub extern "c"` requirement for cdylib is undocumented
+
+```
+corvid build src/main.cor --target=cdylib --sign dev.key
+# error: library targets require at least one `pub extern "c"` agent
+```
+
+The build path's cdylib step never mentions this. Add `pub
+extern "c"` to the build-path example (and ideally have the
+error name a doc page on the exported-ABI surface).
+
+### P5 — DOCS: `corvid claim audit --explain-failures` can't run in a standalone app
+
+```
+corvid claim audit --explain-failures
+# error: read claim inventory `docs/meta/launch-claim-audit.md`: cannot find the path
+```
+
+That inventory is a repo-internal file. The build path lists
+this command in the app-dir context (step 10), where it always
+errors. Either drop it from the app-dir build path, or have
+it no-op gracefully with a clear message when no inventory is
+present.
+
+### Minor
+
+- `corvid --version` still reports semver `0.0.1` (now with
+  `(sha, date)`). A toolchain this mature self-reporting
+  `0.0.1` reads oddly to a new reviewer.
+
+### What's working (so the signal isn't all negative)
+
+- `serve` GET + typed-JSON-body POST routing; the `202` +
+  `/__approvals` queue flow.
+- `new` auto-vendoring `src/std/`; `migrate up` executing real
+  SQL; `jobs enqueue/run`.
+- `deploy --cdylib` emitting `sbom.spdx.json` + an attestation
+  that binds `cdylib_sha256` (`chain_status: complete`);
+  `claim --explain` verifying source↔descriptor SHA agreement
+  and enumerating enforced guarantees. These are genuinely
+  good.
+
+### Reviewer's suggested disposition
+
+- P1: CODE (general) ×2 — serve tool handlers; approval-not-
+  burned-on-failure.
+- P2: CODE (general) or DOCS — register `trust.*` guarantee,
+  or document the exclusion.
+- P3: CODE (general) — Dockerfile renderer + the existing
+  `35V2-P33-deploy-dockerfile-builds` gate.
+- P4, P5: DOCS — build-path corrections.
+
+### Repro harness
+
+> The two apps I used are standalone and reproduce all of the
+> above: `prefs_api/src/main.cor` (server block, approval-
+> gated POST) and the round-1 `prefs_agent/`. Happy to attach
+> them or open a draft PR for the DOCS items (P3/P4/P5) if
+> that's useful.
+
+---
+
+## Round 2 maintainer triage (2026-06-05)
+
+Per the [`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md)
+disposition shape; closing criterion at
+[`ROADMAP.md L51`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md#L51).
+Each finding closes as `code` / `docs` / `test` / `non-scope`
+before the v1.0 cut.
+
+| Finding | Class | Disposition | Owning slice |
+|---------|-------|-------------|--------------|
+| **P1.1** `serve` has no tool-handler registration; Surface 3 undemonstrable over HTTP | code | ROADMAP slice **33Q1 — `serve --with-tools-lib`** | New: parity with the `build --target=cdylib` linkage for the interpreter `serve` path. Needs design pass (subprocess `tools.py` loader vs explicit `--with-tools-lib` flag vs both). |
+| **P1.2** Approval is consumed when approved-execution fails | code | ROADMAP slice **33Q2 — approval-not-burned-on-failure** | New: a 500 from the handler must leave the approval in `pending` (or a new `failed-retryable` state with the original invocation captured), not silently consume it. Adversarial: this is approval-budget integrity, not just UX. |
+| **P2** `@trust(...)` incompatible with `corvid build --sign` | code | ROADMAP slice **33Q3 — `trust.*` guarantee registration** | New: register a `trust.*` row in `GUARANTEE_REGISTRY` (`RuntimeChecked`) so `@trust` annotations participate in the signed-cdylib claim. Surfaces the trust moat in `claim --explain`. |
+| **P3.a** Dockerfile unconditionally COPYs `migrations/`, `evals/`, `traces/`; never COPYs `tools.py` | code | ROADMAP slice **33Q4 — Dockerfile renderer presence-conditional COPYs** | New: emit `COPY` lines only for paths that exist at render time; emit `COPY tools.py` when present. Acceptance: bare `corvid new my_app` → `corvid deploy package` → `docker build` succeeds. |
+| **P3.b** Default `CORVID_VERSION=latest` resolves to v0.1.0 which lacks `serve` subcommand | code | ROADMAP slice **33Q5 — Dockerfile CORVID_VERSION default** | New: pin to the SHA the package was generated against (`ARG CORVID_VERSION=<sha>` with the literal SHA from `corvid --version`), so the rendered image's `CMD` matches the binary's CLI surface. Alternative: emit `CORVID_VERSION=nightly` (resolves the most recent nightly which has `serve`). Default to the SHA-pin since it's reproducible. |
+| **P3.c** Build-path doc says `cd deploy && docker build .` (wrong; COPY paths are app-root-relative) | docs | This slice — prompt fix | Correct to `docker build -f deploy/Dockerfile .` from the app root. |
+| **P4** `pub extern "c"` requirement for cdylib undocumented in the build path | docs | This slice — prompt fix | Add to step 7 of the build path; cdylib `--target` example shows a `pub extern "c"` agent. |
+| **P5** `corvid claim audit --explain-failures` is repo-internal but listed in the app-dir build path | docs | This slice — prompt fix | Drop from step 10; that command belongs to the maintainer-side launch audit, not the app-dir trial flow. |
+| **Minor** `corvid --version` reports `0.0.1` | non-scope (signal noted) | Pre-v1.0 honest versioning; the bump to `0.1.0`/`1.0.0` happens at the actual v1.0 cut. Documented as expected. | Reviewer's signal is real — added a one-liner to the prompt's "Things to know" block so future reviewers see "pre-v1.0 versioning is intentional." |
+| **Repro-harness offer (prefs_api + prefs_agent)** | code | We'd take the draft PR for P3/P4/P5 if offered; the prefs_api app shape is also useful as a small standalone-app test fixture for the 33Q4 `docker build` CI gate. | — |
+
+### Slice dispatch
+
+- **This commit (docs slice):** records the report verbatim,
+  files the triage table, and queues the next commits.
+- **Next commit (33m-prompt-fixes):** P3.c + P4 + P5 + the
+  Minor-versioning-note edit, all in
+  [`33m-friends-and-family-prompt.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md).
+- **Subsequent commits (ROADMAP entries):** file 33Q1-33Q5 as
+  five new sub-slices under a new `33Q-trial-round-2-fixes`
+  block in ROADMAP. Each carries the reviewer-named acceptance
+  criterion. Code work follows per slice discipline.
+
+### Why this round is high-signal
+
+Round-1 surfaced wrappers-and-onboarding bugs. Round 2 — same
+reviewer, same hand-built app shape, retest against a polished
+install pipeline — surfaced **language-and-runtime** bugs: an
+approval can be silently burned on handler failure (an
+approval-integrity bug, not just UX), the trust moat is
+mutually exclusive with the signed-deploy path, the
+auto-generated Dockerfile is broken for the canonical
+`corvid new` shape. None of these are findable from the
+maintainer side because we always test against the monorepo
+where `migrations/` + `evals/` + `traces/` always exist and
+the demo apps don't exercise `@trust` + signed-cdylib together.
+
+This is the round-trip the 33M friends-and-family round
+exists for. The signal density is now closer to the language
+surface we want pre-launch reviewers stress-testing; the
+33Q* slices will be its acceptance criteria.
