@@ -180,6 +180,16 @@ corvid serve src/main.cor --listen 127.0.0.1:8001 &
 #    `--sign` takes the key PATH directly (no `--key` flag).
 #    Either supply the path or `--sign` will fall back to
 #    CORVID_SIGNING_KEY if set.
+#
+#    NOTE: cdylib targets REQUIRE at least one `pub extern "c"`
+#    agent declared in main.cor — that's the exported ABI
+#    surface the signed cdylib enumerates. A hello-world
+#    `corvid new` scaffold won't have one; add (or copy from a
+#    reference app) something like:
+#        pub extern "c" agent handle_request(...) -> Result<...>:
+#            ...
+#    The error message names the requirement but not yet a doc
+#    page (filed as `33Q-pub-extern-doc-page`).
 echo "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" > dev.key
 corvid build src/main.cor --target=cdylib --sign dev.key
 ls target/release/   # main.so / main.dylib / main.dll depending on OS
@@ -198,13 +208,31 @@ ls deploy/
 # Dockerfile  oci-labels.json  env.schema.json  health.json
 # migrate.sh  startup-checks.md  build-attestation.dsse.json
 # sbom.spdx.json  VERIFY.md
+#
+# If you want to actually `docker build` the rendered image,
+# run from the APP ROOT (not `cd deploy/`). The Dockerfile's
+# COPY paths are relative to the app root; `deploy/` only
+# contains generated artifacts:
+#     docker build -f deploy/Dockerfile -t my_app:dev .
+#
+# Heads-up (filed as 33Q4): if your `corvid new` scaffold
+# doesn't have `migrations/`, `evals/`, or `traces/`
+# directories, the current Dockerfile's unconditional `COPY`s
+# will fail. Until the renderer ships presence-conditional
+# COPYs, `mkdir -p migrations evals traces` in the app root
+# before `docker build` is the workaround.
 
 # 10. Stress-test other surfaces.
 corvid audit src/main.cor       # operator-summary; takes a FILE, not a dir
 corvid migrate up               # applies migrations to target/corvid.sqlite
 corvid jobs enqueue --kind email-send --payload '{}'
 corvid jobs run --workers 4 --max-runtime-ms 30000
-corvid claim audit --explain-failures   # nothing aspirational?
+# (`corvid claim audit --explain-failures` is a repo-internal
+#  command that reads `docs/meta/launch-claim-audit.md`; runs
+#  in the Corvid-lang clone, not in a standalone app dir. The
+#  app-dir equivalent is `corvid claim --explain
+#  target/release/main.so --source src/main.cor` shown in
+#  step 8.)
 ```
 
 **Things to know that the surface doesn't always advertise:**
@@ -239,6 +267,29 @@ corvid claim audit --explain-failures   # nothing aspirational?
   "unrecognized publisher" SmartScreen prompt, that's expected
   for pre-v1.0 builds — please flag it in your report as a
   user-experience signal, but it's already on ROADMAP.
+- **Pre-v1.0 versioning is intentional.** `corvid --version`
+  reports `0.0.x` (with the SHA + date suffix). The bump to
+  `0.1.0` / `1.0.0` happens at the actual v1.0 cut; until then
+  every release is honest about being pre-launch. If the
+  low version number reads oddly given the surface maturity,
+  that's the right signal — please flag it in your report.
+- **`corvid serve` and approval-gated tools.** A POST route
+  whose handler calls an `approve`-gated dangerous tool over
+  `corvid serve` currently has no tool-handler-loader story —
+  approving the queued action returns 500 (no handler
+  registered) and consumes the approval. Filed as 33Q1
+  (`serve --with-tools-lib`) + 33Q2 (don't consume approvals
+  on handler-failure). For now, exercise Surface 3 via
+  `corvid build --target=cdylib` + the rendered host, NOT
+  `corvid serve`, OR report the friction and move on — both
+  are useful signals.
+- **`@trust(...)` and `--sign` are mutually exclusive today.**
+  `corvid build --sign` rejects agents that declare `@trust`
+  because no `trust.*` guarantee id is in `GUARANTEE_REGISTRY`
+  yet. Filed as 33Q3. For the trial, either omit `@trust`
+  from agents you sign, or build the cdylib without `--sign`
+  to exercise the trust moat. Flag in your report which path
+  you took.
 
 ## Report template
 
