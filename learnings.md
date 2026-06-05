@@ -6689,3 +6689,72 @@ fallback to a placeholder; no consumed approval on miss (that's
   Throughput is bounded by your slowest tool's coroutine; if you
   need concurrent tool dispatch, use the cdylib path or wait for
   a future async-IO bridge.
+
+## Approvals are not burned when handlers error (2026-06-05)
+
+When a reviewer POSTs `/__approvals/<id>/approve` and the downstream
+handler errors (network failure, missing tool, unexpected exception),
+the approval STAYS pending. The reviewer can retry without granting
+a second human authorization, OR POST `/__approvals/<id>/deny` to
+terminate a permanently-broken approval.
+
+### What you see from the client side
+
+A failed-handler `/approve` returns HTTP 500 with body:
+
+```json
+{
+  "error": "approved_execution_failed",
+  "detail": "<the runtime error that surfaced>",
+  "approval_status": "pending",
+  "retry": {
+    "possible": true,
+    "url": "/__approvals/<id>/approve",
+    "note": "approval was not consumed; POST again to retry, or POST /__approvals/<id>/deny to terminate the pending invocation if the handler is permanently broken"
+  }
+}
+```
+
+A subsequent `GET /__approvals/<id>` reports:
+
+```json
+{
+  "id": "...",
+  "status": "pending",
+  "last_handler_error": "<the same runtime error>",
+  "retry_possible": true,
+  ...
+}
+```
+
+`last_handler_error` is refreshed on every failed `/approve`
+attempt, so the reviewer always sees the most recent failure
+reason.
+
+### What a reviewer client should do
+
+1. POST `/approve` → 500 with `retry.possible: true`.
+2. Surface `detail` + `last_handler_error` to the reviewer.
+3. Reviewer decides: retry (the handler issue might be transient,
+   like a network blip) or deny (the handler is broken; the
+   approval shouldn't stay open forever).
+4. POST `/approve` to retry OR POST `/deny` to terminate.
+
+After `/deny`, `/approve` answers 409 — the reviewer's explicit
+deny is terminal. Their authorization is preserved across retry
+attempts and never silently consumed by a transient failure.
+
+### What this is NOT
+
+- Not a guarantee that the handler will eventually succeed.
+  If your handler is broken (missing dependency, permanently
+  wrong code path), retrying won't help. `/deny` is how you
+  exit.
+- Not retroactive replay of side effects that DID succeed
+  before the failure. The "did anything execute before the
+  error?" question is your handler's responsibility — Corvid
+  guarantees the approval state is intact, not that your
+  handler's partial-execution can be safely retried.
+- Not concurrent retries. `/approve` is sequential per
+  approval id; two simultaneous retries serialize on the
+  approval-queue lock.

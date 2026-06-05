@@ -797,3 +797,226 @@ server test_serve_q1a_api:
          end-to-end. body={approve_body}"
     );
 }
+
+/// 33Q2 end-to-end gate. The anonymous-2026-06-04 round-2 trial
+/// report P1.2 documented that a handler error under
+/// `/__approvals/<id>/approve` consumed the approval anyway — a
+/// transient handler failure permanently burned a human approval,
+/// an approval-budget-integrity bug, not just UX.
+///
+/// This test pins the leave-pending fix: a Corvid app declares a
+/// `dangerous` tool the cdylib does NOT implement (so the runtime
+/// produces `UnknownTool` when reached after approval), an
+/// approve-gated agent that calls it, and a POST route. The flow:
+///
+/// 1. POST `/broken` → 202 + approval_id.
+/// 2. POST `/__approvals/<id>/approve` → 500. The 500 body MUST
+///    carry `approval_status: "pending"` + `retry.possible: true` +
+///    the `detail` field naming the runtime error. The approval
+///    MUST NOT transition to `approved`.
+/// 3. GET `/__approvals/<id>` → 200 with `status: "pending"` +
+///    `last_handler_error` populated + `retry_possible: true`. The
+///    reviewer can see WHY their grant didn't take effect.
+/// 4. POST `/__approvals/<id>/approve` AGAIN → still 500, still
+///    pending. The reviewer's authorization is preserved across
+///    retry attempts.
+/// 5. POST `/__approvals/<id>/deny` → 200, terminates the pending
+///    invocation. After deny, `/approve` answers 409 (already
+///    decided) — the reviewer's safety valve to exit a permanently-
+///    broken loop.
+///
+/// Adversarial: across multiple /approve retries against a
+/// permanently-broken handler, the approval state never transitions
+/// to `approved`. A handler-error cannot expose any approval-bypass
+/// primitive (the `ProgrammaticApprover::always_yes` bypass runtime
+/// is local to each approve_approval call and never escapes).
+///
+/// Port `8199` so it can't collide with the other serve tests
+/// (8190-8198).
+#[test]
+fn serve_approval_is_preserved_when_handler_errors_and_terminates_only_on_deny() {
+    // We re-use the cdylib fixture (echo_string) — but the Corvid
+    // app declares a SECOND tool `permanently_broken_tool` that the
+    // fixture does NOT implement. The 33Q1a loader logs it as
+    // "declared in app but missing from cdylib" and the runtime
+    // hits `UnknownTool` when the agent reaches that tool call after
+    // approval, which is the controlled handler-error we need.
+    let cdylib_path = build_serve_tools_fixture();
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type BrokenReq:
+    value: String
+
+type BrokenReceipt:
+    result: String
+
+effect broken_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool permanently_broken_tool(value: String) -> String dangerous uses broken_external
+
+agent execute_broken(req: BrokenReq) -> BrokenReceipt uses broken_external:
+    approve PermanentlyBrokenTool(req.value)
+    out = permanently_broken_tool(req.value)
+    return BrokenReceipt(out)
+
+server test_serve_q2_api:
+    route POST "/broken" body BrokenReq -> json BrokenReceipt uses broken_external:
+        return execute_broken(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8199;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--with-tools-cdylib")
+        .arg(&cdylib_path)
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(wait_until_ready(port), "server did not become ready on :{port}");
+
+    // 1. POST /broken → 202 + approval_id.
+    let probe_value = "this approval will be retried then denied";
+    let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
+    let (post_status, post_body_resp) =
+        http_post(port, "/broken", &post_body).expect("POST /broken failed");
+    assert_eq!(post_status, 202, "POST /broken must answer 202: {post_body_resp}");
+    let resp: serde_json::Value =
+        serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id`")
+        .to_string();
+
+    // 2. POST /approve → 500 with approval_status: pending, retry.possible: true.
+    //    Pre-33Q2 this answered 500 too, but the approval got silently
+    //    consumed AND the pending invocation removed — leaving the
+    //    reviewer with no way to recover.
+    let approve_url = format!("/__approvals/{approval_id}/approve");
+    let (approve_status, approve_body) =
+        http_post(port, &approve_url, "").expect("POST /approve failed");
+    assert_eq!(
+        approve_status, 500,
+        "POST /approve must answer 500 when the handler errors: {approve_body}"
+    );
+    let approve_resp: serde_json::Value =
+        serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
+    assert_eq!(
+        approve_resp.get("error").and_then(|v| v.as_str()),
+        Some("approved_execution_failed"),
+        "500 body must use the `approved_execution_failed` error code: {approve_body}"
+    );
+    assert_eq!(
+        approve_resp.get("approval_status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "500 body MUST carry `approval_status: pending` so the reviewer \
+         knows the approval was NOT consumed — the load-bearing assertion \
+         for 33Q2's leave-pending behaviour: {approve_body}"
+    );
+    let retry = approve_resp
+        .get("retry")
+        .expect("500 body must carry a `retry` envelope describing the retry path");
+    assert_eq!(
+        retry.get("possible").and_then(|v| v.as_bool()),
+        Some(true),
+        "retry.possible MUST be true so the reviewer's client knows to \
+         try /approve again or /deny: {approve_body}"
+    );
+
+    // 3. GET /__approvals/<id> → status: pending + last_handler_error captured.
+    let get_url = format!("/__approvals/{approval_id}");
+    let (get_status, get_body) =
+        http_get(port, &get_url).expect("GET /__approvals/<id> failed");
+    assert_eq!(get_status, 200, "GET /__approvals/<id> must answer 200");
+    let one: serde_json::Value =
+        serde_json::from_str(&get_body).expect("GET body must be valid JSON");
+    assert_eq!(
+        one.get("status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "GET /__approvals/<id> must report status=pending after a failed \
+         /approve — proves the approval was not consumed: {get_body}"
+    );
+    let last_err = one
+        .get("last_handler_error")
+        .and_then(|v| v.as_str())
+        .expect("GET /__approvals/<id> must include `last_handler_error` after a failed /approve");
+    assert!(
+        !last_err.is_empty(),
+        "last_handler_error must not be empty — operator needs the failure \
+         signal to decide whether to retry or deny: {get_body}"
+    );
+    assert_eq!(
+        one.get("retry_possible").and_then(|v| v.as_bool()),
+        Some(true),
+        "GET must report retry_possible=true so the reviewer's client can \
+         render the retry option: {get_body}"
+    );
+
+    // 4. POST /approve AGAIN → still 500, still pending (adversarial:
+    //    no number of retries against a permanently-broken handler
+    //    can flip the approval state to `approved`).
+    let (approve2_status, approve2_body) =
+        http_post(port, &approve_url, "").expect("POST /approve retry failed");
+    assert_eq!(
+        approve2_status, 500,
+        "second /approve against the still-broken handler must also \
+         answer 500: {approve2_body}"
+    );
+    let approve2_resp: serde_json::Value =
+        serde_json::from_str(&approve2_body).expect("retry body must be valid JSON");
+    assert_eq!(
+        approve2_resp.get("approval_status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "second /approve attempt must STILL report `pending` — handler \
+         errors cannot expose any path that transitions the approval to \
+         `approved` without a successful handler invocation: {approve2_body}"
+    );
+
+    // GET again — still pending, last_handler_error STILL populated
+    // (and refreshed to whatever the second attempt produced).
+    let (get2_status, get2_body) =
+        http_get(port, &get_url).expect("second GET /__approvals/<id> failed");
+    assert_eq!(get2_status, 200);
+    let two: serde_json::Value = serde_json::from_str(&get2_body).unwrap();
+    assert_eq!(
+        two.get("status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "after the second /approve attempt the approval STILL stays \
+         pending: {get2_body}"
+    );
+
+    // 5. POST /deny → 200, approval terminates as denied. This is the
+    //    reviewer's safety valve to exit a permanently-broken loop.
+    let deny_url = format!("/__approvals/{approval_id}/deny");
+    let (deny_status, deny_body) = http_post(port, &deny_url, "").expect("POST /deny failed");
+    assert_eq!(deny_status, 200, "POST /deny must answer 200: {deny_body}");
+    let deny_resp: serde_json::Value = serde_json::from_str(&deny_body).unwrap();
+    assert_eq!(
+        deny_resp.get("status").and_then(|v| v.as_str()),
+        Some("denied"),
+        "/deny must transition to denied: {deny_body}"
+    );
+
+    // After deny, /approve answers 409 (already decided) — the
+    // approval can no longer be retried because the reviewer
+    // explicitly terminated it.
+    let (approve3_status, _) =
+        http_post(port, &approve_url, "").expect("post-deny /approve failed");
+    assert_eq!(
+        approve3_status, 409,
+        "/approve after /deny must answer 409 — the reviewer's explicit \
+         deny is terminal"
+    );
+}

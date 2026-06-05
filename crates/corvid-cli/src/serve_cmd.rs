@@ -78,10 +78,21 @@ const SERVE_REVIEWER_ROLE: &str = "operator";
 /// `approve` boundary surfaces `ApprovalQueued` — the dispatch handler
 /// already has the agent name + args at that point and just stashes
 /// them under the freshly-minted approval id.
+///
+/// 33Q2 — `last_handler_error` carries the most recent
+/// re-execution failure when an approval was granted but the
+/// downstream handler errored. The approval stays `pending` so the
+/// reviewer can retry without re-granting; the captured error is
+/// surfaced by `GET /__approvals/<id>` and in the 500 body returned
+/// by `POST /__approvals/<id>/approve` so the reviewer can decide
+/// whether to retry (transient) or `/deny` (permanently broken).
+/// Pre-33Q2 a 500 silently consumed the approval — the bug
+/// anonymous-2026-06-04 P1.2 reported.
 #[derive(Clone)]
 struct PendingInvocation {
     agent: String,
     args: Vec<Value>,
+    last_handler_error: Option<String>,
 }
 
 /// Shared, read-only serving state: the lowered app, the interpreter
@@ -360,6 +371,7 @@ fn capture_pending_invocation_if_queued(
         PendingInvocation {
             agent: agent.to_string(),
             args: args.to_vec(),
+            last_handler_error: None,
         },
     );
 }
@@ -524,30 +536,22 @@ async fn approve_approval(
         }
     }
 
-    let actor = serve_reviewer_actor();
-    if let Err(e) = state.approval_queue.approve(
-        &id,
-        SERVE_DEFAULT_TENANT,
-        &actor,
-        Some("approved via /__approvals/:id/approve"),
-    ) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "approval_transition_failed",
-                "detail": e.to_string(),
-            })),
-        )
-            .into_response();
-    }
-
-    // Pop the pending invocation. If a client transitioned an approval
-    // without ever going through a serve route (e.g. via a manually-
-    // POSTed id that never existed in this serve process), the queue
-    // record is now marked approved but there's no agent to re-run.
-    // Respond with 409 so the reviewer knows the approval was
-    // recorded but no result is available.
-    let invocation = match state.pending_invocations.lock().unwrap().remove(&id) {
+    // 33Q2 — peek the pending invocation BEFORE transitioning the
+    // queue. If the handler errors, the approval stays at `pending`
+    // so the reviewer can retry without re-granting; the invocation
+    // stays in `pending_invocations` for the retry path. Pre-33Q2,
+    // `queue.approve()` ran first and then the invocation was
+    // pop'd unconditionally — a handler 500 left the approval
+    // permanently `approved` AND the invocation gone, so neither
+    // /approve (409 already-decided) nor a re-POST of the original
+    // request (would create a NEW approval — silently double-
+    // billing the reviewer's authorization) could recover. That's
+    // the regression anonymous-2026-06-04 P1.2 documented.
+    //
+    // The invocation is CLONED, not removed; removal only happens
+    // after the queue transition succeeds (which itself only runs
+    // after the handler succeeds).
+    let invocation = match state.pending_invocations.lock().unwrap().get(&id).cloned() {
         Some(inv) => inv,
         None => {
             return (
@@ -555,7 +559,7 @@ async fn approve_approval(
                 Json(serde_json::json!({
                     "error": "no_pending_invocation",
                     "id": id,
-                    "detail": "approval transitioned to `approved` but no pending invocation is linked in this serve process — re-execution is not possible. This happens when the approval id is not one this server queued.",
+                    "detail": "approval is pending but no pending invocation is linked in this serve process — re-execution is not possible. This happens when the approval id is not one this server queued.",
                 })),
             )
                 .into_response();
@@ -574,13 +578,9 @@ async fn approve_approval(
     //
     // Tool registry is cloned from the host's startup config
     // (`ServeState::host_tools`) so the re-executed agent sees the
-    // same `--with-tools-cdylib` handlers as the original request.
-    // Pre-33Q1a this was an empty default registry, which is the
-    // bug anonymous-2026-06-04 P1.1 hit: an approval-gated tool
-    // call answered 500 "no handler registered for tool `<name>`"
-    // on `/approve` even when the operator had passed
-    // `--with-tools-cdylib`, because the bypass runtime's
-    // registry never inherited the loaded handlers.
+    // same `--with-tools-cdylib` / `tools.py` handlers as the
+    // original request. Pre-33Q1a this was an empty default
+    // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
     let bypass_runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .tool_registry(state.host_tools.clone())
@@ -592,23 +592,79 @@ async fn approve_approval(
         &bypass_runtime,
     )
     .await;
+
     match outcome {
-        Ok(value) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "approved",
-                "result": value_to_json(&value),
-            })),
-        )
-            .into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "approved_execution_failed",
-                "detail": err.to_string(),
-            })),
-        )
-            .into_response(),
+        Ok(value) => {
+            // Handler succeeded — NOW transition the queue and pop
+            // the pending invocation. The 200 response carries the
+            // re-executed agent's result.
+            let actor = serve_reviewer_actor();
+            if let Err(e) = state.approval_queue.approve(
+                &id,
+                SERVE_DEFAULT_TENANT,
+                &actor,
+                Some("approved via /__approvals/:id/approve"),
+            ) {
+                // Queue transition failed AFTER successful handler
+                // execution — the side effect already happened, so
+                // we surface the queue error but the action is done.
+                // Leave the pending invocation in place so the
+                // operator can inspect/retry the queue transition if
+                // needed. (This is a very rare edge case — SQLite
+                // write failure mid-handler.)
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "approval_transition_failed",
+                        "detail": e.to_string(),
+                        "handler_outcome": "succeeded",
+                    })),
+                )
+                    .into_response();
+            }
+            state.pending_invocations.lock().unwrap().remove(&id);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "approved",
+                    "result": value_to_json(&value),
+                })),
+            )
+                .into_response()
+        }
+        Err(err) => {
+            // Handler errored — KEEP the approval pending, keep the
+            // pending invocation, capture the error for diagnostic
+            // surfacing via GET. The reviewer can /approve again to
+            // retry (transient failure) or /deny to terminate
+            // (permanent failure). Adversarial: a permanently-broken
+            // handler creates a replayable approval but the reviewer
+            // can /deny to exit; nothing here bypasses the original
+            // approve boundary because retrying /approve still runs
+            // the same `ProgrammaticApprover::always_yes` bypass
+            // runtime that's local to this handler call.
+            let detail = err.to_string();
+            {
+                let mut pending = state.pending_invocations.lock().unwrap();
+                if let Some(stored) = pending.get_mut(&id) {
+                    stored.last_handler_error = Some(detail.clone());
+                }
+            }
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "approved_execution_failed",
+                    "detail": detail,
+                    "approval_status": "pending",
+                    "retry": {
+                        "possible": true,
+                        "url": format!("/__approvals/{id}/approve"),
+                        "note": "approval was not consumed; POST again to retry, or POST /__approvals/<id>/deny to terminate the pending invocation if the handler is permanently broken",
+                    },
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -702,9 +758,19 @@ async fn get_approval(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
     match state.approval_queue.get(&id) {
-        Ok(Some(record)) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
+        Ok(Some(record)) => {
+            // 33Q2 — surface the captured `last_handler_error` (if any)
+            // from `PendingInvocation` so a reviewer probing why an
+            // approval is still `pending` after they POSTed /approve
+            // can see "the handler errored with <message>; you may
+            // retry or deny" instead of guessing.
+            let last_handler_error = state
+                .pending_invocations
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|inv| inv.last_handler_error.clone());
+            let mut body = serde_json::json!({
                 "id": record.id,
                 "action": record.action,
                 "status": record.status,
@@ -712,9 +778,13 @@ async fn get_approval(
                 "requester_actor_id": record.requester_actor_id,
                 "created_ms": record.created_ms,
                 "updated_ms": record.updated_ms,
-            })),
-        )
-            .into_response(),
+            });
+            if let Some(err) = last_handler_error {
+                body["last_handler_error"] = serde_json::json!(err);
+                body["retry_possible"] = serde_json::json!(true);
+            }
+            (StatusCode::OK, Json(body)).into_response()
+        }
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "approval_not_found", "id": id })),

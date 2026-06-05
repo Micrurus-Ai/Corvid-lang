@@ -290,11 +290,13 @@ corvid jobs run --workers 4 --max-runtime-ms 30000
   - Both shipped under 33Q1 ([`2d3e24f`](https://github.com/Micrurus-Ai/Corvid-lang/commit/2d3e24f),
     [`ff49112`](https://github.com/Micrurus-Ai/Corvid-lang/commit/ff49112)).
 - **Approval-budget integrity.** A 500 from a handler under
-  `/__approvals/<id>/approve` still consumes the approval
-  today — that's filed separately as 33Q2 and remediates
-  before v1.0 cut. If you hit a transient handler failure
-  during the trial, the approval gets burned; flag it in your
-  report and move on.
+  `/__approvals/<id>/approve` no longer consumes the approval
+  (closed under 33Q2). The 500 body carries
+  `approval_status: "pending"` + a `retry` envelope, and
+  `GET /__approvals/<id>` surfaces a `last_handler_error`
+  field so you can see why the grant didn't take effect. Retry
+  /approve to try again, or POST /__approvals/<id>/deny to
+  terminate a permanently-broken approval.
 - **`@trust(...)` and `--sign` are mutually exclusive today.**
   `corvid build --sign` rejects agents that declare `@trust`
   because no `trust.*` guarantee id is in `GUARANTEE_REGISTRY`

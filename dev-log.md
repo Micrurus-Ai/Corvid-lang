@@ -4,6 +4,66 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q2 closed: `corvid serve` no longer burns approvals when handlers error
+
+Anonymous-2026-06-04 round-2 P1.2 caught an approval-budget-integrity
+bug: a 500 from the handler under `POST /__approvals/<id>/approve`
+silently consumed the approval anyway, leaving the reviewer no
+recovery path. Both /approve (409 already-decided) and a re-POST
+of the original request (would mint a new approval — double-billing
+the reviewer's authorization) were broken.
+
+Fix shape, after the leave-pending vs new-terminal-state pre-phase
+chat: leave-pending. Approval transitions to `approved` ONLY after
+the handler succeeds. On handler error, the approval STAYS
+`pending`, the pending invocation stays in `pending_invocations`,
+and a new `last_handler_error: Option<String>` on the invocation
+captures the error for diagnostic surfacing.
+
+Mechanics in `crates/corvid-cli/src/serve_cmd.rs::approve_approval`:
+
+- Peek the pending invocation (clone) instead of pop. The pop
+  only happens after `queue.approve()` succeeds, which only
+  runs after the handler succeeds.
+- 500 response body now carries `approval_status: "pending"` +
+  `retry: {possible: true, url: "...", note: "..."}` so the
+  reviewer's client knows the grant wasn't consumed and how to
+  retry.
+- `GET /__approvals/<id>` surfaces `last_handler_error` +
+  `retry_possible: true` when the pending invocation has a
+  captured failure, so reviewers probing why their grant didn't
+  take effect see WHY instead of guessing.
+- /deny still terminates the loop — the reviewer's safety valve
+  for a permanently-broken handler.
+
+**Adversarial concern resolved.** A handler that always errors
+creates an indefinitely-replayable approval. Mitigated three ways:
+(a) /deny terminates the loop, (b) the captured `last_handler_error`
+makes "this is going to keep failing" visible to the reviewer
+so they decide to /deny, (c) the always-yes bypass runtime is
+constructed per-call inside `approve_approval` and never escapes
+that call — there's no path where a handler error exposes any
+approval-bypass primitive to the rest of the request handling.
+
+Acceptance gate `serve_approval_is_preserved_when_handler_errors_and_terminates_only_on_deny`
+in `crates/corvid-cli/tests/serve_smoke.rs` runs the round-trip:
+POST → 202 → /approve (500, stays pending, retry advertised) →
+GET (last_handler_error captured) → /approve again (still 500,
+still pending — proves no number of retries can flip state) →
+/deny (200, denied) → /approve after deny (409, terminal).
+
+**Pattern learned.** When designing fixes for state-transition
+bugs, prefer leave-pending over new-terminal-state shapes when
+the existing state machine has a natural retry path (here:
+`/approve` can be POSTed any number of times). Adding a new
+state expands the surface area every transition handler has to
+care about; leave-pending uses semantics that already exist.
+The `last_handler_error` surfacing gives the diagnostic
+observability a new state would have provided, without the
+state-machine expansion cost.
+
+---
+
 ## 2026-06-05 - 33Q1 closed: `corvid serve` loads tool handlers two ways
 
 Anonymous-2026-06-04 round-2 P1.1 said Surface 3 (approval-gated
