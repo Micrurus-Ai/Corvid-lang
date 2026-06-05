@@ -4,6 +4,61 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q5 closed: deploy Dockerfile pins CORVID_VERSION to the rendering binary's SHA
+
+Anonymous-2026-06-04 round-2 P3.b reported that the rendered
+Dockerfile's `ARG CORVID_VERSION=latest` resolved to v0.1.0 (the
+current latest stable), which lacks the `serve` subcommand the
+image's CMD invokes. The container's entrypoint was a command
+its own binary didn't have.
+
+Fix: `render_dockerfile` now constructs
+`ARG CORVID_VERSION=nightly-{CORVID_BUILD_DATE}-{CORVID_BUILD_SHA}`
+at render time, using the env vars `crates/corvid-cli/build.rs`
+injects at compile time. The rendered image's `corvid --version`
+reproduces the binary the package was generated against, AND the
+image's CLI surface matches what the package was rendered for —
+the reviewer's both-criteria ask in one knob.
+
+When either env var is the documented `unknown` fallback (corvid
+was built outside a git checkout — see build.rs's three failure
+modes), the default falls back to the literal string `nightly`.
+The Dockerfile's URL-resolver block now handles three CORVID_VERSION
+shapes:
+
+- `latest` → `releases/latest/download/...`
+- `nightly` → API query for the newest `nightly-*` tag (mirrors
+  install/install.sh's logic — grep + sed for `tag_name`, no jq
+  dep)
+- literal tag (e.g. `v0.1.0`, `nightly-2026-06-04-d23d381`) →
+  `releases/download/<tag>/...`
+
+Acceptance test reads the same `env!("CORVID_BUILD_SHA")` +
+`env!("CORVID_BUILD_DATE")` the renderer reads and asserts the
+constructed default matches. Adversarial guard asserts
+`ARG CORVID_VERSION=latest` does NOT appear (the prior default
+that triggered the regression).
+
+**Caveat for stable-release hosts.** If a v0.1.0 stable host
+renders a Dockerfile, the constructed `nightly-<date>-<sha>` tag
+is a nightly tag format but the SHA was tagged as `v0.1.0`, so
+no `nightly-<date>-<sha>` release exists. Docker build would
+fail at curl time with a clear 404 — better than pre-33Q5's
+failure mode (image builds, container starts, then the v0.1.0
+binary errors on `serve` with no clear pointer back to the
+version mismatch). Operators can override via `--build-arg
+CORVID_VERSION=v0.1.0` (and accept that v0.1.0 will fail at
+runtime instead) or `CORVID_VERSION=nightly` (which always
+works).
+
+**Pattern recorded.** When rendering an artifact that names a
+remote dependency by version, pin the version to the rendering
+binary's own version. The diagnostic for a missing dependency
+is then a clean 404 with a specific tag instead of a "this
+worked at render time, why does it fail at run time" mystery.
+
+---
+
 ## 2026-06-05 - 33Q4 closed: deploy Dockerfile COPYs only what exists
 
 Anonymous-2026-06-04 round-2 P3.a caught that the rendered
