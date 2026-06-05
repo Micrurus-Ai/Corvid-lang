@@ -100,6 +100,53 @@ pub fn find_tools_py(source_path: &Path) -> ToolsPyDiscovery {
     ToolsPyDiscovery::NotFound
 }
 
+/// Locate the bundled `corvid_runtime` Python package so the
+/// autoloader doesn't require operators to set PYTHONPATH manually.
+/// Returns the directory that should be prepended to `sys.path` (the
+/// PARENT of the `corvid_runtime/` directory, so `import corvid_runtime`
+/// resolves it).
+///
+/// Search order:
+///
+/// 1. **Install layout** — `<binary_parent>/../runtime-py/`. This is
+///    where `release.yml` stages the package alongside the binary in
+///    the release tarball (slice 33Q6's release-side change). The
+///    install script extracts the tarball under `/opt/corvid/`, so a
+///    binary at `/opt/corvid/bin/corvid` resolves to
+///    `/opt/corvid/runtime-py/` here.
+/// 2. **Dev layout** — `<exe_dir>/../../runtime/python/` (the
+///    workspace's `runtime/python/` relative to `target/<profile>/`).
+///    Matches `cargo run -p corvid-cli` from a source clone.
+///
+/// Returns `None` when neither path resolves — the autoloader then
+/// falls back to whatever's on the operator's PYTHONPATH (the pre-33Q6
+/// behaviour). That fallback is what dev environments with
+/// system-wide `corvid_runtime` would use.
+fn find_bundled_corvid_runtime() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    // Install layout: <binary_parent>/../runtime-py/
+    // (binary at /opt/corvid/bin/corvid -> /opt/corvid/runtime-py/)
+    if let Some(parent) = exe_dir.parent() {
+        let candidate = parent.join("runtime-py");
+        if candidate.join("corvid_runtime").is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    // Dev layout: target/<profile>/../../runtime/python/
+    // (target/debug/corvid -> ../../runtime/python -> runtime/python)
+    if let Some(workspace_root) = exe_dir.parent().and_then(|p| p.parent()) {
+        let candidate = workspace_root.join("runtime").join("python");
+        if candidate.join("corvid_runtime").is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
 /// Embed Python via PyO3, import `tools` from `project_root` (which
 /// triggers the `@tool("...")` decorators), and return a
 /// [`ToolRegistry`] whose handlers dispatch through PyO3 to the
@@ -139,6 +186,36 @@ pub fn install_python_tools(
                     "project root path is not valid UTF-8",
                 ))?;
             path.call_method1("insert", (0, project_root_str))?;
+
+            // Slice 33Q6: prepend the bundled `corvid_runtime`
+            // package's parent directory to sys.path so user
+            // tools.py files can do `from corvid_runtime import
+            // tool` without operators having to set PYTHONPATH.
+            // `find_bundled_corvid_runtime` checks (in order):
+            //
+            // 1. Install layout: `<binary_parent>/../runtime-py/`
+            //    (where `release.yml` stages the package alongside
+            //    the binary). This is the friends-and-family-
+            //    reviewer path — they `curl ... | sh` install
+            //    script and just-works.
+            // 2. Dev layout: `<workspace_root>/runtime/python/`
+            //    (where the source lives during development). This
+            //    is the maintainer path — `cargo run -p corvid-cli`
+            //    without a release tarball.
+            //
+            // Without 33Q6, a fresh `corvid new` project's tools.py
+            // crashed at `from corvid_runtime import tool` with
+            // `ModuleNotFoundError`, because `corvid_runtime` is
+            // NOT on PyPI and a release-installed reviewer had no
+            // PYTHONPATH for it. The scaffold's "Next steps" output
+            // even told them `pip install corvid-runtime` — broken
+            // before they could exercise Surface 3 of the trial.
+            // Filed by maintainer-as-reviewer-2026-06-05 P1.1.
+            if let Some(runtime_py_dir) = find_bundled_corvid_runtime() {
+                if let Some(s) = runtime_py_dir.to_str() {
+                    path.call_method1("insert", (0, s))?;
+                }
+            }
 
             // Importing `tools` runs the user's module top-level code,
             // which registers every decorated implementation via

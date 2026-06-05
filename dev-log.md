@@ -4,6 +4,62 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q6 closed: corvid_runtime Python package autodetected without pip install
+
+Maintainer-as-reviewer-2026-06-05 P1.1 caught that the
+`corvid_runtime` Python package — which every tools.py imports
+as `from corvid_runtime import tool` — is NOT on PyPI. The
+scaffold's `commands/misc.rs::cmd_new` told reviewers to
+`pip install corvid-runtime` as part of "Next steps"; the
+33Q1b tools.py autoloader required `corvid_runtime` importable
+to function; release-installed reviewers had no path between
+the two. Every reviewer's first attempt at Surface 3 died with
+`ModuleNotFoundError: No module named 'corvid_runtime'`.
+
+Fix: ship `corvid_runtime` alongside the binary AND teach the
+autoloader to find it without operator-set PYTHONPATH.
+
+Three layers:
+
+- **`crates/corvid-runtime/src/python_tools.rs`**: new
+  `find_bundled_corvid_runtime()` checks two layouts and
+  prepends the right dir to `sys.path` before importing
+  tools.py. Install layout: `<binary_parent>/../runtime-py/`
+  (binary at `$CORVID_HOME/bin/corvid` → package at
+  `$CORVID_HOME/runtime-py/corvid_runtime/`). Dev layout:
+  `<exe_dir>/../../runtime/python/` (matches `cargo run` /
+  `cargo test` against `target/<profile>/corvid`).
+- **`.github/workflows/release.yml`**: stage artifact step
+  now copies `runtime/python/` to `$stage/runtime-py/` so the
+  release tarball ships the package alongside the binary. The
+  install scripts' existing `tar -xzC /opt -f` extracts it
+  without any install-script change needed.
+- **`crates/corvid-cli/src/commands/misc.rs::cmd_new`**:
+  scaffold's "Next steps" output drops the broken
+  `pip install corvid-runtime` line, replaced with an honest
+  description of the bundle ("works without any pip install").
+
+Acceptance gate
+`serve_autoloads_tools_py_via_bundled_corvid_runtime_without_pythonpath`
+in `crates/corvid-cli/tests/serve_smoke.rs` runs the full
+POST → 202 → /approve → 200-with-echoed-value round-trip
+WITHOUT setting PYTHONPATH. If the autodetection regresses,
+the test fails to become ready with a clear diagnostic.
+
+**Verified live.** Against the maintainer-trial app at
+`/tmp/threat_intel_agent`, `corvid serve` with NO PYTHONPATH
+now starts cleanly. Pre-33Q6: crashed with
+`ModuleNotFoundError`. Post-33Q6: prints the route table and
+answers `/healthz` 200.
+
+**Pattern recorded.** When a feature requires a runtime
+dependency that isn't on the standard package manager, ship
+the dep with the binary AND teach the consumer to find it
+without operator setup. Don't write directives that assume a
+package-manager fix that hasn't happened yet.
+
+---
+
 ## 2026-06-05 - 33Q5 closed: deploy Dockerfile pins CORVID_VERSION to the rendering binary's SHA
 
 Anonymous-2026-06-04 round-2 P3.b reported that the rendered

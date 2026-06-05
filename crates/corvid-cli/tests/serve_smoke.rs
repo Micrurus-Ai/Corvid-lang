@@ -649,6 +649,139 @@ async def echo_string(value: str) -> str:
     );
 }
 
+/// 33Q6 end-to-end gate. Maintainer-as-reviewer-2026-06-05 P1.1
+/// caught that the 33Q1b tools.py autoloader failed on every
+/// release-installed reviewer's first attempt because
+/// `corvid_runtime` is NOT on PyPI (the scaffold's "Next steps"
+/// directive `pip install corvid-runtime` was broken). 33Q6 ships
+/// the `corvid_runtime` package alongside the binary in the
+/// release tarball under `<binary_parent>/../runtime-py/` and
+/// teaches `install_python_tools` to auto-detect it before
+/// importing tools.py.
+///
+/// This test pins the autodetection: spawns `corvid serve` with
+/// **NO PYTHONPATH set** and asserts the same end-to-end
+/// scaffold + tools.py + approval-gated round-trip the prior 33Q1b
+/// test exercised, but without the operator-facing PYTHONPATH
+/// override. The dev-layout branch of `find_bundled_corvid_runtime`
+/// resolves `target/debug/corvid.exe -> ../../runtime/python`
+/// during `cargo test`, so we get the autodetect-via-workspace
+/// path covered.
+///
+/// Port `8200` so it can't collide with the other serve tests
+/// (8190-8199).
+#[test]
+fn serve_autoloads_tools_py_via_bundled_corvid_runtime_without_pythonpath() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_root = dir.path();
+    let src_dir = project_root.join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let src_path = src_dir.join("main.cor");
+
+    // Same shape as the 33Q1b test — a `dangerous` tool that
+    // tools.py implements, an approve-gated agent calling it, a
+    // POST route bound to the agent. We need the round-trip to
+    // observe the actual tool implementation running.
+    let source = r#"type EchoReq:
+    value: String
+
+type EchoReceipt:
+    echoed: String
+
+effect echo_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool echo_string(value: String) -> String dangerous uses echo_external
+
+agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
+    approve EchoString(req.value)
+    echoed = echo_string(req.value)
+    return EchoReceipt(echoed)
+
+server test_serve_q6_api:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+        return execute_echo(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let tools_py = r#"from corvid_runtime import tool
+
+
+@tool("echo_string")
+async def echo_string(value: str) -> str:
+    return value
+"#;
+    std::fs::write(project_root.join("tools.py"), tools_py).unwrap();
+
+    let port: u16 = 8200;
+    // NO .env("PYTHONPATH", ...) — that's the load-bearing
+    // assertion 33Q6 makes: bundled corvid_runtime resolves
+    // automatically.
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port} — probable cause: \
+         33Q6 bundled-corvid_runtime autodetection regressed. The CLI \
+         should resolve `find_bundled_corvid_runtime` to the dev-layout \
+         workspace path during `cargo test` (`target/debug/corvid` -> \
+         `../../runtime/python`). If this fails, re-check the path math \
+         in `crates/corvid-runtime/src/python_tools.rs`."
+    );
+
+    // Round-trip: POST → 202, /approve → 200 with echoed value
+    // matches the original POST body. Proves the bundled
+    // corvid_runtime was importable AND tools.py registered the
+    // handler AND the handler was reachable end-to-end.
+    let probe_value = "hello via bundled corvid_runtime";
+    let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
+    let (post_status, post_body_resp) =
+        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+    assert_eq!(post_status, 202, "POST /echo must answer 202: {post_body_resp}");
+    let resp: serde_json::Value =
+        serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id`")
+        .to_string();
+
+    let (approve_status, approve_body) = http_post(
+        port,
+        &format!("/__approvals/{approval_id}/approve"),
+        "",
+    )
+    .expect("POST /approve failed");
+    assert_eq!(
+        approve_status, 200,
+        "POST /approve must answer 200 — bundled corvid_runtime must be \
+         importable so tools.py registers echo_string: {approve_body}"
+    );
+    let approve_resp: serde_json::Value =
+        serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
+    let result = approve_resp
+        .get("result")
+        .expect("/approve body must carry a `result`");
+    assert_eq!(
+        result.get("echoed").and_then(|v| v.as_str()),
+        Some(probe_value),
+        "the bundled corvid_runtime tools.py autoload must dispatch the \
+         user's coroutine end-to-end. body={approve_body}"
+    );
+}
+
 /// 33Q1a end-to-end gate. The anonymous-2026-06-04 round-2 trial
 /// report P1.1 documented that `corvid serve` had no tool-handler
 /// registration mechanism: an approval-gated POST whose handler

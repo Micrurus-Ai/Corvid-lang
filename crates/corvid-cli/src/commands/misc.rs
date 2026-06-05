@@ -31,10 +31,24 @@ pub(crate) fn cmd_new(name: &str) -> Result<u8> {
         Ok(None) => {}
         Err(err) => eprintln!("warning: failed to vendor stdlib: {err:#}"),
     }
+    // Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): the
+    // prior "Next steps" output told reviewers `pip install
+    // corvid-runtime` — but that package is NOT on PyPI. A
+    // release-installed reviewer running the command would either
+    // 404 or get a wrong package. The fix ships the
+    // `corvid_runtime` Python package alongside the binary (under
+    // `<corvid-home>/runtime-py/`) and `python_tools.rs::find_bundled_corvid_runtime`
+    // auto-detects it at autoload time. No manual install needed.
     println!("\nNext steps:");
     println!("  cd {name}");
-    println!("  pip install corvid-runtime");
-    println!("  corvid run src/main.cor");
+    println!("  corvid run src/main.cor   # OR `corvid serve src/main.cor` for the HTTP path");
+    println!();
+    println!("Tools that need a Python implementation go in `tools.py`. The");
+    println!("`corvid_runtime` Python package is bundled with the install,");
+    println!("so `from corvid_runtime import tool` works without any pip");
+    println!("install. (Filed as slice 33Q6 closing the prior `pip install");
+    println!("corvid-runtime` directive that was broken because the package");
+    println!("isn't on PyPI.)");
     Ok(0)
 }
 
