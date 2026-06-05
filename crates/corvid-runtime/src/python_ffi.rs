@@ -102,7 +102,7 @@ fn required_effect_for_call(module: &str, function: &str) -> Option<&'static str
     }
 }
 
-fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
+pub(crate) fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
     Ok(match value {
         Value::Null => py.None(),
         Value::Bool(value) => value.into_py(py),
@@ -135,7 +135,7 @@ fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
     })
 }
 
-fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+pub(crate) fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
     }
@@ -199,7 +199,7 @@ fn python_error(
     }
 }
 
-fn format_python_error(py: Python<'_>, err: &PyErr) -> Option<String> {
+pub(crate) fn format_python_error(py: Python<'_>, err: &PyErr) -> Option<String> {
     let traceback = py.import_bound("traceback").ok()?;
     let formatted = traceback
         .getattr("format_exception")

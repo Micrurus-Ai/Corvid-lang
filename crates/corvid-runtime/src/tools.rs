@@ -72,6 +72,19 @@ impl ToolRegistry {
         v.sort();
         v
     }
+
+    /// Merge `other`'s handlers into `self`. Entries in `other`
+    /// OVERWRITE same-named entries in `self`. Used by `corvid serve`
+    /// to compose `tools.py` autoloaded handlers (registered first)
+    /// with `--with-tools-cdylib` handlers (registered second), so
+    /// the explicit operator flag wins precedence over the implicit
+    /// autoload — see `crates/corvid-cli/src/serve_cmd.rs::cmd_serve`
+    /// for the call site.
+    pub fn extend(&mut self, other: ToolRegistry) {
+        for (name, handler) in other.tools {
+            self.tools.insert(name, handler);
+        }
+    }
 }
 
 #[cfg(test)]

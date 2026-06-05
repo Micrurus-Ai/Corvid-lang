@@ -173,26 +173,29 @@ pub(crate) fn cmd_serve(
         ApprovalQueueRuntime::open_in_memory()
             .context("open in-memory approval queue for `corvid serve`")?,
     );
-    // `--with-tools-cdylib <path>` (slice 33Q1a): dlopen the host's
-    // tools cdylib and register one Rust `ToolHandler` per declared
-    // tool that bridges to the C-ABI registry. Without this, the
-    // interpreter's tool registry stays empty and approved actions
-    // fail with "no handler registered for tool `<name>`" — exactly
-    // the regression the anonymous-2026-06-04 round-2 trial report
-    // P1.1 documented. See `register_cdylib_tool_handlers` for the
-    // dlopen + register + bridge pattern.
+    // Tool registry composition (slices 33Q1a + 33Q1b):
     //
-    // The populated `ToolRegistry` is cloned into both the main
-    // runtime (below) and stored in `ServeState::host_tools` so the
-    // `/approve` re-execution path (`approve_approval`) can hand the
-    // same registry to its bypass runtime — without that, the bypass
-    // runtime had an empty tool registry and reproduced the P1.1
-    // regression even with the loader wired up.
-    let host_tools = if let Some(cdylib_path) = tools_cdylib {
-        register_cdylib_tool_handlers(&ir, cdylib_path)?
-    } else {
-        ToolRegistry::default()
-    };
+    // - `tools.py` autoloader (33Q1b) runs FIRST. If a `tools.py`
+    //   sits next to the source (or in the project root), embed
+    //   Python via PyO3, import it, and materialise one Rust handler
+    //   per `@tool("<name>")`-decorated implementation.
+    // - `--with-tools-cdylib <path>` loader (33Q1a) runs SECOND. The
+    //   cdylib's `__corvid_tool_<name>` symbols are dlsym'd,
+    //   registered via `corvid_register_tool`, and bridged into the
+    //   ToolRegistry through `dispatch_host_tool`.
+    // - `extend` overwrites same-named entries, so cdylib (the
+    //   explicit operator flag) wins precedence over tools.py
+    //   (implicit autoload). Mental model: explicit beats implicit.
+    //
+    // Without either source, `host_tools` stays empty and the
+    // interpreter's existing `UnknownTool` error surfaces the gap
+    // at call time — the same behaviour the trial documented as
+    // P1.1, now an honest signal rather than a silent regression.
+    let mut host_tools = corvid_runtime::python_tools::install_python_tools(file)
+        .context("autoload tools.py")?;
+    if let Some(cdylib_path) = tools_cdylib {
+        host_tools.extend(register_cdylib_tool_handlers(&ir, cdylib_path)?);
+    }
 
     let runtime = Runtime::builder()
         .approver(Arc::new(QueueApprover::new(approval_queue.clone())))

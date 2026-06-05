@@ -24,7 +24,7 @@ corvid-differential-verify = { workspace = true }
 corvid-types = { workspace = true }
 corvid-vm = { workspace = true }
 corvid-repl = { workspace = true }
-corvid-runtime = { workspace = true }
+corvid-runtime = { workspace = true, features = ["python"] }
 corvid-trace-schema = { workspace = true }
 corvid-tour-catalog = { workspace = true }
 clap = { workspace = true }

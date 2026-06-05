@@ -502,6 +502,153 @@ fn build_serve_tools_fixture() -> PathBuf {
     );
 }
 
+/// 33Q1b end-to-end gate. The anonymous-2026-06-04 round-2 trial
+/// report P1.1 said "adding the tool to `tools.py` does not help —
+/// the interpreter serve path doesn't load it." This test pins the
+/// fix: a Corvid app declares a `dangerous` tool, an approve-gated
+/// agent, and a POST route. A `tools.py` sits next to the source
+/// with an `@tool("echo_string")`-decorated async implementation.
+/// `corvid serve` autodetects `tools.py`, embeds Python via PyO3,
+/// imports the module (running the decorators), and bridges each
+/// registered Python coroutine into the runtime's `ToolRegistry`.
+///
+/// PYTHONPATH is set to include `runtime/python/` so the user's
+/// `from corvid_runtime import tool` import resolves to the local
+/// `corvid_runtime` package without requiring a global pip install.
+///
+/// Port `8198` so it can't collide with the other serve tests
+/// (8190-8197).
+#[test]
+fn serve_autoloads_tools_py_and_dispatches_approval_gated_tool_through_python() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_root = dir.path();
+    let src_dir = project_root.join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let src_path = src_dir.join("main.cor");
+
+    // Corvid source: identical shape to the cdylib test but the
+    // tool implementation will come from tools.py instead of the
+    // fixture cdylib. The approve label `EchoString` snake_case-
+    // normalizes to `echo_string` so the dangerous-call checker
+    // accepts the approval.
+    let source = r#"type EchoReq:
+    value: String
+
+type EchoReceipt:
+    echoed: String
+
+effect echo_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool echo_string(value: String) -> String dangerous uses echo_external
+
+agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
+    approve EchoString(req.value)
+    echoed = echo_string(req.value)
+    return EchoReceipt(echoed)
+
+server test_serve_q1b_api:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+        return execute_echo(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    // tools.py at project root — that's where the autoloader's
+    // walk-up-one-level rule expects it (next to `src/`).
+    let tools_py = r#"from corvid_runtime import tool
+
+
+@tool("echo_string")
+async def echo_string(value: str) -> str:
+    return value
+"#;
+    std::fs::write(project_root.join("tools.py"), tools_py).unwrap();
+
+    // PYTHONPATH points at the local corvid_runtime package so
+    // `from corvid_runtime import tool` resolves without a pip
+    // install. Repo root + `runtime/python/`.
+    let python_path = repo_root().join("runtime").join("python");
+    assert!(
+        python_path.is_dir(),
+        "runtime/python missing at {} — corvid_runtime package layout regressed?",
+        python_path.display()
+    );
+
+    let port: u16 = 8198;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .env("PYTHONPATH", &python_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port} \
+         (probable cause: tools.py autoloader failed — re-run with stderr \
+         inherited to see the import traceback; common failures: \
+         `corvid_runtime` package not importable (PYTHONPATH wrong) or \
+         tools.py raised at import time)"
+    );
+
+    // 1. POST /echo → 202 + approval_id (approve boundary queues).
+    let probe_value = "hello from tools.py";
+    let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
+    let (post_status, post_body_resp) =
+        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+    assert_eq!(
+        post_status, 202,
+        "POST /echo must answer 202: {post_body_resp}"
+    );
+    let resp: serde_json::Value =
+        serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
+    let approval_id = resp
+        .get("approval_id")
+        .and_then(|v| v.as_str())
+        .expect("202 body must carry an `approval_id`")
+        .to_string();
+
+    // 2. POST /__approvals/<id>/approve → 200 + result.echoed == probe_value.
+    //    If the autoloader didn't wire echo_string into the runtime,
+    //    this answers 500 "no handler registered for tool `echo_string`"
+    //    and reproduces P1.1's regression.
+    let (approve_status, approve_body) = http_post(
+        port,
+        &format!("/__approvals/{approval_id}/approve"),
+        "",
+    )
+    .expect("POST /__approvals/<id>/approve failed");
+    assert_eq!(
+        approve_status, 200,
+        "POST /__approvals/<id>/approve must answer 200 — the tools.py \
+         echo_string handler must run via PyO3 after approval. got \
+         status={approve_status} body=`{approve_body}`. If 500 with `no \
+         handler registered for tool`: the tools.py autoloader regressed \
+         (file not found, Python import failed, _TOOL_IMPLS read failed, \
+         or the GIL-acquiring bridge broke)."
+    );
+    let approve_resp: serde_json::Value =
+        serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
+    let result = approve_resp
+        .get("result")
+        .expect("/approve body must carry a `result` envelope");
+    assert_eq!(
+        result.get("echoed").and_then(|v| v.as_str()),
+        Some(probe_value),
+        "re-executed agent's `echoed` field must equal the original POST \
+         `value`, proving the tools.py @tool(\"echo_string\") implementation \
+         was actually invoked via PyO3 + asyncio.run end-to-end. body={approve_body}"
+    );
+}
+
 /// 33Q1a end-to-end gate. The anonymous-2026-06-04 round-2 trial
 /// report P1.1 documented that `corvid serve` had no tool-handler
 /// registration mechanism: an approval-gated POST whose handler
