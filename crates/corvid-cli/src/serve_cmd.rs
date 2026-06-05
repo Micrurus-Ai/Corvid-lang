@@ -440,18 +440,23 @@ fn finish(outcome: Result<Value, RunError>) -> Response {
                 )
                     .into_response();
             }
+            // 33Q10: emit user-facing detail (no IR byte-span prefix)
+            // so clients don't see `[1227..1269] ...` they can't act on.
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
                     "error": "handler_failed",
-                    "detail": RunError::Interp(e).to_string(),
+                    "detail": RunError::Interp(e).user_facing_detail(),
                 })),
             )
                 .into_response()
         }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "handler_failed", "detail": err.to_string() })),
+            Json(serde_json::json!({
+                "error": "handler_failed",
+                "detail": err.user_facing_detail(),
+            })),
         )
             .into_response(),
     }
@@ -671,7 +676,12 @@ async fn approve_approval(
             // approve boundary because retrying /approve still runs
             // the same `ProgrammaticApprover::always_yes` bypass
             // runtime that's local to this handler call.
-            let detail = err.to_string();
+            //
+            // 33Q10: user_facing_detail strips the IR `[start..end]`
+            // byte-span prefix from interpreter errors so 500 bodies
+            // (and the `last_handler_error` field that surfaces in
+            // GET) don't leak internal compiler artifacts to clients.
+            let detail = err.user_facing_detail();
             {
                 let mut pending = state.pending_invocations.lock().unwrap();
                 if let Some(stored) = pending.get_mut(&id) {

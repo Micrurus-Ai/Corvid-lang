@@ -1279,3 +1279,120 @@ server test_serve_q9_api:
          regression the maintainer trial caught. banner=\n{banner}"
     );
 }
+
+/// 33Q10 acceptance — maintainer-as-reviewer-2026-06-05 P2.2.
+/// Pre-33Q10, `corvid serve` 500 response bodies leaked IR byte-span
+/// ranges (`[1227..1269]`) into the `detail` field via
+/// `InterpError`'s Display impl. Internal compiler artifacts in a
+/// client-facing surface — clients can't act on a byte-span in
+/// source they don't have. The fix added
+/// `RunError::user_facing_detail()` that strips the span prefix
+/// before serialization.
+///
+/// This test pins the fix: it deliberately POSTs to a route whose
+/// agent calls a tool with NO registered handler (the natural
+/// 500-producing path during incremental development) and asserts
+/// the resulting body's `detail` field contains the human-readable
+/// message ("no handler registered for tool ...") WITHOUT any
+/// `[<digits>..<digits>]` span-range prefix.
+///
+/// Port `8202` so it can't collide with the other serve tests
+/// (8190-8201).
+#[test]
+fn serve_500_response_strips_ir_byte_span_prefix_from_detail() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    // Agent calls `classify_anything` which is declared but has no
+    // registered handler. POST will produce 500 + "no handler
+    // registered" — the natural site where the IR-span prefix used
+    // to leak.
+    let source = r#"type ClassifyReq:
+    raw: String
+
+type ClassifyVerdict:
+    label: String
+
+effect classify_effect:
+    cost: $0.01
+    trust: autonomous
+    data: external
+
+tool classify_anything(raw: String) -> ClassifyVerdict uses classify_effect
+
+agent run_classify(req: ClassifyReq) -> ClassifyVerdict uses classify_effect:
+    verdict = classify_anything(req.raw)
+    return verdict
+
+server test_serve_q10_api:
+    route POST "/classify" body ClassifyReq -> json ClassifyVerdict uses classify_effect:
+        return run_classify(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8202;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(wait_until_ready(port), "server did not become ready on :{port}");
+
+    let (status, body) = http_post(port, "/classify", r#"{"raw":"hello"}"#)
+        .expect("POST /classify failed");
+    assert_eq!(
+        status, 500,
+        "POST /classify must answer 500 (no handler for the tool): {body}"
+    );
+
+    let resp: serde_json::Value =
+        serde_json::from_str(&body).expect("500 body must be valid JSON");
+    assert_eq!(
+        resp.get("error").and_then(|v| v.as_str()),
+        Some("handler_failed"),
+        "500 body must carry error=`handler_failed`: {body}"
+    );
+
+    let detail = resp
+        .get("detail")
+        .and_then(|v| v.as_str())
+        .expect("500 body must carry a `detail` string");
+
+    // The load-bearing 33Q10 assertion: the detail MUST NOT carry
+    // an `[<n>..<n>]` IR byte-span prefix. Pre-33Q10 it looked like
+    // `[1227..1269] no handler registered for tool ...` — the
+    // bracketed range is an internal compiler artifact and must
+    // never leak to HTTP clients.
+    let leaks_span = detail.starts_with('[')
+        && detail
+            .chars()
+            .skip(1)
+            .take_while(|c| *c != ']')
+            .any(|c| c == '.');
+    assert!(
+        !leaks_span,
+        "500 body's `detail` MUST NOT start with an IR byte-span \
+         prefix like `[1227..1269]`. Internal compiler artifacts \
+         leaking to HTTP clients was the maintainer trial's P2.2 \
+         finding. detail={detail:?}"
+    );
+
+    // Sanity: the detail still carries the actionable message
+    // ("no handler registered") so we haven't just nuked all
+    // diagnostic content along with the span prefix.
+    assert!(
+        detail.contains("no handler registered"),
+        "detail must still contain the actionable message after \
+         span-stripping: detail={detail:?}"
+    );
+    assert!(
+        detail.contains("classify_anything"),
+        "detail must still name the unregistered tool: detail={detail:?}"
+    );
+}

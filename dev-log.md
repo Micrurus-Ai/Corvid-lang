@@ -4,6 +4,53 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-05 - 33Q10 closed: serve 500 bodies no longer leak IR byte-spans
+
+Maintainer-as-reviewer-2026-06-05 P2.2 caught that `corvid serve`
+500 response bodies leaked internal IR byte-span ranges:
+
+```json
+{"detail":"[1227..1269] no handler registered for tool `classify_ioc`","error":"handler_failed"}
+```
+
+The `[1227..1269]` is the IR byte-span of the call site that
+errored — an internal compiler artifact `InterpError`'s `Display`
+prepends unconditionally because it's useful in tracing + dev-
+time stderr. But the HTTP layer is a different audience: clients
+can't act on a byte-span in source they don't have, and the
+prefix just clutters the actionable message.
+
+Fix: new `RunError::user_facing_detail()` method in
+`crates/corvid-driver/src/run.rs` returns the error message
+WITHOUT the span prefix. `RunError::Display` is unchanged
+(tracing + stderr still get the span). The 500-construction
+sites in `serve_cmd.rs` — both `finish()` for the body-dispatch
+path and `approve_approval()` for the /approve re-execution
+path — call `user_facing_detail()` instead of `to_string()`.
+
+Acceptance gate `serve_500_response_strips_ir_byte_span_prefix_from_detail`
+in `crates/corvid-cli/tests/serve_smoke.rs` deliberately POSTs
+to a route whose tool has no handler (the natural 500-producing
+path during incremental development) and asserts:
+
+- HTTP 500 returned.
+- `detail` does NOT start with `[<digits>..<digits>]`.
+- `detail` still contains "no handler registered" AND the tool
+  name `classify_anything` (proves the strip didn't nuke
+  actionable content).
+
+Verified live on the maintainer-trial app: pre-33Q10 the body
+had the bracketed span; post-33Q10 it's clean.
+
+**Pattern recorded.** A struct's `Display` impl is for one
+audience (tracing, debug output, stderr). When a different
+audience consumes it (HTTP body, log aggregator, end-user UI),
+that audience may need a different formatter. Add an explicit
+`<audience>_detail()` method rather than overloading `Display`
+— each audience gets the right shape, no one's wrong.
+
+---
+
 ## 2026-06-05 - 33Q9 closed: serve startup banner labels routes accurately
 
 Maintainer-as-reviewer-2026-06-05 P2.1 caught that `corvid serve`

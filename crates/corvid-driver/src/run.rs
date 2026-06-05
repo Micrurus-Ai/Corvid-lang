@@ -70,6 +70,27 @@ impl fmt::Display for RunError {
     }
 }
 
+impl RunError {
+    /// User-facing detail string, suitable for HTTP 500 response
+    /// bodies and other operator-facing surfaces where internal
+    /// compiler artifacts (IR byte-spans, etc.) leak the
+    /// implementation. The default `Display` impl prepends
+    /// `[start..end]` to interpreter errors because that anchor is
+    /// useful in tracing + dev-time stderr; the HTTP layer should
+    /// strip it because clients can't act on a byte-span in source
+    /// they don't have. Slice 33Q10 (maintainer-as-reviewer-2026-06-05
+    /// P2.2): without this method, a 500 from
+    /// `corvid serve` carried bodies like
+    /// `{"detail":"[1227..1269] no handler registered for tool ..."}` —
+    /// the bracketed range is meaningless to the client.
+    pub fn user_facing_detail(&self) -> String {
+        match self {
+            Self::Interp(e) => e.kind.to_string(),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl std::error::Error for RunError {}
 
 /// Which execution tier `corvid run` should use.
