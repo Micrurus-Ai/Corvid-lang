@@ -29,7 +29,21 @@ make first-class:
 
 1. **At least one HTTP route** that handles a real request body
    (typed, JSON-deserialized).
-2. **Persistence** through `std.db` — at least 2 tables and one
+2. **Persistence** through `std.db` + `corvid migrate up`. Heads-up
+   on v1.0 scope: `std/db.cor` ships the typed envelopes
+   (`DbConnection`, `DbQuery`, `DbResult`, `DbParam`, `DbColumn`,
+   `DbError`) but NOT a `db.query(...)` source-syntax primitive.
+   At v1.0 you bridge your own SQL execution through a Corvid
+   `tool` wrapper (you write the SQL invocation in `tools.py`
+   using `sqlite3`, `psycopg`, or your DB client of choice;
+   declare the tool's signature in `main.cor` with `uses
+   db_effect` so the envelopes are the typed boundary). The
+   source-syntax sugar that elides the tool wrapper is post-
+   v1.0 work; v1.0 honestly ships the runtime (real SQLite +
+   Postgres execution via Phase 38) without the source-syntax
+   layer on top. The runbook examples in
+   `examples/backend/personal_executive_agent/migrations/` show
+   the canonical migration shape. Aim for ≥2 tables + 1
    migration applied through `corvid migrate up`.
 3. **At least one approval-gated tool** that crosses an
    `approve` boundary before a dangerous side effect.

@@ -21,9 +21,28 @@ pub fn build_library_to_disk(
         .iter()
         .any(|agent| matches!(agent.extern_abi, Some(IrExternAbi::C)))
     {
+        // Slice 33Q12c (maintainer-as-reviewer-2026-06-05 Minor):
+        // anchor the diagnostic at the first agent's declaration
+        // span when the file HAS any agents (so the reviewer sees
+        // "add `pub extern \"c\"` before this agent" rendered
+        // inline) instead of the prior `0..0` zero-width anchor at
+        // the file start. Falls back to `0..0` only when the file
+        // declares no agents at all — at that point there's no
+        // useful source location to point at and the message text
+        // is the only signal.
+        let anchor_span = ir
+            .agents
+            .first()
+            .map(|a| a.span)
+            .unwrap_or_else(|| corvid_ast::Span::new(0, 0));
         return Err(CodegenError::not_supported(
-            "library targets require at least one `pub extern \"c\"` agent",
-            corvid_ast::Span::new(0, 0),
+            "library targets (cdylib / staticlib) need at least one \
+             `pub extern \"c\"` agent — the C-ABI entry point the \
+             linker exports. Add `pub extern \"c\"` to an agent that \
+             takes scalar parameters (Int / Float / Bool / String) and \
+             returns a scalar / `Grounded<scalar>` / `Nothing`. See \
+             `docs/reference/exported-abi.md` for the full ABI surface",
+            anchor_span,
         ));
     }
 

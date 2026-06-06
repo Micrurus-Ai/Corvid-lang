@@ -1,4 +1,28 @@
 # Standard database metadata envelopes.
+#
+# v1.0 scope (slice 33Q12a, maintainer-as-reviewer-2026-06-05 P3.2):
+# this file ships the TYPED ENVELOPES — DbConnection, DbQuery,
+# DbResult, DbParam, DbColumn, DbError, etc. — that describe a DB
+# interaction. It does NOT ship a `db.query(...)` source-syntax
+# primitive that compiles down to actual SQL execution. The
+# `corvid migrate up` runtime DOES execute real SQL against SQLite
+# and Postgres (Phase 35V2-P37 + Phase 35V2-P38 shipped the
+# host-side runtime), but at v1.0 your application code reaches
+# the runtime through a Corvid `tool` wrapper: declare a tool
+# signature in your main.cor with `uses db_effect`, then implement
+# the tool in your tools.py using `sqlite3` / `psycopg` / your DB
+# client of choice. The envelopes below are the TYPED BOUNDARY
+# between your agent and that tool — they carry redaction markers,
+# effect envelopes, and replay keys so the moat features
+# (replay-safety, audit-log grounding, effect-row composition)
+# still apply across the bridge.
+#
+# Post-v1.0 (filed under `35V2-P39-I`-style source-syntax sugar
+# slice): a `db.query("SELECT ...", params)` primitive lowers to
+# the runtime directly without the tool wrapper. The envelopes
+# in this file are the contract that primitive will produce; the
+# v1.0 shape is forward-compatible with the post-v1.0 ergonomic
+# layer.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

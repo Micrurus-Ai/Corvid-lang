@@ -4,6 +4,92 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-06 - 33Q12 closed: misc polish — std.db docs, OCI path normalization, pub-extern error UX
+
+Three P3/Minor findings from maintainer-as-reviewer-2026-06-05
+shipped together as one polish slice. Each was small in scope but
+each shaved off a sharp edge a friends-and-family reviewer would
+hit early in the build.
+
+**(a) std.db docs honesty.** The friends-and-family prompt's
+Surface 2 said "Persistence through `std.db` — at least 2 tables
+and one migration applied through `corvid migrate up`," implying
+typed query primitives that don't exist at v1.0. Reality: `std/db.cor`
+ships TYPED ENVELOPES (`DbConnection`, `DbQuery`, `DbResult`,
+`DbParam`, `DbColumn`, `DbError`), not a `db.query(...)` source-
+syntax primitive. The runtime SQLite + Postgres execution paths
+shipped under Phase 35V2-P37/P38, but at v1.0 your application
+code reaches them through a Corvid `tool` wrapper — you write the
+SQL invocation in tools.py against `sqlite3`/`psycopg`, declare the
+signature in main.cor with `uses db_effect`, and the envelopes are
+the typed boundary. The source-syntax sugar that elides the
+wrapper is filed as post-v1.0 work (a 35V2-P39-I-style slice).
+
+Prompt now spells this out so reviewers don't expect `db.query(...)`.
+`std/db.cor` header block names the same boundary so a reviewer
+reading the source file directly sees the v1.0 scope inline.
+
+**(b) OCI label path-separator normalization.** The reviewer's
+generated `oci-labels.json` had
+`"org.opencontainers.image.source": "C:/Users/.../Temp/threat_intel_agent\\src\\main.cor"`
+— mixed `/` and `\\` because `Path::display()` mixes the
+user-supplied path's separators with `Path::join`'s platform-
+native ones. Mixed separators read strangely in OCI metadata that
+downstream tools (registries, SBOM viewers, attestation parsers)
+expect to be POSIX-shaped.
+
+Fix: `run_package` now post-processes
+`source.display().to_string()` with `.replace('\\', "/")` before
+constructing `OciLabels::source`. The on-disk path stays platform-
+native everywhere else; only the OCI boundary is normalized.
+
+Acceptance test `deploy_package_normalizes_backslashes_in_oci_source_label`
+runs `run_package` on a tempdir app, parses the resulting
+`oci-labels.json`, and asserts `labels["org.opencontainers.image.source"]`
+contains no `\` regardless of OS.
+
+**(c) `pub extern "c"` missing-agent error UX.** Pre-33Q12c, a
+build of a source with no `pub extern "c"` agent emitted:
+
+```
+error: [0..0] native codegen does not yet support: library targets require at least one `pub extern "c"` agent
+```
+
+Two complaints: the `[0..0]` span anchor was a zero-width point
+at file start (useless for locating the fix site), and the
+phrasing "not yet support: library targets require..." parsed
+awkwardly because of the embedded colon.
+
+Fix: when the file has any agent, the diagnostic anchors at the
+first agent's span so the reviewer's editor highlights "add
+`pub extern \"c\"` to this agent". The message itself is tightened
+to name what the operator should do (add `pub extern "c"` to an
+agent that takes scalar params + returns scalar/Grounded<scalar>/
+Nothing) and points at `docs/reference/exported-abi.md` for the
+full ABI surface.
+
+Created the doc page in this slice (it didn't exist —
+referencing a non-existent doc would be its own bug). The page
+documents v1.0 boundary types, what's NOT accepted (struct
+boundaries, lists, options) with explicit reference to the
+post-v1.0 33Q8 plan that lifts the restriction, and the v1.0
+workaround pattern (scalar decomposition or JSON-through-String).
+
+Acceptance test
+`cdylib_missing_pub_extern_c_error_anchors_at_first_agent_and_names_doc_page`
+in `crates/corvid-codegen-cl/tests/cdylib_emission.rs` verifies
+three contract points: (1) span moved OFF `[0..0]`, (2) error
+text contains `exported-abi.md`, (3) error names `pub extern "c"`
+verbatim so the operator can grep.
+
+**Trial-round status: 7 of 10 findings shipped** (P1.3/33Q8
+remains post-v1.0). With 33Q12 closed, every actionable item
+from the maintainer-trial round has either a shipped fix or an
+explicit non-scope deferral with a slice tracking the post-v1.0
+work.
+
+---
+
 ## 2026-06-06 - 33Q11 closed: deploy package atomic-on-error + env-var discoverability
 
 Maintainer-as-reviewer-2026-06-05 P2.3 + P3.1 caught two related

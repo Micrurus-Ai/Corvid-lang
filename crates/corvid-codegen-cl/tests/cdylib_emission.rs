@@ -536,3 +536,71 @@ int main(void) {{
 "#
     )
 }
+
+/// 33Q12c acceptance — maintainer-as-reviewer-2026-06-05 Minor.
+/// Pre-33Q12c, building a cdylib from a source with NO
+/// `pub extern "c"` agent produced this error:
+///
+/// ```text
+/// error: [0..0] native codegen does not yet support: library targets require at least one `pub extern "c"` agent
+/// ```
+///
+/// Two complaints: (1) the `[0..0]` span is a zero-width anchor at
+/// the file start — useless for a reviewer trying to locate where
+/// to add the keyword, (2) the "not yet support: library targets
+/// require..." phrasing reads awkwardly because of the colon's
+/// parse. 33Q12c fixes both:
+///
+/// - When the file has any agent, the diagnostic anchors at the
+///   first agent's span so the reviewer's editor can highlight
+///   "add `pub extern \"c\"` to this agent".
+/// - The message names what the user must do AND references
+///   `docs/reference/exported-abi.md` for the full ABI surface.
+#[test]
+fn cdylib_missing_pub_extern_c_error_anchors_at_first_agent_and_names_doc_page() {
+    // Source has one agent that is NOT `pub extern "c"` — the error
+    // should fire and anchor at that agent's span.
+    const SRC: &str = "agent foo(x: Int) -> Int:\n    return x\n";
+    let bundle = frontend_of(SRC);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("missing_extern_test");
+
+    let err = build_library_to_disk(
+        &bundle.ir,
+        "missing_extern_test",
+        &out,
+        BuildTarget::Cdylib,
+        &[],
+        None,
+        None,
+    )
+    .expect_err("must error when no pub extern \"c\" agent is declared");
+
+    // Assertion 1: error message must point reviewers at the doc page
+    // we created in 33Q12c.
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("exported-abi.md"),
+        "error message must reference docs/reference/exported-abi.md \
+         so the reviewer can read up on the ABI surface. got: {msg}"
+    );
+
+    // Assertion 2: the span anchor must NOT be the prior `[0..0]`
+    // zero-width-at-file-start. The agent is on the first line so
+    // the new anchor falls inside the first ~40 characters.
+    let first_agent_span = bundle.ir.agents[0].span;
+    assert!(
+        !msg.starts_with("[0..0]"),
+        "33Q12c MUST point the span away from `[0..0]` toward the \
+         first agent's actual location ({first_agent_span:?}). \
+         got: {msg}"
+    );
+
+    // Assertion 3: the message must name what the operator should
+    // do (add `pub extern \"c\"`), not just complain.
+    assert!(
+        msg.contains("pub extern \"c\""),
+        "error must name the missing construct verbatim so the \
+         operator can grep for it. got: {msg}"
+    );
+}
