@@ -4,6 +4,57 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-06 - 33Q13a closed: corvid beta synthesize-feedback (deterministic core)
+
+First of the three remaining "AI helper" slices under
+`35V2-P43-T-LR-phase-43-ai-helpers`. Ships
+`corvid beta synthesize-feedback <REPORTS>...` — a deterministic
+Rust synthesizer that walks one or more trial-report markdown
+files, extracts every `### P<n>` / `### Minor` finding header,
+groups them by declared class (`CODE` / `DOCS` / `UX` /
+`CODE/DOCS` / etc.), and emits either markdown (default) or JSON
+(`--json`).
+
+**Why deterministic Rust at v1.0.** `corvid claim audit` (already
+shipped, registered as `claim.audit_runnable_artifacts`) is
+exactly this shape — typed classification + line-grounded
+citations. The "AI helper" umbrella name fits both because what
+matters to the registry is that the output is STRUCTURED enough
+for an AI/developer to consume, not that the helper invokes an
+LLM internally. A 33Q13b-llm-promote follow-up adds LLM-driven
+thematic clustering on top of this grounded base — without 33Q13a's
+no-fabrication guarantee, an LLM-only synthesizer could
+hallucinate themes the source reports don't actually mention.
+
+**Load-bearing groundedness contract.** The integration test
+`synthesize_feedback_is_grounded_every_citation_resolves_to_real_header`
+runs against both shipped trial reports
+(`33m-trial-anonymous-2026-06-04.md` and
+`33m-trial-maintainer-as-reviewer-2026-06-05.md`) and asserts
+that for EVERY finding the synthesizer emits, the cited file:line
+MUST contain a `### ` header whose text contains both the claimed
+severity AND the claimed class. If the parser ever invents a
+finding, this test fails immediately. The contract is pinned NOW
+so when the LLM-driven layer lands (post-v1.0 slice 33Q13b), the
+LLM is structurally constrained to refine, never override, the
+deterministic citations.
+
+**Verified live on the real corpus.** Two reports + 14 findings
+across 5 class buckets (`CODE` / `CODE/DOCS` / `DOCS` / `DOCS+CODE`
+/ `UX`); the markdown rendering reads like a human-written
+synthesis, with citation links back to each source line.
+
+**Pattern recorded.** When the long-term shape of a helper is
+LLM-driven, ship the deterministic core first with the
+groundedness/structural-truth contract pinned by tests. The LLM
+layer slots into that core as a refinement, not a replacement.
+This lets v1.0 ship something REAL and prevents the LLM layer
+from being the first thing reviewers see — the deterministic
+output is what reviewers test against, the LLM output is what
+they get extra value from when it's ready.
+
+---
+
 ## 2026-06-06 - 33Q12 closed: misc polish — std.db docs, OCI path normalization, pub-extern error UX
 
 Three P3/Minor findings from maintainer-as-reviewer-2026-06-05

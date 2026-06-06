@@ -18,6 +18,7 @@ pub mod approvals;
 pub mod approver;
 pub mod auth;
 pub mod bench;
+pub mod beta;
 pub mod bundle;
 pub mod capsule;
 pub mod claim;

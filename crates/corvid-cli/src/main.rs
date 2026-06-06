@@ -35,6 +35,7 @@ mod approver_cmd;
 mod audit_cmd;
 mod auth_cmd;
 mod bench_cmd;
+mod beta_cmd;
 mod bind_cmd;
 mod build_cmd;
 mod bundle_cmd;

@@ -700,6 +700,13 @@ pub enum Command {
         #[command(subcommand)]
         command: DeployCommand,
     },
+    /// Operator helpers for running the friends-and-family (33M)
+    /// beta round — today: `synthesize-feedback`, future:
+    /// recruitment / round-tracking / summarization (slice 33Q13a).
+    Beta {
+        #[command(subcommand)]
+        command: super::beta::BetaCommand,
+    },
     /// Produce signed release-channel artifacts (`release
     /// build`) or render structured release notes between two
     /// git refs (`release notes`).

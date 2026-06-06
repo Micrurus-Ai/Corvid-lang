@@ -450,6 +450,11 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 deploy_cmd::run_systemd(&app, &out).map(|_| 0)
             }
         },
+        Some(Command::Beta { command }) => match command {
+            crate::cli::beta::BetaCommand::SynthesizeFeedback { reports, json } => {
+                crate::beta_cmd::run_synthesize_feedback(&reports, json)
+            }
+        },
         Some(Command::Release { command }) => match command {
             ReleaseCommand::Build {
                 channel,
