@@ -4,6 +4,74 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-06 - 33Q13c closed: corvid deploy tailor (deterministic core)
+
+Second of the three remaining AI-helper slices. Ships
+`corvid deploy tailor <app>` — a deterministic Rust analyzer
+that compiles the app's source to IR, walks for known patterns,
+checks the filesystem for the optional directories, and emits
+structured recommendations for tailoring the generated deploy
+manifests.
+
+**Detection patterns** (the v1.0 surface):
+
+- Server blocks present → recommend port + readiness probe in
+  Compose/K8s. Server blocks ABSENT → WARN that the generated
+  CMD `corvid serve` will fail at container startup.
+- Dangerous tools present → CRITICAL recommendation to wire the
+  approval-queue admin endpoints to a reviewer surface
+  (otherwise dangerous calls queue forever).
+- Agents with `@budget` → recommend K8s resource limits in line
+  with the compile-time cost ceilings — lift-and-shift of the
+  moat from compile time to runtime.
+- tools.py present → confirms the 33Q4 presence-conditional
+  COPY + 33Q6 bundled corvid_runtime are doing their job.
+- migrations/ dir present → WARN: the generated CMD doesn't
+  run migrate; add an init container or startup hook.
+- evals/ present → info: schedule a periodic `corvid eval list`
+  for regression detection.
+- Tools declared but NO tools.py → WARN: either write tools.py
+  or pass `--with-tools-cdylib` at runtime.
+
+**Load-bearing groundedness contract.** The integration test
+`deploy_tailor_is_grounded_recommendations_match_present_signals`
+runs the analyzer against a bare scaffold-shape app and asserts
+the migrate-up and approval-queue recommendations are ABSENT
+(no fabrication) — the analyzer cannot invent a recommendation
+for a signal the app doesn't have. The companion test
+`deploy_tailor_surfaces_canonical_signals_for_reference_app`
+runs against the personal_executive_agent reference app and
+asserts the expected detection (server block, dangerous tools,
+migrations dir all > 0, the critical approval-queue
+recommendation present). Same shape as 33Q13a's groundedness
+contract.
+
+**Verified live.** Against the maintainer-trial app at
+`/tmp/threat_intel_agent`: 1 server block, 7 agents, 2 tools
+(1 dangerous), 2 agents with @budget, tools.py present → 4
+recommendations (1 critical + 3 info). Against PEA: 1 server,
+many agents, 5 dangerous tools, migrations dir → 4
+recommendations (1 critical + 1 warn + 2 info).
+
+**Bonus correctness — ENV_LOCK.** Adding the 33Q13c tailor
+brought corvid-cli's bin test count past a parallelism
+threshold where the 33Q11 atomicity test (removes
+CORVID_DEPLOY_SIGNING_KEY) and the 33Q12b OCI normalization
+test (sets it) raced under the default cargo-test parallelism.
+Added a `static ENV_LOCK: std::sync::Mutex<()>` to
+`deploy_cmd::tests` that both env-mutating tests take before
+mutation. Surgical fix; no new test-deps.
+
+**Pattern reinforced from 33Q13a.** When the long-term shape of
+a helper is LLM-driven, ship the deterministic core first with
+the groundedness contract pinned by tests. The LLM layer slots
+into the core as a refinement of grounded signals. This is now
+the same pattern across both shipped AI helpers
+(synthesize-feedback + deploy-tailor), each with a filed
+LLM-promote post-v1.0 follow-up (33Q13b + 33Q13d).
+
+---
+
 ## 2026-06-06 - 33Q13a closed: corvid beta synthesize-feedback (deterministic core)
 
 First of the three remaining "AI helper" slices under

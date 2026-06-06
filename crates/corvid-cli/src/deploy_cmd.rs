@@ -195,6 +195,292 @@ pub fn run_k8s(app: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Slice 33Q13c — deterministic deploy-manifest tailoring.
+///
+/// Walks the app's IR and filesystem layout for known patterns
+/// (server blocks, dangerous tools, budget constraints, optional
+/// directories) and emits structured recommendations against the
+/// generated Dockerfile / Compose / K8s manifests / env-schema.
+/// Each recommendation cites the IR or filesystem signal that
+/// triggered it so the operator can map back to source — mirrors
+/// the 33Q13a synthesizer's groundedness contract.
+///
+/// Output: markdown by default; JSON when `json` is true.
+pub fn run_tailor(app: &Path, json: bool) -> Result<u8> {
+    let report = tailor_analyze(app)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .context("serialize tailor report")?
+        );
+    } else {
+        print!("{}", tailor_render_markdown(&report));
+    }
+    Ok(0)
+}
+
+/// One actionable recommendation derived from the IR walk.
+#[derive(Debug, Clone, Serialize)]
+pub struct TailorRecommendation {
+    /// Severity: `critical` (must address before deploying),
+    /// `warn` (likely-broken without action), `info` (suggestion).
+    pub severity: TailorSeverity,
+    /// Which generated manifest the recommendation targets:
+    /// `Dockerfile`, `Compose`, `K8s`, `env.schema.json`,
+    /// `runbook`, etc.
+    pub target: String,
+    /// One-line title naming what to do.
+    pub title: String,
+    /// Brief rationale + the source-level signal that triggered
+    /// this recommendation (the "grounded citation" — keeps the
+    /// recommendation from being a free-form invention).
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TailorSeverity {
+    Critical,
+    Warn,
+    Info,
+}
+
+/// Full tailor report for the operator.
+#[derive(Debug, Clone, Serialize)]
+pub struct TailorReport {
+    pub app_name: String,
+    pub source_path: std::path::PathBuf,
+    pub recommendations: Vec<TailorRecommendation>,
+    /// Counters that summarize what the analyzer detected. Useful
+    /// in tests to assert "an app with N tools surfaces N
+    /// dangerous-tool checks" without reading every individual
+    /// recommendation.
+    pub signals: TailorSignals,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct TailorSignals {
+    pub server_blocks: usize,
+    pub agents: usize,
+    pub tools_total: usize,
+    pub dangerous_tools: usize,
+    pub agents_with_budget: usize,
+    pub has_tools_py: bool,
+    pub has_migrations: bool,
+    pub has_evals: bool,
+    pub has_traces: bool,
+}
+
+/// Build the tailor report for a given app dir. Public for tests.
+pub fn tailor_analyze(app: &Path) -> Result<TailorReport> {
+    use corvid_driver::{compile_to_ir_with_config_at_path, load_corvid_config_for};
+
+    let app_name = app
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("app path must end in a valid directory name")?
+        .to_string();
+
+    let source_path = app.join("src").join("main.cor");
+    let source = fs::read_to_string(&source_path)
+        .with_context(|| format!("read app source `{}`", source_path.display()))?;
+    let config = load_corvid_config_for(&source_path);
+    let ir = compile_to_ir_with_config_at_path(&source, &source_path, config.as_ref())
+        .map_err(|diags| anyhow::anyhow!("compile diagnostics: {} found", diags.len()))?;
+
+    // Tally the signals the analyzer cares about. Reading them all
+    // here keeps the recommendation builder declarative.
+    let signals = TailorSignals {
+        server_blocks: ir.servers.len(),
+        agents: ir.agents.len(),
+        tools_total: ir.tools.len(),
+        dangerous_tools: ir
+            .tools
+            .iter()
+            .filter(|t| matches!(t.effect, corvid_ast::Effect::Dangerous))
+            .count(),
+        agents_with_budget: ir.agents.iter().filter(|a| a.cost_budget.is_some()).count(),
+        has_tools_py: app.join("tools.py").is_file(),
+        has_migrations: app.join("migrations").is_dir(),
+        has_evals: app.join("evals").is_dir(),
+        has_traces: app.join("traces").is_dir(),
+    };
+
+    let mut recommendations = Vec::new();
+
+    // Server block → port + healthCheck implications.
+    if signals.server_blocks > 0 {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Info,
+            target: "Compose / K8s".to_string(),
+            title: "Expose port 8000 and add a readiness probe".to_string(),
+            rationale: format!(
+                "{} server block(s) detected in main.cor — `corvid serve` binds 0.0.0.0:8000 \
+                 by default. The generated Compose / K8s manifests need a port mapping + a \
+                 `/readyz` probe so orchestrators don't roll traffic before the runtime is up.",
+                signals.server_blocks
+            ),
+        });
+    } else {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Warn,
+            target: "Dockerfile / Compose / K8s".to_string(),
+            title: "No server block — consider --target=cdylib instead of serve".to_string(),
+            rationale: "main.cor declares no `server` block, but the generated Dockerfile's \
+                CMD invokes `corvid serve`. The image will start and immediately error. Either \
+                add a `server` block OR drop the orchestrator manifests in favor of a one-shot \
+                CLI runner image."
+                .to_string(),
+        });
+    }
+
+    // Dangerous tools → approval queue, audit log, secret management.
+    if signals.dangerous_tools > 0 {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Critical,
+            target: "K8s / Compose / runbook".to_string(),
+            title: "Wire the approval-queue admin endpoints to an actual reviewer surface"
+                .to_string(),
+            rationale: format!(
+                "{} `dangerous` tool(s) detected. `corvid serve` queues their invocations \
+                 under `/__approvals/<id>` — reviewers POST `/approve` or `/deny`. The \
+                 generated manifests do NOT include a reviewer UI; either expose the admin \
+                 endpoints to a trusted internal network OR proxy them through your own \
+                 approval dashboard. Without this, dangerous calls queue forever.",
+                signals.dangerous_tools
+            ),
+        });
+    }
+
+    // Agents with `@budget` → resource limits in K8s.
+    if signals.agents_with_budget > 0 {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Info,
+            target: "K8s".to_string(),
+            title: "Set resource limits in line with declared @budget constraints".to_string(),
+            rationale: format!(
+                "{} agent(s) declare `@budget` constraints (compile-time cost ceilings). \
+                 Translate the declared dollar/token/latency caps into K8s `resources.limits` \
+                 + `resources.requests` so a runaway agent can't escalate beyond the budget \
+                 the source enforces. This is a Lift-and-Shift of the moat from compile time \
+                 into runtime resource pressure.",
+                signals.agents_with_budget
+            ),
+        });
+    }
+
+    // tools.py presence → COPY in Dockerfile, Python in image.
+    if signals.has_tools_py {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Info,
+            target: "Dockerfile".to_string(),
+            title: "tools.py is bundled via the 33Q4 presence-conditional COPY".to_string(),
+            rationale: "tools.py detected at app root. The 33Q4 Dockerfile renderer COPYs it \
+                automatically — no manual step. If you add the LLM-driven tool dispatch \
+                pattern (`from corvid_runtime import tool`), the 33Q6 bundled `corvid_runtime` \
+                package is already on PYTHONPATH inside the image."
+                .to_string(),
+        });
+    }
+
+    // Migrations directory → init container or migrate-on-startup.
+    if signals.has_migrations {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Warn,
+            target: "K8s / Compose".to_string(),
+            title: "Run `corvid migrate up` before serving".to_string(),
+            rationale: "migrations/ detected. The generated CMD is `corvid serve`, which does \
+                NOT run migrations. Either add an init container (K8s) / depends_on (Compose) \
+                that runs `corvid migrate up` before the serve container, OR add a startup \
+                hook to the serve container that runs migrate before bind."
+                .to_string(),
+        });
+    }
+
+    // Evals + Traces → observability / replay surface.
+    if signals.has_evals {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Info,
+            target: "K8s / runbook".to_string(),
+            title: "Schedule a periodic `corvid eval list` for regression detection".to_string(),
+            rationale: "evals/ detected. Add a daily/weekly CronJob (K8s) or scheduled \
+                docker run (Compose) that runs `corvid eval list` against the deployed \
+                cdylib + alerts on regressions. The evals are useless if they only run in \
+                CI."
+                .to_string(),
+        });
+    }
+
+    // Tools total → tools.py vs cdylib choice.
+    if signals.tools_total > 0 && !signals.has_tools_py {
+        recommendations.push(TailorRecommendation {
+            severity: TailorSeverity::Warn,
+            target: "Dockerfile / runbook".to_string(),
+            title: "Tools declared but no tools.py — provide --with-tools-cdylib at runtime"
+                .to_string(),
+            rationale: format!(
+                "{} tool(s) declared in main.cor but no tools.py file at app root. The \
+                 `corvid serve` interpreter path has no handler implementations to dispatch \
+                 to. Either: (a) write tools.py against the 33Q6 bundled `corvid_runtime` \
+                 package, OR (b) build a cdylib host (`cargo build --crate-type cdylib`) \
+                 and pass it via `corvid serve --with-tools-cdylib <path>`. The generated \
+                 manifests assume path (a); pick path (b) and adjust the CMD accordingly.",
+                signals.tools_total
+            ),
+        });
+    }
+
+    Ok(TailorReport {
+        app_name,
+        source_path,
+        recommendations,
+        signals,
+    })
+}
+
+/// Render the tailor report as a human-readable markdown document.
+pub fn tailor_render_markdown(report: &TailorReport) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(out, "# Deploy tailor — `{}`", report.app_name);
+    let _ = writeln!(out);
+    let _ = writeln!(out, "Source: `{}`", report.source_path.display());
+    let _ = writeln!(out);
+    let _ = writeln!(out, "## Signals");
+    let _ = writeln!(out);
+    let _ = writeln!(out, "- Server blocks: **{}**", report.signals.server_blocks);
+    let _ = writeln!(out, "- Agents: **{}**", report.signals.agents);
+    let _ = writeln!(out, "- Tools (total / dangerous): **{} / {}**", report.signals.tools_total, report.signals.dangerous_tools);
+    let _ = writeln!(out, "- Agents with @budget: **{}**", report.signals.agents_with_budget);
+    let _ = writeln!(out, "- Filesystem (tools.py / migrations / evals / traces): **{} / {} / {} / {}**", report.signals.has_tools_py, report.signals.has_migrations, report.signals.has_evals, report.signals.has_traces);
+    let _ = writeln!(out);
+    let _ = writeln!(out, "## Recommendations ({})", report.recommendations.len());
+    let _ = writeln!(out);
+    for sev in [
+        TailorSeverity::Critical,
+        TailorSeverity::Warn,
+        TailorSeverity::Info,
+    ] {
+        let bucket: Vec<&TailorRecommendation> = report
+            .recommendations
+            .iter()
+            .filter(|r| r.severity == sev)
+            .collect();
+        if bucket.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "### {:?} ({})", sev, bucket.len());
+        let _ = writeln!(out);
+        for rec in bucket {
+            let _ = writeln!(out, "- **{}** _(target: {})_", rec.title, rec.target);
+            let _ = writeln!(out, "  - {}", rec.rationale);
+        }
+        let _ = writeln!(out);
+    }
+    out
+}
+
 pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
     let app_name = app
         .file_name()
@@ -792,6 +1078,15 @@ fn render_systemd_tmpfiles(app_name: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Tests that mutate `CORVID_DEPLOY_SIGNING_KEY` MUST hold this
+    /// lock to serialize against each other — env-var mutation is
+    /// process-global and the default `cargo test` thread pool runs
+    /// tests in parallel. Without this, the 33Q11 atomicity test
+    /// (which removes the env) races the 33Q12b OCI normalization
+    /// test (which sets it). Surfaced when both tests landed
+    /// together; this lock is the surgical fix.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// 43M: the SBOM emitted by `corvid deploy package` is
     /// structurally valid SPDX 2.3 JSON — has the required
     /// top-level fields, a CC0-1.0 data license, an
@@ -1174,9 +1469,11 @@ mod tests {
         let out_parent = tempfile::tempdir().expect("out tempdir");
         let out = out_parent.path().join("deploy");
 
-        // SAFETY: env-var mutation in tests races with parallel
-        // tests on the same env. See the 33Q11 atomicity test for
-        // the rationale.
+        // Take ENV_LOCK before mutating CORVID_DEPLOY_SIGNING_KEY
+        // so we serialize against the 33Q11 atomicity test that
+        // *removes* the same env. Without the lock the two tests
+        // race under default cargo-test parallelism.
+        let _guard = ENV_LOCK.lock().expect("ENV_LOCK poisoned");
         let prior = std::env::var("CORVID_DEPLOY_SIGNING_KEY").ok();
         unsafe {
             std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", "0".repeat(64));
@@ -1246,13 +1543,10 @@ mod tests {
         // SAFETY: env-var manipulation in tests races with parallel
         // tests on the SAME env. Each deploy_cmd::tests test that
         // touches `CORVID_DEPLOY_SIGNING_KEY` MUST take the same
-        // lock, OR run on --test-threads=1. We take the simple path:
-        // remove the var, run the test, restore the prior value if
-        // any. The corvid-cli test runs with default parallelism so
-        // this could in theory race, but no other test currently
-        // reads this env (`grep -rn CORVID_DEPLOY_SIGNING_KEY` in
-        // the corvid-cli crate). If that changes, lift this to a
-        // serial_test or a dedicated env-mutex.
+        // lock, OR run on --test-threads=1. The 33Q12b OCI
+        // normalization test races this one without the lock —
+        // surfaced when 33Q13c landed and the test pool grew.
+        let _guard = ENV_LOCK.lock().expect("ENV_LOCK poisoned");
         let prior = std::env::var("CORVID_DEPLOY_SIGNING_KEY").ok();
         // SAFETY: Rust 2024 edition marks env-var mutation `unsafe`
         // for race-with-FFI reasons. In tests we accept that.

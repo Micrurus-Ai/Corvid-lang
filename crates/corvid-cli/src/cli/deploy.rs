@@ -61,4 +61,28 @@ pub enum DeployCommand {
         #[arg(long, value_name = "DIR")]
         out: Option<PathBuf>,
     },
+    /// Analyze an app's IR + filesystem and emit deploy-manifest
+    /// tailoring recommendations — slice 33Q13c (the second of three
+    /// remaining AI helpers under
+    /// `35V2-P43-T-LR-phase-43-ai-helpers`).
+    ///
+    /// v1.0 ships a deterministic Rust analyzer that walks the IR
+    /// for known patterns (server blocks, dangerous tools, budget
+    /// constraints, etc.) and emits a structured list of
+    /// recommendations against the generated Dockerfile / Compose /
+    /// K8s / env-schema artifacts. Each recommendation cites the IR
+    /// pattern it derived from (the source-level entity that
+    /// triggered it) so the operator can map every suggestion back
+    /// to their source. A post-v1.0 follow-up (33Q13d) adds an
+    /// LLM-driven refinement layer that proposes free-form
+    /// adjustments on top of the deterministic grounded base.
+    Tailor {
+        /// App directory to analyze (the IR + filesystem layout).
+        app: PathBuf,
+        /// Emit the recommendations as JSON instead of the default
+        /// markdown rendering. Useful for downstream tooling that
+        /// wants to consume the structured shape directly.
+        #[arg(long)]
+        json: bool,
+    },
 }

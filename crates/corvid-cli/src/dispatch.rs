@@ -449,6 +449,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 let out = out.unwrap_or_else(|| app.join("target").join("systemd"));
                 deploy_cmd::run_systemd(&app, &out).map(|_| 0)
             }
+            DeployCommand::Tailor { app, json } => deploy_cmd::run_tailor(&app, json),
         },
         Some(Command::Beta { command }) => match command {
             crate::cli::beta::BetaCommand::SynthesizeFeedback { reports, json } => {
