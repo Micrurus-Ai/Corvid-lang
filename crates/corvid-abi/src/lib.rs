@@ -56,6 +56,12 @@ pub use signing::{
     load_signing_key, load_verifying_key, pae, sign_envelope, verify_envelope, DsseEnvelope,
     DsseSignature, KeySource, SignError, VerifyError,
 };
+/// Re-exported for callers that need to thread a pre-validated key
+/// into `sign_envelope` from outside this crate (e.g.
+/// `corvid-cli/src/deploy_cmd.rs::run_package`'s 33Q11 pre-flight
+/// validation of `CORVID_DEPLOY_SIGNING_KEY`). The opaque alias
+/// keeps `ed25519_dalek` from leaking into the rest of the workspace.
+pub use ed25519_dalek::SigningKey;
 
 use std::io;
 use std::path::Path;

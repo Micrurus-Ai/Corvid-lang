@@ -32,8 +32,32 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     let source = app.join("src").join("main.cor");
     let source_bytes =
         fs::read(&source).with_context(|| format!("read app source `{}`", source.display()))?;
-    fs::create_dir_all(out)
-        .with_context(|| format!("create deploy package `{}`", out.display()))?;
+
+    // 33Q11 (maintainer-as-reviewer-2026-06-05 P2.3 + P3.1) — fail
+    // fast on the things we can't recover from BEFORE writing the
+    // first artifact. Pre-33Q11, `CORVID_DEPLOY_SIGNING_KEY` was
+    // read inside `render_attestation` which runs AFTER 6 files
+    // are already on disk; a missing env left a partial deploy/
+    // dir that confused operators ("error but I see Dockerfile?").
+    // Same for the cdylib read: if --cdylib points at a path that
+    // doesn't exist, fail before we've written anything.
+    //
+    // Reading the env into a SigningKey here also covers the
+    // env-is-set-but-malformed case (e.g. wrong length, invalid
+    // hex) — pre-33Q11 those failed mid-package too. The validated
+    // key is threaded through to `render_attestation` so the
+    // attestation step doesn't re-read the env (single source of
+    // truth + an atomic precondition).
+    let signing_key_raw = std::env::var("CORVID_DEPLOY_SIGNING_KEY").map_err(|_| {
+        anyhow::anyhow!(
+            "CORVID_DEPLOY_SIGNING_KEY is required for the deploy package's signed \
+             attestation envelope. Set it to a 32-byte ed25519 seed encoded as 64 \
+             hex characters (e.g. `openssl rand -hex 32` output). See \
+             `corvid deploy package --help` for the env-var contract."
+        )
+    })?;
+    let signing_key = load_signing_key(&KeySource::Env(signing_key_raw))
+        .map_err(|err| anyhow::anyhow!("load CORVID_DEPLOY_SIGNING_KEY: {err}"))?;
 
     // 43O: chain anchor for the deploy attestation. When `--cdylib`
     // is provided, the SHA-256 of the cdylib's bytes goes into the
@@ -43,6 +67,9 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     // provided, the chain is incomplete and the attestation marks
     // it explicitly so downstream verification refuses to trust an
     // unchained deploy.
+    //
+    // 33Q11: also pre-flight — read the cdylib here so a bad path
+    // fails BEFORE we touch `out/`.
     let cdylib_sha256 = match cdylib {
         Some(path) => {
             let bytes = fs::read(path).with_context(|| {
@@ -52,6 +79,13 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         }
         None => None,
     };
+
+    // Only NOW, after the env + cdylib pre-flight, do we create
+    // the output directory and start writing files. Any failure
+    // before this point leaves `out/` untouched (atomic-on-error
+    // contract).
+    fs::create_dir_all(out)
+        .with_context(|| format!("create deploy package `{}`", out.display()))?;
 
     fs::write(out.join("Dockerfile"), render_dockerfile(app_name, app)).context("write Dockerfile")?;
 
@@ -77,7 +111,8 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         render_startup_checks(app_name),
     )
     .context("write startup checks")?;
-    let attestation = render_attestation(app_name, &metadata_json, cdylib_sha256.as_deref())?;
+    let attestation =
+        render_attestation(app_name, &metadata_json, cdylib_sha256.as_deref(), &signing_key)?;
     fs::write(out.join("build-attestation.dsse.json"), attestation)
         .context("write build attestation")?;
     // 43M: SPDX SBOM accompanies every deploy package so the
@@ -493,11 +528,14 @@ fn render_attestation(
     app_name: &str,
     metadata_json: &str,
     cdylib_sha256: Option<&str>,
+    signing_key: &corvid_abi::SigningKey,
 ) -> Result<String> {
-    let signing_key = std::env::var("CORVID_DEPLOY_SIGNING_KEY")
-        .context("CORVID_DEPLOY_SIGNING_KEY is required for deploy package attestation")?;
-    let key = load_signing_key(&KeySource::Env(signing_key))
-        .map_err(|err| anyhow::anyhow!("load deploy signing key: {err}"))?;
+    // 33Q11: the signing key is now loaded by `run_package` up-front
+    // so we don't read the env here. Pre-33Q11 this function did the
+    // `std::env::var(...)` itself, which deferred the env failure
+    // until after 6 files had been written into `out/` — leaving a
+    // partial deploy package on disk when the env was missing.
+    //
     // 43O: payload carries the attestation-chain anchor. When
     // `cdylib_sha256` is `Some`, the deploy attestation binds to
     // the exact cdylib bytes that ship in the image — the cdylib
@@ -521,7 +559,7 @@ fn render_attestation(
     let envelope = sign_envelope(
         payload.as_bytes(),
         "application/vnd.corvid.deploy.attestation.v1+json",
-        &key,
+        signing_key,
         "deploy-package",
     );
     serde_json::to_string_pretty(&envelope).context("serialize deploy attestation")
@@ -784,13 +822,20 @@ mod tests {
         // Use the `inner` payload format the render function emits
         // (the wrapper sign_envelope adds a DSSE envelope around
         // it). Test the payload structure by exercising the public
-        // render path directly via a controlled key.
-        std::env::set_var(
-            "CORVID_DEPLOY_SIGNING_KEY",
-            "0".repeat(64),
-        );
-        let envelope =
-            render_attestation("test_app", "{\"image\":\"test_app\"}", None).expect("render");
+        // render path directly via a controlled key. Slice 33Q11
+        // moved env reading out of render_attestation; we pass the
+        // pre-loaded test key directly.
+        let signing_key = corvid_abi::load_signing_key(
+            &corvid_abi::KeySource::Env("0".repeat(64)),
+        )
+        .expect("load test signing key");
+        let envelope = render_attestation(
+            "test_app",
+            "{\"image\":\"test_app\"}",
+            None,
+            &signing_key,
+        )
+        .expect("render");
         let parsed: serde_json::Value =
             serde_json::from_str(&envelope).expect("envelope JSON");
         // DSSE envelope base64s the payload; decode + parse.
@@ -806,7 +851,6 @@ mod tests {
         assert_eq!(payload["chain_status"], "incomplete");
         assert!(payload["cdylib_sha256"].is_null());
         assert_eq!(payload["app"], "test_app");
-        std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
     }
 
     /// 43O: when `--cdylib` is provided, the attestation payload
@@ -815,14 +859,23 @@ mod tests {
     /// digest, breaking the chain as intended.
     #[test]
     fn deploy_attestation_binds_to_cdylib_digest_when_provided() {
-        std::env::set_var(
-            "CORVID_DEPLOY_SIGNING_KEY",
-            "0".repeat(64),
-        );
+        // Slice 33Q11 changed render_attestation's signature to take
+        // a pre-loaded SigningKey instead of reading the env. Build
+        // a deterministic test key here (32 zero bytes encoded as
+        // 64 hex zeros) — same shape the prior env-reading path
+        // exercised, no more env mutation in this test.
+        let signing_key = corvid_abi::load_signing_key(
+            &corvid_abi::KeySource::Env("0".repeat(64)),
+        )
+        .expect("load test signing key");
         let cdylib_digest = "abc123def456";
-        let envelope =
-            render_attestation("test_app", "{\"image\":\"test_app\"}", Some(cdylib_digest))
-                .expect("render");
+        let envelope = render_attestation(
+            "test_app",
+            "{\"image\":\"test_app\"}",
+            Some(cdylib_digest),
+            &signing_key,
+        )
+        .expect("render");
         let parsed: serde_json::Value =
             serde_json::from_str(&envelope).expect("envelope JSON");
         use base64::Engine as _;
@@ -836,7 +889,6 @@ mod tests {
             serde_json::from_slice(&payload_bytes).expect("payload JSON");
         assert_eq!(payload["chain_status"], "complete");
         assert_eq!(payload["cdylib_sha256"], cdylib_digest);
-        std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
     }
 
     /// 43N: the Dockerfile rendered by `corvid deploy package`
@@ -1062,6 +1114,98 @@ mod tests {
             "Dockerfile MUST NOT default ARG CORVID_VERSION to `latest` — \
              that's the v0.1.0-lacks-serve regression anonymous-2026-06-04 \
              P3.b documented. got Dockerfile:\n{dockerfile}"
+        );
+    }
+
+    /// 33Q11 acceptance — maintainer-as-reviewer-2026-06-05 P2.3.
+    /// Pre-33Q11, `corvid deploy package` read
+    /// `CORVID_DEPLOY_SIGNING_KEY` inside `render_attestation` which
+    /// runs AFTER 6 files have already been written into `out/`. A
+    /// missing env left a partial deploy directory on disk —
+    /// `Dockerfile`, `oci-labels.json`, `env.schema.json`,
+    /// `health.json`, `migrate.sh`, `startup-checks.md` were
+    /// already there, and `sbom.spdx.json`, `build-attestation.dsse.json`,
+    /// and `VERIFY.md` weren't. A reviewer would see "error" and
+    /// also "6 of 9 files in deploy/" and wonder what to do.
+    ///
+    /// 33Q11 moves the env validation BEFORE
+    /// `fs::create_dir_all(out)`. Missing env → command fails AND
+    /// `out/` doesn't exist. This is the load-bearing assertion.
+    #[test]
+    fn deploy_package_missing_signing_key_env_does_not_create_out_dir() {
+        // Build a minimal valid app structure in a tempdir so we
+        // reach the env check (not the source-read or app-name check).
+        let app_dir = tempfile::tempdir().expect("app tempdir");
+        let src_dir = app_dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src/");
+        std::fs::write(
+            src_dir.join("main.cor"),
+            "agent dummy() -> Int:\n    return 0\n",
+        )
+        .expect("write main.cor");
+
+        // Output target inside another tempdir so we can verify
+        // nothing landed there.
+        let out_parent = tempfile::tempdir().expect("out tempdir");
+        let out = out_parent.path().join("deploy");
+
+        // SAFETY: env-var manipulation in tests races with parallel
+        // tests on the SAME env. Each deploy_cmd::tests test that
+        // touches `CORVID_DEPLOY_SIGNING_KEY` MUST take the same
+        // lock, OR run on --test-threads=1. We take the simple path:
+        // remove the var, run the test, restore the prior value if
+        // any. The corvid-cli test runs with default parallelism so
+        // this could in theory race, but no other test currently
+        // reads this env (`grep -rn CORVID_DEPLOY_SIGNING_KEY` in
+        // the corvid-cli crate). If that changes, lift this to a
+        // serial_test or a dedicated env-mutex.
+        let prior = std::env::var("CORVID_DEPLOY_SIGNING_KEY").ok();
+        // SAFETY: Rust 2024 edition marks env-var mutation `unsafe`
+        // for race-with-FFI reasons. In tests we accept that.
+        unsafe {
+            std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
+        }
+
+        let result = super::run_package(app_dir.path(), &out, None);
+
+        // Restore prior env BEFORE assertions so a failing assertion
+        // doesn't leak into other tests' environments.
+        if let Some(v) = prior {
+            unsafe {
+                std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", v);
+            }
+        }
+
+        // Assertion 1: the command MUST fail.
+        let Err(err) = result else {
+            panic!(
+                "deploy package with no CORVID_DEPLOY_SIGNING_KEY must \
+                 fail; it succeeded with out={}",
+                out.display()
+            );
+        };
+
+        // Assertion 2: the error message MUST name the env var so the
+        // operator knows what to set (the P3.1 ask alongside P2.3).
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("CORVID_DEPLOY_SIGNING_KEY"),
+            "error must name CORVID_DEPLOY_SIGNING_KEY so the \
+             operator can act on it; got: {msg}"
+        );
+
+        // Assertion 3 (LOAD-BEARING): the output directory MUST NOT
+        // exist. Pre-33Q11 it existed with 6 of 9 expected files in
+        // it. Atomic-on-error contract: no partial state on failure.
+        assert!(
+            !out.exists(),
+            "deploy/ output directory MUST NOT exist after a missing-env \
+             failure — that's the 33Q11 atomic-on-error contract. \
+             Pre-33Q11, deploy/ would contain Dockerfile + 5 other \
+             files when CORVID_DEPLOY_SIGNING_KEY was unset, leaving a \
+             confusing partial state for the operator. \
+             out={}",
+            out.display()
         );
     }
 

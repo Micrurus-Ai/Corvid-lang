@@ -4,6 +4,78 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-06 - 33Q11 closed: deploy package atomic-on-error + env-var discoverability
+
+Maintainer-as-reviewer-2026-06-05 P2.3 + P3.1 caught two related
+gaps in `corvid deploy package`:
+
+- The `CORVID_DEPLOY_SIGNING_KEY` env was read INSIDE
+  `render_attestation`, which runs AFTER 6 of 9 artifact files
+  have been written into `out/`. A missing env left
+  `Dockerfile`, `oci-labels.json`, `env.schema.json`,
+  `health.json`, `migrate.sh`, `startup-checks.md` on disk but
+  the attestation, SBOM, and VERIFY.md missing. Reviewers saw
+  "error" plus a partial directory and weren't sure what state
+  they were in.
+- `corvid deploy package --help` didn't mention
+  `CORVID_DEPLOY_SIGNING_KEY` at all. Reviewers had to read
+  the build prompt or a source file to learn the env was
+  required, what shape it took, or that there even WAS one.
+
+Two-track fix:
+
+- **Atomic-on-error contract**: `run_package` now pre-flights
+  the env (and the `--cdylib` read) BEFORE
+  `fs::create_dir_all(out)`. A missing or invalid env fails
+  with a clear error AND leaves `out/` untouched. The
+  validated `SigningKey` is threaded through to
+  `render_attestation` as a parameter — single source of
+  truth, no env re-reads, can't get a different result mid-
+  package.
+- **`--help` surface**: the clap `Package` variant gains a
+  long-form docstring naming `CORVID_DEPLOY_SIGNING_KEY` as
+  REQUIRED with format (32-byte ed25519 seed, 64 hex chars,
+  `openssl rand -hex 32` example) and the atomic-on-error
+  contract spelled out so operators see the deal up-front.
+
+Plumbing: `corvid_abi::SigningKey` is now re-exported from
+corvid-abi (was hidden behind the internal
+`ed25519_dalek::SigningKey` reference). Other crates that
+need to thread a pre-validated key into `sign_envelope` get
+the same alias without dragging `ed25519_dalek` into their
+deps.
+
+Acceptance gate
+`deploy_package_missing_signing_key_env_does_not_create_out_dir`
+in `deploy_cmd::tests` builds a minimal valid app, removes
+`CORVID_DEPLOY_SIGNING_KEY`, calls `run_package`, asserts:
+
+- Returns `Err` (must fail).
+- The error message names `CORVID_DEPLOY_SIGNING_KEY` so the
+  operator knows what to set.
+- `out/` MUST NOT exist (load-bearing). Pre-33Q11 it had 6 files.
+
+Existing tests `deploy_attestation_binds_to_cdylib_digest_when_provided`
+and `deploy_attestation_marks_chain_incomplete_without_cdylib`
+were updated for the new `render_attestation` signature
+(passes a pre-loaded test key instead of mutating the env).
+The env-mutation lines that used to pollute the test process's
+env are now gone — cleaner test setup as a side effect.
+
+Verified live on the maintainer-trial app: pre-33Q11
+`corvid deploy package $(pwd) --out deploy/` (no env) left 6
+files in `deploy/`; post-33Q11 the same command exits with a
+clear error and `deploy/` doesn't exist.
+
+**Pattern recorded.** When a command has multiple required
+inputs (file paths, env vars, flags), validate them ALL up-
+front BEFORE any side effect. Defer-validation means a missing
+late-input leaves partial state on disk that confuses operators
+about the recovery path. Pre-flight pass first, side effects
+second.
+
+---
+
 ## 2026-06-05 - 33Q10 closed: serve 500 bodies no longer leak IR byte-spans
 
 Maintainer-as-reviewer-2026-06-05 P2.2 caught that `corvid serve`

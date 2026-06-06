@@ -4,6 +4,15 @@ use std::path::PathBuf;
 #[derive(Subcommand)]
 pub enum DeployCommand {
     /// Emit a deploy package containing Dockerfile and OCI metadata.
+    ///
+    /// REQUIRED env var:
+    ///   CORVID_DEPLOY_SIGNING_KEY  32-byte ed25519 seed, encoded as
+    ///                              64 hex characters (e.g.
+    ///                              `openssl rand -hex 32`). Signs
+    ///                              the build attestation. Missing or
+    ///                              malformed -> command fails BEFORE
+    ///                              any files are written (slice
+    ///                              33Q11's atomic-on-error contract).
     Package {
         /// App directory, e.g. examples/backend/personal_executive_agent.
         app: PathBuf,
