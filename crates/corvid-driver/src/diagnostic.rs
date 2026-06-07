@@ -11,7 +11,7 @@
 use corvid_ast::Span;
 use corvid_resolve::ResolveError;
 use corvid_syntax::errors::{LexError, ParseError};
-use corvid_types::TypeError;
+use corvid_types::{TypeError, TypeWarning};
 use std::fmt;
 use std::path::Path;
 
@@ -80,6 +80,16 @@ impl From<TypeError> for Diagnostic {
             span: e.span,
             message,
             hint,
+        }
+    }
+}
+
+impl From<TypeWarning> for Diagnostic {
+    fn from(w: TypeWarning) -> Self {
+        Diagnostic {
+            span: w.span,
+            message: w.kind.message(),
+            hint: w.kind.hint(),
         }
     }
 }

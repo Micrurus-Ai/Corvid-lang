@@ -23,6 +23,14 @@ use super::{lower_driver_file, typecheck_driver_file};
 pub struct CompileResult {
     pub python_source: Option<String>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Self-trial round 4 (Gap A): non-blocking warnings surfaced
+    /// during typecheck — e.g. `ScheduleNotExecutable` flagging
+    /// that the scheduler runner doesn't fire crons in v1.0. Kept
+    /// SEPARATE from `diagnostics` so the existing error-flow
+    /// (`compile_with_config_at_path` callers checking `ok()`)
+    /// stays unchanged; CLIs that want to surface warnings read
+    /// this field explicitly (see `crates/corvid-cli/src/commands/misc.rs::cmd_check`).
+    pub warnings: Vec<Diagnostic>,
 }
 
 impl CompileResult {
@@ -52,6 +60,7 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
             return CompileResult {
                 python_source: None,
                 diagnostics,
+                warnings: Vec::new(),
             };
         }
     };
@@ -67,11 +76,20 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
     // 4. Typecheck (collects errors — this is where the killer feature lives)
     let checked = typecheck_with_config(&file, &resolved, config);
     diagnostics.extend(checked.errors.iter().cloned().map(Diagnostic::from));
+    // Self-trial round 4 Gap A: thread warnings through so the CLI can
+    // surface them at `corvid check` time. Previously dropped silently.
+    let warnings: Vec<Diagnostic> = checked
+        .warnings
+        .iter()
+        .cloned()
+        .map(Diagnostic::from)
+        .collect();
 
     if !diagnostics.is_empty() {
         return CompileResult {
             python_source: None,
             diagnostics,
+            warnings,
         };
     }
 
@@ -82,6 +100,7 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
     CompileResult {
         python_source: Some(py),
         diagnostics: Vec::new(),
+        warnings,
     }
 }
 
@@ -101,6 +120,7 @@ pub fn compile_with_config_at_path(
             return CompileResult {
                 python_source: None,
                 diagnostics,
+                warnings: Vec::new(),
             };
         }
     };
@@ -120,11 +140,24 @@ pub fn compile_with_config_at_path(
             .cloned()
             .map(Diagnostic::from),
     );
+    // Self-trial round 4 Gap A: surface warnings (separate from
+    // errors) for `corvid check`. Pre-fix these were silently
+    // dropped — including the new ScheduleNotExecutable warning that
+    // tells reviewers their cron won't fire on v1.0.
+    let warnings: Vec<Diagnostic> = typechecked
+        .result
+        .checked
+        .warnings
+        .iter()
+        .cloned()
+        .map(Diagnostic::from)
+        .collect();
 
     if !diagnostics.is_empty() {
         return CompileResult {
             python_source: None,
             diagnostics,
+            warnings,
         };
     }
 
@@ -134,5 +167,6 @@ pub fn compile_with_config_at_path(
     CompileResult {
         python_source: Some(py),
         diagnostics: Vec::new(),
+        warnings,
     }
 }

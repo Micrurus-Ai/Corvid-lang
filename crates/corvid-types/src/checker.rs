@@ -118,6 +118,28 @@ fn typecheck_with_everything(
     config: Option<&crate::config::CorvidConfig>,
     modules: Option<&corvid_resolve::ModuleResolution>,
 ) -> Checked {
+    // Self-trial round 4 gap (Gap A — schedule decls silently dropped):
+    // emit a warning for every `schedule` declaration so reviewers
+    // know the cron won't fire on v1.0. The IR lowering at
+    // `crates/corvid-ir/src/lower.rs:231` silently drops the decl
+    // ("until the scheduler runner slice"); without this warning a
+    // reviewer writing `schedule "0 9 * * *" zone "America/New_York"
+    // -> summarize_yesterday()` gets `ok: src/main.cor — no errors`
+    // and confidently expects the cron to fire. The hint points
+    // them at the external-cron workaround until the runner ships.
+    let mut early_warnings: Vec<crate::errors::TypeWarning> = Vec::new();
+    for decl in &file.decls {
+        if let Decl::Schedule(sched) = decl {
+            early_warnings.push(crate::errors::TypeWarning::new(
+                crate::errors::TypeWarningKind::ScheduleNotExecutable {
+                    agent: sched.target.name.clone(),
+                    cron: sched.cron.clone(),
+                },
+                sched.span,
+            ));
+        }
+    }
+
     // Build the effect registry up front. Slice 2b of Provenance
     // Propagation (Design X, D1 part A) needs it *during* the main
     // check pass so `check_*_call` can wrap a `data: grounded`
@@ -140,6 +162,7 @@ fn typecheck_with_everything(
     let registry = crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config);
 
     let mut c = Checker::new(file, resolved, modules, &registry);
+    c.warnings.extend(early_warnings);
     c.validate_import_use_items(file);
     c.validate_python_import_effects(file);
     c.check_file(file);

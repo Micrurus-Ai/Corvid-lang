@@ -15,6 +15,7 @@
 use anyhow::{Context, Result};
 use corvid_driver::{
     compile_with_config_at_path, diff_snapshots, load_corvid_config_for, render_all_pretty,
+    render_all_pretty_warnings,
     render_effect_diff, scaffold_new, snapshot_revision, vendor_std,
 };
 use std::path::{Path, PathBuf};
@@ -57,8 +58,27 @@ pub(crate) fn cmd_check(file: &Path) -> Result<u8> {
         .with_context(|| format!("cannot read `{}`", file.display()))?;
     let config = load_corvid_config_for(file);
     let result = compile_with_config_at_path(&source, file, config.as_ref());
+    // Self-trial round 4 Gap A — surface warnings BEFORE the
+    // success/error branch so a reviewer sees them even when the
+    // source compiles cleanly. Pre-fix these were silently dropped
+    // and reviewers had no signal that e.g. `schedule "0 9 * * *"
+    // -> daily_summary()` parses but won't fire on v1.0.
+    if !result.warnings.is_empty() {
+        eprint!(
+            "{}",
+            render_all_pretty_warnings(&result.warnings, file, &source)
+        );
+    }
     if result.ok() {
-        println!("ok: {} — no errors", file.display());
+        if result.warnings.is_empty() {
+            println!("ok: {} — no errors", file.display());
+        } else {
+            println!(
+                "ok: {} — no errors ({} warning(s) above)",
+                file.display(),
+                result.warnings.len()
+            );
+        }
         Ok(0)
     } else {
         eprint!("{}", render_all_pretty(&result.diagnostics, file, &source));

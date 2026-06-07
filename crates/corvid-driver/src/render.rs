@@ -17,12 +17,30 @@ use std::path::Path;
 /// a real terminal — captured / piped / redirected output stays plain
 /// text so PowerShell conhost and CI logs render readably.
 pub fn render_pretty(diag: &Diagnostic, source_path: &Path, source: &str) -> String {
+    render_pretty_with_severity(diag, source_path, source, Severity::Error)
+}
+
+/// Self-trial round 4 Gap A: severity-aware variant so warnings
+/// (like `W0280` schedule-not-executable) render with the correct
+/// "warning:" header + yellow accent instead of being shown as
+/// "error: W0280 ...". The original `render_pretty` keeps the
+/// error-only path callers depend on.
+pub fn render_pretty_with_severity(
+    diag: &Diagnostic,
+    source_path: &Path,
+    source: &str,
+    severity: Severity,
+) -> String {
     let filename = source_path.display().to_string();
     let span = diag.span.start..diag.span.end.max(diag.span.start + 1);
 
     let code = detect_error_code(&diag.message);
     let with_color = std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal();
-    let kind = ReportKind::Custom("error", Color::Red);
+    let (header, accent) = match severity {
+        Severity::Error => ("error", Color::Red),
+        Severity::Warning => ("warning", Color::Yellow),
+    };
+    let kind = ReportKind::Custom(header, accent);
 
     let mut builder = Report::build(kind, filename.as_str(), span.start)
         .with_config(Config::default().with_color(with_color))
@@ -31,7 +49,7 @@ pub fn render_pretty(diag: &Diagnostic, source_path: &Path, source: &str) -> Str
         .with_label(
             Label::new((filename.as_str(), span))
                 .with_message(label_for(&diag.message))
-                .with_color(Color::Red),
+                .with_color(accent),
         );
 
     if let Some(hint) = &diag.hint {
@@ -91,6 +109,29 @@ pub fn render_all_pretty(
     }
     out.push_str(&format!("\n{} error(s) found.\n", diags.len()));
     out
+}
+
+/// Self-trial round 4 Gap A — same as `render_all_pretty` but with
+/// a warning-shaped header + "N warning(s)" summary instead of
+/// "N error(s) found." Used by `corvid check` to surface
+/// non-blocking warnings (e.g. `ScheduleNotExecutable`).
+pub fn render_all_pretty_warnings(
+    diags: &[Diagnostic],
+    source_path: &Path,
+    source: &str,
+) -> String {
+    let mut out = String::new();
+    for d in diags {
+        out.push_str(&render_pretty_with_severity(d, source_path, source, Severity::Warning));
+    }
+    out.push_str(&format!("\n{} warning(s).\n", diags.len()));
+    out
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Severity {
+    Error,
+    Warning,
 }
 
 /// Best-effort mapping from a diagnostic message to a stable error code.

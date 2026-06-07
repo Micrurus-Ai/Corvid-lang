@@ -419,6 +419,15 @@ Executes via the Rust tree-walking interpreter in `corvid-vm`. Full AI runtime a
 
 Every error has a code (`E0001`–`E0302`) and a suggested fix. See [ARCHITECTURE.md §8](ARCHITECTURE.md#L336) for the design target.
 
+### Compile-time warnings
+
+Some declarations parse + typecheck cleanly but won't execute on v1.0 because a runner slice is still pending. `corvid check` surfaces these as yellow `warning:` blocks BEFORE the success line so they can't be missed:
+
+- **`W0280` — `schedule` declarations preserve but don't fire.** `schedule "0 9 * * *" zone "..." -> agent(...)` lowers to IR cleanly so the post-v1.0 scheduler runner can wire it up later, but in v1.0 the cron is not yet attached to the runtime tick loop. The warning names the agent and cron so a reviewer doesn't ship a daily summary they think is running.
+
+A clean check with warnings prints `ok: file.cor — no errors (N warning(s) above)` and exits 0 — warnings are signal, not failure.
+
+
 ### Runtime errors (native binaries)
 
 A compiled program can fail at runtime for:

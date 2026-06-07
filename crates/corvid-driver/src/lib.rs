@@ -62,7 +62,7 @@ pub use meta_verify::{
     render_meta_report, verify_counterexample_corpus, Counterexample, MetaKind, MetaVerdict, CORPUS,
 };
 pub use native_ability::{native_ability, NotNativeReason};
-pub use render::{render_all_pretty, render_pretty};
+pub use render::{render_all_pretty, render_all_pretty_warnings, render_pretty};
 pub use spec_check::{
     extract_spec_examples, render_spec_report, verify_spec_examples, Expectation, SpecExample,
     SpecVerdict, VerdictKind,

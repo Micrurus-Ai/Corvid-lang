@@ -4,6 +4,121 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-07 - 33Q14 closed: self-trial round 4 gap closure (schedule warning + cdylib_catalog serialization)
+
+Comprehensive gap-closure pass between 33Q13e and the next
+launch-material slice. The trigger was a maintainer-as-reviewer
+self-trial round 4: a fresh app shape (`/tmp/job_coordinator` —
+a daily-summary cron app) that none of the previous three rounds
+exercised. Two real reviewer-visible launch-blocker-class gaps
+surfaced; both ship in this slice.
+
+### Gap A — `schedule` declarations silently dropped at v1.0
+
+A reviewer writing
+
+```corvid
+schedule "0 9 * * *" zone "America/New_York" -> summarize_yesterday()
+```
+
+would have seen `corvid check` print `ok: ... — no errors` with
+NO signal that the v1.0 scheduler runner does not yet fire
+scheduled jobs. The declaration parses, typechecks, and lowers
+into the IR cleanly — the entire pipeline is intact for the
+post-v1.0 runner slice that will wire it up. But the cron would
+silently never fire. That is a launch-blocker-class first-
+impression gap: a reviewer's daily cron would not run, and they
+would have no idea why.
+
+**Fix.** A new typecheck warning, `W0280`:
+
+- `TypeWarningKind::ScheduleNotExecutable { agent, cron }` in
+  `crates/corvid-types/src/errors/warning_kind.rs` carries the
+  agent name + cron expression and renders a precise hint
+  telling the reader the declaration is preserved in the IR for
+  the post-v1.0 runner slice — so they know it's TRACKED, not
+  broken.
+- A pre-pass in `typecheck_with_everything`
+  (`crates/corvid-types/src/checker.rs`) walks `Decl::Schedule`
+  entries and emits the warning before the main checker runs,
+  so even if other errors fire the schedule warning still
+  appears.
+- `CompileResult` in `crates/corvid-driver/src/pipeline/compile.rs`
+  grew a `pub warnings: Vec<Diagnostic>` field kept SEPARATE
+  from `diagnostics` — the existing `ok()` path stays unchanged,
+  warnings are additive.
+- `From<TypeWarning> for Diagnostic` in
+  `crates/corvid-driver/src/diagnostic.rs` reuses the same span
+  + hint shape as errors.
+- New severity-aware renderer in
+  `crates/corvid-driver/src/render.rs`:
+  - `Severity::{Error, Warning}` enum
+  - `render_pretty_with_severity(...)` uses ariadne's
+    `ReportKind::Custom("warning", Color::Yellow)` for warnings;
+    the existing `render_pretty` keeps the error-only path so
+    legacy callers don't see a behavior change.
+  - `render_all_pretty_warnings(...)` emits `N warning(s).` as
+    the summary tail instead of the `N error(s) found.` shape
+    that would have read as a false-positive.
+- `cmd_check` in `crates/corvid-cli/src/commands/misc.rs` surfaces
+  warnings via `render_all_pretty_warnings` BEFORE the
+  success/error branch so a reviewer sees them even when the
+  source compiles cleanly, and the success line tags the count:
+  `ok: ... — no errors (1 warning(s) above)`.
+
+**Live verification.** `corvid check /tmp/job_coordinator/src/main.cor`
+now prints a yellow `warning: W0280` block + the `1 warning(s).`
+summary and exits 0 with the tagged success line. Pre-fix it
+printed only `ok`. The reviewer now has a precise actionable
+signal at exactly the point a silent failure would otherwise
+land.
+
+### Gap B — `cdylib_catalog` integration tests race under `cargo test --workspace`
+
+The 9 `#[test]` functions in
+`crates/corvid-runtime/tests/cdylib_catalog.rs` each invoke
+`build_catalog_library()` (an actual `cargo build` of a real
+cdylib) and then load the shared library via `libloading`.
+Under `cargo test --workspace` default parallel scheduler they
+raced on two shared resources:
+
+1. The concurrent cargo build lock — multiple parallel
+   `cargo build`s of the same fixture would deadlock or thrash.
+2. The process-global C-ABI registry populated by
+   `corvid_register_tool` — two libraries loaded in the same
+   process with overlapping symbol names produced visible
+   cross-test pollution.
+
+Pre-fix: 7/9 spurious failures in workspace runs; `--test-threads=1`
+made all 9 pass.
+
+**Fix.** Mirrors the `ENV_LOCK` pattern that 33Q13c shipped for
+`deploy_cmd::tests`:
+
+- Module-level `static BUILD_LOCK: Mutex<()> = Mutex::new(());`
+  with a comment that names the race precisely so future
+  maintainers don't accidentally remove the serialization.
+- `let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");`
+  as the FIRST line of every `#[test]` body. All 9 tests guarded.
+
+**Live verification.** Parallel
+`cargo test -p corvid-runtime --test cdylib_catalog` (no
+`--test-threads=1`) now passes 9/9 reliably in ~136s. Pre-fix
+the same command produced 7 failures.
+
+### Pattern reinforced
+
+The `ENV_LOCK` / `BUILD_LOCK` pattern is now the canonical fix
+shape for any integration-test pool that touches a process-global
+mutable resource (env vars, cargo build lock, libloading
+registry). Filed as the second instance of the
+"serialize-process-global-shared-state via module-level Mutex"
+pattern — explicitly NOT a generic test-helper crate because
+each lock names the specific resource it serializes, which is
+clearer than a generic `serial_test` macro.
+
+---
+
 ## 2026-06-07 - 33Q13e closed: corvid upgrade assist (deterministic core)
 
 Third and final of the deterministic-first AI helpers under

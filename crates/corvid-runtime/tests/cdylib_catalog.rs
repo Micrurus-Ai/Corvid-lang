@@ -17,7 +17,26 @@ use libloading::Library;
 use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
 use tempfile::TempDir;
+
+/// Self-trial round 4 (Gap B): each test in this file spawns
+/// `cargo build` to produce a fresh cdylib AND mutates the
+/// process-global C-ABI tool / approver registries via the loaded
+/// library. Under default `cargo test` parallelism the test binary
+/// runs N tests concurrently — multiple `cargo build` invocations
+/// race on the shared `target/` lock + the embedded-descriptor
+/// emission, AND multiple cdylibs simultaneously mutate the same
+/// global registries. The failure shape is "1 to N tests fail
+/// non-deterministically per workspace run."
+///
+/// Each test takes `BUILD_LOCK` as its first statement to
+/// serialize the cargo-build + global-registry path. Tests still
+/// run in their own threads; the lock just keeps the cdylib-build
+/// + load + interaction body atomic per-test. Re-running
+/// `cargo test -p corvid-runtime --test cdylib_catalog` (no
+/// `--test-threads=1`) is now reliable.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 const CATALOG_SRC: &str = r#"
 tool echo_string(value: String) -> String dangerous
@@ -230,6 +249,7 @@ fn write_approver_source(dir: &TempDir, source: &str) -> PathBuf {
 
 #[test]
 fn embedded_section_roundtrips_from_built_library() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     let section = read_embedded_section_from_library(&built.path).expect("read embedded section");
     let decoded = descriptor_from_embedded_section(&section).expect("decode descriptor");
@@ -238,6 +258,7 @@ fn embedded_section_roundtrips_from_built_library() {
 
 #[test]
 fn two_builds_of_same_source_produce_identical_embedded_descriptor_sections() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let left =
         read_embedded_section_from_library(&build_catalog_library().path).expect("left section");
     let right =
@@ -248,6 +269,7 @@ fn two_builds_of_same_source_produce_identical_embedded_descriptor_sections() {
 
 #[test]
 fn corvid_abi_verify_matches_and_rejects_one_bit_flip() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
@@ -265,6 +287,7 @@ fn corvid_abi_verify_matches_and_rejects_one_bit_flip() {
 
 #[test]
 fn corvid_list_agents_lists_declaration_order_and_introspection_entries() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
@@ -326,6 +349,7 @@ fn corvid_list_agents_lists_declaration_order_and_introspection_entries() {
 
 #[test]
 fn corvid_pre_flight_validates_args_and_rejects_unsupported_sigs_without_dispatching() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         std::env::remove_var("CORVID_TEST_MOCK_LLM");
@@ -385,6 +409,7 @@ fn corvid_pre_flight_validates_args_and_rejects_unsupported_sigs_without_dispatc
 
 #[test]
 fn corvid_call_agent_handles_happy_path_bad_args_and_approval_flow() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         std::env::set_var("CORVID_MODEL", "mock-1");
@@ -499,6 +524,7 @@ fn corvid_call_agent_handles_happy_path_bad_args_and_approval_flow() {
 
 #[test]
 fn corvid_mark_preapproved_request_allows_direct_dangerous_call_without_callback() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
@@ -546,6 +572,7 @@ fn corvid_mark_preapproved_request_allows_direct_dangerous_call_without_callback
 
 #[test]
 fn corvid_find_agents_where_filters_in_live_catalog_order() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     unsafe {
         let lib = Library::new(&built.path).expect("load library");
@@ -627,6 +654,7 @@ fn corvid_find_agents_where_filters_in_live_catalog_order() {
 
 #[test]
 fn corvid_source_approver_registration_and_predicate_eval_work() {
+    let _guard = BUILD_LOCK.lock().expect("BUILD_LOCK poisoned");
     let built = build_catalog_library();
     let approver_path = write_approver_source(
         &built._temp,
