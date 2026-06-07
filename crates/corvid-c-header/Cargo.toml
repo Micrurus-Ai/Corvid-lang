@@ -7,7 +7,10 @@ description = "C header emission for Corvid embedded library targets."
 
 [dependencies]
 corvid-ir = { workspace = true }
+corvid-prompt-format = { workspace = true }
+corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 corvid-ast = { workspace = true }

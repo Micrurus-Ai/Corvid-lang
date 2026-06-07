@@ -3369,15 +3369,74 @@ agent refund_bot(ticket_id: String, amount: Float) -> Bool:
     );
 }
 
+// Slice 33Q8 — `pub extern "c"` agents now accept struct
+// parameters whose fields are all 20n-C-supported scalars. The
+// boundary travels via JSON-encoded `*const c_char`; the
+// typechecker lift here is the front of the slice.
 #[test]
-fn extern_c_agent_with_struct_param_errors_with_hint_at_22b() {
+fn extern_c_agent_with_scalar_struct_param_compiles_clean() {
     let checked = check(
         r#"
 type Ticket:
     id: String
+    amount: Int
 
 pub extern "c"
-agent refund_bot(ticket: Ticket) -> Bool:
+agent refund_bot(ticket: Ticket @borrowed) -> Bool:
+    return true
+"#,
+    );
+    let extern_errs: Vec<_> = checked
+        .errors
+        .iter()
+        .filter(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
+        .collect();
+    assert!(
+        extern_errs.is_empty(),
+        "expected no NonScalarInExternC errors for scalar-field struct param; got {extern_errs:?}"
+    );
+}
+
+#[test]
+fn extern_c_agent_with_scalar_struct_return_compiles_clean() {
+    let checked = check(
+        r#"
+type Receipt:
+    id: String
+    ok: Bool
+
+pub extern "c"
+agent finalize() -> Receipt:
+    return Receipt("abc", true)
+"#,
+    );
+    let extern_errs: Vec<_> = checked
+        .errors
+        .iter()
+        .filter(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
+        .collect();
+    assert!(
+        extern_errs.is_empty(),
+        "expected no NonScalarInExternC errors for scalar-field struct return; got {extern_errs:?}"
+    );
+}
+
+// Adversarial: a struct whose field is itself a nested struct
+// (or list / option) still trips the rejection — the 20n-C
+// codegen does not yet support these field shapes, so the
+// typechecker stays in lock-step with codegen depth.
+#[test]
+fn extern_c_agent_with_struct_param_containing_nested_struct_field_still_errors() {
+    let checked = check(
+        r#"
+type Inner:
+    label: String
+
+type Outer:
+    inner: Inner
+
+pub extern "c"
+agent refund_bot(outer: Outer @borrowed) -> Bool:
     return true
 "#,
     );
@@ -3385,11 +3444,11 @@ agent refund_bot(ticket: Ticket) -> Bool:
         .errors
         .iter()
         .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
-        .expect("expected NonScalarInExternC error");
+        .expect("expected NonScalarInExternC error for nested-struct field");
+    let hint = err.hint().unwrap_or_default();
     assert!(
-        err.hint().unwrap_or_default().contains("Phase 22"),
-        "expected Phase 22 FFI hint, got {:?}",
-        err.hint()
+        hint.contains("scalars") && hint.contains("Nested structs"),
+        "expected scalar-only hint, got {hint:?}"
     );
 }
 
@@ -3407,10 +3466,10 @@ agent ids() -> List<String>:
         .iter()
         .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
         .expect("expected NonScalarInExternC error");
+    let hint = err.hint().unwrap_or_default();
     assert!(
-        err.hint().unwrap_or_default().contains("Phase 22"),
-        "expected Phase 22 FFI hint, got {:?}",
-        err.hint()
+        hint.contains("Lists") || hint.contains("rich types") || hint.contains("scalars"),
+        "expected scalar-only hint covering lists, got {hint:?}"
     );
 }
 

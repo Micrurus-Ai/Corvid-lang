@@ -885,7 +885,7 @@ impl TypeErrorKind {
                 "every arm (including `else`) of a replay block must produce the same type; adjust the arm body to return `{expected}`"
             )),
             Self::NonScalarInExternC { .. } => Some(
-                "extern \"c\" currently accepts Int/Float/Bool/String parameters plus scalar, `Grounded<scalar>`, or `Nothing` returns; rich structured boundary types still wait for later Phase 22 FFI slices".into(),
+                "extern \"c\" accepts Int/Float/Bool/String parameters, scalar / `Grounded<scalar>` / `Nothing` returns, and user-declared structs whose fields are themselves all scalars (Int/Float/Bool/String). Nested structs, Lists, Options, and other rich types still wait for follow-up FFI slices. Boundary structs travel the C ABI as JSON-encoded strings; see docs/reference/exported-abi.md".into(),
             ),
             Self::AmbiguousExternOwnership { .. } => Some(
                 "add an explicit ownership annotation such as `@owned`, `@borrowed`, `@shared`, or `@static` after the boundary type".into(),

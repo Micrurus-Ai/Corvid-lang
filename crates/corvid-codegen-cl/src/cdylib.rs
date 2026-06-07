@@ -118,6 +118,14 @@ fn exported_symbols(ir: &IrFile, has_attestation: bool) -> Vec<String> {
                 corvid_types::Type::Grounded(inner) => {
                     matches!(&**inner, corvid_types::Type::String)
                 }
+                // Slice 33Q8: struct extern-c returns leave the
+                // wrapper as `const char*` JSON, allocated via
+                // `corvid_string_into_cstr`. The C caller must
+                // free them via `corvid_free_string`, so the
+                // symbol needs export whenever any extern-c agent
+                // returns a struct.
+                corvid_types::Type::Struct(_)
+                | corvid_types::Type::ImportedStruct(_) => true,
                 _ => false,
             }
     }) {

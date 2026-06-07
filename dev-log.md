@@ -4,6 +4,135 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-07 - 33Q8 closed: `pub extern "c"` struct boundary lift (JSON wire)
+
+Final P1 launch-blocker from the maintainer-as-reviewer-2026-06-05
+round-3 trial. With this slice the round-3 parent (`33Q-trial-round-
+3-code-findings`) also closes — every P1/P2/P3/Minor child either
+shipped or sits explicitly post-v1.0.
+
+### What the gap was
+
+`pub extern "c" agent foo(req: StructReq) -> StructResp` was rejected
+at typecheck time:
+
+```
+error: extern "c" agent `foo` uses unsupported ABI type `struct` in parameter `req`
+```
+
+Phase 20n-C had already shipped per-struct JSON decoder / encoder
+for INTERNAL sites (prompt return shape, entry-agent stdout printing
+in `corvid run`), but the **public** `pub extern "c"` boundary still
+rejected struct shapes. The cost: any production-shape HTTP
+backend whose route bodies are structured (`HttpRequest`, `OrderLine`,
+`Receipt`) couldn't ship via `corvid build --target=cdylib --sign`.
+The reviewer either accepted scalar-only signatures (false economy
+on type discipline) or smuggled the struct as a `String` JSON
+parameter that the agent parsed internally (which moves type
+discipline OFF the signed boundary — the exact opposite of
+Corvid's pitch).
+
+### What shipped
+
+The boundary now travels structs as JSON. Slice 1 of 4 — typechecker:
+
+- `Checker::extern_c_param_type_supported` and
+  `Checker::extern_c_return_type_supported` accept `Type::Struct(_)`
+  and `Type::ImportedStruct(_)` when every field's `TypeRef`
+  resolves to a scalar named type (`Int` / `Float` / `Bool` /
+  `String`). Nested struct, list, option, and other rich field
+  shapes still trip `NonScalarInExternC` so the typechecker stays
+  in lock-step with the 20n-C codegen depth.
+- Ownership inference covers structs: param → `@borrowed` with
+  `call` lifetime (matches the String borrow shape — the JSON
+  buffer is caller-owned for the call frame); return → `@owned`
+  (the Corvid wrapper hands back a Corvid-owned buffer the caller
+  frees via `corvid_free_string`).
+- Hint message rewritten to drop the stale "Phase 22 FFI" reference
+  and direct readers at `docs/reference/exported-abi.md`.
+
+Slice 2 — codegen wiring at the `pub extern "c"` wrapper
+(`crates/corvid-codegen-cl/src/lowering/agent.rs::define_extern_c_wrapper`):
+
+- Struct **parameter**: `const char* JSON` → `string_from_cstr` →
+  `lookup_or_emit_struct_decoder` → struct pointer. Temporary
+  CorvidString released. Decoder NULL return traps cleanly
+  (`cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW`); the v1
+  contract is "well-formed JSON or trap," documented in
+  `docs/reference/exported-abi.md`. A follow-up FFI slice can
+  thread an error-out-parameter for richer reporting.
+- Struct **return**: struct pointer → `lookup_or_emit_struct_to_json`
+  → CorvidString → `string_into_cstr` → `const char* JSON`. Source
+  struct released after encoding (the encoder retains field strings
+  internally per its 20n-C doc, so the wrapper's release here is
+  the struct itself).
+- `extern_c_abi_type` maps `Type::Struct(_)` to `I64` — the
+  JSON-pointer wire shape.
+- `cdylib::exported_symbols` exports `corvid_free_string` whenever
+  any extern-c agent returns a struct (mirror of the pre-33Q8
+  String-return / Grounded-String-return cases). Without this, the
+  C caller couldn't free the returned buffer.
+
+Slice 3 — C header generation
+(`crates/corvid-c-header/src/lib.rs::emit_header`):
+
+- New deps on `corvid-prompt-format`, `corvid-resolve`, `serde_json`.
+- For each struct boundary, `schema_for(ty, types_by_id)` produces
+  a JSON Schema; the c-header generator pretty-prints it and
+  embeds it as a `// JSON shape for parameter \`<name>\`:` (or
+  `// JSON shape for return value \`return\`:`) block comment
+  above the agent's C signature. The signature itself declares
+  `const char* <param>` for struct params and `const char*
+  agent(...)` for struct returns. A C caller reading the `.h`
+  knows the exact JSON field shape without opening the `.cor`
+  source.
+
+Slice 4 — acceptance:
+
+- `cdylib_struct_param_and_return_roundtrip_via_json` in
+  `crates/corvid-codegen-cl/tests/cdylib_emission.rs` is the
+  load-bearing roundtrip — builds a cdylib with
+  `pub extern "c" agent finalize_ticket(ticket: Ticket @borrowed)
+  -> Receipt`, dlopens it, calls it with
+  `{"id":"vip-007","amount":42}`, asserts the returned JSON
+  parses + has `ok: true` AND that `note: "vip-007"` survives the
+  decode/encode round (proves the user value actually marshals
+  through the wrapper, not just that the wrapper returns a
+  syntactically-valid JSON envelope).
+- `cdylib_struct_boundary_c_header_documents_json_schema` checks
+  the emitted `.h` declares the C types AND embeds the schema
+  comments with the real field names.
+- Typechecker tests (`extern_c_agent_with_scalar_struct_param_compiles_clean`,
+  `..._scalar_struct_return_compiles_clean`,
+  `..._with_struct_param_containing_nested_struct_field_still_errors`,
+  `..._with_list_return_errors_with_hint_at_22b`) pin the lift
+  surface — happy path AND adversarial guard for the nested-field
+  case that the codegen doesn't yet support.
+
+### Verification scope
+
+- `cargo test -p corvid-types --lib` — typechecker green.
+- `cargo test -p corvid-c-header` — 8/8 header tests green
+  including the new struct-boundary one.
+- `cargo test -p corvid-codegen-cl --test cdylib_emission` —
+  11/11 green (was 9/9 pre-33Q8; +2 new). The roundtrip test
+  runs an actual cargo-build + libloading-dlopen + JSON call —
+  closest test to "the reviewer's reality" we ship.
+- Workspace check + corpus verify clean.
+
+### Why this matters for v1.0
+
+A production-shape Corvid HTTP backend can now ship via
+`corvid build --target=cdylib --sign` with **structured request /
+response bodies** in the signed boundary. The signed binary
+attests the boundary contract via the descriptor; the C caller
+sees the JSON schema in the header so it can't accidentally drift
+from the Corvid types. That's the reviewer's reality — round-3
+gave us back a P1 launch-blocker because they couldn't ship the
+shape they wanted, and 33Q8 closes it.
+
+---
+
 ## 2026-06-07 - 33Q14 closed: self-trial round 4 gap closure (schedule warning + cdylib_catalog serialization)
 
 Comprehensive gap-closure pass between 33Q13e and the next

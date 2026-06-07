@@ -29,30 +29,41 @@ library.
 
 | Position | Accepted types |
 |---|---|
-| **Parameter** | `Int`, `Float`, `Bool`, `String` |
-| **Return** | `Int`, `Float`, `Bool`, `String`, `Grounded<Int>`, `Grounded<Float>`, `Grounded<Bool>`, `Grounded<String>`, `Nothing` |
+| **Parameter** | `Int`, `Float`, `Bool`, `String`, **user-declared structs whose fields are all `Int` / `Float` / `Bool` / `String`** |
+| **Return** | `Int`, `Float`, `Bool`, `String`, `Grounded<Int>`, `Grounded<Float>`, `Grounded<Bool>`, `Grounded<String>`, `Nothing`, **user-declared structs whose fields are all `Int` / `Float` / `Bool` / `String`** |
 
-The boundary is scalar-only by design at v1.0 — the C ABI doesn't
-have a portable struct layout that round-trips identically across
-hosts, so signed boundaries stay in the scalar lane where the ABI is
-well-defined.
+Slice 33Q8 lifted the struct boundary (filed by maintainer-as-reviewer-
+2026-06-05 P1.3). The lift reuses Phase 20n-C's per-struct JSON
+decoder + encoder so a struct parameter arrives at the cdylib as a
+**caller-owned `const char*` JSON buffer** and a struct return leaves
+as a **Corvid-owned `const char*` JSON buffer** the caller frees via
+`corvid_free_string(...)`. The generated C header documents the JSON
+schema for each struct boundary as a block comment so a C caller knows
+the exact field shape without reading the `.cor` source.
 
-## What's NOT accepted at v1.0
+### Struct boundary contract
 
-- **Struct parameters or returns**. An agent like
-  `pub extern "c" agent triage(req: IocRequest) -> IocVerdict` is
-  rejected at typecheck time with an error naming the unsupported
-  type. The internal codegen DOES support struct returns (Phase
-  20n-C lifted them for prompt bridges and internal entry
-  agents), so the underlying machinery exists; surfacing it at
-  the `pub extern "c"` boundary is post-v1.0 work tracked under
-  ROADMAP slice **33Q8** (filed by maintainer-as-reviewer-
-  2026-06-05 P1.3). When 33Q8 ships, the boundary will accept
-  struct shapes via the existing JSON-decoder/encoder family +
-  `corvid-prompt-format`'s schema generator.
-- **`List<T>`, `Option<T>`, generic parameters**. Same reason —
-  no portable C-ABI representation. The post-v1.0 plan threads
-  these through the same JSON boundary 33Q8 introduces.
+When a struct parameter or return uses the JSON wire:
+
+- **Parameter**: the C caller passes UTF-8, null-terminated JSON
+  matching the schema in the generated `.h`. The cdylib's wrapper
+  decodes the JSON; if the JSON is malformed (parse failure or
+  missing required field), the wrapper **traps** the process. The C
+  caller is responsible for sending well-formed JSON; richer
+  error-out-parameter wiring is filed for a follow-up FFI slice.
+- **Return**: the cdylib serializes the struct to UTF-8 JSON and
+  hands the C caller a pointer to a Corvid-owned buffer. Free it
+  via `corvid_free_string(...)`.
+
+### What's still NOT accepted at v1.0
+
+- **Struct fields that aren't scalars.** Nested structs, `List<T>`,
+  `Option<T>`, and other rich field shapes are rejected at typecheck
+  time because Phase 20n-C's encoder/decoder doesn't yet support
+  them at the wire. Promoting these is a follow-up FFI slice.
+- **Top-level `List<T>`, `Option<T>`, generic parameters**. Same
+  reason — the JSON encoder/decoder family currently supports
+  scalar fields only. Wrap them in a one-field struct as a stopgap.
 - **Tool calls inside the exported agent's body**. Allowed, but
   the host must supply the tool implementation at runtime via
   the `corvid_register_tool` C-API (the same dispatch path
@@ -86,25 +97,48 @@ DSSE-signed descriptor whose `claim_guarantees` array carries the
 three guarantee ids above. `corvid claim --explain <output.so>`
 enumerates them as the binary's enforced surface.
 
-## Working around the struct restriction at v1.0
+## Worked example — struct boundary (33Q8)
 
-If your route or RPC naturally takes a struct (`HttpRequest`,
-`OrderLine`, etc.), the pattern at v1.0 is:
+```corvid
+type Ticket:
+    id: String
+    amount: Int
 
-1. Decompose the struct into scalar parameters at the boundary
-   (`String` for opaque-id payloads, multiple `Int`/`Float` for
-   structured numerics).
-2. OR: serialize the struct to JSON in the host (the binding
-   layer that calls into the cdylib) and pass it as a single
-   `String` parameter. Have the Corvid agent parse the JSON
-   internally — but be aware this pushes type discipline OFF the
-   signed boundary, which is the opposite of Corvid's pitch. We
-   recommend it as a stopgap, not as the production shape.
+type Receipt:
+    ok: Bool
+    note: String
 
-When 33Q8 ships, both workarounds become unnecessary — the
-boundary natively accepts struct shapes with the same JSON
-roundtrip happening at codegen time inside the signed boundary
-instead of in the host.
+@budget($0.20)
+pub extern "c"
+agent finalize_ticket(ticket: Ticket @borrowed) -> Receipt:
+    return Receipt(true, ticket.id)
+```
+
+`corvid build --target=cdylib` produces a library exporting:
+
+```c
+// agent finalize_ticket(ticket: struct) -> struct
+// JSON shape for parameter `ticket`:
+//   {
+//     "type": "object",
+//     "properties": { "id": {"type": "string"}, "amount": {"type": "integer"} },
+//     "required": ["id", "amount"],
+//     "additionalProperties": false
+//   }
+// JSON shape for return value `return`:
+//   {
+//     "type": "object",
+//     "properties": { "ok": {"type": "boolean"}, "note": {"type": "string"} },
+//     "required": ["ok", "note"],
+//     "additionalProperties": false
+//   }
+const char* finalize_ticket(const char* ticket, uint64_t* out_observation_handle);
+```
+
+The C caller passes a JSON string matching the parameter schema and
+receives a JSON string matching the return schema. Both buffers are
+UTF-8 + null-terminated; the return must be freed via
+`corvid_free_string(...)`.
 
 ## Related references
 
@@ -115,5 +149,5 @@ instead of in the host.
 - [`inventions.md`](./inventions.md) — Phase 20n-C "native
   struct returns" entry, the internal codegen work this slice
   builds on.
-- ROADMAP slice **33Q8** — the planned tightening that lifts
-  this v1.0 restriction.
+- ROADMAP slice **33Q8** — the closed slice that shipped the
+  struct boundary.

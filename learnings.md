@@ -419,6 +419,20 @@ Executes via the Rust tree-walking interpreter in `corvid-vm`. Full AI runtime a
 
 Every error has a code (`E0001`–`E0302`) and a suggested fix. See [ARCHITECTURE.md §8](ARCHITECTURE.md#L336) for the design target.
 
+### `pub extern "c"` boundary types (33Q8)
+
+A `pub extern "c"` agent exported in a `corvid build --target=cdylib`
+library can now take and return user-declared structs whose fields
+are all `Int` / `Float` / `Bool` / `String`. The struct travels the C
+ABI as a JSON-encoded `const char*` buffer; the generated `.h`
+embeds the JSON schema as a block comment above the agent's C
+signature so a C caller knows the exact shape without reading the
+`.cor` source. Returned buffers are freed with `corvid_free_string(...)`.
+Nested-struct / list / option fields still need follow-up FFI work
+and are rejected at typecheck time with a hint pointing at
+`docs/reference/exported-abi.md`.
+
+
 ### Compile-time warnings
 
 Some declarations parse + typecheck cleanly but won't execute on v1.0 because a runner slice is still pending. `corvid check` surfaces these as yellow `warning:` blocks BEFORE the success line so they can't be missed:

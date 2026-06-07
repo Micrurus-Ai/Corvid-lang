@@ -604,3 +604,115 @@ fn cdylib_missing_pub_extern_c_error_anchors_at_first_agent_and_names_doc_page()
          operator can grep for it. got: {msg}"
     );
 }
+
+const STRUCT_BOUNDARY_SRC: &str = r#"
+type Ticket:
+    id: String
+    amount: Int
+
+type Receipt:
+    ok: Bool
+    note: String
+
+pub extern "c"
+agent finalize_ticket(ticket: Ticket @borrowed) -> Receipt:
+    return Receipt(true, ticket.id)
+"#;
+
+/// Slice 33Q8 acceptance — the headline lift. `pub extern "c"` agents
+/// with struct parameters AND struct returns must build into a cdylib,
+/// dlopen, and round-trip through the C ABI as JSON-encoded strings.
+///
+/// Pre-33Q8 the typechecker rejected `agent finalize_ticket(ticket:
+/// Ticket) -> Receipt` outright with `extern \"c\" agent uses
+/// unsupported ABI type `struct` in parameter`. The reviewer's
+/// production HTTP backend (any shape that takes a structured
+/// request and returns a structured response) was killed at the
+/// signed-cdylib boundary. 33Q8 lifts the rejection by reusing
+/// 20n-C's struct decoder/encoder at the C ABI boundary: the
+/// param arrives as `const char* /* JSON */`, the wrapper decodes
+/// it; the return leaves as `const char* /* JSON */`, the caller
+/// frees via `corvid_free_string`.
+#[test]
+fn cdylib_struct_param_and_return_roundtrip_via_json() {
+    let produced = build_cdylib(STRUCT_BOUNDARY_SRC, "finalize_ticket_cdylib");
+    // SAFETY: symbols are loaded from the just-built library and invoked with valid ABI values.
+    unsafe {
+        let lib = load_library_leaked(&produced);
+        let finalize: libloading::Symbol<
+            unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char,
+        > = lib
+            .get(b"finalize_ticket")
+            .expect("resolve finalize_ticket");
+        let free: libloading::Symbol<unsafe extern "C" fn(*const c_char)> = lib
+            .get(b"corvid_free_string")
+            .expect("resolve corvid_free_string");
+
+        let input = CString::new(r#"{"id":"vip-007","amount":42}"#).unwrap();
+        let mut observation = 0u64;
+        let output_ptr = finalize(input.as_ptr(), &mut observation as *mut u64);
+        assert!(!output_ptr.is_null(), "extern wrapper returned NULL");
+        assert_ne!(observation, 0, "observation handle was not populated");
+        let output = CStr::from_ptr(output_ptr).to_str().unwrap().to_owned();
+        free(output_ptr);
+
+        // Acceptance: the returned JSON parses, has the right
+        // fields, and propagates the input id into the note (the
+        // agent body returns `Receipt(true, ticket.id)` so the
+        // note must equal the input id — proves both decode AND
+        // encode actually marshal the user-provided value through
+        // the wrapper without dropping it).
+        let parsed: serde_json::Value =
+            serde_json::from_str(&output).expect("parse returned JSON");
+        assert_eq!(parsed["ok"], serde_json::Value::Bool(true));
+        assert_eq!(parsed["note"], serde_json::Value::String("vip-007".into()));
+    }
+}
+
+/// Slice 33Q8 — the emitted C header must document the struct
+/// boundary as a `const char*` (JSON) carrying a JSON schema
+/// block-comment so a C caller knows what to send / decode without
+/// reading the .cor source.
+#[test]
+fn cdylib_struct_boundary_c_header_documents_json_schema() {
+    let bundle = frontend_of(STRUCT_BOUNDARY_SRC);
+    let header = emit_header(
+        &bundle.ir,
+        &HeaderOptions {
+            library_name: "finalize_ticket".into(),
+        },
+    );
+
+    // The parameter must travel as `const char*` not as a C struct
+    // mirror.
+    assert!(
+        header.contains("const char* ticket"),
+        "header must declare struct param as `const char*` JSON. got:\n{header}"
+    );
+    // The return must travel as `const char*` not as a C struct.
+    assert!(
+        header.contains("const char* finalize_ticket("),
+        "header must declare struct return as `const char*` JSON. got:\n{header}"
+    );
+    // Both param + return must carry a JSON-schema block comment so
+    // the C caller knows the shape (per the slice's prompt-format
+    // re-use clause).
+    assert!(
+        header.contains("// JSON shape for parameter `ticket`:"),
+        "header must emit parameter JSON-schema comment. got:\n{header}"
+    );
+    assert!(
+        header.contains("// JSON shape for return value `return`:"),
+        "header must emit return JSON-schema comment. got:\n{header}"
+    );
+    // The schemas must reference the actual field names — proves the
+    // schema was generated from the real Type, not stubbed.
+    assert!(
+        header.contains("\"amount\""),
+        "schema for parameter must mention the `amount` field. got:\n{header}"
+    );
+    assert!(
+        header.contains("\"note\""),
+        "schema for return value must mention the `note` field. got:\n{header}"
+    );
+}

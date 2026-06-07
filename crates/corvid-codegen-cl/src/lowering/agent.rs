@@ -82,9 +82,10 @@ pub(super) fn define_extern_c_wrapper(
 
         let mut call_args = Vec::with_capacity(agent.params.len());
         let mut converted_string_params = Vec::new();
+        let mut converted_struct_params = Vec::new();
         for (idx, param) in agent.params.iter().enumerate() {
             let raw = builder.block_params(entry)[idx];
-            match param.ty {
+            match &param.ty {
                 Type::String => {
                     let from_cstr_ref =
                         module.declare_func_in_func(runtime.string_from_cstr, builder.func);
@@ -92,6 +93,51 @@ pub(super) fn define_extern_c_wrapper(
                     let value = builder.inst_results(call)[0];
                     call_args.push(value);
                     converted_string_params.push(value);
+                }
+                // Slice 33Q8: struct extern-c parameter — receive a
+                // `*const c_char` JSON buffer from the C caller,
+                // convert to an owned CorvidString, hand to the
+                // 20n-C struct decoder, release the temporary
+                // string, then pass the decoded struct pointer to
+                // the inner agent. On parse failure the decoder
+                // returns NULL; the wrapper traps so a C caller
+                // sees an honest abort instead of a delayed crash
+                // when the inner reads a NULL field. The traceable
+                // v1 contract is documented in
+                // docs/reference/exported-abi.md.
+                Type::Struct(def_id) => {
+                    let from_cstr_ref =
+                        module.declare_func_in_func(runtime.string_from_cstr, builder.func);
+                    let from_cstr_call = builder.ins().call(from_cstr_ref, &[raw]);
+                    let json_str = builder.inst_results(from_cstr_call)[0];
+
+                    let decoder_fid =
+                        lookup_or_emit_struct_decoder(module, runtime, *def_id, param.span)?;
+                    let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
+                    let decode_call = builder.ins().call(decoder_ref, &[json_str]);
+                    let struct_ptr = builder.inst_results(decode_call)[0];
+
+                    // The decoder reads from json_str without taking
+                    // ownership — release the temporary now.
+                    emit_release(&mut builder, module, runtime, json_str);
+
+                    let zero_i64 = builder.ins().iconst(I64, 0);
+                    let decode_failed =
+                        builder.ins().icmp(IntCC::Equal, struct_ptr, zero_i64);
+                    let ok_b = builder.create_block();
+                    let fail_b = builder.create_block();
+                    builder.ins().brif(decode_failed, fail_b, &[], ok_b, &[]);
+
+                    builder.switch_to_block(fail_b);
+                    builder.seal_block(fail_b);
+                    builder
+                        .ins()
+                        .trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
+
+                    builder.switch_to_block(ok_b);
+                    builder.seal_block(ok_b);
+                    call_args.push(struct_ptr);
+                    converted_struct_params.push(struct_ptr);
                 }
                 _ => call_args.push(raw),
             }
@@ -181,6 +227,38 @@ pub(super) fn define_extern_c_wrapper(
                 emit_grounded_handle_store(&mut builder, grounded_handle_ptr, handle);
                 builder.ins().return_(&[result]);
             }
+            // Slice 33Q8: struct extern-c return — call the 20n-C
+            // encoder to turn the struct pointer into a CorvidString
+            // JSON value, convert that to a C string for the C ABI
+            // caller, then release the JSON CorvidString and the
+            // struct itself (the wrapper owns the result the inner
+            // produced). The caller frees the returned `*mut c_char`
+            // via the runtime's standard `corvid_string_free` helper.
+            Type::Struct(def_id) => {
+                let result = *results.first().ok_or_else(|| {
+                    CodegenError::cranelift(
+                        format!(
+                            "extern-c wrapper `{}` expected one struct result, got {}",
+                            agent.name,
+                            results.len()
+                        ),
+                        agent.span,
+                    )
+                })?;
+                let to_json_fid =
+                    lookup_or_emit_struct_to_json(module, runtime, *def_id, agent.span)?;
+                let to_json_ref = module.declare_func_in_func(to_json_fid, builder.func);
+                let to_json_call = builder.ins().call(to_json_ref, &[result]);
+                let json_str = builder.inst_results(to_json_call)[0];
+
+                let into_cstr_ref =
+                    module.declare_func_in_func(runtime.string_into_cstr, builder.func);
+                let into_cstr_call = builder.ins().call(into_cstr_ref, &[json_str]);
+                let cstr = builder.inst_results(into_cstr_call)[0];
+
+                emit_release(&mut builder, module, runtime, result);
+                builder.ins().return_(&[cstr]);
+            }
             _ => {
                 let result = *results.first().ok_or_else(|| {
                     CodegenError::cranelift(
@@ -244,6 +322,12 @@ fn extern_c_abi_type(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> 
         Type::Float => Ok(F64),
         Type::Bool => Ok(I8),
         Type::String => Ok(I64),
+        // Slice 33Q8: struct boundaries travel the C ABI as
+        // `*const c_char` (param) or `*mut c_char` (return) JSON
+        // buffers, decoded/encoded by the per-DefId routines that
+        // 20n-C already shipped for internal sites. Both are I64-
+        // shaped on the wire.
+        Type::Struct(_) => Ok(I64),
         Type::Grounded(inner) => extern_c_abi_type(inner, span),
         Type::Nothing => Err(CodegenError::cranelift(
             "`Nothing` is only valid as an extern-c return type",

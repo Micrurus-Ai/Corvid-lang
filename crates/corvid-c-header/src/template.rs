@@ -186,6 +186,12 @@ pub fn render_header(opts: &HeaderOptions, agents: &[HeaderAgent]) -> String {
 
     for agent in agents {
         out.push_str(&format!("// {}\n", agent.signature_comment));
+        // Slice 33Q8: per-agent struct boundary schemas (when
+        // present) so the C caller knows the JSON shape to send
+        // and decode.
+        if !agent.json_schema_comments.is_empty() {
+            out.push_str(&agent.json_schema_comments);
+        }
         out.push_str(&format!(
             "{} {}({});\n\n",
             agent.return_c_type, agent.name, agent.params_c
