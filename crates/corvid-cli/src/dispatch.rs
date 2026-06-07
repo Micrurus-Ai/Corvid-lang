@@ -504,6 +504,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 claims_target.as_deref(),
             ),
             UpgradeCommand::Apply { path, json } => upgrade_cmd::run_apply(&path, json),
+            UpgradeCommand::Assist { path, json } => upgrade_cmd::run_assist(&path, json),
         },
         Some(Command::Migrate { command }) => match command {
             MigrateCommand::Status {

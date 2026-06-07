@@ -4,6 +4,78 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-07 - 33Q13e closed: corvid upgrade assist (deterministic core)
+
+Third and final of the deterministic-first AI helpers under
+`35V2-P43-T-LR-phase-43-ai-helpers`. Ships `corvid upgrade assist
+<path>` — a source auditor that scans each `.cor` file in the
+project for patterns requiring operator judgment at the next
+strict-typecheck / feature-boundary upgrade.
+
+**Distinct from `corvid upgrade check`**: `check` reports
+mechanical syntax/stdlib substitutions that `apply` can rewrite
+automatically (e.g. `std.llm.complete(` → `std.agent.run(`).
+`assist` covers patterns that NEED operator judgment — no
+mechanical fix exists, and the LLM-promote follow-up adds
+contextual refinement on top of these grounded signals.
+
+**Detection patterns** (the v1.0 surface):
+
+- `trust: <custom>` — non-canonical values that 33Q7b will
+  require an explicit `corvid.toml` declaration for. Severity
+  `warn`. Mirrors the 33Q7a drift-gate's canonical value list
+  exactly (`autonomous` / `supervisor_required` / `human_required`
+  / `autonomous_if_confident`).
+- `data: <custom>` — same shape for the data dimension.
+- `pub extern "c" agent foo(req: SomeStruct) -> SomeStruct` —
+  the 33Q8 boundary lift is tracked; emit `info` so reviewers
+  know v1.0 rejects the shape but 33Q8 will lift it.
+- `agent foo(...) uses some_llm_effect` with no `@budget` in
+  the preceding header — the moat's
+  `budget.compile_time_ceiling` guarantee doesn't apply
+  without an `@budget` annotation. Emit `warn`.
+
+**Load-bearing groundedness contract.** The integration test
+`upgrade_assist_does_not_false_positive_on_struct_field_declarations`
+pins the false-positive guard surfaced during live verification.
+Pre-fix, the dimension-value parser matched struct field
+declarations like:
+
+```corvid
+public type EffectEnvelope:
+    name: String
+    trust: String   # field of type String, NOT a dimension value
+    data: String    # same
+```
+
+… as if they were non-canonical dimension declarations and
+emitted bogus findings. The fix is one structural guard in
+`parse_dimension_value`: skip values whose first character is
+uppercase (effect-dimension values are always lowercase
+identifiers, type names are PascalCase). The test pins this
+property so a future change to the parser can't regress it.
+
+**Verified live.** Against the maintainer-trial app
+(`/tmp/threat_intel_agent`): 2 warn findings (both
+`data: external`, the non-canonical value). Against the
+personal-executive-agent reference app: 12+ warn findings
+across 4 trust + 4 data extensions (`workspace`, `local`,
+`bounded`, `readonly` for trust; `private`, `customer`,
+`external`, `internal` for data) — exactly what we'd expect
+from the 33Q7a catalog. Both reports stay clean of any
+`trust: String` / `data: String` false positives from the
+std/effects.cor field declarations.
+
+**Pattern completed.** All three deterministic-first AI
+helpers (synthesize-feedback / deploy-tailor / upgrade-assist)
+now ship with the same groundedness contract pinned by tests.
+Each has a filed LLM-promote follow-up (33Q13b / 33Q13d /
+33Q13f) for post-v1.0 augmentation. The
+`35V2-P43-T-LR-phase-43-ai-helpers` umbrella's v1.0 surface
+is now complete.
+
+---
+
 ## 2026-06-06 - 33Q13c closed: corvid deploy tailor (deterministic core)
 
 Second of the three remaining AI-helper slices. Ships

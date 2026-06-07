@@ -35,4 +35,34 @@ pub enum UpgradeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Audit source for patterns that will need attention at the
+    /// next strict-typecheck or feature-boundary upgrade — slice
+    /// 33Q13e (third and last of the remaining AI helpers under
+    /// `35V2-P43-T-LR-phase-43-ai-helpers`).
+    ///
+    /// Distinct from `corvid upgrade check`: `check` reports
+    /// mechanical syntax/stdlib substitutions that `apply` can
+    /// rewrite automatically. `assist` reports patterns that
+    /// require operator judgment — e.g. custom `trust:`/`data:`
+    /// values that 33Q7b will require `corvid.toml` declarations
+    /// for, `pub extern "c"` agents with struct boundaries that
+    /// 33Q8 will lift, LLM-tool-using agents with no `@budget`
+    /// constraint (cost-overrun risk). Output is a structured
+    /// recommendations list with severity buckets + per-pattern
+    /// citations of the source line that triggered the finding.
+    ///
+    /// v1.0 implementation is deterministic Rust (same shape as
+    /// `corvid claim audit`, `corvid beta synthesize-feedback`,
+    /// `corvid deploy tailor`). A post-v1.0 follow-up
+    /// (33Q13f-upgrade-assist-llm-promote) adds LLM-driven
+    /// refinement anchored to the same deterministic signals.
+    Assist {
+        /// Source file or project directory to audit.
+        path: PathBuf,
+        /// Emit JSON findings instead of the default markdown
+        /// rendering. Useful for downstream tooling that wants to
+        /// consume the structured shape directly.
+        #[arg(long)]
+        json: bool,
+    },
 }
