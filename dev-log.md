@@ -4,6 +4,95 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33R4a closed: registry shape decision (pre-phase chat)
+
+First slice of the P1 wave. The brief filed 33R4 (the package
+registry stand-up) as a "P1 invention" with four sub-slices;
+33R4a is the pre-phase chat that locks the shape before any
+code lands. The 33R kickoff already locked the hosting story
+(GitHub Releases + Worker-served static index) — this slice
+locks the schema, the publish flow, and the signing model.
+
+Decisions captured at
+[`docs/internals/registry-design.md`](docs/internals/registry-design.md):
+
+- **Single global `index.json`** for v1.0. At 5–10 first-party
+  packages × ~5 versions, the file stays under 10 KB and resolves
+  in one client fetch. A `version: "1"` field gates a forward-
+  compatible reshape to per-package indexes once the file grows
+  past ~100 KB.
+- **Separate registry signing key** distinct from the existing
+  `corvid build --sign` key. Two reasons: different threat models
+  (binary attestation vs. package authenticity), and independent
+  rotation. The public hex sits in the index root; the maintainer
+  holds the private key.
+- **Committed per-version manifests** under
+  `web/registry/<pkg>/<version>.json` + a `regenerate.sh` that
+  walks them into `web/registry/index.json`. Publishing is a PR
+  with the new manifest + the regenerated index — auditable in
+  git history, no live mutation of a database, the Worker stays
+  a static-file server.
+- **Artifacts at GitHub Releases**, tagged `pkg-<name>-v<semver>`,
+  carrying `<name>-<version>.corvid` + `<name>-<version>.corvid.sig`.
+  The Releases CDN handles bandwidth; the Worker never proxies
+  artifact bytes.
+
+Client `--registry` default flips from "no default; user must
+specify" to `https://corvid-lang.org/registry/` in 33R4b. The
+existing `--registry` / `CORVID_PACKAGE_REGISTRY` overrides
+remain so private/self-hosted registries still work.
+
+### What was deliberately deferred
+
+- **DSSE-signed `index.json`** — v1.0 trusts the Worker deploy
+  controls + HTTPS + the git audit trail. Worker compromise is
+  out-of-scope for v1.0; the per-PR review of `index.json`
+  catches mismatches in the maintainer's normal review flow.
+  Hardening slice filed post-v1.0.
+- **Discovery / search server-side** — `corvid package metadata`
+  already renders per-package data; no fuzzy-search endpoint.
+- **Yanking protocol** — to deprecate a version, the maintainer
+  commits a `yanked: true` field in a follow-up PR; no mutation-
+  in-place wire shape.
+
+### Why each decision was the load-bearing one
+
+1. *Single index vs. per-package index*: pick the smaller story
+   first when the package count is small. Reshaping to per-package
+   later is a schema bump, not a re-architecture.
+2. *Separate vs. shared signing key*: shared key would mean a
+   compromised build key kills the registry too. The marginal cost
+   of two keys is a `.hex` file each; the marginal benefit of
+   isolation is large.
+3. *Committed manifests vs. live publish*: committed manifests
+   mean the package universe is reviewable in git. Live publish
+   means trusting a daemon. For v1.0 with maintainer-controlled
+   publishing only, committed is strictly safer.
+4. *GitHub Releases vs. R2 / S3*: Releases is free, comes with
+   CDN, and the existing `release.yml` workflow already drives
+   them. Object storage adds a service to operate.
+
+### What unblocks what
+
+- 33R4b (client default-registry pointer) needs only the URL
+  decision from this doc. Can start independently.
+- 33R4c (hosted static index) needs this full doc — builds the
+  Worker route, the regenerator script, the schema doc page.
+- 33R4d (seed packages) needs 33R4c shipped AND 33R5b/c (the
+  `json` and `strings` stdlib batteries from 33R5) so there's
+  something real to publish.
+
+Validation gate (doc-only slice):
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+P1 track: 1/8 sub-slices closed (33R4a). Next is 33R4b — the
+small client-side default-registry pointer; explicit pre-phase
+scope before code lands.
+
+---
+
 ## 2026-06-08 - 33R3 closed: README adoption funnel (P0 launch blocker)
 
 Third and final P0 slice of the 33R market-readiness track. The
