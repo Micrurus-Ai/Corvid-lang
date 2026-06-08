@@ -47,6 +47,22 @@ pub struct AuditReport {
 }
 
 pub fn run_audit(path: &Path, json: bool) -> Result<u8> {
+    // Slice 33Q17c: when the operator passes a directory (the project
+    // root, the natural mental model when they're inside `cd my_app/`
+    // and type `corvid audit .`), the next `read_to_string` returns a
+    // raw OS error — on Windows that's "Access is denied. (os error 5)"
+    // which gives the reader no idea the input was the problem. Catch
+    // the case up-front and emit a diagnostic that points them at the
+    // expected entry-point source file.
+    if path.is_dir() {
+        let suggested = path.join("src").join("main.cor");
+        anyhow::bail!(
+            "`corvid audit` takes a `.cor` source file (the project's root \
+             module), not a directory. Try `corvid audit {}` — that's the \
+             default entry point for a `corvid new`-scaffolded project.",
+            suggested.display()
+        );
+    }
     let report = build_audit_report(path)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -309,5 +325,49 @@ fn format_dimension_value(value: &corvid_ast::DimensionValue) -> String {
             above,
             below,
         } => format!("{}_if_confident({threshold:.3}) else {}", above, below),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Slice 33Q17c — `corvid audit <directory>` (the natural mental
+    /// model when an operator is inside `cd my_app/` and types
+    /// `corvid audit .`) used to surface the raw OS error
+    /// `"Access is denied. (os error 5)"` on Windows / `"Is a
+    /// directory (os error 21)"` on Linux. Post-33Q17c, the audit
+    /// detects the directory case up-front and emits a diagnostic
+    /// that names what's expected AND suggests the path to try.
+    #[test]
+    fn audit_on_a_directory_emits_clear_diagnostic_pointing_at_src_main_cor() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // The path IS a directory — the early-return case the slice
+        // targets. We don't need to populate src/main.cor; the
+        // diagnostic fires from the is_dir check before any read.
+        let result = run_audit(tmp.path(), false);
+        let err = result.expect_err("audit on a directory must error");
+        let msg = format!("{err}");
+
+        // The error must name the expected input type so the
+        // operator knows what was wrong.
+        assert!(
+            msg.contains(".cor source file") || msg.contains("source file"),
+            "diagnostic must name the expected input type. got: {msg}"
+        );
+        // The error must point at the canonical entry-point path so
+        // the operator can fix the call directly.
+        assert!(
+            msg.contains("src") && msg.contains("main.cor"),
+            "diagnostic must suggest <dir>/src/main.cor as the path to try. got: {msg}"
+        );
+        // And the error MUST NOT be the raw OS message that hid the
+        // problem pre-33Q17c.
+        assert!(
+            !msg.contains("Access is denied")
+                && !msg.contains("Is a directory")
+                && !msg.contains("os error"),
+            "diagnostic must not leak the raw OS error. got: {msg}"
+        );
     }
 }

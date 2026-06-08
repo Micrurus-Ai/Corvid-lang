@@ -15,7 +15,12 @@ use anyhow::{Context, Result};
 use corvid_driver::{load_corvid_config_for, run_with_target, RunTarget};
 use std::path::Path;
 
-pub(crate) fn cmd_run(file: &Path, target: &str, tools_lib: Option<&Path>) -> Result<u8> {
+pub(crate) fn cmd_run(
+    file: &Path,
+    target: &str,
+    tools_lib: Option<&Path>,
+    args: &[String],
+) -> Result<u8> {
     let configured_target;
     let target = if target == "auto" {
         configured_target = load_corvid_config_for(file)
@@ -48,6 +53,6 @@ pub(crate) fn cmd_run(file: &Path, target: &str, tools_lib: Option<&Path>) -> Re
     // Interpreter otherwise (with a stderr notice). Native-required
     // and interpreter-forced are the explicit overrides. See
     // `RunTarget` docs in corvid-driver for the exact semantics.
-    run_with_target(file, rt, tools_lib)
+    run_with_target(file, rt, tools_lib, args)
         .with_context(|| format!("failed to run `{}`", file.display()))
 }

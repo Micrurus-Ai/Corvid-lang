@@ -18,7 +18,7 @@ use corvid_runtime::{
     load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, OllamaAdapter, OpenAiAdapter,
     RedactionSet, Runtime, StdinApprover, Tracer,
 };
-use corvid_vm::InterpError;
+use corvid_vm::{InterpError, Value};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -113,9 +113,9 @@ pub enum RunTarget {
 
 /// `corvid run <file>` with auto-dispatch — native tier where possible,
 /// interpreter fallback with an announced-on-stderr reason otherwise.
-/// Equivalent to `run_with_target(path, RunTarget::Auto, None)`.
+/// Equivalent to `run_with_target(path, RunTarget::Auto, None, &[])`.
 pub fn run_native(path: &Path) -> Result<u8, anyhow::Error> {
-    run_with_target(path, RunTarget::Auto, None)
+    run_with_target(path, RunTarget::Auto, None, &[])
 }
 
 /// `corvid run <file> [--target=...] [--with-tools-lib <path>]`
@@ -130,6 +130,7 @@ pub fn run_with_target(
     path: &Path,
     target: RunTarget,
     tools_lib: Option<&Path>,
+    args: &[String],
 ) -> Result<u8, anyhow::Error> {
     // Env is loaded for both tiers: the native binary may read it via
     // libc `getenv` (the entry shim's leak-counter toggle does), and the
@@ -168,9 +169,9 @@ pub fn run_with_target(
 
     match target {
         RunTarget::Native => match &scan {
-            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib),
+            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args),
             Err(reason) if tools_satisfy(reason) => {
-                run_via_native_tier(path, &source, &ir, tools_lib)
+                run_via_native_tier(path, &source, &ir, tools_lib, args)
             }
             Err(reason) => {
                 eprintln!(
@@ -179,15 +180,15 @@ pub fn run_with_target(
                 Ok(1)
             }
         },
-        RunTarget::Interpreter => run_via_interpreter_tier(path, &ir),
+        RunTarget::Interpreter => run_via_interpreter_tier(path, &ir, args),
         RunTarget::Auto => match &scan {
-            Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib),
+            Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib, args),
             Err(reason) if tools_satisfy(reason) => {
-                try_native_then_interpret(path, &source, &ir, tools_lib)
+                try_native_then_interpret(path, &source, &ir, tools_lib, args)
             }
             Err(reason) => {
                 eprintln!("↻ running via interpreter: {reason}");
-                run_via_interpreter_tier(path, &ir)
+                run_via_interpreter_tier(path, &ir, args)
             }
         },
     }
@@ -210,12 +211,13 @@ fn try_native_then_interpret(
     source: &str,
     ir: &IrFile,
     tools_lib: Option<&Path>,
+    args: &[String],
 ) -> Result<u8, anyhow::Error> {
-    match run_via_native_tier(path, source, ir, tools_lib) {
+    match run_via_native_tier(path, source, ir, tools_lib, args) {
         Ok(code) => Ok(code),
         Err(err) if is_missing_staticlib_error(&err) => {
             eprintln!("↻ running via interpreter: native staticlib unavailable");
-            run_via_interpreter_tier(path, ir)
+            run_via_interpreter_tier(path, ir, args)
         }
         Err(err) => Err(err),
     }
@@ -244,7 +246,89 @@ fn is_missing_staticlib_error(err: &anyhow::Error) -> bool {
 /// LLM adapters + JSONL tracer, run the entry agent under the async
 /// interpreter, print its return value. Matches prior `run_native`
 /// semantics exactly — this is the only path that existed before 12j.
-fn run_via_interpreter_tier(path: &Path, ir: &IrFile) -> Result<u8, anyhow::Error> {
+/// Slice 33Q17a: pick the entry agent the same way `run_ir_with_runtime`
+/// will (single-agent OR `main` OR ambiguous error), then parse each
+/// CLI string against the agent's declared scalar parameter types. We
+/// do the parse HERE (not inside the VM call) so the user sees a
+/// crisp `cannot parse "abc" as Int for parameter `n`` error rather
+/// than a generic type mismatch deep in the VM.
+fn parse_args_for_entry_agent(
+    ir: &IrFile,
+    args: &[String],
+) -> Result<Vec<Value>, anyhow::Error> {
+    if args.is_empty() {
+        return Ok(Vec::new());
+    }
+    let chosen = if ir.agents.len() == 1 {
+        &ir.agents[0]
+    } else if let Some(main) = ir.agents.iter().find(|a| a.name == "main") {
+        main
+    } else {
+        anyhow::bail!(
+            "cannot pick an entry agent to receive {} CLI argument(s): \
+             this file declares multiple agents and none of them is named \
+             `main`. Use a runner that calls `run_with_runtime` with an \
+             explicit agent name.",
+            args.len()
+        );
+    };
+    if args.len() != chosen.params.len() {
+        anyhow::bail!(
+            "agent `{}` expects {} argument(s), got {} from the CLI",
+            chosen.name,
+            chosen.params.len(),
+            args.len()
+        );
+    }
+    let mut parsed = Vec::with_capacity(args.len());
+    for (param, raw) in chosen.params.iter().zip(args.iter()) {
+        let value = match &param.ty {
+            corvid_types::Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot parse `{raw}` as Int for parameter `{}` of agent `{}`",
+                    param.name,
+                    chosen.name
+                )
+            })?),
+            corvid_types::Type::Float => Value::Float(raw.parse::<f64>().map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot parse `{raw}` as Float for parameter `{}` of agent `{}`",
+                    param.name,
+                    chosen.name
+                )
+            })?),
+            corvid_types::Type::Bool => match raw.as_str() {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                _ => anyhow::bail!(
+                    "cannot parse `{raw}` as Bool for parameter `{}` of agent `{}` \
+                     (expected `true` or `false`)",
+                    param.name,
+                    chosen.name
+                ),
+            },
+            corvid_types::Type::String => {
+                Value::String(std::sync::Arc::<str>::from(raw.as_str()))
+            }
+            other => anyhow::bail!(
+                "parameter `{}` of agent `{}` has type `{}` which is not \
+                 supported as a CLI argument; only `Int` / `Float` / `Bool` / \
+                 `String` parameters can receive `corvid run` positional args",
+                param.name,
+                chosen.name,
+                other.display_name()
+            ),
+        };
+        parsed.push(value);
+    }
+    Ok(parsed)
+}
+
+fn run_via_interpreter_tier(
+    path: &Path,
+    ir: &IrFile,
+    args: &[String],
+) -> Result<u8, anyhow::Error> {
     let trace_dir = trace_dir_for(path);
     let tracer = Tracer::open(&trace_dir, corvid_runtime::fresh_run_id())
         .with_redaction(RedactionSet::from_env());
@@ -272,7 +356,14 @@ fn run_via_interpreter_tier(path: &Path, ir: &IrFile) -> Result<u8, anyhow::Erro
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let result = tokio_rt.block_on(run_ir_with_runtime(ir, None, vec![], &rt));
+    let parsed_args = match parse_args_for_entry_agent(ir, args) {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return Ok(1);
+        }
+    };
+    let result = tokio_rt.block_on(run_ir_with_runtime(ir, None, parsed_args, &rt));
 
     match result {
         Ok(value) => {
@@ -300,9 +391,15 @@ fn run_via_native_tier(
     source: &str,
     ir: &IrFile,
     tools_lib: Option<&Path>,
+    args: &[String],
 ) -> Result<u8, anyhow::Error> {
     let binary = build_or_get_cached_native(path, source, ir, tools_lib)?.path;
+    // Slice 33Q17a: forward CLI positional args verbatim. The
+    // codegen-emitted `main` decodes argv per parameter type, so the
+    // shape is the same as a normal C-style `prog arg1 arg2 ...` —
+    // pass the strings through.
     let status = std::process::Command::new(&binary)
+        .args(args)
         .status()
         .map_err(|e| anyhow::anyhow!("spawn native binary `{}`: {e}", binary.display()))?;
     Ok(status.code().unwrap_or(1) as u8)

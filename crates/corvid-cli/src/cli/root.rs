@@ -135,6 +135,14 @@ pub enum Command {
         /// interpreter (auto) or error out (native).
         #[arg(long, value_name = "PATH")]
         with_tools_lib: Option<PathBuf>,
+        /// Slice 33Q17a: positional arguments to forward to the
+        /// entry agent. Each argument is parsed against the agent's
+        /// declared parameter type — `Int` / `Float` / `Bool` /
+        /// `String` are supported. Trailing varargs so
+        /// `corvid run src/main.cor world 42` works the way every
+        /// other CLI tool ships positional args.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Serve a Corvid app's `server` block over HTTP. Loads the app,
     /// builds the same interpreter runtime `corvid run` uses, and
@@ -145,9 +153,22 @@ pub enum Command {
         /// Source file. Defaults to `src/main.cor` in a Corvid project.
         file: Option<PathBuf>,
         /// Address to bind, `host:port`. Honors `CORVID_HOST`/`CORVID_PORT`
-        /// when unset.
+        /// when unset. Composes with `--host` and `--port` — when either
+        /// is provided, the explicit value wins over the corresponding
+        /// half of `--listen`.
         #[arg(long, default_value = "127.0.0.1:8080")]
         listen: String,
+        /// Slice 33Q17b: ergonomic alias for the host half of `--listen`.
+        /// Common backend-tool muscle-memory; overrides `--listen`'s host
+        /// when provided.
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+        /// Slice 33Q17b: ergonomic alias for the port half of `--listen`.
+        /// `corvid serve --port 8081` works the way every other backend
+        /// CLI ships port overrides; overrides `--listen`'s port when
+        /// provided.
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
         /// Path to a compiled `#[tool]` CDYLIB (`.so` / `.dylib` /
         /// `.dll`). When provided, `corvid serve` dlopens the cdylib
         /// at startup and registers each tool declared in the app

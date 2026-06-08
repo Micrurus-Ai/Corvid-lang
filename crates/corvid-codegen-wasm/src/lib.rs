@@ -205,8 +205,18 @@ pub fn emit_wasm_artifacts(
 
 fn validate_agent(agent: &IrAgent) -> Result<&IrAgent, WasmCodegenError> {
     if agent.extern_abi.is_some() {
+        // Slice 33Q17d: point readers at the doc page that owns the
+        // cdylib-only contract. Pre-33Q17d the message named the
+        // restriction but left the reader to guess where the contract
+        // is documented; the doc page explains the JSON-wire struct
+        // boundary, the scalar set, and why the boundary lives in
+        // cdylib and not wasm.
         return Err(WasmCodegenError::unsupported(format!(
-            "wasm target does not lower `pub extern \"c\"` agent `{}`; export a normal agent for browser/edge use",
+            "wasm target does not lower `pub extern \"c\"` agent `{}`. \
+             The `pub extern \"c\"` boundary is cdylib-only — wasm exports \
+             normal Corvid agents. See `docs/reference/exported-abi.md` \
+             for the boundary contract; drop the `pub extern \"c\"` modifier \
+             to make this agent browser/edge-callable.",
             agent.name
         )));
     }
@@ -1551,5 +1561,33 @@ agent refund(amount: Int) -> Int:
         assert!(artifacts
             .ts_types
             .contains("'issue_refund': (amount: bigint) => bigint"));
+    }
+
+    /// Slice 33Q17d — when the user passes a `pub extern "c"` agent
+    /// to the wasm target, the error must point them at
+    /// `docs/reference/exported-abi.md` where the cdylib-only boundary
+    /// contract is documented. Pre-33Q17d the message said
+    /// "export a normal agent" with no indication of WHY the
+    /// restriction exists.
+    #[test]
+    fn pub_extern_c_rejection_references_exported_abi_doc() {
+        let ir = lower_src(
+            r#"
+pub extern "c"
+agent ping() -> Int:
+    return 1
+"#,
+        );
+        let err =
+            emit_wasm_artifacts(&ir, "extern_test").expect_err("wasm must reject pub extern c");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("docs/reference/exported-abi.md"),
+            "error must point at the doc page that owns the boundary contract. got: {msg}"
+        );
+        assert!(
+            msg.contains("cdylib"),
+            "error must name where the boundary IS supported. got: {msg}"
+        );
     }
 }

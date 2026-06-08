@@ -100,17 +100,21 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             file,
             target,
             with_tools_lib,
+            args,
         }) => {
             let file = resolve_project_source(file)?;
-            cmd_run(&file, &target, with_tools_lib.as_deref())
+            cmd_run(&file, &target, with_tools_lib.as_deref(), &args)
         }
         Some(Command::Serve {
             file,
             listen,
+            host,
+            port,
             with_tools_cdylib,
         }) => {
             let file = resolve_project_source(file)?;
-            cmd_serve(&file, &listen, with_tools_cdylib.as_deref())
+            let composed_listen = compose_serve_listen(&listen, host.as_deref(), port);
+            cmd_serve(&file, &composed_listen, with_tools_cdylib.as_deref())
         }
         Some(Command::Test {
             target,
@@ -835,3 +839,92 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
 // ------------------------------------------------------------
 // Commands
 // ------------------------------------------------------------
+
+/// Slice 33Q17b — compose the final `host:port` listen address from
+/// `corvid serve`'s three address controls. Precedence: `--host` and
+/// `--port` each override the corresponding half of `--listen` if
+/// supplied. Falls back to `127.0.0.1:8080` if `--listen` is
+/// malformed (no `:` separator).
+///
+/// Exposed for testing and so future serve UX work has a single
+/// composition point.
+pub(crate) fn compose_serve_listen(
+    listen: &str,
+    host: Option<&str>,
+    port: Option<u16>,
+) -> String {
+    let (default_host, default_port) = match listen.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.to_string()),
+        None => ("127.0.0.1".to_string(), "8080".to_string()),
+    };
+    let final_host = host.map(|s| s.to_string()).unwrap_or(default_host);
+    let final_port = port
+        .map(|p| p.to_string())
+        .unwrap_or(default_port);
+    format!("{final_host}:{final_port}")
+}
+
+#[cfg(test)]
+mod serve_listen_composition_tests {
+    use super::compose_serve_listen;
+
+    /// Slice 33Q17b — no overrides means the default `--listen`
+    /// value wins (the pre-33Q17b behavior preserved).
+    #[test]
+    fn no_overrides_returns_listen_default() {
+        assert_eq!(
+            compose_serve_listen("127.0.0.1:8080", None, None),
+            "127.0.0.1:8080"
+        );
+        assert_eq!(
+            compose_serve_listen("0.0.0.0:9000", None, None),
+            "0.0.0.0:9000"
+        );
+    }
+
+    /// Slice 33Q17b — `--port 8081` overrides just the port half,
+    /// inherits the host from `--listen`'s default.
+    #[test]
+    fn port_override_keeps_host_from_listen() {
+        assert_eq!(
+            compose_serve_listen("127.0.0.1:8080", None, Some(8081)),
+            "127.0.0.1:8081"
+        );
+        assert_eq!(
+            compose_serve_listen("0.0.0.0:8080", None, Some(443)),
+            "0.0.0.0:443"
+        );
+    }
+
+    /// Slice 33Q17b — `--host 0.0.0.0` overrides just the host half.
+    #[test]
+    fn host_override_keeps_port_from_listen() {
+        assert_eq!(
+            compose_serve_listen("127.0.0.1:8080", Some("0.0.0.0"), None),
+            "0.0.0.0:8080"
+        );
+    }
+
+    /// Slice 33Q17b — both overrides supplied → both come from
+    /// the overrides, `--listen` is fully ignored.
+    #[test]
+    fn both_overrides_supersede_listen_entirely() {
+        assert_eq!(
+            compose_serve_listen("127.0.0.1:8080", Some("10.0.0.5"), Some(9090)),
+            "10.0.0.5:9090"
+        );
+    }
+
+    /// Slice 33Q17b — IPv6 listen value with bracketed host:
+    /// rsplit_once on `:` picks up the last colon (the port), so the
+    /// host carries the brackets through. Acceptable for v1.0 since
+    /// the upstream `cmd_serve` parses the same shape; record the
+    /// behavior so a future regression is caught.
+    #[test]
+    fn ipv6_listen_default_round_trips_with_no_overrides() {
+        assert_eq!(
+            compose_serve_listen("[::1]:8080", None, None),
+            "[::1]:8080"
+        );
+    }
+}

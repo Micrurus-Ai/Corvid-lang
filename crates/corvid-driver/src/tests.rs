@@ -2036,7 +2036,7 @@ agent load(id: String) -> String:
         let src_path = tmp.path().join("pure.cor");
         std::fs::write(&src_path, NATIVE_ABLE_SRC).expect("write");
 
-        let code = run_with_target(&src_path, RunTarget::Auto, None).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Auto, None, &[]).expect("run");
         assert_eq!(code, 0, "pure program should exit 0");
         // Cache populated under <tmpdir>/target/cache/native/.
         let cache_dir = tmp.path().join("target").join("cache").join("native");
@@ -2064,9 +2064,67 @@ agent load(id: String) -> String:
         let src_path = tmp.path().join("tooly.cor");
         std::fs::write(&src_path, TOOL_USING_SRC).expect("write");
 
-        let code = run_with_target(&src_path, RunTarget::Native, None).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Native, None, &[]).expect("run");
         assert_eq!(
             code, 1,
             "native-required on a tool-using program must exit 1"
         );
+    }
+
+    /// Slice 33Q17a — `corvid run src/main.cor world 42` forwards
+    /// positional args to the entry agent. Pre-33Q17a, clap rejected
+    /// trailing args with "unexpected argument 'world' found"; the
+    /// reviewer couldn't run the scaffold's `greet(name: String)`
+    /// agent from the CLI at all. Post-33Q17a, the args are parsed
+    /// against the agent's parameter types and forwarded — strings to
+    /// String, parseable digits to Int, etc.
+    #[test]
+    fn run_with_target_interp_forwards_positional_args_to_parameterized_agent() {
+        const PARAMETERIZED_SRC: &str = "agent echo(n: Int) -> Int:\n    return n + 1\n";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_path = tmp.path().join("echo.cor");
+        std::fs::write(&src_path, PARAMETERIZED_SRC).expect("write");
+
+        // Interpreter tier is the most portable to test — native tier
+        // also works (entry.rs decodes argv) but requires the runtime
+        // staticlib which the cargo-test environment doesn't always
+        // resolve cleanly.
+        let args = vec!["41".to_string()];
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        assert_eq!(
+            code, 0,
+            "agent must run cleanly with the CLI-supplied Int arg"
+        );
+    }
+
+    /// Slice 33Q17a — bad parse → exit 1 with a crisp error rather
+    /// than a panic deep in the VM. The error message names the
+    /// offending parameter so the operator can fix the call.
+    #[test]
+    fn run_with_target_rejects_unparseable_positional_arg_cleanly() {
+        const PARAMETERIZED_SRC: &str = "agent echo(n: Int) -> Int:\n    return n\n";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_path = tmp.path().join("echo.cor");
+        std::fs::write(&src_path, PARAMETERIZED_SRC).expect("write");
+
+        let args = vec!["not_a_number".to_string()];
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        assert_eq!(
+            code, 1,
+            "unparseable Int arg must exit 1 (not panic / crash)"
+        );
+    }
+
+    /// Slice 33Q17a — arity mismatch is caught at the driver level
+    /// with a clean diagnostic, before the VM gets the call.
+    #[test]
+    fn run_with_target_rejects_wrong_arg_count_cleanly() {
+        const PARAMETERIZED_SRC: &str = "agent echo(a: Int, b: Int) -> Int:\n    return a + b\n";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_path = tmp.path().join("echo.cor");
+        std::fs::write(&src_path, PARAMETERIZED_SRC).expect("write");
+
+        let args = vec!["1".to_string()]; // only one arg for two-param agent
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        assert_eq!(code, 1, "wrong arg count must exit 1");
     }

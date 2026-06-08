@@ -4,6 +4,167 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33Q17 closed: CLI ergonomics polish (4 reviewer-impression gaps)
+
+Closes four CLI papercuts the 2026-06-08 end-to-end verification
+sweep surfaced. Each one looks small in isolation, but together they
+formed exactly the shape that frustrates a friends-and-family (33M)
+reviewer mid-task. None was a correctness bug; all were "the tool
+works but the message rhymes with hostility."
+
+### (a) `corvid run` positional args
+
+Pre-fix:
+
+```
+$ corvid run src/main.cor world
+error: unexpected argument 'world' found
+```
+
+The scaffold's default `greet(name: String)` agent declares one
+parameter — and the reviewer fresh from `corvid new` couldn't run
+the scaffold they were just told to run. The error pointed at clap
+("use '-- --port'") which didn't help because there was no flag, just
+a positional value.
+
+Post-fix:
+
+```
+$ corvid run src/main.cor world
+world
+$ corvid run src/main.cor 41
+42
+$ corvid run src/main.cor abc
+corvid: cannot parse argv[1] = "abc" as Int
+```
+
+`Command::Run` gained a trailing-varargs slot. `run_with_target` +
+`cmd_run` thread the args to:
+- **Interpreter tier**: a new `parse_args_for_entry_agent` helper
+  parses each string against the chosen agent's declared parameter
+  type (`Int` / `Float` / `Bool` / `String`) up-front. Bad parses
+  exit 1 with a crisp `cannot parse \`abc\` as Int for parameter
+  `n` of agent `add_one`` error — the operator can fix the call
+  without a stack trace.
+- **Native tier**: `Command::args(args)` so the codegen-emitted
+  `main` decodes argv per its parameter type (which entry.rs
+  already does). Bad parses get the runtime's argv error from
+  `corvid_parse_i64` / friends.
+
+### (b) `corvid serve --port` and `--host` aliases
+
+Pre-fix:
+
+```
+$ corvid serve src/main.cor --port 8086
+error: unexpected argument '--port' found
+  tip: to pass '--port' as a value, use '-- --port'
+```
+
+The flag is `--listen host:port`. The clap hint is wrong — `--
+--port` doesn't help either. Backend tooling muscle memory is
+`--port`; the missing alias was friction with no upside.
+
+Post-fix:
+
+```
+$ corvid serve src/main.cor --port 8086
+corvid serve: listening on http://127.0.0.1:8086
+$ corvid serve src/main.cor --host 0.0.0.0 --port 8087
+corvid serve: listening on http://0.0.0.0:8087
+```
+
+`Command::Serve` grew optional `--host <HOST>` and `--port <PORT>`
+flags. A new `compose_serve_listen(listen, host, port)` helper in
+`dispatch.rs` overlays each explicit override onto `--listen`'s
+default. Precedence is "explicit wins, half-overlay allowed" —
+`--port 8081` keeps the host from `--listen`; `--host 0.0.0.0`
+keeps the port from `--listen`; both override → both win.
+
+### (c) `corvid audit <directory>` diagnostic
+
+Pre-fix:
+
+```
+$ corvid audit /tmp/my_app
+error: cannot read `/tmp/my_app`: Access is denied. (os error 5)
+```
+
+(Linux: `"Is a directory (os error 21)"`.) The natural mental
+model when sitting in `cd my_app/` is `corvid audit .` — and the
+OS-level error gave no hint that the input was the problem.
+
+Post-fix:
+
+```
+$ corvid audit /tmp/my_app
+error: `corvid audit` takes a `.cor` source file (the project's
+root module), not a directory. Try `corvid audit /tmp/my_app/src/main.cor`
+— that's the default entry point for a `corvid new`-scaffolded
+project.
+```
+
+`audit_cmd::run_audit` checks `path.is_dir()` up-front and bails
+with the structured diagnostic. The OS error is no longer reachable
+for this case.
+
+### (d) wasm `pub extern "c"` doc-link
+
+Pre-fix:
+
+```
+error: wasm target does not lower `pub extern "c"` agent `ping`;
+       export a normal agent for browser/edge use
+```
+
+The message named the restriction but left the reader to guess
+where the contract lives — and the doc page that owns it
+(`docs/reference/exported-abi.md`) is now the JSON-wire boundary
+spec from 33Q8.
+
+Post-fix:
+
+```
+error: wasm target does not lower `pub extern "c"` agent `ping`.
+       The `pub extern "c"` boundary is cdylib-only — wasm exports
+       normal Corvid agents. See `docs/reference/exported-abi.md`
+       for the boundary contract; drop the `pub extern "c"`
+       modifier to make this agent browser/edge-callable.
+```
+
+### Acceptance
+
+10 new tests total:
+
+- `corvid-driver::tests::run_with_target_interp_forwards_positional_args_to_parameterized_agent`
+- `corvid-driver::tests::run_with_target_rejects_unparseable_positional_arg_cleanly`
+- `corvid-driver::tests::run_with_target_rejects_wrong_arg_count_cleanly`
+- `corvid-cli::dispatch::serve_listen_composition_tests::no_overrides_returns_listen_default`
+- `corvid-cli::dispatch::serve_listen_composition_tests::port_override_keeps_host_from_listen`
+- `corvid-cli::dispatch::serve_listen_composition_tests::host_override_keeps_port_from_listen`
+- `corvid-cli::dispatch::serve_listen_composition_tests::both_overrides_supersede_listen_entirely`
+- `corvid-cli::dispatch::serve_listen_composition_tests::ipv6_listen_default_round_trips_with_no_overrides`
+- `corvid-cli::audit_cmd::tests::audit_on_a_directory_emits_clear_diagnostic_pointing_at_src_main_cor`
+- `corvid-codegen-wasm::tests::pub_extern_c_rejection_references_exported_abi_doc`
+
+All 10 green plus the existing 2 driver run-tests + 17 wasm
+codegen tests + the unaffected 350 corvid-cli tests + 234
+corvid-types tests. Workspace check clean. Corpus verify exits 1
+only on the two deliberate fixtures.
+
+### Why this is "ergonomics" not "feature"
+
+None of these four gaps blocked a feature from working — every one
+of them was reachable with a workaround. The reason they ship as
+launch-readiness is the 33M reviewer-impression principle: a
+reviewer's patience budget is finite, and four papercuts in the
+first hour add up to "this language is harder than it should be."
+Fixing them takes a few hundred lines of code and pre-loads goodwill
+the same reviewer will spend on actual hard problems later in their
+build.
+
+---
+
 ## 2026-06-08 - 33Q15 closed: `deploy package` write atomicity (stage + atomic rename)
 
 Surfaced during a post-33Q8 inventory of the deploy-package UX
