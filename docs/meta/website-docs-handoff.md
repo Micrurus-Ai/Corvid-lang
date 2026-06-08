@@ -160,7 +160,7 @@ landing page content.
 ## What you will build
 
 A docs section on the Corvid website rendering this tree as a
-navigable site at `https://corvid.dev/docs/...`. Concrete
+navigable site at `https://corvid-lang.org/docs/...`. Concrete
 deliverables:
 
 1. **A docs site build pipeline** in the
@@ -419,7 +419,7 @@ This project takes documentation honesty seriously. Honor these:
 
 The slice is done when:
 
-- [ ] Visiting `corvid.dev/docs` shows the docs landing page
+- [ ] Visiting `corvid-lang.org/docs` shows the docs landing page
       (rendered from `docs/README.md`).
 - [ ] Left-nav lists every section (Book, Guides, Recipes,
       Reference, Migration, Operations, Security, Internals,
@@ -489,7 +489,8 @@ an issue on `Micrurus-Ai/Corvid-lang` with the `33J3` label):
   (Vercel? Netlify? Cloudflare Pages? GitHub Pages?)
 - Is there a CI workflow already wired in `corvid-website`, or
   do we need to add one?
-- Confirm the canonical domain: `corvid.dev` is the assumption;
+- Confirm the canonical domain: `corvid-lang.org` is the assumption
+  (locked in the 33R market-readiness track 2026-06-08);
   if it's something else, that affects link resolution.
 - Confirm that the existing `index.html` should remain at `/`
   versus being absorbed into the Starlight site as the home

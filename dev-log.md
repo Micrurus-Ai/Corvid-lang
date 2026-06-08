@@ -4,6 +4,116 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33R2 closed: repo-identity unify (P0 launch blocker)
+
+Second slice of the 33R market-readiness track. The 2026-06-08
+audit named "inconsistent repo identity / dead links" as a P0
+launch-blocker — three different identities lived in the repo at
+once:
+
+- `Cargo.toml` declared `github.com/corvid-lang/corvid` (no such
+  org / repo exists).
+- The actual git remote + the install pipeline + the Cloudflare
+  Worker pointed at `github.com/Micrurus-Ai/Corvid-lang`.
+- README and docs cited two more domains (`corvid.dev`,
+  `corvid-lang.org`) — neither was served from this repo.
+
+A first-time evaluator looking at the `Cargo.toml` would click
+the repository URL, hit a 404, and bounce. Even when the actual
+remote was correct, an evaluator following the install
+instructions (`curl -fsSL corvid.dev/install.sh | sh`) would hit
+a domain that doesn't resolve.
+
+Pre-phase chat (in the 33R kickoff) locked the canonical
+identities:
+
+- Repo URL: `github.com/Micrurus-Ai/Corvid-lang` (the actual
+  remote — lowest churn, no migration needed).
+- Domain: `corvid-lang.org` (to be served from the existing
+  `web/` Cloudflare Worker; domain registration is a follow-up
+  to this slice but the URL goes in docs now so a future
+  find-replace pass doesn't have to happen).
+
+Files updated (live references only — historical/audit text
+preserved):
+
+- `Cargo.toml`: workspace `repository` field. This is the
+  load-bearing change because Cargo + crates.io read this when
+  the publish slice (33R6b) ships.
+- `FEATURES.md`: install command in the v1.0 pitch.
+- `ROADMAP.md`: install command in the v1.0 launch goals
+  section.
+- `runtime/python/README.md`: the README PyPI will render as
+  the package's front page.
+- `crates/corvid-driver/src/adversarial.rs`: `DEFAULT_REPO`
+  constant used by `corvid verify github-issues` to know where
+  to file adversarial-bypass findings.
+- `docs/meta/v1.0-demo-script.md`: the `git clone` step in the
+  post-demo handoff list.
+- `crates/corvid-connector-runtime/src/tasks.rs` + the matching
+  integration test in `tests/executive_agent_connectors.rs`:
+  GitHub-tasks connector test fixtures used `corvid-lang/corvid`
+  as the sample repo identifier. Updated mock + assertion in
+  the same edit so the test pair stayed internally consistent.
+  Five total hits across the two files.
+- `docs/book/01-install.md`: the two install one-liners that
+  the README's adoption funnel (33R3) will link.
+- `docs/guides/performance.md` + `docs/help/faq.md`:
+  benchmarks-page links.
+- `docs/meta/website-docs-handoff.md`: three references to the
+  canonical-domain assumption in the website-docs build plan.
+- `docs/internals/package-manager-scope.md`: two references to
+  the hypothetical `registry.corvid.dev` domain (negative "what
+  we don't run" context — updated to the canonical
+  `registry.corvid-lang.org` for forward-looking accuracy).
+- `web/README.md`: the deploy walkthrough's "register the
+  domain" step. Pre-fix listed `corvid.dev` / `corvid.run` /
+  `corvid-lang.com` as hypothetical alternatives; post-fix
+  states `corvid-lang.org` as the canonical choice (with a note
+  for forkers).
+
+Preserved as historical record:
+
+- `ROADMAP.md:1660` — the 25-G "no-hosted-registry-honesty"
+  closure entry that documents the prior state.
+- `ROADMAP.md:1969` — my own 33R parent filing entry that
+  records the canonicalization decision.
+- `dev-log.md:8432, 8487` — historical mentions of a defunct
+  `registry.corvid.dev` from the 25-G slice.
+- `docs/market-readiness-audit.md` and
+  `docs/market-readiness-remediation-prompt.md` — user-provided
+  audit + brief; their description of the pre-fix state is
+  source-of-truth for what this slice closed.
+
+Validation gate:
+
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-connector-runtime --lib` green
+  (the only crate whose constants changed).
+- `cargo test -p corvid-connector-runtime --test executive_agent_connectors`
+  green (the integration test whose fixtures we updated).
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### Why this matters
+
+Pre-33R2, the `Cargo.toml` `repository` field claimed
+`corvid-lang/corvid` and crates.io would render that broken
+link verbatim on the package's page when 33R6b publishes. The
+fix is a one-line `Cargo.toml` change but the reason it has to
+happen now (not later) is that the publish slice depends on
+it. Similarly, the install one-liners going into the README
+adoption funnel (33R3) have to point at the canonical domain
+before that slice writes the funnel — otherwise we'd be
+linking to a dead address from the very top of the README the
+moment 33R3 ships.
+
+Track progress: P0 tier now at 2/3 closed (33R1, 33R2);
+33R3 (README adoption funnel) is next — it depends on the
+canonical URL + domain locked here.
+
+---
+
 ## 2026-06-08 - 33R1 closed: MIT license on disk (P0 launch blocker)
 
 First slice of the 33R market-readiness track. The 2026-06-08

@@ -17,7 +17,7 @@ throughput. Honest numbers (Phase 17 baselines):
 
 The "honest slower" framing is deliberate — Corvid's value is the
 correctness surface, not raw orchestration speed. See the
-[benchmarks](https://corvid.dev/benchmarks) page for full archives.
+[benchmarks](https://corvid-lang.org/benchmarks) page for full archives.
 
 ## When to optimize
 

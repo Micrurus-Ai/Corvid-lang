@@ -287,7 +287,7 @@ mod tests {
             state: "open".to_string(),
             assignee: "bob".to_string(),
             updated_ms: 200,
-            url: "https://github.com/corvid-lang/corvid/issues/42".to_string(),
+            url: "https://github.com/Micrurus-Ai/Corvid-lang/issues/42".to_string(),
         };
         connector.insert_mock("linear_search", serde_json::json!([linear.clone()]));
         connector.insert_mock("github_search", serde_json::json!([github.clone()]));
@@ -341,7 +341,7 @@ mod tests {
                 "id": "gh-2",
                 "key": "#43",
                 "approval_id": "approval-1",
-                "replay_key": "tasks:github_write:corvid-lang/corvid:new:Create"
+                "replay_key": "tasks:github_write:Micrurus-Ai/Corvid-lang:new:Create"
             }),
         );
 
@@ -383,7 +383,7 @@ mod tests {
             .write_github(
                 TaskWriteRequest {
                     provider: "github".to_string(),
-                    workspace_or_repo: "corvid-lang/corvid".to_string(),
+                    workspace_or_repo: "Micrurus-Ai/Corvid-lang".to_string(),
                     issue_id: None,
                     title: "Build connector".to_string(),
                     body: "details".to_string(),
@@ -403,7 +403,7 @@ mod tests {
             .write_github(
                 TaskWriteRequest {
                     provider: "github".to_string(),
-                    workspace_or_repo: "corvid-lang/corvid".to_string(),
+                    workspace_or_repo: "Micrurus-Ai/Corvid-lang".to_string(),
                     issue_id: Some("42".to_string()),
                     title: "Update".to_string(),
                     body: "comment".to_string(),

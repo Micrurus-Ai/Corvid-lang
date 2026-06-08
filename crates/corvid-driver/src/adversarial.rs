@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::env;
 
-const DEFAULT_REPO: &str = "corvid-lang/corvid";
+const DEFAULT_REPO: &str = "Micrurus-Ai/Corvid-lang";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AdversarialCategory {

@@ -14,7 +14,7 @@ On orchestration-only benches (no model call), Corvid is roughly
 canonical reference apps. The numbers were published in Phase 17
 deliberately as "honest slower" — Corvid is not optimized for raw
 throughput; it is optimized for the AI-correctness surface. See the
-[benchmarks](https://corvid.dev/benchmarks) page for the full numbers.
+[benchmarks](https://corvid-lang.org/benchmarks) page for the full numbers.
 
 ## Does the compiler need network access?
 

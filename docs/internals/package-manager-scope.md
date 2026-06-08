@@ -43,7 +43,7 @@ A hosted registry service does not run as part of v1.0.
 
 ## What does NOT ship today
 
-- **A hosted registry service at `registry.corvid.dev` or anywhere else.**
+- **A hosted registry service at `registry.corvid-lang.org` or anywhere else.**
   No production registry runs. No package has been published to a public
   index Corvid maintainers operate. The CLI's `--url-base` accepts `file://`
   and any http endpoint a user runs themselves; Corvid does not provide one.
@@ -97,7 +97,7 @@ fact that no Corvid-operated public service runs.
 - `crates/corvid-driver/src/package_policy.rs` — policy enforcement.
 - `crates/corvid-cli/src/main.rs` — `Package` subcommand and dispatch.
 
-`grep` against any of these files returns zero `https://registry.corvid.dev`
+`grep` against any of these files returns zero `https://registry.corvid-lang.org`
 references. The format is what Corvid ships.
 
 ## Registry guarantee row

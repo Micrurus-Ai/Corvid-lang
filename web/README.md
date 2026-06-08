@@ -26,7 +26,7 @@ That's the whole thing.
 
 Prerequisites:
 
-1. **Register the domain.** `corvid.sh` is the example; substitute whatever you actually own. Common alternatives if `.sh` is taken: `corvid.dev`, `corvid.run`, `getcorvid.dev`, `corvid-lang.com`.
+1. **Register the domain.** The canonical project domain is `corvid-lang.org` (decided in the 33R market-readiness track 2026-06-08). If you're forking and want a different domain, the `wrangler.toml` and `worker.js` references below need updating.
 2. **Free Cloudflare account** at [dash.cloudflare.com](https://dash.cloudflare.com).
 3. **wrangler CLI** locally: `npm install -g wrangler`.
 

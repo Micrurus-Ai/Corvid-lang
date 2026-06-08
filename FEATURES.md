@@ -139,7 +139,7 @@ Stable API, documented, production-ready.
 
 1. **Stable language spec** — semver `1.0` guarantees; no breaking changes without major bump.
 2. **Full docs + tutorial + book**.
-3. **Installer** — `curl -fsSL corvid.dev/install.sh | sh` distributes the binary and sets up the environment.
+3. **Installer** — `curl -fsSL corvid-lang.org/install.sh | sh` distributes the binary and sets up the environment.
 4. **Public launch** — HN, conferences, keynote demo.
 5. **Windows + Linux + macOS** binaries shipped through the installer.
 

@@ -11,13 +11,13 @@ parity harness on all three on every push.
 Unix (macOS + Linux):
 
 ```sh
-curl -fsSL https://corvid.dev/install.sh | sh
+curl -fsSL https://corvid-lang.org/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://corvid.dev/install.ps1 | iex
+iwr -useb https://corvid-lang.org/install.ps1 | iex
 ```
 
 The script downloads the platform-appropriate signed release, installs

@@ -70,7 +70,7 @@ fn executive_agent_uses_email_calendar_tasks_chat_and_files_through_connector_mo
             "id": "gh-1",
             "key": "#1",
             "approval_id": "approval-task",
-            "replay_key": "tasks:github_write:corvid-lang/corvid:new:Create"
+            "replay_key": "tasks:github_write:Micrurus-Ai/Corvid-lang:new:Create"
         }),
     );
 
@@ -180,7 +180,7 @@ fn executive_agent_uses_email_calendar_tasks_chat_and_files_through_connector_mo
             .write_github(
                 TaskWriteRequest {
                     provider: "github".to_string(),
-                    workspace_or_repo: "corvid-lang/corvid".to_string(),
+                    workspace_or_repo: "Micrurus-Ai/Corvid-lang".to_string(),
                     issue_id: None,
                     title: "Task".to_string(),
                     body: "body".to_string(),

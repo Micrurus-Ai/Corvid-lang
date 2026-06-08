@@ -42,7 +42,7 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Corvid Authors"]
 license = "MIT"
-repository = "https://github.com/corvid-lang/corvid"
+repository = "https://github.com/Micrurus-Ai/Corvid-lang"
 rust-version = "1.75"
 
 [workspace.dependencies]
