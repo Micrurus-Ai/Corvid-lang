@@ -4,6 +4,201 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33S0 closed: foundation for executing I/O surfaces
+
+First slice of the 33S phase (HTTP + File + SQLite as
+effect-carrying executing primitives). 33S0 is shared
+machinery — no user-facing surface lands here. The actual
+executing primitives ship per-surface in 33S1 (file), 33S2
+(HTTP), 33S3 (SQLite).
+
+### Honest re-scope during execution
+
+The original 33S0 scope (per the ROADMAP filing) included
+registering 8 guarantees (7 RuntimeChecked + 1 Static), updating
+claim-coverage, and regenerating `docs/reference/core-semantics.md`.
+While implementing, I hit a real constraint:
+
+> `corvid-guarantees::tests::every_enforced_guarantee_has_positive_and_adversarial_test_refs`
+> requires every Static/RuntimeChecked guarantee to carry at least
+> one positive AND one adversarial test ref. Empty refs are
+> rejected.
+
+The 8 new guarantees can't satisfy this in 33S0 because their
+tests don't exist yet — they ship in 33S1/2/3. Two options:
+
+1. Register the guarantees with placeholder/stub tests that pass
+   trivially. **This is the shortcut shape** — the cross-reference
+   invariant exists precisely to prevent "we claim to test X but
+   the refs point at nothing real."
+2. Defer guarantee registration to per-surface slices, where each
+   guarantee ships alongside its real tests. **No shortcut**:
+   each slice carries its full proof contract.
+
+Took option (2). 33S0's scope contracted to: effect registry +
+io_source dim + scaffolds + error variant + config parsing.
+33S1/S2/S3 each register their guarantees + tests +
+core-semantics rows in one atomic commit per surface.
+
+### What shipped
+
+**1. `io_source` dimension**
+(`crates/corvid-types/src/effects.rs::register_builtin_dimensions()`)
+
+```rust
+self.dimensions.insert(
+    "io_source".into(),
+    DimensionSchema {
+        name: "io_source".into(),
+        composition: CompositionRule::Union,
+        default: DimensionValue::Name("none".into()),
+    },
+);
+```
+
+Distinct from the existing `data` dim (content-class:
+none/grounded/session/memory). The new dim carries source/sink
+classification (fs.read / fs.write / net.egress / db.read /
+db.write). Union composition means an agent that reads files
+AND writes to a DB carries `io_source: {fs.read, db.write}` —
+exactly the shape future egress policies will reason about.
+
+**2. Seven built-in effect profiles** via three new register
+methods on `EffectRegistry` (`register_io_effects` /
+`register_http_effects` / `register_db_effects`), called from
+`from_decls_with_config()` alongside the existing built-in
+registrations (`register_retrieval_effect`,
+`register_store_effects`, `register_dangerous_effect`):
+
+| effect | io_source | reversible |
+|---|---|---|
+| `io_read` | `fs.read` | default (true) |
+| `io_write` | `fs.write` | **false** |
+| `io_list` | `fs.read` | default (true) |
+| `http_get` | `net.egress` | default (true) — from caller perspective |
+| `http_post` | `net.egress` | **false** |
+| `db_query` | `db.read` | default (true) |
+| `db_execute` | `db.write` | **false** |
+
+Trust is `autonomous` for all seven (the default). The brief's
+ask: writes to disk / HTTP POST / SQL execute are routine for
+typed programs; gating every one behind `human_required` would
+force `approve` on every file write. Users who want write
+protection use `@trust(human_required)` on the agent or wrap
+the call in `dangerous`.
+
+**3. `RuntimeError::SurfaceNotImplemented { surface, function }`**
+in `crates/corvid-runtime-core/src/errors.rs`. Distinct from
+`QuarantineViolation`; Display impl names both fields and
+references the per-surface slice that will wire the impl:
+
+```
+executing surface `io` is registered but its implementation has
+not yet been wired — `io.read_text` is reachable today only as
+a ffi_bridge stub. The runtime side ships in the 33S1/33S2/33S3
+per-surface slices; calling this function before those land
+returns SurfaceNotImplemented so the program fails closed rather
+than silently no-op.
+```
+
+**4. Three ffi_bridge module scaffolds** at
+`crates/corvid-runtime/src/ffi_bridge/{io,http,db}_exports.rs`.
+Each carries a `surface_not_implemented(function)` helper that
+returns the matching `SurfaceNotImplemented` variant. The actual
+`pub unsafe extern "C" fn corvid_<name>(...)` entry points land
+per-surface in 33S1/2/3. Module registrations added to
+`ffi_bridge/mod.rs` so the helpers are reachable from the
+runtime crate.
+
+**5. `CorvidConfig` extensions** in
+`crates/corvid-types/src/config.rs`:
+
+```rust
+pub struct CorvidConfig {
+    // ... existing fields ...
+    pub io: IoConfig,       // [io] root: Option<String>
+    pub http: HttpConfig,   // [http] allow: Vec<String>
+}
+```
+
+Parsing only — no enforcement in 33S0. 33S1 will:
+- Resolve `[io] root` against the corvid.toml directory (both
+  relative `"./data"` and absolute `"/var/lib/.../data"` paths
+  are accepted; semantic resolution lives in 33S1's
+  path-confinement enforcement).
+- Fail closed with a clear "missing `[io] root`" diagnostic if
+  the field is absent when an executing file-I/O call is reached.
+
+33S2 will do the same for `[http] allow` (empty list → fail
+closed) and run the SSRF block (private / loopback / link-local
+IP rejection) unconditionally regardless of allowlist contents.
+
+### Tests
+
+12 new unit tests across the touched crates:
+
+- `corvid-types::effects::tests::io_source_dimension_is_registered_with_union_default_none` —
+  the new dim is in the registry with the correct shape.
+- `corvid-types::effects::tests::io_http_db_effects_are_registered_with_correct_io_source_and_reversibility` —
+  all 7 effects present with right io_source + reversibility.
+- `corvid-types::effects::tests::composing_io_read_and_db_execute_unions_their_io_source_values` —
+  Union composition + LeastReversible compose correctly across the new effects.
+- `corvid-runtime-core::errors::tests::surface_not_implemented_display_names_surface_and_function` —
+  Display mentions the surface, function, and the future slice.
+- `corvid-runtime-core::errors::tests::surface_not_implemented_is_a_distinct_variant_from_quarantine_violation` —
+  the new variant pattern-matches cleanly against the existing
+  quarantine variant.
+- `corvid-types::config::tests::io_root_parses_from_corvid_toml_when_set` —
+  positive case for `[io] root = "."`.
+- `corvid-types::config::tests::io_root_absent_parses_to_none` —
+  absent `[io]` section is None (33S1 fails closed on None).
+- `corvid-types::config::tests::io_root_accepts_both_relative_and_absolute_strings` —
+  both `"./data"` and `"/var/lib/..."` parse through; semantic
+  resolution lives in 33S1.
+- `corvid-types::config::tests::http_allow_parses_as_vec_of_strings` —
+  positive case for `[http] allow = ["api.example.com", ...]`.
+- `corvid-types::config::tests::http_allow_absent_parses_to_empty_vec` —
+  absent `[http]` section is empty (33S2 fails closed on empty).
+- `corvid-types::config::tests::io_and_http_sections_compose_with_existing_sections` —
+  the new sections coexist with `[run]`, `[effect-system]`,
+  `[package-policy]` without breaking pre-33S0 corvid.toml files.
+
+Validation gate:
+
+- `cargo check --workspace --tests` clean
+- `cargo test -p corvid-types --lib` — 243 pass (was 234; +9
+  effects/config tests + the existing 234)
+- `cargo test -p corvid-runtime-core` — 22 pass including the
+  2 new SurfaceNotImplemented tests
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures
+
+### What unblocks what
+
+33S0's plumbing means 33S1/S2/S3 can each focus on their
+surface-specific work:
+
+- 33S1 (File I/O) — `io.read_text` / `io.write_text` /
+  `io.list_dir` wire through `IoRuntime`; `[io] root`
+  enforcement; path-traversal rejection; replay-quarantine
+  fixture; 3 guarantees (read/write/list quarantine) registered
+  with their tests; tour topic + reference doc.
+- 33S2 (HTTP) — `http.get` / `http.post_json` wire through
+  `HttpClient::send`; SSRF block + `[http] allow` enforcement;
+  timeout/size caps; 2 guarantees + tests; tour + doc.
+- 33S3 (SQLite) — `db.open` / `db.query` / `db.execute` wire
+  through new `db_exports.rs` over rusqlite; `Value::DbHandle`
+  variant in corvid-vm; param-binding only; new SQLite
+  quarantine mode; 2 guarantees + tests; tour + doc.
+
+Plus the 1 Static guarantee (the @deterministic-rejection check)
+becomes one row registered by whichever per-surface slice ships
+the actual checker enforcement.
+
+P1 track progress: 33S 1/5 sub-slices closed.
+
+---
+
 ## 2026-06-08 - 33R4b closed: registry format migration TOML → JSON
 
 Second slice of the 33R4 (package registry) sub-track. 33R4a

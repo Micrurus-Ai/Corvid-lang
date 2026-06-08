@@ -152,6 +152,20 @@ pub enum RuntimeError {
         detail: String,
     },
 
+    /// Phase 33S0: an executing I/O surface (file / http / SQLite)
+    /// was called before its per-surface slice (33S1 / 33S2 / 33S3)
+    /// wired the actual runtime side. The ffi_bridge stubs return
+    /// this variant so a program that tries to call e.g.
+    /// `io.read_text(...)` against a partially-built toolchain gets
+    /// a precise diagnostic naming the surface, not a generic crash.
+    /// Cleared from existence by the per-surface slice landing the
+    /// real implementation — once 33S1 ships, the `io` arm of any
+    /// ffi_bridge function should never return this variant.
+    SurfaceNotImplemented {
+        surface: String,
+        function: String,
+    },
+
     /// Catch-all. Prefer adding a dedicated variant.
     Other(String),
 }
@@ -283,9 +297,77 @@ impl fmt::Display for RuntimeError {
                 f,
                 "replay-mode quarantine ({surface}) blocked an unrecorded side-effect: {detail}"
             ),
+            Self::SurfaceNotImplemented { surface, function } => write!(
+                f,
+                "executing surface `{surface}` is registered but its implementation has not yet been wired — \
+                 `{function}` is reachable today only as a ffi_bridge stub. The runtime side ships in the \
+                 33S1/33S2/33S3 per-surface slices; calling this function before those land returns \
+                 SurfaceNotImplemented so the program fails closed rather than silently no-op."
+            ),
             Self::Other(msg) => f.write_str(msg),
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Slice 33S0 — the SurfaceNotImplemented variant renders a
+    /// diagnostic that names both the surface and the function so
+    /// an early caller (one reaching an ffi_bridge stub before
+    /// 33S1/2/3 lands the real impl) sees a precise error rather
+    /// than a generic "feature missing" sentinel.
+    #[test]
+    fn surface_not_implemented_display_names_surface_and_function() {
+        let err = RuntimeError::SurfaceNotImplemented {
+            surface: "io".to_string(),
+            function: "io.read_text".to_string(),
+        };
+        let rendered = format!("{err}");
+        assert!(
+            rendered.contains("io"),
+            "Display must mention the surface; got {rendered}"
+        );
+        assert!(
+            rendered.contains("io.read_text"),
+            "Display must mention the function name; got {rendered}"
+        );
+        assert!(
+            rendered.contains("33S1") || rendered.contains("33S2") || rendered.contains("33S3"),
+            "Display should reference the slice number that will wire the impl; got {rendered}"
+        );
+    }
+
+    /// Slice 33S0 — `SurfaceNotImplemented` is distinguishable
+    /// from `QuarantineViolation` at the variant level. Pre-fix
+    /// the ffi_bridge stubs would have had to return a generic
+    /// `Other(...)` which can't be matched cleanly; the new
+    /// variant lets call sites pattern-match precisely.
+    #[test]
+    fn surface_not_implemented_is_a_distinct_variant_from_quarantine_violation() {
+        let surface_err = RuntimeError::SurfaceNotImplemented {
+            surface: "http".to_string(),
+            function: "http.post_json".to_string(),
+        };
+        let quarantine_err = RuntimeError::QuarantineViolation {
+            surface: "http".to_string(),
+            detail: "POST to api.example.com".to_string(),
+        };
+
+        assert!(matches!(
+            surface_err,
+            RuntimeError::SurfaceNotImplemented { .. }
+        ));
+        assert!(matches!(
+            quarantine_err,
+            RuntimeError::QuarantineViolation { .. }
+        ));
+        assert!(!matches!(
+            surface_err,
+            RuntimeError::QuarantineViolation { .. }
+        ));
+    }
+}

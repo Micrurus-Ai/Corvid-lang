@@ -45,6 +45,14 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod approval_exports;
+// Phase 33S0: scaffolded modules for the executing I/O surfaces.
+// The actual extern "C" entry points land in 33S1 (io), 33S2
+// (http), 33S3 (db). The modules exist now so the per-surface
+// slices have a settled home and the `SurfaceNotImplemented`
+// helper is reachable from regression tests.
+mod db_exports;
+mod http_exports;
+mod io_exports;
 mod json_exports;
 mod llm_dispatch;
 mod prompt_exports;

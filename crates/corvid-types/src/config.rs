@@ -32,6 +32,52 @@ pub struct CorvidConfig {
     #[serde(rename = "package-policy")]
     pub package_policy: PackagePolicyConfig,
     pub run: RunConfig,
+    /// Phase 33S0: file-I/O scope configuration. The executing
+    /// `io.read_text` / `io.write_text` / `io.list_dir` primitives
+    /// (33S1) enforce that resolved paths stay inside `root` —
+    /// path traversal (`..`) and absolute-path escapes are
+    /// rejected. Parsing only in 33S0; enforcement lands in 33S1.
+    /// `corvid new` scaffolds `[io] root = "."` so the default
+    /// starter project works while making the boundary explicit.
+    pub io: IoConfig,
+    /// Phase 33S0: HTTP-client egress configuration. The
+    /// executing `http.get` / `http.post_json` primitives (33S2)
+    /// enforce that the target host appears in `allow`; SSRF
+    /// block (private / loopback / link-local) is always on
+    /// regardless of allow contents. Parsing only in 33S0;
+    /// enforcement lands in 33S2.
+    pub http: HttpConfig,
+}
+
+/// Phase 33S0: parsed `[io]` table from `corvid.toml`. Fields
+/// validated/normalised here; semantic enforcement (path
+/// confinement, traversal rejection) lands in 33S1.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct IoConfig {
+    /// File-I/O root. When `None`, executing file-I/O surfaces
+    /// fail closed in 33S1 with a clear "missing `[io] root`"
+    /// diagnostic. `corvid new` scaffolds `"."` so a fresh
+    /// project works out of the box. Relative paths resolve
+    /// against the directory containing `corvid.toml`; absolute
+    /// paths are taken as-is.
+    pub root: Option<String>,
+}
+
+/// Phase 33S0: parsed `[http]` table from `corvid.toml`. Fields
+/// validated/normalised here; semantic enforcement (SSRF block,
+/// allowlist check) lands in 33S2.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HttpConfig {
+    /// Allowlist of HTTP egress hosts. Each entry is a host
+    /// string (no scheme, no path, no port — exact hostname
+    /// match against the request URL's host). When the list is
+    /// empty, executing HTTP surfaces fail closed in 33S2 with
+    /// a clear "missing `[http] allow`" diagnostic. SSRF block
+    /// (private / loopback / link-local) runs regardless and
+    /// rejects RFC1918 + 127.0.0.0/8 + 169.254.0.0/16 unilaterally.
+    pub allow: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -555,5 +601,98 @@ default = "0"
         let cfg = CorvidConfig::load_walking(&nested).unwrap().unwrap();
         assert_eq!(cfg.effect_system.dimensions.len(), 1);
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    // -------- Slice 33S0: [io] root + [http] allow parsing --------
+
+    /// 33S0 — A `corvid.toml` with `[io] root = "."` parses into
+    /// `CorvidConfig::io.root = Some(".")`. The enforcement (path
+    /// confinement against the root) lands in 33S1; this slice
+    /// just verifies the value reaches the loaded config.
+    #[test]
+    fn io_root_parses_from_corvid_toml_when_set() {
+        let parsed: CorvidConfig = toml::from_str(
+            r#"
+[io]
+root = "."
+"#,
+        )
+        .expect("parse [io] root config");
+        assert_eq!(parsed.io.root.as_deref(), Some("."));
+    }
+
+    /// 33S0 — Absent `[io] root` parses to `None` (the executing
+    /// surfaces in 33S1 fail closed with a clear diagnostic).
+    #[test]
+    fn io_root_absent_parses_to_none() {
+        let parsed: CorvidConfig =
+            toml::from_str("# no [io] table").expect("parse empty config");
+        assert!(parsed.io.root.is_none());
+    }
+
+    /// 33S0 — Absolute paths in `[io] root` parse through as
+    /// strings (semantic interpretation — resolve relative
+    /// against corvid.toml directory; treat absolute as-is —
+    /// lives in 33S1 alongside the actual enforcement).
+    #[test]
+    fn io_root_accepts_both_relative_and_absolute_strings() {
+        for value in [".", "./data", "/var/lib/corvid-app/data"] {
+            let parsed: CorvidConfig =
+                toml::from_str(&format!("[io]\nroot = \"{value}\""))
+                    .unwrap_or_else(|err| panic!("parse failed for `{value}`: {err}"));
+            assert_eq!(parsed.io.root.as_deref(), Some(value));
+        }
+    }
+
+    /// 33S0 — `[http] allow = ["api.example.com", "..."]` parses
+    /// into `CorvidConfig::http.allow`. SSRF block enforcement +
+    /// allowlist check both land in 33S2; this just verifies the
+    /// value reaches the loaded config.
+    #[test]
+    fn http_allow_parses_as_vec_of_strings() {
+        let parsed: CorvidConfig = toml::from_str(
+            r#"
+[http]
+allow = ["api.example.com", "api.anthropic.com"]
+"#,
+        )
+        .expect("parse [http] allow config");
+        assert_eq!(
+            parsed.http.allow,
+            vec!["api.example.com".to_string(), "api.anthropic.com".to_string()]
+        );
+    }
+
+    /// 33S0 — Absent `[http] allow` parses to an empty Vec.
+    /// (33S2 treats empty as "no host allowed; egress fails
+    /// closed.")
+    #[test]
+    fn http_allow_absent_parses_to_empty_vec() {
+        let parsed: CorvidConfig =
+            toml::from_str("# no [http] table").expect("parse empty config");
+        assert!(parsed.http.allow.is_empty());
+    }
+
+    /// 33S0 — Both new sections coexist with the existing
+    /// `[effect-system]`, `[package-policy]`, `[run]` sections
+    /// without breaking pre-33S0 corvid.toml files.
+    #[test]
+    fn io_and_http_sections_compose_with_existing_sections() {
+        let parsed: CorvidConfig = toml::from_str(
+            r#"
+[run]
+target = "native"
+
+[io]
+root = "."
+
+[http]
+allow = ["api.example.com"]
+"#,
+        )
+        .expect("parse mixed config");
+        assert_eq!(parsed.run.target.as_deref(), Some("native"));
+        assert_eq!(parsed.io.root.as_deref(), Some("."));
+        assert_eq!(parsed.http.allow, vec!["api.example.com".to_string()]);
     }
 }

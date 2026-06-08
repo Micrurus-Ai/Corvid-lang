@@ -142,6 +142,18 @@ impl EffectRegistry {
         registry.register_dangerous_effect();
         registry.register_human_boundary_effects();
 
+        // Phase 33S0: seven built-in executing-I/O effects —
+        // `io_read` / `io_write` / `io_list` (file surface),
+        // `http_get` / `http_post` (HTTP client surface),
+        // `db_query` / `db_execute` (SQLite surface). The runtime
+        // side wires up in 33S1/2/3; registering the effects here
+        // means user code can declare `uses io_read` etc. and have
+        // the effect-row analyzer compose them correctly before the
+        // per-surface slices land their executing implementations.
+        registry.register_io_effects();
+        registry.register_http_effects();
+        registry.register_db_effects();
+
         for decl in decls {
             let mut profile = EffectProfile {
                 name: decl.name.name.clone(),
@@ -297,6 +309,106 @@ impl EffectRegistry {
                 default: DimensionValue::Name("standard".into()),
             },
         );
+        // Phase 33S0: `io_source` classifies WHERE an effect reads
+        // from or writes to — distinct from `data` (which classifies
+        // WHAT KIND of data: none/grounded/session/memory).
+        // Composition is `Union`: an agent that reads files AND
+        // writes to a DB carries `io_source: {fs.read, db.write}`.
+        // Default `none` so existing programs with no I/O effect
+        // declare nothing on this dimension. Valid values are
+        // declared by the seven built-in I/O effects below; user
+        // code can extend with declared values via `corvid.toml`
+        // custom-dimension entries the same way other dimensions do.
+        self.dimensions.insert(
+            "io_source".into(),
+            DimensionSchema {
+                name: "io_source".into(),
+                composition: CompositionRule::Union,
+                default: DimensionValue::Name("none".into()),
+            },
+        );
+    }
+
+    /// Phase 33S0: register the three built-in file-I/O effects —
+    /// `io_read`, `io_write`, `io_list`. These are referenced by
+    /// the executing `std/io.cor` agents (33S1 wires the actual
+    /// `io.read_text` / `io.write_text` / `io.list_dir`); registering
+    /// them here makes the effect-row check valid for any program
+    /// that declares `uses io_read` etc. before 33S1 ships the
+    /// runtime side.
+    fn register_io_effects(&mut self) {
+        for (name, source, reversible) in [
+            ("io_read", "fs.read", true),
+            ("io_write", "fs.write", false),
+            ("io_list", "fs.read", true),
+        ] {
+            let mut dims = HashMap::new();
+            dims.insert(
+                "io_source".into(),
+                DimensionValue::Name(source.into()),
+            );
+            if !reversible {
+                dims.insert("reversible".into(), DimensionValue::Bool(false));
+            }
+            self.effects.insert(
+                name.into(),
+                EffectProfile {
+                    name: name.into(),
+                    dimensions: dims,
+                },
+            );
+        }
+    }
+
+    /// Phase 33S0: register the two built-in HTTP-client effects —
+    /// `http_get` (reversible from the caller's perspective; the
+    /// server-side log/billing/rate-limit side-effects are not the
+    /// caller's state) and `http_post` (NOT reversible — POSTs by
+    /// convention change server state).
+    fn register_http_effects(&mut self) {
+        for (name, reversible) in [("http_get", true), ("http_post", false)] {
+            let mut dims = HashMap::new();
+            dims.insert(
+                "io_source".into(),
+                DimensionValue::Name("net.egress".into()),
+            );
+            if !reversible {
+                dims.insert("reversible".into(), DimensionValue::Bool(false));
+            }
+            self.effects.insert(
+                name.into(),
+                EffectProfile {
+                    name: name.into(),
+                    dimensions: dims,
+                },
+            );
+        }
+    }
+
+    /// Phase 33S0: register the two built-in SQLite effects —
+    /// `db_query` (reversible read) and `db_execute` (NOT
+    /// reversible: writes/DDL/DML change DB state).
+    fn register_db_effects(&mut self) {
+        for (name, source, reversible) in [
+            ("db_query", "db.read", true),
+            ("db_execute", "db.write", false),
+        ] {
+            let mut dims = HashMap::new();
+            dims.insert(
+                "io_source".into(),
+                DimensionValue::Name(source.into()),
+            );
+            if !reversible {
+                dims.insert("reversible".into(), DimensionValue::Bool(false));
+            }
+            self.effects.insert(
+                name.into(),
+                EffectProfile {
+                    name: name.into(),
+                    dimensions: dims,
+                },
+            );
+        }
     }
 
     fn register_retrieval_effect(&mut self) {
@@ -489,7 +601,7 @@ pub use grounded::{
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_dimension, dimension_satisfies};
+    use super::{compose_dimension, dimension_satisfies, EffectRegistry};
     use corvid_ast::{BackpressurePolicy, CompositionRule, DimensionValue};
 
     #[test]
@@ -557,5 +669,111 @@ mod tests {
             },
             "latency",
         ));
+    }
+
+    // -------- Slice 33S0: io_source dim + 7 built-in I/O effects --------
+
+    /// 33S0 — the new `io_source` dimension is registered with the
+    /// expected default and composition rule. Programs that don't
+    /// touch I/O see no change; programs that do compose the new
+    /// values via `Union` (so an agent reading files AND writing
+    /// to a DB carries the union `{fs.read, db.write}`).
+    #[test]
+    fn io_source_dimension_is_registered_with_union_default_none() {
+        let registry = EffectRegistry::from_decls(&[]);
+        let schema = registry
+            .dimensions
+            .get("io_source")
+            .expect("io_source dim must be registered");
+        assert!(matches!(schema.composition, CompositionRule::Union));
+        assert!(matches!(
+            &schema.default,
+            DimensionValue::Name(s) if s == "none"
+        ));
+    }
+
+    /// 33S0 — all seven built-in I/O effects are in the registry
+    /// with the right io_source value and reversibility. The read-
+    /// shape three (io_read, io_list, http_get, db_query) inherit
+    /// reversible=true from the dimension default and don't carry
+    /// an explicit reversible value; the write-shape three
+    /// (io_write, http_post, db_execute) carry reversible=false
+    /// explicitly so the LeastReversible composition picks them up.
+    #[test]
+    fn io_http_db_effects_are_registered_with_correct_io_source_and_reversibility() {
+        let registry = EffectRegistry::from_decls(&[]);
+
+        for (name, source, expect_explicit_reversible_false) in [
+            ("io_read", "fs.read", false),
+            ("io_write", "fs.write", true),
+            ("io_list", "fs.read", false),
+            ("http_get", "net.egress", false),
+            ("http_post", "net.egress", true),
+            ("db_query", "db.read", false),
+            ("db_execute", "db.write", true),
+        ] {
+            let profile = registry
+                .effects
+                .get(name)
+                .unwrap_or_else(|| panic!("effect `{name}` must be registered"));
+            let actual_source = profile
+                .dimensions
+                .get("io_source")
+                .unwrap_or_else(|| panic!("effect `{name}` must declare io_source"));
+            assert!(
+                matches!(actual_source, DimensionValue::Name(s) if s == source),
+                "effect `{name}` io_source: expected `{source}`, got {actual_source:?}"
+            );
+            let has_explicit_reversible = profile.dimensions.contains_key("reversible");
+            assert_eq!(
+                has_explicit_reversible, expect_explicit_reversible_false,
+                "effect `{name}` reversibility declaration mismatch \
+                 (explicit-reversible-false expected={expect_explicit_reversible_false}, \
+                 got has_explicit_reversible={has_explicit_reversible})"
+            );
+            if expect_explicit_reversible_false {
+                let actual_reversible = &profile.dimensions["reversible"];
+                assert!(
+                    matches!(actual_reversible, DimensionValue::Bool(false)),
+                    "effect `{name}` reversible: expected false, got {actual_reversible:?}"
+                );
+            }
+        }
+    }
+
+    /// 33S0 — Union-composition of two I/O effects yields the
+    /// expected combined io_source. An agent that `uses io_read,
+    /// db_execute` carries `io_source: {fs.read, db.write}` as a
+    /// composed value the checker can reason about. (The exact
+    /// DimensionValue shape for a Union of two Names depends on
+    /// `compose_dimension`; assert via `format!` to be format-
+    /// agnostic.)
+    #[test]
+    fn composing_io_read_and_db_execute_unions_their_io_source_values() {
+        let registry = EffectRegistry::from_decls(&[]);
+        let composed = registry.compose(&["io_read", "db_execute"]);
+        let io_source = composed
+            .dimensions
+            .get("io_source")
+            .expect("composed profile must include io_source");
+        let rendered = format!("{io_source:?}");
+        assert!(
+            rendered.contains("fs.read"),
+            "composed io_source should include fs.read; got {rendered}"
+        );
+        assert!(
+            rendered.contains("db.write"),
+            "composed io_source should include db.write; got {rendered}"
+        );
+        // db_execute is reversible=false, so the composed
+        // reversible should be false (LeastReversible rule).
+        let reversible = composed
+            .dimensions
+            .get("reversible")
+            .expect("reversible should be in composed profile");
+        assert!(
+            matches!(reversible, DimensionValue::Bool(false)),
+            "composing a non-reversible effect must yield reversible=false; got {reversible:?}"
+        );
     }
 }
