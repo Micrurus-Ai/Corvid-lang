@@ -4,6 +4,74 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33R1 closed: MIT license on disk (P0 launch blocker)
+
+First slice of the 33R market-readiness track. The 2026-06-08
+audit (`docs/market-readiness-audit.md`) named "no LICENSE file
+despite MIT OR Apache-2.0 claimed" as the load-bearing P0 — a
+project that declares an open-source license but ships no on-disk
+text is, legally, all-rights-reserved by default, and GitHub's
+license detector resolves to "none."
+
+Per the pre-phase chat, narrowing the prior dual-license claim to
+MIT-only (rather than dual-licensing) because there were zero
+downstream consumers actually relying on the Apache-2.0 option at
+`0.0.1` (no LICENSE on disk = no offer ever stood), and MIT is the
+simpler default for the launch surface.
+
+The change rippled wider than the slice header suggests because
+the prior "MIT OR Apache-2.0" string appeared in:
+
+- `Cargo.toml` workspace declaration (one source of truth — every
+  workspace member already inherits via `license.workspace = true`)
+- `runtime/python/pyproject.toml` (the bundled Python runtime
+  package's metadata — what `pip install` sees)
+- `extensions/vscode-corvid/package.json` + `package-lock.json`
+  (what the VS Code Marketplace will read in 33R6a)
+- `web/worker.js` installer-landing footer
+- `docs/help/faq.md` and `docs/meta/remaining-slices-handoff.md`
+- The `corvid bind` Rust-binding template
+  (`crates/corvid-bind/src/rust_backend/cargo.rs`) — generates
+  Cargo.toml for embedded library users
+- 12 committed example `bindings_rust/Cargo.toml` test fixtures
+  (output of `corvid bind` against the example apps; updated via
+  one-shot `sed` since the line is invariant across all 12)
+
+The README's `## License` section was rewritten from the bare
+`MIT OR Apache-2.0` line to a proper section linking `LICENSE`,
+stating MIT, and documenting the inbound = outbound contribution
+convention so a future contributor can reason about their grant
+without reading 33R-track decisions.
+
+Three files were deliberately NOT rewritten:
+
+- `ROADMAP.md`'s 33R parent entry (documents the narrowing
+  decision as historical record).
+- `docs/market-readiness-audit.md` (the user-provided audit; its
+  description of the pre-fix state stays as filed).
+- `docs/market-readiness-remediation-prompt.md` (the user-provided
+  execution brief; same reason).
+
+The `gh license-detector` shape (or its grep proxy
+`grep -rn "MIT OR Apache-2.0"`) now returns only those three
+intentional references. GitHub's UI will resolve the repo as
+MIT-licensed on next push.
+
+Validation gate:
+- `cargo check --workspace --tests` clean
+- `cargo test -p corvid-bind --lib` 2/2 pass (the only crate
+  whose source-rendering changed)
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures
+
+Track progress: 33R1 closed. Next is 33R2 (repo-identity unify);
+pre-phase chat already covered the canonical URL
+(`github.com/Micrurus-Ai/Corvid-lang`) and domain
+(`corvid-lang.org`), so 33R2 can start without further
+clarification.
+
+---
+
 ## 2026-06-08 - 33Q17 closed: CLI ergonomics polish (4 reviewer-impression gaps)
 
 Closes four CLI papercuts the 2026-06-08 end-to-end verification
