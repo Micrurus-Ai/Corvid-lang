@@ -225,7 +225,9 @@ pub use http::{
     record_exchange, request_fingerprint, HttpClient, HttpHeader, HttpRequest, HttpResponse,
     HttpRetryPolicy, RecordedHttpExchange,
 };
-pub use io::{DirectoryEntry, FileRead, FileSystemEffect, FileWrite, IoRuntime, TextLineStream};
+pub use io::{
+    DirectoryEntry, FileRead, FileSystemEffect, FileWrite, IoRuntime, IoToolPolicy, TextLineStream,
+};
 pub use lineage::{
     lineage_span_id, validate_lineage, LineageEvent, LineageKind, LineageStatus, LineageValidation,
     LINEAGE_SCHEMA,

@@ -247,3 +247,99 @@ fn live_mode_does_not_quarantine_any_surface() {
     assert!(!runtime.stores().is_write_quarantined());
     assert!(!runtime.io().is_write_quarantined());
 }
+
+/// Slice 33S1b — the executing `io.write_text` tool dispatch
+/// (33S1a's interception inside `Runtime::call_tool` for any
+/// `io.*` name) is gated by the replay substitution path. In
+/// substitute-mode replay, ANY `io.*` tool call goes through
+/// `replay.replay_tool_call` before reaching the dispatch
+/// interception — so the call either substitutes from the
+/// recorded trace OR diverges (when the trace doesn't carry
+/// the expected event), but never reaches the filesystem.
+/// This fixture proves the dispatch path doesn't open a bypass:
+/// the minimal trace has no recorded tool_call, so the executing
+/// write returns ReplayDivergence and the file never appears
+/// on disk. The IoRuntime write-quarantine guards the DIRECT
+/// `runtime.io().write_text(...)` path (see
+/// `replay_quarantines_io_writes` above) — together the two
+/// fixtures cover both routes into IoRuntime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let policy = corvid_runtime::IoToolPolicy::new(dir.path().to_str(), None);
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(
+            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
+        ))
+        .replay_from(&trace_path)
+        .io_policy(policy)
+        .build();
+    assert!(runtime.is_replay_mode());
+    assert!(runtime.io().is_write_quarantined());
+
+    let new_path = dir.path().join("dispatch-blocked.txt");
+    let err = runtime
+        .call_tool(
+            "io.write_text",
+            vec![
+                serde_json::json!("dispatch-blocked.txt"),
+                serde_json::json!("blocked"),
+            ],
+        )
+        .await
+        .expect_err("executing dispatch write must refuse during replay");
+    // The dispatch reaches the replay-substitution path first;
+    // with no recorded tool_call in the minimal trace the
+    // substitution diverges. EITHER divergence OR quarantine is
+    // acceptable here — both prove the call doesn't escape to
+    // the filesystem, which is the load-bearing safety property.
+    match err {
+        RuntimeError::ReplayDivergence(_) => {}
+        RuntimeError::QuarantineViolation { surface, .. } => assert_eq!(surface, "io"),
+        other => panic!("expected ReplayDivergence or io QuarantineViolation, got {other:?}"),
+    }
+    assert!(
+        !new_path.exists(),
+        "executing io.write_text dispatch must not touch the filesystem during replay: {new_path:?}"
+    );
+}
+
+/// Slice 33S1b — companion: executing `io.read_text` is ALSO
+/// gated by the replay substitution path. With the minimal
+/// trace lacking a recorded tool_call event, the call diverges
+/// (no read happens). This proves reads ALSO don't open a
+/// bypass — they're constrained by the same trace contract
+/// as writes, just without the additional write-quarantine
+/// layer that `replay_quarantines_io_writes` exercises.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_blocks_executing_io_read_tool_dispatch_without_recorded_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let seed_path = dir.path().join("seed-via-dispatch.txt");
+    std::fs::write(&seed_path, "passthrough").unwrap();
+
+    let policy = corvid_runtime::IoToolPolicy::new(dir.path().to_str(), None);
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(
+            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
+        ))
+        .replay_from(&trace_path)
+        .io_policy(policy)
+        .build();
+    assert!(runtime.is_replay_mode());
+
+    let err = runtime
+        .call_tool(
+            "io.read_text",
+            vec![serde_json::json!("seed-via-dispatch.txt")],
+        )
+        .await
+        .expect_err("executing read must go through replay substitution, not the live FS");
+    match err {
+        RuntimeError::ReplayDivergence(_) => {}
+        other => panic!("expected ReplayDivergence (no recorded io.read_text event), got {other:?}"),
+    }
+}

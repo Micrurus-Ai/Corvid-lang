@@ -10,13 +10,13 @@
 
 use super::native_cache;
 use super::{
-    compile_to_ir_with_config_at_path, load_corvid_config_for, native_ability, render_all_pretty,
-    run_ir_with_runtime, Diagnostic, NotNativeReason,
+    compile_to_ir_with_config_at_path, load_corvid_config_for, load_corvid_config_with_path_for,
+    native_ability, render_all_pretty, run_ir_with_runtime, Diagnostic, NotNativeReason,
 };
 use corvid_ir::IrFile;
 use corvid_runtime::{
-    load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, OllamaAdapter, OpenAiAdapter,
-    RedactionSet, Runtime, StdinApprover, Tracer,
+    load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, IoToolPolicy, OllamaAdapter,
+    OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
 };
 use corvid_vm::{InterpError, Value};
 use std::fmt;
@@ -337,6 +337,14 @@ fn run_via_interpreter_tier(
         .approver(std::sync::Arc::new(StdinApprover::new()))
         .tracer(tracer);
 
+    // Slice 33S1b: install the [io] root policy parsed from
+    // corvid.toml (33S0) onto the runtime so the executing
+    // io.read_text / io.write_text / io.list_dir tools resolve
+    // every caller path through the configured root. CORVID_IO_ROOT
+    // env override takes precedence over the corvid.toml value —
+    // matches the existing env-override pattern for CORVID_MODEL.
+    builder = builder.io_policy(load_io_tool_policy(path));
+
     if let Ok(model) = std::env::var("CORVID_MODEL") {
         builder = builder.default_model(&model);
     }
@@ -540,6 +548,157 @@ mod tests {
         assert!(
             !is_missing_staticlib_error(&err),
             "codegen errors must propagate"
+        );
+    }
+}
+
+/// Slice 33S1b — build the `IoToolPolicy` for a `corvid run` /
+/// `corvid serve` invocation. Resolution order:
+///
+///   1. `CORVID_IO_ROOT` env var (overrides config; matches the
+///      existing env-override pattern for CORVID_MODEL etc.).
+///   2. `[io] root` from the loaded `corvid.toml`. Relative paths
+///      anchor against the corvid.toml directory; absolute paths
+///      are taken as-is.
+///   3. None (unconfigured). Every executing file-I/O call then
+///      fails closed with the missing-config diagnostic — the
+///      33S0 security model.
+///
+/// Public so the embed paths (`corvid serve`, custom embedders)
+/// can share this loading logic instead of re-implementing the
+/// precedence.
+pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {
+    // 1. Env override.
+    if let Ok(env_root) = std::env::var("CORVID_IO_ROOT") {
+        let env_root_trimmed = env_root.trim();
+        if !env_root_trimmed.is_empty() {
+            // The env override is treated relative to the
+            // current working directory if not absolute — no
+            // corvid.toml anchor is in play here.
+            return IoToolPolicy::new(Some(env_root_trimmed), None);
+        }
+    }
+
+    // 2. corvid.toml.
+    if let Some((toml_path, config)) = load_corvid_config_with_path_for(source_path) {
+        let anchor = toml_path.parent();
+        return IoToolPolicy::new(config.io.root.as_deref(), anchor);
+    }
+
+    // 3. Unconfigured — fail-closed default.
+    IoToolPolicy::unset()
+}
+
+#[cfg(test)]
+mod io_policy_loader_tests {
+    use super::*;
+
+    /// Slice 33S1b — corvid.toml with `[io] root = "."` produces
+    /// a configured policy with the corvid.toml's parent dir as
+    /// the resolved root.
+    #[test]
+    fn corvid_toml_with_relative_root_dot_anchors_against_toml_dir() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[io]\nroot = \".\"\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_IO_ROOT").ok();
+        // SAFETY: tests serialize on env via dedicated locks; for
+        // a single-test path we accept the rare race against
+        // unrelated tests.
+        unsafe { std::env::remove_var("CORVID_IO_ROOT") };
+
+        let policy = load_io_tool_policy(&source);
+
+        if let Some(v) = prior_env {
+            unsafe { std::env::set_var("CORVID_IO_ROOT", v) };
+        }
+
+        assert!(
+            policy.is_configured(),
+            "configured corvid.toml should produce a configured policy"
+        );
+        let root = policy.root_path().expect("configured policy has root");
+        // Project dir may be a symlinked /tmp path on some hosts —
+        // normalize both sides via the policy's own resolver,
+        // which uses the same normalize_path helper.
+        assert!(
+            root.ends_with(project.file_name().unwrap()),
+            "configured root should be the corvid.toml dir; got {root:?}, expected to end with {project:?}"
+        );
+    }
+
+    /// Slice 33S1b — missing `[io] root` (corvid.toml exists but
+    /// no `[io]` table) produces an unconfigured policy. Every
+    /// executing file-I/O call then fails closed.
+    #[test]
+    fn corvid_toml_without_io_section_produces_unconfigured_policy() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[run]\ntarget = \"interpreter\"\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_IO_ROOT").ok();
+        unsafe { std::env::remove_var("CORVID_IO_ROOT") };
+
+        let policy = load_io_tool_policy(&source);
+
+        if let Some(v) = prior_env {
+            unsafe { std::env::set_var("CORVID_IO_ROOT", v) };
+        }
+
+        assert!(
+            !policy.is_configured(),
+            "no [io] section should produce an unconfigured policy"
+        );
+    }
+
+    /// Slice 33S1b — `CORVID_IO_ROOT` env var takes precedence
+    /// over `[io] root` in corvid.toml. Matches the existing
+    /// env-override pattern for CORVID_MODEL.
+    #[test]
+    fn env_var_overrides_corvid_toml_io_root() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        let env_root = tmp.path().join("override_root");
+        std::fs::create_dir_all(&env_root).unwrap();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[io]\nroot = \"./from_toml\"\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_IO_ROOT").ok();
+        unsafe { std::env::set_var("CORVID_IO_ROOT", env_root.to_str().unwrap()) };
+
+        let policy = load_io_tool_policy(&source);
+
+        match prior_env {
+            Some(v) => unsafe { std::env::set_var("CORVID_IO_ROOT", v) },
+            None => unsafe { std::env::remove_var("CORVID_IO_ROOT") },
+        }
+
+        assert!(policy.is_configured());
+        let root = policy.root_path().expect("configured");
+        assert!(
+            root.ends_with("override_root"),
+            "CORVID_IO_ROOT env override should win over corvid.toml; got {root:?}"
         );
     }
 }

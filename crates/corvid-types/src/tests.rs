@@ -3618,6 +3618,68 @@ agent lookup(id: String) -> String:
     );
 }
 
+/// Slice 33S1b — proves the existing decl-replayability rule
+/// (`crates/corvid-types/src/checker/decl_replayability.rs:184`)
+/// already covers the new executing file-I/O tools: a tool
+/// declared with `uses io_read` (the 33S0 effect row) called
+/// from a `@deterministic` agent gets the same
+/// `NonDeterministicCall` rejection any other tool call gets.
+/// No new checker code needed — the decl-kind classifier rejects
+/// all `tool` calls regardless of effect. This test pins the
+/// property: calling `read_text` (which uses `io_read`) inside
+/// `@deterministic` is a compile error.
+#[test]
+fn deterministic_agent_calling_io_read_tool_is_rejected() {
+    let src = "\
+effect io_read:
+    reversible: true
+
+tool read_text(path: String) -> String uses io_read
+
+@deterministic
+agent fetch_config(path: String) -> String:
+    return read_text(path)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "read_text" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for io_read tool invocation, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 33S1b — same rejection fires for the write-shape tool.
+/// Confirms that the dimension-level write vs. read distinction
+/// is irrelevant to the determinism rule (which is decl-kind-
+/// based, not effect-row-based).
+#[test]
+fn deterministic_agent_calling_io_write_tool_is_rejected() {
+    let src = "\
+effect io_write:
+    reversible: false
+
+tool write_text(path: String, content: String) -> Bool uses io_write
+
+@deterministic
+agent persist_config(path: String, content: String) -> Bool:
+    return write_text(path, content)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "write_text" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for io_write tool invocation, got {:?}",
+        c.errors
+    );
+}
+
 #[test]
 fn deterministic_agent_calling_prompt_is_rejected() {
     let src = "\
