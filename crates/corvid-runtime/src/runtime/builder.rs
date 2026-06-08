@@ -4,7 +4,7 @@ use crate::calibration::CalibrationStore;
 use crate::errors::RuntimeError;
 use crate::http::HttpClient;
 use crate::human::{HumanInteractor, StdinHumanInteractor};
-use crate::io::IoRuntime;
+use crate::io::{IoRuntime, IoToolPolicy};
 use crate::llm::{LlmAdapter, LlmRegistry};
 use crate::models::{ModelCatalog, RegisteredModel};
 use crate::prompt_cache::PromptCache;
@@ -36,6 +36,12 @@ pub struct RuntimeBuilder {
     pub(super) replay_model_swap: Option<String>,
     replay_mutation: Option<(usize, serde_json::Value)>,
     stores: StoreManager,
+    /// Slice 33S1a: policy carrying the configured `[io] root`
+    /// from `corvid.toml`. Threaded into `Runtime::io_policy`
+    /// at build time. Defaults to an unconfigured policy that
+    /// makes every executing file-I/O tool fail closed with the
+    /// missing-config diagnostic.
+    io_policy: IoToolPolicy,
 }
 
 impl Default for RuntimeBuilder {
@@ -55,6 +61,7 @@ impl Default for RuntimeBuilder {
             replay_model_swap: None,
             replay_mutation: None,
             stores: StoreManager::default(),
+            io_policy: IoToolPolicy::default(),
         }
     }
 }
@@ -128,6 +135,18 @@ impl RuntimeBuilder {
 
     pub fn llm(mut self, adapter: Arc<dyn LlmAdapter>) -> Self {
         self.llms.register(adapter);
+        self
+    }
+
+    /// Slice 33S1a: install the parsed `[io] root` policy on the
+    /// runtime. The executing file-I/O tools (`io.read_text` /
+    /// `io.write_text` / `io.list_dir`) resolve every caller-
+    /// supplied path through this policy. Default (when this
+    /// setter isn't called) is an unconfigured policy that makes
+    /// every executing file-I/O call fail closed with the
+    /// missing-config diagnostic — the 33S0 security model.
+    pub fn io_policy(mut self, policy: IoToolPolicy) -> Self {
+        self.io_policy = policy;
         self
     }
 
@@ -338,6 +357,7 @@ impl RuntimeBuilder {
             usage_ledger: LlmUsageLedger::new(),
             http,
             io,
+            io_policy: self.io_policy,
             secrets: SecretRuntime::new(),
             queue: QueueRuntime::new(),
         }

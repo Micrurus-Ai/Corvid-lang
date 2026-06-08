@@ -22,6 +22,17 @@ impl Runtime {
     // ---- dispatch helpers ----
 
     /// Call a tool by name. Emits trace events bracketing the call.
+    ///
+    /// Slice 33S1a: tool names starting with `io.` are intercepted
+    /// and routed to `dispatch_stdlib_io_tool` so the executing
+    /// file-I/O stdlib tools (declared in `std/io.cor` —
+    /// `read_text`, `write_text`, `list_dir`) can reach the
+    /// `IoRuntime` + the `[io] root` policy that the standard
+    /// `tools.call` handler-closure path can't see. Replay-mode
+    /// reads still substitute from the recorded trace (the
+    /// `replay_source` branch runs first); writes pass through the
+    /// dispatch which then hits the `IoRuntime::quarantine_writes`
+    /// guard if write-quarantine is on.
     pub async fn call_tool(
         &self,
         name: &str,
@@ -37,6 +48,8 @@ impl Runtime {
         }
         let result = if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)?
+        } else if let Some(io_tool) = name.strip_prefix("io.") {
+            self.dispatch_stdlib_io_tool(io_tool, args.clone()).await?
         } else {
             self.tools.call(name, args.clone()).await?
         };
@@ -49,6 +62,99 @@ impl Runtime {
             });
         }
         Ok(result)
+    }
+
+    /// Slice 33S1a: dispatch handler for the three executing
+    /// stdlib file-I/O tools. The interception in `call_tool`
+    /// strips the `io.` prefix and passes the suffix (`read_text`
+    /// / `write_text` / `list_dir`) here. Each branch:
+    ///
+    ///   1. Extracts + validates args as JSON values.
+    ///   2. Resolves the caller's path through `self.io_policy`
+    ///      (fails closed when `[io] root` is unconfigured;
+    ///      rejects traversal + absolute escapes).
+    ///   3. Calls the existing `IoRuntime` method
+    ///      (`read_text` / `write_text` / `list_dir`).
+    ///   4. Marshals the typed result back to a JSON value
+    ///      matching the envelope schema declared in `std/io.cor`
+    ///      (FileReadEnvelope / FileWriteEnvelope /
+    ///      [DirectoryEntryEnvelope]).
+    ///
+    /// Unknown `io.*` names fall through to `UnknownTool` so the
+    /// existing diagnostic shape stays consistent.
+    async fn dispatch_stdlib_io_tool(
+        &self,
+        suffix: &str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        match suffix {
+            "read_text" => {
+                let path_arg = args
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "io.read_text".to_string(),
+                        message: "expected one String argument (path)".to_string(),
+                    })?;
+                let resolved = self.io_policy.resolve(path_arg)?;
+                let read = self.io.read_text(&resolved).await?;
+                Ok(serde_json::json!({
+                    "path_value": read.path.display().to_string(),
+                    "contents": read.contents,
+                    "bytes": read.bytes as i64,
+                    "effect_meta": stdlib_io_effect_envelope(&read.effect),
+                }))
+            }
+            "write_text" => {
+                let path_arg = args
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "io.write_text".to_string(),
+                        message: "expected (path: String, content: String) — path missing"
+                            .to_string(),
+                    })?;
+                let content_arg = args
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "io.write_text".to_string(),
+                        message: "expected (path: String, content: String) — content missing"
+                            .to_string(),
+                    })?;
+                let resolved = self.io_policy.resolve(path_arg)?;
+                let write = self.io.write_text(&resolved, content_arg).await?;
+                Ok(serde_json::json!({
+                    "path_value": write.path.display().to_string(),
+                    "bytes": write.bytes as i64,
+                    "effect_meta": stdlib_io_effect_envelope(&write.effect),
+                }))
+            }
+            "list_dir" => {
+                let path_arg = args
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "io.list_dir".to_string(),
+                        message: "expected one String argument (path)".to_string(),
+                    })?;
+                let resolved = self.io_policy.resolve(path_arg)?;
+                let entries = self.io.list_dir(&resolved).await?;
+                let json_entries: Vec<serde_json::Value> = entries
+                    .into_iter()
+                    .map(|entry| {
+                        serde_json::json!({
+                            "path_value": entry.path.display().to_string(),
+                            "name": entry.name,
+                            "is_dir": entry.is_dir,
+                            "effect_meta": stdlib_io_effect_envelope(&entry.effect),
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::Value::Array(json_entries))
+            }
+            other => Err(RuntimeError::UnknownTool(format!("io.{other}"))),
+        }
     }
 
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
@@ -552,4 +658,24 @@ fn hex_lower(bytes: &[u8]) -> String {
         out.push(HEX[(byte & 0x0f) as usize] as char);
     }
     out
+}
+
+/// Slice 33S1a: marshal `IoRuntime::FileSystemEffect` into a JSON
+/// object matching the `EffectEnvelope` type declared in
+/// `std/effects.cor`. Field order matches the type's declaration
+/// order so the IR-side struct construction picks up each field
+/// positionally even though we emit them as a named JSON object.
+///
+/// EffectEnvelope fields: effect_name, provenance_key,
+/// approval_label, cache_key, replay_key.
+fn stdlib_io_effect_envelope(
+    effect: &crate::io::FileSystemEffect,
+) -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": effect.effect_tag,
+        "provenance_key": "",
+        "approval_label": effect.approval_label,
+        "cache_key": "",
+        "replay_key": effect.replay_key,
+    })
 }

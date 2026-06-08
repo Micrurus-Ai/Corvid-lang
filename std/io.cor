@@ -33,3 +33,32 @@ public agent file_write(path_value: String, bytes: Int) -> FileWriteEnvelope:
 
 public agent directory_entry(path_value: String, name: String, is_dir: Bool) -> DirectoryEntryEnvelope:
     return DirectoryEntryEnvelope(path_value, name, is_dir, effect_envelope("std.io.list", "", "", "", "std.io.list"))
+
+# ----------------------------------------------------------------
+# Phase 33S1 — executing file-I/O surface.
+#
+# These three `tool` declarations are the user-facing entry points
+# for actual filesystem operations. They flow through the typed
+# effect system (`uses io_read` / `uses io_write` / `uses io_list`)
+# so the checker tracks `io_source: fs.read / fs.write` on every
+# caller, and the runtime enforces:
+#
+#   * [io] root confinement — paths must stay inside the configured
+#     root, declared in `corvid.toml`'s `[io] root` field.
+#     `corvid new` scaffolds `[io] root = "."`. Calling these tools
+#     without the field set fails closed with a precise diagnostic.
+#   * Path-traversal rejection — `..` escapes and absolute-path
+#     escapes outside the root are refused.
+#   * Replay quarantine — writes (`write_text`) refuse to escape
+#     the process during Substitute-mode replay; reads
+#     (`read_text` / `list_dir`) substitute from the recorded trace.
+#
+# All three are tools (not agents), so they are automatically
+# rejected inside `@deterministic` bodies by the checker's
+# declaration-kind classifier — calling any I/O from a
+# `@deterministic` agent is a compile error.
+# ----------------------------------------------------------------
+
+public tool read_text(path: String) -> FileReadEnvelope uses io_read
+public tool write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
+public tool list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list

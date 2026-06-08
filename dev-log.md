@@ -4,6 +4,143 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33S1a closed: tool decls + IoToolPolicy plumbing for executing file-I/O
+
+First sub-slice of 33S1 (which was honestly split into a/b/c
+because the umbrella scope was too large for one responsible
+single-session commit — split is documented in commit 338cc6c).
+33S1a is the **plumbing**: tool declarations, the policy struct,
+the dispatch interception. It's not user-callable yet (33S1b
+will prove that via end-to-end Corvid programs); but every
+piece below the surface is in place.
+
+### What shipped
+
+**Tool declarations in `std/io.cor`**:
+
+```corvid
+public tool read_text(path: String) -> FileReadEnvelope uses io_read
+public tool write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
+public tool list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list
+```
+
+Each uses one of the three built-in I/O effects 33S0 registered.
+The checker's existing decl-replayability rule (in
+`corvid-types/src/checker/decl_replayability.rs:184`) automatically
+rejects any tool call inside a `@deterministic` body regardless
+of effect — so calling `io.read_text` inside a `@deterministic`
+agent is a compile error by construction. No new checker code
+needed; 33S1b will pin this behavior with a test.
+
+**`IoToolPolicy` struct** in `crates/corvid-runtime/src/io.rs`:
+
+```rust
+pub struct IoToolPolicy {
+    root: Option<PathBuf>,
+}
+
+impl IoToolPolicy {
+    pub fn new(root_value: Option<&str>, corvid_toml_dir: Option<&Path>) -> Self { ... }
+    pub fn unset() -> Self { ... }
+    pub fn is_configured(&self) -> bool { ... }
+    pub fn root_path(&self) -> Option<&Path> { ... }
+    pub fn resolve(&self, caller_path: &str) -> Result<PathBuf, RuntimeError> { ... }
+}
+```
+
+The resolve method carries the load-bearing security logic:
+
+1. If no `[io] root` is configured, fail closed with a
+   structured diagnostic that names the missing config + points
+   at the 33S0 security model.
+2. Strip leading separators from the caller path so an absolute-
+   looking input (`/etc/passwd`) gets confined under root
+   instead of escaping it.
+3. Join + normalise the path (collapse `.` / `..`).
+4. Reject if the normalised result escapes the configured root
+   via component-by-component `Path::starts_with`.
+
+**`Runtime::io_policy` field + `RuntimeBuilder::io_policy(p)`
+setter**. The builder defaults to `IoToolPolicy::default()` (the
+unconfigured/fail-closed variant); callers (the CLI's `corvid
+run` / `corvid serve` paths land in 33S1b) install the policy
+parsed from the loaded `corvid.toml`.
+
+**Dispatch interception in `Runtime::call_tool`**: tool names
+starting with `io.` route to a new `dispatch_stdlib_io_tool`
+method that:
+
+- Extracts JSON args (`path` for read/list; `(path, content)`
+  for write).
+- Resolves the caller's path through `self.io_policy.resolve()`.
+- Calls the matching `IoRuntime` method (`read_text` /
+  `write_text` / `list_dir`).
+- Marshals the typed result (`FileRead` / `FileWrite` /
+  `DirectoryEntry`) to a JSON object matching the envelope
+  schema in `std/io.cor`.
+
+The replay-source branch in `call_tool` runs FIRST (before the
+`io.*` interception), so replay reads still substitute from the
+recorded trace — no change to the existing replay flow. Writes
+hit the dispatch path, which then hits the existing
+`IoRuntime::quarantine_writes` guard if write-quarantine is on.
+
+**Result marshalling helper**: `stdlib_io_effect_envelope`
+produces the `EffectEnvelope` JSON the Corvid type system
+expects, sourced from `FileSystemEffect`'s `effect_tag`,
+`approval_label`, `replay_key` fields.
+
+### Tests (6, plumbing-only)
+
+`crates/corvid-runtime/src/io.rs::tests`:
+
+- `io_tool_policy_relative_root_resolves_against_corvid_toml_dir`
+- `io_tool_policy_absolute_root_taken_as_is`
+- `io_tool_policy_rejects_parent_traversal_escape` —
+  load-bearing security guard; verifies the error message
+  names the offending path AND the configured root.
+- `io_tool_policy_strips_leading_separator_to_confine_absolute_inputs` —
+  load-bearing confinement guard for absolute-looking caller
+  paths.
+- `io_tool_policy_unconfigured_fails_closed_on_resolve` —
+  verifies the 33S0 fail-closed contract + the diagnostic
+  shape.
+- `io_tool_policy_configured_reports_root_path`.
+
+End-to-end Corvid-program tests (running an actual `corvid run`
+against a project with `[io] root` set) ship in 33S1b. The
+plumbing alone has no Corvid-visible behavior to test
+end-to-end yet — the executing tool dispatch is wired but no
+caller invokes it until 33S1b ships either a test fixture or
+the corvid.toml-loading wiring.
+
+### Validation gate
+
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-runtime --lib io::tests::io_tool_policy` —
+  6/6 pass.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What unblocks 33S1b
+
+The plumbing is in place. 33S1b ships:
+- corvid.toml-loading wiring at the CLI / driver layer so
+  `Runtime::builder().io_policy(policy_from_config)` actually
+  runs in the live path.
+- End-to-end acceptance tests: read/write/list happy paths;
+  traversal rejection at the Corvid-program level;
+  `@deterministic` rejection diagnostic; missing-config fails
+  closed; absolute + relative roots both work.
+- Replay-quarantine fixture extending the existing
+  `replay_quarantines_io_writes` shape to cover the new tool-
+  dispatch path.
+
+P1 progress: 33S 2/5 (33S0 + 33S1a). 33S1 itself is 1/3
+(33S1a + pending 33S1b + 33S1c).
+
+---
+
 ## 2026-06-08 - 33S0 closed: foundation for executing I/O surfaces
 
 First slice of the 33S phase (HTTP + File + SQLite as

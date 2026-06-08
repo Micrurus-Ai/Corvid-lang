@@ -13,7 +13,7 @@ use crate::calibration::CalibrationStore;
 use crate::errors::RuntimeError;
 use crate::http::HttpClient;
 use crate::human::HumanInteractor;
-use crate::io::IoRuntime;
+use crate::io::{IoRuntime, IoToolPolicy};
 use crate::llm::LlmRegistry;
 use crate::models::ModelCatalog;
 #[cfg(test)]
@@ -72,6 +72,13 @@ pub struct Runtime {
     usage_ledger: LlmUsageLedger,
     http: HttpClient,
     io: IoRuntime,
+    /// Slice 33S1a: policy carrying the configured `[io] root`
+    /// from `corvid.toml`. The `io.*` tool-dispatch interception
+    /// in `call_tool` resolves every caller-supplied path
+    /// through this policy before any `IoRuntime` method runs.
+    /// Default (unconfigured) makes every executing file-I/O
+    /// call fail closed.
+    pub(super) io_policy: IoToolPolicy,
     secrets: SecretRuntime,
     queue: QueueRuntime,
 }
