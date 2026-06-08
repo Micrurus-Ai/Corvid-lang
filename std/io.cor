@@ -59,6 +59,21 @@ public agent directory_entry(path_value: String, name: String, is_dir: Bool) -> 
 # `@deterministic` agent is a compile error.
 # ----------------------------------------------------------------
 
+# The three I/O effect rows. Registered as built-ins by
+# `crates/corvid-types/src/effects.rs::register_io_effects` so a
+# composing checker can compose them across calls; declared
+# inline here so the resolver in standalone-module compilation
+# sees them as named identifiers (the resolver's name table is
+# source-driven, not registry-driven).
+effect io_read:
+    reversible: true
+
+effect io_write:
+    reversible: false
+
+effect io_list:
+    reversible: true
+
 public tool io_read_text(path: String) -> FileReadEnvelope uses io_read
 public tool io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
 public tool io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list

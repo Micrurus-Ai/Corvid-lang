@@ -562,11 +562,11 @@ fn std_http_imported_helpers_typecheck() {
         "http",
         true,
         r#"
-import "./std/http" use HttpHeader, HttpRequestEnvelope, HttpResponseEnvelope, http_get, http_post_json, http_with_retry, http_with_timeout, http_ok
+import "./std/http" use HttpHeader, HttpRequestEnvelope, HttpResponseEnvelope, http_request_get, http_request_post_json, http_with_retry, http_with_timeout, http_ok
 
 agent main() -> Bool:
-    req = http_get("https://api.example.com/v1/health")
-    posted = http_post_json("https://api.example.com/v1/widgets", "{}")
+    req = http_request_get("https://api.example.com/v1/health")
+    posted = http_request_post_json("https://api.example.com/v1/widgets", "{}")
     retried = http_with_retry(req, 3)
     bounded = http_with_timeout(retried, 5000)
     response = HttpResponseEnvelope(200, "ok", 1, 12, bounded.effect_meta)

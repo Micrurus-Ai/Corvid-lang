@@ -360,13 +360,22 @@ impl EffectRegistry {
         }
     }
 
-    /// Phase 33S0: register the two built-in HTTP-client effects —
-    /// `http_get` (reversible from the caller's perspective; the
-    /// server-side log/billing/rate-limit side-effects are not the
-    /// caller's state) and `http_post` (NOT reversible — POSTs by
-    /// convention change server state).
+    /// Phase 33S0 (renamed 33S2a): register the two built-in
+    /// HTTP-client effects. Originally registered as `http_get` /
+    /// `http_post` per the brief's IDs, but renamed to
+    /// `http_egress_get` / `http_egress_post` when the 33S2a tools
+    /// `http_get` / `http_post_json` collided with the effect names
+    /// in the resolver's name table (effects and tools share a
+    /// namespace at the resolver level). The user-facing tool
+    /// names are load-bearing API; the effect names are
+    /// implementation detail.
+    ///
+    /// `http_egress_get` (reversible from the caller's perspective;
+    /// the server-side log/billing/rate-limit side-effects are not
+    /// the caller's state) and `http_egress_post` (NOT reversible —
+    /// POSTs by convention change server state).
     fn register_http_effects(&mut self) {
-        for (name, reversible) in [("http_get", true), ("http_post", false)] {
+        for (name, reversible) in [("http_egress_get", true), ("http_egress_post", false)] {
             let mut dims = HashMap::new();
             dims.insert(
                 "io_source".into(),
@@ -707,8 +716,8 @@ mod tests {
             ("io_read", "fs.read", false),
             ("io_write", "fs.write", true),
             ("io_list", "fs.read", false),
-            ("http_get", "net.egress", false),
-            ("http_post", "net.egress", true),
+            ("http_egress_get", "net.egress", false),
+            ("http_egress_post", "net.egress", true),
             ("db_query", "db.read", false),
             ("db_execute", "db.write", true),
         ] {

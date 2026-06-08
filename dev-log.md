@@ -4,6 +4,124 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33S2a closed: tool declarations + HttpEgressPolicy plumbing for executing HTTP-client surface
+
+Opened 33S2 (HTTP) with the same a/b/c split that worked for 33S1 — keeps each
+commit single-concern and avoids context-exhaustion mid-implementation. This is
+33S2a: declarations + policy + runtime/dispatch plumbing, NO end-to-end CLI
+loader test yet (that's 33S2b) and NO guarantees/tour/docs yet (33S2c).
+
+### What 33S2a actually shipped
+
+1. **Renamed `std/http.cor`'s envelope-builder agents** from `http_get` /
+   `http_post_json` (which were envelope builders, not network calls) to
+   `http_request_get` / `http_request_post_json`. Naming both "build a request"
+   and "perform a GET" `http_get` is a library-convention carryover that
+   Corvid's "language-not-SDK" pitch rejects.
+
+2. **Declared the two executing `tool` rows in `std/http.cor`**:
+
+   ```cor
+   effect http_egress_get:
+       reversible: true
+
+   effect http_egress_post:
+       reversible: false
+
+   public tool http_get(url: String) -> HttpResponseEnvelope uses http_egress_get
+   public tool http_post_json(url: String, body: String) -> HttpResponseEnvelope uses http_egress_post
+   ```
+
+   Effect names differ from tool names so the resolver namespace doesn't
+   collide — tools and effects share the resolver namespace at the
+   identifier-table level. Same trap as 33S1's `io_*` rename.
+
+3. **`HttpEgressPolicy` in `crates/corvid-runtime/src/http.rs`** —
+   dual-layer enforcement:
+
+   - **Always-on SSRF block** (structural property of the language, not a
+     configurable setting): RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`,
+     `192.168.0.0/16`), loopback (`127.0.0.0/8` + `::1`), link-local
+     (`169.254.0.0/16` + `fe80::/10`), unspecified (`0.0.0.0/8` + `::`),
+     ULA (`fc00::/7`), and the `localhost` DNS alias.
+   - **Required `[http] allow` allowlist** on top — when not configured,
+     every executing HTTP call fails closed with a precise diagnostic.
+     Mirrors `[io] root`'s fail-closed contract from 33S1.
+
+   IPv6 parsing handles the bracketed `[::1]:port` URL form via `strip_prefix('[')`
+   + `find(']')` — the naive `split(':')` would corrupt IPv6 hosts.
+
+4. **Threaded `http_policy` through `Runtime` + `RuntimeBuilder::http_policy(...)`.**
+   Re-exported `HttpEgressPolicy` from `corvid-runtime`'s lib.
+
+5. **Refactored dispatch interception from prefix-matching to exact-name
+   matching** via `is_stdlib_io_tool` / `is_stdlib_http_tool` helpers.
+   The 33S1-fix-naming commit had matched the `io_` prefix, which would
+   silently steal any user tool whose name happened to start with `io_`
+   (e.g. `io_uring_*`, `io_redirect_*`). 33S2a closes that by listing the
+   six stdlib tool names exactly. Same fix applied to the HTTP side from
+   the start.
+
+6. **Wired executing dispatch**: `http_get` / `http_post_json` call
+   `self.http_policy.check(url)` (errors out on SSRF or missing-allowlist
+   before any network call), then `HttpClient::send`, then marshal the
+   response into `HttpResponseEnvelope`.
+
+### A latent 33S1 bug surfaced and closed in 33S2a
+
+`cargo test -p corvid-driver --test stdlib` was failing on
+`std_io_compiles_as_corvid_source` and `std_http_compiles_as_corvid_source`
+throughout 33S1 — the resolver was rejecting `uses io_read` etc. because the
+33S0 effect registration (`crates/corvid-types/src/effects.rs::register_io_effects`)
+populated `EffectRegistry` but the resolver's name table is source-driven, not
+registry-driven. The 33S1 validation gate only ran `cargo check` (which
+compiles but doesn't fail-on-test-failure), so the standalone-stdlib-compile
+regressions slipped through.
+
+Fix: declare the effects inline in `std/io.cor` and `std/http.cor`. Registry
+registration stays — it's load-bearing for composing checkers across module
+boundaries — but source-declared effects are what the resolver actually reads.
+
+This is the kind of two-layer-state-divergence bug that the file-responsibility
+discipline (and a hard validation gate that includes `cargo test`, not just
+`cargo check`) is supposed to prevent. Logged as a lesson; the gate from
+33S2 onwards explicitly runs targeted `cargo test` for the changed crate(s) +
+the stdlib test, not just `cargo check`.
+
+### Tests
+
+- **9 plumbing tests** in `corvid-runtime/src/http.rs::http_egress_*`:
+  - `policy_is_unset_by_default`, `policy_check_rejects_url_with_no_host`
+  - `policy_check_rejects_rfc1918_private_ranges` (covers 10/8, 172.16-31/12, 192.168/16)
+  - `policy_check_rejects_loopback_v4`, `policy_check_rejects_loopback_v6`
+  - `policy_check_rejects_link_local_v4`, `policy_check_rejects_link_local_v6`
+  - `policy_check_rejects_localhost_dns_alias`
+  - `policy_check_requires_allowlist_when_configured`
+- **45 stdlib tests** green (proves the rename + inline effect declarations
+  didn't break any of the existing compile-and-import paths).
+- **`corvid-types::io_http_db_effects_are_registered_with_correct_io_source_and_reversibility`**
+  updated to reference the new effect names (`http_egress_get` /
+  `http_egress_post`).
+- **`cargo check --workspace --tests`** clean.
+- **`corvid verify --corpus tests/corpus`** exits 1 only on the two
+  deliberate fixtures.
+
+### What's deliberately NOT in 33S2a
+
+- No CLI loader for `corvid.toml`'s `[http] allow` (33S2b).
+- No end-to-end test that compiles a real Corvid program and performs a real
+  GET through `corvid run` (33S2b — and per the lesson from 33S1, that test
+  gets written FIRST in 33S2b before any further plumbing).
+- No `corvid new` scaffold update for the `[http]` section (33S2b).
+- No guarantees in `corvid-guarantees`, no claim-coverage anchors, no
+  tour topic, no `docs/reference/stdlib/http.md`, no inventions.md row, no
+  README catalog entry (33S2c).
+
+These are the invention proof — they land in 33S2c, NOT in 33S2a. The
+discipline of separating plumbing from proof keeps each commit single-concern.
+
+---
+
 ## 2026-06-08 - 33S1-fix-naming: dispatch was bypassed by real Corvid code; renamed + added end-to-end test
 
 Honest correction commit on top of the 33S1 umbrella. While

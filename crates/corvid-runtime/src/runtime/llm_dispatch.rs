@@ -53,8 +53,10 @@ impl Runtime {
         }
         let result = if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)?
-        } else if let Some(io_tool) = name.strip_prefix("io_") {
-            self.dispatch_stdlib_io_tool(io_tool, args.clone()).await?
+        } else if is_stdlib_io_tool(name) {
+            self.dispatch_stdlib_io_tool(name, args.clone()).await?
+        } else if is_stdlib_http_tool(name) {
+            self.dispatch_stdlib_http_tool(name, args.clone()).await?
         } else {
             self.tools.call(name, args.clone()).await?
         };
@@ -70,30 +72,28 @@ impl Runtime {
     }
 
     /// Slice 33S1a: dispatch handler for the three executing
-    /// stdlib file-I/O tools. The interception in `call_tool`
-    /// strips the `io.` prefix and passes the suffix (`read_text`
-    /// / `write_text` / `list_dir`) here. Each branch:
+    /// stdlib file-I/O tools (`io_read_text` / `io_write_text` /
+    /// `io_list_dir`). Receives the full tool name; the caller
+    /// (`call_tool`) gated entry via `is_stdlib_io_tool` so an
+    /// unknown name here is a programmer error rather than a
+    /// fall-through. Each branch:
     ///
     ///   1. Extracts + validates args as JSON values.
     ///   2. Resolves the caller's path through `self.io_policy`
     ///      (fails closed when `[io] root` is unconfigured;
     ///      rejects traversal + absolute escapes).
-    ///   3. Calls the existing `IoRuntime` method
-    ///      (`read_text` / `write_text` / `list_dir`).
+    ///   3. Calls the existing `IoRuntime` method.
     ///   4. Marshals the typed result back to a JSON value
     ///      matching the envelope schema declared in `std/io.cor`
     ///      (FileReadEnvelope / FileWriteEnvelope /
     ///      [DirectoryEntryEnvelope]).
-    ///
-    /// Unknown `io.*` names fall through to `UnknownTool` so the
-    /// existing diagnostic shape stays consistent.
     async fn dispatch_stdlib_io_tool(
         &self,
-        suffix: &str,
+        name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
-        match suffix {
-            "read_text" => {
+        match name {
+            "io_read_text" => {
                 let path_arg = args
                     .first()
                     .and_then(|v| v.as_str())
@@ -110,7 +110,7 @@ impl Runtime {
                     "effect_meta": stdlib_io_effect_envelope(&read.effect),
                 }))
             }
-            "write_text" => {
+            "io_write_text" => {
                 let path_arg = args
                     .first()
                     .and_then(|v| v.as_str())
@@ -135,7 +135,7 @@ impl Runtime {
                     "effect_meta": stdlib_io_effect_envelope(&write.effect),
                 }))
             }
-            "list_dir" => {
+            "io_list_dir" => {
                 let path_arg = args
                     .first()
                     .and_then(|v| v.as_str())
@@ -158,7 +158,81 @@ impl Runtime {
                     .collect();
                 Ok(serde_json::Value::Array(json_entries))
             }
-            other => Err(RuntimeError::UnknownTool(format!("io_{other}"))),
+            other => Err(RuntimeError::UnknownTool(other.to_string())),
+        }
+    }
+
+    /// Slice 33S2a: dispatch handler for the two executing
+    /// stdlib HTTP tools (`http_get` / `http_post_json`).
+    /// Receives the full tool name; entry is gated by
+    /// `is_stdlib_http_tool`. Each branch:
+    ///
+    ///   1. Extracts + validates args as JSON values.
+    ///   2. Checks the URL through `self.http_policy` (always-on
+    ///      SSRF block + required `[http] allow` allowlist; fails
+    ///      closed when allowlist is unconfigured).
+    ///   3. Calls `HttpClient::send` with the constructed
+    ///      `HttpRequest`.
+    ///   4. Marshals the typed `HttpResponse` back to a JSON
+    ///      value matching the `HttpResponseEnvelope` schema
+    ///      declared in `std/http.cor`.
+    async fn dispatch_stdlib_http_tool(
+        &self,
+        name: &str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        use crate::http::HttpRequest;
+        match name {
+            "http_get" => {
+                let url_arg = args
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "http_get".to_string(),
+                        message: "expected one String argument (url)".to_string(),
+                    })?;
+                self.http_policy.check(url_arg)?;
+                let request = HttpRequest::get(url_arg.to_string())
+                    .effect_tag("std.http.request");
+                let response = self.http.send(&request).await?;
+                Ok(serde_json::json!({
+                    "status": response.status as i64,
+                    "body": response.body,
+                    "attempts": 1_i64,
+                    "elapsed_ms": 0_i64,
+                    "effect_meta": stdlib_http_effect_envelope(),
+                }))
+            }
+            "http_post_json" => {
+                let url_arg = args
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "http_post_json".to_string(),
+                        message: "expected (url: String, body: String) — url missing"
+                            .to_string(),
+                    })?;
+                let body_arg = args
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RuntimeError::ToolFailed {
+                        tool: "http_post_json".to_string(),
+                        message: "expected (url: String, body: String) — body missing"
+                            .to_string(),
+                    })?;
+                self.http_policy.check(url_arg)?;
+                let request = HttpRequest::post_json(url_arg.to_string(), body_arg.to_string())
+                    .effect_tag("std.http.request");
+                let response = self.http.send(&request).await?;
+                Ok(serde_json::json!({
+                    "status": response.status as i64,
+                    "body": response.body,
+                    "attempts": 1_i64,
+                    "elapsed_ms": 0_i64,
+                    "effect_meta": stdlib_http_effect_envelope(),
+                }))
+            }
+            other => Err(RuntimeError::UnknownTool(other.to_string())),
         }
     }
 
@@ -682,5 +756,37 @@ fn stdlib_io_effect_envelope(
         "approval_label": effect.approval_label,
         "cache_key": "",
         "replay_key": effect.replay_key,
+    })
+}
+
+/// Slice 33S1a (refactored 33S2a): exact-match gate for the
+/// stdlib file-I/O tools. Returns true only for the three
+/// declared tool names; a user-defined tool that happens to
+/// start with `io_` (e.g. `io_foobar`) reaches the normal
+/// `tools.call` path. Prevents the dispatch interception from
+/// stealing user tool names.
+fn is_stdlib_io_tool(name: &str) -> bool {
+    matches!(name, "io_read_text" | "io_write_text" | "io_list_dir")
+}
+
+/// Slice 33S2a: exact-match gate for the stdlib HTTP tools.
+/// Same rationale as `is_stdlib_io_tool` — exact names only,
+/// no prefix sweep.
+fn is_stdlib_http_tool(name: &str) -> bool {
+    matches!(name, "http_get" | "http_post_json")
+}
+
+/// Slice 33S2a: marshal an `EffectEnvelope` for the executing
+/// HTTP tools. The runtime side doesn't carry a per-call
+/// effect-tag structure for HTTP (the request/response cycle
+/// is the unit), so we emit a fixed `std.http.request` tag
+/// matching what `std/http.cor` programs already expect.
+fn stdlib_http_effect_envelope() -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": "std.http.request",
+        "provenance_key": "",
+        "approval_label": "",
+        "cache_key": "",
+        "replay_key": "std.http.request",
     })
 }

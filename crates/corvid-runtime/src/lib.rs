@@ -222,8 +222,8 @@ pub use ensemble::{majority_vote, weighted_vote, EnsembleVoteOutcome};
 pub use env::{find_dotenv_walking, load_dotenv, load_dotenv_walking};
 pub use corvid_runtime_core::errors::RuntimeError;
 pub use http::{
-    record_exchange, request_fingerprint, HttpClient, HttpHeader, HttpRequest, HttpResponse,
-    HttpRetryPolicy, RecordedHttpExchange,
+    record_exchange, request_fingerprint, HttpClient, HttpEgressPolicy, HttpHeader, HttpRequest,
+    HttpResponse, HttpRetryPolicy, RecordedHttpExchange,
 };
 pub use io::{
     DirectoryEntry, FileRead, FileSystemEffect, FileWrite, IoRuntime, IoToolPolicy, TextLineStream,

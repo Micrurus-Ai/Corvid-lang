@@ -4,6 +4,7 @@ use crate::calibration::CalibrationStore;
 use crate::errors::RuntimeError;
 use crate::http::HttpClient;
 use crate::human::{HumanInteractor, StdinHumanInteractor};
+use crate::http::HttpEgressPolicy;
 use crate::io::{IoRuntime, IoToolPolicy};
 use crate::llm::{LlmAdapter, LlmRegistry};
 use crate::models::{ModelCatalog, RegisteredModel};
@@ -42,6 +43,13 @@ pub struct RuntimeBuilder {
     /// makes every executing file-I/O tool fail closed with the
     /// missing-config diagnostic.
     io_policy: IoToolPolicy,
+    /// Slice 33S2a: policy carrying the configured `[http] allow`
+    /// allowlist from `corvid.toml`. Threaded into
+    /// `Runtime::http_policy` at build time. Defaults to an
+    /// unconfigured policy that makes every executing HTTP tool
+    /// fail closed with the missing-config diagnostic; SSRF
+    /// block is always on regardless of allowlist contents.
+    http_policy: HttpEgressPolicy,
 }
 
 impl Default for RuntimeBuilder {
@@ -62,6 +70,7 @@ impl Default for RuntimeBuilder {
             replay_mutation: None,
             stores: StoreManager::default(),
             io_policy: IoToolPolicy::default(),
+            http_policy: HttpEgressPolicy::default(),
         }
     }
 }
@@ -139,14 +148,27 @@ impl RuntimeBuilder {
     }
 
     /// Slice 33S1a: install the parsed `[io] root` policy on the
-    /// runtime. The executing file-I/O tools (`io.read_text` /
-    /// `io.write_text` / `io.list_dir`) resolve every caller-
+    /// runtime. The executing file-I/O tools (`io_read_text` /
+    /// `io_write_text` / `io_list_dir`) resolve every caller-
     /// supplied path through this policy. Default (when this
     /// setter isn't called) is an unconfigured policy that makes
     /// every executing file-I/O call fail closed with the
     /// missing-config diagnostic — the 33S0 security model.
     pub fn io_policy(mut self, policy: IoToolPolicy) -> Self {
         self.io_policy = policy;
+        self
+    }
+
+    /// Slice 33S2a: install the parsed `[http] allow` policy on
+    /// the runtime. The executing HTTP tools (`http_get` /
+    /// `http_post_json`) check every URL against the policy
+    /// (always-on SSRF block + allowlist) before any
+    /// `HttpClient::send` runs. Default (when this setter isn't
+    /// called) is an unconfigured policy that makes every
+    /// executing HTTP call fail closed with the missing-config
+    /// diagnostic — the 33S0 security model.
+    pub fn http_policy(mut self, policy: HttpEgressPolicy) -> Self {
+        self.http_policy = policy;
         self
     }
 
@@ -356,6 +378,7 @@ impl RuntimeBuilder {
             stores,
             usage_ledger: LlmUsageLedger::new(),
             http,
+            http_policy: self.http_policy,
             io,
             io_policy: self.io_policy,
             secrets: SecretRuntime::new(),

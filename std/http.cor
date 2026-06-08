@@ -21,10 +21,17 @@ public type HttpResponseEnvelope:
     elapsed_ms: Int
     effect_meta: EffectEnvelope
 
-public agent http_get(url: String) -> HttpRequestEnvelope:
+# 33S2a (2026-06-08) — these envelope-builder agents were
+# renamed from `http_get` / `http_post_json` to
+# `http_request_get` / `http_request_post_json` so the
+# unprefixed names can host the new executing tools below.
+# Building a request and PERFORMING a GET are two different
+# operations; naming both `http_get` was a library-convention
+# carryover that Corvid's "language-not-SDK" pitch rejects.
+public agent http_request_get(url: String) -> HttpRequestEnvelope:
     return HttpRequestEnvelope("GET", url, "", 30000, 0, effect_envelope("std.http.request", "", "", "", "std.http.request"))
 
-public agent http_post_json(url: String, body: String) -> HttpRequestEnvelope:
+public agent http_request_post_json(url: String, body: String) -> HttpRequestEnvelope:
     return HttpRequestEnvelope("POST", url, body, 30000, 0, effect_envelope("std.http.request", "", "", "", "std.http.request"))
 
 public agent http_with_retry(request: HttpRequestEnvelope, max_retries: Int) -> HttpRequestEnvelope:
@@ -35,3 +42,51 @@ public agent http_with_timeout(request: HttpRequestEnvelope, timeout_ms: Int) ->
 
 public agent http_ok(response: HttpResponseEnvelope) -> Bool:
     return response.status >= 200 and response.status < 300
+
+# ----------------------------------------------------------------
+# Phase 33S2 — executing HTTP-client surface.
+#
+# These two `tool` declarations are the user-facing entry points
+# for actual HTTP egress. They flow through the typed effect
+# system (`uses http_get` / `uses http_post`) so the checker
+# tracks `io_source: net.egress` on every caller, and the runtime
+# enforces:
+#
+#   * SSRF block (always on) — private RFC1918 ranges
+#     (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback
+#     (127.0.0.0/8 + ::1), and link-local (169.254.0.0/16 +
+#     fe80::/10) hosts are refused regardless of allowlist
+#     contents. This is a STRUCTURAL property of the language,
+#     not a configurable setting.
+#   * [http] allow allowlist — every reachable host must appear
+#     in corvid.toml's `[http] allow = [...]` (or the
+#     CORVID_HTTP_ALLOW env override). When the allowlist is
+#     empty, every executing HTTP call fails closed — same
+#     fail-closed contract as [io] root for the file surface.
+#   * Replay quarantine — POSTs through replay refuse to escape
+#     the process; GETs go through the replay substitution path
+#     (read from recorded trace or diverge), never reaching the
+#     live network.
+#
+# Both are tools (not agents), so they are automatically
+# rejected inside `@deterministic` bodies by the checker's
+# declaration-kind classifier — calling any HTTP from a
+# `@deterministic` agent is a compile error.
+# ----------------------------------------------------------------
+
+# The two HTTP effect rows. Registered as built-ins by
+# `crates/corvid-types/src/effects.rs::register_http_effects` so
+# a composing checker can compose them across calls; declared
+# inline here so the resolver in standalone-module compilation
+# sees them as named identifiers. Named `http_egress_*` so the
+# tool names (`http_get` / `http_post_json`) don't collide with
+# the effect names — effects and tools share a namespace at
+# the resolver level.
+effect http_egress_get:
+    reversible: true
+
+effect http_egress_post:
+    reversible: false
+
+public tool http_get(url: String) -> HttpResponseEnvelope uses http_egress_get
+public tool http_post_json(url: String, body: String) -> HttpResponseEnvelope uses http_egress_post

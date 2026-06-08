@@ -71,6 +71,13 @@ pub struct Runtime {
     stores: StoreManager,
     usage_ledger: LlmUsageLedger,
     http: HttpClient,
+    /// Slice 33S2a: policy carrying the configured `[http] allow`
+    /// list + the always-on SSRF block. The `http_*` tool-
+    /// dispatch interception in `call_tool` checks every URL
+    /// through this policy before any `HttpClient::send` runs.
+    /// Default (unconfigured) makes every executing HTTP call
+    /// fail closed.
+    pub(super) http_policy: crate::http::HttpEgressPolicy,
     io: IoRuntime,
     /// Slice 33S1a: policy carrying the configured `[io] root`
     /// from `corvid.toml`. The `io.*` tool-dispatch interception
