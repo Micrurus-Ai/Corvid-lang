@@ -179,6 +179,102 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-types/src/tests.rs::python_import_without_effects_is_rejected",
         ],
     },
+    // ----- io_source dimension (Phase 33S1c) ----------------------
+    //
+    // The executing file-I/O surface (`io.read_text` / `io.write_text`
+    // / `io.list_dir`, declared in `std/io.cor`) ships three runtime-
+    // checked guarantees. They classify what the runtime enforces
+    // about ANY call to these tools: path confinement against the
+    // configured `[io] root`, write-quarantine on substitute-mode
+    // replay, and read-passthrough on substitute-mode replay (which
+    // is gated by the same trace contract that prevents bypass).
+    //
+    // The @deterministic-rejection property is NOT a separate
+    // guarantee here — it's covered by the existing decl-replayability
+    // rule (`crates/corvid-types/src/checker/decl_replayability.rs:184`)
+    // that rejects all tool calls inside `@deterministic` bodies
+    // regardless of effect. Slice 33S1b added pinning tests for the
+    // io_read / io_write cases at
+    // `crates/corvid-types/src/tests.rs::deterministic_agent_calling_io_*_tool_is_rejected`
+    // — they're part of the broader replay.deterministic_pure_path
+    // proof matrix, not a new io-specific guarantee.
+    Guarantee {
+        id: "io_source.fs_path_confinement",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Every call to an executing file-I/O tool (io.read_text / \
+             io.write_text / io.list_dir, from std/io.cor) resolves the \
+             caller's path through the project's configured `[io] root` \
+             before reaching the filesystem. Paths that traverse out of \
+             the root (via `..` segments or absolute-prefix escapes) \
+             are refused with a structured diagnostic naming the \
+             offending path AND the configured root. When no `[io] root` \
+             is configured, every call fails closed — the executing \
+             file-I/O surface refuses to operate without an explicit \
+             security boundary declared in corvid.toml.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/io.rs::io_tool_policy_relative_root_resolves_against_corvid_toml_dir",
+            "crates/corvid-runtime/tests/executing_io_tools.rs::executing_io_tools_resolve_both_absolute_and_relative_roots",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/io.rs::io_tool_policy_rejects_parent_traversal_escape",
+            "crates/corvid-runtime/src/io.rs::io_tool_policy_strips_leading_separator_to_confine_absolute_inputs",
+            "crates/corvid-runtime/src/io.rs::io_tool_policy_unconfigured_fails_closed_on_resolve",
+            "crates/corvid-runtime/tests/executing_io_tools.rs::executing_io_tools_reject_path_traversal_with_clear_diagnostic",
+            "crates/corvid-runtime/tests/executing_io_tools.rs::executing_io_tools_fail_closed_without_io_root_configured",
+        ],
+    },
+    Guarantee {
+        id: "io_source.fs_write_quarantine_on_replay",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A Substitute-mode replay runtime refuses every executing \
+             file-write call. Both the low-level `IoRuntime::write_text` \
+             path AND the `Runtime::call_tool(\"io.write_text\", ...)` \
+             dispatch path are covered: the low-level path returns \
+             QuarantineViolation directly; the dispatch path goes \
+             through the replay-substitution path first (so writes \
+             either substitute from the recorded trace OR diverge — \
+             they never reach the live filesystem). The filesystem \
+             is provably untouched in both cases.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/tests/executing_io_tools.rs::executing_io_tools_round_trip_through_runtime_dispatch",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_io_writes",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem",
+        ],
+    },
+    Guarantee {
+        id: "io_source.fs_read_quarantine_on_replay",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A Substitute-mode replay runtime gates every executing \
+             file-read call (read_text / list_dir). The low-level \
+             `IoRuntime::read_text` path passes through transparently \
+             during replay (reads don't escape the process and the \
+             quarantine flag is write-only). The `Runtime::call_tool` \
+             dispatch path goes through replay-substitution first, so \
+             dispatch-path reads either substitute from the recorded \
+             trace OR diverge when no recorded event matches — they \
+             never reach the live filesystem unless the trace \
+             prescribed it.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_passes_through_io_reads",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_io_read_tool_dispatch_without_recorded_event",
+        ],
+    },
     // ----- Grounded<T> --------------------------------------------
     Guarantee {
         id: "grounded.provenance_required",

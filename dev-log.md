@@ -4,6 +4,113 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33S1c closed (umbrella 33S1 done): invention proof artifacts for executing file-I/O
+
+Final sub-slice of the 33S1 umbrella. Ships the **invention-
+proof contract** for the executing file-I/O surface: the registry
+rows, the docs, the tour, the catalog entries. With this commit
+the umbrella 33S1 closes — the surface declared in std/io.cor at
+33S1a, wired through Runtime::call_tool + IoToolPolicy at 33S1a,
+proved end-to-end at 33S1b, is now FULLY documented and signable.
+
+### What landed
+
+**Three RuntimeChecked guarantees** registered in
+`crates/corvid-guarantees/src/registry.rs`:
+
+| id | description |
+|---|---|
+| `io_source.fs_path_confinement` | Path stays inside `[io] root`; traversal refused; missing root fails closed. |
+| `io_source.fs_write_quarantine_on_replay` | Writes during replay never reach the filesystem (both low-level and dispatch paths covered). |
+| `io_source.fs_read_quarantine_on_replay` | Reads during replay either substitute from the trace or diverge. |
+
+Each guarantee carries 1–5 positive + 1–5 adversarial test refs
+pointing at the actual tests added in 33S1a + 33S1b (the
+cross-reference sentinel requires non-empty enforcement refs for
+Static/RuntimeChecked rows — this is the architectural reason
+guarantee registration was deferred from 33S0 to the per-surface
+slices where the tests live).
+
+**Three `pub const GUARANTEE_ID_*` anchors** at the enforcement
+sites in `crates/corvid-runtime/src/io.rs`, so the
+`every_enforced_guarantee_id_is_wired_to_workspace_source`
+sentinel resolves the runtime side of each guarantee to a real
+source location.
+
+**Claim-coverage**: the 3 ids added to
+`corvid-guarantees::signed_claim::SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`.
+A signed cdylib whose source uses `read_text` / `write_text` /
+`list_dir` now carries these properties in its claim manifest;
+`corvid claim --explain` lists them; `corvid build --sign`
+accepts them.
+
+**Doc artifacts**:
+- `docs/reference/core-semantics.md` regenerated via `corvid
+  contract regen-doc` — the drift gate sentinel passes.
+- `docs/reference/stdlib/io.md` — new ~140-line reference page
+  covering the 3 tools, the `[io] root` security model, the
+  `CORVID_IO_ROOT` env override, the 3 guarantees, the
+  `@deterministic`-rejection property (covered by the existing
+  decl-replayability rule, not a new io-specific guarantee),
+  the replay-quarantine layers, and a worked file-backed
+  daily-summary example.
+- `docs/reference/stdlib/README.md`'s `## std.io` section
+  expanded to mention the new executing tools and link to the
+  new reference page.
+- `docs/reference/inventions.md` — proof-matrix row added under
+  the canonical "Shipped (33S1)" column.
+- `README.md` — invention-catalog entry added under
+  "Verification" with the standard Spec/Tour/Roadmap/Proof/
+  Non-scope footer.
+
+**`corvid tour --topic file-io`** added to
+`crates/corvid-tour-catalog/src/lib.rs`. The topic source is a
+real `persist_summary` + `load_summary` agent pair that compiles
+through `corvid_driver::compile` (the `all_tour_sources_compile`
+test now passes 33/33 — was 32; +1 file-io topic).
+
+### Validation gate
+
+- `cargo test -p corvid-guarantees --lib` — 28 pass (was 25;
+  +3 new guarantees registered).
+- `cargo test -p corvid-cli --bin corvid all_tour_sources_compile` —
+  passes (33/33 tour topics compile).
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### Honest re-scope from 33S0 documented
+
+The 33S0 dev-log entry already documented that the guarantee-
+registration step was deferred from 33S0 to the per-surface
+slices because the cross-reference sentinel requires real test
+refs. 33S1c is the slice where those guarantees finally land —
+alongside the tests that justify them. This is the
+"no-shortcut" path the user asked for: each guarantee ships
+with its test in one atomic commit, not as a forward-declaration
+with a TODO test ref.
+
+### What this unblocks
+
+The 33S phase pattern is now proven end-to-end on one surface.
+33S2 (HTTP) and 33S3 (SQLite) follow the same three-step
+pattern:
+
+1. **33S{2,3}a**: tool decls in `std/http.cor` / `std/db.cor` +
+   policy struct + dispatch interception.
+2. **33S{2,3}b**: end-to-end + replay-quarantine tests + CLI
+   wiring (`load_http_egress_policy` for HTTP's `[http] allow`
+   allowlist + SSRF block; the SQLite slice 33S3b also adds
+   `Value::DbHandle`).
+3. **33S{2,3}c**: guarantees + tour + reference doc +
+   inventions row + README catalog.
+
+P1 progress: 33S 4/5 — only 33S2 + 33S3 remain (well, 33S4
+batteries quickstart too, gated on 33R5b json + 33S2 + 33S3).
+33S1 itself: 3/3 closed. The umbrella is done.
+
+---
+
 ## 2026-06-08 - 33S1b closed: end-to-end + replay-quarantine acceptance for executing file-I/O
 
 Second sub-slice of 33S1. 33S1a wired the plumbing (tool decls,

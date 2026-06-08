@@ -451,6 +451,26 @@ agent safe_refund(id: String) -> String:
     return refund(id)
 "#,
     },
+    TourTopic {
+        name: "file-io",
+        title: "Executing File-I/O Surface",
+        category: "Executing I/O",
+        pitch: "Corvid's std/io tools execute real filesystem operations through a runtime-enforced [io] root confinement. Paths that escape the root are refused; calls inside @deterministic agents are rejected at typecheck; replay-mode writes never reach the live filesystem. The security boundary is declared in corvid.toml and signable through the cdylib's claim manifest.",
+        spec: "docs/reference/stdlib/io.md",
+        roadmap: "Phase 33S1 executing file-I/O surface",
+        test: "crates/corvid-runtime/tests/executing_io_tools.rs + crates/corvid-runtime/src/io.rs IoToolPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_io_* fixtures",
+        non_scope: "Confines paths to the declared [io] root; does not police what user code does with the read contents.",
+        source: r#"import "./std/io" use read_text, write_text
+
+agent persist_summary(date: String, body: String) -> String:
+    write_text(date + ".txt", body)
+    return date
+
+agent load_summary(date: String) -> String:
+    file = read_text(date + ".txt")
+    return file.contents
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

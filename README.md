@@ -555,6 +555,28 @@ Roadmap: [Phase 20g adversarial generator](./ROADMAP.md)
 Proof: [adversarial tests](./crates/corvid-driver/src/adversarial.rs)
 Non-scope: Live LLM generation expands the corpus; deterministic seeds remain the safety gate.
 
+#### Executing File-I/O Surface
+
+Corvid's `std/io` module ships three executing tools — `read_text`, `write_text`, `list_dir` — that flow through typed effect rows (`io_read`, `io_write`, `io_list`) and a runtime-enforced `[io] root` confinement boundary.
+
+The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.fs_path_confinement` + the two replay-quarantine guarantees in its claim manifest, so a host can verify the binary refuses to operate outside the declared root.
+
+```corvid
+import "./std/io" use read_text, write_text
+
+agent persist_summary(date: String, body: String) -> String:
+    write_text(date + ".txt", body)
+    return date
+```
+
+Calls outside the configured `[io] root` are refused with a structured diagnostic naming the offending path AND the root. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during replay either substitute from the recorded trace or diverge — the filesystem is provably untouched.
+
+Spec: [`std.io` reference](./docs/reference/stdlib/io.md)
+Tour: `corvid tour --topic file-io`
+Roadmap: [Phase 33S1](./ROADMAP.md)
+Proof: [executing I/O tests](./crates/corvid-runtime/tests/executing_io_tools.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs) + [path-confinement tests](./crates/corvid-runtime/src/io.rs)
+Non-scope: Confines paths to the declared root; does not police what user code does with the contents.
+
 ## Architecture
 
 ```text

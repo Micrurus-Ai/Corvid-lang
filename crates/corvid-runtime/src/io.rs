@@ -364,6 +364,38 @@ impl TextLineStream {
 // fail-closed contract 33S0 prepared for.
 // ============================================================================
 
+/// Phase 33S1c — anchor for the path-confinement guarantee.
+/// `IoToolPolicy::resolve` is the enforcement site: every
+/// executing file-I/O call resolves through this policy and is
+/// refused if it would escape the configured `[io] root` (or if
+/// no root is configured). The `corvid-guarantees` inverse-
+/// coverage sentinel uses this anchor to confirm the registry
+/// row is wired to the enforcement code.
+pub const GUARANTEE_ID_IO_SOURCE_FS_PATH_CONFINEMENT: &str =
+    "io_source.fs_path_confinement";
+
+/// Phase 33S1c — anchor for the write-quarantine guarantee.
+/// `IoRuntime::write_text_with_effect` (low-level) AND the
+/// `Runtime::call_tool("io.write_text", ...)` dispatch path BOTH
+/// honour replay-mode write-quarantine: the low-level path
+/// returns QuarantineViolation directly when `write_quarantined`
+/// is set; the dispatch path goes through replay-substitution
+/// first so any write either substitutes from the recorded trace
+/// OR diverges — never reaching the live filesystem.
+pub const GUARANTEE_ID_IO_SOURCE_FS_WRITE_QUARANTINE_ON_REPLAY: &str =
+    "io_source.fs_write_quarantine_on_replay";
+
+/// Phase 33S1c — anchor for the read-passthrough/gated guarantee.
+/// `IoRuntime::read_text_with_effect` (low-level) passes
+/// through during replay (reads don't escape the process);
+/// `Runtime::call_tool("io.read_text", ...)` goes through
+/// replay-substitution so dispatch-path reads either substitute
+/// from the trace OR diverge when no event matches — they
+/// never reach the live filesystem unless the trace prescribed
+/// it.
+pub const GUARANTEE_ID_IO_SOURCE_FS_READ_QUARANTINE_ON_REPLAY: &str =
+    "io_source.fs_read_quarantine_on_replay";
+
 /// Policy carrying the configured `[io] root` for the executing
 /// file-I/O surface. Construct via `IoToolPolicy::new` once per
 /// `Runtime` and store on the runtime; the `io.*` tool dispatch

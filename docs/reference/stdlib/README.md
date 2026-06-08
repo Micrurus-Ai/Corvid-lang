@@ -48,16 +48,27 @@ size metadata.
 
 ## `std.io`
 
-`std/io.cor` defines path and file-system envelopes:
+`std/io.cor` defines path and file-system envelopes plus the executing
+file-I/O tool surface added in Phase 33S1:
 
 - `PathInfo`
 - `FileReadEnvelope`
 - `FileWriteEnvelope`
 - `DirectoryEntryEnvelope`
+- `read_text(path) -> FileReadEnvelope uses io_read` — executing tool
+- `write_text(path, content) -> FileWriteEnvelope uses io_write` — executing tool
+- `list_dir(path) -> List<DirectoryEntryEnvelope> uses io_list` — executing tool
 
-The runtime exposes structured text read, text write, and directory listing
-APIs. Each emits `std.io.*` trace events with operation, path, byte count,
-entry count, latency, and error metadata.
+The executing tools enforce three RuntimeChecked guarantees:
+`io_source.fs_path_confinement` (paths stay inside the configured `[io] root`),
+`io_source.fs_write_quarantine_on_replay`, and
+`io_source.fs_read_quarantine_on_replay`. Programs that call these tools from
+a `@deterministic` agent are rejected at typecheck (the existing decl-
+replayability rule treats all tool calls as non-deterministic).
+
+See [`io.md`](./io.md) for the full reference, including the corvid.toml
+`[io] root` security model, the `CORVID_IO_ROOT` env override, and the
+envelope schemas.
 
 ## `std.secrets`
 

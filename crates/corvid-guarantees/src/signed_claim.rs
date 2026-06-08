@@ -45,6 +45,19 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     // `effect_row.body_completeness` (above) fires a single
     // diagnostic that enforces both perspectives.
     "effect_row.import_boundary",
+    // Slice 33S1c — the three executing file-I/O guarantees
+    // (from the 33S/33S1 executing-I/O-surfaces phase). A
+    // signed cdylib whose source uses `io.read_text` /
+    // `io.write_text` / `io.list_dir` (declared in std/io.cor)
+    // asserts these three RuntimeChecked properties in its
+    // claim manifest: path confinement against `[io] root`,
+    // write quarantine on replay, and read gate on replay.
+    // See crates/corvid-runtime/src/io.rs for the enforcement
+    // anchors and crates/corvid-guarantees/src/registry.rs for
+    // the rows + test refs.
+    "io_source.fs_path_confinement",
+    "io_source.fs_write_quarantine_on_replay",
+    "io_source.fs_read_quarantine_on_replay",
     "grounded.provenance_required",
     // `grounded.propagation_across_calls` removed 2026-05-08 by
     // Phase 35V-T1-B — downgraded to OutOfScope because the
