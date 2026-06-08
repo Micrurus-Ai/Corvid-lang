@@ -630,4 +630,7 @@ If `cargo fmt --check` fails because `cargo-fmt` is not installed, install the R
 
 ## License
 
-MIT OR Apache-2.0
+Corvid is released under the [MIT License](LICENSE).
+
+Contributions are licensed under the same MIT terms (inbound = outbound)
+unless the contributor marks otherwise.

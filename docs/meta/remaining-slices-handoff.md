@@ -1267,8 +1267,8 @@ v1.0 ships only after:
 ## Out of scope
 
 - A paid beta or any monetization at this stage.
-- A NDA or contributor-license agreement (the repo's MIT/
-  Apache-2.0 dual license is enough).
+- A NDA or contributor-license agreement (the repo's MIT
+  license is enough).
 - A formal advisory board (post-launch).
 
 ---

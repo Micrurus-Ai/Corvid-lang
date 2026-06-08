@@ -186,7 +186,7 @@ const LANDING_HTML = `<!doctype html>
 </main>
 
 <footer>
-  Dual-licensed MIT or Apache-2.0.
+  Licensed under the MIT license.
 </footer>
 
 <script>

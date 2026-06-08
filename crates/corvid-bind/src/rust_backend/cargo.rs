@@ -14,7 +14,7 @@ pub(super) fn render_cargo_toml(context: &BindingContext) -> String {
 name = "{name}"
 version = "0.0.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Generated Corvid Rust bindings for {source}"
 
 [dependencies]

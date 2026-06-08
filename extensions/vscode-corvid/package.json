@@ -4,7 +4,7 @@
   "description": "Reference VS Code client for the Corvid AI-native general programming language.",
   "version": "0.0.1",
   "publisher": "corvid-lang",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.90.0"
   },

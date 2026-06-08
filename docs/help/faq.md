@@ -77,7 +77,7 @@ the audience.
 
 ## Is the runtime open source?
 
-Yes. MIT/Apache-2.0 dual-licensed.
+Yes. MIT-licensed.
 [`Micrurus-Ai/Corvid-lang`](https://github.com/Micrurus-Ai/Corvid-lang)
 on GitHub.
 
