@@ -4,6 +4,103 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33R3 closed: README adoption funnel (P0 launch blocker)
+
+Third and final P0 slice of the 33R market-readiness track. The
+2026-06-08 audit flagged the README as an invention catalog
+rather than an adoption funnel: 633 lines, the actual five-minute
+quickstart (`docs/book/02-quickstart.md`) and the `corvid tour`
+never linked from it, and no `install → corvid new → corvid run`
+path above the fold. A first-time evaluator hitting the top of
+the README would see a `tool issue_refund(...)` example and a
+"Verifiable Launch Surface" section with four `cargo run -q -p
+corvid-cli -- build app.cor --target=cdylib --sign=...` commands
+before they ever saw `corvid new hello`.
+
+### What kept, what moved, what added
+
+The existing lines 1-24 already formed a strong opening: a
+one-sentence pitch, the "what makes it different" hook, the
+refund-agent example, and the load-bearing closer ("Remove the
+`approve` line and the program does not compile"). The audit said
+"keep the approve/budget example — it's strong" and I agreed —
+that block is already a funnel. Nothing in those 24 lines
+changed.
+
+The new `## Quickstart` section sits between the existing closer
+and the `## Verifiable Launch Surface` section. Its shape:
+
+- The macOS/Linux install one-liner (Windows PowerShell + custom
+  paths + env overrides + `cargo install` paths stay linked-to
+  in the `## Install` section below — the Quickstart deliberately
+  shows one path so a newcomer doesn't get distracted by the
+  matrix).
+- `corvid new hello && cd hello && corvid run` — the first
+  program the audit specifically named.
+- Three "then explore" links: the 5-minute quickstart in the
+  book, `corvid tour --list`, and the book index.
+
+The new `## Contents` ToC sits right after Quickstart so a
+catalog-reader scrolling past the funnel can jump straight to
+the section they want. Includes anchor links for Verifiable
+Launch Surface, Invention Catalog, Architecture, Status, Install,
+Install From Source, Developer Commands, Documentation, License.
+
+Two small internal-consistency fixes while touching the file:
+the existing Install section's `./ROADMAP.md#L1923` line anchors
+(2 hits) were one line off after the 33R track insertion shifted
+the 33P block down. Fixed to `#L1924` so the anchors resolve
+correctly.
+
+### What was deliberately NOT done in this slice
+
+- The Status badge mentioned in the audit's Slice 3 description
+  was deferred to 33R8 (`stability-policy-and-changelog`). The
+  no-shortcut answer: ship the badge in the same commit as the
+  `CHANGELOG.md` + `docs/stability.md` it links to, so the badge
+  + its target page form one atomic concern. Adding a badge in
+  33R3 that links to a placeholder anchor (option a) is a
+  half-finished implementation; adding it pointing at a file
+  that won't exist until 33R8 (option b) is a dead link on
+  `main`. Both violate the "no shortcuts" rule.
+- The `E0301`→`E0101` quickstart error-code drift the audit
+  also names is filed as 33R12 and stays there — Slice 3 is
+  "restructure" not "fix bugs in the existing prose."
+
+### Why this matters for v1.0 launch
+
+The audit's verdict line for this gap: "There is no above-the-
+fold install → first program → run path." Post-33R3, the first
+screen of the README shows the pitch (one sentence), the
+differentiator (the refund example), and the install + first-run
+flow. The invention catalog is still there — moved one section
+down, behind the new ToC — for the readers who want the
+proof-matrix tour. The two audiences (newcomers + proof-seekers)
+now have distinct entry points instead of fighting for the first
+30 lines.
+
+Validation gate:
+
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### P0 tier closed
+
+This is the third P0 slice and the last one. The P0 wave
+(33R1 license + 33R2 identity + 33R3 funnel) is now end-to-end:
+a fresh evaluator clicking the GitHub repo can read a coherent
+front-page pitch, see a working install command pointing at the
+canonical URL, find an MIT license on disk, and reach the
+5-minute quickstart in two more clicks — all blockers the audit
+named as "do not launch without these" are gone.
+
+Per the brief, this is the checkpoint moment: P1 (registry +
+stdlib batteries + publishing + CLI grouping + stability page)
+is next.
+
+---
+
 ## 2026-06-08 - 33R2 closed: repo-identity unify (P0 launch blocker)
 
 Second slice of the 33R market-readiness track. The 2026-06-08

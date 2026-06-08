@@ -23,6 +23,44 @@ agent refund(id: String) -> Receipt:
 
 Remove the `approve` line and the program does not compile. Increase the composed cost above `$1.00` and the program does not compile. Return `Grounded<T>` without retrieval provenance and the program does not compile. That is the point: AI safety is not an SDK convention; it is part of the language.
 
+## Quickstart
+
+Install ([Windows PowerShell](#install) — macOS / Linux below):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.sh | sh
+```
+
+First program:
+
+```bash
+corvid new hello
+cd hello
+corvid run
+```
+
+Then explore:
+
+- [The 5-minute quickstart in the book](./docs/book/02-quickstart.md)
+- The shipped invention tour: `corvid tour --list`
+- [The full book index](./docs/book/README.md)
+
+For the full install options (Windows PowerShell, custom paths,
+env overrides, `cargo install` from source, planned package-
+manager paths), see [Install](#install) below.
+
+## Contents
+
+- [Verifiable launch surface](#verifiable-launch-surface) — signed cdylib + `claim --explain`
+- [Invention catalog](#invention-catalog) — every shipped invention with proof matrix
+- [Architecture](#architecture)
+- [Status](#status)
+- [Install](#install)
+- [Install from source](#install-from-source)
+- [Developer commands](#developer-commands)
+- [Documentation](#documentation)
+- [License](#license)
+
 ## Verifiable Launch Surface
 
 Corvid's strongest production claim is not prose; it is a signed cdylib
@@ -567,7 +605,7 @@ Override defaults with `CORVID_REPO`, `CORVID_VERSION` (e.g. `v0.1.0`), or `CORV
 > **Status:** the install scripts above (`install/install.{sh,ps1}`)
 > are the **canonical install path** for Corvid v1.0. The package-
 > manager manifests below are tracked as Phase 33P slices in
-> [`ROADMAP.md`](./ROADMAP.md#L1923) and ship **post-v1.0** — none of
+> [`ROADMAP.md`](./ROADMAP.md#L1924) and ship **post-v1.0** — none of
 > them is the "installer," each is additive metadata that a
 > language-installer manager's central repo consumes and routes back
 > to the GitHub Release artifacts `release.yml` produces. They're
@@ -584,7 +622,7 @@ Override defaults with `CORVID_REPO`, `CORVID_VERSION` (e.g. `v0.1.0`), or `CORV
 | APT / RPM (Debian / Fedora) | `apt install corvid` / `dnf install corvid` after one-time repo add | `33P6-apt-rpm-repo` |
 
 If you want to **track or contribute** any of these,
-[`ROADMAP.md`'s Phase 33P block](./ROADMAP.md#L1923) names each
+[`ROADMAP.md`'s Phase 33P block](./ROADMAP.md#L1924) names each
 filed slice with what it actually does. Manifest contributions are
 welcome at any time — the GitHub Release artifacts they consume
 (`release.yml`) are already shipping; the manifests are
