@@ -4,6 +4,137 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33S1-fix-naming: dispatch was bypassed by real Corvid code; renamed + added end-to-end test
+
+Honest correction commit on top of the 33S1 umbrella. While
+opening 33S2 (HTTP) and tracing how the IR lowers tool calls, I
+found that the 33S1 dispatch interception in
+`Runtime::call_tool` matched names with `io.` (dotted) prefix —
+but `corvid-ir/src/lower.rs:1069-1249` lowers tool calls with
+bare `callee_name` (the identifier as it appears in source), no
+module-path prefix. So when a Corvid program does
+
+```corvid
+import "./std/io" use io_read_text
+io_read_text(path)
+```
+
+the runtime gets `callee_name = "io_read_text"`, not
+`"io.io_read_text"` or `"io.read_text"`. My `io.`-prefix
+interception never fired from real code.
+
+### Why the existing tests didn't catch this
+
+The 33S1 acceptance tests passed because they called
+`Runtime::call_tool("io.write_text", ...)` LITERALLY with the
+dotted prefix — bypassing the IR. The tour topic source compiled
+fine (the `all_tour_sources_compile` test only does `compile`,
+not run). The replay-quarantine fixtures also used literal
+prefixed names. NO test exercised the path that compiled +
+ran a real Corvid program through the executing dispatch. That
+test gap was the load-bearing one.
+
+### The fix
+
+Renamed the three stdlib tools to carry the prefix in their
+declared name:
+
+```corvid
+# std/io.cor — post-fix
+public tool io_read_text(path: String) -> FileReadEnvelope uses io_read
+public tool io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
+public tool io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list
+```
+
+The runtime dispatch interception in
+`crates/corvid-runtime/src/runtime/llm_dispatch.rs` switched
+from `strip_prefix("io.")` to `strip_prefix("io_")` — matching
+the bare IR name. The `match suffix { "read_text" => ... }`
+arms stayed the same since stripping `io_` from `io_read_text`
+yields `read_text`.
+
+Updated every literal-name reference: 5 tests in
+`crates/corvid-runtime/tests/executing_io_tools.rs`, 2 tests in
+`crates/corvid-runtime/tests/replay_quarantine_corpus.rs`, the
+tour topic source in `crates/corvid-tour-catalog/src/lib.rs`,
+the worked example in `docs/reference/stdlib/io.md`, the section
+in `docs/reference/stdlib/README.md`, and the README invention-
+catalog entry.
+
+### The load-bearing missing test
+
+New file `crates/corvid-driver/tests/executing_io_through_driver.rs`
+with one test:
+
+```rust
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_corvid_program_writes_file_through_executing_io_dispatch() {
+    // ... set up tempdir as project with src/main.cor +
+    // src/std/io.cor + src/std/effects.cor + corvid.toml ...
+    let source = r#"
+import "./std/io" use io_write_text
+agent main() -> Int:
+    io_write_text("note.txt", "hello from real corvid")
+    return 42
+"#;
+    let ir = compile_to_ir_with_config_at_path(source, &main_path, None).unwrap();
+    let policy = IoToolPolicy::new(Some("."), Some(project.path()));
+    let runtime = Runtime::builder().io_policy(policy).build();
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime).await.unwrap();
+    assert!(matches!(result, Value::Int(42)));
+    let written = fs::read_to_string(project.path().join("note.txt")).unwrap();
+    assert_eq!(written, "hello from real corvid");
+}
+```
+
+This test:
+- Compiles a real Corvid program through the driver (same path
+  `corvid run` takes).
+- Runs through `run_ir_with_runtime` (same path).
+- Asserts BOTH the return value AND the file existence on disk.
+
+Pre-fix this would have failed with `UnknownTool("io_write_text")`
+because the IR's bare name never matched the `io.` interception.
+Post-fix it passes — proving real Corvid code reaches the
+executing surface.
+
+### Lesson for 33S2 (HTTP) and 33S3 (SQLite)
+
+Each per-surface slice's acceptance test MUST include at least
+one test that:
+1. Writes real `.cor` source.
+2. Compiles through `compile_to_ir_with_config_at_path`.
+3. Runs through `run_ir_with_runtime`.
+4. Asserts the side effect actually fired.
+
+Tests that call `Runtime::call_tool` with literal names prove
+the dispatch path WORKS but don't prove the IR's name MATCHES
+the dispatch's match arm. The integration test is the only one
+that closes that gap.
+
+The dev-log entry for 33S2 will explicitly call out this
+"compile + run real .cor source" acceptance class as part of
+its test plan.
+
+### Validation gate
+
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-runtime --test executing_io_tools` — 5/5
+  pass under the new names.
+- `cargo test -p corvid-runtime --test replay_quarantine_corpus`
+  — 10/10 pass.
+- `cargo test -p corvid-cli --bin corvid all_tour_sources_compile`
+  — 33/33 pass.
+- `cargo test -p corvid-driver --test executing_io_through_driver`
+  — 1/1 pass (the new integration test).
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+ROADMAP entries 33S1a/b/c preserved as historical record — the
+dev-log + the new integration test document the fix.
+
+---
+
 ## 2026-06-08 - 33S1c closed (umbrella 33S1 done): invention proof artifacts for executing file-I/O
 
 Final sub-slice of the 33S1 umbrella. Ships the **invention-

@@ -59,6 +59,6 @@ public agent directory_entry(path_value: String, name: String, is_dir: Bool) -> 
 # `@deterministic` agent is a compile error.
 # ----------------------------------------------------------------
 
-public tool read_text(path: String) -> FileReadEnvelope uses io_read
-public tool write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
-public tool list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list
+public tool io_read_text(path: String) -> FileReadEnvelope uses io_read
+public tool io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
+public tool io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list

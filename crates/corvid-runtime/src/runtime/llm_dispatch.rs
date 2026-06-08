@@ -23,15 +23,20 @@ impl Runtime {
 
     /// Call a tool by name. Emits trace events bracketing the call.
     ///
-    /// Slice 33S1a: tool names starting with `io.` are intercepted
-    /// and routed to `dispatch_stdlib_io_tool` so the executing
-    /// file-I/O stdlib tools (declared in `std/io.cor` —
-    /// `read_text`, `write_text`, `list_dir`) can reach the
-    /// `IoRuntime` + the `[io] root` policy that the standard
-    /// `tools.call` handler-closure path can't see. Replay-mode
-    /// reads still substitute from the recorded trace (the
-    /// `replay_source` branch runs first); writes pass through the
-    /// dispatch which then hits the `IoRuntime::quarantine_writes`
+    /// Slice 33S1a (with 33S1-fix-naming 2026-06-08): tool names
+    /// starting with `io_` are intercepted and routed to
+    /// `dispatch_stdlib_io_tool` so the executing file-I/O stdlib
+    /// tools (declared in `std/io.cor` as `io_read_text`,
+    /// `io_write_text`, `io_list_dir`) can reach the `IoRuntime` +
+    /// the `[io] root` policy that the standard `tools.call`
+    /// handler-closure path can't see. The original 33S1a wired
+    /// the interception against an `io.` dotted prefix, but the IR
+    /// lowers `import "./std/io" use io_read_text; io_read_text(p)`
+    /// to a tool call with bare `callee_name = "io_read_text"` —
+    /// no module prefix. Underscore matches the bare IR name.
+    /// Replay-mode reads still substitute from the recorded trace
+    /// (the `replay_source` branch runs first); writes pass through
+    /// the dispatch which then hits the `IoRuntime::quarantine_writes`
     /// guard if write-quarantine is on.
     pub async fn call_tool(
         &self,
@@ -48,7 +53,7 @@ impl Runtime {
         }
         let result = if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)?
-        } else if let Some(io_tool) = name.strip_prefix("io.") {
+        } else if let Some(io_tool) = name.strip_prefix("io_") {
             self.dispatch_stdlib_io_tool(io_tool, args.clone()).await?
         } else {
             self.tools.call(name, args.clone()).await?
@@ -93,7 +98,7 @@ impl Runtime {
                     .first()
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "io.read_text".to_string(),
+                        tool: "io_read_text".to_string(),
                         message: "expected one String argument (path)".to_string(),
                     })?;
                 let resolved = self.io_policy.resolve(path_arg)?;
@@ -110,7 +115,7 @@ impl Runtime {
                     .first()
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "io.write_text".to_string(),
+                        tool: "io_write_text".to_string(),
                         message: "expected (path: String, content: String) — path missing"
                             .to_string(),
                     })?;
@@ -118,7 +123,7 @@ impl Runtime {
                     .get(1)
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "io.write_text".to_string(),
+                        tool: "io_write_text".to_string(),
                         message: "expected (path: String, content: String) — content missing"
                             .to_string(),
                     })?;
@@ -135,7 +140,7 @@ impl Runtime {
                     .first()
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "io.list_dir".to_string(),
+                        tool: "io_list_dir".to_string(),
                         message: "expected one String argument (path)".to_string(),
                     })?;
                 let resolved = self.io_policy.resolve(path_arg)?;
@@ -153,7 +158,7 @@ impl Runtime {
                     .collect();
                 Ok(serde_json::Value::Array(json_entries))
             }
-            other => Err(RuntimeError::UnknownTool(format!("io.{other}"))),
+            other => Err(RuntimeError::UnknownTool(format!("io_{other}"))),
         }
     }
 

@@ -460,14 +460,14 @@ agent safe_refund(id: String) -> String:
         roadmap: "Phase 33S1 executing file-I/O surface",
         test: "crates/corvid-runtime/tests/executing_io_tools.rs + crates/corvid-runtime/src/io.rs IoToolPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_io_* fixtures",
         non_scope: "Confines paths to the declared [io] root; does not police what user code does with the read contents.",
-        source: r#"import "./std/io" use read_text, write_text
+        source: r#"import "./std/io" use io_read_text, io_write_text
 
 agent persist_summary(date: String, body: String) -> String:
-    write_text(date + ".txt", body)
+    io_write_text(date + ".txt", body)
     return date
 
 agent load_summary(date: String) -> String:
-    file = read_text(date + ".txt")
+    file = io_read_text(date + ".txt")
     return file.contents
 "#,
     },

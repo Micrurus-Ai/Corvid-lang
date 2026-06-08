@@ -282,7 +282,7 @@ async fn replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesys
     let new_path = dir.path().join("dispatch-blocked.txt");
     let err = runtime
         .call_tool(
-            "io.write_text",
+            "io_write_text",
             vec![
                 serde_json::json!("dispatch-blocked.txt"),
                 serde_json::json!("blocked"),
@@ -333,7 +333,7 @@ async fn replay_blocks_executing_io_read_tool_dispatch_without_recorded_event() 
 
     let err = runtime
         .call_tool(
-            "io.read_text",
+            "io_read_text",
             vec![serde_json::json!("seed-via-dispatch.txt")],
         )
         .await

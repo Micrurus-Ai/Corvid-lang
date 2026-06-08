@@ -33,7 +33,7 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
     // 1. Write a file via io.write_text.
     let write_result = rt
         .call_tool(
-            "io.write_text",
+            "io_write_text",
             vec![json!("hello.txt"), json!("hello from 33S1b")],
         )
         .await
@@ -53,7 +53,7 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
 
     // 2. Read it back via io.read_text.
     let read_result = rt
-        .call_tool("io.read_text", vec![json!("hello.txt")])
+        .call_tool("io_read_text", vec![json!("hello.txt")])
         .await
         .expect("read_text call");
     assert_eq!(
@@ -65,7 +65,7 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
 
     // 3. List the directory via io.list_dir.
     let list_result = rt
-        .call_tool("io.list_dir", vec![json!(".")])
+        .call_tool("io_list_dir", vec![json!(".")])
         .await
         .expect("list_dir call");
     let entries = list_result.as_array().expect("list returns array");
@@ -90,7 +90,7 @@ async fn executing_io_tools_reject_path_traversal_with_clear_diagnostic() {
 
     let err = rt
         .call_tool(
-            "io.read_text",
+            "io_read_text",
             vec![json!("../../etc/passwd")],
         )
         .await
@@ -115,7 +115,7 @@ async fn executing_io_tools_fail_closed_without_io_root_configured() {
     let rt = Runtime::builder().build(); // default = IoToolPolicy::unset()
 
     let err = rt
-        .call_tool("io.read_text", vec![json!("any.txt")])
+        .call_tool("io_read_text", vec![json!("any.txt")])
         .await
         .expect_err("unconfigured policy must fail closed");
     let msg = format!("{err}");
@@ -140,7 +140,7 @@ async fn executing_io_tools_resolve_both_absolute_and_relative_roots() {
     let abs_rt = Runtime::builder().io_policy(abs_policy).build();
     let write_abs = abs_rt
         .call_tool(
-            "io.write_text",
+            "io_write_text",
             vec![json!("abs.txt"), json!("absolute root")],
         )
         .await
@@ -159,7 +159,7 @@ async fn executing_io_tools_resolve_both_absolute_and_relative_roots() {
     let rel_rt = Runtime::builder().io_policy(rel_policy).build();
     let write_rel = rel_rt
         .call_tool(
-            "io.write_text",
+            "io_write_text",
             vec![json!("rel.txt"), json!("relative root")],
         )
         .await
@@ -187,7 +187,7 @@ async fn executing_io_write_is_quarantined_when_runtime_quarantine_is_active() {
     let seed_rt = Runtime::builder().io_policy(policy.clone()).build();
     seed_rt
         .call_tool(
-            "io.write_text",
+            "io_write_text",
             vec![json!("seed.txt"), json!("seed content")],
         )
         .await
@@ -214,7 +214,7 @@ async fn executing_io_write_is_quarantined_when_runtime_quarantine_is_active() {
     // Confirm the read path works (it does NOT need quarantine):
     let read_rt = Runtime::builder().io_policy(policy).build();
     let read = read_rt
-        .call_tool("io.read_text", vec![json!("seed.txt")])
+        .call_tool("io_read_text", vec![json!("seed.txt")])
         .await
         .expect("read after seed");
     assert_eq!(

@@ -55,9 +55,9 @@ file-I/O tool surface added in Phase 33S1:
 - `FileReadEnvelope`
 - `FileWriteEnvelope`
 - `DirectoryEntryEnvelope`
-- `read_text(path) -> FileReadEnvelope uses io_read` — executing tool
-- `write_text(path, content) -> FileWriteEnvelope uses io_write` — executing tool
-- `list_dir(path) -> List<DirectoryEntryEnvelope> uses io_list` — executing tool
+- `io_read_text(path) -> FileReadEnvelope uses io_read` — executing tool
+- `io_write_text(path, content) -> FileWriteEnvelope uses io_write` — executing tool
+- `io_list_dir(path) -> List<DirectoryEntryEnvelope> uses io_list` — executing tool
 
 The executing tools enforce three RuntimeChecked guarantees:
 `io_source.fs_path_confinement` (paths stay inside the configured `[io] root`),

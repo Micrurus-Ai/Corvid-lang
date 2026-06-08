@@ -557,15 +557,15 @@ Non-scope: Live LLM generation expands the corpus; deterministic seeds remain th
 
 #### Executing File-I/O Surface
 
-Corvid's `std/io` module ships three executing tools — `read_text`, `write_text`, `list_dir` — that flow through typed effect rows (`io_read`, `io_write`, `io_list`) and a runtime-enforced `[io] root` confinement boundary.
+Corvid's `std/io` module ships three executing tools — `io_read_text`, `io_write_text`, `io_list_dir` — that flow through typed effect rows (`io_read`, `io_write`, `io_list`) and a runtime-enforced `[io] root` confinement boundary.
 
 The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.fs_path_confinement` + the two replay-quarantine guarantees in its claim manifest, so a host can verify the binary refuses to operate outside the declared root.
 
 ```corvid
-import "./std/io" use read_text, write_text
+import "./std/io" use io_read_text, io_write_text
 
 agent persist_summary(date: String, body: String) -> String:
-    write_text(date + ".txt", body)
+    io_write_text(date + ".txt", body)
     return date
 ```
 

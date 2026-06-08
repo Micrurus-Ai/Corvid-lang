@@ -8,11 +8,11 @@
 ## Quick reference
 
 ```corvid
-import "./std/io" use read_text, write_text, list_dir
+import "./std/io" use io_read_text, io_write_text, io_list_dir
 
 agent demo() -> String:
-    write_text("notes.txt", "hello from corvid")
-    file = read_text("notes.txt")
+    io_write_text("notes.txt", "hello from corvid")
+    file = io_read_text("notes.txt")
     return file.contents
 ```
 
@@ -23,13 +23,13 @@ the configured `[io] root` and return typed envelopes:
 
 ## The three tools
 
-### `read_text(path: String) -> FileReadEnvelope uses io_read`
+### `io_read_text(path: String) -> FileReadEnvelope uses io_read`
 
 Reads a UTF-8 file under the configured root. The envelope carries
 `path_value`, `contents`, `bytes`, and an `effect_meta` field for
 trace + replay metadata.
 
-### `write_text(path: String, content: String) -> FileWriteEnvelope uses io_write`
+### `io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write`
 
 Writes UTF-8 content to a file under the configured root. The
 envelope carries `path_value`, `bytes`, and `effect_meta`. The
@@ -37,7 +37,7 @@ effect row marks the operation as `reversible: false` — composes
 correctly with `@reversible` constraints elsewhere in the call
 graph.
 
-### `list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list`
+### `io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list`
 
 Lists immediate children of a directory under the configured root.
 Each entry carries `path_value`, `name`, `is_dir`, and `effect_meta`.
@@ -104,10 +104,10 @@ recorded trace), the executing file-I/O surface honors the same
 quarantine the existing `IoRuntime::quarantine_writes` hook
 provides. Two layers:
 
-1. **Low-level `IoRuntime::write_text`** returns
+1. **Low-level `IoRuntime::io_write_text`** returns
    `QuarantineViolation { surface: "io", .. }` if called during
    replay. Read paths pass through transparently.
-2. **Dispatch path** (`Runtime::call_tool("io.write_text", ...)`)
+2. **Dispatch path** (`Runtime::call_tool("io.io_write_text", ...)`)
    goes through the replay-substitution path FIRST. Writes either
    substitute from the recorded trace OR diverge — they never
    reach the live filesystem.
@@ -133,16 +133,16 @@ tool calls regardless of effect.
 ## Worked example — file-backed daily summary
 
 ```corvid
-import "./std/io" use read_text, write_text
+import "./std/io" use io_read_text, io_write_text
 
 agent record_summary(date: String, summary: String) -> String:
     path = date + ".txt"
-    write_text(path, summary)
+    io_write_text(path, summary)
     return path
 
 agent load_summary(date: String) -> String:
     path = date + ".txt"
-    file = read_text(path)
+    file = io_read_text(path)
     return file.contents
 ```
 
