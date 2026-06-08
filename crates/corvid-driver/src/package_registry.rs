@@ -101,24 +101,65 @@ pub struct RegistryVerificationFailure {
     pub reason: String,
 }
 
+/// Slice 33R4b — registry index wire shape per
+/// [`docs/internals/registry-design.md`](../../docs/internals/registry-design.md).
+///
+/// The previous (pre-33R4b) shape was a TOML `[[package]]` array.
+/// 33R4b migrates to JSON with a nested `packages.{name}.versions.{version}`
+/// map so client lookups are O(1) by name, and adds a root-level
+/// `signing_key` field carrying the registry's public ed25519
+/// verifying key. Per-version `signature` fields drop the
+/// verifying-key embedding (it lives once at the root now) and
+/// carry just the detached ed25519 signature hex (kept hex for
+/// consistency with the sha256 + key encodings the rest of the
+/// codebase uses).
+///
+/// `version: "1"` gates the schema. A future move to per-package
+/// indexes (when this file exceeds ~100 KB) bumps it to `"2"`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 struct RegistryIndex {
+    #[serde(default = "registry_index_schema_version")]
+    version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generated_at: Option<String>,
+    /// Registry signing key fingerprint: `ed25519:<key_id>:<verifying_key_hex>`.
+    /// Distinct from the build-attestation key used by `corvid build --sign`.
+    /// All per-version `signature` fields verify against this key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signing_key: Option<String>,
     #[serde(default)]
-    package: Vec<RegistryPackage>,
+    packages: std::collections::BTreeMap<String, RegistryPackageEntry>,
+}
+
+fn registry_index_schema_version() -> String {
+    "1".to_string()
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+struct RegistryPackageEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    latest: Option<String>,
+    #[serde(default)]
+    versions: std::collections::BTreeMap<String, RegistryPackage>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct RegistryPackage {
     name: String,
     version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     uri: Option<String>,
     url: String,
     sha256: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     registry: Option<String>,
-    #[serde(default)]
+    /// Detached ed25519 signature of the package signature subject,
+    /// encoded as 128 hex chars (64 raw bytes). Verifies against
+    /// the index's root `signing_key`. None when the index opted
+    /// out of signing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     signature: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     semantic_summary: Option<ModuleSemanticSummary>,
 }
 
@@ -130,15 +171,18 @@ fn load_registry_index(location: &str) -> Result<RegistryIndex> {
             .with_context(|| format!("registry index `{location}` is not UTF-8"))?
     } else {
         let path = Path::new(location);
+        // Slice 33R4b: registry index lives in `index.json` (was
+        // `index.toml` pre-33R4b). When pointed at a directory,
+        // resolve to `<dir>/index.json`.
         let path = if path.is_dir() {
-            path.join("index.toml")
+            path.join("index.json")
         } else {
             path.to_path_buf()
         };
         std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read registry index `{}`", path.display()))?
     };
-    toml::from_str(&source).context("failed to parse package registry index")
+    serde_json::from_str(&source).context("failed to parse package registry index (expected JSON)")
 }
 
 fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
@@ -160,47 +204,64 @@ fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
     }
 }
 
-fn sign_package(package: &RegistryPackage, seed_hex: &str, key_id: &str) -> Result<String> {
+/// Slice 33R4b — detached-signature signing.
+///
+/// Returns a tuple of (detached-sig hex, signing-key fingerprint).
+/// The detached sig goes into the per-version `signature` field;
+/// the fingerprint (`ed25519:<key_id>:<verifying_key_hex>`) goes
+/// into the index root's `signing_key` field once per index, so
+/// callers can verify every package's sig against a single root
+/// key instead of carrying the verifying key inside each
+/// signature.
+fn sign_package(package: &RegistryPackage, seed_hex: &str, key_id: &str) -> Result<(String, String)> {
     let seed = decode_hex_32(seed_hex).context("signing seed must be 32 bytes of hex")?;
     let signing_key = SigningKey::from_bytes(&seed);
     let verifying_key = signing_key.verifying_key();
     let subject = package_signature_subject(package)?;
     let signature = signing_key.sign(&subject);
-    Ok(format!(
-        "ed25519:{}:{}:{}",
+    let detached_sig_hex = encode_hex(&signature.to_bytes());
+    let fingerprint = format!(
+        "ed25519:{}:{}",
         key_id,
-        encode_hex(verifying_key.as_bytes()),
-        encode_hex(&signature.to_bytes())
-    ))
+        encode_hex(verifying_key.as_bytes())
+    );
+    Ok((detached_sig_hex, fingerprint))
 }
 
+/// Slice 33R4b — verify a per-version detached signature against
+/// the index's root signing-key fingerprint. The fingerprint format
+/// is `ed25519:<key_id>:<verifying_key_hex>`; the signature is the
+/// detached ed25519 hex (128 chars / 64 raw bytes).
 fn verify_package_signature(
     package: &RegistryPackage,
     summary: &ModuleSemanticSummary,
-    signature: &str,
+    detached_sig_hex: &str,
+    root_signing_key: &str,
 ) -> Result<(), String> {
     let mut signed_package = package.clone();
     signed_package.semantic_summary = Some(summary.clone());
-    let parts = signature.split(':').collect::<Vec<_>>();
-    if parts.len() != 4 || parts[0] != "ed25519" {
+
+    let parts = root_signing_key.split(':').collect::<Vec<_>>();
+    if parts.len() != 3 || parts[0] != "ed25519" {
         return Err(format!(
-            "package `{}`@{} has unsupported signature format",
+            "package `{}`@{}: index root signing_key has unsupported format \
+             (expected `ed25519:<key_id>:<verifying_key_hex>`)",
             package.name, package.version
         ));
     }
     let key = decode_hex_32(parts[2]).map_err(|err| {
         format!(
-            "package `{}`@{} has invalid verifying key: {err}",
+            "package `{}`@{}: index root verifying key is invalid hex: {err}",
             package.name, package.version
         )
     })?;
     let verifying_key = VerifyingKey::from_bytes(&key).map_err(|err| {
         format!(
-            "package `{}`@{} has invalid verifying key: {err}",
+            "package `{}`@{}: index root verifying key is invalid: {err}",
             package.name, package.version
         )
     })?;
-    let sig_bytes = decode_hex_64(parts[3]).map_err(|err| {
+    let sig_bytes = decode_hex_64(detached_sig_hex).map_err(|err| {
         format!(
             "package `{}`@{} has invalid signature: {err}",
             package.name, package.version
@@ -308,13 +369,20 @@ mod tests {
 
     #[test]
     fn resolver_selects_highest_matching_patch() {
-        let index = RegistryIndex {
-            package: vec![
-                registry_pkg("2.3.0"),
-                registry_pkg("2.3.4"),
-                registry_pkg("2.4.0"),
-            ],
-        };
+        // Slice 33R4b: nested-shape index. Same packages as the
+        // pre-33R4b flat-shape variant; the resolver picks the
+        // highest matching version within the
+        // `packages.{name}.versions` map.
+        let mut entry = RegistryPackageEntry::default();
+        for version in ["2.3.0", "2.3.4", "2.4.0"] {
+            entry
+                .versions
+                .insert(version.to_string(), registry_pkg(version));
+        }
+        let mut index = RegistryIndex::default();
+        index
+            .packages
+            .insert("@anthropic/safety-baseline".to_string(), entry);
         let spec = parse_package_spec("@anthropic/safety-baseline@2.3").unwrap();
         let selected = select_package(&index, &spec).unwrap().unwrap();
         assert_eq!(selected.version, "2.3.4");
@@ -351,18 +419,22 @@ mod tests {
         let package_src = "public type SafetyReceipt:\n    id: String\n";
         let digest = sha256_hex(package_src.as_bytes());
         let url = serve_once("/safety.cor", package_src);
-        let index = tmp.path().join("index.toml");
+        // Slice 33R4b: index is now nested JSON at `index.json`.
+        let index = tmp.path().join("index.json");
         fs::write(
             &index,
-            format!(
-                "\
-[[package]]
-name = \"@anthropic/safety-baseline\"
-version = \"2.3.4\"
-uri = \"corvid://@anthropic/safety-baseline/v2.3.4\"
-url = \"{url}\"
-sha256 = \"{digest}\"
-"
+            json_index_fixture(
+                None,
+                &[(
+                    "@anthropic/safety-baseline",
+                    &[FixtureVersion {
+                        version: "2.3.4",
+                        uri: Some("corvid://@anthropic/safety-baseline/v2.3.4"),
+                        url: &url,
+                        sha256: &digest,
+                        signature: None,
+                    }],
+                )],
             ),
         )
         .unwrap();
@@ -402,17 +474,21 @@ sha256 = \"{digest}\"
         let package_src = "public agent helper() -> Bool:\n    return true\n";
         let digest = sha256_hex(package_src.as_bytes());
         let url = serve_once("/helper.cor", package_src);
-        let index = tmp.path().join("index.toml");
+        let index = tmp.path().join("index.json");
         fs::write(
             &index,
-            format!(
-                "\
-[[package]]
-name = \"@scope/helper\"
-version = \"1.0.0\"
-url = \"{url}\"
-sha256 = \"{digest}\"
-"
+            json_index_fixture(
+                None,
+                &[(
+                    "@scope/helper",
+                    &[FixtureVersion {
+                        version: "1.0.0",
+                        uri: None,
+                        url: &url,
+                        sha256: &digest,
+                        signature: None,
+                    }],
+                )],
             ),
         )
         .unwrap();
@@ -460,7 +536,26 @@ sha256 = \"{digest}\"
 
         assert!(matches!(outcome, AddPackageOutcome::Added { .. }));
         let lock = fs::read_to_string(tmp.path().join("Corvid.lock")).unwrap();
-        assert!(lock.contains("ed25519:test-key"));
+        // Slice 33R4b: lockfile carries the per-version detached
+        // signature hex (128 chars). The root signing-key
+        // fingerprint lives in the registry index, not the lock —
+        // the lock just pins the signature value the registry
+        // reported at resolve time.
+        assert!(lock.contains("signature ="), "{lock}");
+        // The detached sig is the 128-char ed25519 hex; verify a
+        // long hex run is present so the lock actually pins
+        // something signature-shaped.
+        let has_long_hex = lock
+            .lines()
+            .filter(|line| line.contains("signature = "))
+            .any(|line| {
+                let sig = line
+                    .split('"')
+                    .nth(1)
+                    .unwrap_or("");
+                sig.len() == 128 && sig.chars().all(|c| c.is_ascii_hexdigit())
+            });
+        assert!(has_long_hex, "lock did not pin a 128-char hex signature: {lock}");
     }
 
     #[test]
@@ -487,19 +582,29 @@ sha256 = \"{digest}\"
             key_id: "test-key",
         })
         .unwrap();
-        let mut index = fs::read_to_string(&published.index).unwrap();
-        let sig_start = index.find("signature = \"").unwrap() + "signature = \"".len();
-        let sig_end = index[sig_start..].find('"').unwrap() + sig_start;
-        let sig_last = sig_end - 1;
-        index.replace_range(
-            sig_last..sig_end,
-            if &index[sig_last..sig_end] == "0" {
-                "1"
-            } else {
-                "0"
-            },
+        // Slice 33R4b: tamper the per-version detached signature in
+        // the JSON index. Parse → flip the last hex char → re-serialize
+        // so the file still parses but the signature verification
+        // fires on the changed bytes.
+        let mut index_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&published.index).unwrap()).unwrap();
+        let sig_ptr = index_json
+            .pointer_mut("/packages/@scope~1name/versions/1.0.0/signature")
+            .expect("signature field at the expected JSON path");
+        let original_sig = sig_ptr.as_str().expect("signature is a string").to_string();
+        let last_char_pos = original_sig.len() - 1;
+        let last_char = &original_sig[last_char_pos..];
+        let flipped = format!(
+            "{}{}",
+            &original_sig[..last_char_pos],
+            if last_char == "0" { "1" } else { "0" }
         );
-        fs::write(&published.index, index).unwrap();
+        *sig_ptr = serde_json::Value::String(flipped);
+        fs::write(
+            &published.index,
+            serde_json::to_string_pretty(&index_json).unwrap(),
+        )
+        .unwrap();
 
         let outcome = add_package(
             "@scope/name@1",
@@ -526,22 +631,25 @@ sha256 = \"{digest}\"
             Some("public, max-age=31536000, immutable".to_string()),
         )]);
         fs::write(
-            tmp.path().join("index.toml"),
-            format!(
-                "\
-[[package]]
-name = \"@scope/name\"
-version = \"1.0.0\"
-uri = \"corvid://@scope/name/v1.0.0\"
-url = \"{base_url}/scope-name-1.0.0.cor\"
-sha256 = \"{digest}\"
-"
+            tmp.path().join("index.json"),
+            json_index_fixture(
+                None,
+                &[(
+                    "@scope/name",
+                    &[FixtureVersion {
+                        version: "1.0.0",
+                        uri: Some("corvid://@scope/name/v1.0.0"),
+                        url: &format!("{base_url}/scope-name-1.0.0.cor"),
+                        sha256: &digest,
+                        signature: None,
+                    }],
+                )],
             ),
         )
         .unwrap();
 
         let report =
-            verify_registry_contract(tmp.path().join("index.toml").to_str().unwrap()).unwrap();
+            verify_registry_contract(tmp.path().join("index.json").to_str().unwrap()).unwrap();
 
         assert!(report.is_clean(), "{report:?}");
         assert_eq!(report.checked, 1);
@@ -558,21 +666,25 @@ sha256 = \"{digest}\"
             Some("public, max-age=31536000".to_string()),
         )]);
         fs::write(
-            tmp.path().join("index.toml"),
-            format!(
-                "\
-[[package]]
-name = \"@scope/name\"
-version = \"1.0.0\"
-url = \"{base_url}/scope-name-1.0.0.cor\"
-sha256 = \"{digest}\"
-"
+            tmp.path().join("index.json"),
+            json_index_fixture(
+                None,
+                &[(
+                    "@scope/name",
+                    &[FixtureVersion {
+                        version: "1.0.0",
+                        uri: None,
+                        url: &format!("{base_url}/scope-name-1.0.0.cor"),
+                        sha256: &digest,
+                        signature: None,
+                    }],
+                )],
             ),
         )
         .unwrap();
 
         let report =
-            verify_registry_contract(tmp.path().join("index.toml").to_str().unwrap()).unwrap();
+            verify_registry_contract(tmp.path().join("index.json").to_str().unwrap()).unwrap();
 
         assert_eq!(report.failures.len(), 1, "{report:?}");
         assert!(report.failures[0].reason.contains("immutable"));
@@ -635,30 +747,37 @@ version = \"1\"
 registry = \"{}\"
 ",
                 tmp.path()
-                    .join("index.toml")
+                    .join("index.json")
                     .to_string_lossy()
                     .replace('\\', "/")
             ),
         )
         .unwrap();
+        let old_digest = sha256_hex(old_src.as_bytes());
+        let new_digest = sha256_hex(new_src.as_bytes());
         fs::write(
-            tmp.path().join("index.toml"),
-            format!(
-                "\
-[[package]]
-name = \"@scope/helper\"
-version = \"1.0.0\"
-url = \"{old_url}\"
-sha256 = \"{}\"
-
-[[package]]
-name = \"@scope/helper\"
-version = \"1.2.0\"
-url = \"{new_url}\"
-sha256 = \"{}\"
-",
-                sha256_hex(old_src.as_bytes()),
-                sha256_hex(new_src.as_bytes()),
+            tmp.path().join("index.json"),
+            json_index_fixture(
+                None,
+                &[(
+                    "@scope/helper",
+                    &[
+                        FixtureVersion {
+                            version: "1.0.0",
+                            uri: None,
+                            url: &old_url,
+                            sha256: &old_digest,
+                            signature: None,
+                        },
+                        FixtureVersion {
+                            version: "1.2.0",
+                            uri: None,
+                            url: &new_url,
+                            sha256: &new_digest,
+                            signature: None,
+                        },
+                    ],
+                )],
             ),
         )
         .unwrap();
@@ -735,5 +854,74 @@ sha256 = \"{}\"
             }
         });
         (format!("http://{addr}"), handle)
+    }
+
+    /// Slice 33R4b — JSON-fixture helper for registry-index tests.
+    /// Produces a v1 nested-shape `index.json` body the loader
+    /// deserializes the same way it does production traffic.
+    struct FixtureVersion<'a> {
+        version: &'a str,
+        uri: Option<&'a str>,
+        url: &'a str,
+        sha256: &'a str,
+        signature: Option<&'a str>,
+    }
+
+    fn json_index_fixture(
+        signing_key: Option<&str>,
+        entries: &[(&str, &[FixtureVersion<'_>])],
+    ) -> String {
+        let mut packages = serde_json::Map::new();
+        for (name, versions) in entries {
+            let mut versions_map = serde_json::Map::new();
+            let mut latest: Option<String> = None;
+            for v in *versions {
+                let mut pkg = serde_json::json!({
+                    "name": name,
+                    "version": v.version,
+                    "url": v.url,
+                    "sha256": v.sha256,
+                });
+                if let Some(uri) = v.uri {
+                    pkg.as_object_mut().unwrap().insert(
+                        "uri".to_string(),
+                        serde_json::Value::String(uri.to_string()),
+                    );
+                }
+                if let Some(sig) = v.signature {
+                    pkg.as_object_mut().unwrap().insert(
+                        "signature".to_string(),
+                        serde_json::Value::String(sig.to_string()),
+                    );
+                }
+                versions_map.insert(v.version.to_string(), pkg);
+                latest = Some(v.version.to_string());
+            }
+            let mut entry = serde_json::Map::new();
+            if let Some(latest) = latest {
+                entry.insert("latest".to_string(), serde_json::Value::String(latest));
+            }
+            entry.insert(
+                "versions".to_string(),
+                serde_json::Value::Object(versions_map),
+            );
+            packages.insert(
+                name.to_string(),
+                serde_json::Value::Object(entry),
+            );
+        }
+        let mut root = serde_json::Map::new();
+        root.insert("version".to_string(), serde_json::Value::String("1".into()));
+        if let Some(key) = signing_key {
+            root.insert(
+                "signing_key".to_string(),
+                serde_json::Value::String(key.to_string()),
+            );
+        }
+        root.insert(
+            "packages".to_string(),
+            serde_json::Value::Object(packages),
+        );
+        serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap()
     }
 }

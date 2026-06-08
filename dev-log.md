@@ -4,6 +4,169 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33R4b closed: registry format migration TOML → JSON
+
+Second slice of the 33R4 (package registry) sub-track. 33R4a
+locked the agreed shape (single nested-JSON `index.json` with a
+root `signing_key` field + per-version detached signatures); this
+slice migrates the existing client + publisher code to that shape.
+
+### The re-scope (no shortcuts)
+
+The original 33R4b scope was "client default-registry pointer" —
+flip the `--registry` default to `https://corvid-lang.org/registry/`.
+But the surface inventory found that the existing client
+deserializes the registry index as **TOML** unconditionally via
+`toml::from_str`, and the existing `corvid publish` writes
+`index.toml`. The shipped client format and the 33R4a agreed
+format didn't match.
+
+Two honest paths: (1) amend the design doc back to TOML, the
+smaller change; (2) do the migration to JSON as the design doc
+specified, the bigger but more aligned change. Per the user's
+"go with the one that is not a shortcut and is needed by Corvid
+and powerful" framing, we picked (2). Rationale: the rest of
+Corvid's trust-and-attestation surface is JSON (claim --explain
+output, DSSE attestations, future Worker-served endpoints), and
+having the package registry in TOML while everything else is
+JSON-signed creates a mismatch future tooling has to bridge.
+Aligned with the design doc; pays the migration cost once.
+
+So 33R4b became "the registry format migration" as a single
+concern; the URL default flip moves to 33R4c where it pairs with
+standing up the actual endpoint.
+
+### The migration
+
+Five files touched, all under
+`crates/corvid-driver/src/package_registry/`:
+
+**`package_registry.rs`** — schema + signing model:
+
+- `RegistryIndex` restructured from `package: Vec<RegistryPackage>`
+  (flat TOML array) to a nested JSON shape:
+
+  ```rust
+  RegistryIndex {
+      version: String,           // schema version, default "1"
+      generated_at: Option<String>,
+      signing_key: Option<String>,  // ed25519:<key_id>:<pubkey_hex>
+      packages: BTreeMap<String, RegistryPackageEntry>,
+  }
+
+  RegistryPackageEntry {
+      latest: Option<String>,
+      versions: BTreeMap<String, RegistryPackage>,
+  }
+  ```
+
+  `BTreeMap` (not HashMap) so iteration order is deterministic,
+  which the verify-contract test relies on for stable failure-
+  sequence reporting.
+
+- `sign_package` now returns `(detached_sig_hex, fingerprint)`:
+  the detached sig is 128-char ed25519 hex; the fingerprint is
+  `ed25519:<key_id>:<pubkey_hex>`. The detached sig goes per-
+  version into `signature`; the fingerprint goes once into the
+  index root's `signing_key` field. Pre-33R4b each per-package
+  signature carried the embedded pubkey (the 4-part
+  `ed25519:keyid:pubkey:sig` shape) — that worked but mean a
+  registry could end up with packages signed by different keys
+  without a single root statement of "who is the registry
+  publisher." Post-33R4b the root key is THE source of truth and
+  per-version sigs are just the detached signature value.
+
+- `verify_package_signature` rewritten to take the root signing
+  key + the detached sig as separate inputs. If either is
+  missing, signature verification is skipped (gated by the
+  package-policy check elsewhere — that's the "require
+  signatures" enforcement boundary).
+
+- `load_registry_index` parses JSON (not TOML); when given a
+  directory, resolves to `<dir>/index.json` (not `index.toml`).
+
+**`package_registry/publish.rs`** — publish path:
+
+- Writes `index.json` (not `index.toml`).
+- Upserts into the nested shape: insert into
+  `entry.versions[version]`; recompute `entry.latest` as the
+  highest semver after insert.
+- Bails if a re-publish brings a different fingerprint than an
+  existing `index.signing_key`. One registry = one signing key
+  is the invariant; mixing keys without an explicit migration
+  is refused.
+
+**`package_registry/add.rs`** — resolve path:
+
+- `select_package` walks
+  `index.packages.get(name).versions.values()` instead of
+  scanning the flat array. O(1) name lookup.
+- The signature-verify call site reads the root `signing_key`
+  off the index and threads it to `verify_package_signature`.
+- Error message in `resolve_registry_location` updated
+  `index.toml|dir|url` → `index.json|dir|url`.
+
+**`package_registry/verify.rs`** — registry-contract verifier:
+
+- Walks the nested shape with the same `(name, version)` flatten
+  the report uses for stable ordering.
+- Signature verification reads the root `signing_key` once and
+  threads it per-version.
+
+**Tests** (`package_registry::tests`):
+
+- 8 affected tests rewritten with a `json_index_fixture` helper
+  that produces the new shape from a sparse `FixtureVersion`
+  list, keeping each test body small and the wire format in
+  one place.
+- The tampered-signature test now flips the last hex char of
+  the per-version `signature` via `serde_json::Value::pointer_mut`
+  on the `/packages/@scope~1name/versions/1.0.0/signature` path
+  — exact byte-level mutation, then re-serialize. Pre-33R4b the
+  test did a TOML string-search to find the signature value and
+  flipped a char in-place; the new pointer-based approach is
+  cleaner.
+- The `publish + add + verify-sig` test now asserts the lockfile
+  carries a 128-char hex string in the `signature = ` field
+  (the detached sig); pre-33R4b it asserted the 4-part
+  `ed25519:test-key:...` prefix which no longer exists.
+
+### Design doc amendment in the same commit
+
+The 33R4a design doc said the `signature` field was
+"base64 ed25519 detached signature." The migration noticed that
+the rest of the codebase encodes everything else as **hex** —
+sha256, verifying keys, key fingerprints. Adding base64 only for
+the signature value would create one ad-hoc encoding boundary
+for no real reason. Updated the design doc in the same commit to
+spec "hex (128 chars / 64 raw bytes)" instead of base64. Char-
+count difference is negligible (88 vs 128); encoding consistency
+is the load-bearing benefit.
+
+### Validation gate
+
+- `cargo check --workspace --tests` clean.
+- `cargo test -p corvid-driver --lib package_registry::` —
+  11/11 pass on the new format.
+- `cargo test -p corvid-cli --test package_help` — 2/2 pass
+  (the error message change is internally consistent with the
+  existing help-text assertions).
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What this unblocks
+
+- **33R4c** (hosted static index) now has both the agreed shape
+  AND a working client/publisher implementation. The Worker
+  serves the JSON the client expects; no further migration work
+  in 33R4c.
+- The URL default flip rides on 33R4c when the endpoint exists.
+
+P1 track progress: 2/8 (33R4a + 33R4b). 33R4c is the worker +
+regenerator + the URL default flip — that's the next slice.
+
+---
+
 ## 2026-06-08 - 33R4a closed: registry shape decision (pre-phase chat)
 
 First slice of the P1 wave. The brief filed 33R4 (the package

@@ -23,69 +23,77 @@ pub fn verify_registry_contract(location: &str) -> Result<RegistryVerificationRe
     };
     let mut seen = std::collections::BTreeSet::<(String, String)>::new();
 
-    for package in &index.package {
-        report.checked += 1;
-        if !seen.insert((package.name.clone(), package.version.clone())) {
-            report.failures.push(failure(
-                package,
-                "duplicate package name/version entry in registry index",
-            ));
-            continue;
-        }
-        if let Err(err) = validate_registry_entry_contract(package) {
-            report.failures.push(failure(package, err));
-            continue;
-        }
-        let fetched = match fetch_package_for_verification(&package.url) {
-            Ok(fetched) => fetched,
-            Err(err) => {
-                report.failures.push(failure(package, err.to_string()));
-                continue;
-            }
-        };
-        if let Some(reason) = cache_header_violation(&fetched.cache_control) {
-            report.failures.push(failure(package, reason));
-        }
-        let actual = sha256_hex(&fetched.bytes);
-        if !actual.eq_ignore_ascii_case(&package.sha256) {
-            report.failures.push(failure(
-                package,
-                format!(
-                    "artifact hash mismatch: expected sha256:{}, actual sha256:{actual}",
-                    package.sha256
-                ),
-            ));
-            continue;
-        }
-        let source = match String::from_utf8(fetched.bytes) {
-            Ok(source) => source,
-            Err(err) => {
-                report
-                    .failures
-                    .push(failure(package, format!("artifact is not UTF-8: {err}")));
-                continue;
-            }
-        };
-        let summary = match summarize_module_source(&source) {
-            Ok(summary) => summary,
-            Err(err) => {
-                report
-                    .failures
-                    .push(failure(package, format!("semantic summary failed: {err}")));
-                continue;
-            }
-        };
-        if let Some(index_summary) = &package.semantic_summary {
-            if index_summary != &summary {
+    // Slice 33R4b: registry index is nested under
+    // `packages.{name}.versions.{version}`; flatten the iteration
+    // into a deterministic-order (name, version) walk so the
+    // verification report sequence is stable across runs.
+    let root_signing_key = index.signing_key.clone();
+    for (_name, entry) in &index.packages {
+        for (_ver, package) in &entry.versions {
+            report.checked += 1;
+            if !seen.insert((package.name.clone(), package.version.clone())) {
                 report.failures.push(failure(
                     package,
-                    "index semantic_summary does not match artifact source",
+                    "duplicate package name/version entry in registry index",
                 ));
+                continue;
             }
-        }
-        if let Some(signature) = &package.signature {
-            if let Err(reason) = verify_package_signature(package, &summary, signature) {
+            if let Err(err) = validate_registry_entry_contract(package) {
+                report.failures.push(failure(package, err));
+                continue;
+            }
+            let fetched = match fetch_package_for_verification(&package.url) {
+                Ok(fetched) => fetched,
+                Err(err) => {
+                    report.failures.push(failure(package, err.to_string()));
+                    continue;
+                }
+            };
+            if let Some(reason) = cache_header_violation(&fetched.cache_control) {
                 report.failures.push(failure(package, reason));
+            }
+            let actual = sha256_hex(&fetched.bytes);
+            if !actual.eq_ignore_ascii_case(&package.sha256) {
+                report.failures.push(failure(
+                    package,
+                    format!(
+                        "artifact hash mismatch: expected sha256:{}, actual sha256:{actual}",
+                        package.sha256
+                    ),
+                ));
+                continue;
+            }
+            let source = match String::from_utf8(fetched.bytes) {
+                Ok(source) => source,
+                Err(err) => {
+                    report
+                        .failures
+                        .push(failure(package, format!("artifact is not UTF-8: {err}")));
+                    continue;
+                }
+            };
+            let summary = match summarize_module_source(&source) {
+                Ok(summary) => summary,
+                Err(err) => {
+                    report
+                        .failures
+                        .push(failure(package, format!("semantic summary failed: {err}")));
+                    continue;
+                }
+            };
+            if let Some(index_summary) = &package.semantic_summary {
+                if index_summary != &summary {
+                    report.failures.push(failure(
+                        package,
+                        "index semantic_summary does not match artifact source",
+                    ));
+                }
+            }
+            if let (Some(signature), Some(root_key)) = (&package.signature, &root_signing_key) {
+                if let Err(reason) = verify_package_signature(package, &summary, signature, root_key)
+                {
+                    report.failures.push(failure(package, reason));
+                }
             }
         }
     }

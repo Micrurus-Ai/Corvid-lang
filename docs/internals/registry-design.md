@@ -57,7 +57,7 @@ web/
   "version": "0.1.0",
   "url": "https://github.com/Micrurus-Ai/Corvid-lang/releases/download/pkg-json-v0.1.0/json-0.1.0.corvid",
   "sha256": "<hex of the .corvid artifact bytes>",
-  "signature": "<base64 ed25519 detached signature of the .corvid bytes>",
+  "signature": "<hex ed25519 detached signature of the .corvid bytes (128 chars)>",
   "deps": {},
   "description": "JSON encode/decode helpers",
   "published_at": "2026-06-08T12:00:00Z"

@@ -69,8 +69,12 @@ pub fn add_package(
     {
         return Ok(AddPackageOutcome::Rejected { reason });
     }
-    if let Some(signature) = &selected.signature {
-        if let Err(message) = verify_package_signature(selected, &summary, signature) {
+    // Slice 33R4b: verify the per-version detached signature against
+    // the index's root signing key. Both must be present for a sig
+    // check to fire; missing either is treated as "no signature
+    // declared," gated separately by the package-policy check above.
+    if let (Some(signature), Some(root_key)) = (&selected.signature, &index.signing_key) {
+        if let Err(message) = verify_package_signature(selected, &summary, signature, root_key) {
             return Ok(AddPackageOutcome::Rejected { reason: message });
         }
     }
@@ -119,7 +123,7 @@ pub(super) fn resolve_registry_location(
         .map(str::to_string)
         .or(env_registry)
         .ok_or_else(|| {
-            "no hosted Corvid package registry runs yet; pass --registry <index.toml|dir|url> \
+            "no hosted Corvid package registry runs yet; pass --registry <index.json|dir|url> \
              or set CORVID_PACKAGE_REGISTRY to a local or self-hosted registry index"
                 .to_string()
         })
@@ -129,11 +133,15 @@ pub(super) fn select_package<'a>(
     index: &'a RegistryIndex,
     spec: &PackageSpec,
 ) -> Result<Option<&'a RegistryPackage>> {
+    // Slice 33R4b: registry index is now nested under
+    // `packages.{name}.versions.{version}`. Walk the package-name
+    // bucket directly instead of scanning a flat array — O(1) name
+    // lookup + linear over versions of the matching package only.
+    let Some(entry) = index.packages.get(&spec.name) else {
+        return Ok(None);
+    };
     let mut candidates = Vec::new();
-    for package in &index.package {
-        if package.name != spec.name {
-            continue;
-        }
+    for package in entry.versions.values() {
         let version = Version::parse(&normalize_version(&package.version)).with_context(|| {
             format!(
                 "registry package `{}` has invalid version `{}`",

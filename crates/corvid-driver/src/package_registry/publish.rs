@@ -49,21 +49,36 @@ pub fn publish_package(options: PublishPackageOptions<'_>) -> Result<PublishPack
         signature: None,
         semantic_summary: Some(summary),
     };
-    package.signature = Some(sign_package(
-        &package,
-        options.signing_seed_hex,
-        options.key_id,
-    )?);
+    // Slice 33R4b: detached-sig signing returns (detached sig hex,
+    // root-key fingerprint). Detached sig goes into the per-version
+    // `signature`; fingerprint lives once at the index root and is
+    // upsert-checked on re-publish so a single index can't end up
+    // with multiple registry keys (that would be a real footgun).
+    let (detached_sig_hex, fingerprint) =
+        sign_package(&package, options.signing_seed_hex, options.key_id)?;
+    package.signature = Some(detached_sig_hex);
 
-    let index_path = options.out_dir.join("index.toml");
+    let index_path = options.out_dir.join("index.json");
     let mut index = match std::fs::read_to_string(&index_path) {
-        Ok(source) => toml::from_str::<RegistryIndex>(&source)
+        Ok(source) => serde_json::from_str::<RegistryIndex>(&source)
             .with_context(|| format!("parse existing registry index `{}`", index_path.display()))?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => RegistryIndex::default(),
         Err(err) => return Err(anyhow!("read `{}`: {err}", index_path.display())),
     };
+    if let Some(existing_key) = &index.signing_key {
+        if existing_key != &fingerprint {
+            anyhow::bail!(
+                "registry index `{}` is already signed by `{existing_key}`; \
+                 publishing with a different signing key (`{fingerprint}`) is refused — \
+                 either reuse the original key, or publish to a new index path",
+                index_path.display()
+            );
+        }
+    } else {
+        index.signing_key = Some(fingerprint);
+    }
     upsert_registry_package(&mut index, package);
-    let index_source = toml::to_string_pretty(&index)
+    let index_source = serde_json::to_string_pretty(&index)
         .with_context(|| format!("serialize registry index `{}`", index_path.display()))?;
     std::fs::write(&index_path, index_source)
         .with_context(|| format!("write registry index `{}`", index_path.display()))?;
@@ -77,18 +92,18 @@ pub fn publish_package(options: PublishPackageOptions<'_>) -> Result<PublishPack
 }
 
 fn upsert_registry_package(index: &mut RegistryIndex, package: RegistryPackage) {
-    if let Some(existing) = index
-        .package
-        .iter_mut()
-        .find(|entry| entry.name == package.name && entry.version == package.version)
-    {
-        *existing = package;
-    } else {
-        index.package.push(package);
-        index.package.sort_by(|a, b| {
-            a.name
-                .cmp(&b.name)
-                .then_with(|| normalize_version(&a.version).cmp(&normalize_version(&b.version)))
-        });
-    }
+    let name = package.name.clone();
+    let version = package.version.clone();
+    let entry = index.packages.entry(name).or_default();
+    entry.versions.insert(version.clone(), package);
+    // Slice 33R4b: `latest` tracks the highest published semver in
+    // the entry. Recompute on every upsert; small fixed cost,
+    // avoids drift.
+    let latest = entry
+        .versions
+        .keys()
+        .filter_map(|v| Version::parse(&normalize_version(v)).ok().map(|sv| (sv, v.clone())))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, raw)| raw);
+    entry.latest = latest;
 }
