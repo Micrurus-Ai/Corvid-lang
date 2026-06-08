@@ -80,14 +80,32 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         None => None,
     };
 
-    // Only NOW, after the env + cdylib pre-flight, do we create
-    // the output directory and start writing files. Any failure
-    // before this point leaves `out/` untouched (atomic-on-error
-    // contract).
-    fs::create_dir_all(out)
-        .with_context(|| format!("create deploy package `{}`", out.display()))?;
+    // 33Q15: stage every write into a sibling tempdir, then atomically
+    // rename into `out`. 33Q11 already guaranteed "no out/ on
+    // pre-flight error"; this strengthens the guarantee to "no
+    // MUTATION of out/ on ANY error" — if `render_attestation` fails
+    // at write #7, the user keeps their prior `out/` exactly as it
+    // was, not a 6-file partial that mixes the failed run with the
+    // last successful one. The TempDir is built in `out`'s parent
+    // (rather than the OS tmpdir) so the final `fs::rename` is
+    // same-filesystem and therefore atomic on POSIX + Windows.
+    let parent = out.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| {
+        format!("create parent directory `{}` for deploy package", parent.display())
+    })?;
+    let stage = tempfile::Builder::new()
+        .prefix(".corvid-deploy-package-stage-")
+        .tempdir_in(parent)
+        .with_context(|| {
+            format!(
+                "create staging directory under `{}` for atomic deploy package write",
+                parent.display()
+            )
+        })?;
+    let stage_path = stage.path().to_path_buf();
 
-    fs::write(out.join("Dockerfile"), render_dockerfile(app_name, app)).context("write Dockerfile")?;
+    fs::write(stage_path.join("Dockerfile"), render_dockerfile(app_name, app))
+        .context("write Dockerfile")?;
 
     let source_sha256 = hex::encode(Sha256::digest(&source_bytes));
     // Slice 33Q12b (maintainer-as-reviewer-2026-06-05 P3.3) — OCI
@@ -112,19 +130,19 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     };
     let metadata_json =
         serde_json::to_string_pretty(&metadata).context("serialize OCI metadata")?;
-    fs::write(out.join("oci-labels.json"), &metadata_json).context("write OCI metadata")?;
-    fs::write(out.join("env.schema.json"), render_env_schema()).context("write env schema")?;
-    fs::write(out.join("health.json"), render_health_config()).context("write health config")?;
-    fs::write(out.join("migrate.sh"), render_migration_runner(app_name))
+    fs::write(stage_path.join("oci-labels.json"), &metadata_json).context("write OCI metadata")?;
+    fs::write(stage_path.join("env.schema.json"), render_env_schema()).context("write env schema")?;
+    fs::write(stage_path.join("health.json"), render_health_config()).context("write health config")?;
+    fs::write(stage_path.join("migrate.sh"), render_migration_runner(app_name))
         .context("write migration runner")?;
     fs::write(
-        out.join("startup-checks.md"),
+        stage_path.join("startup-checks.md"),
         render_startup_checks(app_name),
     )
     .context("write startup checks")?;
     let attestation =
         render_attestation(app_name, &metadata_json, cdylib_sha256.as_deref(), &signing_key)?;
-    fs::write(out.join("build-attestation.dsse.json"), attestation)
+    fs::write(stage_path.join("build-attestation.dsse.json"), attestation)
         .context("write build attestation")?;
     // 43M: SPDX SBOM accompanies every deploy package so the
     // shipped image carries a machine-readable inventory of what
@@ -132,8 +150,32 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     // RuntimeChecked once the completeness adversarial test lands
     // in 43V.
     let sbom = render_spdx_sbom(app_name, &source_sha256)?;
-    fs::write(out.join("sbom.spdx.json"), sbom).context("write SPDX SBOM")?;
-    fs::write(out.join("VERIFY.md"), render_verify_docs()).context("write verification docs")?;
+    fs::write(stage_path.join("sbom.spdx.json"), sbom).context("write SPDX SBOM")?;
+    fs::write(stage_path.join("VERIFY.md"), render_verify_docs())
+        .context("write verification docs")?;
+
+    // 33Q15: all writes succeeded in the stage. Atomically swap into
+    // `out`. If `out` already exists from a prior run, remove it
+    // FIRST so leftover files from a previous shape don't leak into
+    // the new bundle (Dockerfile / oci-labels / etc. get overwritten
+    // by the rename, but a stale file at a path the new bundle no
+    // longer emits would persist without the explicit cleanup).
+    if out.exists() {
+        fs::remove_dir_all(out).with_context(|| {
+            format!("remove prior deploy package `{}` before atomic replace", out.display())
+        })?;
+    }
+    // Disarm the TempDir guard so its Drop doesn't try to delete the
+    // path we're about to rename — `keep()` returns the path and
+    // converts the TempDir into a no-op-on-drop handle.
+    let staged = stage.keep();
+    fs::rename(&staged, out).with_context(|| {
+        format!(
+            "atomically rename staged deploy package `{}` -> `{}`",
+            staged.display(),
+            out.display()
+        )
+    })?;
 
     println!("deploy package: {}", out.display());
     println!("dockerfile: {}", out.join("Dockerfile").display());
@@ -1594,6 +1636,154 @@ mod tests {
              confusing partial state for the operator. \
              out={}",
             out.display()
+        );
+    }
+
+    /// 33Q15 acceptance — strengthens the 33Q11 contract from
+    /// "no out/ on error" to "out/ replaced atomically on success."
+    ///
+    /// Pre-33Q15, `run_package` did `fs::create_dir_all(out)` +
+    /// 9 sequential `fs::write`s into `out/`. If a previous run had
+    /// emitted a file the current shape no longer writes (e.g.
+    /// `out/legacy_marker.json` from before SBOM was added), that
+    /// stale file would persist into the new bundle, mixing two
+    /// builds in one directory. A reviewer reading the bundle had
+    /// no way to tell which file belonged to which run.
+    ///
+    /// Post-33Q15, run_package stages every write into a sibling
+    /// TempDir and atomically renames into place. If `out/`
+    /// already exists, it's removed BEFORE the rename so the new
+    /// bundle is exactly what the current run emitted — no
+    /// inherited cruft.
+    #[test]
+    fn deploy_package_atomically_replaces_stale_out_dir_on_success() {
+        let app_dir = tempfile::tempdir().expect("app tempdir");
+        let src_dir = app_dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src/");
+        std::fs::write(
+            src_dir.join("main.cor"),
+            "agent dummy() -> Int:\n    return 0\n",
+        )
+        .expect("write main.cor");
+        let out_parent = tempfile::tempdir().expect("out tempdir");
+        let out = out_parent.path().join("deploy");
+
+        // Pre-create out/ with a stale marker file that the
+        // current run does NOT emit. Post-33Q15 it must be gone
+        // after success.
+        std::fs::create_dir_all(&out).expect("create stale out/");
+        let stale_marker = out.join("legacy_marker_from_prior_run.json");
+        std::fs::write(&stale_marker, "{\"shape\":\"pre-33Q15\"}\n")
+            .expect("write stale marker");
+        assert!(stale_marker.exists(), "test setup: stale marker should exist");
+
+        let _guard = ENV_LOCK.lock().expect("ENV_LOCK poisoned");
+        let prior = std::env::var("CORVID_DEPLOY_SIGNING_KEY").ok();
+        unsafe {
+            std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", "0".repeat(64));
+        }
+
+        let result = super::run_package(app_dir.path(), &out, None);
+
+        match prior {
+            Some(v) => unsafe { std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", v) },
+            None => unsafe { std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY") },
+        }
+
+        result.expect("run_package");
+
+        // Load-bearing: the stale file from the prior run MUST be
+        // gone. Pre-33Q15, it would still be there because we just
+        // wrote over the same dir.
+        assert!(
+            !stale_marker.exists(),
+            "stale file from a prior deploy package run MUST be \
+             removed when the current run succeeds — that's the \
+             33Q15 atomic-replace contract. Without it, two runs' \
+             worth of files mix in one directory and the reviewer \
+             can't tell which is current. stale={}",
+            stale_marker.display()
+        );
+
+        // Sanity: the current run's expected files all exist.
+        for expected in [
+            "Dockerfile",
+            "oci-labels.json",
+            "env.schema.json",
+            "health.json",
+            "migrate.sh",
+            "startup-checks.md",
+            "build-attestation.dsse.json",
+            "sbom.spdx.json",
+            "VERIFY.md",
+        ] {
+            assert!(
+                out.join(expected).exists(),
+                "expected current-run file `{expected}` missing after \
+                 atomic replace; the rename clobbered the wrong dir"
+            );
+        }
+    }
+
+    /// 33Q15 — pre-existing `out/` must be untouched when pre-flight
+    /// fails. This is the strengthening of 33Q11's
+    /// `out/-must-not-be-created` to
+    /// `out/-must-not-be-MUTATED-on-error`. If an operator had a
+    /// known-good deploy bundle and ran `corvid deploy package`
+    /// without the env set, pre-33Q15 the dir might be partially
+    /// overwritten depending on where the failure hit; post-33Q15
+    /// the dir stays exactly as it was.
+    #[test]
+    fn deploy_package_leaves_prior_out_untouched_when_pre_flight_fails() {
+        let app_dir = tempfile::tempdir().expect("app tempdir");
+        let src_dir = app_dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src/");
+        std::fs::write(
+            src_dir.join("main.cor"),
+            "agent dummy() -> Int:\n    return 0\n",
+        )
+        .expect("write main.cor");
+        let out_parent = tempfile::tempdir().expect("out tempdir");
+        let out = out_parent.path().join("deploy");
+
+        // Pre-create out/ with a known-good marker.
+        std::fs::create_dir_all(&out).expect("create prior out/");
+        let prior_marker = out.join("prior_run_marker.txt");
+        let prior_content = "known-good deploy from yesterday";
+        std::fs::write(&prior_marker, prior_content).expect("write prior marker");
+
+        let _guard = ENV_LOCK.lock().expect("ENV_LOCK poisoned");
+        let prior_env = std::env::var("CORVID_DEPLOY_SIGNING_KEY").ok();
+        unsafe {
+            std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
+        }
+
+        let result = super::run_package(app_dir.path(), &out, None);
+
+        if let Some(v) = prior_env {
+            unsafe {
+                std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", v);
+            }
+        }
+
+        assert!(result.is_err(), "missing env must error");
+
+        // Load-bearing: the prior_marker MUST still be there with
+        // its original contents.
+        assert!(
+            prior_marker.exists(),
+            "prior run's file MUST NOT be deleted by a failing \
+             deploy package run — that's the 33Q15 strengthening of \
+             33Q11. The operator's known-good deploy bundle stays \
+             exactly as it was. marker={}",
+            prior_marker.display()
+        );
+        let read_back =
+            std::fs::read_to_string(&prior_marker).expect("read prior marker");
+        assert_eq!(
+            read_back, prior_content,
+            "prior run's file contents MUST NOT be mutated by a \
+             failing deploy package run"
         );
     }
 

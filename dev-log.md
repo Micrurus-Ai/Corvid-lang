@@ -4,6 +4,143 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-08 - 33Q15 closed: `deploy package` write atomicity (stage + atomic rename)
+
+Surfaced during a post-33Q8 inventory of the deploy-package UX
+prompted by a self-trial screenshot showing two coexisting
+`prefs_agent/deploy/` + `prefs_agent/deploy2/` directories — the
+reviewer had run `corvid deploy package` twice (once unsigned,
+once signed) and ended up with a layout the tool didn't help
+them disambiguate. The inventory found that the file count
+itself is fine (8 files for a production Docker + K8s + signed
+attestation + SBOM deploy is the minimum operator-actionable
+set), but two real correctness gaps lurked underneath.
+
+### The gap
+
+`run_package` (`crates/corvid-cli/src/deploy_cmd.rs`) had this
+shape between the 33Q11 pre-flight and the success print:
+
+```rust
+fs::create_dir_all(out)?;
+fs::write(out.join("Dockerfile"), ...)?;
+fs::write(out.join("oci-labels.json"), ...)?;
+fs::write(out.join("env.schema.json"), ...)?;
+fs::write(out.join("health.json"), ...)?;
+fs::write(out.join("migrate.sh"), ...)?;
+fs::write(out.join("startup-checks.md"), ...)?;
+fs::write(out.join("build-attestation.dsse.json"), ...)?;
+fs::write(out.join("sbom.spdx.json"), ...)?;
+fs::write(out.join("VERIFY.md"), ...)?;
+```
+
+Two correctness failures fall out of that:
+
+1. **Partial-write leak on mid-package failure.** Any write past
+   the first failing (disk full; permission flip; an edge case
+   `render_attestation` doesn't pre-validate) leaves `out/` with
+   a partial subset of the 9 files. The reviewer sees an error
+   AND a `deploy/` directory with Dockerfile + 5 other files —
+   exactly the shape 33Q11 was meant to eliminate before any
+   write, but unaddressed for failures AFTER pre-flight.
+2. **Stale-file leak across runs.** If a prior successful run
+   emitted file `legacy_marker.json` that the current shape no
+   longer writes, that file persists across `run_package`
+   calls — the new bundle silently contains a vestige of the
+   previous one. The reviewer reads the directory thinking it
+   describes the current build; it actually describes a mix.
+
+### The fix
+
+Stage every write into a sibling `tempfile::TempDir`, then
+atomically rename into place:
+
+```rust
+let parent = out.parent().unwrap_or_else(|| Path::new("."));
+fs::create_dir_all(parent)?;
+let stage = tempfile::Builder::new()
+    .prefix(".corvid-deploy-package-stage-")
+    .tempdir_in(parent)?;
+let stage_path = stage.path().to_path_buf();
+
+// ... all 9 writes target stage_path.join(...) ...
+
+if out.exists() {
+    fs::remove_dir_all(out)?;
+}
+let staged = stage.keep();
+fs::rename(&staged, out)?;
+```
+
+Three things this design buys:
+
+- **Same-filesystem rename.** Putting the staging dir under
+  `out.parent()` (rather than the OS tmpdir) guarantees the
+  final rename is on the same FS, so the rename is atomic on
+  POSIX AND Windows. Cross-FS rename falls back to copy + delete
+  in some std impls, which would defeat the atomicity guarantee.
+- **TempDir Drop = automatic cleanup.** If any write in the
+  staging phase fails, the `?` returns and Rust drops `stage`,
+  which deletes the partial staging dir. The caller's `out/`
+  is never touched. This strengthens 33Q11's "no out/ on
+  pre-flight error" to "no MUTATION of out/ on ANY error."
+- **Explicit remove-before-rename.** Without the
+  `fs::remove_dir_all(out)`, a stale file from a prior run at a
+  path the new run doesn't emit would leak into the new
+  bundle. With it, the new bundle is exactly what the current
+  run produced.
+
+The `tempfile::TempDir::keep()` call is the load-bearing
+disarm — without it, Drop would race the rename and try to
+delete a path that has just moved.
+
+### Acceptance
+
+Two new tests in `deploy_cmd::tests`:
+
+- `deploy_package_atomically_replaces_stale_out_dir_on_success`
+  pre-creates `out/legacy_marker_from_prior_run.json`, runs
+  `run_package` successfully, asserts the stale marker is
+  GONE and all 9 current-build files are present. Without the
+  explicit `remove_dir_all` step this test fails because the
+  rename happily merges into an existing dir on POSIX. The
+  test pins the replace-semantics contract.
+- `deploy_package_leaves_prior_out_untouched_when_pre_flight_fails`
+  pre-creates `out/prior_run_marker.txt` with known contents,
+  removes `CORVID_DEPLOY_SIGNING_KEY`, calls `run_package`,
+  asserts (a) the run errors, (b) the marker file still exists,
+  (c) its contents are unchanged. This is the strengthening
+  of 33Q11 — pre-33Q15 the pre-flight error was already
+  prevented from creating `out/`, but if `out/` already existed
+  the contract was silent. Post-33Q15, the prior bundle is
+  preserved bit-for-bit when the current run errors.
+
+The 10 pre-existing deploy_cmd tests (33Q4 / 33Q5 / 33Q11 /
+33Q12b / 43M attestation + SBOM) still pass — 12/12 total.
+Verified workspace check clean + corpus verify exits 1 only on
+the two deliberate fixtures.
+
+### Why this matters
+
+The reviewer reaching for `corvid deploy package` is at the
+edge of their patience — they want a single bundle they can
+hand to ops. Pre-33Q15, a transient failure in the middle of
+the package step left them with debris they had to manually
+inspect to decide what was current. Post-33Q15, either the
+bundle is complete or their prior bundle is untouched. That's
+the level of correctness a production operator expects from a
+`build` command, and now the deploy bundle matches that bar.
+
+Also filed (not shipped): **33Q16 — `corvid deploy diff
+<out-a> <out-b>`**. Structural diff between two deploy bundles
+to support the "did anything change between these builds"
+workflow the self-trial reached for. Filed post-v1.0 because
+the workflow itself works fine with the new atomicity story
+shipped here; diff is launch-narrative quality-of-life, not
+launch-critical correctness.
+
+---
+
 ## 2026-06-07 - 33Q8 closed: `pub extern "c"` struct boundary lift (JSON wire)
 
 Final P1 launch-blocker from the maintainer-as-reviewer-2026-06-05
