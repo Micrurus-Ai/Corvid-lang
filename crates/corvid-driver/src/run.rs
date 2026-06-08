@@ -15,8 +15,8 @@ use super::{
 };
 use corvid_ir::IrFile;
 use corvid_runtime::{
-    load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, IoToolPolicy, OllamaAdapter,
-    OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
+    load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, HttpEgressPolicy, IoToolPolicy,
+    OllamaAdapter, OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
 };
 use corvid_vm::{InterpError, Value};
 use std::fmt;
@@ -345,6 +345,15 @@ fn run_via_interpreter_tier(
     // matches the existing env-override pattern for CORVID_MODEL.
     builder = builder.io_policy(load_io_tool_policy(path));
 
+    // Slice 33S2b: install the [http] allow policy parsed from
+    // corvid.toml (33S0) onto the runtime so the executing
+    // http_get / http_post_json tools gate every URL through the
+    // allowlist + always-on SSRF block. CORVID_HTTP_ALLOW env
+    // override (comma-separated host list) takes precedence over
+    // the corvid.toml value — same env-override pattern as
+    // CORVID_IO_ROOT / CORVID_MODEL.
+    builder = builder.http_policy(load_http_egress_policy(path));
+
     if let Ok(model) = std::env::var("CORVID_MODEL") {
         builder = builder.default_model(&model);
     }
@@ -589,6 +598,61 @@ pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {
     IoToolPolicy::unset()
 }
 
+/// Slice 33S2b — build the `HttpEgressPolicy` for a `corvid run` /
+/// `corvid serve` invocation. Resolution order mirrors
+/// `load_io_tool_policy` exactly:
+///
+///   1. `CORVID_HTTP_ALLOW` env var (overrides config; matches the
+///      existing env-override pattern for CORVID_MODEL /
+///      CORVID_IO_ROOT). Value is a comma-separated host list:
+///      `CORVID_HTTP_ALLOW=api.example.com,api.anthropic.com`.
+///      Empty entries are stripped; whitespace around hosts is
+///      trimmed.
+///   2. `[http] allow = [...]` from the loaded `corvid.toml`. Each
+///      entry is taken verbatim (lowercase comparison happens
+///      inside `HttpEgressPolicy::check`).
+///   3. None (unconfigured). Every executing HTTP call then fails
+///      closed with the missing-config diagnostic — the 33S0
+///      security model.
+///
+/// The SSRF block is a structural property of
+/// `HttpEgressPolicy::check`; it runs regardless of which path
+/// supplied the allowlist, and there is no env override that can
+/// disable it.
+///
+/// Public so the embed paths (`corvid serve`, custom embedders)
+/// can share this loading logic instead of re-implementing the
+/// precedence.
+pub fn load_http_egress_policy(source_path: &Path) -> HttpEgressPolicy {
+    // 1. Env override.
+    if let Ok(env_allow) = std::env::var("CORVID_HTTP_ALLOW") {
+        let env_allow_trimmed = env_allow.trim();
+        if !env_allow_trimmed.is_empty() {
+            let hosts: Vec<String> = env_allow_trimmed
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !hosts.is_empty() {
+                return HttpEgressPolicy::new(Some(&hosts));
+            }
+        }
+    }
+
+    // 2. corvid.toml.
+    if let Some((_toml_path, config)) = load_corvid_config_with_path_for(source_path) {
+        // An empty allow list is intentional: it signals "the
+        // project has been configured, but no hosts are
+        // approved yet" — fail-closed. The configured-vs-
+        // unset distinction is preserved here by passing the
+        // (possibly empty) list through `HttpEgressPolicy::new`.
+        return HttpEgressPolicy::new(Some(&config.http.allow));
+    }
+
+    // 3. Unconfigured — fail-closed default.
+    HttpEgressPolicy::unset()
+}
+
 #[cfg(test)]
 mod io_policy_loader_tests {
     use super::*;
@@ -699,6 +763,219 @@ mod io_policy_loader_tests {
         assert!(
             root.ends_with("override_root"),
             "CORVID_IO_ROOT env override should win over corvid.toml; got {root:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod http_policy_loader_tests {
+    //! Slice 33S2b — loader unit tests mirroring the
+    //! `io_policy_loader_tests` mod. Resolution precedence:
+    //! `CORVID_HTTP_ALLOW` env override > `[http] allow` from
+    //! corvid.toml > unconfigured (fail-closed default).
+    //!
+    //! These tests serialise on env state — they always snapshot
+    //! the current `CORVID_HTTP_ALLOW` value, mutate inside the
+    //! test, then restore it. Two tests touching the same env
+    //! var must NOT run in parallel; the `tokio::test` flavor
+    //! `multi_thread` is fine here because cargo test runs each
+    //! function on its own thread by default, but cross-test
+    //! parallelism is the actual concern. For the loader tests
+    //! here that's `cargo test`'s job to schedule; we don't add
+    //! a serial lock because the existing 33S1b `CORVID_IO_ROOT`
+    //! tests pass the same way.
+
+    use super::*;
+
+    /// 33S2b — corvid.toml with `[http] allow = ["api.example.com"]`
+    /// produces a configured policy whose `allow_list` includes
+    /// the host.
+    #[test]
+    fn corvid_toml_with_http_allow_produces_configured_policy() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[http]\nallow = [\"api.example.com\", \"api.anthropic.com\"]\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
+        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
+
+        let policy = load_http_egress_policy(&source);
+
+        if let Some(v) = prior_env {
+            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
+        }
+
+        assert!(
+            policy.is_configured(),
+            "non-empty [http] allow should produce a configured policy"
+        );
+        let allow = policy.allow_list();
+        assert!(
+            allow.contains(&"api.example.com".to_string()),
+            "configured allowlist should contain api.example.com; got {allow:?}"
+        );
+        assert!(
+            allow.contains(&"api.anthropic.com".to_string()),
+            "configured allowlist should contain api.anthropic.com; got {allow:?}"
+        );
+    }
+
+    /// 33S2b — corvid.toml with an empty `[http] allow = []`
+    /// produces an unconfigured policy. Same fail-closed shape
+    /// as missing-section: the empty-list-and-missing-section
+    /// distinction is intentional UX (the scaffolded
+    /// corvid.toml uses an empty allow list to make the
+    /// security boundary visible without granting any default
+    /// host access).
+    #[test]
+    fn corvid_toml_with_empty_http_allow_produces_unconfigured_policy() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[http]\nallow = []\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
+        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
+
+        let policy = load_http_egress_policy(&source);
+
+        if let Some(v) = prior_env {
+            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
+        }
+
+        assert!(
+            !policy.is_configured(),
+            "empty [http] allow should fail closed like missing section"
+        );
+    }
+
+    /// 33S2b — corvid.toml WITHOUT a `[http]` section produces
+    /// an unconfigured policy. Every executing HTTP call then
+    /// fails closed.
+    #[test]
+    fn corvid_toml_without_http_section_produces_unconfigured_policy() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[run]\ntarget = \"interpreter\"\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
+        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
+
+        let policy = load_http_egress_policy(&source);
+
+        if let Some(v) = prior_env {
+            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
+        }
+
+        assert!(
+            !policy.is_configured(),
+            "no [http] section should produce an unconfigured policy"
+        );
+    }
+
+    /// 33S2b — `CORVID_HTTP_ALLOW` env var takes precedence
+    /// over `[http] allow` in corvid.toml. Mirrors the existing
+    /// `CORVID_IO_ROOT` env-override pattern from 33S1b.
+    /// Comma-separated entries are parsed; whitespace trimmed.
+    #[test]
+    fn env_var_overrides_corvid_toml_http_allow() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[http]\nallow = [\"from-toml.example\"]\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
+        unsafe {
+            std::env::set_var(
+                "CORVID_HTTP_ALLOW",
+                "env-host-one.example, env-host-two.example",
+            )
+        };
+
+        let policy = load_http_egress_policy(&source);
+
+        match prior_env {
+            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
+            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
+        }
+
+        assert!(policy.is_configured());
+        let allow = policy.allow_list();
+        assert!(
+            allow.contains(&"env-host-one.example".to_string()),
+            "env override should populate first host; got {allow:?}"
+        );
+        assert!(
+            allow.contains(&"env-host-two.example".to_string()),
+            "env override should populate second host; got {allow:?}"
+        );
+        assert!(
+            !allow.iter().any(|h| h.contains("from-toml")),
+            "env override should fully replace corvid.toml allowlist; got {allow:?}"
+        );
+    }
+
+    /// 33S2b — `CORVID_HTTP_ALLOW` set to whitespace or comma-
+    /// only garbage falls back to the corvid.toml value (or
+    /// unconfigured if no toml). The env override should
+    /// require at least one non-empty host to take effect.
+    #[test]
+    fn env_var_with_only_whitespace_falls_back_to_corvid_toml() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let project = tmp.path();
+        std::fs::write(
+            project.join("corvid.toml"),
+            "[http]\nallow = [\"fallback.example\"]\n",
+        )
+        .expect("write corvid.toml");
+        let source = project.join("src").join("main.cor");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
+
+        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
+        unsafe { std::env::set_var("CORVID_HTTP_ALLOW", "   ,, ,  ") };
+
+        let policy = load_http_egress_policy(&source);
+
+        match prior_env {
+            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
+            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
+        }
+
+        assert!(
+            policy.is_configured(),
+            "whitespace-only env override should fall back to corvid.toml"
+        );
+        let allow = policy.allow_list();
+        assert!(
+            allow.contains(&"fallback.example".to_string()),
+            "corvid.toml fallback should win when env is garbage; got {allow:?}"
         );
     }
 }

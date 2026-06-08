@@ -139,6 +139,31 @@ impl HttpClient {
         Self::default()
     }
 
+    /// Construct an `HttpClient` backed by a caller-supplied
+    /// `reqwest::Client`. Production code uses [`HttpClient::new`],
+    /// which builds a default reqwest client with the standard
+    /// redirect policy; tests use this constructor to install a
+    /// reqwest client configured with `.resolve(host, addr)` DNS
+    /// overrides so a publicly-named URL (e.g.
+    /// `http://api.example.com/`) routes at the TCP layer to a
+    /// loopback wiremock server.
+    ///
+    /// This is the no-shortcut answer to "how do we end-to-end test
+    /// the executing HTTP surface without poking holes in the SSRF
+    /// block". The `HttpEgressPolicy::check` runs on the literal
+    /// hostname in the URL string — `api.example.com` is a public-
+    /// looking name to the policy, so SSRF passes and the allowlist
+    /// gate runs normally. Only the reqwest layer's DNS resolution
+    /// is rewritten to point at the loopback test server. Production
+    /// behavior is identical to a real network call; only the
+    /// transport endpoint differs in tests.
+    pub fn with_reqwest_client(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            quarantined: false,
+        }
+    }
+
     /// Flip into replay-quarantine mode. Subsequent `send` calls fail
     /// closed with `RuntimeError::QuarantineViolation { surface:
     /// "http", .. }` instead of reaching the network. Called by

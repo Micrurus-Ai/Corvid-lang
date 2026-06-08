@@ -343,3 +343,102 @@ async fn replay_blocks_executing_io_read_tool_dispatch_without_recorded_event() 
         other => panic!("expected ReplayDivergence (no recorded io.read_text event), got {other:?}"),
     }
 }
+
+/// Slice 33S2b — the executing `http_post_json` tool dispatch
+/// (33S2a's interception inside `Runtime::call_tool` for any
+/// `http_*` name) is gated by the replay substitution path
+/// AND by the `HttpClient::quarantine` flag the builder flips
+/// on when entering Substitute-mode replay. Together these
+/// form two independent layers: the trace-substitution path
+/// runs FIRST (so even a hypothetical bypass of the policy
+/// check would land on it), and the quarantine flag is the
+/// floor underneath. This fixture proves the executing POST
+/// path cannot reach the network during replay, regardless of
+/// allowlist contents — the load-bearing safety property for
+/// the executing HTTP-client surface's replay claim. Mirrors
+/// `replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem`
+/// from 33S1b.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    // Allowlist deliberately includes the host the test URL
+    // names — to prove that even a fully-configured policy
+    // cannot bypass the replay quarantine. The safety property
+    // here is "replay refuses the network call regardless of
+    // allowlist," not "the policy blocks every test URL."
+    let policy = corvid_runtime::HttpEgressPolicy::new(Some(&[
+        "api.example.com".to_string(),
+    ]));
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(
+            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
+        ))
+        .replay_from(&trace_path)
+        .http_policy(policy)
+        .build();
+    assert!(runtime.is_replay_mode());
+    assert!(runtime.http().is_quarantined());
+
+    let err = runtime
+        .call_tool(
+            "http_post_json",
+            vec![
+                serde_json::json!("https://api.example.com/should-not-reach"),
+                serde_json::json!(r#"{"payload":"blocked"}"#),
+            ],
+        )
+        .await
+        .expect_err("executing dispatch POST must refuse during replay");
+    // The dispatch reaches the replay-substitution path first;
+    // with no recorded tool_call in the minimal trace the
+    // substitution diverges. EITHER divergence (no recorded
+    // event) OR quarantine (HttpClient flag) is acceptable —
+    // both prove the call doesn't escape to the network, which
+    // is the load-bearing safety property.
+    match err {
+        RuntimeError::ReplayDivergence(_) => {}
+        RuntimeError::QuarantineViolation { surface, .. } => assert_eq!(surface, "http"),
+        other => panic!(
+            "expected ReplayDivergence or http QuarantineViolation, got {other:?}"
+        ),
+    }
+}
+
+/// Slice 33S2b — companion: executing `http_get` is also
+/// gated by the replay path. With the minimal trace lacking a
+/// recorded tool_call event, the call diverges (no GET
+/// happens). This proves reads (GETs) ALSO don't open a
+/// network bypass during replay — same contract as POST,
+/// without the additional `HttpClient::quarantine` test on
+/// the response side.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_blocks_executing_http_get_tool_dispatch_without_recorded_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let policy = corvid_runtime::HttpEgressPolicy::new(Some(&[
+        "api.example.com".to_string(),
+    ]));
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(
+            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
+        ))
+        .replay_from(&trace_path)
+        .http_policy(policy)
+        .build();
+    assert!(runtime.is_replay_mode());
+
+    let err = runtime
+        .call_tool(
+            "http_get",
+            vec![serde_json::json!("https://api.example.com/probe")],
+        )
+        .await
+        .expect_err("executing GET must go through replay substitution, not the live network");
+    match err {
+        RuntimeError::ReplayDivergence(_) => {}
+        other => panic!("expected ReplayDivergence (no recorded http_get event), got {other:?}"),
+    }
+}

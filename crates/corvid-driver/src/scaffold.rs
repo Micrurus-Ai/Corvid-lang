@@ -28,6 +28,32 @@ version = "0.1.0"
 [llm]
 # No default model is set. Pick one explicitly:
 #   default_model = "claude-opus-4-6"
+
+# Phase 33S1/33S2 — executing I/O surfaces are gated by explicit
+# config. Both sections fail closed when missing; the scaffolds
+# below declare a sensible, narrow default so a fresh project runs
+# the file-I/O surface out of the box while leaving HTTP egress
+# explicitly empty until the developer names trusted hosts.
+
+[io]
+# File-I/O root. The executing `io_read_text` / `io_write_text` /
+# `io_list_dir` stdlib tools resolve every caller-supplied path
+# against this root. Path traversal (`..`) and absolute-path
+# escapes outside the root are refused. `"."` keeps every read /
+# write under the project directory; widen to `"./data"` etc. to
+# narrow further. Set CORVID_IO_ROOT in the environment to
+# override at run time.
+root = "."
+
+[http]
+# HTTP egress allowlist. The executing `http_get` / `http_post_json`
+# stdlib tools refuse any URL whose host is not in this list. The
+# SSRF block (RFC1918 / loopback / link-local) is ALWAYS ON
+# regardless of allowlist contents and is not configurable. An
+# empty list (the default below) means HTTP egress fails closed
+# until you add a host. Set CORVID_HTTP_ALLOW=host1,host2 in the
+# environment to override at run time.
+allow = []
 "#
         ),
     )?;

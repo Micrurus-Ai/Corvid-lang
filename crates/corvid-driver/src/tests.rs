@@ -1067,6 +1067,43 @@ agent main() -> Bool:
         assert!(root.join(".gitignore").exists());
     }
 
+    /// Slice 33S2b — `corvid new` must scaffold the two
+    /// security-boundary sections (`[io] root = "."` and
+    /// `[http] allow = []`) so a fresh project's
+    /// executing-I/O surfaces are explicit-by-default. The
+    /// file-I/O surface works out of the box (root = ".");
+    /// the HTTP egress surface fails closed until the
+    /// developer names a host. This is a load-bearing UX
+    /// promise — the corresponding loader rules in
+    /// `run.rs::load_http_egress_policy` /
+    /// `load_io_tool_policy` produce fail-closed policies for
+    /// missing sections, so the scaffold must produce both
+    /// sections (or the very first `corvid run` of any HTTP-
+    /// using sample would fail with a confusing
+    /// "missing `[http] allow`" diagnostic).
+    #[test]
+    fn scaffold_corvid_toml_declares_io_and_http_security_boundaries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = scaffold_new_in(tmp.path(), "boundary_check").unwrap();
+        let toml = std::fs::read_to_string(root.join("corvid.toml"))
+            .expect("scaffolded corvid.toml must be readable");
+        assert!(
+            toml.contains("[io]") && toml.contains("root = \".\""),
+            "scaffolded corvid.toml must declare [io] root = \".\"; got:\n{toml}"
+        );
+        assert!(
+            toml.contains("[http]") && toml.contains("allow = []"),
+            "scaffolded corvid.toml must declare [http] allow = [] \
+             (fail-closed-by-default); got:\n{toml}"
+        );
+        // Also assert the corvid.toml parses cleanly so a fresh
+        // project doesn't fail at config-load time.
+        let parsed: corvid_types::CorvidConfig =
+            toml::from_str(&toml).expect("scaffolded corvid.toml must parse");
+        assert_eq!(parsed.io.root.as_deref(), Some("."));
+        assert!(parsed.http.allow.is_empty());
+    }
+
     #[test]
     fn scaffold_rejects_existing_dir() {
         let tmp = tempfile::tempdir().unwrap();

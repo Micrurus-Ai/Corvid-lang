@@ -4,6 +4,132 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S2b closed: end-to-end and replay-quarantine acceptance for executing HTTP-client surface
+
+Wired the executing HTTP-client surface to run end-to-end through `corvid run`,
+proved it with a real-HTTP-stack acceptance test, and closed two latent gaps
+(the missing 33S1b scaffold update + the absence of a replay-quarantine fixture
+for the executing-HTTP dispatch path).
+
+### The no-shortcut design
+
+The hard problem this slice solved: **how do you end-to-end test the executing
+HTTP surface without poking a hole in the SSRF guarantee?** The structural
+SSRF block in `HttpEgressPolicy::check` blocks RFC1918 / loopback / link-local
+host strings unconditionally — which is exactly what makes the guarantee
+load-bearing. But it also makes a loopback `wiremock::MockServer` unreachable
+through the executing surface, so the obvious test rig "bind wiremock to
+127.0.0.1, point http_get at it" doesn't work.
+
+The shortcut answer would be a `--allow-loopback-for-test` knob or a
+`#[cfg(test)]` constructor on `HttpEgressPolicy` that disables SSRF. Both
+undermine the structural-property claim — once "SSRF is on except in tests" is
+allowed, the guarantee weakens to "SSRF is on by default."
+
+The actual answer: **the SSRF policy parses URL strings, not DNS.** The host
+`api.example.com` in the URL `http://api.example.com/status` is a literal
+string to the policy. The policy never resolves it. So:
+
+1. The test URL uses a public-looking host: `http://api.example.com/status`.
+2. `HttpEgressPolicy::check` parses the URL → host = `api.example.com` →
+   `is_ssrf_blocked_host("api.example.com")` returns `false` (not a private
+   literal) → allowlist contains `api.example.com` → check passes.
+3. The reqwest `Client` is built with
+   `.resolve("api.example.com", loopback_wiremock_addr)`. When `HttpClient::send`
+   makes the actual TCP connection, reqwest sees `api.example.com` and routes
+   to the loopback address.
+4. wiremock serves the canned response. End-to-end behavior is identical to a
+   real network call; only the transport endpoint differs.
+
+This is materially better than a mock-client trait abstraction (the earlier
+plan): every layer is real — URL parsing, SSRF check, allowlist check,
+reqwest's send path, response body handling, header parsing, envelope
+marshalling. The only thing that's "mocked" is the destination IP, and
+production code doesn't notice.
+
+`HttpClient::with_reqwest_client(reqwest::Client)` + `RuntimeBuilder::http_client`
+are the injection points. Both are `pub` — tests use them; production builds
+use `HttpClient::new()` (default reqwest with standard redirect policy).
+
+### What 33S2b shipped
+
+1. **CLI loader** at `crates/corvid-driver/src/run.rs::load_http_egress_policy`
+   mirrors `load_io_tool_policy`:
+   - `CORVID_HTTP_ALLOW=host1,host2,...` env override (whitespace trimmed,
+     empty entries stripped, whitespace-only string falls back to corvid.toml)
+   - `[http] allow = [...]` from `corvid.toml`
+   - `HttpEgressPolicy::unset()` fail-closed default
+   Installed via `builder.http_policy(load_http_egress_policy(path))` in the
+   `run_via_interpreter_tier` path so live `corvid run` invocations gate
+   executing HTTP through the loader output.
+
+2. **`corvid new` scaffold update** — the scaffolded `corvid.toml` now writes:
+
+   ```toml
+   [io]
+   root = "."
+
+   [http]
+   allow = []
+   ```
+
+   33S1b's ROADMAP promised the `[io] root = "."` line but actually never wrote
+   it to the scaffold; 33S2b closes that miss while adding the `[http] allow =
+   []` line. Both have inline comments explaining the security model.
+
+3. **Tests** — 11 new tests across 4 surfaces:
+   - **`crates/corvid-driver/tests/executing_http_through_driver.rs`** (3 tests):
+     - `real_corvid_program_performs_get_through_executing_http_dispatch` —
+       the load-bearing acceptance test. Compiles a real `.cor` source through
+       the driver, runs through the interpreter, calls `http_get(url)` against
+       a loopback wiremock server (URL host = `api.example.com` via reqwest
+       `.resolve()` override), asserts main returns the response status.
+     - `ssrf_block_rejects_loopback_url_even_when_allowlist_contains_it` —
+       deliberately misconfigures `[http] allow = ["127.0.0.1"]` and proves
+       the structural SSRF block still refuses. The diagnostic mentions
+       "SSRF" and "structural property" / "never reachable" so the operator
+       understands the floor.
+     - `missing_http_allowlist_fails_closed_with_actionable_diagnostic` —
+       proves the fail-closed contract; diagnostic names `[http] allow`,
+       `CORVID_HTTP_ALLOW` env, and the fail-closed security-model phrase.
+   - **`crates/corvid-driver/src/run.rs::http_policy_loader_tests`** (5 tests):
+     configured corvid.toml; empty `allow = []` produces unconfigured;
+     missing `[http]` section produces unconfigured; env override beats
+     corvid.toml; whitespace-only env falls back to corvid.toml.
+   - **`crates/corvid-driver/src/tests.rs::scaffold_corvid_toml_declares_io_and_http_security_boundaries`**
+     (1 test): proves `corvid new` writes BOTH `[io] root = "."` AND
+     `[http] allow = []` AND that the scaffolded corvid.toml parses cleanly
+     through `corvid_types::CorvidConfig`.
+   - **`crates/corvid-runtime/tests/replay_quarantine_corpus.rs`** (2 tests):
+     `replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network`
+     proves the POST dispatch refuses during Substitute-mode replay even with
+     a fully-configured allowlist (loadbearing safety property: replay
+     quarantine is independent of the policy gate); companion
+     `replay_blocks_executing_http_get_tool_dispatch_without_recorded_event`
+     proves GETs are also gated by replay substitution.
+
+4. **Validation gate** — workspace `cargo check --tests` clean; all targeted
+   tests pass (3 driver e2e + 5 loader + 1 scaffold + 2 replay + the 33S2a
+   plumbing tests + the 33S1 IO tests still green); `corvid verify --corpus
+   tests/corpus` exits 1 only on the two deliberate fixtures.
+
+### What 33S2c will add
+
+Anchor the four executing-HTTP guarantees (SSRF structural block, allowlist
+enforcement, replay quarantine, deterministic-context rejection) in
+`corvid-guarantees`, with claim-coverage wired through to
+`every_enforced_guarantee_id_is_wired_to_workspace_source`. Author
+`docs/reference/stdlib/http.md`. Add the inventions.md row. Add the README
+catalog entry. Add `corvid tour --topic http-client` whose source runs offline
+against an in-tour loopback responder. Update the spec link.
+
+Those are the invention-proof artifacts — they make the behavior public
+(README), discoverable (tour), and trust-anchorable (guarantees + claim).
+Plumbing without proof would be a hidden invention, which the invention
+shipping contract forbids.
+
+---
+
 ## 2026-06-08 - 33S2a closed: tool declarations + HttpEgressPolicy plumbing for executing HTTP-client surface
 
 Opened 33S2 (HTTP) with the same a/b/c split that worked for 33S1 — keeps each

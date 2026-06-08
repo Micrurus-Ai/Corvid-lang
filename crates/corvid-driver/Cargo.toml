@@ -36,3 +36,11 @@ ed25519-dalek = { version = "2", features = ["std"] }
 [dev-dependencies]
 tempfile = "3"
 serde_json = { workspace = true }
+# Slice 33S2b — `executing_http_through_driver.rs` boots a
+# loopback HTTP responder via wiremock and tells reqwest to
+# resolve a public-looking hostname to that loopback. This
+# keeps the structural SSRF block genuinely unconditional in
+# production code (no test-only carve-outs) while still
+# exercising the real reqwest send path end-to-end.
+wiremock = "0.6"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

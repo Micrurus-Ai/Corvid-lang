@@ -50,6 +50,15 @@ pub struct RuntimeBuilder {
     /// fail closed with the missing-config diagnostic; SSRF
     /// block is always on regardless of allowlist contents.
     http_policy: HttpEgressPolicy,
+    /// Slice 33S2b: optional caller-supplied `HttpClient`. `None`
+    /// (the default) means `build()` constructs a fresh
+    /// `HttpClient::new()` with a standard reqwest backend. End-to-
+    /// end tests inject a client built with `reqwest::Client`'s
+    /// `.resolve(...)` DNS override so a publicly-named URL routes
+    /// at the TCP layer to a loopback wiremock server — see the
+    /// docstring on `HttpClient::with_reqwest_client` for why this
+    /// is the no-shortcut alternative to a test-only SSRF carve-out.
+    http_client_override: Option<HttpClient>,
 }
 
 impl Default for RuntimeBuilder {
@@ -71,6 +80,7 @@ impl Default for RuntimeBuilder {
             stores: StoreManager::default(),
             io_policy: IoToolPolicy::default(),
             http_policy: HttpEgressPolicy::default(),
+            http_client_override: None,
         }
     }
 }
@@ -169,6 +179,18 @@ impl RuntimeBuilder {
     /// diagnostic — the 33S0 security model.
     pub fn http_policy(mut self, policy: HttpEgressPolicy) -> Self {
         self.http_policy = policy;
+        self
+    }
+
+    /// Slice 33S2b: install a caller-supplied `HttpClient` instead
+    /// of letting `build()` construct a default one. End-to-end
+    /// tests use this to inject a reqwest client with
+    /// `.resolve(host, addr)` DNS overrides pointing publicly-named
+    /// URLs at a loopback wiremock server. Production callers
+    /// generally do NOT call this — the default `HttpClient::new()`
+    /// is correct for shipping binaries.
+    pub fn http_client(mut self, client: HttpClient) -> Self {
+        self.http_client_override = Some(client);
         self
     }
 
@@ -345,7 +367,7 @@ impl RuntimeBuilder {
         //   `write_text*`. Reads pass through. Trace emission uses
         //   `JsonlTraceWriter` directly and is unaffected.
         let mut llms = self.llms;
-        let mut http = HttpClient::new();
+        let mut http = self.http_client_override.unwrap_or_else(HttpClient::new);
         let mut stores = self.stores;
         let mut io = IoRuntime::new();
         if let RuntimeMode::Replay(source) = &mode {
