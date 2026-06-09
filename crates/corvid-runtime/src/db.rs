@@ -4,6 +4,294 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+// ============================================================================
+// Phase 33S3 — opaque DbHandle for the executing SQLite surface.
+//
+// `DbHandleInner` is the payload of `corvid_vm::Value::DbHandle`. It
+// lives in `corvid-runtime` (not `corvid-vm`) for two reasons:
+//
+//   1. The runtime's `DbHandleRegistry` is the sole authority for
+//      allocating handle ids. Putting `DbHandleInner` here means the
+//      same crate that owns the registry also owns the type that
+//      wraps a registered id; the VM just imports the type.
+//
+//   2. `Runtime::db_open_tool` must MINT an `Arc<DbHandleInner>` and
+//      hand it back to the interpreter (the dispatch path that
+//      produces a `Value::DbHandle`). The runtime cannot construct
+//      a `Value`, but it CAN construct an `Arc<DbHandleInner>` —
+//      the interpreter then wraps the Arc in the Value variant.
+//      This keeps the dependency direction clean: corvid-runtime
+//      is lower than corvid-vm, so the Arc-shaped boundary is the
+//      narrow waist between the two layers.
+// ============================================================================
+
+/// Phase 33S3a/b — the opaque, refcounted payload behind
+/// `corvid_vm::Value::DbHandle`. Holds the registry slot id the
+/// runtime uses to look up the actual `rusqlite::Connection` plus
+/// the original opening `path` for diagnostics. Constructed only
+/// by [`DbHandleRegistry::open`]; user code reaches this through
+/// the typed-Value dispatch surface (`Runtime::db_open_tool`),
+/// not directly. The "opaque" half of the brief's promise: with
+/// no public constructor outside this module, no `From<u64>` or
+/// `Default` impl, and the VM-level JSON marshalling refusing to
+/// reconstruct a handle from JSON (`corvid_vm::conv::json_to_value`
+/// rejects `Type::DbHandle`), user code structurally cannot
+/// fabricate a SQLite connection.
+#[derive(Debug)]
+pub struct DbHandleInner {
+    /// Slot key into `DbHandleRegistry`'s connection table. The
+    /// registry is the sole authority for allocating these; the
+    /// VM cannot mint an id, and there is no integer→DbHandleInner
+    /// conversion exposed in this crate's public API.
+    pub handle_id: u64,
+    /// Original path the handle was opened against. `":memory:"`
+    /// for ephemeral databases; an `[io] root`-relative resolved
+    /// absolute path otherwise. Used purely for diagnostics
+    /// (e.g. "no recorded db_query event for handle opened at
+    /// `./data/app.sqlite`").
+    pub path: String,
+}
+
+impl DbHandleInner {
+    /// Construct a new `DbHandleInner`. Public so the VM's
+    /// `Value::DbHandle` test fixtures can build handles without
+    /// going through a real connection, and so 33S3b's dispatch
+    /// path can mint one after `DbHandleRegistry::open` allocates
+    /// a slot. Production user code reaches this through
+    /// `Runtime::db_open_tool` (33S3b), never directly.
+    pub fn new(handle_id: u64, path: impl Into<String>) -> Self {
+        Self {
+            handle_id,
+            path: path.into(),
+        }
+    }
+}
+
+// ============================================================================
+// Phase 33S3b — DbHandleRegistry.
+//
+// The executing `db_open` / `db_query` / `db_execute` stdlib tools
+// (declared in `std/db.cor`) need a process-wide table mapping
+// handle ids to live `rusqlite::Connection`s. The Corvid program
+// receives a `Value::DbHandle(Arc<DbHandleInner>)`; the registry
+// is the authority that translates the handle's `handle_id` back
+// to a usable connection for `query` / `execute`.
+//
+// Lifetime: the registry holds `Arc<Mutex<Connection>>` per slot.
+// Multiple Corvid handles to the same connection (clones of one
+// `Value::DbHandle`) share the same Arc. When the last Corvid
+// reference drops, the `Arc<DbHandleInner>` is dropped — 33S3c
+// will wire a runtime-callback closer that releases the registry
+// slot at that moment (completing the "refcounted" half of the
+// brief's promise). 33S3b's slot release is bounded by the
+// `DbHandleRegistry`'s own drop (runtime drop).
+//
+// Replay quarantine: `quarantine_writes` is the same shape as
+// `IoRuntime::quarantine_writes` and `StoreManager::quarantine_writes`
+// — when set, `execute` returns `QuarantineViolation { surface:
+// "db", .. }`. Reads (`query`) pass through during replay because
+// SQLite reads don't escape the process; the substitution path
+// for db_query lives at the dispatch level (33S3c integrates the
+// trace-substitution layer alongside the io / http precedents).
+// ============================================================================
+
+/// Registry of open SQLite connections keyed by handle id. Held
+/// on `Runtime` (single instance per runtime, shared across
+/// clones via internal `Arc`). The `Runtime::db_open_tool` /
+/// `db_query_tool` / `db_execute_tool` dispatch methods are the
+/// public surface that talks to this registry on the program's
+/// behalf.
+#[derive(Clone, Default)]
+pub struct DbHandleRegistry {
+    inner: std::sync::Arc<DbHandleRegistryInner>,
+}
+
+#[derive(Default)]
+struct DbHandleRegistryInner {
+    next_id: std::sync::atomic::AtomicU64,
+    slots: std::sync::RwLock<
+        std::collections::HashMap<u64, std::sync::Arc<Mutex<Connection>>>,
+    >,
+    /// Phase 33S3b — write-quarantine flag. Set by
+    /// `RuntimeBuilder::build` when entering a Substitute-mode
+    /// replay; `execute` then short-circuits with
+    /// `QuarantineViolation { surface: "db", .. }`. Reads pass
+    /// through (sqlite reads don't escape the process; the
+    /// substitution path for replay lives at the dispatch level
+    /// in 33S3c).
+    quarantine_writes: std::sync::atomic::AtomicBool,
+}
+
+impl DbHandleRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Open a SQLite connection at `path` and register it under a
+    /// freshly-allocated handle id. The path is assumed to already
+    /// be resolved through any `IoToolPolicy` confinement check
+    /// the caller cares about — this method does not consult any
+    /// policy. The documented special case `":memory:"` opens an
+    /// in-memory database and skips path resolution at the
+    /// dispatch layer.
+    pub fn open(&self, path: &str) -> Result<std::sync::Arc<DbHandleInner>, RuntimeError> {
+        let conn = if path == ":memory:" {
+            Connection::open_in_memory().map_err(|err| {
+                RuntimeError::Other(format!("std.db sqlite open `:memory:` failed: {err}"))
+            })?
+        } else {
+            Connection::open(path).map_err(|err| {
+                RuntimeError::Other(format!("std.db sqlite open `{path}` failed: {err}"))
+            })?
+        };
+        let id = self
+            .inner
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner
+            .slots
+            .write()
+            .map_err(|err| {
+                RuntimeError::Other(format!("std.db registry poisoned: {err}"))
+            })?
+            .insert(id, std::sync::Arc::new(Mutex::new(conn)));
+        Ok(std::sync::Arc::new(DbHandleInner::new(id, path)))
+    }
+
+    /// Run a parameterised SELECT against the connection at the
+    /// supplied handle id. Returns rows + row_count. Parameter
+    /// binding goes through `rusqlite::params_from_iter` over the
+    /// typed `DbValue` enum — there is no string interpolation
+    /// path; a literal `"'; DROP TABLE users; --"` inside `params`
+    /// is bound as data and stored verbatim, not parsed as SQL.
+    /// 33S3b's plumbing test pins this property.
+    pub fn query(
+        &self,
+        handle_id: u64,
+        sql: &str,
+        params: &[DbValue],
+    ) -> Result<DbQueryRows, RuntimeError> {
+        let conn = self.lookup(handle_id)?;
+        let conn = conn.lock().map_err(|err| {
+            RuntimeError::Other(format!("std.db connection mutex poisoned: {err}"))
+        })?;
+        let sql_params = params.iter().map(db_value_to_sql_value).collect::<Vec<_>>();
+        let mut stmt = conn.prepare(sql).map_err(redacted_sql_error)?;
+        let column_names = stmt
+            .column_names()
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        let rows = stmt
+            .query_map(params_from_iter(sql_params), |row| {
+                let mut cells = BTreeMap::new();
+                for (index, name) in column_names.iter().enumerate() {
+                    let value = row.get_ref(index)?;
+                    let db_value = db_value_from_ref(value);
+                    cells.insert(
+                        name.clone(),
+                        DbCell {
+                            kind: db_value.kind().to_string(),
+                            value: db_value,
+                            redacted: false,
+                        },
+                    );
+                }
+                Ok(cells)
+            })
+            .map_err(redacted_sql_error)?;
+        let mut collected = Vec::new();
+        for row in rows {
+            collected.push(row.map_err(redacted_sql_error)?);
+        }
+        Ok(DbQueryRows {
+            row_count: collected.len(),
+            rows: collected,
+        })
+    }
+
+    /// Run a parameterised INSERT / UPDATE / DELETE / DDL against
+    /// the connection at the supplied handle id. Refused with
+    /// `QuarantineViolation { surface: "db", .. }` when the
+    /// registry is in replay write-quarantine mode. Parameter
+    /// binding goes through `params_from_iter` over typed
+    /// `DbValue`s — the same injection-resistant path as `query`.
+    pub fn execute(
+        &self,
+        handle_id: u64,
+        sql: &str,
+        params: &[DbValue],
+    ) -> Result<DbExecuteResult, RuntimeError> {
+        if self
+            .inner
+            .quarantine_writes
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(RuntimeError::QuarantineViolation {
+                surface: "db".to_string(),
+                detail: format!(
+                    "blocked an unrecorded `db_execute` call against handle {handle_id} \
+                     during replay-mode quarantine. A replayed run must not mutate the \
+                     database; if the program's recorded trace does not carry the \
+                     equivalent execute event, the replay diverges rather than re-issuing \
+                     the SQL."
+                ),
+            });
+        }
+        let conn = self.lookup(handle_id)?;
+        let conn = conn.lock().map_err(|err| {
+            RuntimeError::Other(format!("std.db connection mutex poisoned: {err}"))
+        })?;
+        let sql_params = params.iter().map(db_value_to_sql_value).collect::<Vec<_>>();
+        let rows_affected = conn
+            .execute(sql, params_from_iter(sql_params))
+            .map_err(redacted_sql_error)?;
+        Ok(DbExecuteResult {
+            rows_affected: rows_affected as u64,
+        })
+    }
+
+    /// Flip into replay-quarantine mode. Subsequent `execute`
+    /// calls fail closed with `QuarantineViolation { surface:
+    /// "db", .. }`. Called by `RuntimeBuilder::build` when
+    /// entering Substitute-mode replay.
+    pub fn quarantine_writes(&self) {
+        self.inner
+            .quarantine_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// True when this registry refuses live `execute` calls.
+    /// Test helper + introspection.
+    pub fn is_write_quarantined(&self) -> bool {
+        self.inner
+            .quarantine_writes
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn lookup(
+        &self,
+        handle_id: u64,
+    ) -> Result<std::sync::Arc<Mutex<Connection>>, RuntimeError> {
+        self.inner
+            .slots
+            .read()
+            .map_err(|err| {
+                RuntimeError::Other(format!("std.db registry poisoned: {err}"))
+            })?
+            .get(&handle_id)
+            .cloned()
+            .ok_or_else(|| {
+                RuntimeError::Other(format!(
+                    "std.db dispatch received an unregistered handle id `{handle_id}` — \
+                     the handle was either forged or already released. Handles can \
+                     only be minted by `db_open` and remain valid for the runtime's \
+                     lifetime."
+                ))
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DbValue {
     Null,
@@ -419,5 +707,182 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("std.db postgres error"), "{rendered}");
         assert!(rendered.contains("values redacted"), "{rendered}");
+    }
+
+    // -------- Phase 33S3b — DbHandleRegistry plumbing tests --------
+
+    /// 33S3b — the registry round-trips a :memory: connection
+    /// end-to-end: open, create, parameterized insert, query.
+    /// This is the plumbing-layer equivalent of 33S2a's
+    /// HttpEgressPolicy unit tests — load-bearing acceptance
+    /// that the dispatch-level methods actually work against
+    /// rusqlite.
+    #[test]
+    fn db_handle_registry_round_trip_against_memory_database() {
+        let reg = DbHandleRegistry::new();
+        let handle = reg.open(":memory:").expect("open :memory:");
+        assert_eq!(handle.path, ":memory:");
+        let id = handle.handle_id;
+
+        reg.execute(
+            id,
+            "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)",
+            &[],
+        )
+        .expect("create");
+        let inserted = reg
+            .execute(
+                id,
+                "INSERT INTO users(id, email) VALUES (?, ?)",
+                &[DbValue::Integer(1), DbValue::Text("alice@example.com".into())],
+            )
+            .expect("insert");
+        assert_eq!(inserted.rows_affected, 1);
+        let rows = reg
+            .query(id, "SELECT email FROM users WHERE id = ?", &[DbValue::Integer(1)])
+            .expect("select");
+        assert_eq!(rows.row_count, 1);
+        let email = match rows.rows[0].get("email").map(|c| &c.value) {
+            Some(DbValue::Text(s)) => s.clone(),
+            other => panic!("expected Text email, got {other:?}"),
+        };
+        assert_eq!(email, "alice@example.com");
+    }
+
+    /// 33S3b — **the load-bearing injection-proof test**. A
+    /// parameter whose `DbValue::Text` carries SQL syntax —
+    /// `"'; DROP TABLE users; --"` — is bound as DATA and stored
+    /// verbatim. The table still exists after the insert; the
+    /// stored email is the exact metacharacter-laden string,
+    /// not interpolated as SQL.
+    ///
+    /// This proves the structural property the executing SQLite
+    /// surface advertises: `params_from_iter` never sees the
+    /// string as SQL because the parameter binding goes through
+    /// rusqlite's typed value path, not through string
+    /// concatenation. There is no `format!("...{}...")` anywhere
+    /// on the dispatch path; the typechecker's `List<DbParam>`
+    /// signature forces every user value through the typed
+    /// constructors.
+    #[test]
+    fn db_param_text_with_sql_metacharacters_is_bound_as_data() {
+        let reg = DbHandleRegistry::new();
+        let handle = reg.open(":memory:").expect("open :memory:");
+        let id = handle.handle_id;
+
+        reg.execute(
+            id,
+            "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)",
+            &[],
+        )
+        .expect("create");
+
+        let attack = "'; DROP TABLE users; --";
+        reg.execute(
+            id,
+            "INSERT INTO users(id, email) VALUES (?, ?)",
+            &[DbValue::Integer(1), DbValue::Text(attack.into())],
+        )
+        .expect("insert with attack string");
+
+        // The table must still exist (DROP would have removed it
+        // if the string had been interpolated as SQL).
+        let count = reg
+            .query(id, "SELECT count(*) AS c FROM users", &[])
+            .expect("count query — proves the table survived");
+        assert_eq!(count.row_count, 1);
+        let n = match count.rows[0].get("c").map(|c| &c.value) {
+            Some(DbValue::Integer(n)) => *n,
+            other => panic!("expected Integer count, got {other:?}"),
+        };
+        assert_eq!(n, 1, "the attack string must not have dropped the table");
+
+        // The stored email must be the EXACT metacharacter string
+        // — not parsed, not escaped, not transformed.
+        let rows = reg
+            .query(id, "SELECT email FROM users WHERE id = ?", &[DbValue::Integer(1)])
+            .expect("select stored email");
+        let email = match rows.rows[0].get("email").map(|c| &c.value) {
+            Some(DbValue::Text(s)) => s.clone(),
+            other => panic!("expected Text email, got {other:?}"),
+        };
+        assert_eq!(
+            email, attack,
+            "the stored string must be the verbatim parameter, never interpolated"
+        );
+    }
+
+    /// 33S3b — write-quarantine refuses `execute` calls during
+    /// Substitute-mode replay. The `quarantine_writes` flag is
+    /// the same shape as `IoRuntime::quarantine_writes` and
+    /// `StoreManager::quarantine_writes`; this test pins the
+    /// SQLite parallel.
+    #[test]
+    fn db_handle_registry_quarantine_blocks_execute_with_db_surface_violation() {
+        let reg = DbHandleRegistry::new();
+        let handle = reg.open(":memory:").expect("open :memory:");
+        reg.quarantine_writes();
+        assert!(reg.is_write_quarantined());
+
+        let err = reg
+            .execute(
+                handle.handle_id,
+                "INSERT INTO users(id) VALUES (?)",
+                &[DbValue::Integer(1)],
+            )
+            .expect_err("execute must refuse during write-quarantine");
+        match err {
+            RuntimeError::QuarantineViolation { surface, .. } => {
+                assert_eq!(surface, "db", "quarantine surface must be `db`");
+            }
+            other => panic!("expected QuarantineViolation, got {other:?}"),
+        }
+    }
+
+    /// 33S3b — write-quarantine does NOT block `query` (reads
+    /// pass through during replay; the trace-substitution layer
+    /// 33S3c integrates is the upper gate). This test pins the
+    /// read-pass-through property so a future refactor can't
+    /// silently start blocking reads.
+    #[test]
+    fn db_handle_registry_quarantine_does_not_block_query() {
+        let reg = DbHandleRegistry::new();
+        let handle = reg.open(":memory:").expect("open :memory:");
+        reg.execute(
+            handle.handle_id,
+            "CREATE TABLE t(x INTEGER)",
+            &[],
+        )
+        .expect("setup table");
+        reg.execute(
+            handle.handle_id,
+            "INSERT INTO t(x) VALUES (?)",
+            &[DbValue::Integer(42)],
+        )
+        .expect("setup row");
+
+        reg.quarantine_writes();
+
+        // Query passes through.
+        let rows = reg
+            .query(handle.handle_id, "SELECT x FROM t", &[])
+            .expect("query must pass through during write-quarantine");
+        assert_eq!(rows.row_count, 1);
+    }
+
+    /// 33S3b — looking up an unregistered handle id is a
+    /// structured error. Names the property: handles are
+    /// minted only by `db_open` and cannot be forged.
+    #[test]
+    fn db_handle_registry_rejects_unregistered_handle_id() {
+        let reg = DbHandleRegistry::new();
+        let err = reg
+            .query(99999, "SELECT 1", &[])
+            .expect_err("unregistered id must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unregistered handle id") && msg.contains("99999"),
+            "diagnostic must name the property; got: {msg}"
+        );
     }
 }

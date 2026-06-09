@@ -45,9 +45,9 @@ pub use step::{
     StepAction, StepController, StepEvent, StepHook, StepMode, StmtKind,
 };
 pub use value::{
-    DbHandleInner, GroundedValue, StreamValue, StructValue, Value,
+    GroundedValue, StreamValue, StructValue, Value,
 };
-pub use corvid_runtime::{ProvenanceChain, ProvenanceEntry, ProvenanceKind};
+pub use corvid_runtime::{DbHandleInner, ProvenanceChain, ProvenanceEntry, ProvenanceKind};
 
 #[cfg(test)]
 mod tests;

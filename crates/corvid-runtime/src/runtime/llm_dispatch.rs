@@ -236,6 +236,185 @@ impl Runtime {
         }
     }
 
+    // ========================================================================
+    // Slice 33S3b — typed-Value dispatch for the executing SQLite
+    // surface.
+    //
+    // Unlike the io / http stdlib tools (which round-trip through
+    // `serde_json::Value`), the SQLite tools `db_open` / `db_query` /
+    // `db_execute` need a typed-Value dispatch path because
+    // `Value::DbHandle(Arc<DbHandleInner>)` cannot be marshalled
+    // through JSON — the inner `Arc` carries pointer identity into
+    // the runtime's `DbHandleRegistry` slotmap, and a JSON value
+    // cannot carry that pointer. The opacity gate in
+    // `corvid_vm::conv::json_to_value` rejects any attempt to
+    // reconstruct a handle from JSON.
+    //
+    // The three methods below are the typed entry points the
+    // interpreter calls (via the special-case branch in
+    // `interp.rs`'s tool-call site). `db_open_tool` returns an
+    // `Arc<DbHandleInner>` directly; `db_query_tool` /
+    // `db_execute_tool` take an `Arc<DbHandleInner>` reference
+    // (the same Arc the caller's `Value::DbHandle` wraps) and
+    // return JSON envelopes the interpreter then marshals into
+    // typed `DbResult` / `List<DbResult>` values.
+    //
+    // Path confinement: `db_open_tool` resolves the path through
+    // `self.io_policy` so `db_open(path)` is structurally as
+    // narrow as the `io_*` tools — a program with `[io] root =
+    // "./data"` cannot open `/etc/passwd` as a database, even
+    // though sqlite would have refused it as malformed (the
+    // STRUCTURAL refusal happens BEFORE rusqlite ever sees the
+    // path). The documented special case `":memory:"` bypasses
+    // policy resolution because there is no filesystem path to
+    // confine.
+    //
+    // Trace emission: all three methods emit `ToolCall` /
+    // `ToolResult` events so traces capture db operations
+    // alongside the io / http surfaces. The JSON shape for the
+    // ToolCall payload uses the opaque sentinel
+    // (`{"tag": "db_handle_opaque_sentinel", ...}`) for handles —
+    // the SAME shape `value_to_json` emits — so trace renderers
+    // can show "a DbHandle was used here." The opacity gate
+    // still holds because the only path that mints a handle is
+    // `db_open_tool` itself, which the interpreter recognises by
+    // name.
+    // ========================================================================
+
+    /// Slice 33S3b — typed-Value dispatch for `db_open`. Resolves
+    /// the supplied path through the IoToolPolicy (with the
+    /// `":memory:"` special case), opens a SQLite connection,
+    /// registers it under a fresh handle id, and returns an
+    /// `Arc<DbHandleInner>` the interpreter wraps in
+    /// `Value::DbHandle`. Production callers go through the
+    /// interpreter's `Type::DbHandle`-aware branch in
+    /// `crates/corvid-vm/src/interp.rs`; tests can call this
+    /// directly to mint a handle.
+    pub async fn db_open_tool(
+        &self,
+        path: String,
+    ) -> Result<std::sync::Arc<crate::db::DbHandleInner>, RuntimeError> {
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolCall {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_open".to_string(),
+                args: vec![serde_json::Value::String(path.clone())],
+            });
+        }
+        let resolved_path = if path == ":memory:" {
+            ":memory:".to_string()
+        } else {
+            self.io_policy.resolve(&path)?.display().to_string()
+        };
+        let handle = self.db_registry.open(&resolved_path)?;
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolResult {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_open".to_string(),
+                result: serde_json::json!({
+                    "tag": "db_handle_opaque_sentinel",
+                    "handle_id": handle.handle_id,
+                    "path": handle.path,
+                }),
+            });
+        }
+        Ok(handle)
+    }
+
+    /// Slice 33S3b — typed-Value dispatch for `db_query`. Takes
+    /// the `Arc<DbHandleInner>` directly (the interpreter
+    /// extracts it from the caller's `Value::DbHandle`), runs
+    /// the parameterised SELECT through the registry, marshals
+    /// rows into the JSON envelope the interpreter then converts
+    /// into a `List<DbResult>` via the standard `json_to_value`
+    /// path.
+    pub async fn db_query_tool(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolCall {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_query".to_string(),
+                args: vec![
+                    serde_json::json!({
+                        "tag": "db_handle_opaque_sentinel",
+                        "handle_id": handle.handle_id,
+                        "path": handle.path,
+                    }),
+                    serde_json::Value::String(sql.clone()),
+                    serde_json::Value::Array(
+                        params.iter().map(db_value_to_json_param).collect(),
+                    ),
+                ],
+            });
+        }
+        let rows = self.db_registry.query(handle.handle_id, &sql, &params)?;
+        let payload = db_query_rows_to_envelope(&rows);
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolResult {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_query".to_string(),
+                result: payload.clone(),
+            });
+        }
+        Ok(payload)
+    }
+
+    /// Slice 33S3b — typed-Value dispatch for `db_execute`. Same
+    /// shape as `db_query_tool` but routes through
+    /// `DbHandleRegistry::execute`, which refuses with
+    /// `QuarantineViolation { surface: "db", .. }` during
+    /// Substitute-mode replay (the registry's `write-quarantine`
+    /// flag is flipped by `RuntimeBuilder::build`).
+    pub async fn db_execute_tool(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolCall {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_execute".to_string(),
+                args: vec![
+                    serde_json::json!({
+                        "tag": "db_handle_opaque_sentinel",
+                        "handle_id": handle.handle_id,
+                        "path": handle.path,
+                    }),
+                    serde_json::Value::String(sql.clone()),
+                    serde_json::Value::Array(
+                        params.iter().map(db_value_to_json_param).collect(),
+                    ),
+                ],
+            });
+        }
+        let result = self.db_registry.execute(handle.handle_id, &sql, &params)?;
+        let payload = serde_json::json!({
+            "rows_affected": result.rows_affected as i64,
+            "row_count": 0_i64,
+            "replay_key": "",
+            "effect_meta": stdlib_db_effect_envelope(),
+        });
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolResult {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: "db_execute".to_string(),
+                result: payload.clone(),
+            });
+        }
+        Ok(payload)
+    }
+
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
     pub async fn call_llm(&self, mut req: LlmRequest) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
@@ -789,4 +968,73 @@ fn stdlib_http_effect_envelope() -> serde_json::Value {
         "cache_key": "",
         "replay_key": "std.http.request",
     })
+}
+
+/// Slice 33S3b — marshal an `EffectEnvelope` for the executing
+/// SQLite tools. Mirrors `stdlib_http_effect_envelope` — the
+/// runtime side doesn't carry a per-call effect-tag structure
+/// for SQLite (each statement is a unit), so we emit a fixed
+/// `std.db.execute` tag matching what `std/db.cor` programs
+/// already expect from the envelope types.
+fn stdlib_db_effect_envelope() -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": "std.db.execute",
+        "provenance_key": "",
+        "approval_label": "",
+        "cache_key": "",
+        "replay_key": "std.db.execute",
+    })
+}
+
+/// Slice 33S3b — render a `DbValue` for trace emission. The
+/// runtime stores parameters as the typed `DbValue` enum
+/// (`Null`, `Integer`, `Float`, `Text`, `Bool`) — `params_from_iter`
+/// binds them, never interpolates, so a literal `"'; DROP TABLE
+/// users; --"` survives as `Text("...")` data. The trace payload
+/// reflects the same typed shape so an audit trail shows exactly
+/// what was bound.
+fn db_value_to_json_param(value: &crate::db::DbValue) -> serde_json::Value {
+    use crate::db::DbValue;
+    match value {
+        DbValue::Null => serde_json::Value::Null,
+        DbValue::Integer(n) => serde_json::Value::from(*n),
+        DbValue::Float(f) => serde_json::Value::from(*f),
+        DbValue::Text(s) => serde_json::Value::String(s.clone()),
+        DbValue::Bool(b) => serde_json::Value::Bool(*b),
+    }
+}
+
+/// Slice 33S3b — marshal `DbQueryRows` into the JSON envelope
+/// the interpreter then converts to a `List<DbResult>` via the
+/// standard `json_to_value` path. The envelope carries one
+/// `DbResult`-shaped object per row with `rows_affected: 0`
+/// (irrelevant for SELECTs) and the row's cells folded into the
+/// effect_meta as a debug aid. The richer "rows as a
+/// `List<Map<String, Cell>>`" shape is post-v1.0 — for 33S3b
+/// the minimum-viable shape is row-as-`DbResult` so the existing
+/// std/db.cor envelopes work without changes.
+fn db_query_rows_to_envelope(rows: &crate::db::DbQueryRows) -> serde_json::Value {
+    let cells: Vec<serde_json::Value> = rows
+        .rows
+        .iter()
+        .map(|row| {
+            let cells: serde_json::Map<String, serde_json::Value> = row
+                .iter()
+                .map(|(name, cell)| (name.clone(), db_value_to_json_param(&cell.value)))
+                .collect();
+            serde_json::json!({
+                "rows_affected": 0_i64,
+                "row_count": rows.row_count as i64,
+                "replay_key": "",
+                "effect_meta": serde_json::json!({
+                    "effect_name": "std.db.query",
+                    "provenance_key": "",
+                    "approval_label": "",
+                    "cache_key": "",
+                    "replay_key": serde_json::Value::Object(cells),
+                }),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(cells)
 }

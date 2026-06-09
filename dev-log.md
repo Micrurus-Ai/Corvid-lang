@@ -4,6 +4,153 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S3b closed: executing SQLite tool surface (db_open/db_query/db_execute)
+
+Lit up the executing SQLite surface against the 33S3a opaque-handle type
+primitive. A real Corvid program can now call `db_open(":memory:")`, get back
+a `Value::DbHandle`, thread it through `db_execute("CREATE TABLE...")`,
+parameterised `db_execute("INSERT...", [db_param_int(1), db_param_text("...")])`,
+and read it back with `db_query("SELECT...", [...])` — end-to-end through the
+interpreter tier, with parameter binding via `rusqlite::params_from_iter` (no
+SQL interpolation anywhere on the dispatch path).
+
+### Load-bearing properties shipped
+
+**SQL injection-proof by structure**, not by escaping. The test
+`db_param_text_with_sql_metacharacters_is_bound_as_data` proves this: insert
+`"'; DROP TABLE users; --"` as a typed `DbValue::Text` parameter, then verify
+the users table still exists AND the stored string is the EXACT verbatim
+metacharacter string. The structural argument: `extract_db_params` in
+`interp.rs` reads the `value_kind` discriminator + the typed value field, the
+runtime's `params_from_iter` binds typed values, and the SQL string is never
+concatenated with parameter content. There is no `format!("...{}...")`
+anywhere on the path; the typechecker's `List<DbParam>` signature forces every
+user value through the typed constructors.
+
+**Opacity composed with refcounting.** `Value::DbHandle(Arc<DbHandleInner>)`
+is minted by `Runtime::db_open_tool` (the typed-Value dispatch path) and
+never round-trips through JSON. The opacity gate in `conv.rs::json_to_value`
+(33S3a) rejects any attempt to mint a handle from JSON; the only way to obtain
+one is the trusted `dispatch_stdlib_db_tool` branch in the interpreter, gated
+by `is_stdlib_db_tool(callee_name)`. User-defined tools whose names start
+with `db_` (e.g. `db_user_helper`) fall through to the normal JSON dispatch
+path and CANNOT mint handles. Multiple clones of a handle share the same Arc
+(refcount); the underlying connection lives until the registry drops (33S3c
+will wire a runtime-callback closer for early release).
+
+**Write-quarantine on replay.** `DbHandleRegistry::execute` returns
+`QuarantineViolation { surface: "db", .. }` when the registry is in
+quarantine mode (set by `RuntimeBuilder::build` during Substitute-mode
+replay, alongside io / http / store). Reads pass through; the
+trace-substitution upper gate lands in 33S3c. The fixture
+`db_handle_registry_quarantine_blocks_execute_with_db_surface_violation`
+pins the property, mirroring 33S1c's IO-surface and 33S2c's HTTP-surface
+replay-quarantine fixtures.
+
+### Architecture move: DbHandleInner crossed crates
+
+`DbHandleInner` moved from `corvid-vm/src/value/mod.rs` (where 33S3a put it)
+to `corvid-runtime/src/db.rs`. The reason: the runtime's
+`Runtime::db_open_tool` dispatch method must MINT an `Arc<DbHandleInner>`
+and hand it back to the interpreter (which wraps it in
+`Value::DbHandle(arc)`). The dependency direction is corvid-runtime → corvid-vm,
+so the Arc-shaped boundary becomes the narrow waist: corvid-runtime
+constructs Arcs, corvid-vm wraps them in the Value variant. corvid-vm
+re-exports `DbHandleInner` from corvid-runtime so existing import paths
+continue to resolve.
+
+### What 33S3b shipped
+
+**`crates/corvid-runtime/src/db.rs`** — new `DbHandleRegistry` type. Public
+surface: `new()`, `open(path) -> Arc<DbHandleInner>`,
+`query(handle_id, sql, params) -> DbQueryRows`,
+`execute(handle_id, sql, params) -> DbExecuteResult`, `quarantine_writes()`,
+`is_write_quarantined()`. Internal Arc<RwLock + AtomicU64 + AtomicBool> so
+the registry clones cheaply and all clones share the same backing slotmap +
+quarantine flag — Runtime's `with_tracer` clone semantics work without copying
+connections.
+
+**`crates/corvid-runtime/src/runtime/llm_dispatch.rs`** — three typed-Value
+dispatch methods on Runtime: `db_open_tool`, `db_query_tool`,
+`db_execute_tool`. `db_open_tool` resolves the path through
+`self.io_policy.resolve(...)` (with `":memory:"` as the bypass) before
+calling the registry — `[io] root` confinement is REUSED for SQLite paths
+without a separate `[db]` allowlist. The fail-closed property propagates
+unchanged: a program with no `[io] root` configured cannot open a SQLite
+file. `db_query_tool` and `db_execute_tool` accept `&Arc<DbHandleInner>`,
+take ownership of `Vec<DbValue>` params (the interpreter does the Value→DbValue
+conversion), and emit envelope-shaped JSON for `json_to_value` to absorb.
+
+**`crates/corvid-runtime/src/runtime/builder.rs`** — DbHandleRegistry field;
+quarantine_writes flipped during Substitute-mode replay.
+
+**`crates/corvid-vm/src/interp.rs`** — `dispatch_stdlib_db_tool` helper +
+`is_stdlib_db_tool` gate. Routes `db_open` / `db_query` / `db_execute`
+through the typed-Value path instead of the JSON `runtime.call_tool`
+dispatch. `extract_db_params` does the `List<DbParam>` → `Vec<DbValue>`
+conversion by reading the `value_kind` discriminator and picking the
+matching value field; unknown discriminators degrade to `DbValue::Null`
+(defensive default; the typechecker forces well-formed `DbParam`s upstream).
+
+**`std/db.cor`** — extended `DbParam` type with value-carrying fields
+(`int_value`, `float_value`, `string_value`, `bool_value`); added 5 typed
+constructor agents (`db_param_int` / `db_param_float` / `db_param_text` /
+`db_param_bool` / `db_param_null`); renamed envelope-builder agents
+`db_query` / `db_execute` → `db_request_query` / `db_request_execute` to
+free the unprefixed names for the executing tools; added inline effect
+declarations (`db_egress_open`, `db_egress_read`, `db_egress_write`); added
+the three executing `tool` declarations.
+
+**`crates/corvid-types/src/effects.rs`** — registry entries renamed from
+`db_query` / `db_execute` to `db_egress_open` / `db_egress_read` /
+`db_egress_write` to avoid the tool↔effect resolver namespace collision
+(same trap as 33S2's HTTP rename and 33S1's IO rename). The 33S0 effect-
+registration test updated to assert the new names + the new `db_egress_open`
+entry.
+
+**`examples/backend/state_app/src/main.cor`** — updated to use the renamed
+envelope agents `db_request_query` / `db_request_execute`. Other callers of
+the old names were absent (only the integration test fixture for the state
+app example used them).
+
+### Tests: 5 plumbing tests in `corvid-runtime/src/db.rs::tests`
+
+1. `db_handle_registry_round_trip_against_memory_database` — CREATE +
+   parameterised INSERT + SELECT round trip through registry methods.
+2. **`db_param_text_with_sql_metacharacters_is_bound_as_data`** — the
+   load-bearing injection-proof test. Inserts `"'; DROP TABLE users; --"`
+   as `DbValue::Text`, verifies the table still exists AND the stored
+   string is the verbatim parameter.
+3. `db_handle_registry_quarantine_blocks_execute_with_db_surface_violation`
+   — quarantine flag + execute → `QuarantineViolation { surface: "db", .. }`.
+4. `db_handle_registry_quarantine_does_not_block_query` — reads pass
+   through during write-quarantine; pins the read-passthrough property.
+5. `db_handle_registry_rejects_unregistered_handle_id` — forged handle
+   ids are refused with a structured diagnostic naming the property.
+
+### What's deliberately NOT in 33S3b
+
+- No CLI loader for `:memory:` vs persistent (33S3c — `[io] root` is the
+  only knob).
+- No end-to-end test through the driver pipeline (33S3c). The plumbing
+  tests cover the runtime registry directly; 33S3c will compile a real
+  Corvid program through `compile_to_ir_with_config_at_path` and
+  `run_ir_with_runtime` to prove the interpreter routing fires.
+- No replay-quarantine fixture in `replay_quarantine_corpus.rs` for the
+  `db_execute` dispatch path (33S3c).
+- No guarantees, no tour topic, no docs, no inventions row, no README
+  catalog entry (33S3d).
+- The runtime-callback closer that releases a registry slot when the
+  last `Arc<DbHandleInner>` drops (33S3c — completes the "refcounted
+  early-release" half of the brief's promise; today connections live
+  until runtime drops).
+
+The discipline of separating runtime+tools from end-to-end+replay-quarantine
+keeps each commit single-concern. 33S3b lights up the surface; 33S3c proves
+it works end-to-end against a real Corvid program through the driver.
+
+---
+
 ## 2026-06-09 - 33S3a closed: opaque DbHandle value + type primitive for the executing SQLite surface
 
 Opened 33S3 (executing SQLite surface) with a four-sub-slice split (a/b/c/d

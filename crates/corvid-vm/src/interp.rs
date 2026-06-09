@@ -50,7 +50,7 @@ use corvid_ir::{
     IrType,
 };
 use corvid_resolve::{DefId, LocalId};
-use corvid_runtime::Runtime;
+use corvid_runtime::{DbValue, Runtime};
 use corvid_types::Type;
 use effect_compose::{composed_confidence, default_stream_backpressure, stream_start_is_retryable};
 use std::collections::HashMap;
@@ -900,6 +900,28 @@ impl<'ir> Interpreter<'ir> {
                                 mock.span,
                             )),
                         })?
+                } else if is_stdlib_db_tool(callee_name) {
+                    // Phase 33S3b — typed-Value dispatch for the
+                    // executing SQLite stdlib tools. `db_open`
+                    // returns `Value::DbHandle(Arc<...>)` directly
+                    // (JSON cannot carry the opaque handle);
+                    // `db_query` / `db_execute` extract the
+                    // `Arc<DbHandleInner>` from the first arg's
+                    // `Value::DbHandle` and pass it to the runtime
+                    // alongside JSON-marshalled SQL + params, then
+                    // convert the JSON-shaped result envelope back
+                    // through `json_to_value`. The opacity gate in
+                    // `conv.rs` ensures that user tools NOT in the
+                    // stdlib set cannot mint handles through JSON.
+                    dispatch_stdlib_db_tool(
+                        self.runtime,
+                        callee_name,
+                        &arg_values,
+                        result_decode_ty,
+                        &self.types_by_id,
+                        span,
+                    )
+                    .await?
                 } else {
                     let result = self
                         .runtime
@@ -1079,4 +1101,176 @@ impl<'ir> Interpreter<'ir> {
             }
         }
     }
+}
+
+// ============================================================================
+// Phase 33S3b — typed-Value dispatch for the executing SQLite
+// stdlib tools (`db_open` / `db_query` / `db_execute`).
+//
+// These three tools cannot round-trip through the JSON
+// `runtime.call_tool` path because their signatures carry
+// `Value::DbHandle(Arc<DbHandleInner>)` — the opaque, refcounted
+// handle whose underlying connection lives in the runtime's
+// `DbHandleRegistry`. The opacity gate in `conv.rs`
+// (`json_to_value` refusing `Type::DbHandle`) is the load-bearing
+// security property; this dispatch helper is the trusted path
+// that bypasses the gate for stdlib calls only.
+//
+// `is_stdlib_db_tool` is the exact-name gate (mirrors
+// `is_stdlib_io_tool` / `is_stdlib_http_tool` in
+// `corvid-runtime`). User-defined tools whose names happen to
+// start with `db_` fall through to the normal JSON dispatch path.
+// ============================================================================
+
+fn is_stdlib_db_tool(name: &str) -> bool {
+    matches!(name, "db_open" | "db_query" | "db_execute")
+}
+
+async fn dispatch_stdlib_db_tool(
+    runtime: &Runtime,
+    callee_name: &str,
+    arg_values: &[Value],
+    result_decode_ty: &Type,
+    types_by_id: &HashMap<DefId, &corvid_ir::IrType>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    match callee_name {
+        "db_open" => {
+            let path = match arg_values.first() {
+                Some(Value::String(s)) => s.to_string(),
+                _ => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Other(
+                            "db_open expected one String path argument".into(),
+                        ),
+                        span,
+                    ))
+                }
+            };
+            let handle = runtime
+                .db_open_tool(path)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::DbHandle(handle))
+        }
+        "db_query" | "db_execute" => {
+            let handle = match arg_values.first() {
+                Some(Value::DbHandle(arc)) => arc.clone(),
+                _ => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Other(format!(
+                            "{callee_name} expected its first argument to be a DbHandle \
+                             (only `db_open` mints valid handles)"
+                        )),
+                        span,
+                    ))
+                }
+            };
+            let sql = match arg_values.get(1) {
+                Some(Value::String(s)) => s.to_string(),
+                _ => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Other(format!(
+                            "{callee_name} expected its second argument to be a String SQL \
+                             statement"
+                        )),
+                        span,
+                    ))
+                }
+            };
+            let params = extract_db_params(arg_values.get(2), callee_name, span)?;
+            let result_json = if callee_name == "db_query" {
+                runtime
+                    .db_query_tool(&handle, sql, params)
+                    .await
+                    .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
+            } else {
+                runtime
+                    .db_execute_tool(&handle, sql, params)
+                    .await
+                    .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
+            };
+            json_to_value(result_json, result_decode_ty, types_by_id).map_err(|e| {
+                InterpError::new(
+                    InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                    span,
+                )
+            })
+        }
+        other => Err(InterpError::new(
+            InterpErrorKind::DispatchFailed(format!(
+                "stdlib db dispatch reached unknown name `{other}` — gate-keeper drift"
+            )),
+            span,
+        )),
+    }
+}
+
+/// Phase 33S3b — convert a `List<DbParam>` Corvid value into the
+/// typed `Vec<DbValue>` the runtime's `DbHandleRegistry::query` /
+/// `execute` expects. Each `DbParam` carries a `value_kind`
+/// discriminator naming which value field is valid; the typed
+/// `db_param_int` / `db_param_text` / `db_param_float` /
+/// `db_param_bool` / `db_param_null` constructors in `std/db.cor`
+/// set the discriminator + the relevant value field.
+///
+/// This is where parameter binding stays injection-safe: a
+/// `DbParam` whose `string_value` carries SQL syntax
+/// (`"'; DROP TABLE users; --"`) is converted to
+/// `DbValue::Text(...)` and threaded through
+/// `rusqlite::params_from_iter` — never interpolated into the
+/// SQL string. The 33S3b plumbing test
+/// `db_param_text_with_sql_metacharacters_is_bound_as_data`
+/// pins this property.
+fn extract_db_params(
+    arg: Option<&Value>,
+    callee_name: &str,
+    span: Span,
+) -> Result<Vec<DbValue>, InterpError> {
+    let Some(Value::List(items)) = arg else {
+        return Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee_name} expected its third argument to be a List<DbParam>"
+            )),
+            span,
+        ));
+    };
+    let mut out = Vec::new();
+    for item in items.iter_cloned().into_iter() {
+        let Value::Struct(s) = item else {
+            return Err(InterpError::new(
+                InterpErrorKind::Other(format!(
+                    "{callee_name} list element is not a DbParam struct"
+                )),
+                span,
+            ));
+        };
+        let value = s.with_fields(|fields| {
+            let value_kind = match fields.get("value_kind") {
+                Some(Value::String(s)) => s.to_string(),
+                _ => "Null".to_string(),
+            };
+            match value_kind.as_str() {
+                "Int" => match fields.get("int_value") {
+                    Some(Value::Int(n)) => DbValue::Integer(*n),
+                    _ => DbValue::Null,
+                },
+                "Float" => match fields.get("float_value") {
+                    Some(Value::Float(f)) => DbValue::Float(*f),
+                    _ => DbValue::Null,
+                },
+                "String" => match fields.get("string_value") {
+                    Some(Value::String(s)) => DbValue::Text(s.to_string()),
+                    _ => DbValue::Null,
+                },
+                "Bool" => match fields.get("bool_value") {
+                    Some(Value::Bool(b)) => DbValue::Bool(*b),
+                    _ => DbValue::Null,
+                },
+                _ => DbValue::Null,
+            }
+        });
+        out.push(value);
+    }
+    Ok(out)
 }

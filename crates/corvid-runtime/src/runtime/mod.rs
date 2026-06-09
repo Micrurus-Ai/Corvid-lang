@@ -86,6 +86,16 @@ pub struct Runtime {
     /// Default (unconfigured) makes every executing file-I/O
     /// call fail closed.
     pub(super) io_policy: IoToolPolicy,
+    /// Slice 33S3b: registry of open SQLite connections keyed by
+    /// handle id. The `Runtime::db_open_tool` /
+    /// `db_query_tool` / `db_execute_tool` dispatch methods (the
+    /// typed-Value path the interpreter uses for the three
+    /// executing `db_*` stdlib tools from `std/db.cor`) talk to
+    /// this registry on the program's behalf. Cloned on every
+    /// `Runtime::with_tracer` call via the registry's internal
+    /// `Arc` so all clones share the same backing slotmap and
+    /// the same write-quarantine flag.
+    pub(super) db_registry: crate::db::DbHandleRegistry,
     secrets: SecretRuntime,
     queue: QueueRuntime,
 }
@@ -150,6 +160,16 @@ impl Runtime {
     /// Read-only handle to the IO runtime. Mirrors `stores()`.
     pub fn io(&self) -> &IoRuntime {
         &self.io
+    }
+
+    /// Slice 33S3b — read-only handle to the SQLite handle registry.
+    /// Mirrors `stores()` / `http()` / `io()`. Used by the
+    /// replay-quarantine integration corpus to assert the wrap
+    /// fires; production callers go through `Runtime::db_open_tool`
+    /// / `db_query_tool` / `db_execute_tool`, which route through
+    /// the replay substitution path before reaching the registry.
+    pub fn db_registry(&self) -> &crate::db::DbHandleRegistry {
+        &self.db_registry
     }
 
     pub fn tracer(&self) -> &Tracer {

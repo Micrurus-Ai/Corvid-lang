@@ -740,14 +740,14 @@ fn std_db_imported_helpers_typecheck() {
         "db",
         true,
         r#"
-import "./std/db" use DbConnection, DbParam, DbQuery, DbResult, DbError, DbColumn, DbRowDecode, DbTransaction, DbAuditRecord, DbAuditWrite, DbTokenRef, DbEncryptedToken, DbMigrationStatus, DbEffectTag, DbReplaySummary, sqlite_open, postgres_open, db_param, db_query, db_execute, db_result, db_error, db_parameterized, db_column, db_decode_ok, db_decode_missing_column, db_decode_wrong_kind, db_transaction, db_transaction_commit, db_transaction_rollback, db_transaction_nested_rejected, db_audit_record, db_audit_approved, db_audit_write, db_audit_write_safe, db_token_ref, db_encrypted_token, db_token_redacted, db_migration_status, db_migration_clean, db_effect_tag, db_effect_is_write, db_replay_summary, db_replay_redacted
+import "./std/db" use DbConnection, DbParam, DbQuery, DbResult, DbError, DbColumn, DbRowDecode, DbTransaction, DbAuditRecord, DbAuditWrite, DbTokenRef, DbEncryptedToken, DbMigrationStatus, DbEffectTag, DbReplaySummary, sqlite_open, postgres_open, db_param, db_request_query, db_request_execute, db_result, db_error, db_parameterized, db_column, db_decode_ok, db_decode_missing_column, db_decode_wrong_kind, db_transaction, db_transaction_commit, db_transaction_rollback, db_transaction_nested_rejected, db_audit_record, db_audit_approved, db_audit_write, db_audit_write_safe, db_token_ref, db_encrypted_token, db_token_redacted, db_migration_status, db_migration_clean, db_effect_tag, db_effect_is_write, db_replay_summary, db_replay_redacted
 
 agent main() -> Bool:
     db = sqlite_open("file:app.db", "db:app")
     pg = postgres_open("postgres://localhost/app", "db:pg")
     id = db_param("id", "String", false)
-    read = db_query("select id from users where id = ?", 1, "db:users:read")
-    write = db_execute("insert into users (id) values (?)", 1, "db:users:write")
+    read = db_request_query("select id from users where id = ?", 1, "db:users:read")
+    write = db_request_execute("insert into users (id) values (?)", 1, "db:users:write")
     result = db_result(1, 0, "db:users:write")
     err = db_error("users.find", "no such table")
     col = db_column("id", "String", "String", true)

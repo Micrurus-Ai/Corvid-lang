@@ -13,7 +13,7 @@
 
 use crate::errors::InterpError;
 use corvid_resolve::DefId;
-use corvid_runtime::{ProvenanceChain, ProvenanceEntry, ProvenanceKind};
+use corvid_runtime::{DbHandleInner, ProvenanceChain, ProvenanceEntry, ProvenanceKind};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -68,40 +68,13 @@ pub enum Value {
     DbHandle(Arc<DbHandleInner>),
 }
 
-/// Phase 33S3a — payload of `Value::DbHandle`. Holds the opaque
-/// identity the runtime uses to look up the actual connection
-/// plus the original opening `path` for diagnostics. 33S3b
-/// extends this struct with a runtime-callback closer so the last
-/// `Arc::drop` notifies the runtime's slotmap to release the
-/// underlying connection (the "refcounted" half of the brief's
-/// "opaque, refcounted" promise); 33S3a establishes the type so
-/// downstream code can carry the variant without yet wiring the
-/// lifecycle.
-#[derive(Debug)]
-pub struct DbHandleInner {
-    /// Slot key into `DbRuntime`'s `HashMap<u64, Arc<Connection>>`.
-    /// The runtime is the sole authority for allocating these;
-    /// nothing in user code can construct a valid id.
-    pub handle_id: u64,
-    /// Original path the handle was opened against. `":memory:"`
-    /// for ephemeral databases; an `[io] root`-relative absolute
-    /// path otherwise. Used in diagnostics (e.g. "no recorded
-    /// db_query event for handle opened at `./data/app.sqlite`").
-    pub path: String,
-}
-
-impl DbHandleInner {
-    /// Construct a new `DbHandleInner`. Public so the
-    /// `corvid-runtime::db` module can produce handles from
-    /// `db_open`'s dispatch path; user code reaches this through
-    /// the typed-Value dispatch surface, not directly.
-    pub fn new(handle_id: u64, path: impl Into<String>) -> Self {
-        Self {
-            handle_id,
-            path: path.into(),
-        }
-    }
-}
+// Phase 33S3b — `DbHandleInner` moved to `corvid-runtime::db`
+// so the runtime's `DbHandleRegistry` can mint Arcs directly
+// (the dispatch path that returns a `Value::DbHandle` produces
+// the Arc inside corvid-runtime and hands it back to the
+// interpreter, which wraps it in the Value variant). The type
+// is re-exported by `corvid-vm` at the crate root so existing
+// consumers' import paths continue to resolve.
 
 pub(super) const UNBOUNDED_STREAM_WARN_THRESHOLD: usize = 1024;
 

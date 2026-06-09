@@ -2,6 +2,7 @@ use super::{Runtime, RuntimeMode};
 use crate::approvals::{Approver, StdinApprover};
 use crate::calibration::CalibrationStore;
 use crate::errors::RuntimeError;
+use crate::db::DbHandleRegistry;
 use crate::http::HttpClient;
 use crate::human::{HumanInteractor, StdinHumanInteractor};
 use crate::http::HttpEgressPolicy;
@@ -370,12 +371,21 @@ impl RuntimeBuilder {
         let mut http = self.http_client_override.unwrap_or_else(HttpClient::new);
         let mut stores = self.stores;
         let mut io = IoRuntime::new();
+        let db_registry = DbHandleRegistry::new();
         if let RuntimeMode::Replay(source) = &mode {
             if !source.uses_live_llm() {
                 llms.quarantine_all();
                 http.quarantine();
                 stores.quarantine_writes();
                 io.quarantine_writes();
+                // Slice 33S3b — flip the SQLite write-quarantine.
+                // `Runtime::db_execute_tool` then refuses with
+                // `QuarantineViolation { surface: "db", .. }`.
+                // Reads (`db_query_tool`) pass through; the
+                // dispatch-level substitution path is the upper
+                // gate (33S3c integrates the trace-substitution
+                // layer alongside the io / http precedents).
+                db_registry.quarantine_writes();
             }
         }
         Runtime {
@@ -403,6 +413,7 @@ impl RuntimeBuilder {
             http_policy: self.http_policy,
             io,
             io_policy: self.io_policy,
+            db_registry,
             secrets: SecretRuntime::new(),
             queue: QueueRuntime::new(),
         }

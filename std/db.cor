@@ -36,6 +36,22 @@ public type DbParam:
     name: String
     value_kind: String
     redacted: Bool
+    # Phase 33S3b — value-carrying fields for the executing
+    # SQLite surface (db_open/db_query/db_execute below). The
+    # `value_kind` discriminator picks which of the four fields
+    # below carries the bound value; others are zero-valued.
+    # The runtime's `params_from_iter` reads only the field
+    # matching `value_kind` — there is no SQL interpolation
+    # path, so a literal `"'; DROP TABLE users; --"` placed in
+    # `string_value` survives as text data and never reaches
+    # SQLite's parser. The v1.0 metadata-only `db_param(...)`
+    # constructor below zeros these fields; the new
+    # `db_param_int` / `db_param_text` / `db_param_float` /
+    # `db_param_bool` / `db_param_null` constructors set them.
+    int_value: Int
+    float_value: Float
+    string_value: String
+    bool_value: Bool
 
 public type DbQuery:
     sql: String
@@ -148,13 +164,41 @@ public agent sqlite_open(dsn: String, replay_key: String) -> DbConnection:
 public agent postgres_open(dsn: String, replay_key: String) -> DbConnection:
     return DbConnection("postgres", dsn, replay_key, effect_envelope("std.db.open", "", "", "", replay_key))
 
+# Phase 33S3b — metadata-only `db_param` constructor (v1.0
+# envelope shape). Zeros the new value-carrying fields; for the
+# executing surface use the typed `db_param_int` / `db_param_text`
+# / etc. constructors below.
 public agent db_param(name: String, value_kind: String, redacted: Bool) -> DbParam:
-    return DbParam(name, value_kind, redacted)
+    return DbParam(name, value_kind, redacted, 0, 0.0, "", false)
 
-public agent db_query(sql: String, param_count: Int, replay_key: String) -> DbQuery:
+# Phase 33S3b — typed value constructors for the executing
+# SQLite surface. The runtime's `params_from_iter` reads only
+# the field matching `value_kind`, so a literal string with SQL
+# syntax in `string_value` survives as data — never interpolated.
+public agent db_param_int(value: Int) -> DbParam:
+    return DbParam("", "Int", false, value, 0.0, "", false)
+
+public agent db_param_float(value: Float) -> DbParam:
+    return DbParam("", "Float", false, 0, value, "", false)
+
+public agent db_param_text(value: String) -> DbParam:
+    return DbParam("", "String", false, 0, 0.0, value, false)
+
+public agent db_param_bool(value: Bool) -> DbParam:
+    return DbParam("", "Bool", false, 0, 0.0, "", value)
+
+public agent db_param_null() -> DbParam:
+    return DbParam("", "Null", false, 0, 0.0, "", false)
+
+# Phase 33S3b — these envelope-builder agents were renamed from
+# `db_query` / `db_execute` to `db_request_query` /
+# `db_request_execute` so the unprefixed names host the
+# executing tools below. Mirrors the 33S2a rename of HTTP
+# envelope agents (http_get → http_request_get etc.).
+public agent db_request_query(sql: String, param_count: Int, replay_key: String) -> DbQuery:
     return DbQuery(sql, true, param_count, "read", replay_key, effect_envelope("std.db.query", "", "", "", replay_key))
 
-public agent db_execute(sql: String, param_count: Int, replay_key: String) -> DbQuery:
+public agent db_request_execute(sql: String, param_count: Int, replay_key: String) -> DbQuery:
     return DbQuery(sql, true, param_count, "write", replay_key, effect_envelope("std.db.execute", "", "", "", replay_key))
 
 public agent db_result(rows_affected: Int, row_count: Int, replay_key: String) -> DbResult:
@@ -228,3 +272,63 @@ public agent db_replay_summary(operation: String, driver: String, query_fingerpr
 
 public agent db_replay_redacted(summary: DbReplaySummary) -> Bool:
     return summary.redacted
+
+# ----------------------------------------------------------------
+# Phase 33S3 — executing SQLite surface.
+#
+# These three `tool` declarations are the user-facing entry
+# points for actual SQLite operations. They flow through the
+# typed effect system (`uses db_egress_open` etc.) so the
+# checker tracks `io_source: db.read / db.write` on every
+# caller, and the runtime enforces:
+#
+#   * `[io] root` confinement on `db_open` — the resolved path
+#     must stay inside the configured root (the same boundary
+#     the io_*_text tools enforce). The documented special case
+#     `":memory:"` bypasses confinement because there is no
+#     filesystem path to confine. Calling `db_open` without
+#     `[io] root` set fails closed with the missing-config
+#     diagnostic.
+#   * Parameter-bound only — all SQL parameters flow through
+#     `rusqlite::params_from_iter` over typed `DbValue`s. There
+#     is no string-interpolation path; a literal `"'; DROP
+#     TABLE users; --"` placed in `string_value` survives as
+#     text data without ever being parsed as SQL. The 33S3b
+#     plumbing test `db_param_text_with_sql_metacharacters_is_bound_as_data`
+#     pins this property.
+#   * Replay quarantine — `db_execute` during Substitute-mode
+#     replay refuses with `QuarantineViolation { surface: "db",
+#     .. }` regardless of statement contents. `db_query` reads
+#     pass through (sqlite reads don't escape the process; the
+#     trace-substitution path 33S3c integrates is the upper
+#     gate). `db_open` opens a fresh connection — 33S3c will
+#     refine this so replay reuses a captured connection state
+#     from the recorded trace.
+#
+# All three are tools (not agents), so they are automatically
+# rejected inside `@deterministic` bodies by the checker's
+# declaration-kind classifier — calling any SQLite operation
+# from a `@deterministic` agent is a compile error.
+# ----------------------------------------------------------------
+
+# The three SQLite effect rows. Registered as built-ins by
+# `crates/corvid-types/src/effects.rs::register_db_effects` so
+# composing checkers can compose them across calls; declared
+# inline here so the resolver in standalone-module compilation
+# sees them as named identifiers. Named `db_egress_*` so the
+# tool names (`db_open` / `db_query` / `db_execute`) don't
+# collide with the effect names — effects and tools share a
+# namespace at the resolver level (same trap as 33S2's HTTP
+# rename and 33S1's IO rename).
+effect db_egress_open:
+    reversible: true
+
+effect db_egress_read:
+    reversible: true
+
+effect db_egress_write:
+    reversible: false
+
+public tool db_open(path: String) -> DbHandle uses db_egress_open
+public tool db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> List<DbResult> uses db_egress_read
+public tool db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> DbResult uses db_egress_write

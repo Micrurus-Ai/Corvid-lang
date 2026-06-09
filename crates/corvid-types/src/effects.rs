@@ -394,13 +394,24 @@ impl EffectRegistry {
         }
     }
 
-    /// Phase 33S0: register the two built-in SQLite effects —
-    /// `db_query` (reversible read) and `db_execute` (NOT
-    /// reversible: writes/DDL/DML change DB state).
+    /// Phase 33S0 / 33S3b: register the three built-in SQLite
+    /// effects — `db_egress_open` (reversible: opening a fresh
+    /// connection doesn't durably modify state by itself, beyond
+    /// creating the file at the configured path), `db_egress_read`
+    /// (reversible read; used by the `db_query` tool), and
+    /// `db_egress_write` (NOT reversible: writes/DDL/DML change
+    /// durable DB state; used by the `db_execute` tool).
+    ///
+    /// Names use the `db_egress_*` shape so the effect-row
+    /// identifiers don't collide with the tool names
+    /// (`db_open` / `db_query` / `db_execute`) in the resolver's
+    /// shared identifier namespace — same trap as 33S2's HTTP
+    /// rename and 33S1's IO rename.
     fn register_db_effects(&mut self) {
         for (name, source, reversible) in [
-            ("db_query", "db.read", true),
-            ("db_execute", "db.write", false),
+            ("db_egress_open", "db.read", true),
+            ("db_egress_read", "db.read", true),
+            ("db_egress_write", "db.write", false),
         ] {
             let mut dims = HashMap::new();
             dims.insert(
@@ -718,8 +729,9 @@ mod tests {
             ("io_list", "fs.read", false),
             ("http_egress_get", "net.egress", false),
             ("http_egress_post", "net.egress", true),
-            ("db_query", "db.read", false),
-            ("db_execute", "db.write", true),
+            ("db_egress_open", "db.read", false),
+            ("db_egress_read", "db.read", false),
+            ("db_egress_write", "db.write", true),
         ] {
             let profile = registry
                 .effects
@@ -750,17 +762,17 @@ mod tests {
         }
     }
 
-    /// 33S0 — Union-composition of two I/O effects yields the
-    /// expected combined io_source. An agent that `uses io_read,
-    /// db_execute` carries `io_source: {fs.read, db.write}` as a
-    /// composed value the checker can reason about. (The exact
-    /// DimensionValue shape for a Union of two Names depends on
-    /// `compose_dimension`; assert via `format!` to be format-
-    /// agnostic.)
+    /// 33S0 / 33S3b — Union-composition of two I/O effects yields
+    /// the expected combined io_source. An agent that `uses
+    /// io_read, db_egress_write` carries `io_source: {fs.read,
+    /// db.write}` as a composed value the checker can reason
+    /// about. (The exact DimensionValue shape for a Union of two
+    /// Names depends on `compose_dimension`; assert via `format!`
+    /// to be format-agnostic.)
     #[test]
-    fn composing_io_read_and_db_execute_unions_their_io_source_values() {
+    fn composing_io_read_and_db_egress_write_unions_their_io_source_values() {
         let registry = EffectRegistry::from_decls(&[]);
-        let composed = registry.compose(&["io_read", "db_execute"]);
+        let composed = registry.compose(&["io_read", "db_egress_write"]);
         let io_source = composed
             .dimensions
             .get("io_source")
