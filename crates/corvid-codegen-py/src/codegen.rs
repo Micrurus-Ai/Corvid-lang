@@ -534,6 +534,15 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         T::Result(_, _) | T::Weak(_, _) => "object".into(),
         T::Grounded(inner) => python_type_hint_of(inner, types),
         T::TraceId => "str".into(),
+        // Phase 33S3a — `DbHandle` is interpreter-tier only; the
+        // Python backend has no representation for the opaque
+        // `Arc<rusqlite::Connection>` the variant holds. Emit
+        // `object` so the generated Python stays valid; the
+        // executing SQLite surface is documented as
+        // interpreter-only until cdylib-style FFI lands. The
+        // typechecker's contracts surface that constraint to
+        // user code before the backend gets here.
+        T::DbHandle => "object".into(),
     }
 }
 

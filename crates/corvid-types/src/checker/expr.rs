@@ -153,7 +153,12 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Weak
                 | BuiltIn::Partial
                 | BuiltIn::ResumeToken
-                | BuiltIn::Grounded => {
+                | BuiltIn::Grounded
+                // Phase 33S3a — naming `DbHandle` in value
+                // position (e.g. `let x = DbHandle`) is a TypeAsValue
+                // error, just like the other primitive type names.
+                // A `DbHandle` value can only come from `db_open`.
+                | BuiltIn::DbHandle => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -538,6 +543,8 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
+            "DbHandle" => Type::DbHandle,
+            "TraceId" => Type::TraceId,
             _ => checker
                 .symbols
                 .lookup_def(&name.name)

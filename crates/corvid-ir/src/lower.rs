@@ -1415,6 +1415,8 @@ impl<'a> Lowerer<'a> {
                 "String" => Type::String,
                 "Bool" => Type::Bool,
                 "Nothing" => Type::Nothing,
+                "DbHandle" => Type::DbHandle,
+                "TraceId" => Type::TraceId,
                 _ => match self.symbols.lookup_def(&name.name) {
                     Some(id) => {
                         if self.symbols.get(id).kind == DeclKind::ImportedUse {

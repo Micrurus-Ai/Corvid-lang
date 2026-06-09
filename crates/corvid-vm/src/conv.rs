@@ -93,6 +93,24 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
             "tag": "stream",
             "backpressure": stream.backpressure().label()
         }),
+        // Phase 33S3a — `Value::DbHandle` cannot be represented as
+        // JSON in a way that survives `json_to_value`'s inverse
+        // round-trip: the underlying `Arc<DbHandleInner>` carries
+        // pointer identity into the runtime's slotmap, and a JSON
+        // value cannot carry that pointer. We emit an opaque
+        // sentinel here PURELY for trace-debug visibility — it
+        // lets traces show "a DbHandle was returned" with the
+        // diagnostic path — but `json_to_value` rejects this shape
+        // when it sees `expected: Type::DbHandle` so a marshalled
+        // JSON DbHandle can never be turned back into a runtime
+        // handle. The typed-Value dispatch path is the ONLY way to
+        // produce a `Value::DbHandle`; that's what makes the
+        // opacity guarantee structural rather than documentary.
+        Value::DbHandle(inner) => serde_json::json!({
+            "tag": "db_handle_opaque_sentinel",
+            "handle_id": inner.handle_id,
+            "path": inner.path,
+        }),
     }
 }
 
@@ -208,6 +226,21 @@ pub fn json_to_value(
         }
         // `Unknown` accepts any JSON, lossy. Used as a graceful fallback.
         (Type::Unknown, json) => Ok(json_to_value_loose(json)),
+        // Phase 33S3a — the opacity guarantee. A JSON value cannot
+        // reconstruct a `Value::DbHandle` because the underlying
+        // `Arc<DbHandleInner>` carries pointer identity into the
+        // runtime's slotmap. Even when the JSON shape matches the
+        // `value_to_json` sentinel (which exists for trace-debug
+        // visibility), this path REFUSES to mint a handle from
+        // JSON — that's what makes "you cannot fabricate a SQLite
+        // connection in user code" a load-bearing language property
+        // rather than a documentation claim. The only path to a
+        // valid `Value::DbHandle` is the typed-Value dispatch
+        // surface in `Runtime::call_tool` for `db_open` (33S3b).
+        (Type::DbHandle, _got) => Err(ConvError::TypeMismatch {
+            expected: "DbHandle (only producible by the runtime's db_open dispatch path)".into(),
+            got: "JSON payload — opaque handles cannot be reconstructed from JSON".into(),
+        }),
         (expected, got) => Err(ConvError::TypeMismatch {
             expected: type_label(expected),
             got: json_kind(&got).into(),
@@ -276,6 +309,7 @@ fn type_label(t: &Type) -> String {
         Type::Partial(inner) => format!("Partial<{}>", type_label(inner)),
         Type::ResumeToken(inner) => format!("ResumeToken<{}>", type_label(inner)),
         Type::TraceId => "TraceId".into(),
+        Type::DbHandle => "DbHandle".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

@@ -93,6 +93,20 @@ pub fn emit_type_description(
         Type::Function { .. } | Type::RouteParams(_) | Type::Unknown => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
         },
+        // Phase 33S3a — `DbHandle` has no ABI descriptor variant
+        // because the cdylib backend doesn't yet support the
+        // opaque `Arc<rusqlite::Connection>` payload it carries
+        // at the VM layer. Emitting `String` here lets the ABI
+        // descriptor surface stay schema-stable; the cdylib
+        // runtime would reject any actual call against such a
+        // descriptor when it tries to marshal a handle. A future
+        // slice that lands C-ABI opaque-pointer support for the
+        // SQLite surface will add a dedicated `ScalarTypeName`
+        // (or `TypeDescription::DbHandle` if richer metadata is
+        // needed) and route this arm there.
+        Type::DbHandle => TypeDescription::Scalar {
+            scalar: ScalarTypeName::String,
+        },
     }
 }
 

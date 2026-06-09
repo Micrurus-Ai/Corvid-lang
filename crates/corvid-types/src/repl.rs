@@ -169,6 +169,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
             generic_type("ResumeToken", vec![type_to_type_ref(inner, symbols)], span)
         }
         Type::TraceId => named_type("TraceId", span),
+        Type::DbHandle => named_type("DbHandle", span),
         Type::Function { .. } | Type::RouteParams(_) | Type::Unknown => named_type("Nothing", span),
     }
 }

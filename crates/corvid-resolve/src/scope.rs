@@ -51,6 +51,16 @@ pub enum BuiltIn {
     StreamResumeToken,
     Ask,
     Choose,
+    /// Phase 33S3a — `DbHandle` is an opaque, refcounted primitive
+    /// type produced ONLY by the executing `db_open` stdlib tool
+    /// (see `std/db.cor`). Registered as a builtin so user code can
+    /// name it in agent signatures (`agent f() -> DbHandle: ...`)
+    /// without resolving as `UndefinedName`. The typechecker maps
+    /// the name to `Type::DbHandle`; the VM-value layer maps the
+    /// dispatched return to `Value::DbHandle(Arc<DbHandleInner>)`.
+    /// Together these make the opacity of the SQLite-connection
+    /// handle a load-bearing language property.
+    DbHandle,
     // Structural sentinels (surface as Idents today; real variants later).
     Break,
     Continue,
@@ -132,6 +142,8 @@ impl SymbolTable {
         self.builtins.insert("choose".into(), BuiltIn::Choose);
         self.builtins.insert("break".into(), BuiltIn::Break);
         self.builtins.insert("continue".into(), BuiltIn::Continue);
+        // Phase 33S3a — see the `BuiltIn::DbHandle` docstring.
+        self.builtins.insert("DbHandle".into(), BuiltIn::DbHandle);
         self.builtins.insert("pass".into(), BuiltIn::Pass);
     }
 

@@ -5232,3 +5232,39 @@ agent outer(id: String) -> Grounded<String>:
     assert_eq!(kind_label, "non_grounded_pure_call");
     assert_eq!(target_label, "inner");
 }
+
+// -------- Phase 33S3a — DbHandle as a load-bearing opaque type --------
+
+/// 33S3a — the named type `DbHandle` resolves to `Type::DbHandle`
+/// (the opaque primitive) inside agent + tool signatures. The
+/// resolver-level promise: anywhere a Corvid signature mentions
+/// `DbHandle`, the typechecker carries the opaque primitive
+/// rather than a `Type::Unknown` (silent failure) or a
+/// `Type::Struct` lookup (forgery vector). This test pins the
+/// wiring by checking that an agent / tool / prompt that names
+/// `DbHandle` in its return type produces NO typecheck errors —
+/// the resolver maps the identifier to the primitive directly
+/// (see `named_type_to_type` / `named_type_in_module` /
+/// `type_ref_to_type_readonly` in `checker/types.rs` +
+/// `checker/expr.rs`, and `type_ref_to_type` in
+/// `corvid-ir/src/lower.rs`).
+#[test]
+fn db_handle_named_type_resolves_to_the_opaque_primitive() {
+    let src = "\
+effect db_open_eff:
+    reversible: true
+
+tool db_open(path: String) -> DbHandle uses db_open_eff
+
+agent open_demo(path: String) -> DbHandle:
+    return db_open(path)
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "DbHandle must resolve as the opaque primitive with no typecheck errors; got {:?}",
+        c.errors
+    );
+    use crate::types::Type;
+    assert_eq!(Type::DbHandle.display_name(), "DbHandle");
+}

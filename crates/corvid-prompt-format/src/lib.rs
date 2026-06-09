@@ -142,6 +142,13 @@ fn schema_for_inner(
         // `TraceId` also shouldn't appear as a prompt return type;
         // if it does, fall back to string (traces are path-backed).
         Type::TraceId => json!({ "type": "string" }),
+        // Phase 33S3a — `DbHandle` is structurally not a prompt
+        // return type: it carries an Arc<rusqlite::Connection> the
+        // model could never produce. Emit an empty permissive
+        // schema so a hypothetical malformed prompt declaration
+        // doesn't crash the format layer; the typechecker is the
+        // real backstop and will surface the misuse upstream.
+        Type::DbHandle => json!({}),
         Type::Unknown => json!({}),
     }
 }

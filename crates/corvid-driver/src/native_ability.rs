@@ -106,6 +106,12 @@ fn is_native_value_type(ty: &Type) -> bool {
         // tier (Phase 21 slice 21-inv-E-4 + E-runtime). Until then,
         // a program using replay routes to the interpreter tier.
         Type::TraceId => false,
+        // Phase 33S3a — `DbHandle` is interpreter-tier only; the
+        // driver's tier-picker checks this function and routes any
+        // program mentioning `DbHandle` (including transitively
+        // through agent signatures) to the interpreter so the user
+        // never sees a confusing native-codegen error mid-build.
+        Type::DbHandle => false,
         Type::Nothing
         | Type::Function { .. }
         | Type::Stream(_)

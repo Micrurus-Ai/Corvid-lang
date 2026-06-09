@@ -91,6 +91,11 @@ impl fmt::Display for Value {
                 token.delivered.len()
             ),
             Value::Stream(stream) => write!(f, "Stream({})", stream.backpressure_label()),
+            Value::DbHandle(inner) => write!(
+                f,
+                "DbHandle(handle_id: {}, path: {})",
+                inner.handle_id, inner.path
+            ),
         }
     }
 }

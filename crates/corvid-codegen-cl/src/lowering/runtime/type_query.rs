@@ -75,6 +75,16 @@ pub fn mangle_type_name(ty: &Type) -> String {
             }
         }
         Type::TraceId => "TraceId".into(),
+        // Phase 33S3a — `DbHandle` is interpreter-tier only; the
+        // mangled name lets Cranelift codegen produce a typeinfo
+        // symbol so other passes don't crash on mangler lookup,
+        // but any actual emission of code that USES the type
+        // bails out at `lower_expr` with the standard "not yet
+        // supported in native backend" diagnostic. When cdylib
+        // codegen adds opaque-pointer support for SQLite handles,
+        // this entry just gains symbol layout — the mangled
+        // string stays stable.
+        Type::DbHandle => "DbHandle".into(),
         Type::RouteParams(_) => "RouteParams".into(),
         Type::Unknown => "Unknown".into(),
     }
@@ -446,6 +456,14 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // TraceId is a string-backed opaque handle at runtime;
         // treat it as a value type for native emission purposes.
         Type::TraceId => true,
+        // Phase 33S3a — `DbHandle` has no native (Cranelift)
+        // representation yet; the executing SQLite surface runs
+        // through the interpreter tier only. Returning false here
+        // means any program that mentions `DbHandle` falls through
+        // to the standard "type not yet supported in native
+        // backend" diagnostic at `lower_expr` rather than crashing
+        // codegen with an unhandled match arm.
+        Type::DbHandle => false,
         Type::Nothing
         | Type::Function { .. }
         | Type::RouteParams(_)

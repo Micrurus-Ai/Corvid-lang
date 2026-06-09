@@ -50,6 +50,57 @@ pub enum Value {
     Partial(PartialValue),
     ResumeToken(ResumeTokenValue),
     Stream(StreamValue),
+    /// Phase 33S3a — opaque, refcounted handle to a SQLite
+    /// connection owned by the runtime. The inner `Arc` carries the
+    /// handle's identity (the `handle_id` in `corvid-runtime`'s
+    /// `DbRuntime` slotmap) plus diagnostic metadata; the actual
+    /// `rusqlite::Connection` lives behind a mutex in the runtime
+    /// and is reached only through `Runtime::call_tool` dispatch
+    /// for `db_query` / `db_execute`. The opacity is structural:
+    /// `DbHandleInner` is not `Default` or `From<u64>`, it has no
+    /// public constructor outside the runtime crate's dispatch
+    /// path, and `Value::DbHandle` cannot be produced via the
+    /// JSON marshalling path (`json_to_value` rejects the handle
+    /// shape with a structured error). This is what makes
+    /// "you cannot fabricate a SQLite connection in user code" a
+    /// load-bearing language property rather than a documentation
+    /// claim.
+    DbHandle(Arc<DbHandleInner>),
+}
+
+/// Phase 33S3a — payload of `Value::DbHandle`. Holds the opaque
+/// identity the runtime uses to look up the actual connection
+/// plus the original opening `path` for diagnostics. 33S3b
+/// extends this struct with a runtime-callback closer so the last
+/// `Arc::drop` notifies the runtime's slotmap to release the
+/// underlying connection (the "refcounted" half of the brief's
+/// "opaque, refcounted" promise); 33S3a establishes the type so
+/// downstream code can carry the variant without yet wiring the
+/// lifecycle.
+#[derive(Debug)]
+pub struct DbHandleInner {
+    /// Slot key into `DbRuntime`'s `HashMap<u64, Arc<Connection>>`.
+    /// The runtime is the sole authority for allocating these;
+    /// nothing in user code can construct a valid id.
+    pub handle_id: u64,
+    /// Original path the handle was opened against. `":memory:"`
+    /// for ephemeral databases; an `[io] root`-relative absolute
+    /// path otherwise. Used in diagnostics (e.g. "no recorded
+    /// db_query event for handle opened at `./data/app.sqlite`").
+    pub path: String,
+}
+
+impl DbHandleInner {
+    /// Construct a new `DbHandleInner`. Public so the
+    /// `corvid-runtime::db` module can produce handles from
+    /// `db_open`'s dispatch path; user code reaches this through
+    /// the typed-Value dispatch surface, not directly.
+    pub fn new(handle_id: u64, path: impl Into<String>) -> Self {
+        Self {
+            handle_id,
+            path: path.into(),
+        }
+    }
 }
 
 pub(super) const UNBOUNDED_STREAM_WARN_THRESHOLD: usize = 1024;
@@ -176,6 +227,13 @@ impl Clone for Value {
             Value::Partial(p) => Value::Partial(p.clone()),
             Value::ResumeToken(token) => Value::ResumeToken(token.clone()),
             Value::Stream(stream) => Value::Stream(stream.clone()),
+            // Phase 33S3a — cloning a DbHandle increments the
+            // inner Arc's strong count. This is the "refcounted"
+            // half of the brief's "opaque, refcounted" promise:
+            // multiple agents can hold the same handle and the
+            // underlying connection lives until the last clone
+            // drops (33S3b wires the actual runtime callback).
+            Value::DbHandle(inner) => Value::DbHandle(inner.clone()),
         }
     }
 }
@@ -199,6 +257,7 @@ impl Value {
             Value::Stream(stream) => {
                 format!("Stream<{}>", stream.backpressure_label())
             }
+            Value::DbHandle(_) => "DbHandle".into(),
         }
     }
 
@@ -257,6 +316,14 @@ impl PartialEq for Value {
             (Value::Partial(a), Value::Partial(b)) => a == b,
             (Value::ResumeToken(a), Value::ResumeToken(b)) => a == b,
             (Value::Stream(a), Value::Stream(b)) => a == b,
+            // Phase 33S3a — two DbHandles compare equal when
+            // they reference the SAME underlying connection
+            // (same Arc pointer). This is identity equality, not
+            // structural: cloning a handle yields an equal handle;
+            // opening the same database file twice produces two
+            // *different* handles (consistent with how rusqlite
+            // treats independent connections).
+            (Value::DbHandle(a), Value::DbHandle(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -267,9 +334,115 @@ impl PartialEq for Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{StructValue, Value};
+    use super::{DbHandleInner, StructValue, Value};
     use corvid_resolve::DefId;
     use std::sync::Arc;
+
+    /// Phase 33S3a — `Value::DbHandle` cloning is just an `Arc`
+    /// increment. Many clones of the same handle all observe the
+    /// same inner pointer; dropping them returns the strong count
+    /// to 1. This is the load-bearing "refcounted" half of the
+    /// brief's promise — multiple agents can hold the same handle
+    /// without copying the underlying connection.
+    #[test]
+    fn db_handle_clones_share_inner_arc_and_refcount_returns_to_one_on_drop() {
+        let value = Value::DbHandle(Arc::new(DbHandleInner::new(42, ":memory:")));
+        let strong = match &value {
+            Value::DbHandle(inner) => Arc::strong_count(inner),
+            _ => unreachable!(),
+        };
+        assert_eq!(strong, 1);
+
+        let mut clones = Vec::new();
+        for _ in 0..1000 {
+            clones.push(value.clone());
+        }
+
+        let strong = match &value {
+            Value::DbHandle(inner) => Arc::strong_count(inner),
+            _ => unreachable!(),
+        };
+        assert_eq!(strong, 1001);
+
+        drop(clones);
+
+        let strong = match &value {
+            Value::DbHandle(inner) => Arc::strong_count(inner),
+            _ => unreachable!(),
+        };
+        assert_eq!(strong, 1);
+    }
+
+    /// Phase 33S3a — `Value::DbHandle` equality is Arc-pointer
+    /// identity. Two clones of the same handle are equal; two
+    /// independently-constructed handles with the same handle_id
+    /// are NOT equal because they represent independent connection
+    /// references (`rusqlite::Connection::open` semantics).
+    #[test]
+    fn db_handle_equality_is_arc_pointer_identity_not_structural() {
+        let a = Value::DbHandle(Arc::new(DbHandleInner::new(7, ":memory:")));
+        let a_clone = a.clone();
+        let b = Value::DbHandle(Arc::new(DbHandleInner::new(7, ":memory:")));
+
+        assert_eq!(a, a_clone, "clones share the same Arc and must compare equal");
+        assert_ne!(
+            a, b,
+            "independently-constructed handles with the same handle_id must NOT compare equal"
+        );
+    }
+
+    /// Phase 33S3a — `Value::DbHandle.type_name()` returns the
+    /// language-level name "DbHandle" (not "DbHandleInner" or any
+    /// implementation detail). This is what user-facing diagnostics
+    /// surface when a typecheck or marshal error mentions the type.
+    #[test]
+    fn db_handle_type_name_is_the_language_level_name() {
+        let value = Value::DbHandle(Arc::new(DbHandleInner::new(0, "./data/app.sqlite")));
+        assert_eq!(value.type_name(), "DbHandle");
+    }
+
+    /// Phase 33S3a — the opacity guarantee at the JSON boundary.
+    /// `json_to_value` REFUSES to mint a `Value::DbHandle` from a
+    /// JSON payload, even when the payload exactly matches the
+    /// shape `value_to_json` emits for trace-debug visibility. This
+    /// is what makes "you cannot fabricate a SQLite connection in
+    /// user code" a load-bearing language property — there is no
+    /// JSON round-trip a malicious tool could exploit to forge a
+    /// handle.
+    #[test]
+    fn json_to_value_refuses_to_mint_a_db_handle_even_when_shape_matches_sentinel() {
+        use crate::conv::{json_to_value, value_to_json};
+        use corvid_types::Type;
+        use std::collections::HashMap;
+
+        // Round-trip an authentic handle through value_to_json to
+        // obtain the EXACT sentinel shape an attacker would forge.
+        let authentic =
+            Value::DbHandle(Arc::new(DbHandleInner::new(99, "./data/app.sqlite")));
+        let sentinel_json = value_to_json(&authentic);
+        // Sentinel shape carries the tag for trace-debug visibility.
+        assert_eq!(
+            sentinel_json.get("tag").and_then(|t| t.as_str()),
+            Some("db_handle_opaque_sentinel"),
+            "value_to_json must tag the sentinel so traces can render it"
+        );
+
+        // Now attempt the round-trip: feeding the sentinel back
+        // through json_to_value with expected: Type::DbHandle must
+        // be refused. This is the OPACITY GATE.
+        let empty: HashMap<DefId, &corvid_ir::IrType> = HashMap::new();
+        let result = json_to_value(sentinel_json, &Type::DbHandle, &empty);
+        assert!(
+            result.is_err(),
+            "json_to_value must refuse to mint a DbHandle from the sentinel; got {:?}",
+            result.map(|v| v.type_name())
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("DbHandle") && err.contains("opaque"),
+            "diagnostic must name the opacity property; got: {err}"
+        );
+    }
 
     #[test]
     fn struct_handle_refcount_tracks_value_clones() {

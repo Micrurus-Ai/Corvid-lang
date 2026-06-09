@@ -75,6 +75,22 @@ pub enum Type {
     /// 21-inv-E-3.
     TraceId,
 
+    /// Compiler-known `DbHandle` — an opaque, refcounted handle to
+    /// a SQLite connection, returned by `std/db.cor`'s executing
+    /// `db_open` tool and threaded through `db_query` /
+    /// `db_execute`. Phase 33S3a introduces the type as a
+    /// load-bearing language primitive: it can ONLY be constructed
+    /// by the runtime's `db_open` dispatch path (mapped at the
+    /// vm-value layer to `Value::DbHandle(Arc<DbHandleInner>)`),
+    /// which means user code structurally cannot fabricate a
+    /// connection. The opacity guarantee is what makes
+    /// "executing SQLite is typed and tamper-proof" true at the
+    /// language level rather than at the documentation level.
+    /// Codegen backends (CL / Py / WASM) refuse to lower this
+    /// type until cdylib codegen lands in a future slice;
+    /// interpreter-tier execution is fully supported.
+    DbHandle,
+
     /// Synthetic struct-like value for backend route path captures.
     RouteParams(Vec<(String, Type)>),
 
@@ -123,6 +139,7 @@ impl Type {
             Type::Partial(inner) => format!("Partial<{}>", inner.display_name()),
             Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
             Type::TraceId => "TraceId".into(),
+            Type::DbHandle => "DbHandle".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

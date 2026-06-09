@@ -101,6 +101,18 @@ impl<'a> Checker<'a> {
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
+            // Phase 33S3a — `DbHandle` is an opaque, refcounted
+            // primitive type produced ONLY by the executing
+            // `db_open` stdlib tool (see `std/db.cor` from 33S3b).
+            // Users cannot construct or fabricate a value of this
+            // type; the language-level promise is that any
+            // `DbHandle` your code holds came from `db_open`. The
+            // value-side representation is `Value::DbHandle` in
+            // `corvid-vm`; the JSON marshalling path rejects this
+            // type because there is no JSON representation for the
+            // refcounted Arc inside.
+            "DbHandle" => Type::DbHandle,
+            "TraceId" => Type::TraceId,
             _ => match self.symbols.lookup_def(name) {
                 Some(id) => {
                     let entry = self.symbols.get(id);
@@ -212,6 +224,8 @@ impl<'a> Checker<'a> {
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
+            "DbHandle" => Type::DbHandle,
+            "TraceId" => Type::TraceId,
             _ => match module.resolved.symbols.lookup_def(name) {
                 Some(def_id)
                     if matches!(

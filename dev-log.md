@@ -4,6 +4,145 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S3a closed: opaque DbHandle value + type primitive for the executing SQLite surface
+
+Opened 33S3 (executing SQLite surface) with a four-sub-slice split (a/b/c/d
+instead of the 33S1/33S2 three-slice precedent). The expansion reflects an
+architectural reality the earlier surfaces didn't have: SQLite needs an
+opaque, refcounted handle type to be load-bearing at the language level —
+that's a new type-system primitive, and adding one cleanly is its own slice.
+
+This is the **CTO call** I made when picking between two implementation
+options:
+
+- Option A: `Value::DbHandle(Arc<DbHandleInner>)` + `Type::DbHandle` primitive
+  with full type-system + resolver + backend plumbing.
+- Option B: slotmap-key handle struct (`DbConnection { handle_id: Int }`
+  envelope routed through the existing JSON dispatch path).
+
+Picked A because:
+
+1. Per CLAUDE.md's `no shortcuts` rule, the brief explicitly said
+   `Value::DbHandle (opaque, refcounted) in corvid-vm`. Softening the spec
+   because the impl is multi-crate is exactly the textbook shortcut the
+   project rule was written to prevent.
+2. The type-system property is load-bearing for the security claim. With
+   Type::DbHandle as an opaque primitive, the typechecker structurally
+   prevents user code from forging a `DbConnection(handle_id=42, ...)`. With
+   Option B, that property would only hold by documentation hand-waving.
+3. The "refcounted" half of the brief's promise — VM-tracked early-drop
+   semantics — is correct for any long-running embedding (an agent kernel
+   running for months opens many transient connections; Option B leaked
+   them all until runtime drop). 33S3a establishes the Arc; 33S3b will wire
+   the runtime callback that completes the refcount-and-release lifecycle.
+4. It future-proofs cdylib codegen. C-ABI's natural representation of a
+   refcounted opaque handle IS a void* with retain/release. Doing the
+   slotmap dance for the interpreter and ALSO a different opaque-pointer
+   path for cdylib later means writing this code twice and reconciling two
+   representations. Adding Type::DbHandle now means the cdylib slice (when
+   it lands) plugs into the existing variant.
+
+### What 33S3a shipped
+
+**`corvid-resolve`** (`BuiltIn::DbHandle` + register in `register_builtins`):
+the resolver recognises `DbHandle` as an always-in-scope primitive name so
+user code can write `agent f() -> DbHandle: ...` without a resolve-time
+`UndefinedName`.
+
+**`corvid-types`** (`Type::DbHandle` primitive + 5 type-mapping sites):
+`named_type_to_type`, `named_type_in_module`, `type_ref_to_type_readonly`,
+`display_name`, `repl::type_to_type_ref` all map the name to the primitive.
+Naming `DbHandle` in value position (e.g. `let x = DbHandle`) produces a
+`TypeAsValue` error, same as the other type-name primitives.
+
+**`corvid-ir`** (`type_ref_to_type`): IR lowering carries the type through
+agent signatures end-to-end without falling back to `Type::Unknown`.
+
+**`corvid-vm`** (`Value::DbHandle(Arc<DbHandleInner>)` + 5 match-arm sites):
+- `DbHandleInner { handle_id: u64, path: String }` is the payload. Public
+  constructor `DbHandleInner::new(...)` so 33S3b's `corvid-runtime::db`
+  module can mint handles from the `db_open` dispatch path.
+- Clone clones the Arc (refcount increment).
+- `type_name()` returns `"DbHandle"` (language-level name).
+- `PartialEq` is `Arc::ptr_eq` (identity, not structural): two clones of
+  the same handle are equal, two independently-constructed handles to the
+  same path are NOT equal.
+- `Display` + `repl_display` render `DbHandle(handle_id: N, path: ...)`
+  and `DbHandle(path: ...)` respectively.
+
+**`corvid-vm/src/conv.rs`** (the opacity gate — load-bearing):
+- `value_to_json` emits a tagged sentinel
+  `{"tag": "db_handle_opaque_sentinel", "handle_id": N, "path": "..."}`
+  PURELY for trace-debug visibility so traces can render "a DbHandle was
+  returned" with its diagnostic identity.
+- `json_to_value` REFUSES to mint a `Value::DbHandle` from any JSON
+  payload, including a payload that exactly matches the sentinel shape.
+  The diagnostic names the property: "DbHandle (only producible by the
+  runtime's db_open dispatch path) ... JSON payload — opaque handles
+  cannot be reconstructed from JSON". This is what makes "you cannot
+  fabricate a SQLite connection in user code" a load-bearing language
+  property rather than a documentation claim. There is no JSON
+  round-trip a malicious tool could exploit to forge a handle.
+
+**Backend error paths** — codegen-cl emits a structured
+`CodegenError::not_supported(...)` diagnostic naming the future slice:
+> "`DbHandle` - the executing SQLite surface (`db_open` / `db_query` /
+> `db_execute` from std/db.cor) is interpreter-only in 33S3; a future
+> slice lands C-ABI opaque-pointer codegen so the handle can cross cdylib
+> boundaries. Use the interpreter tier (`corvid run --tier interp`) until
+> then."
+
+`is_native_value_type` in both codegen-cl and corvid-driver's tier-picker
+returns false for DbHandle so the driver auto-routes any program mentioning
+the type to the interpreter tier — the user never sees a confusing
+native-codegen error mid-build.
+
+codegen-py emits `object` as the type hint with a documenting comment.
+
+corvid-prompt-format emits a permissive `{}` schema because DbHandle is
+structurally not a prompt return type — the typechecker is the real
+backstop.
+
+corvid-abi routes DbHandle through the `Function | RouteParams | Unknown`
+catch-all (Scalar::String) until cdylib opaque-pointer support lands.
+Documented as a future-slice extension point.
+
+### Tests (5 new)
+
+- `db_handle_clones_share_inner_arc_and_refcount_returns_to_one_on_drop`
+  proves the "refcounted" half of the brief: 1000 clones → strong count
+  1001 → drop all → strong count 1.
+- `db_handle_equality_is_arc_pointer_identity_not_structural` proves
+  clones compare equal but two independently-constructed handles to the
+  same `:memory:` path are NOT equal (mirrors rusqlite's "independent
+  connections are independent" semantics).
+- `db_handle_type_name_is_the_language_level_name` proves
+  `value.type_name() == "DbHandle"`.
+- `json_to_value_refuses_to_mint_a_db_handle_even_when_shape_matches_sentinel`
+  proves the OPACITY GATE: round-trips a real handle through
+  value_to_json to obtain the exact sentinel shape, then verifies
+  json_to_value refuses it.
+- `db_handle_named_type_resolves_to_the_opaque_primitive` proves the
+  resolver+typechecker end-to-end pipeline carries `Type::DbHandle` from
+  source identifier to typed signature.
+
+### What's deliberately NOT in 33S3a
+
+- No `std/db.cor` changes — 33S3b adds the executing tool declarations.
+- No `corvid-runtime::db` module — 33S3b builds DbRuntime + the typed-Value
+  dispatch path.
+- No path-confinement enforcement — 33S3b reuses `IoToolPolicy::resolve`
+  with `:memory:` as the documented special case.
+- No CLI loader — 33S3c (which also brings the end-to-end test +
+  injection-proof + replay quarantine).
+- No guarantees, no tour, no docs — 33S3d invention proof.
+
+The discipline of separating type-system plumbing from executing-surface
+plumbing keeps each commit single-concern. 33S3a establishes the language
+primitive; 33S3b lights up the SQLite surface against it.
+
+---
+
 ## 2026-06-09 - 33S2c closed (umbrella 33S2 done): invention proof artifacts for executing HTTP-client surface
 
 Closes the 33S2 umbrella. 33S2a shipped the plumbing (declarations, policy,

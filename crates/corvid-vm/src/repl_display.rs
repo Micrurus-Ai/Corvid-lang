@@ -153,6 +153,9 @@ fn render_value_inner(
                 )
             }
         }
+        Value::DbHandle(inner) => {
+            format!("DbHandle(path: {})", inner.path)
+        }
     }
 }
 

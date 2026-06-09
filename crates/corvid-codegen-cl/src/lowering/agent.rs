@@ -435,6 +435,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`TraceId` - native codegen for replay expressions lands in Phase 21 slice 21-inv-E-4; use the interpreter tier (`corvid run --tier interp`) until then",
             span,
         )),
+        Type::DbHandle => Err(CodegenError::not_supported(
+            "`DbHandle` - the executing SQLite surface (`db_open` / `db_query` / `db_execute` from std/db.cor) is interpreter-only in 33S3; a future slice lands C-ABI opaque-pointer codegen so the handle can cross cdylib boundaries. Use the interpreter tier (`corvid run --tier interp`) until then.",
+            span,
+        )),
         Type::Unknown => Err(CodegenError::cranelift(
             "encountered `Unknown` type at codegen — typecheck should have caught this",
             span,

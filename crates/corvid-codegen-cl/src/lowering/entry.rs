@@ -428,6 +428,12 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::DbHandle => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `DbHandle` - the executing SQLite surface is interpreter-only in 33S3; an entry agent that returns a DB handle has no native command-line representation. Wrap the handle in an agent that returns a printable result (e.g. a query result) for native execution, or use the interpreter tier (`corvid run --tier interp`)."
+            ),
+            span,
+        )),
         Type::Function { .. } | Type::Unknown => Err(CodegenError::cranelift(
             format!("entry agent {role} has un-printable type `{}`", ty.display_name()),
             span,

@@ -259,6 +259,7 @@ pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, resolved: &Resolved) -> Type
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
             "TraceId" => Type::TraceId,
+            "DbHandle" => Type::DbHandle,
             other => resolved
                 .symbols
                 .lookup_def(other)
