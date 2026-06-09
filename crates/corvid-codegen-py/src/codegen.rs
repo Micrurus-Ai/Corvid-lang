@@ -543,6 +543,14 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // typechecker's contracts surface that constraint to
         // user code before the backend gets here.
         T::DbHandle => "object".into(),
+        // Phase 33R5b-a — JsonValue / JsonBuilder also
+        // interpreter-tier only. The Python codegen-py backend
+        // can lower them as `object` since the cdylib C-ABI
+        // exports already exist (corvid_json_parse etc.) and a
+        // follow-up slice will wire the bridging; until then,
+        // `object` keeps the generated Python valid.
+        T::JsonValue => "object".into(),
+        T::JsonBuilder => "object".into(),
     }
 }
 

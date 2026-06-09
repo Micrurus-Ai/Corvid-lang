@@ -61,6 +61,25 @@ pub enum BuiltIn {
     /// Together these make the opacity of the SQLite-connection
     /// handle a load-bearing language property.
     DbHandle,
+    /// Phase 33R5b-a — `JsonValue` is an opaque, refcounted parsed
+    /// JSON payload produced by `std/json.cor`'s `json_parse` and
+    /// threaded through the typed accessor tools. Wraps
+    /// `Arc<serde_json::Value>` at the VM layer; the typed
+    /// accessors return `Result<T, String>` so field-type
+    /// mismatches surface as recoverable errors. Unlike DbHandle,
+    /// JsonValue has no opacity gate at `json_to_value` because
+    /// the payload IS the JSON shape — there is no underlying
+    /// registry the value indexes into.
+    JsonValue,
+    /// Phase 33R5b-a — `JsonBuilder` is an opaque, mutable JSON
+    /// object builder. Wraps
+    /// `Arc<Mutex<serde_json::Map<String, serde_json::Value>>>`
+    /// at the VM layer; `json_object_set_*` mutates the inner
+    /// map and returns the same builder for fluent chaining;
+    /// `json_object_finish` snapshots and serialises without
+    /// invalidating the builder (so set+finish cycles can
+    /// continue).
+    JsonBuilder,
     // Structural sentinels (surface as Idents today; real variants later).
     Break,
     Continue,
@@ -144,6 +163,11 @@ impl SymbolTable {
         self.builtins.insert("continue".into(), BuiltIn::Continue);
         // Phase 33S3a — see the `BuiltIn::DbHandle` docstring.
         self.builtins.insert("DbHandle".into(), BuiltIn::DbHandle);
+        // Phase 33R5b-a — see the `BuiltIn::JsonValue` /
+        // `BuiltIn::JsonBuilder` docstrings.
+        self.builtins.insert("JsonValue".into(), BuiltIn::JsonValue);
+        self.builtins
+            .insert("JsonBuilder".into(), BuiltIn::JsonBuilder);
         self.builtins.insert("pass".into(), BuiltIn::Pass);
     }
 

@@ -170,6 +170,8 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
         }
         Type::TraceId => named_type("TraceId", span),
         Type::DbHandle => named_type("DbHandle", span),
+        Type::JsonValue => named_type("JsonValue", span),
+        Type::JsonBuilder => named_type("JsonBuilder", span),
         Type::Function { .. } | Type::RouteParams(_) | Type::Unknown => named_type("Nothing", span),
     }
 }

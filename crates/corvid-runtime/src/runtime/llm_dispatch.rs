@@ -415,6 +415,194 @@ impl Runtime {
         Ok(payload)
     }
 
+    // ========================================================================
+    // Slice 33R5b-a — typed-Value dispatch for the executing JSON
+    // surface.
+    //
+    // The opaque path: `json_parse` returns a Value::JsonValue
+    // (the interpreter wraps the Arc<serde_json::Value> we hand
+    // back); `json_get_*` take the Arc and return JSON envelopes
+    // matching the `Result<T, String>` shape declared in
+    // `std/json.cor`; `json_object_new` returns a
+    // Value::JsonBuilder; `json_object_set_*` mutate the builder
+    // and return the SAME Arc; `json_object_finish` serialises.
+    //
+    // Unlike the io / http / db surfaces, JSON has no security
+    // boundary beyond serde validation — no policy parameter,
+    // no allowlist, no quarantine flag. The structural property
+    // the dispatch carries is `json.parse_safety_no_panic`:
+    // malformed input returns `Result::Err(message)` through the
+    // standard Corvid Result envelope.
+    // ========================================================================
+
+    /// Slice 33R5b-a — `json_parse(text) -> Result<JsonValue, String>`.
+    /// Returns a typed Value directly (the interpreter wraps the
+    /// `Arc<serde_json::Value>` we return in `Value::JsonValue`
+    /// for the Ok branch; the Err branch flows through
+    /// `Value::ResultErr`).
+    pub async fn json_parse_tool(
+        &self,
+        text: String,
+    ) -> Result<Result<std::sync::Arc<serde_json::Value>, String>, RuntimeError> {
+        Ok(crate::json::parse(&text))
+    }
+
+    /// Slice 33R5b-a — `json_get_int(value, field) -> Result<Int, String>`.
+    /// Takes the `Arc<serde_json::Value>` directly (the interpreter
+    /// extracts it from `Value::JsonValue`) and returns the typed
+    /// Result.
+    pub async fn json_get_int_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<i64, String>, RuntimeError> {
+        Ok(crate::json::get_int(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_get_float`. Same shape as `json_get_int`.
+    pub async fn json_get_float_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<f64, String>, RuntimeError> {
+        Ok(crate::json::get_float(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_get_string`.
+    pub async fn json_get_string_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<String, String>, RuntimeError> {
+        Ok(crate::json::get_string(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_get_bool`.
+    pub async fn json_get_bool_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<bool, String>, RuntimeError> {
+        Ok(crate::json::get_bool(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_get_object`. Returns a fresh Arc
+    /// over the cloned subtree so the caller can pass it back
+    /// into other typed accessors.
+    pub async fn json_get_object_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<std::sync::Arc<serde_json::Value>, String>, RuntimeError> {
+        Ok(crate::json::get_object(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_get_array`. Returns `Vec<Arc<JsonValue>>`
+    /// the interpreter wraps as `List<JsonValue>`.
+    pub async fn json_get_array_tool(
+        &self,
+        value: &std::sync::Arc<serde_json::Value>,
+        field: String,
+    ) -> Result<Result<Vec<std::sync::Arc<serde_json::Value>>, String>, RuntimeError> {
+        Ok(crate::json::get_array(value, &field))
+    }
+
+    /// Slice 33R5b-a — `json_object_new() -> JsonBuilder`.
+    /// Returns the `Arc<Mutex<Map>>` directly (the interpreter
+    /// wraps in Value::JsonBuilder).
+    pub async fn json_object_new_tool(
+        &self,
+    ) -> Result<
+        std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        RuntimeError,
+    > {
+        Ok(crate::json::object_new())
+    }
+
+    /// Slice 33R5b-a — `json_object_set_int(builder, key, value) -> JsonBuilder`.
+    /// Mutates and returns the same builder Arc.
+    pub async fn json_object_set_int_tool(
+        &self,
+        builder: std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        key: String,
+        value: i64,
+    ) -> Result<
+        std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        RuntimeError,
+    > {
+        crate::json::object_set_int(builder, &key, value)
+    }
+
+    /// Slice 33R5b-a — `json_object_set_float`.
+    pub async fn json_object_set_float_tool(
+        &self,
+        builder: std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        key: String,
+        value: f64,
+    ) -> Result<
+        std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        RuntimeError,
+    > {
+        crate::json::object_set_float(builder, &key, value)
+    }
+
+    /// Slice 33R5b-a — `json_object_set_string`.
+    pub async fn json_object_set_string_tool(
+        &self,
+        builder: std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        key: String,
+        value: String,
+    ) -> Result<
+        std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        RuntimeError,
+    > {
+        crate::json::object_set_string(builder, &key, &value)
+    }
+
+    /// Slice 33R5b-a — `json_object_set_bool`.
+    pub async fn json_object_set_bool_tool(
+        &self,
+        builder: std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        key: String,
+        value: bool,
+    ) -> Result<
+        std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+        RuntimeError,
+    > {
+        crate::json::object_set_bool(builder, &key, value)
+    }
+
+    /// Slice 33R5b-a — `json_object_finish(builder) -> String`.
+    /// Snapshots the builder's current state and serialises to a
+    /// String. The builder remains usable for further set+finish
+    /// cycles.
+    pub async fn json_object_finish_tool(
+        &self,
+        builder: &std::sync::Arc<
+            std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+        >,
+    ) -> Result<String, RuntimeError> {
+        crate::json::object_finish(builder)
+    }
+
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
     pub async fn call_llm(&self, mut req: LlmRequest) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {

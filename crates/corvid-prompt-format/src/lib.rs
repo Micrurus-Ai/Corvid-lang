@@ -149,6 +149,17 @@ fn schema_for_inner(
         // doesn't crash the format layer; the typechecker is the
         // real backstop and will surface the misuse upstream.
         Type::DbHandle => json!({}),
+        // Phase 33R5b-a — `JsonValue` could conceivably be a
+        // prompt return type (an LLM that emits structured JSON)
+        // but the schema layer doesn't constrain its shape — by
+        // design JsonValue is the dynamic-JSON path. Emit a
+        // permissive schema; downstream prompt validation can
+        // tighten if the prompt declares a typed shape.
+        Type::JsonValue => json!({}),
+        // Phase 33R5b-a — `JsonBuilder` is process-internal and
+        // shouldn't appear as a prompt return type; emit a
+        // permissive schema and let the typechecker enforce.
+        Type::JsonBuilder => json!({}),
         Type::Unknown => json!({}),
     }
 }

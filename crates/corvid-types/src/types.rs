@@ -91,6 +91,51 @@ pub enum Type {
     /// interpreter-tier execution is fully supported.
     DbHandle,
 
+    /// Compiler-known `JsonValue` — an opaque, refcounted parsed
+    /// JSON value, returned by `std/json.cor`'s executing
+    /// `json_parse` tool and threaded through the typed accessor
+    /// tools (`json_get_int` / `json_get_string` / etc.). Phase
+    /// 33R5b-a introduces the type as a load-bearing language
+    /// primitive: the value is the parsed JSON shape (a wrapper
+    /// around `Arc<serde_json::Value>`), and the typed accessors
+    /// return `Result<T, String>` so field-type mismatches surface
+    /// as recoverable errors rather than panics.
+    ///
+    /// Unlike `DbHandle`, JsonValue has NO opacity gate at the
+    /// `json_to_value` boundary because the payload IS the JSON
+    /// shape — there is no underlying registry the value indexes
+    /// into. Constructing `Value::JsonValue` from JSON is the
+    /// natural conversion path; the JSON `null` / numbers /
+    /// strings / arrays / objects all map directly.
+    ///
+    /// Codegen backends refuse to lower this type until cdylib
+    /// codegen lands in a follow-up slice (the C-ABI exports
+    /// `corvid_json_parse` / `corvid_json_get_field_*` already
+    /// exist in `corvid-runtime::ffi_bridge::json_exports`, so
+    /// the cdylib bridging is plumbing rather than primitives).
+    JsonValue,
+
+    /// Compiler-known `JsonBuilder` — an opaque, mutable builder
+    /// for assembling JSON objects field-by-field. Returned by
+    /// `std/json.cor`'s `json_object_new` and consumed by
+    /// `json_object_set_*` (fluent — mutates the inner
+    /// `Arc<Mutex<...>>` and returns the same builder) and
+    /// `json_object_finish` (snapshots the current state and
+    /// serialises to a `String`; the builder remains usable for
+    /// further set+finish cycles).
+    ///
+    /// The Arc-of-Mutex design lets multiple references to the
+    /// same builder all see each other's mutations — useful when
+    /// passing a builder through a chain of agent calls. The
+    /// snapshot semantics of `json_object_finish` means there is
+    /// no "consumed builder" lifecycle to track; calling finish
+    /// twice yields two independent strings reflecting the
+    /// builder's state at each call.
+    ///
+    /// Codegen backends refuse to lower this type for the same
+    /// reason as `JsonValue` — interpreter-only in 33R5b.
+    JsonBuilder,
+
     /// Synthetic struct-like value for backend route path captures.
     RouteParams(Vec<(String, Type)>),
 
@@ -140,6 +185,8 @@ impl Type {
             Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
             Type::TraceId => "TraceId".into(),
             Type::DbHandle => "DbHandle".into(),
+            Type::JsonValue => "JsonValue".into(),
+            Type::JsonBuilder => "JsonBuilder".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

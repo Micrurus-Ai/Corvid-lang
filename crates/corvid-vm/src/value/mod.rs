@@ -66,6 +66,33 @@ pub enum Value {
     /// load-bearing language property rather than a documentation
     /// claim.
     DbHandle(Arc<DbHandleInner>),
+
+    /// Phase 33R5b-a — opaque, refcounted parsed JSON value.
+    /// Produced by `std/json.cor`'s `json_parse` tool and threaded
+    /// through the typed accessor tools (`json_get_int` /
+    /// `json_get_string` / etc.). Unlike `DbHandle`, the payload
+    /// IS the JSON shape — there is no registry the value indexes
+    /// into. `json_to_value` against `Type::JsonValue` is the
+    /// natural conversion path (the JSON `null` / numbers /
+    /// strings / arrays / objects all map directly).
+    ///
+    /// Multiple references share the same Arc; the underlying
+    /// `serde_json::Value` is immutable so no synchronization is
+    /// needed.
+    JsonValue(Arc<serde_json::Value>),
+
+    /// Phase 33R5b-a — opaque, mutable JSON object builder.
+    /// Returned by `std/json.cor`'s `json_object_new` and mutated
+    /// by `json_object_set_*` (fluent — mutates the inner
+    /// `serde_json::Map` and returns the same builder for
+    /// chaining). `json_object_finish` snapshots the current
+    /// state and serialises to a `String`; the builder remains
+    /// usable for further set+finish cycles.
+    ///
+    /// The `Arc<Mutex<...>>` design lets multiple references to
+    /// the same builder all see each other's mutations — useful
+    /// when passing a builder through a chain of agent calls.
+    JsonBuilder(Arc<std::sync::Mutex<serde_json::Map<String, serde_json::Value>>>),
 }
 
 // Phase 33S3b — `DbHandleInner` moved to `corvid-runtime::db`
@@ -207,6 +234,13 @@ impl Clone for Value {
             // underlying connection lives until the last clone
             // drops (33S3b wires the actual runtime callback).
             Value::DbHandle(inner) => Value::DbHandle(inner.clone()),
+            // Phase 33R5b-a — JSON value/builder clones are just
+            // Arc increments. JsonValue's payload is immutable so
+            // clones share read-only access; JsonBuilder's payload
+            // is behind a Mutex so clones share mutable access
+            // (set_* on one clone is visible through another).
+            Value::JsonValue(value) => Value::JsonValue(value.clone()),
+            Value::JsonBuilder(builder) => Value::JsonBuilder(builder.clone()),
         }
     }
 }
@@ -231,6 +265,8 @@ impl Value {
                 format!("Stream<{}>", stream.backpressure_label())
             }
             Value::DbHandle(_) => "DbHandle".into(),
+            Value::JsonValue(_) => "JsonValue".into(),
+            Value::JsonBuilder(_) => "JsonBuilder".into(),
         }
     }
 
@@ -297,6 +333,16 @@ impl PartialEq for Value {
             // *different* handles (consistent with how rusqlite
             // treats independent connections).
             (Value::DbHandle(a), Value::DbHandle(b)) => Arc::ptr_eq(a, b),
+            // Phase 33R5b-a — JsonValue equality is STRUCTURAL:
+            // two JSON values with the same shape are equal even
+            // if they were parsed from different sources. This
+            // matches the natural mental model and matches
+            // serde_json::Value's own PartialEq. JsonBuilder
+            // equality is IDENTITY (Arc ptr_eq) because the
+            // builder is mutable and structural equality would
+            // race against concurrent mutations.
+            (Value::JsonValue(a), Value::JsonValue(b)) => **a == **b,
+            (Value::JsonBuilder(a), Value::JsonBuilder(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }

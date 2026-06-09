@@ -922,6 +922,24 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                     .await?
+                } else if is_stdlib_json_tool(callee_name) {
+                    // Phase 33R5b-a — typed-Value dispatch for the
+                    // executing JSON stdlib tools. `json_parse`
+                    // returns `Value::JsonValue(Arc<...>)` wrapped
+                    // in `Value::ResultOk` / `Value::ResultErr`;
+                    // `json_get_*` extract the Arc and return
+                    // typed Result values; `json_object_new`
+                    // returns `Value::JsonBuilder(Arc<Mutex<...>>)`;
+                    // `json_object_set_*` mutate and return the
+                    // same builder; `json_object_finish` returns
+                    // a `String` snapshot.
+                    dispatch_stdlib_json_tool(
+                        self.runtime,
+                        callee_name,
+                        &arg_values,
+                        span,
+                    )
+                    .await?
                 } else {
                     let result = self
                         .runtime
@@ -1273,4 +1291,327 @@ fn extract_db_params(
         out.push(value);
     }
     Ok(out)
+}
+
+// ============================================================================
+// Phase 33R5b-a — typed-Value dispatch for the executing JSON
+// stdlib tools (`json_parse` / `json_get_*` / `json_object_new`
+// / `json_object_set_*` / `json_object_finish`).
+//
+// `is_stdlib_json_tool` is the exact-name gate (mirrors
+// `is_stdlib_io_tool` / `is_stdlib_http_tool` / `is_stdlib_db_tool`).
+// User-defined tools whose names happen to start with `json_`
+// fall through to the normal JSON dispatch path.
+// ============================================================================
+
+fn is_stdlib_json_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "json_parse"
+            | "json_get_int"
+            | "json_get_float"
+            | "json_get_string"
+            | "json_get_bool"
+            | "json_get_object"
+            | "json_get_array"
+            | "json_object_new"
+            | "json_object_set_int"
+            | "json_object_set_float"
+            | "json_object_set_string"
+            | "json_object_set_bool"
+            | "json_object_finish"
+    )
+}
+
+async fn dispatch_stdlib_json_tool(
+    runtime: &Runtime,
+    callee_name: &str,
+    arg_values: &[Value],
+    span: Span,
+) -> Result<Value, InterpError> {
+    match callee_name {
+        "json_parse" => {
+            let text = expect_string_arg(arg_values, 0, callee_name, span)?;
+            let result = runtime
+                .json_parse_tool(text)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_arc_json(result))
+        }
+        "json_get_int" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_int_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_int(result))
+        }
+        "json_get_float" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_float_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_float(result))
+        }
+        "json_get_string" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_string_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_string(result))
+        }
+        "json_get_bool" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_bool_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_bool(result))
+        }
+        "json_get_object" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_object_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_arc_json(result))
+        }
+        "json_get_array" => {
+            let handle = expect_json_value_arg(arg_values, 0, callee_name, span)?;
+            let field = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let result = runtime
+                .json_get_array_tool(&handle, field)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(wrap_result_array(result))
+        }
+        "json_object_new" => {
+            let builder = runtime
+                .json_object_new_tool()
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::JsonBuilder(builder))
+        }
+        "json_object_set_int" => {
+            let builder = expect_json_builder_arg(arg_values, 0, callee_name, span)?;
+            let key = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let value = expect_int_arg(arg_values, 2, callee_name, span)?;
+            let result = runtime
+                .json_object_set_int_tool(builder, key, value)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::JsonBuilder(result))
+        }
+        "json_object_set_float" => {
+            let builder = expect_json_builder_arg(arg_values, 0, callee_name, span)?;
+            let key = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let value = expect_float_arg(arg_values, 2, callee_name, span)?;
+            let result = runtime
+                .json_object_set_float_tool(builder, key, value)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::JsonBuilder(result))
+        }
+        "json_object_set_string" => {
+            let builder = expect_json_builder_arg(arg_values, 0, callee_name, span)?;
+            let key = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let value = expect_string_arg(arg_values, 2, callee_name, span)?;
+            let result = runtime
+                .json_object_set_string_tool(builder, key, value)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::JsonBuilder(result))
+        }
+        "json_object_set_bool" => {
+            let builder = expect_json_builder_arg(arg_values, 0, callee_name, span)?;
+            let key = expect_string_arg(arg_values, 1, callee_name, span)?;
+            let value = expect_bool_arg(arg_values, 2, callee_name, span)?;
+            let result = runtime
+                .json_object_set_bool_tool(builder, key, value)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::JsonBuilder(result))
+        }
+        "json_object_finish" => {
+            let builder = expect_json_builder_arg(arg_values, 0, callee_name, span)?;
+            let result = runtime
+                .json_object_finish_tool(&builder)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            Ok(Value::String(Arc::from(result.as_str())))
+        }
+        other => Err(InterpError::new(
+            InterpErrorKind::DispatchFailed(format!(
+                "stdlib json dispatch reached unknown name `{other}` — gate-keeper drift"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_string_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<String, InterpError> {
+    match args.get(index) {
+        Some(Value::String(s)) => Ok(s.to_string()),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be a String"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_int_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<i64, InterpError> {
+    match args.get(index) {
+        Some(Value::Int(n)) => Ok(*n),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be an Int"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_float_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<f64, InterpError> {
+    match args.get(index) {
+        Some(Value::Float(f)) => Ok(*f),
+        Some(Value::Int(n)) => Ok(*n as f64),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be a Float"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_bool_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<bool, InterpError> {
+    match args.get(index) {
+        Some(Value::Bool(b)) => Ok(*b),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be a Bool"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_json_value_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<Arc<serde_json::Value>, InterpError> {
+    match args.get(index) {
+        Some(Value::JsonValue(arc)) => Ok(arc.clone()),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be a JsonValue (only `json_parse` mints these)"
+            )),
+            span,
+        )),
+    }
+}
+
+fn expect_json_builder_arg(
+    args: &[Value],
+    index: usize,
+    callee: &str,
+    span: Span,
+) -> Result<
+    Arc<std::sync::Mutex<serde_json::Map<String, serde_json::Value>>>,
+    InterpError,
+> {
+    match args.get(index) {
+        Some(Value::JsonBuilder(arc)) => Ok(arc.clone()),
+        _ => Err(InterpError::new(
+            InterpErrorKind::Other(format!(
+                "{callee} expected argument {index} to be a JsonBuilder (only `json_object_new` mints these)"
+            )),
+            span,
+        )),
+    }
+}
+
+/// Wrap a `Result<Arc<serde_json::Value>, String>` into a Corvid
+/// `Result<JsonValue, String>` Value. The Ok branch becomes a
+/// `Value::ResultOk(BoxedValue(Value::JsonValue(arc)))`, the Err
+/// branch becomes `Value::ResultErr(BoxedValue(Value::String))`.
+fn wrap_result_arc_json(
+    result: Result<Arc<serde_json::Value>, String>,
+) -> Value {
+    match result {
+        Ok(arc) => Value::ResultOk(BoxedValue::new(Value::JsonValue(arc))),
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+fn wrap_result_int(result: Result<i64, String>) -> Value {
+    match result {
+        Ok(n) => Value::ResultOk(BoxedValue::new(Value::Int(n))),
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+fn wrap_result_float(result: Result<f64, String>) -> Value {
+    match result {
+        Ok(f) => Value::ResultOk(BoxedValue::new(Value::Float(f))),
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+fn wrap_result_string(result: Result<String, String>) -> Value {
+    match result {
+        Ok(s) => Value::ResultOk(BoxedValue::new(Value::String(Arc::from(s.as_str())))),
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+fn wrap_result_bool(result: Result<bool, String>) -> Value {
+    match result {
+        Ok(b) => Value::ResultOk(BoxedValue::new(Value::Bool(b))),
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+fn wrap_result_array(
+    result: Result<Vec<Arc<serde_json::Value>>, String>,
+) -> Value {
+    match result {
+        Ok(arcs) => {
+            let list_items: Vec<Value> =
+                arcs.into_iter().map(Value::JsonValue).collect();
+            Value::ResultOk(BoxedValue::new(Value::List(ListValue::new(list_items))))
+        }
+        Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
 }

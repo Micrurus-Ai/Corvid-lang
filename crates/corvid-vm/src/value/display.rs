@@ -96,6 +96,11 @@ impl fmt::Display for Value {
                 "DbHandle(handle_id: {}, path: {})",
                 inner.handle_id, inner.path
             ),
+            Value::JsonValue(value) => write!(f, "JsonValue({})", value),
+            Value::JsonBuilder(builder) => match builder.lock() {
+                Ok(map) => write!(f, "JsonBuilder({} fields)", map.len()),
+                Err(_) => write!(f, "JsonBuilder(<poisoned>)"),
+            },
         }
     }
 }

@@ -156,6 +156,13 @@ fn render_value_inner(
         Value::DbHandle(inner) => {
             format!("DbHandle(path: {})", inner.path)
         }
+        Value::JsonValue(value) => {
+            format!("JsonValue({})", value)
+        }
+        Value::JsonBuilder(builder) => match builder.lock() {
+            Ok(map) => format!("JsonBuilder({} fields)", map.len()),
+            Err(_) => "JsonBuilder(<poisoned>)".to_string(),
+        },
     }
 }
 

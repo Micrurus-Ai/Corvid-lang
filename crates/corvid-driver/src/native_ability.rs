@@ -112,6 +112,10 @@ fn is_native_value_type(ty: &Type) -> bool {
         // through agent signatures) to the interpreter so the user
         // never sees a confusing native-codegen error mid-build.
         Type::DbHandle => false,
+        // Phase 33R5b-a — same rationale for JsonValue and
+        // JsonBuilder. Interpreter-tier only until the cdylib
+        // bridging slice ships.
+        Type::JsonValue | Type::JsonBuilder => false,
         Type::Nothing
         | Type::Function { .. }
         | Type::Stream(_)

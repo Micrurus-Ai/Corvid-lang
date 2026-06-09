@@ -153,6 +153,7 @@ impl EffectRegistry {
         registry.register_io_effects();
         registry.register_http_effects();
         registry.register_db_effects();
+        registry.register_json_effects();
 
         for decl in decls {
             let mut profile = EffectProfile {
@@ -421,6 +422,33 @@ impl EffectRegistry {
             if !reversible {
                 dims.insert("reversible".into(), DimensionValue::Bool(false));
             }
+            self.effects.insert(
+                name.into(),
+                EffectProfile {
+                    name: name.into(),
+                    dimensions: dims,
+                },
+            );
+        }
+    }
+
+    /// Phase 33R5b-a: register the two built-in JSON effects —
+    /// `json_egress_read` (parsing + typed accessors) and
+    /// `json_egress_build` (object builder). Both are reversible
+    /// because JSON parse/access/build are process-internal and
+    /// have no durable side effects. The `io_source` value is
+    /// `data.json` so checkers can compose JSON operations into
+    /// data-flow analyses alongside the other I/O sources.
+    fn register_json_effects(&mut self) {
+        for (name, source) in [
+            ("json_egress_read", "data.json"),
+            ("json_egress_build", "data.json"),
+        ] {
+            let mut dims = HashMap::new();
+            dims.insert(
+                "io_source".into(),
+                DimensionValue::Name(source.into()),
+            );
             self.effects.insert(
                 name.into(),
                 EffectProfile {

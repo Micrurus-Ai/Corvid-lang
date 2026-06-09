@@ -439,6 +439,14 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`DbHandle` - the executing SQLite surface (`db_open` / `db_query` / `db_execute` from std/db.cor) is interpreter-only in 33S3; a future slice lands C-ABI opaque-pointer codegen so the handle can cross cdylib boundaries. Use the interpreter tier (`corvid run --tier interp`) until then.",
             span,
         )),
+        Type::JsonValue => Err(CodegenError::not_supported(
+            "`JsonValue` - the executing JSON surface (`json_parse` / `json_get_*` from std/json.cor) is interpreter-only in 33R5b; the corvid_json_* C-ABI exports already exist in ffi_bridge::json_exports, so the cdylib bridging is plumbing in a follow-up slice. Use the interpreter tier (`corvid run --tier interp`) until then.",
+            span,
+        )),
+        Type::JsonBuilder => Err(CodegenError::not_supported(
+            "`JsonBuilder` - the JSON builder surface (`json_object_new` / `json_object_set_*` / `json_object_finish` from std/json.cor) is interpreter-only in 33R5b; cdylib bridging lands in a follow-up slice. Use the interpreter tier (`corvid run --tier interp`) until then.",
+            span,
+        )),
         Type::Unknown => Err(CodegenError::cranelift(
             "encountered `Unknown` type at codegen — typecheck should have caught this",
             span,

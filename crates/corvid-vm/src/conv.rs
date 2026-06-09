@@ -111,6 +111,24 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
             "handle_id": inner.handle_id,
             "path": inner.path,
         }),
+        // Phase 33R5b-a — `Value::JsonValue`'s payload IS the JSON
+        // shape; the round trip is lossless. Unlike DbHandle there
+        // is no opacity gate because there is no underlying
+        // registry the value indexes into. Cloning the inner
+        // serde_json::Value is structurally necessary because the
+        // returned `serde_json::Value` is owned by the caller.
+        Value::JsonValue(value) => (**value).clone(),
+        // Phase 33R5b-a — `Value::JsonBuilder` is a process-
+        // internal mutation surface. Emit a snapshot of the
+        // current state for trace-debug visibility. There is no
+        // `json_to_value` round-trip for JsonBuilder (the type
+        // is constructed only by `json_object_new`).
+        Value::JsonBuilder(builder) => match builder.lock() {
+            Ok(map) => serde_json::Value::Object((*map).clone()),
+            Err(_) => serde_json::json!({
+                "tag": "json_builder_poisoned",
+            }),
+        },
     }
 }
 
@@ -241,6 +259,23 @@ pub fn json_to_value(
             expected: "DbHandle (only producible by the runtime's db_open dispatch path)".into(),
             got: "JSON payload — opaque handles cannot be reconstructed from JSON".into(),
         }),
+        // Phase 33R5b-a — `Type::JsonValue`'s payload IS the JSON
+        // shape, so the conversion is the natural identity:
+        // wrap the input in an Arc. Unlike DbHandle there is NO
+        // opacity gate here — the JsonValue type is a recoverable
+        // wrapper around `serde_json::Value`, not a registry
+        // index. This is what lets `json_parse` return a
+        // `Result<JsonValue, String>` whose Ok payload round-
+        // trips cleanly.
+        (Type::JsonValue, json) => Ok(Value::JsonValue(Arc::new(json))),
+        // Phase 33R5b-a — `Type::JsonBuilder` cannot be
+        // reconstructed from JSON either; the type is constructed
+        // ONLY by `json_object_new`'s typed-Value dispatch path.
+        // Reject the conversion if anyone tries.
+        (Type::JsonBuilder, _got) => Err(ConvError::TypeMismatch {
+            expected: "JsonBuilder (only producible by the runtime's json_object_new dispatch path)".into(),
+            got: "JSON payload — builders cannot be reconstructed from JSON".into(),
+        }),
         (expected, got) => Err(ConvError::TypeMismatch {
             expected: type_label(expected),
             got: json_kind(&got).into(),
@@ -310,6 +345,8 @@ fn type_label(t: &Type) -> String {
         Type::ResumeToken(inner) => format!("ResumeToken<{}>", type_label(inner)),
         Type::TraceId => "TraceId".into(),
         Type::DbHandle => "DbHandle".into(),
+        Type::JsonValue => "JsonValue".into(),
+        Type::JsonBuilder => "JsonBuilder".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

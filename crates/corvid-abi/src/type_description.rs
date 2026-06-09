@@ -107,6 +107,18 @@ pub fn emit_type_description(
         Type::DbHandle => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
         },
+        // Phase 33R5b-a — JsonValue and JsonBuilder route through
+        // the same future-slice extension point as DbHandle.
+        // The cdylib C-ABI for JSON is fully implemented in
+        // ffi_bridge::json_exports (handle-based), but the
+        // descriptor schema variant lands when the cdylib
+        // bridging slice ships.
+        Type::JsonValue => TypeDescription::Scalar {
+            scalar: ScalarTypeName::String,
+        },
+        Type::JsonBuilder => TypeDescription::Scalar {
+            scalar: ScalarTypeName::String,
+        },
     }
 }
 

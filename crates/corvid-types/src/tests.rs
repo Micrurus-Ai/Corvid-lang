@@ -5310,6 +5310,52 @@ agent outer(id: String) -> Grounded<String>:
 /// `type_ref_to_type_readonly` in `checker/types.rs` +
 /// `checker/expr.rs`, and `type_ref_to_type` in
 /// `corvid-ir/src/lower.rs`).
+/// Slice 33R5b-a — same shape as DbHandle: `JsonValue` resolves
+/// to `Type::JsonValue` (the opaque primitive). User code can
+/// name it in agent/tool signatures.
+#[test]
+fn json_value_named_type_resolves_to_the_opaque_primitive() {
+    let src = "\
+effect json_egress_read:
+    reversible: true
+
+tool json_parse(text: String) -> JsonValue uses json_egress_read
+
+agent demo(text: String) -> JsonValue:
+    return json_parse(text)
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "JsonValue must resolve as the opaque primitive with no typecheck errors; got {:?}",
+        c.errors
+    );
+    use crate::types::Type;
+    assert_eq!(Type::JsonValue.display_name(), "JsonValue");
+}
+
+/// Slice 33R5b-a — same shape for `JsonBuilder`.
+#[test]
+fn json_builder_named_type_resolves_to_the_opaque_primitive() {
+    let src = "\
+effect json_egress_build:
+    reversible: true
+
+tool json_object_new() -> JsonBuilder uses json_egress_build
+
+agent demo() -> JsonBuilder:
+    return json_object_new()
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "JsonBuilder must resolve as the opaque primitive with no typecheck errors; got {:?}",
+        c.errors
+    );
+    use crate::types::Type;
+    assert_eq!(Type::JsonBuilder.display_name(), "JsonBuilder");
+}
+
 #[test]
 fn db_handle_named_type_resolves_to_the_opaque_primitive() {
     let src = "\

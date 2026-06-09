@@ -260,6 +260,8 @@ pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, resolved: &Resolved) -> Type
             "Nothing" => Type::Nothing,
             "TraceId" => Type::TraceId,
             "DbHandle" => Type::DbHandle,
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
             other => resolved
                 .symbols
                 .lookup_def(other)

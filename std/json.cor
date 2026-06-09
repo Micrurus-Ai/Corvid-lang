@@ -1,0 +1,72 @@
+# Standard JSON parsing and building surface.
+#
+# Phase 33R5b — the executing JSON stdlib. Two complementary
+# shapes:
+#
+#   1. Opaque JsonValue + typed accessors — for dynamic JSON
+#      (LLM responses, debug tooling, polymorphic API
+#      responses). Parse text into a JsonValue, then access
+#      fields via typed getters that return Result<T, String>
+#      so type mismatches and missing fields surface as
+#      recoverable errors.
+#
+#   2. Typed-decoder convention (lands fully in 33R5b-b) — for
+#      typed APIs where the JSON shape matches a declared
+#      Corvid struct. User code declares a tool with the
+#      target type as its return type; the runtime decodes
+#      via serde + json_to_value against the declared type
+#      table.
+#
+# JSON has no security boundary beyond serde's own validation
+# (no I/O, no network, no filesystem). The structural property
+# the surface carries is `json.parse_safety_no_panic`: malformed
+# input returns Err, never panics.
+#
+# All three tools are non-deterministic from the typechecker's
+# perspective (decl-replayability rejects tool calls inside
+# @deterministic bodies regardless of effect), even though the
+# operations themselves are pure and process-internal. Programs
+# that need deterministic JSON access can wrap the calls in
+# their own audit layer or factor parse calls into a separate,
+# non-deterministic agent.
+
+# The four JSON effect rows. Read effects are reversible
+# (parsing and accessing JSON doesn't mutate observable state);
+# the build path is also reversible since `json_object_finish`
+# is a snapshot, not a commit. Named `json_egress_*` so the tool
+# names don't collide with the effect names (effects and tools
+# share a namespace at the resolver level — same trap as 33S1's
+# io_*, 33S2's http_*, 33S3's db_egress_*).
+effect json_egress_read:
+    reversible: true
+
+effect json_egress_build:
+    reversible: true
+
+public tool json_parse(text: String) -> Result<JsonValue, String> uses json_egress_read
+
+# Typed accessors. Each one returns Result<T, String> so the
+# typechecker forces user code to handle parse-time / access-
+# time errors. The error message names the field that violated
+# the expectation so user code can route a useful diagnostic
+# up to its callers.
+public tool json_get_int(value: JsonValue, field: String) -> Result<Int, String> uses json_egress_read
+public tool json_get_float(value: JsonValue, field: String) -> Result<Float, String> uses json_egress_read
+public tool json_get_string(value: JsonValue, field: String) -> Result<String, String> uses json_egress_read
+public tool json_get_bool(value: JsonValue, field: String) -> Result<Bool, String> uses json_egress_read
+public tool json_get_object(value: JsonValue, field: String) -> Result<JsonValue, String> uses json_egress_read
+public tool json_get_array(value: JsonValue, field: String) -> Result<List<JsonValue>, String> uses json_egress_read
+
+# Builder side. `json_object_new` returns an empty builder;
+# `json_object_set_*` mutate the inner Mutex and return the
+# SAME builder for fluent chaining (clones share access to the
+# same underlying Map); `json_object_finish` snapshots the
+# current state and serialises to a String. The builder remains
+# usable for further set+finish cycles — the semantics are
+# snapshot, not consume.
+public tool json_object_new() -> JsonBuilder uses json_egress_build
+public tool json_object_set_int(builder: JsonBuilder, key: String, value: Int) -> JsonBuilder uses json_egress_build
+public tool json_object_set_float(builder: JsonBuilder, key: String, value: Float) -> JsonBuilder uses json_egress_build
+public tool json_object_set_string(builder: JsonBuilder, key: String, value: String) -> JsonBuilder uses json_egress_build
+public tool json_object_set_bool(builder: JsonBuilder, key: String, value: Bool) -> JsonBuilder uses json_egress_build
+public tool json_object_finish(builder: JsonBuilder) -> String uses json_egress_build

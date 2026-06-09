@@ -158,7 +158,13 @@ impl<'a> Checker<'a> {
                 // position (e.g. `let x = DbHandle`) is a TypeAsValue
                 // error, just like the other primitive type names.
                 // A `DbHandle` value can only come from `db_open`.
-                | BuiltIn::DbHandle => {
+                | BuiltIn::DbHandle
+                // Phase 33R5b-a — same shape for the JSON
+                // primitives: a `JsonValue` can only come from
+                // `json_parse`, and a `JsonBuilder` can only come
+                // from `json_object_new`.
+                | BuiltIn::JsonValue
+                | BuiltIn::JsonBuilder => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -545,6 +551,8 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
             "Nothing" => Type::Nothing,
             "DbHandle" => Type::DbHandle,
             "TraceId" => Type::TraceId,
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
             _ => checker
                 .symbols
                 .lookup_def(&name.name)

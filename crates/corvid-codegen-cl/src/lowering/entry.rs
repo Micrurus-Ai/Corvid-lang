@@ -434,6 +434,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::JsonValue | Type::JsonBuilder => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - the executing JSON surface is interpreter-only in 33R5b; an entry agent that returns a JSON handle has no native command-line representation. Convert to a printable shape (e.g. via `json_object_finish` returning String) for native execution, or use the interpreter tier (`corvid run --tier interp`).",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Function { .. } | Type::Unknown => Err(CodegenError::cranelift(
             format!("entry agent {role} has un-printable type `{}`", ty.display_name()),
             span,

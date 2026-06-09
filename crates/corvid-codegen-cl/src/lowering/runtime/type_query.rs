@@ -85,6 +85,12 @@ pub fn mangle_type_name(ty: &Type) -> String {
         // this entry just gains symbol layout — the mangled
         // string stays stable.
         Type::DbHandle => "DbHandle".into(),
+        // Phase 33R5b-a — stable mangled names so other passes
+        // don't crash on typeinfo lookup; actual emission errors
+        // out at `cl_type_for` with the interpreter-only
+        // diagnostic. Same shape as `DbHandle`.
+        Type::JsonValue => "JsonValue".into(),
+        Type::JsonBuilder => "JsonBuilder".into(),
         Type::RouteParams(_) => "RouteParams".into(),
         Type::Unknown => "Unknown".into(),
     }
@@ -464,6 +470,13 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // backend" diagnostic at `lower_expr` rather than crashing
         // codegen with an unhandled match arm.
         Type::DbHandle => false,
+        // Phase 33R5b-a — JsonValue / JsonBuilder are
+        // interpreter-tier only; native (Cranelift) representation
+        // lands in the cdylib-bridging slice. Until then, return
+        // false so the driver's tier-picker routes any program
+        // mentioning these types to the interpreter.
+        Type::JsonValue => false,
+        Type::JsonBuilder => false,
         Type::Nothing
         | Type::Function { .. }
         | Type::RouteParams(_)

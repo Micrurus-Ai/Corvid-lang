@@ -113,6 +113,13 @@ impl<'a> Checker<'a> {
             // refcounted Arc inside.
             "DbHandle" => Type::DbHandle,
             "TraceId" => Type::TraceId,
+            // Phase 33R5b-a — JsonValue and JsonBuilder are
+            // opaque primitives produced ONLY by the executing
+            // stdlib JSON tools. Same shape as DbHandle but
+            // without the opacity gate at json_to_value (the
+            // payload IS the JSON shape; no underlying registry).
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
             _ => match self.symbols.lookup_def(name) {
                 Some(id) => {
                     let entry = self.symbols.get(id);
@@ -226,6 +233,8 @@ impl<'a> Checker<'a> {
             "Nothing" => Type::Nothing,
             "DbHandle" => Type::DbHandle,
             "TraceId" => Type::TraceId,
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
             _ => match module.resolved.symbols.lookup_def(name) {
                 Some(def_id)
                     if matches!(

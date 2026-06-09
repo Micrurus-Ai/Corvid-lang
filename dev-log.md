@@ -4,6 +4,169 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33R5b-a closed: opaque JsonValue + JsonBuilder primitives + executing JSON tools (std/json.cor)
+
+Opened 33R5b (JSON batteries — gates 33S4 batteries-quickstart). The CTO call
+was Option C: ship BOTH opaque JsonValue/JsonBuilder primitives AND the typed-
+decoder convention. Three sub-slices because JSON is stateless (no Arc
+lifecycle, no policy, no security model beyond serde validation):
+
+- 33R5b-a: Type/Value primitives + std/json.cor + Runtime dispatch + tests
+- 33R5b-b: Typed-decoder convention + end-to-end driver tests
+- 33R5b-c: Invention proof (guarantees + tour + reference doc + inventions row + README catalog)
+
+### What 33R5b-a shipped
+
+`BuiltIn::JsonValue` and `BuiltIn::JsonBuilder` in `corvid-resolve` —
+registered as always-in-scope so user code can name the types in agent
+and tool signatures.
+
+`Type::JsonValue` and `Type::JsonBuilder` opaque primitives in
+`corvid-types`. Wired through 5 type-mapping sites: `named_type_to_type`,
+`named_type_in_module`, `type_ref_to_type_readonly`, IR
+`lower::type_ref_to_type`, abi `emit::resolve_typeref_to_type`. Naming
+either type in value position is a `TypeAsValue` error.
+
+`Value::JsonValue(Arc<serde_json::Value>)` — the payload IS the JSON
+shape; no underlying registry. Unlike DbHandle, NO opacity gate at
+`json_to_value` — converting `Type::JsonValue` from any JSON payload is
+the natural identity wrap. This is what lets `json_parse` return a
+`Result<JsonValue, String>` whose Ok payload round-trips cleanly.
+
+`Value::JsonBuilder(Arc<Mutex<serde_json::Map<String, Value>>>)` — the
+mutable builder side. The Arc-of-Mutex lets multiple references share
+the same map; `json_object_set_*` returns the SAME Arc so set+set+finish
+chains work without copying. `json_to_value` REJECTS `Type::JsonBuilder`
+because there's no JSON representation for a mutable builder (the type
+is only constructed by `json_object_new`).
+
+Updated 11+ Value/Type match-arm sites across `corvid-vm` (Clone,
+type_name, PartialEq, display, repl_display, conv::value_to_json +
+json_to_value + type_label), `corvid-codegen-cl` (mangle_type_name,
+is_native_value_type, cl_type_for, check_entry_boundary_type),
+`corvid-codegen-py` (python_type_hint_of), `corvid-driver`
+(native_ability::is_native_value_type), `corvid-prompt-format`
+(schema_for_inner), `corvid-abi` (type_description, emit). Backend
+codegen-cl emits structured `not_supported("interpreter-only in 33R5b;
+cdylib bridging lands in a follow-up slice")` diagnostics — the C-ABI
+`corvid_json_parse` / `corvid_json_get_field_*` / `corvid_json_object_*`
+exports already exist in `corvid-runtime::ffi_bridge::json_exports`, so
+the cdylib bridging IS plumbing-ready; just a follow-up slice connects
+the wire.
+
+### Equality semantics
+
+- `Value::JsonValue` PartialEq is STRUCTURAL — two JSON values with the
+  same shape are equal even if they were parsed from different sources.
+  Matches serde_json::Value's own PartialEq and the natural mental
+  model.
+- `Value::JsonBuilder` PartialEq is IDENTITY (`Arc::ptr_eq`) — structural
+  equality would race against concurrent mutations through the inner
+  Mutex.
+
+### `crates/corvid-runtime/src/json.rs`
+
+New module with pure functions:
+
+- `parse(text) -> Result<Arc<JsonValue>, String>` — pinned by the
+  load-bearing `malformed_json_returns_recoverable_error_never_panics`
+  test. Malformed input → recoverable Err. Never panics.
+- `get_int / get_float / get_string / get_bool / get_object / get_array`
+  — typed field accessors returning `Result<T, String>`. Each names the
+  property the caller violated in the error message (missing field, type
+  mismatch, source isn't an object).
+- `object_new() -> Arc<Mutex<Map>>` + `object_set_int / _float / _string
+  / _bool` + `object_finish(builder) -> String` — fluent builder with
+  snapshot-not-consume semantics.
+
+Two anchor constants: `GUARANTEE_ID_JSON_PARSE_SAFETY_NO_PANIC` and
+`GUARANTEE_ID_JSON_FIELD_TYPE_SAFETY` for the 33R5b-c guarantee rows.
+
+7 plumbing tests in `corvid-runtime/src/json.rs::tests`:
+1. `parse_round_trips_a_typical_object`
+2. **`malformed_json_returns_recoverable_error_never_panics`** — load-
+   bearing parse-safety property
+3. **`typed_accessor_mismatch_returns_recoverable_error`** — load-
+   bearing field-type-safety property
+4. `missing_field_returns_recoverable_error_naming_the_field`
+5. `get_object_returns_subtree_for_further_typed_access`
+6. `builder_set_and_finish_preserves_field_values`
+7. `builder_finish_is_a_snapshot_not_a_consumer` — pins the snapshot
+   semantics
+
+### `std/json.cor` (new)
+
+13 executing tool declarations + 2 inline effect declarations
+(`json_egress_read` reversible, `json_egress_build` reversible):
+
+- `json_parse(text) -> Result<JsonValue, String>`
+- `json_get_int / _float / _string / _bool / _object / _array(value,
+  field) -> Result<T, String>`
+- `json_object_new() -> JsonBuilder`
+- `json_object_set_int / _float / _string / _bool(builder, key, value)
+  -> JsonBuilder`
+- `json_object_finish(builder) -> String`
+
+### `corvid-types/src/effects.rs`
+
+New `register_json_effects` method called from `EffectRegistry::default`.
+Registers `json_egress_read` and `json_egress_build` with
+`io_source: data.json` and both reversible (parse/access/build are
+process-internal with no durable side effects).
+
+### `corvid-runtime/src/runtime/llm_dispatch.rs`
+
+13 new typed-Value dispatch methods on Runtime: `json_parse_tool` /
+`json_get_int_tool` / ... / `json_object_finish_tool`. Each routes
+through the corresponding `crate::json` function and returns typed
+Rust values (Arc<JsonValue>, Arc<Mutex<Map>>, i64, String, etc.) —
+the interpreter does the Corvid-Value wrapping.
+
+### `corvid-vm/src/interp.rs`
+
+`is_stdlib_json_tool(name) -> bool` gate (exact-match against the 13
+tool names) + `dispatch_stdlib_json_tool` async function that:
+1. Extracts typed args from the `arg_values: &[Value]` slice via
+   `expect_string_arg` / `expect_int_arg` / `expect_json_value_arg` /
+   `expect_json_builder_arg` helpers
+2. Calls the runtime's typed dispatch method
+3. Wraps the result in `Value::ResultOk` / `Value::ResultErr` /
+   `Value::JsonValue` / `Value::JsonBuilder` / `Value::String` as
+   appropriate
+
+Six `wrap_result_*` helpers (`wrap_result_int / _float / _string / _bool
+/ _arc_json / _array`) handle the Result<T, String> → Value::Result
+boxing.
+
+### Tests
+
+- 7 runtime-json plumbing tests pass.
+- 2 typechecker tests pass: `json_value_named_type_resolves_to_the_opaque_primitive`
+  and `json_builder_named_type_resolves_to_the_opaque_primitive`.
+- 1 new stdlib compile test: `std_json_compiles_as_corvid_source`
+  (stdlib test count 45 → 46).
+
+Validation gate: `cargo check --workspace --tests` clean; 109 vm + 252
+types + 7 runtime-json + 46 stdlib all pass; corpus verify exits 1 only
+on the two deliberate fixtures.
+
+### What 33R5b-b and 33R5b-c will add
+
+**33R5b-b** — typed-decoder convention: when an interpreter tool call
+has return type `Result<T, String>` where T is a user-declared struct,
+the runtime's stdlib decode dispatch routes through `serde_json::from_str`
++ `json_to_value(parsed, &T_type, &types_by_id)`. End-to-end driver
+tests covering both shapes (opaque + typed decoder), parse-failure
+recovery, and the JsonBuilder snapshot semantics.
+
+**33R5b-c** — invention proof: 2 guarantees
+(`json.parse_safety_no_panic`, `json.field_type_safety_at_access_boundary`)
++ claim coverage + tour topic + `docs/reference/stdlib/json.md`
+reference doc + inventions row + README catalog entry + 2
+@deterministic-rejection pinning tests.
+
+---
+
 ## 2026-06-09 - 33S3d closed (umbrella 33S3 done): invention proof artifacts for executing SQLite surface
 
 Closes the 33S3 umbrella. 33S3a shipped the `Value::DbHandle` + `Type::DbHandle`
