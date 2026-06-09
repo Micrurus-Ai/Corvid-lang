@@ -28,6 +28,9 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `io_source.fs_read_quarantine_on_replay` | effect_row | runtime_checked | runtime |
 | `io_source.http_ssrf_structural_block` | effect_row | runtime_checked | runtime |
 | `io_source.http_allowlist_enforcement` | effect_row | runtime_checked | runtime |
+| `io_source.sqlite_parameter_binding_only` | effect_row | runtime_checked | runtime |
+| `io_source.sqlite_write_quarantine_on_replay` | effect_row | runtime_checked | runtime |
+| `io_source.sqlite_read_passthrough_on_replay` | effect_row | runtime_checked | runtime |
 | `io_source.http_quarantine_on_replay` | effect_row | runtime_checked | runtime |
 | `grounded.provenance_required` | grounded | static | typecheck |
 | `grounded.propagation_across_calls` | grounded | out_of_scope | typecheck |
@@ -281,6 +284,52 @@ Every call to an executing HTTP tool checks the request URL's host against the p
 - `crates/corvid-driver/src/run.rs::corvid_toml_with_empty_http_allow_produces_unconfigured_policy`
 - `crates/corvid-driver/src/run.rs::corvid_toml_without_http_section_produces_unconfigured_policy`
 - `crates/corvid-driver/tests/executing_http_through_driver.rs::missing_http_allowlist_fails_closed_with_actionable_diagnostic`
+
+#### `io_source.sqlite_parameter_binding_only`
+- **class**: runtime_checked
+- **phase**: runtime
+
+Every parameter passed to `db_query` / `db_execute` (executing SQLite tools from std/db.cor) flows through `rusqlite::params_from_iter` over the typed `DbValue` enum — there is no string-interpolation path on the dispatch. The typechecker's `List<DbParam>` signature forces every value through the typed constructors (`db_param_int`, `db_param_text`, `db_param_float`, `db_param_bool`, `db_param_null`); a literal `"'; DROP TABLE users; --"` placed in a `db_param_text` value survives as TEXT data and never reaches SQLite's parser. This is the load-bearing structural property: SQL injection is prevented by the language's type system + the runtime's binding path, not by escaping or sanitisation.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_handle_registry_round_trip_against_memory_database`
+- `crates/corvid-driver/tests/executing_sqlite_through_driver.rs::real_corvid_program_round_trips_data_through_executing_sqlite_dispatch`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_param_text_with_sql_metacharacters_is_bound_as_data`
+- `crates/corvid-driver/tests/executing_sqlite_through_driver.rs::db_param_text_with_sql_metacharacters_survives_round_trip_through_real_corvid_program`
+
+#### `io_source.sqlite_write_quarantine_on_replay`
+- **class**: runtime_checked
+- **phase**: runtime
+
+A Substitute-mode replay runtime refuses every executing `db_execute` call. The dispatch path goes through `Runtime::db_execute_tool` which delegates to `DbHandleRegistry::execute`; the registry's write-quarantine flag (flipped by `RuntimeBuilder::build` during replay) short-circuits with `QuarantineViolation { surface: "db", .. }` regardless of SQL contents — INSERTs, UPDATEs, DELETEs, and DDL all blocked. The database is provably untouched during replay.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_handle_registry_round_trip_against_memory_database`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_blocks_execute_with_db_surface_violation`
+- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_db_execute_dispatch_from_escaping_to_database`
+
+#### `io_source.sqlite_read_passthrough_on_replay`
+- **class**: runtime_checked
+- **phase**: runtime
+
+A Substitute-mode replay runtime passes `db_query` calls through to the live `DbHandleRegistry` — SQLite reads don't escape the process so the write-quarantine flag is the floor for mutations only. A follow-up slice will add the trace-substitution upper gate (replay db_query against a recorded row event yields the recorded rows; a missing event diverges); 33S3d pins the dispatch-side read-passthrough property so a future refactor can't silently flip the policy and start blocking reads during replay.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_does_not_block_query`
+- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_db_query_dispatch_during_write_quarantine`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_does_not_block_query`
 
 #### `io_source.http_quarantine_on_replay`
 - **class**: runtime_checked

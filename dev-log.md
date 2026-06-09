@@ -4,6 +4,206 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S3d closed (umbrella 33S3 done): invention proof artifacts for executing SQLite surface
+
+Closes the 33S3 umbrella. 33S3a shipped the `Value::DbHandle` + `Type::DbHandle`
+opaque-handle plumbing. 33S3b shipped the runtime + executing tools +
+typed-Value dispatch. 33S3c shipped end-to-end driver acceptance + injection-
+proof through a real Corvid program + replay-quarantine fixtures. 33S3d ships
+the invention-shipping-contract artifacts: guarantees + claim coverage + tour
++ reference doc + inventions row + README catalog entry + 2 @deterministic-
+rejection pinning tests.
+
+The executing SQLite surface is now publicly discoverable, runnable, trust-
+anchored, and signable. The umbrella 33S3 ships as a v1.0 invention.
+
+### Three guarantees
+
+Three RuntimeChecked rows in
+`corvid-guarantees::registry::GUARANTEE_REGISTRY`:
+
+- `io_source.sqlite_parameter_binding_only` — the load-bearing structural
+  property. Every SQL parameter flows through `rusqlite::params_from_iter`
+  over the typed `DbValue` enum; the typechecker's `List<DbParam>` signature
+  forces every value through the typed constructors. There is no
+  string-interpolation path on the dispatch — SQL injection is prevented
+  STRUCTURALLY by the language's type system + the runtime's binding path,
+  not by escaping or sanitisation. Test refs include the load-bearing
+  injection-proof unit test in `db.rs` AND the load-bearing
+  injection-proof end-to-end test through a real Corvid program in
+  `executing_sqlite_through_driver.rs`.
+- `io_source.sqlite_write_quarantine_on_replay` — `db_execute` in
+  Substitute-mode replay refuses with `QuarantineViolation { surface:
+  "db", .. }` regardless of SQL contents.
+- `io_source.sqlite_read_passthrough_on_replay` — `db_query` not blocked
+  by the write-quarantine; the trace-substitution upper gate lands in a
+  follow-up slice once the trace schema carries row events.
+
+Three matching `pub const GUARANTEE_ID_*` anchors at the enforcement sites
+in `crates/corvid-runtime/src/db.rs` so the
+`every_enforced_guarantee_id_is_wired_to_workspace_source` sentinel passes
+without changes.
+
+### What is deliberately NOT a separate guarantee
+
+**Path confinement** is not a separate sqlite row because `db_open` reuses
+`IoToolPolicy::resolve` — the existing `io_source.fs_path_confinement`
+guarantee carries the property for both the io tools AND `db_open`. The
+SQLite test refs are folded into `fs_path_confinement`'s adversarial set
+so the cross-reference sentinel confirms the property holds across both
+surfaces. This is the right call: duplicating the confinement boundary
+would invite drift between the two surfaces; the structural argument
+"SQLite paths ARE file paths" is what makes the reuse correct.
+
+**The @deterministic-rejection property** gets no new row. Same rationale as
+33S1c and 33S2c: the existing decl-replayability rule rejects every tool
+call inside `@deterministic` bodies regardless of effect — the executing
+SQLite tools inherit the rejection automatically. 33S3d adds two pinning
+tests at `crates/corvid-types/src/tests.rs::deterministic_agent_calling_db_*_tool_is_rejected`
+so a future relaxation of the decl-replayability rule would surface as
+test breakage, not a silent regression.
+
+### Claim coverage
+
+The three new ids added to
+`corvid-guarantees::signed_claim::SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`. A
+signed cdylib whose source uses `db_open` / `db_query` / `db_execute`
+(declared in `std/db.cor`) can now assert these three RuntimeChecked
+properties in its claim manifest. `corvid build --sign` will accept the
+descriptor. The reused `io_source.fs_path_confinement` is already in the
+whitelist (33S1c), so `db_open`-using cdylibs inherit that claim too.
+
+### Reference doc
+
+`docs/reference/stdlib/db.md` (~270 lines) — REPLACES the prior
+"envelopes only" framing. Structurally parallel to `io.md` (33S1c) and
+`http.md` (33S2c):
+
+- Quick reference with the three executing tools + the typed param
+  constructors.
+- Per-tool blurbs naming the effect each `uses`.
+- A dedicated "The `DbHandle` opaque type" section explaining why the
+  type is load-bearing — no field-construction shape (it's a primitive),
+  no JSON marshalling path (opacity gate in `conv.rs`), Registry is sole
+  allocator. The "you cannot fabricate a SQLite connection in user code"
+  argument made explicit.
+- A "The `DbParam` parameter type" section with the typed constructors
+  and the "use the typed constructors, NEVER construct positionally"
+  prescription.
+- Security model split into three clearly-labeled subsections:
+  parameter-binding-only (with the worked
+  `db_param_text("'; DROP TABLE users; --")` injection-proof example),
+  `[io] root` reuse (no separate `[db]` allowlist), replay
+  write-quarantine.
+- A guarantees table linking back to `core-semantics.md`.
+- A worked typed-user-store example demonstrating the three properties
+  together.
+- An explicit "post-v1.0 — what's deliberately NOT in scope" section
+  covering Postgres (envelope-only), trace-substitution for db_query
+  rows, early Arc-drop registry-slot release, and cdylib codegen.
+
+`docs/reference/stdlib/README.md` gained a `## std.db` section linking
+to `db.md` + summarising the 3 executing tools + the 5 typed param
+constructors + the 3 RuntimeChecked guarantees + the IoToolPolicy reuse
+rationale.
+
+### Tour topic
+
+`corvid tour --topic sqlite` added to
+`crates/corvid-tour-catalog/src/lib.rs`. The source uses `:memory:` so
+the tour runs OFFLINE (no test database file needed):
+
+```cor
+import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+
+agent record_user(email: String) -> Int:
+    handle = db_open(":memory:")
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
+    return rows[0].rows_affected
+```
+
+The source compiles through the `corvid_driver::compile` gate
+(`all_tour_sources_compile` test passes 35/35; was 34, +1 for sqlite).
+The pitch text names the three load-bearing structural properties
+(injection-resistance, [io] root reuse, replay write-quarantine), the
+opaque `DbHandle` primitive, the `@deterministic` rejection, the SQLite-
+only scope (Postgres remains envelope-only), and the `:memory:` offline-
+friendly choice.
+
+### Invention catalog
+
+`docs/reference/inventions.md` row added immediately after the
+HTTP-Client surface row, pointing at the end-to-end driver test, the
+`DbHandleRegistry` tests, and the replay-quarantine fixtures.
+
+`README.md`'s Verification section gains an "Executing SQLite Surface"
+catalog entry directly after "Executing HTTP-Client Surface", carrying:
+
+- A three-bullet summary of the load-bearing structural properties.
+- The signing claim that the three new ids + the reused
+  `io_source.fs_path_confinement` enable.
+- The worked typed-user-store example with the
+  `db_param_text` constructor.
+- The SQLite-only scope statement (Postgres envelope-only).
+- The standard Spec / Tour / Roadmap / Proof / Non-scope footer.
+
+### Validation
+
+- 28 guarantee tests pass (the new 3 rows participate fully via the
+  enforcement-site anchors).
+- 35 tour topics compile (was 34 after 33S2c; +1 for sqlite).
+- 45 stdlib tests + 9 runtime-db tests + 14 replay-quarantine + 3
+  sqlite-e2e + 3 http-e2e + 1 io-e2e + 2 deterministic-rejection all
+  pass.
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What the executing SQLite surface now provides end-to-end
+
+```
+$ cat corvid.toml
+[io]
+root = "./data"
+
+[http]
+allow = []
+
+$ cat src/main.cor
+import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+
+agent main() -> Int:
+    handle = db_open(":memory:")
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text("alice")])
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text("alice")])
+    return rows[0].rows_affected
+
+$ corvid run src/main.cor
+# → real SQLite round trip through :memory:, returns 0 (SELECT envelope's rows_affected)
+```
+
+`db_open("../../etc/passwd")` is refused by IoToolPolicy. A
+`db_execute(handle, "INSERT...", [db_param_text("'; DROP TABLE users; --")])`
+binds the attack string as data (the table survives). A `corvid replay
+<trace>` refuses `db_execute` with `QuarantineViolation { surface: "db",
+.. }`. A `@deterministic agent main(): db_query(...)` is a compile error.
+A `corvid build --sign` of a cdylib using these tools accepts a descriptor
+declaring the three new claim ids + the reused fs_path_confinement.
+
+Phase 33S3 (executing SQLite surface) is done.
+
+The umbrella **33S — executing I/O surfaces** is now COMPLETE: 33S0
+(foundation), 33S1 (file I/O), 33S2 (HTTP client), 33S3 (SQLite) all
+shipped with full invention contracts (README catalog, tour, reference
+doc, guarantees, claim coverage). The next ROADMAP phase is 33S4
+(batteries quickstart) which gates on 33R5b (json batteries) shipping
+first.
+
+---
+
 ## 2026-06-09 - 33S3c closed: end-to-end + injection-proof + replay-quarantine acceptance for executing SQLite surface
 
 Proved 33S3b's executing SQLite surface works through the full driver

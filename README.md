@@ -604,6 +604,37 @@ Roadmap: [Phase 33S2](./ROADMAP.md)
 Proof: [end-to-end HTTP tests](./crates/corvid-driver/tests/executing_http_through_driver.rs) + [policy tests](./crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: Enforces SSRF + allowlist + replay quarantine on the URL host; does not police response-body content or rewrite request headers.
 
+#### Executing SQLite Surface
+
+Corvid's `std/db` module ships three executing tools — `db_open`, `db_query`, `db_execute` — that flow through typed effect rows (`db_egress_open`, `db_egress_read`, `db_egress_write`) and three **load-bearing structural properties**:
+
+1. **SQL injection is prevented structurally**, not by escaping. The `db_query` / `db_execute` tools' `List<DbParam>` signature forces every value through the typed constructors (`db_param_int`, `db_param_text`, etc.), and the runtime binds via `rusqlite::params_from_iter` over typed `DbValue`s. There is no `format!` call anywhere on the dispatch path; a literal `"'; DROP TABLE users; --"` placed in `db_param_text` survives as text data and never reaches SQLite's parser. The structural argument is pinned by a runtime unit test AND an end-to-end driver test against a real Corvid program.
+
+2. **`[io] root` path confinement reuses the file-I/O boundary.** `db_open` routes through the same `IoToolPolicy` the io tools use; SQLite is structurally as narrow as `io_write_text`. No separate `[db]` allowlist exists. The documented special case `":memory:"` bypasses path resolution.
+
+3. **`DbHandle` is an opaque, refcounted primitive type.** Constructed only by `db_open`'s typed-Value dispatch path; user code cannot forge a handle through JSON round-trip (the VM's `json_to_value` REFUSES to mint a `Type::DbHandle` from any payload, including the trace-debug sentinel shape).
+
+The security boundary is **declared in `corvid.toml`** (via `[io] root`) and signable: a signed cdylib carries `io_source.sqlite_parameter_binding_only`, `io_source.sqlite_write_quarantine_on_replay`, `io_source.sqlite_read_passthrough_on_replay`, and the reused `io_source.fs_path_confinement` in its claim manifest.
+
+```corvid
+import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+
+agent record_user(email: String) -> Int:
+    handle = db_open(":memory:")
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
+    return rows[0].rows_affected
+```
+
+Calls inside a `@deterministic` agent are rejected at typecheck. Calls during Substitute-mode replay refuse `db_execute` with `QuarantineViolation { surface: "db", .. }` — the database is provably untouched. SQLite only; the Postgres path remains envelope-only (declare a Postgres tool in user code and reach `corvid-runtime::PostgresDbRuntime` from a tool wrapper).
+
+Spec: [`std.db` reference](./docs/reference/stdlib/db.md)
+Tour: `corvid tour --topic sqlite`
+Roadmap: [Phase 33S3](./ROADMAP.md)
+Proof: [end-to-end SQLite tests](./crates/corvid-driver/tests/executing_sqlite_through_driver.rs) + [DbHandleRegistry tests](./crates/corvid-runtime/src/db.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: SQLite only — the Postgres path remains envelope-only. Path confinement reuses `[io] root`; no separate `[db]` allowlist exists.
+
 ## Architecture
 
 ```text

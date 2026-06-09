@@ -92,6 +92,48 @@ See [`io.md`](./io.md) for the full reference, including the corvid.toml
 `[io] root` security model, the `CORVID_IO_ROOT` env override, and the
 envelope schemas.
 
+## `std.db`
+
+`std/db.cor` defines the executing SQLite surface added in Phase 33S3 plus
+typed parameter constructors and envelope types. The Postgres path remains
+envelope-only — declare your Postgres tool in user code and reach the
+`corvid-runtime::PostgresDbRuntime` from a tool wrapper.
+
+Executing tools:
+
+- `db_open(path) -> DbHandle uses db_egress_open` — executing tool
+- `db_query(handle, sql, params) -> List<DbResult> uses db_egress_read` — executing tool
+- `db_execute(handle, sql, params) -> DbResult uses db_egress_write` — executing tool
+
+Typed parameter constructors (the typechecker's `List<DbParam>` signature
+forces every value through these — there is no string-interpolation path):
+
+- `db_param_int(value)`, `db_param_float(value)`, `db_param_text(value)`,
+  `db_param_bool(value)`, `db_param_null()`
+
+`DbHandle` is an opaque, refcounted primitive type produced ONLY by
+`db_open`. The opacity is structural: there is no path in user code that
+fabricates a `DbHandle`. See the [reference](./db.md) for the security
+argument.
+
+The executing tools enforce three RuntimeChecked guarantees:
+`io_source.sqlite_parameter_binding_only` (all SQL parameters bound via
+`rusqlite::params_from_iter`; no interpolation),
+`io_source.sqlite_write_quarantine_on_replay` (`db_execute` refuses
+during Substitute-mode replay), and `io_source.sqlite_read_passthrough_on_replay`
+(`db_query` not blocked; trace-substitution upper gate lands in a follow-up
+slice). `db_open` reuses the existing `io_source.fs_path_confinement`
+guarantee — there is no separate `[db]` allowlist, the SQLite path
+boundary is the same `[io] root` the file-I/O surface enforces.
+
+Programs that call these tools from a `@deterministic` agent are rejected
+at typecheck (the existing decl-replayability rule treats all tool calls
+as non-deterministic).
+
+See [`db.md`](./db.md) for the full reference, including the `[io] root`
+reuse, the typed `DbParam` value-binding shapes, the worked typed-user-store
+example, and the v1.0 post-scope.
+
 ## `std.secrets`
 
 `std/secrets.cor` defines `SecretReadEnvelope` plus constructors for present and

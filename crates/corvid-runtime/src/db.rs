@@ -67,6 +67,45 @@ impl DbHandleInner {
     }
 }
 
+/// Phase 33S3d — anchor for the parameter-binding-only guarantee.
+/// `DbHandleRegistry::query` and `DbHandleRegistry::execute` are
+/// the enforcement sites: every parameter flows through
+/// `rusqlite::params_from_iter` over the typed `DbValue` enum,
+/// and the typechecker's `List<DbParam>` signature on the
+/// `db_query` / `db_execute` tools forces every value through
+/// the typed constructors in `std/db.cor` (`db_param_int` /
+/// `db_param_text` / etc.). There is no string-interpolation
+/// path anywhere on the dispatch — the language and the runtime
+/// together prevent SQL injection structurally. The
+/// `corvid-guarantees` inverse-coverage sentinel uses this
+/// anchor to confirm the registry row is wired to the
+/// enforcement code.
+pub const GUARANTEE_ID_IO_SOURCE_SQLITE_PARAMETER_BINDING_ONLY: &str =
+    "io_source.sqlite_parameter_binding_only";
+
+/// Phase 33S3d — anchor for the write-quarantine guarantee.
+/// `DbHandleRegistry::execute` short-circuits with
+/// `QuarantineViolation { surface: "db", .. }` when the
+/// `quarantine_writes` flag is set (the flag is flipped by
+/// `RuntimeBuilder::build` during Substitute-mode replay). The
+/// database is provably untouched during replay regardless of
+/// SQL contents.
+pub const GUARANTEE_ID_IO_SOURCE_SQLITE_WRITE_QUARANTINE_ON_REPLAY: &str =
+    "io_source.sqlite_write_quarantine_on_replay";
+
+/// Phase 33S3d — anchor for the read-passthrough guarantee.
+/// `DbHandleRegistry::query` is NOT gated by the
+/// `quarantine_writes` flag — SQLite reads don't escape the
+/// process so the write-quarantine flag is the floor for
+/// mutations only. A follow-up slice will add the trace-
+/// substitution upper gate (replay db_query against a recorded
+/// row event yields the recorded rows; a missing event
+/// diverges); 33S3d pins the dispatch-side read-passthrough
+/// property so a future refactor can't silently flip the
+/// policy and start blocking reads during replay.
+pub const GUARANTEE_ID_IO_SOURCE_SQLITE_READ_PASSTHROUGH_ON_REPLAY: &str =
+    "io_source.sqlite_read_passthrough_on_replay";
+
 // ============================================================================
 // Phase 33S3b — DbHandleRegistry.
 //

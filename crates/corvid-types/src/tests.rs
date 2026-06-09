@@ -3718,6 +3718,68 @@ agent fetch_status(url: String) -> String:
     );
 }
 
+/// Slice 33S3d — same rejection covers the executing SQLite
+/// read surface. A `tool` declared with `uses db_egress_read`
+/// called from a `@deterministic` agent is a typecheck-phase
+/// compile error. The user-facing promise: a pure agent cannot
+/// accidentally read from a database — even if a future
+/// refactor introduces a DB-touching dependency, the compiler
+/// catches it before any code ships. No SQLite-specific
+/// checker logic needed; the existing decl-replayability rule
+/// rejects every tool call inside `@deterministic` bodies.
+#[test]
+fn deterministic_agent_calling_db_query_tool_is_rejected() {
+    let src = "\
+effect db_egress_read:
+    reversible: true
+
+tool db_query(handle: String, sql: String) -> String uses db_egress_read
+
+@deterministic
+agent fetch_row(handle: String, sql: String) -> String:
+    return db_query(handle, sql)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "db_query" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for db_egress_read tool invocation, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 33S3d — same rejection fires for the write-shape tool
+/// (uses the non-reversible `db_egress_write` effect). Confirms
+/// the determinism rule is decl-kind-based and not sensitive to
+/// the reversibility dimension on the effect row — mirrors the
+/// 33S1b / 33S2c pinning tests for io_write / http_post.
+#[test]
+fn deterministic_agent_calling_db_execute_tool_is_rejected() {
+    let src = "\
+effect db_egress_write:
+    reversible: false
+
+tool db_execute(handle: String, sql: String) -> String uses db_egress_write
+
+@deterministic
+agent persist_row(handle: String, sql: String) -> String:
+    return db_execute(handle, sql)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "db_execute" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for db_egress_write tool invocation, got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 33S2c — same rejection fires for the POST-shape tool
 /// (uses the non-reversible `http_egress_post` effect). Confirms
 /// the determinism rule is decl-kind-based and not sensitive to

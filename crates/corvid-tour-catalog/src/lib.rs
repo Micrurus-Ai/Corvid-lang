@@ -472,6 +472,25 @@ agent load_summary(date: String) -> String:
 "#,
     },
     TourTopic {
+        name: "sqlite",
+        title: "Executing SQLite Surface",
+        category: "Executing I/O",
+        pitch: "Corvid's std/db tools perform real SQLite operations through three load-bearing structural properties: SQL injection is prevented STRUCTURALLY (the typechecker's List<DbParam> signature + the runtime's rusqlite::params_from_iter binding path together make string interpolation impossible — a literal `\"'; DROP TABLE users; --\"` placed in db_param_text survives as data); path confinement REUSES [io] root from the file-I/O surface (db_open is structurally as narrow as io_write_text); replay quarantine refuses db_execute regardless of SQL contents. The DbHandle returned by db_open is an opaque, refcounted language primitive — user code cannot construct or forge one. Calls from @deterministic agents are rejected at typecheck. The tour uses `:memory:` so it runs offline; production programs configure persistent paths through corvid.toml's [io] root.",
+        spec: "docs/reference/stdlib/db.md",
+        roadmap: "Phase 33S3 executing SQLite surface",
+        test: "crates/corvid-driver/tests/executing_sqlite_through_driver.rs + crates/corvid-runtime/src/db.rs DbHandleRegistry tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_db_* fixtures",
+        non_scope: "SQLite only; the Postgres path remains envelope-only (declare a Postgres tool in user code). Path confinement reuses [io] root; no separate [db] allowlist.",
+        source: r#"import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+
+agent record_user(email: String) -> Int:
+    handle = db_open(":memory:")
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
+    return rows[0].rows_affected
+"#,
+    },
+    TourTopic {
         name: "http-client",
         title: "Executing HTTP-Client Surface",
         category: "Executing I/O",

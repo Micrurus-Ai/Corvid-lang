@@ -72,6 +72,24 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "io_source.http_ssrf_structural_block",
     "io_source.http_allowlist_enforcement",
     "io_source.http_quarantine_on_replay",
+    // Slice 33S3d — the three executing SQLite guarantees.
+    // A signed cdylib whose source uses `db_open` / `db_query`
+    // / `db_execute` (declared in std/db.cor) asserts these
+    // three RuntimeChecked properties in its claim manifest:
+    // structural parameter-binding-only (no SQL interpolation
+    // path exists; the typechecker's List<DbParam> signature +
+    // rusqlite::params_from_iter together prevent injection),
+    // write quarantine on replay (db_execute refuses during
+    // Substitute-mode), and read passthrough on replay (db_query
+    // is not blocked; trace-substitution upper gate lands in a
+    // follow-up slice). Path confinement reuses the existing
+    // io_source.fs_path_confinement guarantee — db_open routes
+    // through IoToolPolicy::resolve the same way the io tools
+    // do, so a signed cdylib that uses db_open inherits the
+    // fs_path_confinement claim automatically.
+    "io_source.sqlite_parameter_binding_only",
+    "io_source.sqlite_write_quarantine_on_replay",
+    "io_source.sqlite_read_passthrough_on_replay",
     "grounded.provenance_required",
     // `grounded.propagation_across_calls` removed 2026-05-08 by
     // Phase 35V-T1-B — downgraded to OutOfScope because the

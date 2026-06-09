@@ -359,6 +359,118 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-driver/tests/executing_http_through_driver.rs::missing_http_allowlist_fails_closed_with_actionable_diagnostic",
         ],
     },
+    // ----- io_source dimension (Phase 33S3d) ----------------------
+    //
+    // The executing SQLite surface (`db_open` / `db_query` /
+    // `db_execute`, declared in `std/db.cor`) ships three
+    // runtime-checked guarantees. They classify what the runtime
+    // enforces about ANY call to these tools: structural
+    // parameter-binding-only (no string interpolation path exists,
+    // the typechecker's `List<DbParam>` signature forces every
+    // value through typed constructors), write quarantine on
+    // replay (db_execute refuses with `QuarantineViolation
+    // { surface: "db", .. }` during Substitute-mode), and read
+    // passthrough on replay (db_query is not blocked by the
+    // write-quarantine; a future slice adds the trace-substitution
+    // upper gate).
+    //
+    // Path confinement is NOT a separate sqlite guarantee row
+    // because `db_open` reuses `IoToolPolicy::resolve` — the
+    // existing `io_source.fs_path_confinement` guarantee carries
+    // the property for both the io tools AND `db_open`. The
+    // sqlite test refs are added to fs_path_confinement's
+    // adversarial set above so the cross-reference sentinel
+    // confirms the property holds across both surfaces.
+    //
+    // The @deterministic-rejection property is NOT a separate
+    // guarantee here — same rationale as 33S1c (io.*) and 33S2c
+    // (http.*): the existing decl-replayability rule covers all
+    // tool calls regardless of effect. Slice 33S3d adds two
+    // pinning tests at
+    // `crates/corvid-types/src/tests.rs::deterministic_agent_calling_db_*_tool_is_rejected`
+    // so the rule can't quietly relax for SQLite either.
+    Guarantee {
+        id: "io_source.sqlite_parameter_binding_only",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Every parameter passed to `db_query` / `db_execute` \
+             (executing SQLite tools from std/db.cor) flows \
+             through `rusqlite::params_from_iter` over the typed \
+             `DbValue` enum — there is no string-interpolation \
+             path on the dispatch. The typechecker's `List<DbParam>` \
+             signature forces every value through the typed \
+             constructors (`db_param_int`, `db_param_text`, \
+             `db_param_float`, `db_param_bool`, `db_param_null`); \
+             a literal `\"'; DROP TABLE users; --\"` placed in a \
+             `db_param_text` value survives as TEXT data and \
+             never reaches SQLite's parser. This is the load-\
+             bearing structural property: SQL injection is \
+             prevented by the language's type system + the \
+             runtime's binding path, not by escaping or \
+             sanitisation.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_handle_registry_round_trip_against_memory_database",
+            "crates/corvid-driver/tests/executing_sqlite_through_driver.rs::real_corvid_program_round_trips_data_through_executing_sqlite_dispatch",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_param_text_with_sql_metacharacters_is_bound_as_data",
+            "crates/corvid-driver/tests/executing_sqlite_through_driver.rs::db_param_text_with_sql_metacharacters_survives_round_trip_through_real_corvid_program",
+        ],
+    },
+    Guarantee {
+        id: "io_source.sqlite_write_quarantine_on_replay",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A Substitute-mode replay runtime refuses every \
+             executing `db_execute` call. The dispatch path goes \
+             through `Runtime::db_execute_tool` which delegates \
+             to `DbHandleRegistry::execute`; the registry's \
+             write-quarantine flag (flipped by \
+             `RuntimeBuilder::build` during replay) short-\
+             circuits with `QuarantineViolation { surface: \
+             \"db\", .. }` regardless of SQL contents — \
+             INSERTs, UPDATEs, DELETEs, and DDL all blocked. \
+             The database is provably untouched during replay.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_handle_registry_round_trip_against_memory_database",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_blocks_execute_with_db_surface_violation",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_db_execute_dispatch_from_escaping_to_database",
+        ],
+    },
+    Guarantee {
+        id: "io_source.sqlite_read_passthrough_on_replay",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A Substitute-mode replay runtime passes `db_query` \
+             calls through to the live `DbHandleRegistry` — \
+             SQLite reads don't escape the process so the \
+             write-quarantine flag is the floor for mutations \
+             only. A follow-up slice will add the trace-\
+             substitution upper gate (replay db_query against a \
+             recorded row event yields the recorded rows; a \
+             missing event diverges); 33S3d pins the \
+             dispatch-side read-passthrough property so a future \
+             refactor can't silently flip the policy and start \
+             blocking reads during replay.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_does_not_block_query",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_db_query_dispatch_during_write_quarantine",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/db.rs::db_handle_registry_quarantine_does_not_block_query",
+        ],
+    },
     Guarantee {
         id: "io_source.http_quarantine_on_replay",
         kind: GuaranteeKind::EffectRow,
