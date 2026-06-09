@@ -4,6 +4,171 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S2c closed (umbrella 33S2 done): invention proof artifacts for executing HTTP-client surface
+
+Closes the 33S2 umbrella. 33S2a shipped the plumbing (declarations, policy,
+dispatch). 33S2b shipped end-to-end acceptance through `corvid run` plus
+replay-quarantine fixtures. 33S2c ships the invention-shipping-contract
+artifacts: guarantees + claim coverage + tour + reference doc + inventions
+row + README catalog entry. The executing HTTP-client surface is now
+publicly discoverable, runnable, and trust-anchored.
+
+### Guarantees
+
+Three RuntimeChecked rows in `corvid-guarantees::registry::GUARANTEE_REGISTRY`:
+
+- `io_source.http_ssrf_structural_block` — the always-on private/loopback/
+  link-local refusal. Adversarial refs include the deliberately-misconfigured
+  `ssrf_block_rejects_loopback_url_even_when_allowlist_contains_it` driver
+  test, which proves the SSRF block is the security FLOOR rather than the
+  ceiling.
+- `io_source.http_allowlist_enforcement` — required `[http] allow` allowlist.
+  Positive refs cover the loader (`corvid_toml_with_http_allow_produces_configured_policy`,
+  env override) + the success-path acceptance test
+  (`real_corvid_program_performs_get_through_executing_http_dispatch`).
+  Adversarial refs cover missing config, empty list, unlisted host, and
+  the through-driver fail-closed test.
+- `io_source.http_quarantine_on_replay` — POST and GET dispatch through
+  Substitute-mode replay refuses to reach the network regardless of
+  allowlist contents.
+
+Three matching `pub const GUARANTEE_ID_*` anchors at the enforcement sites
+in `crates/corvid-runtime/src/http.rs` (just above `HttpEgressPolicy`),
+mirroring 33S1c's anchor pattern in `io.rs`. The
+`every_enforced_guarantee_id_is_wired_to_workspace_source` sentinel passes
+without changes.
+
+### What is deliberately NOT a separate guarantee
+
+The `@deterministic`-rejection property gets NO new row. Same rationale as
+33S1c made for the io.* surface: the existing decl-replayability rule
+(`crates/corvid-types/src/checker/decl_replayability.rs`) rejects every
+tool call inside `@deterministic` bodies regardless of effect — the
+executing HTTP tools inherit the rejection automatically through that
+generic rule. 33S2c adds two pinning tests at
+`crates/corvid-types/src/tests.rs::deterministic_agent_calling_http_*_tool_is_rejected`
+so a future relaxation of the decl-replayability rule would surface as
+test breakage, not a silent regression.
+
+### Claim coverage
+
+The three new ids added to
+`corvid-guarantees::signed_claim::SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`. A
+signed cdylib whose source uses `http_get` / `http_post_json` (declared in
+`std/http.cor`) can now assert these three RuntimeChecked properties in
+its claim manifest, and `corvid build --sign` will accept the descriptor.
+
+### Reference doc
+
+`docs/reference/stdlib/http.md` (~210 lines), structurally parallel to
+`io.md` from 33S1c:
+
+- Quick reference with both tools + the response envelope.
+- Per-tool blurbs naming the effect each `uses`.
+- Security model split into two clearly-labeled subsections: the
+  structural SSRF block (with a table of the blocked ranges) and the
+  required `[http] allow` allowlist. The "misconfigured allowlist
+  containing `127.0.0.1`" example explicitly demonstrates that SSRF is
+  the floor.
+- Env-override docs (`CORVID_HTTP_ALLOW=host1,host2`) with comma-
+  separated parsing details.
+- What's rejected (3 cases) vs. what's allowed.
+- Determinism + replay-quarantine subsections matching the io.md shape.
+- A guarantees table linking back to `core-semantics.md`.
+- A worked webhook-fan-out example showing allowlist scoping.
+
+`docs/reference/stdlib/README.md`'s `## std.http` section rewritten to
+highlight the new executing tools, the dual-layer security model, and the
+three new guarantees, with a link to the full reference.
+
+### Tour topic
+
+`corvid tour --topic http-client` added to
+`crates/corvid-tour-catalog/src/lib.rs`:
+
+```cor
+import "./std/http" use http_get, http_post_json, http_ok
+
+agent fetch_status(url: String) -> Int:
+    response = http_get(url)
+    return response.status
+
+agent ship_event(url: String, body: String) -> Bool:
+    response = http_post_json(url, body)
+    return http_ok(response)
+```
+
+The source compiles through the `corvid_driver::compile` gate
+(`all_tour_sources_compile` test passes 34/34). The pitch text names the
+two-layer security boundary, the @deterministic rejection, the replay
+quarantine, and the production-vs-test fidelity property ("the same
+source compiles, type-checks, and runs identically whether the configured
+network endpoint is real or a loopback test responder — production
+behavior never branches on a test-only flag") — that last sentence
+captures the no-shortcut design that 33S2b's `reqwest::Client::resolve()`
+override gave us.
+
+### Invention catalog
+
+`docs/reference/inventions.md` row added immediately after the
+file-I/O surface row, pointing at the driver-level acceptance test,
+the `HttpEgressPolicy` policy tests, and the replay-quarantine fixtures.
+
+`README.md`'s Verification section gains an "Executing HTTP-Client Surface"
+catalog entry directly after "Executing File-I/O Surface", carrying:
+
+- A summary of the two-layer security boundary.
+- The signing claim that the three new ids enable.
+- A short worked example with the corvid.toml allowlist.
+- The "even a misconfigured allowlist cannot reach loopback" sentence
+  that names the structural SSRF guarantee in user-facing terms.
+- The standard Spec / Tour / Roadmap / Proof / Non-scope footer.
+
+### Validation
+
+- 28 guarantee tests pass (the new 3 rows participate fully).
+- 34 tour topics compile (was 33 after 33S1c; +1 for http-client).
+- 45 stdlib tests pass.
+- 9 HttpEgressPolicy plumbing tests pass.
+- 2 new `deterministic_agent_calling_http_*_tool_is_rejected` typecheck
+  tests pass.
+- 3 driver-level end-to-end + 2 new replay-quarantine fixtures pass.
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What the executing HTTP-client surface now provides end-to-end
+
+```
+$ cat corvid.toml
+[io]
+root = "."
+
+[http]
+allow = ["api.example.com"]
+
+$ cat src/main.cor
+import "./std/http" use http_get
+
+agent main() -> Int:
+    response = http_get("https://api.example.com/status")
+    return response.status
+
+$ corvid run src/main.cor
+# → real HTTP GET, returns 200
+```
+
+A request to `https://127.0.0.1/...` is refused by the SSRF block before
+the allowlist runs. A request to `https://other.example/...` is refused
+by the allowlist. A `corvid replay <trace>` of the above program refuses
+to reach the network. A `@deterministic agent main() ...` calling
+`http_get` is a compile error. A `corvid build --sign` of a cdylib using
+these tools accepts a descriptor declaring the three new claim ids.
+
+Phase 33S2 (executing HTTP-client surface) is done. Next: 33S3 (SQLite).
+
+---
+
 ## 2026-06-09 - 33S2b closed: end-to-end and replay-quarantine acceptance for executing HTTP-client surface
 
 Wired the executing HTTP-client surface to run end-to-end through `corvid run`,

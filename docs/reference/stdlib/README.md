@@ -34,12 +34,34 @@ trace helpers that carry effects, replay, cost, and provenance metadata.
 
 ## `std.http`
 
-`std/http.cor` defines request/response envelopes for typed HTTP workflows:
+`std/http.cor` defines the executing HTTP-client surface added in Phase 33S2
+plus the request/response envelopes the surface returns.
 
-- `HttpHeader`
-- `HttpRequestEnvelope` plus `http_get`, `http_post_json`, `http_with_retry`,
-  and `http_with_timeout`
-- `HttpResponseEnvelope` plus `http_ok`
+Executing tools:
+
+- `http_get(url) -> HttpResponseEnvelope uses http_egress_get` — executing tool
+- `http_post_json(url, body) -> HttpResponseEnvelope uses http_egress_post` — executing tool
+
+Envelope-builder agents (pure; construct a request without executing it):
+
+- `HttpHeader`, `HttpRequestEnvelope`, `HttpResponseEnvelope`
+- `http_request_get`, `http_request_post_json`, `http_with_retry`,
+  `http_with_timeout`, `http_ok`
+
+The executing tools enforce three RuntimeChecked guarantees:
+`io_source.http_ssrf_structural_block` (always-on private / loopback /
+link-local refusal; structural floor underneath the allowlist),
+`io_source.http_allowlist_enforcement` (URL host must be in the project's
+`[http] allow` list; missing config fails closed), and
+`io_source.http_quarantine_on_replay` (POST + GET both gated by the replay-
+substitution path; never reaches the live network during replay). Programs
+that call these tools from a `@deterministic` agent are rejected at
+typecheck (the existing decl-replayability rule treats all tool calls as
+non-deterministic).
+
+See [`http.md`](./http.md) for the full reference, including the corvid.toml
+`[http] allow` allowlist, the `CORVID_HTTP_ALLOW` env override, the SSRF
+block ranges, and the envelope schemas.
 
 The native runtime also exposes a matching `HttpClient`/`HttpRequest` API. Its
 calls emit `std.http.request`, `std.http.response`, and `std.http.error` trace

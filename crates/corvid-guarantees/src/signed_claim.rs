@@ -58,6 +58,20 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "io_source.fs_path_confinement",
     "io_source.fs_write_quarantine_on_replay",
     "io_source.fs_read_quarantine_on_replay",
+    // Slice 33S2c — the three executing HTTP-client guarantees.
+    // A signed cdylib whose source uses `http_get` /
+    // `http_post_json` (declared in std/http.cor) asserts these
+    // three RuntimeChecked properties in its claim manifest:
+    // structural SSRF block (refuses private / loopback / link-
+    // local hosts regardless of allowlist), required `[http] allow`
+    // allowlist enforcement, and replay quarantine that refuses
+    // POST escapes and gates GETs through the substitution path.
+    // See crates/corvid-runtime/src/http.rs for the enforcement
+    // anchors and crates/corvid-guarantees/src/registry.rs for
+    // the rows + test refs.
+    "io_source.http_ssrf_structural_block",
+    "io_source.http_allowlist_enforcement",
+    "io_source.http_quarantine_on_replay",
     "grounded.provenance_required",
     // `grounded.propagation_across_calls` removed 2026-05-08 by
     // Phase 35V-T1-B — downgraded to OutOfScope because the

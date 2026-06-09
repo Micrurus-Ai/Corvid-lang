@@ -471,6 +471,26 @@ agent load_summary(date: String) -> String:
     return file.contents
 "#,
     },
+    TourTopic {
+        name: "http-client",
+        title: "Executing HTTP-Client Surface",
+        category: "Executing I/O",
+        pitch: "Corvid's std/http tools perform real HTTP requests through a two-layer security boundary: an always-on structural SSRF block that refuses private / loopback / link-local hosts regardless of allowlist, plus a required [http] allow allowlist that fails closed when unconfigured. Calls from @deterministic agents are rejected at typecheck; Substitute-mode replay refuses every executing HTTP call regardless of allowlist contents. The allowlist is declared in corvid.toml (or overridden by CORVID_HTTP_ALLOW) and signable through the cdylib's claim manifest. The same source compiles, type-checks, and runs identically whether the configured network endpoint is real or a loopback test responder — production behavior never branches on a test-only flag.",
+        spec: "docs/reference/stdlib/http.md",
+        roadmap: "Phase 33S2 executing HTTP-client surface",
+        test: "crates/corvid-driver/tests/executing_http_through_driver.rs + crates/corvid-runtime/src/http.rs HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_http_* fixtures",
+        non_scope: "Enforces SSRF + allowlist + replay quarantine on the URL host; does not police what user code does with the response body, and does not inspect or rewrite request headers.",
+        source: r#"import "./std/http" use http_get, http_post_json, http_ok
+
+agent fetch_status(url: String) -> Int:
+    response = http_get(url)
+    return response.status
+
+agent ship_event(url: String, body: String) -> Bool:
+    response = http_post_json(url, body)
+    return http_ok(response)
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

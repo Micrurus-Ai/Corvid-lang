@@ -356,6 +356,37 @@ fn encode_hex(bytes: &[u8]) -> String {
 // see why the call was refused.
 // ============================================================================
 
+/// Phase 33S2c — anchor for the structural SSRF-block guarantee.
+/// `HttpEgressPolicy::check` is the enforcement site: every
+/// executing HTTP call parses the URL's host and refuses any
+/// private RFC1918 / loopback / link-local / unspecified / ULA /
+/// `localhost` literal — regardless of allowlist contents. The
+/// `corvid-guarantees` inverse-coverage sentinel uses this anchor
+/// to confirm the registry row is wired to the enforcement code.
+pub const GUARANTEE_ID_IO_SOURCE_HTTP_SSRF_STRUCTURAL_BLOCK: &str =
+    "io_source.http_ssrf_structural_block";
+
+/// Phase 33S2c — anchor for the allowlist-enforcement guarantee.
+/// `HttpEgressPolicy::check` requires the URL's host to appear
+/// (case-insensitive) in the configured `[http] allow` list.
+/// When no allowlist is configured (missing section, empty list,
+/// or unset env), every call fails closed with a structured
+/// diagnostic naming the URL, the missing config, and the
+/// `CORVID_HTTP_ALLOW` env override pathway.
+pub const GUARANTEE_ID_IO_SOURCE_HTTP_ALLOWLIST_ENFORCEMENT: &str =
+    "io_source.http_allowlist_enforcement";
+
+/// Phase 33S2c — anchor for the replay-quarantine guarantee.
+/// `HttpClient::send` returns QuarantineViolation when the
+/// `quarantined` flag is set (the floor); the
+/// `Runtime::call_tool("http_post_json", ...)` /
+/// `Runtime::call_tool("http_get", ...)` dispatch paths go
+/// through the replay-substitution path FIRST, so dispatch-path
+/// HTTP calls either substitute from the recorded trace OR
+/// diverge — they never reach the live network.
+pub const GUARANTEE_ID_IO_SOURCE_HTTP_QUARANTINE_ON_REPLAY: &str =
+    "io_source.http_quarantine_on_replay";
+
 /// Policy carrying the configured `[http] allow` list for the
 /// executing HTTP-client surface plus the always-on SSRF block.
 /// Construct via `HttpEgressPolicy::new` once per `Runtime` and

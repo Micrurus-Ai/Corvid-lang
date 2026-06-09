@@ -577,6 +577,33 @@ Roadmap: [Phase 33S1](./ROADMAP.md)
 Proof: [executing I/O tests](./crates/corvid-runtime/tests/executing_io_tools.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs) + [path-confinement tests](./crates/corvid-runtime/src/io.rs)
 Non-scope: Confines paths to the declared root; does not police what user code does with the contents.
 
+#### Executing HTTP-Client Surface
+
+Corvid's `std/http` module ships two executing tools — `http_get`, `http_post_json` — that flow through typed effect rows (`http_egress_get`, `http_egress_post`) and a **two-layer security boundary**: an always-on structural SSRF block that refuses RFC1918 / loopback / link-local hosts regardless of allowlist, plus a required `[http] allow` allowlist that fails closed when unconfigured.
+
+The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement`, and `io_source.http_quarantine_on_replay` in its claim manifest, so a host can verify the binary refuses to reach private networks AND can only reach explicitly approved hosts AND cannot escape replay quarantine.
+
+```corvid
+import "./std/http" use http_get, http_post_json, http_ok
+
+agent ship_event(url: String, body: String) -> Bool:
+    response = http_post_json(url, body)
+    return http_ok(response)
+```
+
+```toml
+[http]
+allow = ["hooks.example.com"]
+```
+
+A URL whose host is not in `[http] allow` is refused with a structured diagnostic naming the host AND the configured allowlist. A URL whose host resolves to a private range is refused by the structural SSRF block before the allowlist is consulted — even a misconfigured `[http] allow = ["127.0.0.1"]` cannot reach loopback. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during Substitute-mode replay either substitute from the recorded trace or diverge — the network is provably untouched.
+
+Spec: [`std.http` reference](./docs/reference/stdlib/http.md)
+Tour: `corvid tour --topic http-client`
+Roadmap: [Phase 33S2](./ROADMAP.md)
+Proof: [end-to-end HTTP tests](./crates/corvid-driver/tests/executing_http_through_driver.rs) + [policy tests](./crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: Enforces SSRF + allowlist + replay quarantine on the URL host; does not police response-body content or rewrite request headers.
+
 ## Architecture
 
 ```text

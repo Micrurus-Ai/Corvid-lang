@@ -275,6 +275,117 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_io_read_tool_dispatch_without_recorded_event",
         ],
     },
+    // ----- io_source dimension (Phase 33S2c) ----------------------
+    //
+    // The executing HTTP-client surface (`http_get` / `http_post_json`,
+    // declared in `std/http.cor`) ships three runtime-checked
+    // guarantees. They classify what the runtime enforces about ANY
+    // call to these tools: a structural SSRF block that refuses
+    // private / loopback / link-local hosts regardless of
+    // allowlist (load-bearing security floor), a required
+    // `[http] allow` allowlist that fails closed when unconfigured,
+    // and replay quarantine that refuses POST escapes and gates
+    // GETs through the substitution path.
+    //
+    // The @deterministic-rejection property is NOT a separate
+    // guarantee here — same rationale as the io.* surface in 33S1c.
+    // It's covered by the existing decl-replayability rule
+    // (`crates/corvid-types/src/checker/decl_replayability.rs`)
+    // that rejects all tool calls inside `@deterministic` bodies
+    // regardless of effect. Slice 33S2c adds pinning tests for the
+    // http_get / http_post_json cases at
+    // `crates/corvid-types/src/tests.rs::deterministic_agent_calling_http_*_tool_is_rejected`
+    // — they're part of the broader replay.deterministic_pure_path
+    // proof matrix, not a new http-specific guarantee.
+    Guarantee {
+        id: "io_source.http_ssrf_structural_block",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Every call to an executing HTTP tool (http_get / \
+             http_post_json, from std/http.cor) parses the request \
+             URL and refuses any host that lexically resolves to a \
+             private RFC1918 range (10.0.0.0/8, 172.16.0.0/12, \
+             192.168.0.0/16), loopback (127.0.0.0/8 + ::1), \
+             link-local (169.254.0.0/16 + fe80::/10), unspecified \
+             (0.0.0.0/8 + ::), ULA (fc00::/7), or the `localhost` \
+             DNS alias. The block is a STRUCTURAL property of the \
+             language: it runs regardless of `[http] allow` \
+             contents — even a fully-misconfigured allowlist \
+             containing `127.0.0.1` cannot bypass it. This is the \
+             security floor underneath the configurable allowlist.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_permits_matching_host",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_all_private_loopback_ipv4_ranges",
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_ipv6_loopback_and_link_local",
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_localhost_dns_alias",
+            "crates/corvid-driver/tests/executing_http_through_driver.rs::ssrf_block_rejects_loopback_url_even_when_allowlist_contains_it",
+        ],
+    },
+    Guarantee {
+        id: "io_source.http_allowlist_enforcement",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Every call to an executing HTTP tool checks the \
+             request URL's host against the project's configured \
+             `[http] allow = [...]` list (or the \
+             `CORVID_HTTP_ALLOW` env override). Case-insensitive \
+             exact-host comparison. When no allowlist is \
+             configured (missing `[http]` section, empty `allow`, \
+             or unset env), every call fails closed with a \
+             structured diagnostic naming the requested URL, the \
+             missing config, and the env-override pathway. This \
+             is the configurable layer on top of the always-on \
+             SSRF block.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_permits_matching_host",
+            "crates/corvid-driver/src/run.rs::corvid_toml_with_http_allow_produces_configured_policy",
+            "crates/corvid-driver/src/run.rs::env_var_overrides_corvid_toml_http_allow",
+            "crates/corvid-driver/tests/executing_http_through_driver.rs::real_corvid_program_performs_get_through_executing_http_dispatch",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_unconfigured_fails_closed_on_check",
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_empty_allow_list_is_unconfigured",
+            "crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_refuses_unlisted_host_with_clear_diagnostic",
+            "crates/corvid-driver/src/run.rs::corvid_toml_with_empty_http_allow_produces_unconfigured_policy",
+            "crates/corvid-driver/src/run.rs::corvid_toml_without_http_section_produces_unconfigured_policy",
+            "crates/corvid-driver/tests/executing_http_through_driver.rs::missing_http_allowlist_fails_closed_with_actionable_diagnostic",
+        ],
+    },
+    Guarantee {
+        id: "io_source.http_quarantine_on_replay",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A Substitute-mode replay runtime refuses every \
+             executing HTTP call. POST calls through the \
+             `Runtime::call_tool(\"http_post_json\", ...)` \
+             dispatch path go through the replay-substitution \
+             path first (so they substitute from the recorded \
+             trace OR diverge — they never reach the live \
+             network); the `HttpClient::quarantine` flag is the \
+             floor underneath that returns QuarantineViolation \
+             from any direct `HttpClient::send` call. GET calls \
+             through dispatch are also gated by the substitution \
+             path (read-quarantine equivalent — they substitute \
+             OR diverge, never reaching the live network).",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_quarantines_http_client_send",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_get_tool_dispatch_without_recorded_event",
+        ],
+    },
     // ----- Grounded<T> --------------------------------------------
     Guarantee {
         id: "grounded.provenance_required",

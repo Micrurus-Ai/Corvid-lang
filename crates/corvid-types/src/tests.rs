@@ -3680,6 +3680,72 @@ agent persist_config(path: String, content: String) -> Bool:
     );
 }
 
+/// Slice 33S2c — same rejection covers the executing HTTP
+/// surface. A `tool` declared with `uses http_egress_get` (the
+/// 33S2a-renamed reversible effect that `http_get` uses) called
+/// from a `@deterministic` agent is a typecheck-phase compile
+/// error. The user-facing promise: a `@deterministic` agent
+/// cannot accidentally perform an HTTP egress call — even if a
+/// future refactor introduces an HTTP-touching dependency, the
+/// compiler catches it before any code ships. No HTTP-specific
+/// checker logic needed; the existing decl-replayability rule
+/// (`crates/corvid-types/src/checker/decl_replayability.rs`)
+/// rejects every tool call inside `@deterministic` bodies. This
+/// test pins the property so a future relaxation of that rule
+/// can't quietly open the executing HTTP surface to pure
+/// agents.
+#[test]
+fn deterministic_agent_calling_http_get_tool_is_rejected() {
+    let src = "\
+effect http_egress_get:
+    reversible: true
+
+tool http_get(url: String) -> String uses http_egress_get
+
+@deterministic
+agent fetch_status(url: String) -> String:
+    return http_get(url)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "http_get" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for http_egress_get tool invocation, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 33S2c — same rejection fires for the POST-shape tool
+/// (uses the non-reversible `http_egress_post` effect). Confirms
+/// the determinism rule is decl-kind-based and not sensitive to
+/// the reversibility dimension on the effect row.
+#[test]
+fn deterministic_agent_calling_http_post_json_tool_is_rejected() {
+    let src = "\
+effect http_egress_post:
+    reversible: false
+
+tool http_post_json(url: String, body: String) -> String uses http_egress_post
+
+@deterministic
+agent ship_payload(url: String, body: String) -> String:
+    return http_post_json(url, body)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "http_post_json" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for http_egress_post tool invocation, got {:?}",
+        c.errors
+    );
+}
+
 #[test]
 fn deterministic_agent_calling_prompt_is_rejected() {
     let src = "\
