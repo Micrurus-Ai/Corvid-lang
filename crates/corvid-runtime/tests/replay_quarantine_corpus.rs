@@ -442,3 +442,101 @@ async fn replay_blocks_executing_http_get_tool_dispatch_without_recorded_event()
         other => panic!("expected ReplayDivergence (no recorded http_get event), got {other:?}"),
     }
 }
+
+/// Slice 33S3c — the executing `db_execute` dispatch
+/// (33S3b's typed-Value path through `Runtime::db_execute_tool`)
+/// is gated by the `DbHandleRegistry::quarantine_writes` flag
+/// that `RuntimeBuilder::build` flips when entering Substitute-
+/// mode replay. The registry's `execute` method returns
+/// `QuarantineViolation { surface: "db", .. }` regardless of
+/// the SQL contents — including INSERTs, UPDATEs, DELETEs, and
+/// DDL. This is the load-bearing safety property: a Corvid
+/// program in replay mode cannot mutate the database, full stop.
+///
+/// Mirrors `replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem`
+/// (33S1b) and `replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network`
+/// (33S2b). The fixture uses the runtime's typed-Value path
+/// directly (`runtime.db_execute_tool(&handle, sql, params)`)
+/// rather than the `call_tool` JSON dispatch — that's where the
+/// executing SQLite tools live by design, since DbHandle can't
+/// round-trip through JSON.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_blocks_executing_db_execute_dispatch_from_escaping_to_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let runtime = build_substitute_replay_runtime(&trace_path);
+    assert!(runtime.is_replay_mode());
+    assert!(runtime.db_registry().is_write_quarantined());
+
+    // Mint a handle directly through the registry — the
+    // registry permits opens during replay because creating a
+    // :memory: connection is process-internal (no durable
+    // side effect). The downstream `execute` is what gets
+    // refused.
+    let handle = runtime
+        .db_registry()
+        .open(":memory:")
+        .expect("open :memory: during replay (read-only side; mint succeeds)");
+
+    let err = runtime
+        .db_execute_tool(
+            &handle,
+            "CREATE TABLE users(id INTEGER PRIMARY KEY)".to_string(),
+            vec![],
+        )
+        .await
+        .expect_err("db_execute during replay must refuse with QuarantineViolation");
+    match err {
+        RuntimeError::QuarantineViolation { surface, .. } => {
+            assert_eq!(surface, "db", "quarantine surface must be `db`");
+        }
+        other => panic!("expected db QuarantineViolation, got {other:?}"),
+    }
+}
+
+/// Slice 33S3c — companion: executing `db_query` during replay
+/// is NOT blocked by the write-quarantine flag (reads don't
+/// escape the process; the trace-substitution upper gate lands
+/// in a follow-up slice once the trace schema carries db_query
+/// row events). This test pins the read-passthrough property
+/// at the dispatch layer so a future refactor can't silently
+/// flip the policy and start blocking queries during replay.
+///
+/// The companion shape mirrors
+/// `replay_blocks_executing_io_read_tool_dispatch_without_recorded_event`
+/// (33S1b) and `replay_blocks_executing_http_get_tool_dispatch_without_recorded_event`
+/// (33S2b) — except for SQLite, the local read DOES complete
+/// (the registry doesn't gate reads), because there's no
+/// recorded-event substitution path yet. When the
+/// trace-substitution layer lands for db_query, this test
+/// will be updated to assert ReplayDivergence on a missing
+/// event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_does_not_block_executing_db_query_dispatch_during_write_quarantine() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let runtime = build_substitute_replay_runtime(&trace_path);
+    assert!(runtime.is_replay_mode());
+    assert!(runtime.db_registry().is_write_quarantined());
+
+    let handle = runtime
+        .db_registry()
+        .open(":memory:")
+        .expect("open :memory: during replay");
+
+    // SELECT against an empty :memory: db — returns 0 rows.
+    // The point of the assertion is that the call SUCCEEDS
+    // (i.e. doesn't get blocked by the write-quarantine flag).
+    let result = runtime
+        .db_query_tool(
+            &handle,
+            "SELECT 1 WHERE 0".to_string(),
+            vec![],
+        )
+        .await
+        .expect("db_query during replay must pass through the write-quarantine");
+    assert!(
+        result.is_array(),
+        "db_query envelope must be a JSON array of DbResult-shaped rows; got {result:?}"
+    );
+}

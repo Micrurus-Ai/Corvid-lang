@@ -4,6 +4,123 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-09 - 33S3c closed: end-to-end + injection-proof + replay-quarantine acceptance for executing SQLite surface
+
+Proved 33S3b's executing SQLite surface works through the full driver
+pipeline against real Corvid programs, including the load-bearing
+SQL-injection-proof property end-to-end. Closed the replay-quarantine
+fixtures alongside the io / http precedents.
+
+### No CLI loader needed — `[io] root` is the only knob
+
+The deliberate design decision baked into 33S3b: the SQLite surface reuses
+`IoToolPolicy` for `db_open` path confinement. There is no `[db]` allowlist,
+no `[db] root`, no `CORVID_DB_ROOT` env. The structural property: `db_open`
+is strictly narrower than `io_write_text` — anything the io tools can't
+touch, the db tools can't open as a database. This is the right boundary
+because a SQLite file IS a file; allowing arbitrary opens would silently
+bypass the 33S1 security boundary.
+
+So 33S3c needs no new loader code, and `corvid new`'s scaffold is unchanged
+(33S2b already added `[io] root = "."` + `[http] allow = []`). The CLI
+integration "just works" via the existing `load_io_tool_policy` path.
+
+### 3 driver-layer end-to-end tests
+
+In new `crates/corvid-driver/tests/executing_sqlite_through_driver.rs`:
+
+1. **`real_corvid_program_round_trips_data_through_executing_sqlite_dispatch`**
+   — load-bearing happy path. A real Corvid program (compiled through
+   `compile_to_ir_with_config_at_path`, run through `run_ir_with_runtime`)
+   opens `:memory:`, runs CREATE TABLE, parameterised INSERT with
+   `db_param_int(1)` + `db_param_text("alice@example.com")`, then
+   parameterised SELECT, returns the envelope's `rows_affected` field.
+   Proves the interpreter's `dispatch_stdlib_db_tool` branch (33S3b)
+   correctly extracts the `Arc<DbHandleInner>` from `Value::DbHandle`,
+   threads it through `Runtime::db_query_tool` / `db_execute_tool`, and
+   round-trips data through `DbHandleRegistry` against real rusqlite.
+
+2. **`db_open_with_path_outside_io_root_is_refused_by_policy`** — pins
+   the IoToolPolicy reuse. A program with `[io] root = "."` tries
+   `db_open("../../etc/passwd")`. The dispatch path's
+   `self.io_policy.resolve(&path)?` in `db_open_tool` rejects the
+   traversal at the SAME boundary the io tools enforce. Diagnostic
+   names the `[io] root` policy. This is the language-level promise
+   that "executing SQLite cannot reach outside `[io] root`" holds
+   structurally, not by documentation.
+
+3. **`db_param_text_with_sql_metacharacters_survives_round_trip_through_real_corvid_program`**
+   — the load-bearing injection-proof test through a REAL Corvid
+   program. The program calls
+   `db_param_text("'; DROP TABLE users; --")`, inserts it, then runs
+   `count(*)`. If SQL interpolation existed anywhere on the path
+   (the dispatch, the runtime, rusqlite), the DROP would fire and
+   the count query would error. The fact that the program returns
+   0 (envelope's `rows_affected` for the SELECT) proves:
+
+   (a) the table survived (no DROP fired), and
+   (b) the metacharacter string was bound as `DbValue::Text` data
+       through `rusqlite::params_from_iter`, never parsed as SQL.
+
+   33S3b's unit test proved this at the registry layer; 33S3c proves
+   it at the language-level surface with the canonical `db_param_text`
+   constructor. Both layers carry the property; both layers test it.
+
+### 2 replay-quarantine fixtures
+
+In `crates/corvid-runtime/tests/replay_quarantine_corpus.rs`:
+
+1. **`replay_blocks_executing_db_execute_dispatch_from_escaping_to_database`**
+   — `Runtime::db_execute_tool` in Substitute-mode replay refuses with
+   `QuarantineViolation { surface: "db", .. }` regardless of SQL
+   contents (INSERT / UPDATE / DELETE / DDL all blocked). Load-bearing
+   safety property: a Corvid program in replay mode cannot mutate the
+   database, full stop. Mirrors the 33S1b io / 33S2b http precedents.
+
+2. **`replay_does_not_block_executing_db_query_dispatch_during_write_quarantine`**
+   — companion: `db_query_tool` passes through during replay. Pins the
+   read-passthrough property at the dispatch layer so a future
+   refactor can't silently flip the policy and start blocking queries
+   during replay. The trace-substitution upper gate for db_query rows
+   lands in a follow-up slice once the trace schema carries row events
+   (today's minimal trace doesn't, so the fixture asserts the
+   dispatch-side behavior rather than ReplayDivergence).
+
+The fixtures use the runtime's typed-Value dispatch path
+(`db_execute_tool` / `db_query_tool`) directly rather than `call_tool`
+JSON dispatch, because that's where the executing SQLite tools live by
+design — `Value::DbHandle` can't round-trip through JSON, so the typed
+path is THE entry point for SQLite.
+
+### Validation
+
+- 3 sqlite-e2e + 3 http-e2e + 1 io-e2e = 7 driver-layer end-to-end tests.
+- 14 replay-quarantine corpus (was 12; +2 for sqlite).
+- 45 stdlib + 9 runtime-db + 28 guarantees + 34 tour topics all green.
+- Workspace `cargo check --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What 33S3d will add
+
+Three RuntimeChecked guarantees (`io_source.sqlite_parameter_binding_only`,
+`io_source.sqlite_write_quarantine_on_replay`,
+`io_source.sqlite_read_passthrough_on_replay`) + `GUARANTEE_ID_*` anchors
+in `corvid-runtime/src/db.rs` + claim coverage in
+`SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS` + `docs/reference/stdlib/db.md`
+rewritten (executing-surface reference doc; Postgres "via tool wrapper"
+framing preserved since 33S3 ships only the SQLite executing path) +
+`docs/reference/inventions.md` proof-matrix row + README invention-catalog
+entry + `corvid tour --topic sqlite` topic (uses `:memory:` so the tour
+runs offline) + two `@deterministic`-rejection pinning tests
+(`deterministic_agent_calling_db_*_tool_is_rejected`).
+
+That's the invention-proof artifact set per the project's "every new
+invention ships with public proof at the same time as the code" rule.
+33S3d completes the umbrella; 33S3 ships as a v1.0 invention.
+
+---
+
 ## 2026-06-09 - 33S3b closed: executing SQLite tool surface (db_open/db_query/db_execute)
 
 Lit up the executing SQLite surface against the 33S3a opaque-handle type
