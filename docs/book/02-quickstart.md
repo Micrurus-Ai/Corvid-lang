@@ -63,7 +63,63 @@ You should see something like:
 The compiler is the AI's first line of defense.
 ```
 
-## Step 4 — Add a dangerous tool, watch the compiler refuse
+## Step 4 — Read a real file (the executing-I/O surface)
+
+The example above is an LLM call. Corvid also ships executing-I/O
+surfaces — HTTP, JSON, SQLite, and file I/O — that run real I/O
+through the Corvid interpreter without any Python glue.
+
+The simplest is `io_read_text`: read a UTF-8 file from disk. The
+`corvid new` scaffold wrote `[io] root = "."` to your `corvid.toml`,
+which confines every executing file-I/O call to the project directory.
+Path traversal (`..` escapes) is refused at the runtime boundary.
+
+Create a small data file:
+
+```sh
+echo "Corvid ships a typed effect system." > note.txt
+```
+
+Edit `src/main.cor` to read it:
+
+```corvid
+import "./std/io" use io_read_text
+
+agent main() -> Result<String, String>:
+    file = io_read_text("note.txt")
+    return Ok(file.contents)
+```
+
+Run it:
+
+```sh
+corvid run src/main.cor
+```
+
+Output:
+
+```
+Corvid ships a typed effect system.
+```
+
+What you just got, with zero glue:
+
+- The `[io] root = "."` boundary in `corvid.toml` confined the read
+  to your project directory.
+- `io_read_text("../etc/passwd")` would be refused at the runtime
+  boundary with a structured diagnostic naming the offending path AND
+  the configured root.
+- The agent uses `Result<String, String>`; the call's typed envelope
+  flows through Corvid's existing error-handling surface.
+- A `@deterministic` agent calling this would be a typecheck error.
+- A replay run refuses `io_write_text` calls — the filesystem is
+  provably untouched.
+
+See [`stdlib/io.md`](../reference/stdlib/io.md) for the full reference.
+For the HTTP + JSON + SQLite story end-to-end, see
+[Talking to the outside world](./18-talking-to-the-outside-world.md).
+
+## Step 5 — Add a dangerous tool, watch the compiler refuse
 
 Open `src/main.cor` and add a refund tool:
 
@@ -108,7 +164,7 @@ This is the load-bearing claim: a dangerous tool call without `approve`
 does not compile. Not "produces a runtime warning." Not "fails a lint."
 Does not compile.
 
-## Step 5 — Add `approve`, watch it pass
+## Step 6 — Add `approve`, watch it pass
 
 ```corvid
 agent main() -> String:
@@ -126,7 +182,7 @@ corvid check src/main.cor
 ok. 1 file checked, 0 errors.
 ```
 
-## Step 6 — Replay it
+## Step 7 — Replay it
 
 Every Corvid run records a deterministic trace:
 

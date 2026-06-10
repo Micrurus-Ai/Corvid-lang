@@ -4,6 +4,159 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
+
+The umbrella's adoption payoff lands. A new book chapter walks readers
+through a complete HTTP → typed-decoder JSON → SQLite → read-back
+pipeline in pure Corvid (zero Python glue, zero host-language plumbing);
+the quickstart's first executing-I/O example is an `io_read_text`
+snippet that runs against a project-staged file; both are CI-guarded as
+load-bearing acceptance tests.
+
+This closes the executing-I/O umbrella in user-facing terms. The four
+surfaces (file, HTTP, SQLite, JSON) are now reachable through the
+docs/book / docs/quickstart funnel with structurally honest examples —
+"this exact source runs end-to-end" is a load-bearing CI claim, not a
+documentation aspiration.
+
+### `docs/book/18-talking-to-the-outside-world.md` (new chapter)
+
+Walks through the pipeline shape:
+
+```cor
+effect json_decode_eff:
+    reversible: true
+
+type User:
+    id: Int
+    email: String
+
+import "./std/http" use http_get
+import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+
+tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
+
+agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
+    response = http_get(url)
+    user = decode_user_from_json(response.body)?
+    handle = db_open(db_path)
+    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)",
+               [db_param_int(user.id), db_param_text(user.email)])
+    rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])
+    return Ok(rows[0].rows_affected)
+
+agent main() -> Result<Int, String>:
+    return ingest_user("http://api.example.com/users/1", ":memory:")
+```
+
+Chapter sections cover:
+
+1. Project setup with `corvid new` (the scaffolded `corvid.toml`
+   carries `[io] root = "."` + `[http] allow = []` from 33S2b).
+2. The pipeline code with inline commentary on what each step buys.
+3. The "what's NOT in the project" callout: no `tools.py`, no
+   `requirements.txt`, no glue layer — pure Corvid against real
+   reqwest + serde_json + rusqlite.
+4. Four "trigger each boundary, watch it fire" examples (SSRF block,
+   `[http] allow` fail-closed, `[io] root` confinement reused by
+   SQLite, structural SQL injection-resistance, typed-decoder JSON
+   shape safety).
+5. Replay semantics across all four surfaces (HTTP refuses; db_execute
+   refuses; JSON runs identically; db_query passes through).
+6. Optional signing-claim audit trail naming the 9 load-bearing
+   guarantee ids the pipeline rests on.
+7. Pointers to per-surface reference docs.
+
+### `docs/book/02-quickstart.md` (updated)
+
+Added Step 4 ("Read a real file (the executing-I/O surface)")
+demonstrating `io_read_text` against a project-staged `note.txt`:
+
+```cor
+import "./std/io" use io_read_text
+
+agent main() -> Result<String, String>:
+    file = io_read_text("note.txt")
+    return Ok(file.contents)
+```
+
+The step includes the structural `[io] root` confinement promise
+(path traversal is refused at the runtime boundary), the determinism
+contract (calls from `@deterministic` agents are typecheck errors),
+and the replay contract (writes don't escape during Substitute-mode
+replay). Renumbered subsequent steps so the executing-I/O example
+becomes the first concrete I/O surface a new user encounters.
+
+### CI guards
+
+New `crates/corvid-driver/tests/book_outside_world_pipeline.rs`:
+
+1. **`book_chapter_no_python_pipeline_runs_end_to_end_through_real_corvid_program`**
+   — lifts the chapter's `src/main.cor` body VERBATIM, stages it as a
+   project with the chapter's `corvid.toml`, spins up `wiremock`
+   serving the User payload (`{"id": 7, "email": "alice@example.com"}`),
+   builds a reqwest client with `.resolve()` DNS override pointing
+   `api.example.com` at the loopback wiremock port (same no-shortcut
+   pattern 33S2b established), compiles the source via
+   `compile_to_ir_with_config_at_path`, runs through
+   `run_ir_with_runtime`, asserts the agent returns `Ok(0)` (the
+   SELECT envelope's `rows_affected`). This is the LOAD-BEARING CI
+   claim: when this test passes, the chapter is verified. When it
+   breaks, the chapter is wrong.
+
+2. **`quickstart_executing_io_snippet_compiles_and_reads_the_file`**
+   — stages `note.txt` under the project's `[io] root`, runs the
+   quickstart's `io_read_text` snippet, asserts the read returns the
+   staged contents.
+
+Both tests use the same shape as the existing
+`executing_*_through_driver.rs` driver tests — they aren't fragile
+"the file compiles" gates, they actually run the program end-to-end
+through the driver pipeline and verify the result.
+
+The four executing-I/O tour topics (file-io, http-client, sqlite,
+json) are already CI-covered by
+`crates/corvid-cli/src/tour.rs::all_tour_sources_compile` (36 topics
+total; passes after 33R5b-c added the json topic). No new gate
+needed there — the existing one was extended naturally as each tour
+topic landed.
+
+### Validation
+
+- 36 tour topics compile.
+- 5 sqlite-e2e + 3 http-e2e + 1 io-e2e + 5 json-e2e + 2 book-pipeline-e2e
+  = 16 executing-I/O end-to-end tests; all pass.
+- 46 stdlib + workspace check clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What 33S4 finishes
+
+The executing-I/O umbrella in user-facing terms. A new user can:
+
+1. Run `corvid new outside-world` (33S2b's scaffold gives them
+   `[io] root = "."` + `[http] allow = []`).
+2. Open the docs/book quickstart, hit Step 4, see a working
+   executing-I/O example in their first 10 minutes (and the CI guard
+   proves the snippet still runs).
+3. Open Chapter 18 ("Talking to the outside world"), see the full
+   HTTP → JSON → SQLite pipeline, copy-paste, run it (and the CI
+   guard proves the pipeline still runs).
+4. Sign the resulting binary with `corvid build --sign` and have the
+   manifest declare the 9 load-bearing claim ids the pipeline rests
+   on.
+
+That's the v1.0 "no Python required" payoff. The 33S + 33R5b umbrella
+shipped exactly what it claimed.
+
+Next per ROADMAP: continue down the 33R adoption-readiness track
+(33R5c strings batteries, 33R6 trusted-channel publishing, 33R7 CLI
+help grouping, 33R8 stability policy + changelog), or pick up the
+33S phase-closure criteria check.
+
+---
+
 ## 2026-06-10 - 33R5b-c closed (umbrella 33R5b done): invention proof artifacts for executing JSON surface
 
 Closes the 33R5b umbrella. 33R5b-a shipped the `Value::JsonValue` +
