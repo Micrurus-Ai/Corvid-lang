@@ -4,6 +4,151 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-10 - 33R5b-b closed: typed-decoder convention + end-to-end acceptance for executing JSON surface
+
+Wired the typed-decoder convention and shipped 5 driver-layer end-to-end
+tests + 1 replay-quarantine fixture. Both load-bearing properties — parse-
+safety (no panics on malformed input) AND field-type-safety (typed accessor
+mismatches return Err, never panic or coerce) — now hold end-to-end through
+real Corvid programs.
+
+### The typed-decoder convention
+
+A user declares a tool with the signature:
+
+```cor
+tool decode_<X>_from_json(text: String) -> Result<X, String> uses <effect>
+```
+
+where `<X>` is any Corvid type the runtime can convert from JSON (a
+user-declared struct, a primitive, a list, etc.) and `<effect>` is any
+effect the user declares inline (effects don't export via `use` — the
+runtime dispatch keys on the tool name pattern + return type, not the
+effect).
+
+The interpreter's tool-call site recognises the pattern via
+`is_typed_json_decoder_tool_call(callee_name, result_decode_ty)` —
+TWO conditions checked simultaneously:
+
+1. Name matches `decode_*_from_json` (where * is non-empty).
+2. Return type matches `Result<T, String>` for some T.
+
+Both conditions together prevent the dispatch from silently
+intercepting an unrelated user tool that happens to have one or the
+other property.
+
+When the gate fires, `dispatch_typed_json_decoder`:
+
+1. Extracts the text argument.
+2. Unpacks `Type::Result(ok_ty, _err_ty)` to get the target type T.
+3. Runs `serde_json::from_str` on the text. Failure → wrap in
+   `Value::ResultErr(Value::String("malformed JSON in `<tool>`: ..."))`.
+4. Calls `json_to_value(parsed, ok_ty, &types_by_id)` to convert the
+   parsed JSON to the typed Corvid Value. Type-shape mismatches (e.g.
+   JSON has a String where the user declared an Int) → wrap in
+   `Value::ResultErr(Value::String("JSON shape mismatch in `<tool>`: ..."))`.
+5. Success → wrap in `Value::ResultOk(typed_value)`.
+
+The conversion uses the SAME `json_to_value` path that the io / http /
+db dispatch surfaces use — handles structs, lists, options, results,
+nested types. The runtime's load-bearing claim: the user declares the
+target type once, the runtime handles the dispatch generically.
+
+### 5 driver-layer end-to-end tests
+
+In `crates/corvid-driver/tests/executing_json_through_driver.rs`:
+
+1. **`real_corvid_program_round_trips_data_through_opaque_json_dispatch`**
+   — opaque path happy case. Real Corvid program imports `json_parse`
+   + `json_get_int`, parses `{"id": 42}`, accesses the field via the
+   typed getter, returns `Ok(42)` through `Result<Int, String>`.
+   Uses `?` (TryPropagate) for Result handling — Corvid has no `match`
+   expression, propagation is via the postfix `?` operator.
+
+2. **`real_corvid_program_decodes_typed_struct_via_decode_x_from_json_convention`**
+   — load-bearing typed-decoder acceptance. The program declares a
+   `User` struct, declares `decode_user_from_json` matching the
+   convention with an inline `json_decode_eff` effect, calls it on
+   `{"id": 7, "email": "alice@example.com"}`, returns `Ok(user.id)`.
+   NO per-type runtime handler exists; the interpreter's pattern-match
+   dispatch routes through `serde_json::from_str` + `json_to_value`
+   against the declared `User` type from the IR type table.
+
+3. **`malformed_json_returns_result_err_through_real_corvid_program`**
+   — the load-bearing parse-safety property end-to-end. Program calls
+   `json_parse("{not valid json at all")` with `?` propagation; the
+   Err propagates through to the agent's return as `ResultErr`. Test
+   asserts on `Value::ResultErr` and checks the message names the
+   parse failure. Proves user code can route parse failures up to its
+   caller without crashes.
+
+4. **`typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program`**
+   — companion: typed-decoder shape mismatches surface as Result::Err.
+   Program declares `decode_user_from_json` (expects
+   `{id: Int, email: String}`) but the JSON input has `id` as a
+   String. The runtime returns Err with a diagnostic naming the type
+   mismatch.
+
+5. **`json_builder_finish_is_a_snapshot_through_real_corvid_program`**
+   — pins the snapshot-not-consumer semantics at the language-level
+   surface. Program sets a field, finishes (snapshot A), sets a
+   different value for the same field, finishes again (snapshot B).
+   Returns `snapshot_a != snapshot_b` — must be `true` if the builder
+   is properly preserved across finish calls.
+
+### 1 replay-quarantine fixture
+
+In `crates/corvid-runtime/tests/replay_quarantine_corpus.rs`:
+
+`replay_does_not_block_executing_json_parse_or_builder_dispatch` —
+proves a Substitute-mode replay runtime runs `json_parse_tool` and
+`json_object_new_tool` + `json_object_set_int_tool` +
+`json_object_finish_tool` IDENTICALLY to live mode. JSON parse/build
+are deterministic and process-internal; there's no I/O to record, no
+escape to block, no recorded side effect to substitute against. The
+fixture pins this property so a future refactor that silently adds a
+JSON quarantine flag would break this test.
+
+### What 33R5b-c will add
+
+Two RuntimeChecked guarantees (`json.parse_safety_no_panic`,
+`json.field_type_safety_at_access_boundary`) with `GUARANTEE_ID_*`
+anchors already in place from 33R5b-a + claim coverage + 2
+`@deterministic`-rejection pinning tests + `docs/reference/stdlib/json.md`
+reference doc + inventions row + README catalog + `corvid tour
+--topic json` topic.
+
+### Validation
+
+- 5 sqlite-e2e + 5 json-e2e + 15 replay-quarantine + 46 stdlib + 7
+  runtime-json + 252 types + 109 vm all pass.
+- Workspace `cargo check --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### Side-effect discovery during this slice
+
+The driver tests surfaced two Corvid syntax realities worth recording:
+
+1. **No `match` expression.** Corvid's source surface uses `if`/`else`
+   statements and the postfix `?` (TryPropagate) operator for Result
+   handling. The tests use `?` throughout — the simplest pattern for
+   the surface as it exists today.
+
+2. **Effects don't export via `use`.** A user file that imports
+   `./std/json` cannot bring `json_egress_read` into scope. The
+   typed-decoder convention works around this by having user code
+   declare its own effect inline (`effect json_decode_eff: reversible:
+   true`) and use it. The runtime dispatch ignores the effect name —
+   it keys on the tool name pattern + return type only.
+
+Both are pre-existing Corvid surface decisions; the JSON slice just
+operates within them. A future syntax slice could add `match` and
+effect re-exports without affecting JSON; the typed-decoder convention
+holds independently.
+
+---
+
 ## 2026-06-09 - 33R5b-a closed: opaque JsonValue + JsonBuilder primitives + executing JSON tools (std/json.cor)
 
 Opened 33R5b (JSON batteries — gates 33S4 batteries-quickstart). The CTO call

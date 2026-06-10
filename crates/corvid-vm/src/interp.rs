@@ -940,6 +940,24 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                     .await?
+                } else if is_typed_json_decoder_tool_call(callee_name, result_decode_ty) {
+                    // Phase 33R5b-b — typed-decoder convention.
+                    // User declares a tool with signature
+                    // `tool decode_X_from_json(text: String) ->
+                    // Result<X, String>` and the runtime decodes
+                    // the text into the target type X via
+                    // `serde_json::from_str` + `json_to_value`
+                    // against the IR type table. This is the
+                    // Corvid-idiomatic shape — the typechecker
+                    // enforces the target type at compile time,
+                    // the runtime handles the dispatch.
+                    dispatch_typed_json_decoder(
+                        &arg_values,
+                        result_decode_ty,
+                        &self.types_by_id,
+                        callee_name,
+                        span,
+                    )?
                 } else {
                     let result = self
                         .runtime
@@ -1613,5 +1631,109 @@ fn wrap_result_array(
             Value::ResultOk(BoxedValue::new(Value::List(ListValue::new(list_items))))
         }
         Err(msg) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(msg.as_str())))),
+    }
+}
+
+// ============================================================================
+// Phase 33R5b-b — typed-decoder convention.
+//
+// When a user declares a tool with the signature
+//   tool decode_<X>_from_json(text: String) -> Result<X, String>
+// where X is any Corvid type the runtime can convert from JSON
+// (a user-declared struct, a primitive, a list, etc.), the
+// interpreter intercepts the call and dispatches a generic
+// JSON decode against the declared target type — no per-type
+// runtime handler needed.
+//
+// The convention is keyed on TWO conditions simultaneously:
+//
+//   1. The tool name MATCHES the pattern `decode_*_from_json`
+//      (where * is non-empty).
+//   2. The declared return type MATCHES `Result<T, String>` for
+//      some T (the typechecker enforces this; we re-check
+//      structurally before dispatching).
+//
+// Both conditions together prevent the dispatch from silently
+// intercepting an unrelated user tool that happens to have one
+// or the other property.
+// ============================================================================
+
+fn is_typed_json_decoder_tool_call(callee_name: &str, result_decode_ty: &Type) -> bool {
+    // Name pattern: decode_<X>_from_json where <X> is non-empty.
+    let Some(rest) = callee_name.strip_prefix("decode_") else {
+        return false;
+    };
+    let Some(target) = rest.strip_suffix("_from_json") else {
+        return false;
+    };
+    if target.is_empty() {
+        return false;
+    }
+    // Return type pattern: Result<T, String> for some T.
+    matches!(result_decode_ty, Type::Result(_ok, err) if matches!(**err, Type::String))
+}
+
+fn dispatch_typed_json_decoder(
+    arg_values: &[Value],
+    result_decode_ty: &Type,
+    types_by_id: &HashMap<DefId, &corvid_ir::IrType>,
+    callee_name: &str,
+    span: Span,
+) -> Result<Value, InterpError> {
+    let text = match arg_values.first() {
+        Some(Value::String(s)) => s.to_string(),
+        _ => {
+            return Err(InterpError::new(
+                InterpErrorKind::Other(format!(
+                    "{callee_name} expected a single String argument (the JSON text)"
+                )),
+                span,
+            ))
+        }
+    };
+    let (ok_ty, _err_ty) = match result_decode_ty {
+        Type::Result(ok, err) => (ok.as_ref(), err.as_ref()),
+        _ => {
+            return Err(InterpError::new(
+                InterpErrorKind::Other(format!(
+                    "{callee_name} expected a Result<T, String> return type; got {}",
+                    result_decode_ty.display_name()
+                )),
+                span,
+            ))
+        }
+    };
+
+    // Phase 33R5b-b parse path. Serde failure is the load-bearing
+    // recoverable-error property — we wrap the diagnostic as
+    // `Result::Err(message)` so user code can pattern-match and
+    // route the error up to its caller. No panic; no escape.
+    let parsed: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(err) => {
+            return Ok(Value::ResultErr(BoxedValue::new(Value::String(Arc::from(
+                format!("malformed JSON in `{callee_name}`: {err}").as_str(),
+            )))));
+        }
+    };
+
+    // Convert the parsed JSON to a typed Value against the
+    // user-declared target type. `json_to_value` is the same
+    // path the io / http / db dispatch surfaces use to convert
+    // JSON envelopes back into typed values — it handles
+    // structs, lists, options, results, etc.
+    match json_to_value(parsed, ok_ty, types_by_id) {
+        Ok(value) => Ok(Value::ResultOk(BoxedValue::new(value))),
+        Err(err) => {
+            // A type-shape mismatch (e.g. JSON has a String where
+            // the user declared an Int) is the SECOND load-bearing
+            // recoverable-error path. The typechecker can't enforce
+            // this at compile time because the JSON shape is dynamic;
+            // the runtime catches it and surfaces it through the
+            // Result::Err branch.
+            Ok(Value::ResultErr(BoxedValue::new(Value::String(Arc::from(
+                format!("JSON shape mismatch in `{callee_name}`: {err}").as_str(),
+            )))))
+        }
     }
 }

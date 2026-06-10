@@ -494,6 +494,60 @@ async fn replay_blocks_executing_db_execute_dispatch_from_escaping_to_database()
     }
 }
 
+/// Slice 33R5b-b — companion fixture for the executing JSON
+/// surface. JSON parse / build are DETERMINISTIC and process-
+/// internal — there's no I/O, no network, no filesystem touch,
+/// no SQLite mutation. Replay-mode JSON dispatch runs IDENTICALLY
+/// to live mode: parse the same text → produce the same value;
+/// build the same object → produce the same string.
+///
+/// This fixture pins the property: a Substitute-mode replay
+/// runtime accepts `json_parse_tool` and `json_object_finish_tool`
+/// (no quarantine, no ReplayDivergence) because there's no
+/// recorded side effect to substitute against and no escape to
+/// block. The replay-quarantine corpus tests across surfaces are
+/// the place to assert this — without it, a future refactor that
+/// silently added a `quarantine_json` flag could break the JSON
+/// surface during replay without surfacing in any other test.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_does_not_block_executing_json_parse_or_builder_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    let runtime = build_substitute_replay_runtime(&trace_path);
+    assert!(runtime.is_replay_mode());
+
+    // json_parse passes through.
+    let parsed = runtime
+        .json_parse_tool(r#"{"id": 42}"#.to_string())
+        .await
+        .expect("json_parse during replay must pass through cleanly");
+    let parsed = parsed.expect("json_parse must succeed against valid input");
+    let id = runtime
+        .json_get_int_tool(&parsed, "id".to_string())
+        .await
+        .expect("json_get_int during replay must pass through cleanly")
+        .expect("get_int must succeed against the parsed JSON");
+    assert_eq!(id, 42, "json_get_int must return the same value during replay");
+
+    // json_object_new + set + finish all pass through.
+    let builder = runtime
+        .json_object_new_tool()
+        .await
+        .expect("json_object_new during replay must pass through cleanly");
+    let builder = runtime
+        .json_object_set_int_tool(builder, "version".to_string(), 7)
+        .await
+        .expect("json_object_set_int during replay must pass through cleanly");
+    let serialised = runtime
+        .json_object_finish_tool(&builder)
+        .await
+        .expect("json_object_finish during replay must pass through cleanly");
+    assert!(
+        serialised.contains("\"version\":7"),
+        "json_object_finish during replay must produce the same output as live mode; got {serialised}"
+    );
+}
+
 /// Slice 33S3c — companion: executing `db_query` during replay
 /// is NOT blocked by the write-quarantine flag (reads don't
 /// escape the process; the trace-substitution upper gate lands
