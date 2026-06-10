@@ -134,6 +134,48 @@ See [`db.md`](./db.md) for the full reference, including the `[io] root`
 reuse, the typed `DbParam` value-binding shapes, the worked typed-user-store
 example, and the v1.0 post-scope.
 
+## `std.json`
+
+`std/json.cor` defines the executing JSON surface added in Phase 33R5b. The
+umbrella ships TWO complementary shapes: the opaque-handle path (for
+dynamic JSON) and the typed-decoder convention (for typed APIs). Together
+they make "no Python required for JSON" structurally true at the language
+level.
+
+Executing tools (opaque path):
+
+- `json_parse(text) -> Result<JsonValue, String> uses json_egress_read`
+- `json_get_int / _float / _string / _bool / _object / _array(value, field) -> Result<T, String>` — typed accessors
+- `json_object_new() -> JsonBuilder` + `json_object_set_int / _float / _string / _bool(builder, key, value) -> JsonBuilder` — fluent builder
+- `json_object_finish(builder) -> String` — snapshot semantics; builder remains usable
+
+Typed-decoder convention: the user declares
+`tool decode_<X>_from_json(text: String) -> Result<X, String> uses <effect>`
+where `<X>` is any Corvid type the runtime can convert from JSON. The
+interpreter pattern-matches the tool name + return type and routes through
+`serde_json::from_str` + `json_to_value` against the declared target type.
+**No per-type runtime handler exists** — the dispatch is generic over the
+declared signature.
+
+`JsonValue` and `JsonBuilder` are opaque, refcounted primitive types
+produced ONLY by the executing JSON tools. The codegen-cl backend emits a
+structured "interpreter-only in 33R5b; cdylib bridging lands in a
+follow-up slice" diagnostic (the C-ABI `corvid_json_*` exports already
+exist in `corvid-runtime::ffi_bridge::json_exports`, so the cdylib wire-up
+is plumbing).
+
+The executing tools enforce two RuntimeChecked guarantees:
+`json.parse_safety_no_panic` (malformed input returns `Result::Err`, never
+panics) and `json.field_type_safety_at_access_boundary` (typed-accessor
+mismatches return `Result::Err`, never coerce or panic). Programs that
+call these tools from a `@deterministic` agent are rejected at typecheck
+(the existing decl-replayability rule treats all tool calls as
+non-deterministic).
+
+See [`json.md`](./json.md) for the full reference, including the two
+shapes (opaque + typed-decoder), the worked typed-user-store HTTP →
+JSON → SQLite pipeline (no Python glue), and the v1.0 post-scope.
+
 ## `std.secrets`
 
 `std/secrets.cor` defines `SecretReadEnvelope` plus constructors for present and

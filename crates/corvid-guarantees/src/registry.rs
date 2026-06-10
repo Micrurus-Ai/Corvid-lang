@@ -498,6 +498,92 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_get_tool_dispatch_without_recorded_event",
         ],
     },
+    // ----- json (Phase 33R5b-c) -----------------------------------
+    //
+    // The executing JSON surface (`json_parse` / `json_get_*` /
+    // `json_object_new` / `json_object_set_*` / `json_object_finish`
+    // declared in `std/json.cor`) ships two RuntimeChecked
+    // guarantees plus the typed-decoder convention (which uses
+    // the same parse path so its safety properties are inherited).
+    //
+    // JSON has no security boundary beyond serde validation —
+    // no I/O, no network, no filesystem, no SQLite. The
+    // properties below are PURE SAFETY properties: malformed
+    // input is recoverable, typed-accessor mismatches are
+    // recoverable. Together they make "calling JSON tools is
+    // structurally crash-free" a load-bearing language
+    // property — a Corvid program can route JSON failures
+    // through the standard Result<_, String> envelope without
+    // ever risking a runtime panic or escape.
+    //
+    // The @deterministic-rejection property is NOT a separate
+    // guarantee here — same rationale as 33S1c (io.*), 33S2c
+    // (http.*), 33S3d (sqlite.*): the existing decl-replayability
+    // rule covers all tool calls regardless of effect. 33R5b-c
+    // adds two pinning tests at
+    // `crates/corvid-types/src/tests.rs::deterministic_agent_calling_json_*_tool_is_rejected`
+    // so a future relaxation of the rule would surface as
+    // test breakage, not a silent regression.
+    Guarantee {
+        id: "json.parse_safety_no_panic",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Calling `json_parse(text)` against arbitrary bytes \
+             returns `Result::Err(message)` rather than panicking. \
+             The runtime's `crate::json::parse` routes through \
+             `serde_json::from_str` whose parse failure surfaces \
+             as a structured error description; the Result wraps \
+             the error in the standard `Err(String)` envelope so \
+             user code can pattern-match via `?` propagation and \
+             route the diagnostic up to its caller. A Corvid \
+             program calling `json_parse` on malformed text \
+             cannot crash the runtime regardless of what bytes \
+             are in the input. The typed-decoder convention \
+             (`decode_<X>_from_json`) inherits this property — \
+             malformed input through the decoder dispatch path \
+             also returns `Result::Err`.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/json.rs::parse_round_trips_a_typical_object",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_round_trips_data_through_opaque_json_dispatch",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/json.rs::malformed_json_returns_recoverable_error_never_panics",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::malformed_json_returns_result_err_through_real_corvid_program",
+        ],
+    },
+    Guarantee {
+        id: "json.field_type_safety_at_access_boundary",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "Each typed accessor on the executing JSON surface \
+             (`json_get_int` / `json_get_float` / `json_get_string` \
+             / `json_get_bool` / `json_get_object` / `json_get_array`) \
+             returns `Result<T, String>` where the Err branch fires \
+             on missing fields AND on type mismatches. \
+             `json_get_int(value, field)` against a string-valued \
+             field returns `Err(\"field 'x' is not an Int\")` rather \
+             than coercing or panicking. The typed-decoder \
+             convention inherits the same property — shape \
+             mismatches (a JSON String where the user declared an \
+             Int) flow through `json_to_value` against the target \
+             struct and surface as `Result::Err` with a structured \
+             diagnostic.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/json.rs::get_object_returns_subtree_for_further_typed_access",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_decodes_typed_struct_via_decode_x_from_json_convention",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/json.rs::typed_accessor_mismatch_returns_recoverable_error",
+            "crates/corvid-runtime/src/json.rs::missing_field_returns_recoverable_error_naming_the_field",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program",
+        ],
+    },
     // ----- Grounded<T> --------------------------------------------
     Guarantee {
         id: "grounded.provenance_required",

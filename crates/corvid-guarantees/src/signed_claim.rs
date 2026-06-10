@@ -90,6 +90,18 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "io_source.sqlite_parameter_binding_only",
     "io_source.sqlite_write_quarantine_on_replay",
     "io_source.sqlite_read_passthrough_on_replay",
+    // Slice 33R5b-c — the two executing JSON guarantees.
+    // A signed cdylib whose source uses `json_parse` / `json_get_*`
+    // / `json_object_*` (declared in std/json.cor) asserts these
+    // two RuntimeChecked properties in its claim manifest:
+    // parse-safety (malformed input is recoverable, never
+    // panics) and field-type-safety (typed-accessor mismatches
+    // return Err, never coerce or panic). The typed-decoder
+    // convention (`decode_<X>_from_json`) inherits the same
+    // properties because it routes through the same parse +
+    // json_to_value path.
+    "json.parse_safety_no_panic",
+    "json.field_type_safety_at_access_boundary",
     "grounded.provenance_required",
     // `grounded.propagation_across_calls` removed 2026-05-08 by
     // Phase 35V-T1-B — downgraded to OutOfScope because the

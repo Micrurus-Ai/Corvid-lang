@@ -32,6 +32,8 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `io_source.sqlite_write_quarantine_on_replay` | effect_row | runtime_checked | runtime |
 | `io_source.sqlite_read_passthrough_on_replay` | effect_row | runtime_checked | runtime |
 | `io_source.http_quarantine_on_replay` | effect_row | runtime_checked | runtime |
+| `json.parse_safety_no_panic` | effect_row | runtime_checked | runtime |
+| `json.field_type_safety_at_access_boundary` | effect_row | runtime_checked | runtime |
 | `grounded.provenance_required` | grounded | static | typecheck |
 | `grounded.propagation_across_calls` | grounded | out_of_scope | typecheck |
 | `grounded.no_laundering` | grounded | static | typecheck |
@@ -345,6 +347,39 @@ A Substitute-mode replay runtime refuses every executing HTTP call. POST calls t
 
 - `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network`
 - `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_get_tool_dispatch_without_recorded_event`
+
+#### `json.parse_safety_no_panic`
+- **class**: runtime_checked
+- **phase**: runtime
+
+Calling `json_parse(text)` against arbitrary bytes returns `Result::Err(message)` rather than panicking. The runtime's `crate::json::parse` routes through `serde_json::from_str` whose parse failure surfaces as a structured error description; the Result wraps the error in the standard `Err(String)` envelope so user code can pattern-match via `?` propagation and route the diagnostic up to its caller. A Corvid program calling `json_parse` on malformed text cannot crash the runtime regardless of what bytes are in the input. The typed-decoder convention (`decode_<X>_from_json`) inherits this property — malformed input through the decoder dispatch path also returns `Result::Err`.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/json.rs::parse_round_trips_a_typical_object`
+- `crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_round_trips_data_through_opaque_json_dispatch`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/json.rs::malformed_json_returns_recoverable_error_never_panics`
+- `crates/corvid-driver/tests/executing_json_through_driver.rs::malformed_json_returns_result_err_through_real_corvid_program`
+
+#### `json.field_type_safety_at_access_boundary`
+- **class**: runtime_checked
+- **phase**: runtime
+
+Each typed accessor on the executing JSON surface (`json_get_int` / `json_get_float` / `json_get_string` / `json_get_bool` / `json_get_object` / `json_get_array`) returns `Result<T, String>` where the Err branch fires on missing fields AND on type mismatches. `json_get_int(value, field)` against a string-valued field returns `Err("field 'x' is not an Int")` rather than coercing or panicking. The typed-decoder convention inherits the same property — shape mismatches (a JSON String where the user declared an Int) flow through `json_to_value` against the target struct and surface as `Result::Err` with a structured diagnostic.
+
+**Positive tests:**
+
+- `crates/corvid-runtime/src/json.rs::get_object_returns_subtree_for_further_typed_access`
+- `crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_decodes_typed_struct_via_decode_x_from_json_convention`
+
+**Adversarial tests:**
+
+- `crates/corvid-runtime/src/json.rs::typed_accessor_mismatch_returns_recoverable_error`
+- `crates/corvid-runtime/src/json.rs::missing_field_returns_recoverable_error_naming_the_field`
+- `crates/corvid-driver/tests/executing_json_through_driver.rs::typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program`
 
 ### Grounded provenance
 

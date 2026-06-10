@@ -635,6 +635,46 @@ Roadmap: [Phase 33S3](./ROADMAP.md)
 Proof: [end-to-end SQLite tests](./crates/corvid-driver/tests/executing_sqlite_through_driver.rs) + [DbHandleRegistry tests](./crates/corvid-runtime/src/db.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: SQLite only — the Postgres path remains envelope-only. Path confinement reuses `[io] root`; no separate `[db]` allowlist exists.
 
+#### Executing JSON Surface (Opaque + Typed-Decoder)
+
+Corvid's `std/json` module ships 13 executing tools across TWO complementary shapes — the load-bearing "no Python required for JSON" promise of the batteries umbrella:
+
+1. **Opaque path** — `json_parse(text) -> Result<JsonValue, String>`, typed accessors (`json_get_int`, `json_get_string`, ...), fluent builder (`json_object_new` → `json_object_set_*` → `json_object_finish`). For dynamic JSON: LLM responses of unknown shape, debug tooling, polymorphic APIs.
+
+2. **Typed-decoder convention** — user declares `tool decode_<X>_from_json(text: String) -> Result<X, String>` where X is any Corvid type the runtime can convert from JSON. The interpreter pattern-matches the tool name + return type and routes through `serde_json::from_str` + `json_to_value` against the declared target. **No per-type runtime handler exists** — the dispatch is generic over the declared signature. For typed APIs and the 33S4 HTTP→JSON→SQLite tutorial.
+
+The surface enforces two **load-bearing structural safety properties**:
+
+1. **Parse safety** — `json_parse` against arbitrary bytes returns `Result::Err(message)` rather than panicking. The typed-decoder convention inherits this.
+2. **Field-type safety** — `json_get_int` against a String field returns `Result::Err`, never coerces. The typed-decoder convention inherits this too — JSON shape mismatches surface as `Result::Err` rather than runtime panics.
+
+The security boundary is **structural in the typechecker**: a signed cdylib carries `json.parse_safety_no_panic` and `json.field_type_safety_at_access_boundary` in its claim manifest.
+
+```corvid
+effect json_decode_eff:
+    reversible: true
+
+type User:
+    id: Int
+    email: String
+
+import "./std/json" use json_parse, json_get_int
+
+tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
+
+agent typed_decoder(text: String) -> Result<Int, String>:
+    user = decode_user_from_json(text)?
+    return Ok(user.id)
+```
+
+Calls inside a `@deterministic` agent are rejected at typecheck. JSON parse/build are deterministic and process-internal so replay-mode dispatch runs IDENTICALLY to live (no quarantine flag needed). The cdylib `corvid_json_*` C-ABI exports already exist in `corvid-runtime::ffi_bridge::json_exports`; cdylib codegen for `JsonValue` / `JsonBuilder` is interpreter-only in 33R5b (follow-up slice).
+
+Spec: [`std.json` reference](./docs/reference/stdlib/json.md)
+Tour: `corvid tour --topic json`
+Roadmap: [Phase 33R5b](./ROADMAP.md)
+Proof: [end-to-end JSON tests](./crates/corvid-driver/tests/executing_json_through_driver.rs) + [runtime JSON tests](./crates/corvid-runtime/src/json.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: No JSON Path / JSONata / JMESPath query language (nested access via `json_get_object` chains). cdylib codegen for the opaque types is a follow-up slice; the C-ABI exports already exist.
+
 ## Architecture
 
 ```text

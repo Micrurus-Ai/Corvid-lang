@@ -472,6 +472,36 @@ agent load_summary(date: String) -> String:
 "#,
     },
     TourTopic {
+        name: "json",
+        title: "Executing JSON Surface (Opaque + Typed-Decoder)",
+        category: "Executing I/O",
+        pitch: "Corvid's std/json tools ship BOTH shapes a v1.0 batteries language needs: an opaque JsonValue + typed accessors for dynamic JSON (LLM responses, polymorphic APIs, debug tooling) AND a typed-decoder convention for typed APIs (declare a struct, declare decode_X_from_json, the runtime decodes generically via serde + json_to_value against the target type). Two RuntimeChecked guarantees hold structurally — parse-safety (malformed input returns Result::Err, never panics) and field-type-safety (typed-accessor mismatches return Result::Err, never coerce or panic). Calls from @deterministic agents are rejected at typecheck; JSON parse/build are deterministic and process-internal so replay-mode dispatch runs identically to live. The tour parses JSON, accesses fields via the opaque path, AND demonstrates the typed-decoder convention by declaring a User struct + decode_user_from_json. NO Python glue required.",
+        spec: "docs/reference/stdlib/json.md",
+        roadmap: "Phase 33R5b executing JSON surface",
+        test: "crates/corvid-driver/tests/executing_json_through_driver.rs + crates/corvid-runtime/src/json.rs tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_json_*",
+        non_scope: "Opaque + typed-decoder shapes ship; cdylib codegen for JsonValue / JsonBuilder is interpreter-only in 33R5b (the corvid_json_* C-ABI exports already exist; the cdylib wire-up is plumbing for a follow-up slice). No JSON Path / JSONata / JMESPath query language; nested access via json_get_object chains.",
+        source: r#"effect json_decode_eff:
+    reversible: true
+
+type User:
+    id: Int
+    email: String
+
+import "./std/json" use json_parse, json_get_int
+
+tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
+
+agent opaque_path(text: String) -> Result<Int, String>:
+    parsed = json_parse(text)?
+    id = json_get_int(parsed, "id")?
+    return Ok(id)
+
+agent typed_decoder_path(text: String) -> Result<Int, String>:
+    user = decode_user_from_json(text)?
+    return Ok(user.id)
+"#,
+    },
+    TourTopic {
         name: "sqlite",
         title: "Executing SQLite Surface",
         category: "Executing I/O",

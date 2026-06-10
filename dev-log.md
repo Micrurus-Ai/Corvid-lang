@@ -4,6 +4,210 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-06-10 - 33R5b-c closed (umbrella 33R5b done): invention proof artifacts for executing JSON surface
+
+Closes the 33R5b umbrella. 33R5b-a shipped the `Value::JsonValue` +
+`Value::JsonBuilder` + `Type::JsonValue` + `Type::JsonBuilder` primitives +
+the runtime json module + the executing tool declarations + interpreter
+dispatch. 33R5b-b shipped the typed-decoder convention + 5 driver-layer
+end-to-end tests + 1 replay-quarantine fixture. 33R5b-c ships the
+invention-shipping-contract artifacts: two guarantees + claim coverage
++ tour topic + reference doc + inventions row + README catalog entry +
+two @deterministic-rejection pinning tests.
+
+The executing JSON surface is now publicly discoverable, runnable, trust-
+anchored, and signable. The umbrella 33R5b ships as a v1.0 invention.
+**33S4 batteries-quickstart can now ship** — its gate on 33R5b shipping
+first is satisfied.
+
+### Two guarantees
+
+Two RuntimeChecked rows in
+`corvid-guarantees::registry::GUARANTEE_REGISTRY`:
+
+- `json.parse_safety_no_panic` — the load-bearing parse-safety property.
+  `json_parse(text)` against arbitrary bytes returns `Result::Err(message)`
+  rather than panicking; the runtime never escapes. The typed-decoder
+  convention inherits the property since it routes through the same parse
+  path. Test refs point at both `crates/corvid-runtime/src/json.rs::malformed_json_returns_recoverable_error_never_panics`
+  (unit) AND `crates/corvid-driver/tests/executing_json_through_driver.rs::malformed_json_returns_result_err_through_real_corvid_program`
+  (driver e2e through real Corvid program).
+
+- `json.field_type_safety_at_access_boundary` — the load-bearing field-
+  type-safety property. Each typed accessor returns `Result<T, String>`
+  where the Err branch fires on missing fields AND on type mismatches.
+  `json_get_int(value, "name")` against a String-valued field returns
+  `Err("field 'name' is not an Int (got String)")`. The typed-decoder
+  convention inherits the property because it flows through
+  `json_to_value(parsed, target_type, &types_by_id)` whose error path
+  fires identically. Test refs include both unit-level
+  (`typed_accessor_mismatch_returns_recoverable_error`,
+  `missing_field_returns_recoverable_error_naming_the_field`) and driver
+  e2e (`typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program`).
+
+Two matching `pub const GUARANTEE_ID_*` anchors already in place at the
+enforcement sites in `crates/corvid-runtime/src/json.rs` from 33R5b-a so
+the `every_enforced_guarantee_id_is_wired_to_workspace_source` sentinel
+passes without changes.
+
+### What is deliberately NOT a separate guarantee
+
+**The @deterministic-rejection property** gets no new row. Same rationale
+as 33S1c, 33S2c, 33S3d: the existing decl-replayability rule rejects
+every tool call inside `@deterministic` bodies regardless of effect.
+33R5b-c adds two pinning tests at
+`crates/corvid-types/src/tests.rs::deterministic_agent_calling_json_parse_tool_is_rejected`
+and `deterministic_agent_calling_json_object_finish_tool_is_rejected`
+so a future relaxation would surface as test breakage.
+
+**Replay quarantine** gets no new row either — JSON parse / build are
+deterministic and process-internal, so replay-mode dispatch runs
+identically to live. The 33R5b-b replay-quarantine fixture
+(`replay_does_not_block_executing_json_parse_or_builder_dispatch`)
+documents the property at the dispatch layer; it's a structural
+non-property of the surface rather than an enforcement claim.
+
+### Claim coverage
+
+Two ids added to
+`corvid-guarantees::signed_claim::SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS`:
+`json.parse_safety_no_panic` and `json.field_type_safety_at_access_boundary`.
+A signed cdylib whose source uses `json_parse` / `json_get_*` /
+`json_object_*` (declared in `std/json.cor`) can now assert these two
+RuntimeChecked properties in its claim manifest. The typed-decoder
+convention is covered too since it routes through the same code paths.
+
+### Reference doc
+
+`docs/reference/stdlib/json.md` (~360 lines) — structurally parallel to
+`io.md` (33S1c), `http.md` (33S2c), `db.md` (33S3d):
+
+- Quick reference with both shapes — opaque and typed-decoder side by
+  side.
+- A dedicated "JsonValue — opaque parsed JSON" section explaining why
+  unlike DbHandle there is NO opacity gate at `json_to_value` (the
+  payload IS the JSON shape, not a key into a registry; the conversion
+  is the natural identity wrap).
+- A dedicated "JsonBuilder — mutable JSON object builder" section
+  explaining the Arc<Mutex<...>> design and the snapshot-not-consumer
+  semantics of `json_object_finish`.
+- All 13 executing tools documented with their effects.
+- A dedicated "The typed-decoder convention" section explaining the
+  two-condition gate (`is_typed_json_decoder_tool_call`), the dispatch
+  flow, and a worked example with nested struct decoding.
+- Safety properties (parse-safety + field-type-safety) with worked
+  examples demonstrating each.
+- Determinism + replay-quarantine sections matching the io/http/db
+  shape.
+- A guarantees table linking back to `core-semantics.md`.
+- A worked typed-user-store pipeline (HTTP → typed-decoder → SQLite,
+  no Python glue) — the 33S4 quickstart preview.
+- An explicit "post-v1.0 — what's deliberately NOT in scope" section
+  covering JsonValue-encoder, polymorphic typed decoder, JSON Path /
+  JSONata / JMESPath, and cdylib codegen.
+
+`docs/reference/stdlib/README.md` gained a `## std.json` section linking
+to `json.md` + summarising the 13 executing tools + the typed-decoder
+convention + the two RuntimeChecked guarantees + the cdylib-bridging
+non-scope.
+
+### Tour topic
+
+`corvid tour --topic json` added to
+`crates/corvid-tour-catalog/src/lib.rs`. The source demonstrates
+BOTH shapes in a single tour:
+
+```cor
+effect json_decode_eff:
+    reversible: true
+
+type User:
+    id: Int
+    email: String
+
+import "./std/json" use json_parse, json_get_int
+
+tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
+
+agent opaque_path(text: String) -> Result<Int, String>:
+    parsed = json_parse(text)?
+    id = json_get_int(parsed, "id")?
+    return Ok(id)
+
+agent typed_decoder_path(text: String) -> Result<Int, String>:
+    user = decode_user_from_json(text)?
+    return Ok(user.id)
+```
+
+The source compiles through the `corvid_driver::compile` gate
+(`all_tour_sources_compile` test passes 36/36; was 35, +1 for json). The
+pitch text names the two shapes, the two guarantees, the typed-decoder
+convention's load-bearing role, and the "no Python required" promise.
+
+### Invention catalog
+
+`docs/reference/inventions.md` row added immediately after the SQLite
+surface row, pointing at the end-to-end driver tests, the runtime json
+unit tests, and the replay-quarantine fixtures.
+
+`README.md`'s Verification section gains an "Executing JSON Surface
+(Opaque + Typed-Decoder)" catalog entry directly after "Executing SQLite
+Surface", carrying:
+
+- A two-bullet summary of the two shapes (opaque + typed-decoder).
+- The two load-bearing structural safety properties.
+- The signing claim that the two new ids enable.
+- A worked typed-decoder example.
+- The standard Spec / Tour / Roadmap / Proof / Non-scope footer.
+
+### Validation
+
+- 28 guarantee tests pass (the new 2 rows participate fully via the
+  enforcement-site anchors from 33R5b-a).
+- 36 tour topics compile (was 35; +1 for json).
+- 46 stdlib + 7 runtime-json + 5 sqlite-e2e + 5 json-e2e + 15 replay-
+  quarantine + 2 deterministic-rejection + 252 types + 109 vm all pass.
+- `cargo check --workspace --tests` clean.
+- `corvid verify --corpus tests/corpus` exits 1 only on the two
+  deliberate fixtures.
+
+### What 33R5b umbrella ships in summary
+
+The executing JSON surface is now COMPLETE. End-to-end through `corvid
+run`:
+
+```
+$ cat src/main.cor
+effect json_decode_eff:
+    reversible: true
+
+type User:
+    id: Int
+    email: String
+
+import "./std/json" use json_parse, json_get_int
+
+tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
+
+agent main() -> Result<Int, String>:
+    user = decode_user_from_json("{\"id\": 7, \"email\": \"alice@example.com\"}")?
+    return Ok(user.id)
+
+$ corvid run src/main.cor
+# → real serde decode through json_to_value against User; returns Ok(7)
+```
+
+A `json_parse` on malformed text returns `Result::Err` cleanly. A
+`decode_user_from_json` against shape-mismatched JSON returns
+`Result::Err` with a structured diagnostic. A `@deterministic` agent
+calling either is a compile error. A `corvid build --sign` of a cdylib
+using these tools accepts a descriptor declaring the two new claim ids.
+
+The 33R5b-c invention proof ships. **33S4 batteries-quickstart can now
+proceed** — its ROADMAP gate on 33R5b shipping first is satisfied.
+
+---
+
 ## 2026-06-10 - 33R5b-b closed: typed-decoder convention + end-to-end acceptance for executing JSON surface
 
 Wired the typed-decoder convention and shipped 5 driver-layer end-to-end

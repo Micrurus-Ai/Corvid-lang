@@ -3718,6 +3718,71 @@ agent fetch_status(url: String) -> String:
     );
 }
 
+/// Slice 33R5b-c — same rejection covers the executing JSON
+/// parse surface. A `tool` declared with `uses json_egress_read`
+/// called from a `@deterministic` agent is a typecheck-phase
+/// compile error. The user-facing promise: a pure agent cannot
+/// accidentally parse JSON (whose result is data-dependent on
+/// the input) — even though JSON parse is itself deterministic
+/// given the same input, the typechecker rejects all tool calls
+/// inside @deterministic bodies. The decoupling is intentional:
+/// `@deterministic` is the language-level "this computes from
+/// declared inputs only" annotation; tool calls (whose
+/// implementation could change between runs) are excluded by the
+/// existing decl-replayability rule regardless of effect.
+#[test]
+fn deterministic_agent_calling_json_parse_tool_is_rejected() {
+    let src = "\
+effect json_egress_read:
+    reversible: true
+
+tool json_parse(text: String) -> String uses json_egress_read
+
+@deterministic
+agent parse_config(text: String) -> String:
+    return json_parse(text)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "json_parse" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for json_egress_read tool invocation, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 33R5b-c — same rejection fires for the builder side
+/// (uses `json_egress_build`). Mirrors the 33S1b / 33S2c / 33S3d
+/// pinning tests across reversible AND non-reversible effects on
+/// each surface — confirms the determinism rule is decl-kind-based
+/// and not sensitive to the effect dimension.
+#[test]
+fn deterministic_agent_calling_json_object_finish_tool_is_rejected() {
+    let src = "\
+effect json_egress_build:
+    reversible: true
+
+tool json_object_finish(builder: String) -> String uses json_egress_build
+
+@deterministic
+agent encode_config(builder: String) -> String:
+    return json_object_finish(builder)
+";
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NonDeterministicCall { call, call_kind, .. }
+                if call == "json_object_finish" && call_kind == "tool"
+        )),
+        "expected NonDeterministicCall for json_egress_build tool invocation, got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 33S3d — same rejection covers the executing SQLite
 /// read surface. A `tool` declared with `uses db_egress_read`
 /// called from a `@deterministic` agent is a typecheck-phase
