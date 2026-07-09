@@ -2,41 +2,62 @@
 
 ## What a prompt is
 
-A prompt is a function whose body is a string template, whose return
-type is a typed value (or an `Option<T>` / `Result<T,E>` if the parse
-might fail), and whose effect row carries the LLM call's cost,
-latency, and confidence.
+A prompt is a function whose body is a single string template, whose
+return type is a typed value (or an `Option<T>` / `Result<T,E>` if
+the parse might fail), and whose effect row carries the LLM call's
+cost, latency, and confidence.
 
 ```corvid
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
 prompt summarize(text: String) -> String uses llm_call:
-    "Summarize the following in one sentence: " + text
+    "Summarize the following in one sentence: {text}"
 ```
 
 ## How interpolation works
 
-Variables in the prompt body interpolate. Strings concatenate with `+`.
-There is no implicit string conversion — non-string values must be
-converted explicitly:
+The body is one template string. Parameters interpolate with
+`{param}` — any declared parameter, not just strings. Non-string
+values render as their JSON form, so an `Int` parameter needs no
+conversion:
 
 ```corvid
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
 prompt classify_priority(score: Int) -> String uses llm_call:
-    "Score is " + score.to_string() + ". What priority?"
+    "The urgency score is {score}. Reply with one word: low, medium, or high."
 ```
+
+The body is a template, not an expression — `"Score is " + score`
+is not a prompt body. Everything the model should see goes inside
+the one template string.
 
 ## Typed return values
 
 ```corvid
-struct Decision:
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
+type Decision:
     refund: Bool
     reason: String
 
 prompt decide(ticket: String) -> Decision uses llm_call:
-    "Given ticket: " + ticket + "\n\nReply as JSON {refund, reason}."
+    "Given this support ticket: {ticket} — decide whether to refund. Reply as JSON with fields refund and reason."
 ```
 
-The runtime asks the model to emit JSON matching the `Decision` schema
-and parses the response into a `Decision` value. Parse failure is a
-typed error.
+The runtime derives a JSON schema from the `Decision` type, sends it
+with the request (schema-constrained decoding on providers that
+support it), and parses the response into a `Decision` value. Parse
+failure is a typed error, not a panic.
 
 For per-struct decoders the compiler emits at codegen time, see the
 slice that landed this surface
@@ -44,14 +65,16 @@ slice that landed this surface
 
 ## Multi-message prompts
 
-```corvid
+> **Planned — lands in slice 46b of the Language completeness
+> track.** Today a prompt renders as a single user-role message;
+> there is no system-prompt or role-block surface yet. First-class
+> conversation history follows in slice 46c.
+
+```corvid-planned
 prompt ask(question: String) -> String uses llm_call:
     system: "You are a careful, terse assistant."
-    user: question
+    user: "{question}"
 ```
-
-Each role gets its own template. The runtime renders the messages,
-sends them, parses the response.
 
 ## Provider routing
 

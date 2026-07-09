@@ -86,6 +86,59 @@ realignment).
 
 ---
 
+## 2026-07-09 - 44b closed: pattern-matching + prompts chapters realigned
+
+Second Phase 44 slice, same fence-tag convention, two more chapters
+under the compile guard (now 4 total).
+
+### ch 13 (pattern matching) — from fiction to design doc
+
+The chapter described `match` as shipped ("the compiler refuses to
+emit if a sum-type match doesn't cover every variant") with zero
+implementation behind any of it. Now:
+
+- A chapter-top Planned banner names the implementing slices (45h
+  sum types, 45i match/patterns/destructuring) and frames the whole
+  chapter as the design document for that work.
+- Every design block is `corvid-planned` under a section-level
+  Planned marker. Fixed the `...` vs `..` rest-pattern
+  inconsistency (grammar.md uses `..`) and the fictional
+  `amount.to_string()` call inside a design example.
+- NEW compiling "What ships today" section: a real
+  `Result<Decision, String>` flow demonstrating `?` propagation +
+  `if`/`else` branching — the actual shipped consumption story —
+  with an honest closing note that branching on WHICH error occurred
+  needs 45i/45l.
+
+### ch 11 (prompts) — bodies fixed to the real template form
+
+- All three compiling examples rewritten to the single-template-
+  string form with `{param}` interpolation, each with its own
+  effect declaration so the blocks compile standalone.
+- The interpolation section previously taught two things that are
+  both wrong: `"Score is " + score.to_string()` (prompt bodies are
+  not expressions AND `.to_string()` doesn't exist). The shipped
+  fact is better than the fiction: ANY typed parameter interpolates
+  via `{param}` as its JSON form — an `Int` needs no conversion.
+  The section now teaches that.
+- `struct Decision:` → `type Decision:` in the typed-return example.
+- Multi-message `system:`/`user:` section marked Planned → 46b, with
+  a note that first-class conversation history follows in 46c.
+- Routing / budgets / replay sections were accurate; untouched.
+
+### Validation
+
+- 3/3 snippet-guard tests over 4 chapters (04, 05, 11, 13) — the
+  new ch 11/13 compiling examples pass the driver, confirming the
+  `{score}` Int-interpolation form and the Result "ships today"
+  example are real.
+- Workspace check clean; corpus verify exits 1 only on the two
+  deliberate fixtures.
+
+Next per track order: 44c (grammar drift-gate strengthening).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -25,7 +25,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-const GUARDED_CHAPTERS: &[&str] = &["docs/book/04-syntax.md", "docs/book/05-types.md"];
+const GUARDED_CHAPTERS: &[&str] = &[
+    "docs/book/04-syntax.md",
+    "docs/book/05-types.md",
+    "docs/book/11-prompts.md",
+    "docs/book/13-pattern-matching.md",
+];
 
 /// How far above a `corvid-planned` fence the word "Planned" must
 /// appear (in lines). Generous enough for a marker + blank line +
