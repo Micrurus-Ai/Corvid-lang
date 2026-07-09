@@ -323,6 +323,33 @@ Phase 44 closes with 44f as the long-tail sweep.
 
 ---
 
+## 2026-07-09 - 44e closed: README streaming non-scope states the real boundary
+
+Small, surgical. The README's Streaming section carried a non-scope
+line that misled by omission: "Provider-native continuation depends
+on provider APIs; local typed fallback tokens are the shipped
+boundary" implies the missing piece is *continuation* — when in fact
+NO provider token streaming exists (all four adapters defer SSE; a
+`-> Stream<T>` prompt makes one blocking call and yields the complete
+response as a single chunk, `interp/prompt/mod.rs:35-86`).
+
+Changes:
+
+- Streaming Effects non-scope now states the boundary plainly: the
+  shipped algebra applies to agent-produced `yield` streams; provider
+  token streaming is not wired; live token flow lands with 46d.
+- Partial<T> non-scope: LLM partials arrive complete, not
+  progressively, until 46d.
+- ResumeToken<T> non-scope: live mid-stream interruption of provider
+  tokens requires 46d.
+- The "streaming" entries in the constructs lists stay — Stream<T> /
+  yield / the effect algebra ARE shipped language constructs; the
+  non-scope now makes the provider boundary unambiguous.
+
+Phase 44 is now 5/6: only 44f (remaining-chapters sweep) is open.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -453,7 +453,7 @@ Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic streaming-effects`
 Roadmap: [Phase 20f](./ROADMAP.md)
 Proof: [stream tests](./crates/corvid-vm/src/tests/stream.rs)
-Non-scope: Provider-native continuation depends on provider APIs; local typed fallback tokens are the shipped boundary.
+Non-scope: The stream algebra applies to agent-produced streams (`yield`) today. **Provider token streaming is not yet wired**: a prompt declared `-> Stream<T>` currently makes one blocking LLM call and yields the complete response as a single chunk — all four provider adapters defer SSE streaming. Live token flow through this algebra lands with slice 46d (Language completeness track); provider-native continuation additionally depends on provider APIs.
 
 #### Progressive Structured Streams
 
@@ -474,7 +474,7 @@ Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic partial-streams`
 Roadmap: [Phase 20f Stream<Partial<T>>](./ROADMAP.md)
 Proof: [partial stream tests](./crates/corvid-types/src/tests.rs)
-Non-scope: Full native parity for every partial-stream path remains backend work.
+Non-scope: Full native parity for every partial-stream path remains backend work. Until slice 46d wires provider token streaming, `Partial<T>` values from LLM prompts arrive complete rather than progressively (see the Streaming Effects non-scope above).
 
 #### Typed Stream Resumption
 
@@ -492,7 +492,7 @@ Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic stream-resume`
 Roadmap: [Phase 20f resumption tokens](./ROADMAP.md)
 Proof: [stream resume tests](./crates/corvid-vm/src/tests/stream.rs)
-Non-scope: Provider-native session continuation waits on provider APIs; local fallback is shipped.
+Non-scope: Provider-native session continuation waits on provider APIs; local fallback is shipped. Live mid-stream interruption of provider tokens requires 46d (see the Streaming Effects non-scope above).
 
 #### Declarative Fan-Out / Fan-In
 
