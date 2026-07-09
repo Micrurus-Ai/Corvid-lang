@@ -58,33 +58,33 @@ of work. The compiler will use these to decide which calls need
 approvals, which calls need grounding, and what the budget ceiling is for
 the agent.
 
-## Step 3 — Write the retrieval prompt
+## Step 3 — Write the retrieval tool
 
-```corvid
-prompt fetch_policy() -> Grounded<String> uses retrieval_effect:
-    @retrieve("data/policy.txt")
+```corvid-fragment
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval_effect
 ```
 
-`Grounded<String>` is not the same type as `String`. A grounded value
-carries provenance: which source produced it, when, and a hash. You
-cannot accidentally pass a grounded value where a model-only string is
-expected — the compiler refuses.
+The tool is signature-only; the host's retrieval implementation
+returns the document and the runtime attaches provenance (source
+path, retrieval timestamp, content hash). `Grounded<String>` is not
+the same type as `String` — you cannot pass a plain string where a
+grounded one is expected; the compiler refuses (see
+**[Grounded](/docs/grounded)** for the full asymmetric rule).
 
 ## Step 4 — Write the decision prompt
 
-```corvid
-prompt decide_refund(
-    ticket: String,
-    policy: Grounded<String>,
-) -> Bool uses llm_decision:
-    "Given the policy: " + policy.unwrap_with_citation() +
-    "\n\nDecide whether to refund this ticket: " + ticket +
-    "\n\nReply 'yes' or 'no'."
+```corvid-fragment
+prompt decide_refund(ticket: String, policy: Grounded<String>) -> Bool uses llm_decision:
+    cites policy strictly
+    "Given the policy: {policy} — decide whether to refund this ticket: {ticket}. Reply yes or no."
 ```
 
-`policy.unwrap_with_citation()` produces a string that includes the
-citation. The model sees the source. The trace records the source. The
-auditor can prove the decision was grounded.
+The body is a single template string; `{policy}` and `{ticket}`
+interpolate (grounded parameters interpolate with their provenance
+attached). `cites policy strictly` requires the model's answer to
+carry text evidence from that source — the model sees the source, the
+trace records the source, the auditor can prove the decision was
+grounded.
 
 ## Step 5 — Write the refund tool
 
@@ -103,9 +103,38 @@ routing.
 
 ## Step 6 — Compose the agent
 
+The full program so far (this exact block is compiled in CI):
+
 ```corvid
+effect retrieval_effect:
+    cost: $0.001
+    latency: fast
+    confidence: 0.95
+    data: grounded
+
+effect llm_decision:
+    cost: $0.02
+    latency: medium
+    confidence: 0.9
+    trust: model_only
+
+effect refund_effect:
+    cost: $100.00
+    latency: medium
+    trust: supervisor_required
+    reversible: false
+    data: external_action
+
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval_effect
+
+prompt decide_refund(ticket: String, policy: Grounded<String>) -> Bool uses llm_decision:
+    cites policy strictly
+    "Given the policy: {policy} — decide whether to refund this ticket: {ticket}. Reply yes or no."
+
+tool refund(amount: Float, customer_id: String) -> String dangerous uses refund_effect
+
 agent handle_refund(ticket: String, customer_id: String) -> String:
-    policy = fetch_policy()
+    policy = fetch_policy("data/policy.txt")
     should_refund = decide_refund(ticket, policy)
     if should_refund:
         approve Refund(50.0, customer_id)
@@ -123,7 +152,7 @@ corvid check src/main.cor
 
 Remove the `approve` line:
 
-```corvid
+```corvid-fragment
     if should_refund:
         return refund(50.0, customer_id)
 ```
@@ -142,45 +171,65 @@ Remove the `approve` line:
 1 error(s) found.
 ```
 
-Restore the `approve`. Now make `decide_refund` use the policy without
-unwrapping it (i.e., treat it as a regular `String`):
+Restore the `approve`. Now try laundering provenance: change
+`decide_refund` to take a plain `String` policy and mark the agent
+`@grounded_pure` (the strict provenance mode):
 
-```corvid
-prompt decide_refund(ticket: String, policy: String) -> Bool ...
+```corvid-fragment
+prompt decide_refund(ticket: String, policy: String) -> Bool uses llm_decision:
+    "Given the policy: {policy} — refund this ticket: {ticket}?"
+
+@grounded_pure
+agent handle_refund(ticket: String, customer_id: String) -> String:
+    policy = fetch_policy("data/policy.txt")
+    should_refund = decide_refund(ticket, policy)
+    ...
 ```
 
-```
-error[E0412]: type mismatch
-  --> src/main.cor:30:36
-   |
-30 |     should_refund = decide_refund(ticket, policy)
-   |                                           ^^^^^^ expected `String`, found `Grounded<String>`
-   |
-   = help: use `policy.unwrap_with_citation()` to expose the value
-           with provenance, or `policy.unwrap_discarding_sources()`
-           to drop provenance (loses audit guarantees).
-   = guarantee: grounded.no_silent_unwrap
+```text
+error: agent `handle_refund` is marked `@grounded_pure` but silently
+coerces a `Grounded<T>` into a non-grounded slot at `Grounded<String>`
+    │ Help: preserve the `Grounded<T>` wrapper — return / parameter /
+    │ field types should match the source's grounding, not strip it.
 ```
 
-The compiler refuses to silently drop provenance. If you really want
-to discard it, you write that explicitly with
-`unwrap_discarding_sources()` and the audit log will record that you
-did.
+A strict agent refuses to drop provenance silently. (Without
+`@grounded_pure`, the coercion is permitted and recorded — the
+reverse direction, forging a `Grounded<String>` from a plain string,
+is refused in every mode. See **[Grounded](/docs/grounded)**.)
 
 ## Step 8 — Run with budgets
 
-Add a budget annotation to the agent:
+Add a budget annotation to the agent. Set it BELOW the worst case
+first, to watch the budget checker refuse:
 
-```corvid
+```corvid-fragment
 @budget($0.50)
 @max_steps(5)
 agent handle_refund(ticket: String, customer_id: String) -> String:
     ...
 ```
 
-Now the compiler knows the agent's cost ceiling. At runtime, a budget
-violation aborts the agent with a typed error before the over-budget
-call goes out to the provider.
+```text
+[E0250] error: effect constraint violated in agent `handle_refund`
+    │ @budget($0.50)
+    │ static worst-case cost exceeds the declared budget
+```
+
+The composed worst case includes the $100.00 `refund_effect`, so a
+$0.50 budget is refused at compile time. Raise it to cover the worst
+case:
+
+```corvid-fragment
+@budget($150.00)
+@max_steps(5)
+agent handle_refund(ticket: String, customer_id: String) -> String:
+    ...
+```
+
+Now the agent compiles with a proven cost ceiling. At runtime, a
+budget violation additionally aborts the agent with a typed error
+before an over-budget call goes out to the provider.
 
 ## Step 9 — Replay
 
@@ -207,9 +256,13 @@ Diffs the new model's behavior against the recorded baseline.
 
 A real customer-support agent with five compile-time guarantees:
 
-1. The refund tool cannot be called without an explicit approval.
-2. The policy passed to the model carries provenance the auditor can verify.
-3. The agent has a hard cost ceiling.
+1. The refund tool (marked `dangerous`) cannot be called without an
+   explicit approval.
+2. The policy carries provenance end-to-end: it can never be forged
+   from model output, and under `@grounded_pure` it can never be
+   silently dropped.
+3. The agent has a hard cost ceiling, proven against the composed
+   worst case at compile time (E0250 when exceeded).
 4. The trace is replayable.
 5. A model upgrade is a diff, not an outage.
 

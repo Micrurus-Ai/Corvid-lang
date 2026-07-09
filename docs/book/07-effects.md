@@ -42,20 +42,34 @@ effect refund_effect:
 ## Using effects
 
 ```corvid
-prompt summarize(text: String) -> String uses llm_call:
-    "Summarize: " + text
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
 
-tool refund(amount: Float, id: String) -> String uses refund_effect:
-    @host.payment.refund(id, amount)
+effect refund_effect:
+    cost: $100.00
+    trust: supervisor_required
+    reversible: false
+
+prompt summarize(text: String) -> String uses llm_call:
+    "Summarize: {text}"
+
+tool refund(amount: Float, id: String) -> String dangerous uses refund_effect
 ```
+
+The prompt body is a single template string (`{text}` interpolates);
+the tool is a signature-only declaration whose implementation the
+host provides through registered-tool dispatch.
 
 ## Composition
 
 When an agent calls a prompt and a tool, its effect row is the union:
 
-```corvid
+```corvid-fragment
 agent main() -> String:
     summary = summarize("hello")        # uses llm_call
+    approve Refund(10.0, "cust_1")
     return refund(10.0, "cust_1")       # uses refund_effect
     # main's effect row: { llm_call, refund_effect }
 ```
@@ -68,9 +82,13 @@ explicitly if you want to lock the agent's effect surface.
 Each dimension drives a real compiler behavior:
 
 - `cost` — composed across calls; if the agent has a `@budget` annotation,
-  the compiler proves the worst-case cost is within budget.
-- `trust: supervisor_required` — every call site must be preceded by an
-  `approve` token. See **[Approve](/docs/approve)**.
+  the compiler proves the worst-case cost is within budget (over-budget
+  is a compile error, E0250).
+- `trust` — records the trust tier a call carries; it feeds `@trust(...)`
+  dimensional constraints and runtime approval routing. The compile-time
+  approve gate is the `dangerous` marker on the tool declaration — see
+  **[Approve](/docs/approve)**. (Whether high trust tiers should also
+  imply the approve requirement is an open design decision, ROADMAP 47g.)
 - `reversible: false` — the call is treated as committed at the moment of
   invocation; replay does not re-execute it by default.
 - `data: grounded` — the return value must be wrapped in `Grounded<T>`.

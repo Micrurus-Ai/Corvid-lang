@@ -94,7 +94,7 @@ agent main() -> Result<Int, String>:
 
 ## Step 3 — Notice what's NOT in the project
 
-```
+```text
 outside-world/
 ├── corvid.toml         # security boundaries declared
 └── src/

@@ -42,23 +42,28 @@ NEWLINE         — physical newline (after continuation rules apply)
 ```ebnf
 program           ::= (decl | NEWLINE)* EOF
 
+# `visibility` applies ONLY to type / store / tool / prompt / agent
+# declarations (and annotation-prefixed agents). Effects, models,
+# imports, extends, and the test surface cannot be `public` —
+# `public effect …` / `public import …` are parse errors. Effect
+# re-export is PLANNED(45o); import re-export is not scheduled.
 decl              ::= visibility? (
-                        import_decl
-                      | type_decl
+                        type_decl
                       | store_decl
                       | tool_decl
                       | prompt_decl
-                      | server_decl
-                      | schedule_decl
-                      | eval_decl
-                      | test_decl
-                      | fixture_decl
-                      | mock_decl
                       | agent_decl
-                      | extend_decl
-                      | effect_decl
-                      | model_decl
                       )
+                    | import_decl
+                    | server_decl
+                    | schedule_decl
+                    | eval_decl
+                    | test_decl
+                    | fixture_decl
+                    | mock_decl
+                    | extend_decl
+                    | effect_decl
+                    | model_decl
 
 visibility        ::= 'public' ('(' 'package' ')')?
 ```
@@ -179,11 +184,14 @@ model_field       ::= IDENT ':' dimension_value NEWLINE
 ```ebnf
 agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref uses_clause? ':' INDENT block DEDENT
 
-annotation        ::= '@' IDENT ('(' annotation_args? ')')?
+# Annotation arguments are dimensional constraint values, not general
+# expressions: `@budget($0.50)`, `@trust(autonomous)`, `@max_steps(10)`.
+# Named arguments (`@idempotency(key: expr)`, `@retry(max_attempts: 3)`)
+# are documented in earlier book drafts but DO NOT PARSE — filed with
+# slice 45q alongside the keyword-collision fix for `@retry`.
+annotation        ::= '@' IDENT ('(' annotation_args ')')?
 
-annotation_args   ::= annotation_arg (',' annotation_arg)*
-
-annotation_arg    ::= IDENT ':' expr | expr
+annotation_args   ::= dimension_value
 
 extern_abi        ::= 'pub' 'extern' STRING_LITERAL    # e.g. pub extern "c"
 

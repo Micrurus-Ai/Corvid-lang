@@ -2,75 +2,61 @@
 
 ## What `corvid new` creates
 
-```
+```text
 my-app/
-├── corvid.toml         # project manifest
-├── src/
-│   └── main.cor        # entry point (any agent in here can be run)
-├── tests/
-│   └── main_test.cor   # tests (run via `corvid test`)
+├── corvid.toml         # project manifest + [io]/[http] security boundaries
 ├── .gitignore
-└── README.md
+├── src/
+│   ├── main.cor        # entry point (any agent in here can be run)
+│   └── std/            # vendored stdlib modules (io, http, db, json, …)
+└── tools.py            # optional Python host tools for the starter echo
 ```
 
 `corvid run`, `corvid build`, `corvid check`, and `corvid test` all
-operate on the project rooted at the directory containing `corvid.toml`.
+operate on the project rooted at the directory containing `corvid.toml`
+(discovered by walking upward from the source file, like Cargo).
 
 ## `corvid.toml` reference
 
+The scaffold writes this (comments trimmed):
+
 ```toml
-[package]
 name = "my-app"
 version = "0.1.0"
-description = "What this project does"
-license = "MIT"
 
-[dependencies]
-"@stdlib/io" = "1"
-"@stdlib/http" = "1"
-"@scope/some-pkg" = "0.4"
+[llm]
+# No default model is set. Pick one explicitly:
+#   default_model = "claude-opus-4-6"
 
-[build]
-target = "native"            # native | wasm | server | cdylib
-optimize = "release"         # debug | release
-sign = false                 # require ed25519 signature on the cdylib
+[io]
+# File-I/O root for the executing io_read_text / io_write_text /
+# io_list_dir tools. Path traversal and absolute-path escapes outside
+# the root are refused. Override at run time with CORVID_IO_ROOT.
+root = "."
 
-[runtime]
-default_provider = "openai"  # which LLM substrate adapter to use by default
-
-[approvals]
-operator = "ops@example.com"
-require_for = ["refund_effect", "email_effect"]
-
-[budgets]
-default_per_run = "$0.10"
-
-[replay]
-storage = ".corvid/replay"   # where traces are persisted
-retention_days = 30
+[http]
+# HTTP egress allowlist for the executing http_get / http_post_json
+# tools. The SSRF block (RFC1918 / loopback / link-local) is ALWAYS ON
+# and not configurable. Empty list = HTTP fails closed. Override with
+# CORVID_HTTP_ALLOW=host1,host2.
+allow = []
 ```
 
-Sections:
+Additional parsed tables for advanced configuration:
 
-- `[package]` — project identity. `name` is required; the rest are
-  metadata.
-- `[dependencies]` — pinned package list. The package manager (Phase 25)
-  resolves these; `corvid import-summary` audits what each one brings in.
-- `[build]` — default target, optimization level, sign requirement.
-  Override per-invocation with `corvid build --target=...`.
-- `[runtime]` — runtime config, including the default model substrate.
-- `[approvals]` — host-side approval policy. Effect names listed here
-  require an operator approval at runtime in addition to the
-  compile-time `approve` token.
-- `[budgets]` — per-run cost ceiling. Agents without an explicit
-  `@budget` annotation inherit this.
-- `[replay]` — replay store config.
+- `[effect-system]` — user-declared effect dimensions and dimension
+  policy (see the effect-registry reference).
+- `[package-policy]` — package import policy for the package manager.
+- `[run]` — run-time defaults for `corvid run`.
+
+Package dependency pins are covered in the
+[package-imports reference](../reference/package-imports.md).
 
 ## Multi-file projects
 
 Add additional `.cor` files under `src/`:
 
-```
+```text
 src/
 ├── main.cor
 ├── refund.cor

@@ -33,10 +33,31 @@ use std::path::PathBuf;
 
 const GUARDED_CHAPTERS: &[&str] = &[
     "docs/book/02-quickstart.md",
+    "docs/book/03-tutorial-refund-agent.md",
     "docs/book/04-syntax.md",
     "docs/book/05-types.md",
+    "docs/book/06-modules.md",
+    "docs/book/07-effects.md",
+    "docs/book/08-approve.md",
+    "docs/book/09-grounded.md",
+    "docs/book/10-agents.md",
     "docs/book/11-prompts.md",
+    "docs/book/12-errors.md",
     "docs/book/13-pattern-matching.md",
+    "docs/book/14-project-layout.md",
+    "docs/book/15-testing.md",
+    "docs/book/16-building.md",
+    "docs/book/17-replay.md",
+    "docs/book/18-talking-to-the-outside-world.md",
+    "docs/guides/auth.md",
+    "docs/guides/backend.md",
+    "docs/guides/connectors.md",
+    "docs/guides/debugging.md",
+    "docs/guides/ffi-c-rust.md",
+    "docs/guides/ffi-python.md",
+    "docs/guides/jobs.md",
+    "docs/guides/observability.md",
+    "docs/guides/persistence.md",
 ];
 
 /// How far above a `corvid-planned` fence the word "Planned" must

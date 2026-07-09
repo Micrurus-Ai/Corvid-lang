@@ -350,6 +350,104 @@ Phase 44 is now 5/6: only 44f (remaining-chapters sweep) is open.
 
 ---
 
+## 2026-07-09 - 44f closed — PHASE 44 COMPLETE: the whole book + guides are guard-verified
+
+The long-tail sweep. 26 files now sit under the snippet guard
+(17 book chapters + 9 guides): every `corvid` block compiles through
+the real driver, every `corvid-error` block verifiably fails, every
+planned block sits under a marker naming its slice, and no bare
+fences hide unverified code.
+
+### Method
+
+Same as 44d: run the live compiler on every claim, never trust the
+doc. ~15 scratchpad probe programs drove the rewrites.
+
+### Eight NEW findings beyond the gap audit
+
+1. **The budget checker is real (E0250)** — and the original ch 03
+   tutorial could never have compiled: it teaches `@budget($0.50)`
+   on an agent whose composed worst case includes a $100.00 refund
+   effect. The chapter now teaches the failure as a feature: set the
+   budget low, watch E0250 refuse, raise it to cover the worst case.
+2. **Grounded's real rule is asymmetric.** Ungrounded → grounded
+   slots: always E0208 (model output can never forge provenance).
+   Grounded → ungrounded slots: SILENT legacy coercion unless the
+   agent is `@grounded_pure`, which makes every laundering site a
+   compile error. Ch 09 rewritten around the asymmetry with two
+   CI-pinned corvid-error blocks (the always-refused direction AND
+   the @grounded_pure strict mode).
+3. **The named unwrap trio is fiction.** `unwrap_with_citation()` /
+   `value()` / `unwrap_discarding_sources()` hit the builtin-method
+   restriction. Filed into 45c (they ride the method table); ch 09
+   documents them as Planned and explains that @grounded_pure is the
+   strict boundary until they land.
+4. **`public effect` and `public import` are parse errors.**
+   Visibility applies only to type/store/tool/prompt/agent decls.
+   grammar.md's decl production fixed; ch 06's re-export section is
+   Planned; the effects-can't-be-public fact is now a teaching point
+   (pairs with 45o effect exports).
+5. **Named annotation args don't parse.** `@idempotency(key: expr)` /
+   `@retry(max_attempts: 3)` — annotation args are dimensional
+   constraint values. grammar.md's annotation production corrected
+   (annotation_arg deleted); filed into 45q(1c) alongside the
+   @retry keyword collision.
+6. **Mocks are unusable end-to-end (defect).** Declaring a `mock`
+   alongside its target fails typecheck with E0203 at the mock
+   declaration site. Filed as 45q(1d); ch 15 documents the defect
+   honestly instead of hiding the feature.
+7. **ch 14's corvid.toml reference was seven fictional sections.**
+   `[package]`/`[dependencies]`/`[build]`/`[runtime]`/`[approvals]`/
+   `[budgets]`/`[replay]` — none exist. Real schema
+   (corvid-types/src/config.rs): top-level name/version + `[llm]` +
+   `[io]` + `[http]` + `[effect-system]` + `[package-policy]` +
+   `[run]`. Rewritten from the actual scaffold output.
+8. **The module system works better than feared.** String imports
+   with `as` prefixes, module-prefix calls (`r.refund(...)`), and
+   braceless use-lifts with per-item aliases all probe clean. Ch 06
+   rewritten around the shipped model.
+
+### Per-chapter summary
+
+- ch 03: full realign — retrieval tool (not @retrieve prompt),
+  template-string decision prompt with `cites policy strictly`,
+  full assembled program as a compiling block, @grounded_pure
+  laundering beat, E0250 budget beat, honest five-guarantee closing.
+- ch 06: rewritten (string imports, visibility truth, use-lifts,
+  corvid:// packages, python imports, re-export Planned).
+- ch 07: prompt/tool blocks fixed; trust bullet now states the
+  dangerous-marker rule with the 47g pointer; E0250 noted.
+- ch 09: rewritten around the asymmetric rule (above).
+- ch 10: real annotations only (@budget/@max_steps/@max_wall_time/
+  @replayable probed); @retry/@idempotency in a Planned block filed
+  to 45q; while-loop example replaced with for-based + 45k pointer.
+- ch 12: rewritten — shipped Result/? story, try-retry (which the
+  guard immediately caught needing a Result-typed body — fixed),
+  match/unwrap_or/typed-enums as Planned, runtime-traps section
+  aligned with always-checked semantics.
+- ch 14: real scaffold tree + real corvid.toml schema.
+- ch 15: rewritten — verified test/fixture/from_trace/eval/
+  assert_snapshot shapes (all probed), mock defect documented.
+- ch 08: fragments tagged (its narrative was fixed in 44d).
+- ch 16/17/18 + guides: fence hygiene + guard registration; the
+  guides were already written in the shipped style.
+
+### Validation
+
+- 3/3 snippet-guard tests over 26 files; 3/3 grammar-drift tests
+  (incl. the decl/annotation production fixes); 36 tour topics;
+  workspace check clean; corpus verify exits 1 only on the two
+  deliberate fixtures.
+
+**PHASE 44 CLOSED.** All six slices. The documentation now describes
+the language that exists, mechanically enforced from both sides:
+the book/guides guard (26 files) and the grammar parse-evidence gate.
+Next per the Language completeness track: Phase 45 — 45a-let-bindings
+is the opening implementation slice (pre-phase chat first per
+project rule).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -53,7 +53,7 @@ var if `--sign` is given without a path.
 
 Outputs:
 
-```
+```text
 target/cdylib/
 ├── libmy_app.so          # the binary (or .dylib / .dll)
 ├── my_app.h              # generated C header (with --header)

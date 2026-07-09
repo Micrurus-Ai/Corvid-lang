@@ -500,7 +500,6 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("agent_decl", "agents_annotations_extern"),
     ("annotation", "agents_annotations_extern"),
     ("annotation_args", "agents_annotations_extern"),
-    ("annotation_arg", "agents_annotations_extern"),
     ("extern_abi", "agents_annotations_extern"),
     ("block", "agents_annotations_extern"),
     ("arg_list", "statements"),

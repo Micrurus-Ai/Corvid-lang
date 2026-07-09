@@ -1,28 +1,35 @@
 # Testing
 
-## Test types
+Every `corvid`-tagged block compiles through the real driver in CI.
 
-Corvid ships four test surfaces:
+## Test surfaces
+
+Corvid ships four declaration forms:
 
 - **`test`** — unit tests. Run via `corvid test`.
-- **`eval`** — model-quality tests against saved traces. Run via
-  `corvid eval`.
-- **`fixture`** — reusable test data and setup helpers.
-- **`mock`** — host-call mocks for tools and connectors.
+- **`eval`** — model-quality checks; trace-aware assertion support.
+  Run via `corvid eval`.
+- **`fixture`** — typed, reusable test helpers (params + return type).
+- **`mock`** — tool/prompt replacement for tests (see the known
+  defect below).
 
 ## Writing a unit test
 
+A test body is statements plus `assert` lines:
+
 ```corvid
-# tests/refund_test.cor
-import refund
+agent refund_allowed(amount: Float) -> Bool:
+    if amount > 100.0:
+        return false
+    return true
 
 test refund_within_policy:
-    let result = refund.refund_logic(50.0, "cust_123")
-    assert result == Ok(Unit)
+    result = refund_allowed(50.0)
+    assert result == true
 
 test refund_over_policy_limit:
-    let result = refund.refund_logic(5000.0, "cust_123")
-    assert result == Err(RefundError::OverDailyLimit)
+    result = refund_allowed(5000.0)
+    assert result == false
 ```
 
 Run:
@@ -30,74 +37,90 @@ Run:
 ```sh
 corvid test
 corvid test --filter refund        # only tests whose name matches
-corvid test --watch                # rerun on file change
 ```
-
-## Mocking tools
-
-```corvid
-mock payment_mock:
-    on @host.payment.refund(_, _) -> "refund_ok_mock"
-
-test refund_calls_payment:
-    use payment_mock
-    let result = refund(50.0, "cust_123")
-    assert result == "refund_ok_mock"
-    assert calls(@host.payment.refund) == 1
-```
-
-The `calls()` helper asserts the number of times a host call was
-invoked. The mock surface integrates with the source-bypass corpus —
-attempting to bypass `approve` via a mock fails compile-time the same
-way it fails in production code.
 
 ## Fixtures
 
-```corvid
-fixture sample_ticket:
-    Ticket {
-        id: "tkt_42",
-        text: "I never received my order",
-        customer_id: "cust_123",
-    }
+Fixtures are typed: a parameter list and a return type, called like
+a function from test bodies:
 
-test handles_sample_ticket:
-    use sample_ticket as ticket
-    let decision = process(ticket)
-    assert decision.refund == true
+```corvid
+fixture sample_amount() -> Float:
+    return 50.0
+
+agent refund_allowed(amount: Float) -> Bool:
+    if amount > 100.0:
+        return false
+    return true
+
+test handles_sample_amount:
+    amount = sample_amount()
+    assert refund_allowed(amount) == true
+```
+
+## Trace-bound tests
+
+A test can bind a recorded trace with `from_trace` — the runner
+replays the recorded LLM responses and tool results instead of
+hitting providers:
+
+```corvid
+agent always_true() -> Bool:
+    return true
+
+test replayed_regression from_trace "traces/golden.trace":
+    assert always_true() == true
 ```
 
 ## Eval tests
 
-Eval tests rerun a saved trace against the current code and assert on
-output stability:
+An `eval` is statements plus assertions; `corvid eval` runs them with
+model-quality tooling on top (`--golden-traces`, `--swap-model`,
+`--max-spend` are CLI flags, not language syntax):
 
 ```corvid
-eval refund_quality:
-    source app.cor
-    trace_dir target/refund_traces
-    swap_model gpt-5
-    assert_no_regression on outcome
-    assert_cost_within $0.10 per_run
+agent always_refund() -> Bool:
+    return true
+
+eval refund_accuracy:
+    result = always_refund()
+    assert result == true
 ```
 
-Run:
-
 ```sh
-corvid eval refund_quality
-corvid eval refund_quality --swap-model gpt-5
+corvid eval
+corvid eval --swap-model <model>   # diff behavior against the baseline
 ```
 
 ## Snapshots
 
 ```corvid
-test prompt_output_stable:
-    let result = summarize("hello world")
-    assert_snapshot "summarize_hello.snap"
+agent double_it(x: Int) -> Int:
+    return x * 2
+
+test output_stable:
+    r = double_it(21)
+    assert_snapshot "double_21.snap"
 ```
 
-The snapshot file is committed; subsequent runs diff against it. Use
-`corvid test --update-snapshots` to refresh after intentional changes.
+The snapshot file is committed; subsequent runs diff against it.
+
+## Mocks
+
+A mock names the tool or prompt it replaces and provides a body with
+the same signature:
+
+```corvid-fragment
+mock summarize(text: String) -> String:
+    return "mocked summary"
+```
+
+> **Known defect (filed with slice 45q):** declaring a `mock`
+> alongside its target in the same compile currently fails
+> typechecking with E0203 ("cannot call a value of type mock
+> target"), so mocks are not usable end-to-end today. The
+> declaration form above parses and is grammar-locked; the checker
+> integration is the open bug.
 
 ## CI integration
 

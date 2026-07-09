@@ -1,10 +1,15 @@
 # Modules and imports
 
+Every fenced code block marked `corvid` compiles through the real
+driver in CI. Blocks marked `corvid-fragment` are multi-file examples
+verified against the live compiler (the snippet guard can't stage
+sibling files, so they carry the fragment tag).
+
 ## One file = one module
 
-Every `.cor` file is a module. The module's name is the filename
-without the extension. Public declarations are visible to other
-modules via `import`.
+Every `.cor` file is a module. Public declarations are visible to
+other modules via `import`; imports name the file by relative string
+path (the `.cor` extension is implicit).
 
 ## Visibility
 
@@ -15,77 +20,78 @@ Three levels:
 - `public(package)` — visible to other modules in the same package
   but not to consumers outside the package.
 
-```corvid
-public effect refund_effect:
+`public` applies to `type`, `tool`, `prompt`, `agent`, and store
+declarations. **Effects cannot be `public`** — an effect is private
+to its file today, so a module exposing a public tool declares the
+tool's effect in the same file. (Effect export via `use` lands with
+slice 45o.)
+
+```corvid-fragment
+# src/refund.cor
+effect refund_effect:
     cost: $50.00
     trust: supervisor_required
 
-public tool refund(amount: Float, id: String) -> String uses refund_effect:
-    @host.payment.refund(id, amount)
-
-# private — only this file can call it
-fn validate_refund_amount(amount: Float) -> Bool:
-    amount > 0.0 and amount <= 1000.0
+public tool refund(amount: Float, id: String) -> String dangerous uses refund_effect
 ```
 
 ## Importing local modules
 
-```corvid
+```corvid-fragment
 # src/main.cor
-import refund
+import "./refund" as r
 
-agent main():
-    approve refund.Refund(50.0, "cust_123")
-    return refund.refund(50.0, "cust_123")
-```
-
-`import refund` brings in `src/refund.cor` and exposes its public
-declarations under the `refund.` prefix.
-
-## Aliasing
-
-```corvid
-import refund as r
-
-agent main():
-    approve r.Refund(50.0, "cust_123")
+agent main() -> String:
+    approve Refund(50.0, "cust_123")
     return r.refund(50.0, "cust_123")
 ```
 
-The alias is local to this file.
+`import "./refund" as r` brings in `src/refund.cor` and exposes its
+public declarations under the `r.` prefix. Without `as`, the prefix
+is the filename (`refund.`).
+
+## Selective import (`use`)
+
+The `use` clause lifts specific names into scope directly — no
+braces, per-item aliases with `as`:
+
+```corvid
+import "./std/io" use io_read_text, io_write_text as write
+
+agent main() -> Result<String, String>:
+    file = io_read_text("note.txt")
+    return Ok(file.contents)
+```
+
+Only the named items are bound; the rest of the module is not in
+scope. `use` lifts tools, prompts, agents, and types — not effects
+(see Visibility above).
 
 ## Importing from packages
 
-```corvid
-import "@stdlib/db" as db
-import "@stdlib/http" as http
-import "@scope/connector-gmail" as gmail
+Package imports use `corvid://` URIs resolved through the package
+manager; the version pin lives in `corvid.toml`:
+
+```corvid-fragment
+import "corvid://json-helpers@1.0.0" as jh
 ```
 
-Package imports go through the package manager. The version in
-`corvid.toml` pins the resolved version; `corvid import-summary`
-shows the full transitive set.
+`corvid import-summary` shows the full transitive set. Remote HTTPS
+imports are hash-pinned (`hash:sha256:<digest>`).
 
-## Selective import
+## Python-ecosystem imports
 
-```corvid
-import "@stdlib/io" use { read_file, write_file }
-
-agent main():
-    contents = read_file("data.txt")
-    ...
+```corvid-fragment
+import python "mylib" as ml
 ```
 
-Only `read_file` and `write_file` are bound; the rest of `@stdlib/io`
-is not in scope.
+Brings a Python module's registered tools into scope through the
+embedded PyO3 runtime (see the [Python FFI guide](../guides/ffi-python.md)).
 
 ## Re-export
 
-```corvid
-public import refund use { Refund, refund }
-```
-
-A module that re-exports another's public surface participates in the
-adversarial corpus check (`@approve` re-export bypass): if a re-export
-chain ends with a dangerous tool, the compile-time approval rule
-still applies at the original call site.
+> **Planned.** `public import … use …` re-export syntax does not
+> parse today — a module cannot re-export another module's surface.
+> Consumers import the defining module directly. (Effect re-export
+> is slice 45o; declaration re-export is unscheduled and will be
+> designed alongside it.)

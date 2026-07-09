@@ -1,79 +1,152 @@
 # Grounded
 
+Every `corvid`-tagged block compiles through the real driver in CI;
+the deliberately-failing block is pinned to keep failing.
+
 ## What `Grounded<T>` is
 
 `Grounded<T>` is a type that wraps a value with provenance. A value of
-type `Grounded<String>` is not interchangeable with a value of type
-`String` — the compiler refuses silent conversion in either direction.
+type `Grounded<String>` is not the same type as `String` — and the
+compiler enforces the boundary asymmetrically, in the direction that
+matters for safety:
+
+- **Ungrounded → grounded slot: always a compile error.** You cannot
+  pass a plain `String` where `Grounded<String>` is expected. A model
+  output can never masquerade as sourced data.
+- **Grounded → ungrounded slot: permitted by default** (the "legacy
+  coercion" — the wrapper drops silently, and the typechecker records
+  the site). Mark the agent `@grounded_pure` and every such site
+  becomes a compile error.
+
 This is how Corvid prevents "the model said X, and we treated X as
-fact" without anyone tagging it as a model output.
+fact": sourced data is a different type, and strict agents refuse to
+launder it away.
 
 ## How you produce a grounded value
 
+A tool whose effect carries `data: grounded` returns `Grounded<T>` —
+the runtime attaches the provenance (source, timestamp, content hash)
+when the host's retrieval implementation returns:
+
 ```corvid
-prompt fetch_policy() -> Grounded<String> uses retrieval_effect:
-    @retrieve("data/policy.txt")
+effect retrieval:
+    data: grounded
+
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval
 ```
 
-The `@retrieve(...)` host call returns a value annotated with the
-source path, retrieval timestamp, and content hash. The runtime
-attaches that provenance; the type system propagates it.
+## Grounded values flow through prompts
 
-## How you consume a grounded value
-
-Three ways, each named to make the audit log obvious:
+A prompt can take and return grounded values; `{param}` interpolation
+works on them, and `cites <param> strictly` requires the model's
+answer to carry text evidence from that source:
 
 ```corvid
+effect retrieval:
+    data: grounded
+
+effect llm_call:
+    cost: $0.02
+    latency: medium
+    confidence: 0.9
+
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval
+
+prompt answer(ctx: Grounded<String>) -> Grounded<String> uses llm_call:
+    cites ctx strictly
+    "Answer from the policy: {ctx}"
+
+agent cited(path: String) -> Grounded<String>:
+    return answer(fetch_policy(path))
+```
+
+## What the compiler always refuses
+
+Passing an ungrounded value into a grounded slot:
+
+```corvid-error
+effect retrieval:
+    data: grounded
+
+effect llm_call:
+    cost: $0.02
+    latency: medium
+    confidence: 0.9
+
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval
+
+prompt cite_answer(ctx: Grounded<String>) -> Grounded<String> uses llm_call:
+    cites ctx strictly
+    "Answer from {ctx}"
+
+agent main() -> Grounded<String>:
+    plain = "not grounded"
+    return cite_answer(plain)
+```
+
+```text
+[E0208] error: type mismatch in argument 1 to `cite_answer`
+    │ Help: change the value to produce a `Grounded<String>`, or update the signature
+```
+
+## Strict mode: `@grounded_pure`
+
+By default, passing a `Grounded<String>` into a plain `String` slot
+coerces silently (the legacy rule). Mark the agent `@grounded_pure`
+and the compiler refuses every laundering shape:
+
+```corvid-error
+effect retrieval:
+    data: grounded
+
+effect llm_call:
+    cost: $0.02
+    latency: medium
+    confidence: 0.9
+
+tool fetch_policy(path: String) -> Grounded<String> uses retrieval
+
+prompt decide(policy: String) -> Bool uses llm_call:
+    "Decide from policy: {policy}"
+
+@grounded_pure
+agent main() -> Bool:
+    policy = fetch_policy("data/policy.txt")
+    return decide(policy)
+```
+
+```text
+error: agent `main` is marked `@grounded_pure` but silently coerces a
+`Grounded<T>` into a non-grounded slot at `Grounded<String>`
+    │ Help: preserve the `Grounded<T>` wrapper — return / parameter /
+    │ field types should match the source's grounding, not strip it.
+```
+
+`@grounded_pure` composes through the call graph the same way
+`@deterministic` does: a `@grounded_pure` agent may only call agents
+that are themselves `@grounded_pure`.
+
+## Named unwrap methods
+
+> **Planned — rides the builtin-method machinery (slice 45c).** The
+> named consumption methods (`unwrap_with_citation()`, `value()`,
+> `unwrap_discarding_sources()`) are designed so every provenance
+> drop is explicit and audit-visible, but method calls on built-in
+> types are not implemented yet. Today the only unwrap is the silent
+> legacy coercion described above — which is exactly why
+> `@grounded_pure` exists as the strict boundary until the named
+> methods land.
+
+```corvid-planned
 g.unwrap_with_citation()         # String including the citation marker
 g.value()                        # bare T, but the trace records the unwrap
 g.unwrap_discarding_sources()    # bare T, audit log records the discard
 ```
 
-`unwrap_with_citation()` is the default — the model sees the source,
-the trace records the source, the auditor can prove the decision was
-grounded.
-
-`value()` gives you the bare value but the trace records that you
-unwrapped without citation. Useful for cases where the model already
-saw the source via another path.
-
-`unwrap_discarding_sources()` is the explicit "I am dropping
-provenance" path. The audit log records the discard; the auditor can
-review whether it was justified.
-
-## What the compiler refuses
-
-```corvid
-prompt decide(policy: String) -> Bool uses llm_call:
-    ...
-
-agent main():
-    policy = fetch_policy()        # Grounded<String>
-    decide(policy)                 # error: expected String, got Grounded<String>
-```
-
-```
-error[E0412]: type mismatch
-  = guarantee: grounded.no_silent_unwrap
-```
-
-You either change `decide`'s signature to take `Grounded<String>`, or
-you unwrap explicitly with one of the three named methods. Silent loss
-of provenance does not happen.
-
-## Composing grounded values
-
-```corvid
-fn combine(a: Grounded<String>, b: Grounded<String>) -> Grounded<String>:
-    Grounded.merge(a, b)
-```
-
-`Grounded.merge` produces a value whose provenance is the union of the
-inputs' provenances. The trace shows both sources.
-
 ## Why this is the moat
 
 In every other language, "the model said X" and "the document said X"
 are the same `String`. The auditor cannot tell which one made the
-decision. In Corvid, they are different types, and the compiler will
-not let you mix them up.
+decision. In Corvid they are different types: sourced data can never
+be forged from model output (always enforced), and strict agents
+(`@grounded_pure`) additionally refuse to drop provenance silently.

@@ -12,7 +12,7 @@ the tool declaration.
 
 ## The shape
 
-```corvid
+```corvid-fragment
 approve <PascalCaseAction>(<args matching the call>)
 ```
 
@@ -22,7 +22,7 @@ must match the arguments to the protected call.
 
 ## Example
 
-```corvid
+```corvid-fragment
 agent main() -> String:
     approve Refund(50.0, "cust_123")
     return refund(50.0, "cust_123")
@@ -43,7 +43,7 @@ If you remove the `approve` line, the compiler fails:
 authorizes only the calls in that branch. An `approve` inside a loop
 authorizes only the calls in that iteration of the loop body.
 
-```corvid
+```corvid-fragment
 agent main() -> String:
     if needs_refund:
         approve Refund(50.0, "cust_123")
@@ -76,7 +76,7 @@ to bypass — the binary either carries the proof or it doesn't.
 For workflows where a human approves a specific run (not just the code
 path), use `await_approval`:
 
-```corvid
+```corvid-fragment
 agent main() -> String:
     await_approval RefundDecision(amount: 50.0, customer: "cust_123")
     approve Refund(50.0, "cust_123")

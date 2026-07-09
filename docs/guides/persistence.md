@@ -55,7 +55,7 @@ report without mutating state.
 
 ## Migration file layout
 
-```
+```text
 migrations/
 ├── 0001_core_state.sql        # forward migration
 └── down/
