@@ -315,6 +315,22 @@ in the Language completeness track (Phases 44–47). Traceability:
   WASM-tier gaps (already tracked by the Phase 23 reopen in the
   post-v1.0 section).
 
+**Direction locked (CTO chat, 2026-07-09, same day):** implement
+the book — every book-taught feature gets an implementation slice;
+Phase 44's Planned markers are interim and come off as slices ship.
+Three design calls resolved in that chat:
+
+- Plain `fn` pure-function declarations: **implement** (new slice
+  45r — statically effect-free fourth callable; developers are
+  never forced to use it). User generics: **post-v1.0** (45p
+  resolved; post-v1.0 roadmap entry added).
+- `@host` tool bodies: **book revises to the shipped model** — the
+  registered host-tool/FFI dispatch (Phases 22/30/33S) is the
+  better design; no second FFI mechanism.
+- Int overflow: **always-checked is the semantics** — no
+  `--overflow` saturation flag; book aligns (44a), pinning tests
+  land (47e).
+
 Previously-covered-elsewhere slices now cross-marked as subsumed:
 33R5c→45d, 33R5d→45f/45g/45j, 33R5e/f→45m, 33R12→44d;
 33R5g closed retroactively (the 33S umbrella over-delivered it).
