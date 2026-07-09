@@ -139,6 +139,94 @@ Next per track order: 44c (grammar drift-gate strengthening).
 
 ---
 
+## 2026-07-09 - 44c closed: grammar drift gate now enforces parse-evidence correspondence
+
+The meta-slice of Phase 44: fix the mechanism that let the doc-drift
+class of bug accumulate. grammar.md claimed a drift gate cross-checked
+every production against the parser; the actual 33J6 gate checked only
+internal EBNF consistency (and its doc header admitted it). Now the
+claim is true.
+
+### The new gate
+
+`grammar_drift.rs` gains `every_non_planned_production_has_parse_evidence`:
+
+- Productions whose LHS line carries `# PLANNED(<slice>)` are design
+  documentation — exempt, and REJECTED if they also have evidence
+  (so a shipped feature can't keep hiding behind a stale marker).
+- Every other declared production must appear in a curated
+  `EVIDENCE` table mapping it to a snippet in `SNIPPETS`; every
+  referenced snippet is lexed + parsed through the REAL
+  `corvid_syntax::parse_file`, and any parse error fails CI with the
+  snippet source in the message.
+- Stale evidence keys (production deleted from grammar.md) also fail.
+
+12 productions PLANNED-marked (map/struct literals, match/patterns,
+type aliases, sum-type variants + field_list, role_clause, let-form
+and unary + as comment-line markers). 75 shipped productions → 12
+evidence snippets.
+
+### The gate immediately caught six MORE grammar.md drifts
+
+Writing the evidence snippets faithfully to what grammar.md claimed
+and parsing them through the real parser exposed drift the audit's
+doc-reading pass missed:
+
+1. **Imports**: use-lists are braceless with per-item `as` aliases
+   (`use io_read_text, io_write_text as write`); grammar showed
+   `use { a, b }`. Local targets are STRING paths, and the
+   `import python "mylib" as ml` ecosystem form was undocumented.
+2. **Routes**: real form is `route GET "/health" -> json Health:`
+   with an HTTP method, optional `query`/`body` typed clauses, a
+   typed json response, and a handler BODY BLOCK. Grammar showed
+   one-line `route "/path" -> handler`.
+3. **Schedules**: `zone` is mandatory (grammar had it optional) and
+   an optional uses clause exists.
+4. **Fixtures/mocks**: both take params + return types
+   (`fixture seed_count() -> Int:`); mocks name their target and may
+   carry a uses clause. Grammar showed bare name + block. The
+   phantom `fixture_body`/`mock_body` productions are deleted.
+5. **Retry backoff**: mandatory, bare ms literal —
+   `backoff exponential 250`, not the grammar's optional
+   `exponential(2)`.
+6. **Weak effect rows**: only builtin effect classes
+   (`tool_call`/`llm`/`approve`/`human`); grammar said any IDENT.
+
+Plus one NEW parser finding filed into 45q: `@retry(...)` annotations
+are unparseable — annotation names go through `expect_ident`, and
+`retry` is a reserved keyword, so the form book ch 10 documents
+errors with "got KwRetry, expected an identifier".
+
+Also fixed in grammar.md: the keywords paragraph now documents the
+contextual-vs-reserved split (`use`, `Nothing`, `let`,
+`system`/`user`/`assistant`, `python` are contextual); the false
+`0x…` hex-INT claim dropped (the lexer's hex path is a hash-digest
+special case); prompt bodies documented as single template strings;
+assign_stmt shows the shipped bare form with let/field/index targets
+as PLANNED comments; test_decl gained the real optional
+`from_trace "path"` clause.
+
+### Why this matters
+
+The audit's meta-finding (M15) was that an "authoritative,
+drift-gated" grammar accumulated 12+ unimplemented productions with
+a green gate. The failure mode is now structurally closed: a
+production can exist in grammar.md ONLY as (a) parse-evidence-backed
+shipped syntax or (b) an explicit PLANNED marker naming its slice.
+Nothing in between.
+
+### Validation
+
+- 207 corvid-syntax lib tests + 3 drift-gate tests (the new evidence
+  test caught 6 real drifts during development — that iteration IS
+  the negative test) + 3 book-snippet tests all pass.
+- Workspace check clean; corpus verify exits 1 only on the two
+  deliberate fixtures.
+
+Next per track order: 44d (quickstart honesty — subsumes 33R12).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

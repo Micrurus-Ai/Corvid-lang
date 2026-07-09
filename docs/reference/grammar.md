@@ -3,10 +3,25 @@
 ## Status
 
 This is the formal EBNF for Corvid v1.0, derived from the parser
-implementation in `crates/corvid-syntax/src/parser/`. A drift-gate
-test (slice 33J6) cross-checks every production listed here against
-the parser's tests. The grammar is line-oriented: physical newlines
-are significant, with continuation rules described in
+implementation in `crates/corvid-syntax/src/parser/`. Two drift gates
+in `crates/corvid-syntax/tests/grammar_drift.rs` keep it honest:
+
+1. **Structural consistency** — every RHS reference resolves to a
+   declared production or a listed terminal, and every production is
+   reachable from `program`.
+2. **Parse-evidence correspondence** — every production NOT marked
+   `# PLANNED(<slice>)` must be mapped to a curated Corvid source
+   snippet in the gate's evidence table, and that snippet must parse
+   through the real parser. Adding a production without evidence (or
+   with evidence that fails to parse) fails CI.
+
+Productions marked `# PLANNED(<slice>)` are designed syntax that the
+named ROADMAP slice implements — they are documentation of intent,
+not descriptions of the shipped parser. When the slice ships, the
+marker comes off and the evidence table gains a snippet.
+
+The grammar is line-oriented: physical newlines are significant, with
+continuation rules described in
 [`docs/reference/lexer-rules.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/reference/lexer-rules.md).
 
 ## Notation
@@ -50,26 +65,33 @@ visibility        ::= 'public' ('(' 'package' ')')?
 
 ## Imports
 
+Local modules, package URIs (`corvid://name@version`), remote URLs
+(hash-pinned), and external-ecosystem imports all use string targets;
+the `use` list is braceless with optional per-item aliases.
+
 ```ebnf
-import_decl       ::= 'import' import_target ('as' IDENT)? ('use' '{' import_list '}')? NEWLINE
+import_decl       ::= 'import' import_target ('as' IDENT)? ('use' import_list)? NEWLINE
 
-import_target     ::= IDENT             # local module
-                    | STRING_LITERAL    # package: "@scope/name"
+import_target     ::= STRING_LITERAL             # "./module", "corvid://pkg@1.0.0", "https://…"
+                    | 'python' STRING_LITERAL    # external ecosystem: import python "mylib"
 
-import_list       ::= IDENT (',' IDENT)*
+import_list       ::= import_item (',' import_item)*
+
+import_item       ::= IDENT ('as' IDENT)?
 ```
 
 ## Types and stores
 
 ```ebnf
-type_decl         ::= 'type' IDENT (':' INDENT type_field+ DEDENT | '=' type_alias_body NEWLINE)
+type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
+                    | 'type' IDENT '=' type_alias_body NEWLINE      # PLANNED(45n)
 
 type_field        ::= IDENT ':' type_ref NEWLINE
-                    | '|' IDENT ('(' field_list ')')? NEWLINE   # sum-type variant
+                    | '|' IDENT ('(' field_list ')')? NEWLINE       # PLANNED(45h) sum-type variant
 
-field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
+field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*  # PLANNED(45h)
 
-type_alias_body   ::= type_ref
+type_alias_body   ::= type_ref                                      # PLANNED(45n)
 
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
 ```
@@ -86,10 +108,14 @@ type_arg          ::= type_ref
 
 weak_effect_row   ::= '{' weak_effect (',' weak_effect)* '}'
 
-weak_effect       ::= IDENT
+weak_effect       ::= 'tool_call' | 'llm' | 'approve' | 'human'   # builtin effect classes only
 ```
 
 ## Tool declarations
+
+Tools are signature-only: the implementation is provided by the host
+through registered-tool dispatch (executing stdlib, Rust FFI cdylib,
+or Python host tools) — there is no tool body form.
 
 ```ebnf
 tool_decl         ::= 'tool' IDENT params '->' type_ref ownership? 'dangerous'? uses_clause? NEWLINE
@@ -107,17 +133,25 @@ effect_name       ::= IDENT
 
 ## Prompt declarations
 
+The prompt body is a single template string; parameters interpolate
+with `{param}` inside the string (any typed parameter renders as its
+JSON form). Role-block bodies are planned.
+
 ```ebnf
 prompt_decl       ::= 'prompt' IDENT params '->' type_ref uses_clause? ':' INDENT prompt_body DEDENT
 
-prompt_body       ::= (role_clause | template_line)+
+prompt_body       ::= role_clause* template_line
 
-role_clause       ::= ('system' | 'user' | 'assistant') ':' template_expr
+role_clause       ::= ('system' | 'user' | 'assistant') ':' STRING_LITERAL NEWLINE   # PLANNED(46b)
 
-template_line     ::= template_expr NEWLINE
-
-template_expr     ::= STRING_LITERAL ('+' (STRING_LITERAL | IDENT) )*
+template_line     ::= STRING_LITERAL NEWLINE
 ```
+
+Prompt bodies also accept structured clauses (`requires:`, `route:`,
+`progressive:`, `rollout`, `ensemble`, `adversarial:`, `calibrated`,
+`cacheable`, stream settings) before the template — documented in
+the prompt chapters and the effect spec; their EBNF lands with a
+future grammar-expansion pass rather than being half-specified here.
 
 ## Effect declarations
 
@@ -168,30 +202,39 @@ extend_method     ::= visibility? (agent_decl | prompt_decl | tool_decl)
 
 ## Server and schedule declarations
 
+Routes carry an HTTP method, an optional typed query/body contract,
+a typed `json` response, and a handler body block. The `zone` clause
+on schedules is mandatory.
+
 ```ebnf
 server_decl       ::= 'server' IDENT ':' INDENT route_decl+ DEDENT
 
-route_decl        ::= 'route' STRING_LITERAL '->' IDENT NEWLINE   # path → handler agent
+route_decl        ::= 'route' http_method STRING_LITERAL
+                      ('query' type_ref)? ('body' type_ref)?
+                      '->' 'json' type_ref uses_clause? ':' INDENT block DEDENT
 
-schedule_decl     ::= 'schedule' STRING_LITERAL ('zone' STRING_LITERAL)? '->' IDENT '(' arg_list? ')' NEWLINE
+http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
+                      '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE
 ```
 
 ## Test surface
 
+Fixtures and mocks are typed: both take a parameter list and a
+return type; mocks name the tool/prompt they replace and may carry
+an effect row. Tests may bind a recorded trace with `from_trace`.
+
 ```ebnf
 eval_decl         ::= 'eval' IDENT ':' INDENT eval_body DEDENT
-test_decl         ::= 'test' IDENT ':' INDENT block DEDENT
-fixture_decl      ::= 'fixture' IDENT ':' INDENT fixture_body DEDENT
-mock_decl         ::= 'mock' IDENT ':' INDENT mock_body DEDENT
+
+test_decl         ::= 'test' IDENT ('from_trace' STRING_LITERAL)? ':' INDENT eval_body DEDENT
+
+fixture_decl      ::= 'fixture' IDENT params '->' type_ref ':' INDENT block DEDENT
+
+mock_decl         ::= 'mock' IDENT params '->' type_ref uses_clause? ':' INDENT block DEDENT
 
 eval_body         ::= (assertion | stmt)+
-
-# Fixture and mock bodies share their shape with `block` today —
-# named separately here so a future fixture-/mock-specific extension
-# (custom `@fixture` annotations, mock-call expectation syntax) has a
-# place to land without renaming references throughout the doc.
-fixture_body      ::= block
-mock_body         ::= block
 
 assertion         ::= 'assert' expr NEWLINE
                     | 'assert_snapshot' STRING_LITERAL NEWLINE
@@ -215,6 +258,7 @@ yield_stmt        ::= 'yield' expr NEWLINE
 
 if_stmt           ::= 'if' expr ':' INDENT block DEDENT
                       ('else' ':' INDENT block DEDENT)?
+                      # 'elif' chaining PLANNED(45q); 'while' loops PLANNED(45k)
 
 for_stmt          ::= 'for' IDENT 'in' expr ':' INDENT block DEDENT
 
@@ -224,7 +268,9 @@ break_stmt        ::= 'break' NEWLINE
 continue_stmt     ::= 'continue' NEWLINE
 pass_stmt         ::= 'pass' NEWLINE
 
-assign_stmt       ::= ('let' IDENT (':' type_ref)? | IDENT) '=' expr NEWLINE
+assign_stmt       ::= IDENT '=' expr NEWLINE
+                      # 'let' IDENT (':' type_ref)? '=' expr form PLANNED(45a);
+                      # field/index/compound assignment targets PLANNED(45b)
 
 expr_stmt         ::= expr NEWLINE
 ```
@@ -243,7 +289,8 @@ cmp_expr          ::= add_expr (cmp_op add_expr)?         # no chaining
 cmp_op            ::= '==' | '!=' | '<' | '<=' | '>' | '>='
 add_expr          ::= mul_expr (('+' | '-') mul_expr)*
 mul_expr          ::= unary_expr (('*' | '/' | '%') unary_expr)*
-unary_expr        ::= ('-' | '+')? postfix_expr
+# unary '+' PLANNED(45q)
+unary_expr        ::= '-'? postfix_expr
 postfix_expr      ::= primary_expr postfix_op*
 postfix_op        ::= '(' arg_list? ')'                    # call
                     | '.' IDENT                            # field/method
@@ -254,37 +301,37 @@ primary_expr      ::= literal
                     | IDENT
                     | '(' expr ')'
                     | list_literal
-                    | map_literal
-                    | struct_literal
-                    | match_expr
+                    | map_literal                          # PLANNED(45g)
+                    | struct_literal                       # PLANNED(45n)
+                    | match_expr                           # PLANNED(45i)
                     | retry_expr
 
 literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
 
 list_literal      ::= '[' (expr (',' expr)*)? ']'
 
-map_literal       ::= '{' (map_entry (',' map_entry)*)? '}'
-map_entry         ::= expr ':' expr
+map_literal       ::= '{' (map_entry (',' map_entry)*)? '}'          # PLANNED(45g)
+map_entry         ::= expr ':' expr                                  # PLANNED(45g)
 
-struct_literal    ::= IDENT '{' field_init (',' field_init)* '}'
-field_init        ::= IDENT (':' expr)?
+struct_literal    ::= IDENT '{' field_init (',' field_init)* '}'     # PLANNED(45n)
+field_init        ::= IDENT (':' expr)?                              # PLANNED(45n)
                     | '..' expr             # spread / update
 
-match_expr        ::= 'match' expr ':' INDENT match_arm+ DEDENT
-match_arm         ::= pattern ('if' expr)? '->' expr NEWLINE
+match_expr        ::= 'match' expr ':' INDENT match_arm+ DEDENT      # PLANNED(45i)
+match_arm         ::= pattern ('if' expr)? '->' expr NEWLINE         # PLANNED(45i)
 
-pattern           ::= literal_pattern
+pattern           ::= literal_pattern                                # PLANNED(45i)
                     | IDENT                                  # binding
                     | IDENT '(' pattern (',' pattern)* ')'   # sum-type variant
                     | IDENT '{' field_pattern (',' field_pattern)* (',' '..')? '}'
                     | '_'                                    # wildcard
 
-literal_pattern   ::= literal
+literal_pattern   ::= literal                                        # PLANNED(45i)
 
-field_pattern     ::= IDENT (':' pattern)?
+field_pattern     ::= IDENT (':' pattern)?                           # PLANNED(45i)
 
 retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
-                      ('backoff' ('linear' | 'exponential') '(' arg_list ')')?
+                      'backoff' ('linear' | 'exponential') INT    # base delay in ms; backoff is mandatory
 ```
 
 ## Lexical tokens
@@ -292,18 +339,24 @@ retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
 Keywords (reserved): `agent`, `tool`, `prompt`, `eval`, `test`,
 `fixture`, `mock`, `server`, `route`, `schedule`, `zone`, `type`,
 `session`, `memory`, `import`, `as`, `pub`, `extern`, `extend`,
-`public`, `package`, `use`, `try`, `on`, `error`, `retry`, `times`,
+`public`, `package`, `try`, `on`, `error`, `retry`, `times`,
 `backoff`, `linear`, `exponential`, `approve`, `dangerous`, `effect`,
 `uses`, `assert`, `assert_snapshot`, `model`, `requires`,
 `progressive`, `below`, `rollout`, `ensemble`, `vote`, `adversarial`,
 `propose`, `challenge`, `adjudicate`, `if`, `else`, `for`, `in`,
 `return`, `yield`, `break`, `continue`, `pass`, `replay`, `when`,
-`true`, `false`, `Nothing`, `and`, `or`, `not`, `let`.
+`true`, `false`, `and`, `or`, `not`.
+
+Contextual words (parsed positionally, NOT reserved — they are valid
+identifiers elsewhere): `use` (import lists), `Nothing` (the unit
+literal/type), `system`/`user`/`assistant` (planned role clauses),
+`python` (import source). `let` is currently a plain identifier; it
+becomes a reserved keyword when slice 45a ships.
 
 Identifiers: `[A-Za-z_][A-Za-z0-9_]*` excluding keywords.
 
-Numeric literals: `INT` is `[0-9]+` or `0x[0-9a-fA-F]+`; `FLOAT` is
-`[0-9]+\.[0-9]+(e[+-]?[0-9]+)?`.
+Numeric literals: `INT` is `[0-9]+`; `FLOAT` is
+`[0-9]+\.[0-9]+(e[+-]?[0-9]+)?`. There is no hex literal form.
 
 String literals: `"..."` (single-line, escape-processed) or
 `"""..."""` (multi-line, raw).
@@ -312,7 +365,6 @@ String literals: `"..."` (single-line, escape-processed) or
 
 The parser at `crates/corvid-syntax/src/parser/` is the source of
 truth. This grammar was extracted from it; if a future parser change
-diverges, the drift-gate test fails and one of the two must change.
-The cross-reference table from production rules to parser-test fns
-lives in
-[`crates/corvid-syntax/src/parser/tests.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-syntax/src/parser/tests.rs).
+diverges, the drift gates fail and one of the two must change. The
+per-production parse-evidence snippets live in
+[`crates/corvid-syntax/tests/grammar_drift.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-syntax/tests/grammar_drift.rs).
