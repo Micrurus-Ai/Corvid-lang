@@ -10,6 +10,12 @@
 //!                         sit under a nearby "Planned" marker that
 //!                         names its roadmap slice, and MUST NOT
 //!                         compile-check (it wouldn't).
+//! - ```corvid-error     — deliberately-failing example (e.g. the
+//!                         quickstart's dangerous-call-without-approve
+//!                         program); MUST FAIL to compile. Pins the
+//!                         book's "does not compile" claims so a
+//!                         checker regression that silently ACCEPTS
+//!                         the program breaks CI.
 //! - ```corvid-fragment  — illustrative fragment, not a standalone
 //!                         program; skipped.
 //!
@@ -26,6 +32,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const GUARDED_CHAPTERS: &[&str] = &[
+    "docs/book/02-quickstart.md",
     "docs/book/04-syntax.md",
     "docs/book/05-types.md",
     "docs/book/11-prompts.md",
@@ -98,15 +105,29 @@ fn every_corvid_block_in_guarded_chapters_compiles() {
         let text = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {chapter}: {e}"));
         for fence in corvid_fences(&text) {
-            if fence.tag != "corvid" {
-                continue;
-            }
-            let compiled = corvid_driver::compile(&fence.body);
-            if !compiled.ok() {
-                failures.push(format!(
-                    "{chapter}:{} — `corvid` block fails to compile:\n{:#?}",
-                    fence.start_line, compiled.diagnostics
-                ));
+            match fence.tag.as_str() {
+                "corvid" => {
+                    let compiled = corvid_driver::compile(&fence.body);
+                    if !compiled.ok() {
+                        failures.push(format!(
+                            "{chapter}:{} — `corvid` block fails to compile:\n{:#?}",
+                            fence.start_line, compiled.diagnostics
+                        ));
+                    }
+                }
+                "corvid-error" => {
+                    let compiled = corvid_driver::compile(&fence.body);
+                    if compiled.ok() {
+                        failures.push(format!(
+                            "{chapter}:{} — `corvid-error` block COMPILED CLEAN. \
+                             The book claims this program does not compile; either \
+                             a checker regression now accepts it (fix the checker) \
+                             or the example is stale (fix the book).",
+                            fence.start_line
+                        ));
+                    }
+                }
+                _ => {}
             }
         }
     }

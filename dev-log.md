@@ -227,6 +227,102 @@ Next per track order: 44d (quickstart honesty — subsumes 33R12).
 
 ---
 
+## 2026-07-09 - 44d closed: quickstart honesty — and the approve gate's real trigger discovered
+
+The slice that was supposed to be a mechanical error-code fix
+(E0301 → E0101) surfaced the most serious finding of the Phase 44
+sweep so far.
+
+### MAJOR FINDING: the approve gate keys on `dangerous`, not `trust:`
+
+44d's method was "run the real compiler on every doc example instead
+of trusting the doc." Running the quickstart's dangerous-refund
+program through live `corvid check` produced... `ok — no errors`.
+The program the book says "does not compile" COMPILES.
+
+Root cause: the compile-time approve requirement fires on the
+`dangerous` keyword on the tool declaration. The effect row's
+`trust: supervisor_required` dimension does NOT trigger it — trust
+tiers feed `@trust(...)` dimensional constraints and runtime approval
+routing (`corvid-types/src/effects/compose.rs` orders the tiers).
+The quickstart's tool had the trust dimension but no `dangerous`
+marker, so the load-bearing claim was false as written.
+
+Adding `dangerous` produces the real diagnostic:
+
+    [E0101] error: dangerous tool `refund` called without a prior `approve`
+        │ Help: add `approve Refund(arg1, arg2)` on the line before this call
+
+— which also differs from the book's fabricated diagnostic in every
+detail: code (E0101 not E0301 — E0301 is "undefined name"), renderer
+(ariadne panel, not rustc-style), help text, and NO
+`= guarantee: ...` line (the book invented one).
+
+Two-part response:
+
+1. **Docs teach the shipped model (this slice).** `dangerous` is the
+   compile-time approve gate; `trust:` records the tier. Fixed in
+   ch 02 (full realign), ch 03 (surgical: tool decl + narrative +
+   diagnostic), ch 08 (narrative + diagnostic), and
+   `docs/guides/debugging.md` (real diagnostic + guarantee-lookup
+   narrative). Zero `error[E0301]`-for-approve blocks remain.
+
+2. **The semantics question is filed as 47g** — should the checker
+   derive approve-requirement from trust >= supervisor_required so a
+   forgotten `dangerous` marker isn't a silent footgun? Recommended
+   shape: warning-level nudge for v1.0 (the 33Q14 W0280 precedent),
+   revisit hard coupling post-v1.0. Pre-phase chat required.
+
+### ch 02 quickstart realigned end-to-end
+
+- Every program verified against the LIVE compiler (scratchpad
+  `corvid check` runs), not eyeballed: the Step 5 failing program,
+  the Step 6 approved program (passes), the real `ok:` output line.
+- Real scaffold tree documented (corvid.toml with [io]/[http]
+  boundaries, src/std/ vendored stdlib, tools.py, .gitignore — the
+  old tree showed a `tests/` dir the scaffold doesn't create and
+  omitted what it does).
+- Step 2 reworded: the scaffold's starter is an echo tool; the
+  summarize program is something you WRITE (the old text claimed the
+  scaffold generates it). Prompt body fixed to the `{text}` template
+  form.
+- All bare fences tagged (`text` for outputs, `sh` for commands).
+
+### New `corvid-error` fence tag — "does not compile" is now CI-pinned
+
+The snippet guard gains a third semantic tag: a `corvid-error` block
+MUST FAIL to compile. The quickstart's dangerous-call program is
+tagged with it, so:
+
+- If a checker regression silently ACCEPTS the program (exactly what
+  the trust-vs-dangerous confusion produced), CI breaks.
+- If the example goes stale, CI breaks.
+
+The book's central claim is no longer prose — it's a test.
+
+ch 02 joined `GUARDED_CHAPTERS` (now 5 chapters).
+
+### Also filed
+
+44f-remaining-book-chapters-realign — ch 03 needs a full pass
+(prompt bodies with `+` expressions, `@retrieve(...)`,
+`unwrap_with_citation()` all need live verification), plus ch
+06/07/09/10/12/14/15/16/17 and the guides, each verified the 44d way
+and guard-registered.
+
+### Validation
+
+- 3/3 snippet-guard tests over 5 chapters (corvid-error block
+  verifiably fails compilation).
+- Zero remaining `error[E0301]` approve diagnostics in docs.
+- Workspace check clean; corpus verify exits 1 only on the two
+  deliberate fixtures.
+
+Next per track order: 44e (README streaming-claim alignment) — then
+Phase 44 closes with 44f as the long-tail sweep.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

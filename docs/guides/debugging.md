@@ -2,14 +2,15 @@
 
 ## When a Corvid program won't compile
 
-The diagnostic carries a `guarantee_id`:
+The diagnostic carries a stable error code and a fix hint:
 
-```
-error[E0301]: dangerous tool `refund` called without `approve`
-  = guarantee: approval.dangerous_call_requires_token
+```text
+[E0101] error: dangerous tool `refund` called without a prior `approve`
+    │ Help: add `approve Refund(arg1, arg2)` on the line before this call
 ```
 
-Look it up:
+The guarantee behind an approval-rule diagnostic is
+`approval.dangerous_call_requires_token`. Look it up:
 
 ```sh
 corvid claim --explain approval.dangerous_call_requires_token

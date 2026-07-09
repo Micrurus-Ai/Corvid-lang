@@ -2,10 +2,13 @@
 
 ## What approve is
 
-`approve` is a compile-time token. When a tool's effect row carries
-`trust: supervisor_required`, the compiler refuses to emit a binary
-unless every reachable call site is preceded by an `approve` of the
-matching shape.
+`approve` is a compile-time token. When a tool is declared with the
+`dangerous` marker, the compiler refuses to emit a binary unless every
+reachable call site is preceded by an `approve` of the matching shape.
+The effect row's `trust:` dimension records the trust tier the call
+carries (it feeds `@trust(...)` constraints and runtime approval
+routing); the compile-time approve gate is the `dangerous` marker on
+the tool declaration.
 
 ## The shape
 
@@ -27,10 +30,11 @@ agent main() -> String:
 
 If you remove the `approve` line, the compiler fails:
 
-```
-error[E0301]: dangerous tool `refund` called without `approve`
-  --> ...
-  = guarantee: approval.dangerous_call_requires_token
+```text
+[E0101] error: dangerous tool `refund` called without a prior `approve`
+    │ Help: add `approve Refund(arg1, arg2)` on the line before this call
+
+1 error(s) found.
 ```
 
 ## Lexical scope

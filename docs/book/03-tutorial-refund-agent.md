@@ -88,14 +88,18 @@ auditor can prove the decision was grounded.
 
 ## Step 5 — Write the refund tool
 
-```corvid
-tool refund(amount: Float, customer_id: String) -> String uses refund_effect:
-    @host.payment.refund(customer_id, amount)
+```corvid-fragment
+tool refund(amount: Float, customer_id: String) -> String dangerous uses refund_effect
 ```
 
-This is a real side-effect tool. Its effect row says
-`trust: supervisor_required` and `reversible: false`. The compiler will
-require an `approve` token before any reachable call site.
+This is a real side-effect tool: a signature-only declaration whose
+implementation the host provides through registered-tool dispatch (a
+`tools.py` function, a Rust FFI cdylib, or an executing stdlib tool).
+The `dangerous` marker is the compile-time approve gate — the compiler
+requires an `approve` token before any reachable call site. The effect
+row's `trust: supervisor_required` and `reversible: false` record the
+trust tier, which feeds `@trust(...)` constraints and runtime approval
+routing.
 
 ## Step 6 — Compose the agent
 
@@ -124,14 +128,18 @@ Remove the `approve` line:
         return refund(50.0, customer_id)
 ```
 
-```
-error[E0301]: dangerous tool `refund` called without `approve`
-  --> src/main.cor:25:16
-   |
-25 |         return refund(50.0, customer_id)
-   |                ^^^^^^
-   |
-   = guarantee: approval.dangerous_call_requires_token
+```text
+[E0101] error: dangerous tool `refund` called without a prior `approve`
+    ╭─[src/main.cor:25:16]
+    │
+ 25 │         return refund(50.0, customer_id)
+    │                ────────────┬────────────
+    │                            ╰───────────── this call needs prior approval
+    │
+    │ Help: add `approve Refund(arg1, arg2)` on the line before this call
+────╯
+
+1 error(s) found.
 ```
 
 Restore the `approve`. Now make `decide_refund` use the policy without

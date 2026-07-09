@@ -6,6 +6,10 @@ Five minutes from zero to a Corvid program that calls an LLM, refuses to
 compile when you remove a safety check, and produces a deterministic
 replay you can show your team.
 
+Every `corvid`-tagged code block in this chapter compiles through the
+real driver in CI, and the deliberately-failing block is CI-pinned to
+keep failing (`crates/corvid-driver/tests/book_snippets_compile.rs`).
+
 ## Step 1 — Make a project
 
 ```sh
@@ -15,18 +19,25 @@ cd hello-corvid
 
 This creates:
 
-```
+```text
 hello-corvid/
-├── corvid.toml         # project manifest
+├── corvid.toml         # project manifest + [io]/[http] security boundaries
+├── .gitignore
 ├── src/
-│   └── main.cor        # entry point
-└── tests/
-    └── main_test.cor   # one passing test
+│   ├── main.cor        # entry point (a minimal echo tool)
+│   └── std/            # vendored stdlib modules (io, http, db, json, …)
+└── tools.py            # optional Python host tools for the starter echo
 ```
 
-## Step 2 — Read the entry point
+The scaffolded `corvid.toml` declares the executing-I/O security
+boundaries from day one: `[io] root = "."` confines file access to the
+project directory, and `[http] allow = []` fails HTTP egress closed
+until you name trusted hosts.
 
-`src/main.cor`:
+## Step 2 — Write the entry point
+
+The scaffold's starter program is a one-line echo tool. Replace
+`src/main.cor` with an LLM-backed program:
 
 ```corvid
 effect llm_call:
@@ -35,7 +46,7 @@ effect llm_call:
     confidence: 0.9
 
 prompt summarize(text: String) -> String uses llm_call:
-    "Summarize the following in one sentence: " + text
+    "Summarize the following in one sentence: {text}"
 
 agent main() -> String:
     article = "The compiler should see what your AI is doing."
@@ -47,8 +58,9 @@ What's happening:
 - `effect llm_call` declares a named effect with three dimensions: cost,
   latency, confidence. Every prompt that uses this effect inherits these
   bounds.
-- `prompt summarize` is a function backed by an LLM call. Its return type
-  is `String`, its effect row says it uses `llm_call`.
+- `prompt summarize` is a function backed by an LLM call. Its body is a
+  single template string — `{text}` interpolates the parameter. Its
+  return type is `String`, its effect row says it uses `llm_call`.
 - `agent main` is the program entry. Agents compose prompts and tools.
 
 ## Step 3 — Run it
@@ -59,7 +71,7 @@ corvid run src/main.cor
 
 You should see something like:
 
-```
+```text
 The compiler is the AI's first line of defense.
 ```
 
@@ -98,7 +110,7 @@ corvid run src/main.cor
 
 Output:
 
-```
+```text
 Corvid ships a typed effect system.
 ```
 
@@ -121,24 +133,35 @@ For the HTTP + JSON + SQLite story end-to-end, see
 
 ## Step 5 — Add a dangerous tool, watch the compiler refuse
 
-Open `src/main.cor` and add a refund tool:
+Replace `src/main.cor` with a version that declares a refund tool and
+calls it without approval. The `dangerous` marker on the tool
+declaration is the compile-time approve gate; the effect's `trust:`
+dimension records the trust tier the call carries (it feeds
+`@trust(...)` constraints and runtime approval routing):
 
-```corvid
+```corvid-error
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
 effect refund_effect:
     cost: $50.00
     trust: supervisor_required
     reversible: false
 
-tool refund(amount: Float, customer_id: String) -> String uses refund_effect:
-    @host.payment.refund(customer_id, amount)
+prompt summarize(text: String) -> String uses llm_call:
+    "Summarize the following in one sentence: {text}"
+
+tool refund(amount: Float, customer_id: String) -> String dangerous uses refund_effect
 
 agent main() -> String:
-    article = "..."
+    article = "The compiler should see what your AI is doing."
     summary = summarize(article)
     return refund(50.0, "cust_123")
 ```
 
-Run it again:
+Check it:
 
 ```sh
 corvid check src/main.cor
@@ -146,29 +169,45 @@ corvid check src/main.cor
 
 The compiler refuses:
 
-```
-error[E0301]: dangerous tool `refund` called without `approve`
-  --> src/main.cor:14:12
-   |
-14 |     return refund(50.0, "cust_123")
-   |            ^^^^^^ this tool requires `approve` because its effect
-   |                   row carries `trust: supervisor_required`
-   |
-   = help: add `approve Refund(amount, customer_id)` before this call,
-           or downgrade the effect row's trust dimension if the call
-           is genuinely safe.
-   = guarantee: approval.dangerous_call_requires_token
+```text
+[E0101] error: dangerous tool `refund` called without a prior `approve`
+    ╭─[src/main.cor:19:12]
+    │
+ 19 │     return refund(50.0, "cust_123")
+    │            ────────────┬───────────
+    │                        ╰───────────── this call needs prior approval
+    │
+    │ Help: add `approve Refund(arg1, arg2)` on the line before this call
+────╯
+
+1 error(s) found.
 ```
 
 This is the load-bearing claim: a dangerous tool call without `approve`
 does not compile. Not "produces a runtime warning." Not "fails a lint."
-Does not compile.
+Does not compile. (The failing block above is itself compiled in CI and
+pinned to keep failing with exactly this error class.)
 
 ## Step 6 — Add `approve`, watch it pass
 
 ```corvid
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
+effect refund_effect:
+    cost: $50.00
+    trust: supervisor_required
+    reversible: false
+
+prompt summarize(text: String) -> String uses llm_call:
+    "Summarize the following in one sentence: {text}"
+
+tool refund(amount: Float, customer_id: String) -> String dangerous uses refund_effect
+
 agent main() -> String:
-    article = "..."
+    article = "The compiler should see what your AI is doing."
     summary = summarize(article)
     approve Refund(50.0, "cust_123")
     return refund(50.0, "cust_123")
@@ -178,8 +217,8 @@ agent main() -> String:
 corvid check src/main.cor
 ```
 
-```
-ok. 1 file checked, 0 errors.
+```text
+ok: src/main.cor — no errors
 ```
 
 ## Step 7 — Replay it
