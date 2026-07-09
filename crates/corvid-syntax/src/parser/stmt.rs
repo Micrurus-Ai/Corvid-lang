@@ -206,8 +206,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `IDENT '=' expr NEWLINE` is an assignment; anything else is an
-    /// expression statement.
+    /// `IDENT '=' expr NEWLINE` is an assignment and
+    /// `IDENT ':' type_ref '=' expr NEWLINE` is an annotated
+    /// assignment — the same `name: Type` shape fields, params, and
+    /// effect dimensions use. Anything else is an expression
+    /// statement.
     fn parse_assign_or_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
         // Peek two ahead: IDENT then `=` ? → assignment.
         if matches!(self.peek(), TokKind::Ident(_))
@@ -225,6 +228,38 @@ impl<'a> Parser<'a> {
             return Ok(Stmt::Let {
                 name: Ident::new(name, name_span),
                 ty: None,
+                value,
+                span: start.merge(end),
+            });
+        }
+        // IDENT then `:` (but not `::`) ? → annotated assignment.
+        // The double-colon exclusion matters: path-call expression
+        // statements (`Weak::upgrade(w)`) begin `IDENT ':' ':'`, so
+        // the annotation lookahead must require exactly one colon.
+        if matches!(self.peek(), TokKind::Ident(_))
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokKind::Colon)
+            )
+            && !matches!(
+                self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                Some(TokKind::Colon)
+            )
+        {
+            let start = self.peek_span();
+            let (name, name_span) = self.expect_ident()?;
+            self.bump(); // :
+            let ty = self.parse_type_ref()?;
+            self.expect(
+                TokKind::Assign,
+                "`=` after the type annotation in an annotated assignment",
+            )?;
+            let value = self.parse_expr()?;
+            let end = value.span();
+            self.expect_newline()?;
+            return Ok(Stmt::Let {
+                name: Ident::new(name, name_span),
+                ty: Some(ty),
                 value,
                 span: start.merge(end),
             });

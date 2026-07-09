@@ -276,8 +276,12 @@ break_stmt        ::= 'break' NEWLINE
 continue_stmt     ::= 'continue' NEWLINE
 pass_stmt         ::= 'pass' NEWLINE
 
-assign_stmt       ::= IDENT '=' expr NEWLINE
-                      # 'let' IDENT (':' type_ref)? '=' expr form PLANNED(45a);
+# Bindings are bare (`x = expr`, type inferred) or annotated
+# (`x: Int = expr` — the same `name: Type` shape fields and params
+# use; the checker verifies initializer agreement). There is
+# deliberately NO `let` keyword: one binding form, coherent with the
+# Python-flavored surface (decision recorded at ROADMAP slice 45a).
+assign_stmt       ::= IDENT (':' type_ref)? '=' expr NEWLINE
                       # field/index/compound assignment targets PLANNED(45b)
 
 expr_stmt         ::= expr NEWLINE
@@ -358,8 +362,9 @@ Keywords (reserved): `agent`, `tool`, `prompt`, `eval`, `test`,
 Contextual words (parsed positionally, NOT reserved — they are valid
 identifiers elsewhere): `use` (import lists), `Nothing` (the unit
 literal/type), `system`/`user`/`assistant` (planned role clauses),
-`python` (import source). `let` is currently a plain identifier; it
-becomes a reserved keyword when slice 45a ships.
+`python` (import source). There is no `let` keyword: bindings are
+bare or annotated assignment (decision recorded at ROADMAP slice
+45a), so `let` remains an ordinary identifier permanently.
 
 Identifiers: `[A-Za-z_][A-Za-z0-9_]*` excluding keywords.
 

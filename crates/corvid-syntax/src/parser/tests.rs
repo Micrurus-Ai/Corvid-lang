@@ -419,6 +419,61 @@ use corvid_ast::{Backoff, BackpressurePolicy, BinaryOp, Expr, Literal, ToolDecl,
         assert!(matches!(&b.stmts[0], Stmt::Let { .. }));
     }
 
+    #[test]
+    fn parses_annotated_assignment() {
+        // Slice 45a — `n: Int = 42`, the same `name: Type` shape
+        // fields and params use.
+        let b = parse_blk("\n    n: Int = 42\n");
+        assert_eq!(b.stmts.len(), 1);
+        match &b.stmts[0] {
+            Stmt::Let { name, ty, value, .. } => {
+                assert_eq!(name.name, "n");
+                assert!(ty.is_some(), "annotation should populate Stmt::Let.ty");
+                assert!(matches!(
+                    value,
+                    Expr::Literal {
+                        value: Literal::Int(42),
+                        ..
+                    }
+                ));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_annotated_assignment_with_generic_type() {
+        let b = parse_blk("\n    xs: List<Int> = [1, 2, 3]\n");
+        match &b.stmts[0] {
+            Stmt::Let { ty, .. } => assert!(ty.is_some()),
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn path_call_statement_is_not_mistaken_for_annotation() {
+        // Regression pin (slice 45a): `Weak::upgrade(w)` begins
+        // `IDENT ':' ':'` — the annotation lookahead must require
+        // exactly ONE colon or path-call expression statements break.
+        let b = parse_blk("\n    Weak::upgrade(w)\n");
+        assert!(
+            matches!(&b.stmts[0], Stmt::Expr { .. }),
+            "path-call should parse as an expression statement, got {:?}",
+            b.stmts[0]
+        );
+    }
+
+    #[test]
+    fn annotated_assignment_without_value_is_an_error() {
+        // A bare declaration `n: Int` (no initializer) is not a
+        // statement form — the annotation exists only on assignment.
+        let (_b, errors) = parse_blk_errs("\n    n: Int\n");
+        assert!(
+            !errors.is_empty(),
+            "expected a parse error for an annotation without `= value`"
+        );
+    }
+
     // -------------------- expression statement --------------------
 
     #[test]

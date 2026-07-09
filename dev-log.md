@@ -448,6 +448,73 @@ project rule).
 
 ---
 
+## 2026-07-09 - 45a closed: annotated assignment (`x: Int = 42`) — Phase 45 opens
+
+First implementation slice of the Language completeness track, and
+the first decision made under the CTO's standing principle (set in
+the same pre-phase chat): **every design call is judged on making
+Corvid more inventive, more strong, and more easy for developers.**
+
+### The design decision
+
+Original 45a scope was "restore Rust-style `let`". Judged against
+the principle, `let` loses: it bolts a second, foreign binding form
+onto Corvid's Python-flavored surface (choice paralysis + migration
+burden = less easy) and adds zero safety over an annotation (not
+stronger). The coherent form is **annotated assignment**:
+
+    n: Int = 42
+    xs: List<Int> = [1, 2, 3]
+
+— the exact `name: Type` shape every field, param, and effect
+dimension already uses. One binding form stays (bare `x = expr`);
+the annotation is opt-in; the checker verifies initializer
+agreement (mismatch = TypeMismatch compile error; Int still widens
+into Float slots). `let` is dropped PERMANENTLY from the reserved-
+word plan; ch 13's destructuring design (45i) binds keyword-free.
+
+### The implementation was one parser branch
+
+The checker's `Stmt::Let` arm already handled `ty: Some(...)`
+end-to-end (annotation resolution, agreement check, mismatch
+diagnostic, grounded-coercion recording) — the parser just never
+produced it. Shipped: a two-token-lookahead branch in
+`parse_assign_or_expr_stmt` (`IDENT ':' → annotated binding`).
+
+### The full types suite caught a real ambiguity immediately
+
+First run: `weak_refresh_merges_by_all_paths_not_any_path` FAILED —
+`Weak::upgrade(w)` expression statements begin `IDENT ':' ':'` (the
+path separator lexes as two colons), and the new branch swallowed
+the first colon. Fix: the annotation lookahead requires exactly ONE
+colon (`tokens[pos+2] != Colon`). Regression pinned with
+`path_call_statement_is_not_mistaken_for_annotation`.
+
+### Shipped
+
+- Parser branch + comment stating the `::` exclusion honestly.
+- 4 parser tests (basic, generic type, no-initializer error, `::`
+  regression pin) + 3 checker tests (agreement, mismatch rejection,
+  Int→Float widening).
+- Live end-to-end: `corvid run` on an annotated program returns 42.
+- grammar.md: `assign_stmt ::= IDENT (':' type_ref)? '=' expr` with
+  the no-let decision recorded; keywords note updated (`let` stays
+  an ordinary identifier permanently); evidence snippet exercises
+  the annotated form.
+- Book ch 05: "Type inference and annotations" section with a
+  compiling annotated example; ch 13 destructuring wording updated.
+
+### Validation
+
+257 types + 211 syntax + 109 vm + 3 book-guard (26 files) + 3
+drift-gate tests pass; workspace check clean; corpus verify exits 1
+only on the two deliberate fixtures.
+
+Next per track order: 45b-assignment-targets (`x.field = v`,
+`xs[i] = v`, compound `+=`).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

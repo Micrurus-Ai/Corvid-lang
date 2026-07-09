@@ -417,7 +417,7 @@ mock summarize(text: String) -> String:
 tool refund(amount: Float) -> Nothing uses pay_eff
 
 agent flow(xs: List<Int>) -> Result<Int, String>:
-    total = 0
+    total: Int = 0
     for x in xs:
         if x > 3:
             break

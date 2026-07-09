@@ -3754,6 +3754,61 @@ agent parse_config(text: String) -> String:
     );
 }
 
+/// Slice 45a — annotated assignment `n: Int = 42`: the annotation
+/// binds the local's type and the checker verifies the initializer
+/// agrees with it.
+#[test]
+fn annotated_assignment_with_agreeing_initializer_typechecks() {
+    let src = "\
+agent main() -> Int:
+    n: Int = 42
+    xs: List<Int> = [1, 2, 3]
+    return n + xs[0]
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "annotated assignment with agreeing types should typecheck, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45a — a mismatching initializer is a compile error, and the
+/// annotation (not the initializer) is the binding's type.
+#[test]
+fn annotated_assignment_with_mismatching_initializer_is_rejected() {
+    let src = "\
+agent main() -> Int:
+    n: Int = \"not an int\"
+    return n
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for `n: Int = \\\"...\\\"`, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45a — Int widens implicitly to an annotated Float slot,
+/// matching the existing widening rule at call/return boundaries.
+#[test]
+fn annotated_assignment_widens_int_to_float() {
+    let src = "\
+agent main() -> Float:
+    f: Float = 42
+    return f
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "Int should widen into an annotated Float binding, got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 33R5b-c — same rejection fires for the builder side
 /// (uses `json_egress_build`). Mirrors the 33S1b / 33S2c / 33S3d
 /// pinning tests across reversible AND non-reversible effects on

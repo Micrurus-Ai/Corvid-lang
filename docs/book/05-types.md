@@ -242,7 +242,7 @@ type CustomerId = String
 type Cents = Int
 ```
 
-## Type inference
+## Type inference and annotations
 
 Local bindings don't need annotations — the type is inferred from the
 initializer:
@@ -254,10 +254,22 @@ agent inference_demo() -> Int:
     return n + xs[0]
 ```
 
+When you want the contract explicit, annotate the binding — the same
+`name: Type` shape fields and params use. The checker verifies the
+initializer agrees with the annotation (a mismatch is a compile
+error), and the annotation becomes the binding's type:
+
+```corvid
+agent annotated_demo() -> Float:
+    n: Int = 42
+    xs: List<Int> = [1, 2, 3]
+    f: Float = 42                        # Int widens into the Float slot
+    return f
+```
+
+There is deliberately no `let` keyword — one binding form, coherent
+with the rest of the surface.
+
 Function signatures, record fields, and effect rows always require
 explicit types — they're the boundaries where inference would be
 ambiguous and where you want a checker-readable contract.
-
-> **Planned — `let` bindings with optional annotations
-> (`let n: Int = 42`) land in slice 45a.** Today bindings are bare
-> assignments.

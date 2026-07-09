@@ -56,10 +56,13 @@ match x:
     _            -> "small"
 ```
 
-## Destructuring in `let` and parameters (Planned — 45i, on the 45a `let` surface)
+## Destructuring bindings and parameters (Planned — 45i)
+
+Destructuring binds without a keyword, matching the shipped
+assignment surface (45a decided against a `let` keyword):
 
 ```corvid-planned
-let Decision { refund, amount, .. } = compute_decision(ticket)
+Decision { refund, amount, .. } = compute_decision(ticket)
 
 fn handle(Decision { refund, amount, reason }: Decision) -> String:
     ...
