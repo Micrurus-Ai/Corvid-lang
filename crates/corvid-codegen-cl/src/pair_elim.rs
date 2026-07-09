@@ -135,7 +135,10 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
         | IrStmt::Return { .. }
         | IrStmt::Yield { .. }
         | IrStmt::Break { .. }
-        | IrStmt::Continue { .. } => true,
+        | IrStmt::Continue { .. }
+        // Place assignment mutates through the root local —
+        // conservatively a barrier for drop/alloc pair search.
+        | IrStmt::Assign { .. } => true,
         IrStmt::Approve { args, .. } => args.iter().any(|expr| expr_mentions_local(expr, local_id)),
         IrStmt::Let {
             local_id: defined,
@@ -158,6 +161,24 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
 fn stmt_local_mentions(stmt: &IrStmt, local_id: LocalId) -> usize {
     match stmt {
         IrStmt::Let { value, .. } => count_local_mentions_expr(value, local_id),
+        IrStmt::Assign {
+            local_id: root,
+            path,
+            value,
+            ..
+        } => {
+            usize::from(*root == local_id)
+                + path
+                    .iter()
+                    .map(|seg| match seg {
+                        corvid_ir::IrPathSeg::Index(idx) => {
+                            count_local_mentions_expr(idx, local_id)
+                        }
+                        corvid_ir::IrPathSeg::Field(_) => 0,
+                    })
+                    .sum::<usize>()
+                + count_local_mentions_expr(value, local_id)
+        }
         IrStmt::Return { value, .. } => value
             .as_ref()
             .map(|expr| count_local_mentions_expr(expr, local_id))

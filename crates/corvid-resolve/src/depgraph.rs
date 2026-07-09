@@ -266,6 +266,10 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
         Stmt::Expr { expr, .. } => {
             collect_expr_deps(expr, resolved, deps);
         }
+        Stmt::Assign { target, value, .. } => {
+            collect_expr_deps(target, resolved, deps);
+            collect_expr_deps(value, resolved, deps);
+        }
     }
 }
 

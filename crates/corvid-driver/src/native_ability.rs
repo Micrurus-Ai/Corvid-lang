@@ -46,6 +46,10 @@ pub enum NotNativeReason {
     /// routes to the interpreter tier.
     ReplayPrimitiveNotNative,
     HumanBoundaryNotNative,
+    /// Place assignment (`x.field = v`, `xs[i] = v`, compound `op=`)
+    /// is interpreter-only in slice 45b; native lowering is filed
+    /// with the 47c backend-parity work.
+    PlaceAssignmentNotNative,
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -75,6 +79,9 @@ impl std::fmt::Display for NotNativeReason {
             }
             Self::HumanBoundaryNotNative => {
                 write!(f, "program uses `ask` or `choose` - human input boundaries are interpreter-only in this slice")
+            }
+            Self::PlaceAssignmentNotNative => {
+                write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
             }
         }
     }
@@ -181,6 +188,7 @@ fn scan_block(block: &IrBlock, current_return_ty: &Type) -> Result<(), NotNative
 fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeReason> {
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty),
+        IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
         IrStmt::Return { value: Some(v), .. } => scan_expr(v, current_return_ty),
         IrStmt::Return { value: None, .. } => Ok(()),

@@ -70,6 +70,10 @@ impl<'a> Checker<'a> {
                 self.walk_deterministic_block(agent, body);
             }
             Stmt::Expr { expr, .. } => self.walk_deterministic_expr(agent, expr),
+            Stmt::Assign { target, value, .. } => {
+                self.walk_deterministic_expr(agent, target);
+                self.walk_deterministic_expr(agent, value);
+            }
             Stmt::Approve { action, span } => {
                 // Approve is an LLM-layer concern; a pure function
                 // cannot gate on user approval.
@@ -279,6 +283,10 @@ fn collect_replayability_violations_in_stmt(stmt: &Stmt, out: &mut Vec<Replayabi
         }
         Stmt::Approve { action, .. } => {
             collect_replayability_violations_in_expr(action, out);
+        }
+        Stmt::Assign { target, value, .. } => {
+            collect_replayability_violations_in_expr(target, out);
+            collect_replayability_violations_in_expr(value, out);
         }
     }
 }

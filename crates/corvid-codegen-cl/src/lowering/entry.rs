@@ -11,6 +11,12 @@ fn block_uses_runtime(block: &IrBlock) -> bool {
 fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
     match stmt {
         IrStmt::Let { value, .. } => expr_uses_runtime(value),
+        IrStmt::Assign { path, value, .. } => {
+            path.iter().any(|seg| match seg {
+                corvid_ir::IrPathSeg::Index(idx) => expr_uses_runtime(idx),
+                corvid_ir::IrPathSeg::Field(_) => false,
+            }) || expr_uses_runtime(value)
+        }
         IrStmt::Yield { value, .. } => expr_uses_runtime(value),
         IrStmt::Return { value: Some(e), .. } => expr_uses_runtime(e),
         IrStmt::Return { value: None, .. } => false,

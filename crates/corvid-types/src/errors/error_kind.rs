@@ -2,6 +2,11 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeErrorKind {
+    /// The target of a place assignment (`x.field = v`, `xs[i] = v`,
+    /// compound `+=`) is not assignable — e.g. its root is not a
+    /// local variable (slice 45b).
+    InvalidAssignTarget { reason: String },
+
     /// Wrong number of arguments in a call.
     ArityMismatch {
         callee: String,
@@ -340,6 +345,9 @@ pub enum TypeErrorKind {
 impl TypeErrorKind {
     pub fn message(&self) -> String {
         match self {
+            Self::InvalidAssignTarget { reason } => {
+                format!("invalid assignment target: {reason}")
+            }
             Self::ArityMismatch {
                 callee,
                 expected,
@@ -662,6 +670,9 @@ impl TypeErrorKind {
 
     pub fn hint(&self) -> Option<String> {
         match self {
+            Self::InvalidAssignTarget { .. } => Some(
+                "assign through a path rooted at a local variable, e.g. `x.field = v` or `xs[i] = v`".into(),
+            ),
             Self::ArityMismatch { callee, expected, .. } => Some(format!(
                 "`{callee}` takes {expected} argument{}",
                 if *expected == 1 { "" } else { "s" }

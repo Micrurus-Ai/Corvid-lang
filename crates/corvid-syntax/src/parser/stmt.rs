@@ -12,7 +12,7 @@
 use super::Parser;
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
-use corvid_ast::{Block, Expr, Ident, Span, Stmt};
+use corvid_ast::{BinaryOp, Block, Expr, Ident, Span, Stmt};
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------
@@ -269,8 +269,56 @@ impl<'a> Parser<'a> {
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
+
+        // Slice 45b — place assignment. If the parsed expression is
+        // followed by `=` or a compound-assignment operator, it is an
+        // assignment target rather than an expression statement.
+        let op = match self.peek() {
+            TokKind::Assign => Some(None),
+            TokKind::PlusEq => Some(Some(BinaryOp::Add)),
+            TokKind::MinusEq => Some(Some(BinaryOp::Sub)),
+            TokKind::StarEq => Some(Some(BinaryOp::Mul)),
+            TokKind::SlashEq => Some(Some(BinaryOp::Div)),
+            TokKind::PercentEq => Some(Some(BinaryOp::Mod)),
+            _ => None,
+        };
+        if let Some(op) = op {
+            if !is_assignable_place(&expr) {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "an assignment to a non-place expression".into(),
+                        expected: "an assignable place: a variable, a field access \
+                                   (`x.field`), or an index (`xs[i]`)"
+                            .into(),
+                    },
+                    span: expr.span(),
+                });
+            }
+            let start = expr.span();
+            self.bump(); // the assignment operator
+            let value = self.parse_expr()?;
+            let end = value.span();
+            self.expect_newline()?;
+            return Ok(Stmt::Assign {
+                target: expr,
+                op,
+                value,
+                span: start.merge(end),
+            });
+        }
+
         let span = expr.span();
         self.expect_newline()?;
         Ok(Stmt::Expr { expr, span })
     }
+}
+
+/// An assignable place is a variable, a field access, or an index
+/// expression. Anything else (calls, literals, `?`-propagation, …)
+/// cannot be assigned through.
+fn is_assignable_place(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Ident { .. } | Expr::FieldAccess { .. } | Expr::Index { .. }
+    )
 }

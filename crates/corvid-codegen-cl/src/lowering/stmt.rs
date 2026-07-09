@@ -93,6 +93,10 @@ fn lower_stmt(
             "Stream lowering not yet implemented",
             *span,
         )),
+        IrStmt::Assign { span, .. } => Err(CodegenError::not_supported(
+            "place assignment (x.field = v / xs[i] = v / compound ops) is interpreter-only in 45b",
+            *span,
+        )),
         IrStmt::Return { value, span } => {
             let v = match value {
                 Some(e) => lower_expr(
@@ -668,6 +672,19 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
         IrStmt::Let { value, .. }
         | IrStmt::Expr { expr: value, .. }
         | IrStmt::Yield { value, .. } => expr_mentions_local(value, target),
+        IrStmt::Assign {
+            local_id,
+            path,
+            value,
+            ..
+        } => {
+            *local_id == target
+                || path.iter().any(|seg| match seg {
+                    corvid_ir::IrPathSeg::Index(idx) => expr_mentions_local(idx, target),
+                    corvid_ir::IrPathSeg::Field(_) => false,
+                })
+                || expr_mentions_local(value, target)
+        }
         IrStmt::Return { value, .. } => value
             .as_ref()
             .is_some_and(|value| expr_mentions_local(value, target)),

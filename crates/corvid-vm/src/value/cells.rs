@@ -160,6 +160,17 @@ impl ListValue {
             .and_then(|items| items.get(idx).cloned())
     }
 
+    /// Replace the element at `idx` in place (slice 45b place
+    /// assignment). Callers bounds-check first; out-of-range is a
+    /// no-op here to keep the lock scope minimal.
+    pub fn set(&self, idx: usize, value: Value) {
+        if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
+            if idx < items.len() {
+                items[idx] = value;
+            }
+        }
+    }
+
     pub fn ptr_key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }

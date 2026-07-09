@@ -355,6 +355,22 @@ fn render_block(block: &Block, indent: usize, out: &mut String) {
 
 fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
     match stmt {
+        Stmt::Assign {
+            target, op, value, ..
+        } => {
+            push_indent(indent, out);
+            out.push_str(&render_expr(target));
+            out.push_str(match op {
+                Some(corvid_ast::BinaryOp::Add) => " += ",
+                Some(corvid_ast::BinaryOp::Sub) => " -= ",
+                Some(corvid_ast::BinaryOp::Mul) => " *= ",
+                Some(corvid_ast::BinaryOp::Div) => " /= ",
+                Some(corvid_ast::BinaryOp::Mod) => " %= ",
+                _ => " = ",
+            });
+            out.push_str(&render_expr(value));
+            out.push('\n');
+        }
         Stmt::Let {
             name, ty, value, ..
         } => {

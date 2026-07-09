@@ -69,6 +69,10 @@ impl<'a> Checker<'a> {
             }
             Stmt::Expr { expr, .. } => self.walk_grounded_pure_expr(agent, expr),
             Stmt::Approve { action, .. } => self.walk_grounded_pure_expr(agent, action),
+            Stmt::Assign { target, value, .. } => {
+                self.walk_grounded_pure_expr(agent, target);
+                self.walk_grounded_pure_expr(agent, value);
+            }
         }
     }
 

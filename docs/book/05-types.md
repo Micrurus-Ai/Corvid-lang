@@ -103,6 +103,21 @@ List literals, `Int` indexing, `+` concatenation of two lists, and
 `for … in` iteration are shipped. Out-of-range indexing traps at
 runtime with a typed error.
 
+Elements are assignable in place, including compound forms:
+
+```corvid
+agent bump() -> Int:
+    xs = [10, 20, 30]
+    xs[1] = 99
+    xs[2] += 1
+    return xs[1] + xs[2]
+```
+
+Lists are shared heap cells — assigning a list to another binding or
+storing it in a record field aliases the SAME list; mutation through
+any alias is visible through all of them (reference semantics, as in
+Python).
+
 > **Planned — list methods land in slices 45f (direct) and 45j
 > (lambda-taking):**
 
@@ -189,6 +204,28 @@ agent decide() -> Float:
     d = Decision(true, 50.0, "policy match")
     return d.amount
 ```
+
+Fields are assignable in place, including through nested paths and
+compound operators:
+
+```corvid
+type Wallet:
+    balance: Float
+
+type Account:
+    wallet: Wallet
+
+agent adjust() -> Float:
+    acct = Account(Wallet(100.0))
+    acct.wallet.balance = 250.0
+    acct.wallet.balance += 50.0
+    return acct.wallet.balance
+```
+
+Records are shared heap cells: `alias = acct` aliases the SAME
+account, and `alias.wallet.balance *= 2.0` is visible through
+`acct` too (reference semantics, as in Python). A compound
+assignment evaluates its target path exactly once.
 
 > **Planned — named-field literals and `..` update syntax land in
 > slice 45n:**

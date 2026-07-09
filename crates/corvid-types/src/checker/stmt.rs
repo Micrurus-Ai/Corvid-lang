@@ -193,6 +193,71 @@ impl<'a> Checker<'a> {
             Stmt::Expr { expr, .. } => {
                 let _ = self.check_expr(expr);
             }
+            // Place assignment (45b): `x.field = v`, `xs[i] = v`,
+            // compound `target op= value`. The parser guarantees the
+            // target is an Ident / FieldAccess / Index; the checker
+            // additionally requires the path's ROOT to be a local
+            // variable so IR lowering has a stable base slot.
+            Stmt::Assign {
+                target, op, value, ..
+            } => {
+                if let Some(reason) = self.assign_target_root_problem(target) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::InvalidAssignTarget { reason },
+                        target.span(),
+                    ));
+                }
+                let target_ty = self.check_expr(target);
+                let result_ty = match op {
+                    // Compound: the operator's normal type rule runs on
+                    // (target, value); `check_binop` re-checks both
+                    // operands, which can duplicate a diagnostic on an
+                    // already-invalid target — accepted trade-off to
+                    // keep ONE operator type table.
+                    Some(op) => self.check_binop(*op, target, value, s.span()),
+                    None => self.check_expr_as(value, Some(&target_ty)),
+                };
+                if !result_ty.is_assignable_to(&target_ty) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::TypeMismatch {
+                            expected: target_ty.display_name(),
+                            got: result_ty.display_name(),
+                            context: "assignment target".into(),
+                        },
+                        value.span(),
+                    ));
+                }
+                self.record_if_grounded_coercion(&result_ty, &target_ty, value.span());
+            }
+        }
+    }
+
+    /// Walk to the root of an assignment-target path and report why it
+    /// cannot be assigned through, if anything. Valid roots are local
+    /// variables (params, loop vars, and bindings).
+    fn assign_target_root_problem(&self, target: &Expr) -> Option<String> {
+        let mut root = target;
+        loop {
+            match root {
+                Expr::FieldAccess { target, .. } | Expr::Index { target, .. } => {
+                    root = target;
+                }
+                Expr::Ident { name, .. } => {
+                    return match self.bindings.get(&name.span) {
+                        Some(Binding::Local(_)) => None,
+                        _ => Some(format!(
+                            "the path's root `{}` must be a local variable                              (a binding, parameter, or loop variable)",
+                            name.name
+                        )),
+                    };
+                }
+                _other => {
+                    return Some(
+                        "the path's root must be a local variable, not a call                          or literal expression"
+                            .to_string(),
+                    );
+                }
+            }
         }
     }
 

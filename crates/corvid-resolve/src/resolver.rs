@@ -737,6 +737,13 @@ impl Resolver {
             }
             Stmt::Approve { action, .. } => self.resolve_approve_action(action),
             Stmt::Expr { expr, .. } => self.resolve_expr(expr),
+            // Place assignment (45b): both the target place and the
+            // value are reads of existing bindings — no new binding is
+            // introduced (unlike Stmt::Let).
+            Stmt::Assign { target, value, .. } => {
+                self.resolve_expr(target);
+                self.resolve_expr(value);
+            }
         }
     }
 

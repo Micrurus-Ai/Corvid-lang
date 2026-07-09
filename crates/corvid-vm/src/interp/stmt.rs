@@ -1,12 +1,13 @@
 use super::expr::require_bool;
 use super::{Flow, Interpreter};
 use crate::errors::{InterpError, InterpErrorKind};
+use super::expr::eval_binop;
 use crate::step::{StepAction, StepEvent, StmtKind};
 use crate::value::{StreamChunk, StreamValue, Value};
 use crate::value_to_json;
 use async_recursion::async_recursion;
 use corvid_ast::{BackpressurePolicy, Span};
-use corvid_ir::{IrAgent, IrBlock, IrExpr, IrExprKind, IrStmt};
+use corvid_ir::{IrAgent, IrBlock, IrExpr, IrExprKind, IrPathSeg, IrStmt};
 use corvid_types::Type;
 use std::sync::Arc;
 
@@ -397,10 +398,208 @@ impl<'ir> Interpreter<'ir> {
                 }
                 Ok(Flow::Normal)
             }
+            // Place assignment (45b): `x.field = v`, `xs[i] = v`,
+            // compound `op=`. Reference semantics: structs and lists
+            // are shared heap cells, so mutation through one binding
+            // is visible through every alias. Evaluation order: path
+            // index expressions left-to-right, then the value, then
+            // the store. The compound operator reads the current slot
+            // exactly once and reuses the checked `eval_binop`.
+            IrStmt::Assign {
+                local_id,
+                name,
+                path,
+                op,
+                value,
+                span,
+            } => {
+                let mut idx_values: Vec<Option<Value>> = Vec::with_capacity(path.len());
+                for seg in path {
+                    match seg {
+                        IrPathSeg::Index(idx_expr) => {
+                            let v = match self.eval_expr(idx_expr).await?.into_value() {
+                                Ok(v) => v,
+                                Err(v) => return Ok(Flow::Return(v)),
+                            };
+                            idx_values.push(Some(v));
+                        }
+                        IrPathSeg::Field(_) => idx_values.push(None),
+                    }
+                }
+                let rhs = match self.eval_expr(value).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(Flow::Return(v)),
+                };
+
+                let root = self.env.lookup(*local_id).ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: format!("a bound local `{name}`"),
+                            got: "an unbound local".into(),
+                        },
+                        *span,
+                    )
+                })?;
+
+                if path.is_empty() {
+                    // Plain `x = v` lowers to IrStmt::Let; reaching
+                    // here with an empty path is compound rebind
+                    // (`x += v`).
+                    let new_v = match op {
+                        Some(op) => eval_binop(*op, root, rhs, *span, false)?,
+                        None => rhs,
+                    };
+                    self.env.bind(*local_id, new_v);
+                    self.stream_locals.remove(local_id);
+                    return Ok(Flow::Normal);
+                }
+
+                // Walk to the container that owns the FINAL segment.
+                let mut cur = root;
+                for (seg, idx_v) in path[..path.len() - 1]
+                    .iter()
+                    .zip(idx_values[..path.len() - 1].iter())
+                {
+                    cur = assign_path_read(cur, seg, idx_v, *span)?;
+                }
+
+                let last_seg = path.last().expect("non-empty path");
+                let last_idx = idx_values.last().expect("non-empty path");
+                match (last_seg, cur) {
+                    (IrPathSeg::Field(field), Value::Struct(sv)) => {
+                        let new_v = match op {
+                            Some(op) => {
+                                let current = sv.get_field(field).ok_or_else(|| {
+                                    InterpError::new(
+                                        InterpErrorKind::UnknownField {
+                                            struct_name: sv.type_name().to_string(),
+                                            field: field.clone(),
+                                        },
+                                        *span,
+                                    )
+                                })?;
+                                eval_binop(*op, current, rhs, *span, false)?
+                            }
+                            None => rhs,
+                        };
+                        sv.set_field(field.clone(), new_v);
+                    }
+                    (IrPathSeg::Index(_), Value::List(lv)) => {
+                        let idx = match last_idx.as_ref().expect("index segment has a value") {
+                            Value::Int(i) => *i,
+                            other => {
+                                return Err(InterpError::new(
+                                    InterpErrorKind::TypeMismatch {
+                                        expected: "Int".into(),
+                                        got: other.type_name(),
+                                    },
+                                    *span,
+                                ))
+                            }
+                        };
+                        let len = lv.len();
+                        if idx < 0 || (idx as usize) >= len {
+                            return Err(InterpError::new(
+                                InterpErrorKind::IndexOutOfBounds { len, index: idx },
+                                *span,
+                            ));
+                        }
+                        let new_v = match op {
+                            Some(op) => {
+                                let current =
+                                    lv.get(idx as usize).expect("bounds checked above");
+                                eval_binop(*op, current, rhs, *span, false)?
+                            }
+                            None => rhs,
+                        };
+                        lv.set(idx as usize, new_v);
+                    }
+                    (IrPathSeg::Field(_), other) => {
+                        return Err(InterpError::new(
+                            InterpErrorKind::TypeMismatch {
+                                expected: "a struct value".into(),
+                                got: other.type_name(),
+                            },
+                            *span,
+                        ))
+                    }
+                    (IrPathSeg::Index(_), other) => {
+                        return Err(InterpError::new(
+                            InterpErrorKind::TypeMismatch {
+                                expected: "List".into(),
+                                got: other.type_name(),
+                            },
+                            *span,
+                        ))
+                    }
+                }
+                Ok(Flow::Normal)
+            }
             IrStmt::Break { .. } => Ok(Flow::Break),
             IrStmt::Continue { .. } => Ok(Flow::Continue),
             IrStmt::Pass { .. } => Ok(Flow::Normal),
             IrStmt::Dup { .. } | IrStmt::Drop { .. } => Ok(Flow::Normal),
         }
+    }
+}
+
+
+/// Read one step of a place-assignment path (slice 45b): `.field` on a
+/// struct or `[idx]` on a list. Mirrors the read-path errors of
+/// `FieldAccess` / `Index` expression evaluation.
+fn assign_path_read(
+    cur: Value,
+    seg: &IrPathSeg,
+    idx_v: &Option<Value>,
+    span: corvid_ast::Span,
+) -> Result<Value, InterpError> {
+    match (seg, cur) {
+        (IrPathSeg::Field(field), Value::Struct(sv)) => {
+            sv.get_field(field).ok_or_else(|| {
+                InterpError::new(
+                    InterpErrorKind::UnknownField {
+                        struct_name: sv.type_name().to_string(),
+                        field: field.clone(),
+                    },
+                    span,
+                )
+            })
+        }
+        (IrPathSeg::Index(_), Value::List(lv)) => {
+            let idx = match idx_v.as_ref().expect("index segment has a value") {
+                Value::Int(i) => *i,
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "Int".into(),
+                            got: other.type_name(),
+                        },
+                        span,
+                    ))
+                }
+            };
+            let len = lv.len();
+            if idx < 0 || (idx as usize) >= len {
+                return Err(InterpError::new(
+                    InterpErrorKind::IndexOutOfBounds { len, index: idx },
+                    span,
+                ));
+            }
+            Ok(lv.get(idx as usize).expect("bounds checked above"))
+        }
+        (IrPathSeg::Field(_), other) => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: "a struct value".into(),
+                got: other.type_name(),
+            },
+            span,
+        )),
+        (IrPathSeg::Index(_), other) => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: "List".into(),
+                got: other.type_name(),
+            },
+            span,
+        )),
     }
 }

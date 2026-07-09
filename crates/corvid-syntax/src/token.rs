@@ -159,6 +159,13 @@ pub enum TokKind {
     Slash,   // /
     Percent, // %
 
+    // --- compound assignment (slice 45b) ---
+    PlusEq,    // +=
+    MinusEq,   // -=
+    StarEq,    // *=
+    SlashEq,   // /=
+    PercentEq, // %=
+
     // --- literals ---
     Ident(String),
     Int(i64),

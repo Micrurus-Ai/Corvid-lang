@@ -281,8 +281,21 @@ pass_stmt         ::= 'pass' NEWLINE
 # use; the checker verifies initializer agreement). There is
 # deliberately NO `let` keyword: one binding form, coherent with the
 # Python-flavored surface (decision recorded at ROADMAP slice 45a).
+#
+# Place assignment (45b) writes through a path rooted at a local:
+# `w.balance = v`, `xs[i] = v`, nested `acct.wallet.scores[0] = v`,
+# and compound `+= -= *= /= %=`. Reference semantics: structs and
+# lists are shared heap cells, so mutation through one binding is
+# visible through every alias. The compound operator is NOT
+# desugared — the place (including index expressions) evaluates
+# exactly once.
 assign_stmt       ::= IDENT (':' type_ref)? '=' expr NEWLINE
-                      # field/index/compound assignment targets PLANNED(45b)
+                    | place assign_op expr NEWLINE
+
+place             ::= IDENT (('.' IDENT) | ('[' expr ']'))+
+                    | IDENT                                  # compound only
+
+assign_op         ::= '=' | '+=' | '-=' | '*=' | '/=' | '%='
 
 expr_stmt         ::= expr NEWLINE
 ```

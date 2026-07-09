@@ -416,6 +416,18 @@ mock summarize(text: String) -> String:
 
 tool refund(amount: Float) -> Nothing uses pay_eff
 
+type Wallet:
+    balance: Float
+
+agent mutate(w: Wallet, xs: List<Int>) -> Float:
+    w.balance = 250.0
+    w.balance += 50.0
+    xs[0] = 9
+    xs[1] *= 2
+    n = 5
+    n += 37
+    return w.balance
+
 agent flow(xs: List<Int>) -> Result<Int, String>:
     total: Int = 0
     for x in xs:
@@ -525,6 +537,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("continue_stmt", "statements"),
     ("pass_stmt", "statements"),
     ("assign_stmt", "statements"),
+    ("place", "statements"),
+    ("assign_op", "statements"),
     ("expr_stmt", "statements"),
     ("expr", "expressions"),
     ("or_expr", "expressions"),

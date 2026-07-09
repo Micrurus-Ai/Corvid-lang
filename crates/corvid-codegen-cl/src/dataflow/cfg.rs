@@ -194,6 +194,20 @@ impl CfgBuilder {
             let mut my_path = parent_path.clone();
             my_path.push(IrNavStep::Stmt(ir_idx));
             match stmt {
+                // Place assignment (45b) — interpreter-only; codegen-cl
+                // rejects it at lowering. For dataflow purposes it reads
+                // the path's index expressions and the value (all
+                // non-consuming: the root local stays live).
+                IrStmt::Assign { path, value, .. } => {
+                    let mut reads = Vec::new();
+                    for seg in path {
+                        if let corvid_ir::IrPathSeg::Index(idx) = seg {
+                            reads.extend(collect_reads(idx, false));
+                        }
+                    }
+                    reads.extend(collect_reads(value, false));
+                    self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                }
                 IrStmt::Let {
                     local_id,
                     value,

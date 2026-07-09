@@ -301,6 +301,14 @@ fn visit_block_types(
                 visit_expr_types(value, seen, order, visit);
             }
             IrStmt::Expr { expr, .. } => visit_expr_types(expr, seen, order, visit),
+            IrStmt::Assign { path, value, .. } => {
+                for seg in path {
+                    if let corvid_ir::IrPathSeg::Index(idx) = seg {
+                        visit_expr_types(idx, seen, order, visit);
+                    }
+                }
+                visit_expr_types(value, seen, order, visit);
+            }
             IrStmt::Yield { value, .. } => visit_expr_types(value, seen, order, visit),
             IrStmt::Return { value: Some(e), .. } => visit_expr_types(e, seen, order, visit),
             IrStmt::Return { value: None, .. } => {}

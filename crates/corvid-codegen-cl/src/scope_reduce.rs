@@ -172,6 +172,19 @@ fn find_def_in_same_block(stmts: &[IrStmt], drop_idx: usize, local_id: LocalId) 
 fn stmt_mentions_local(stmt: &IrStmt, local_id: LocalId) -> bool {
     match stmt {
         IrStmt::Let { value, .. } => expr_mentions_local(value, local_id),
+        IrStmt::Assign {
+            local_id: root,
+            path,
+            value,
+            ..
+        } => {
+            *root == local_id
+                || path.iter().any(|seg| match seg {
+                    corvid_ir::IrPathSeg::Index(idx) => expr_mentions_local(idx, local_id),
+                    corvid_ir::IrPathSeg::Field(_) => false,
+                })
+                || expr_mentions_local(value, local_id)
+        }
         IrStmt::Return { value, .. } => value
             .as_ref()
             .map(|value| expr_mentions_local(value, local_id))
@@ -250,6 +263,8 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
 fn stmt_is_effect_barrier(stmt: &IrStmt) -> bool {
     match stmt {
         IrStmt::Let { value, .. } => !expr_is_effect_free(value),
+        // Place assignment mutates shared state — always a barrier.
+        IrStmt::Assign { .. } => true,
         IrStmt::Expr { expr, .. } => !expr_is_effect_free(expr),
         IrStmt::Yield { value, .. } => !expr_is_effect_free(value),
         IrStmt::Return { .. }

@@ -29,6 +29,13 @@ use super::*;
             IrStmt::Let { value, .. }
             | IrStmt::Expr { expr: value, .. }
             | IrStmt::Yield { value, .. } => find_replay_in_expr(value),
+            IrStmt::Assign { path, value, .. } => path
+                .iter()
+                .find_map(|seg| match seg {
+                    crate::IrPathSeg::Index(idx) => find_replay_in_expr(idx),
+                    crate::IrPathSeg::Field(_) => None,
+                })
+                .or_else(|| find_replay_in_expr(value)),
             IrStmt::Approve { args, .. } => args.iter().find_map(find_replay_in_expr),
             IrStmt::Return {
                 value: Some(value), ..

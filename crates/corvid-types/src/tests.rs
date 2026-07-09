@@ -3809,6 +3809,76 @@ agent main() -> Float:
     );
 }
 
+/// Slice 45b — place assignment typechecks: field/index targets take
+/// values assignable to the slot's type; compound ops run the normal
+/// operator rules and the result must fit back into the slot.
+#[test]
+fn place_assignment_with_agreeing_types_typechecks() {
+    let src = "\
+type Wallet:
+    balance: Float
+
+agent main() -> Float:
+    w = Wallet(10.0)
+    w.balance = 250.0
+    w.balance += 50.0
+    xs = [1, 2, 3]
+    xs[0] = 9
+    xs[1] += 1
+    n = 5
+    n += 37
+    return w.balance
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "place assignment with agreeing types should typecheck, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45b — a value that doesn't fit the slot is rejected.
+#[test]
+fn place_assignment_type_mismatch_is_rejected() {
+    let src = "\
+type Wallet:
+    balance: Float
+
+agent main() -> Float:
+    w = Wallet(10.0)
+    w.balance = \"not a float\"
+    return w.balance
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45b — a compound op whose result widens beyond the slot is
+/// rejected: `n += 1.5` on an Int local would produce a Float.
+#[test]
+fn compound_assignment_result_must_fit_the_slot() {
+    let src = "\
+agent main() -> Int:
+    n = 5
+    n += 1.5
+    return n
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for Int += Float, got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 33R5b-c — same rejection fires for the builder side
 /// (uses `json_egress_build`). Mirrors the 33S1b / 33S2c / 33S3d
 /// pinning tests across reversible AND non-reversible effects on

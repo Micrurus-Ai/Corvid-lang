@@ -793,6 +793,52 @@ impl<'a> Lowerer<'a> {
                     span: *span,
                 }
             }
+            // Place assignment (45b): decompose the target into a root
+            // local + a Field/Index path. The checker guarantees the
+            // root is a local binding.
+            Stmt::Assign {
+                target,
+                op,
+                value,
+                span,
+            } => {
+                let mut path_rev: Vec<IrPathSeg> = Vec::new();
+                let mut root = target;
+                loop {
+                    match root {
+                        Expr::FieldAccess { target, field, .. } => {
+                            path_rev.push(IrPathSeg::Field(field.name.clone()));
+                            root = target;
+                        }
+                        Expr::Index { target, index, .. } => {
+                            path_rev.push(IrPathSeg::Index(self.lower_expr(index)));
+                            root = target;
+                        }
+                        _ => break,
+                    }
+                }
+                let (local_id, name) = match root {
+                    Expr::Ident { name, .. } => (
+                        match self.bindings.get(&name.span) {
+                            Some(Binding::Local(id)) => *id,
+                            _ => LocalId(u32::MAX),
+                        },
+                        name.name.clone(),
+                    ),
+                    // The checker rejected non-local roots; emit a
+                    // sentinel so downstream stays total.
+                    _ => (LocalId(u32::MAX), "<invalid>".to_string()),
+                };
+                path_rev.reverse();
+                IrStmt::Assign {
+                    local_id,
+                    name,
+                    path: path_rev,
+                    op: *op,
+                    value: self.lower_expr(value),
+                    span: *span,
+                }
+            }
             Stmt::Approve { action, span } => {
                 let (label, args) = self.extract_approve_action(action);
                 IrStmt::Approve {

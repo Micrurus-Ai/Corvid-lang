@@ -179,6 +179,10 @@ impl<'a> ReachabilityPass<'a> {
             | Stmt::Expr { expr: value, .. } => {
                 self.check_expr(entrypoint, value, approvals, visiting);
             }
+            Stmt::Assign { target, value, .. } => {
+                self.check_expr(entrypoint, target, approvals, visiting);
+                self.check_expr(entrypoint, value, approvals, visiting);
+            }
             Stmt::Return { value, .. } => {
                 if let Some(value) = value {
                     self.check_expr(entrypoint, value, approvals, visiting);

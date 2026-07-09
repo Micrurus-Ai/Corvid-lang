@@ -113,6 +113,14 @@ fn collect_prompt_pins_in_stmt(
 ) {
     match stmt {
         IrStmt::Let { value, .. } => collect_prompt_pins_in_expr(value, borrowed_reads, out),
+        IrStmt::Assign { path, value, .. } => {
+            for seg in path {
+                if let corvid_ir::IrPathSeg::Index(idx) = seg {
+                    collect_prompt_pins_in_expr(idx, borrowed_reads, out);
+                }
+            }
+            collect_prompt_pins_in_expr(value, borrowed_reads, out);
+        }
         IrStmt::Return { value, .. } => {
             if let Some(value) = value {
                 collect_prompt_pins_in_expr(value, borrowed_reads, out);

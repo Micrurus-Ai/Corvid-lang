@@ -60,6 +60,26 @@ pub enum Stmt {
 
     /// An expression evaluated for its side effects: `issue_refund(...)`.
     Expr { expr: Expr, span: Span },
+
+    /// Assignment through a place: `x.field = v`, `xs[i] = v`, and
+    /// compound forms `x += v` / `x.field -= v` (slice 45b).
+    ///
+    /// `target` is restricted by the parser to an assignable place —
+    /// an identifier, a field access, or an index expression. `op` is
+    /// `Some` for compound assignment; the operator lives in the AST
+    /// rather than being desugared into `target = target op value`,
+    /// so an index expression with side effects never evaluates
+    /// twice.
+    ///
+    /// Semantics are reference semantics: structs and lists are
+    /// shared heap cells, so mutation through one binding is visible
+    /// through every alias (matching the Phase 17 memory model).
+    Assign {
+        target: Expr,
+        op: Option<crate::expr::BinaryOp>,
+        value: Expr,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -71,7 +91,8 @@ impl Stmt {
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
             | Stmt::Approve { span, .. }
-            | Stmt::Expr { span, .. } => *span,
+            | Stmt::Expr { span, .. }
+            | Stmt::Assign { span, .. } => *span,
         }
     }
 }

@@ -464,6 +464,65 @@ use corvid_ast::{Backoff, BackpressurePolicy, BinaryOp, Expr, Literal, ToolDecl,
     }
 
     #[test]
+    fn parses_field_assignment() {
+        // Slice 45b — place assignment through a field.
+        let b = parse_blk("\n    w.balance = 250.0\n");
+        match &b.stmts[0] {
+            Stmt::Assign { target, op, .. } => {
+                assert!(matches!(target, Expr::FieldAccess { .. }));
+                assert!(op.is_none());
+            }
+            other => panic!("expected Assign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_index_assignment() {
+        let b = parse_blk("\n    xs[1] = 99\n");
+        match &b.stmts[0] {
+            Stmt::Assign { target, op, .. } => {
+                assert!(matches!(target, Expr::Index { .. }));
+                assert!(op.is_none());
+            }
+            other => panic!("expected Assign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_compound_assignments() {
+        // `x += 1` on a bare local and `w.balance -= 5.0` on a field.
+        let b = parse_blk("\n    x += 1\n    w.balance -= 5.0\n    xs[0] *= 2\n");
+        match &b.stmts[0] {
+            Stmt::Assign { op, .. } => assert!(matches!(op, Some(BinaryOp::Add))),
+            other => panic!("expected Assign, got {other:?}"),
+        }
+        match &b.stmts[1] {
+            Stmt::Assign { op, .. } => assert!(matches!(op, Some(BinaryOp::Sub))),
+            other => panic!("expected Assign, got {other:?}"),
+        }
+        match &b.stmts[2] {
+            Stmt::Assign { op, .. } => assert!(matches!(op, Some(BinaryOp::Mul))),
+            other => panic!("expected Assign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nested_path_assignment() {
+        let b = parse_blk("\n    acct.wallet.scores[0] = 7\n");
+        assert!(matches!(&b.stmts[0], Stmt::Assign { .. }));
+    }
+
+    #[test]
+    fn assignment_to_non_place_is_an_error() {
+        // A call result is not an assignable place.
+        let (_b, errors) = parse_blk_errs("\n    get_wallet() = 5\n");
+        assert!(
+            !errors.is_empty(),
+            "expected a parse error for assignment to a call result"
+        );
+    }
+
+    #[test]
     fn annotated_assignment_without_value_is_an_error() {
         // A bare declaration `n: Int` (no initializer) is not a
         // statement form — the annotation exists only on assignment.

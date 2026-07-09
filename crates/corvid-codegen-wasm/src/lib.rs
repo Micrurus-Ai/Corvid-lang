@@ -9,7 +9,8 @@
 use crate::string_pool::StringPool;
 use corvid_ast::{BinaryOp, UnaryOp};
 use corvid_ir::{
-    IrAgent, IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrLiteral, IrPrompt, IrStmt, IrTool,
+    IrAgent, IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrLiteral, IrPathSeg, IrPrompt,
+    IrStmt, IrTool,
 };
 use corvid_resolve::{DefId, LocalId};
 use corvid_types::Type;
@@ -276,6 +277,14 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
             IrStmt::Let { value, .. } | IrStmt::Expr { expr: value, .. } => {
                 intern_expr_literals(value, pool);
             }
+            IrStmt::Assign { path, value, .. } => {
+                for seg in path {
+                    if let IrPathSeg::Index(idx) = seg {
+                        intern_expr_literals(idx, pool);
+                    }
+                }
+                intern_expr_literals(value, pool);
+            }
             IrStmt::Return { value, .. } => {
                 if let Some(value) = value {
                     intern_expr_literals(value, pool);
@@ -353,6 +362,14 @@ fn collect_block_imports(
     for stmt in &block.stmts {
         match stmt {
             IrStmt::Let { value, .. } | IrStmt::Expr { expr: value, .. } => {
+                collect_expr_imports(value, tools, prompts, plan, agent_name)?;
+            }
+            IrStmt::Assign { path, value, .. } => {
+                for seg in path {
+                    if let IrPathSeg::Index(idx) = seg {
+                        collect_expr_imports(idx, tools, prompts, plan, agent_name)?;
+                    }
+                }
                 collect_expr_imports(value, tools, prompts, plan, agent_name)?;
             }
             IrStmt::Return { value, .. } => {
@@ -787,6 +804,11 @@ fn emit_block(
                         function.instruction(&Instruction::LocalSet(slot.start + offset));
                     }
                 }
+            }
+            IrStmt::Assign { span, .. } => {
+                return Err(WasmCodegenError::unsupported(format!(
+                    "place assignment (x.field = v / xs[i] = v / compound ops) is                      interpreter-only in 45b (at {span:?})"
+                )));
             }
             IrStmt::Return { value, .. } => {
                 if let Some(value) = value {

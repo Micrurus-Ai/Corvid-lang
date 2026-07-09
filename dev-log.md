@@ -515,6 +515,91 @@ Next per track order: 45b-assignment-targets (`x.field = v`,
 
 ---
 
+## 2026-07-09 - 45b closed: place assignment (`x.field = v`, `xs[i] = v`, compound ops)
+
+The first full-pipeline implementation slice of Phase 45 — parser
+through interpreter, with honest degradation on the compiled tiers.
+
+### The semantics decision (judged under the principle)
+
+The natural first plan was copy-on-write value semantics ("mutation
+never spooks an alias"). The runtime survey killed it: structs and
+lists are `Arc<Mutex<…>>` shared heap cells, and the Phase 17 cycle
+collector exists PRECISELY because values are shared mutable
+references. COW would have fought the entire memory model. Re-judged:
+**Python-style reference semantics** — mutation through one binding
+is visible through every alias — is coherent with both the runtime
+and the Python-flavored surface (easy), and one memory model beats
+two (strong). The e2e test pins it in both directions: an aliased
+struct sees `alias.balance *= 2.0`, and a list stored into a struct
+field remains THE SAME list.
+
+Second design call: the compound operator lives in the AST and IR —
+`xs[f()] += 1` is NOT desugared into `xs[f()] = xs[f()] + 1`, so an
+index expression with side effects evaluates exactly once.
+
+### What shipped, layer by layer
+
+- **Lexer**: `+= -= *= /= %=` tokens (with the `-=`-vs-`->` order
+  handled).
+- **AST**: `Stmt::Assign { target, op: Option<BinaryOp>, value }`
+  with parser-enforced place validation (Ident / FieldAccess /
+  Index; anything else gets "expected an assignable place" naming
+  the three forms).
+- **Checker**: target-type agreement (E0208-class TypeMismatch on
+  `w.balance = "str"`), compound ops through the ONE existing
+  operator table (so `n += 1.5` on an Int is rejected — the result
+  must fit back into the slot), new `InvalidAssignTarget` error when
+  the path root isn't a local, and — easy to miss — the cost
+  analysis covers BOTH sides so an LLM call hiding in an index
+  expression still counts against `@budget`.
+- **IR**: `IrStmt::Assign` + `IrPathSeg::{Field, Index}`; lowering
+  decomposes the target chain to a root local + path.
+- **Interpreter**: evaluation order = index exprs left-to-right,
+  then value, then store; descends the shared cells and mutates via
+  `StructValue::set_field` / new `ListValue::set`; compound reads
+  the slot once and reuses the checked `eval_binop` (overflow still
+  traps); bounds/type errors mirror the read paths exactly.
+- **Tiers**: new `PlaceAssignmentNotNative` reason — `corvid run`
+  prints the fallback line and runs the interpreter; codegen-cl
+  rejects with `not_supported`, codegen-py emits a loud
+  `raise NotImplementedError` (per the 47c no-object-degradation
+  direction), wasm errors. The cl ownership/dataflow passes treat
+  Assign conservatively (a mutation is an effect barrier).
+
+### Live verification
+
+One probe program exercised everything at once — field writes,
+nested `acct.wallet.balance -= 100.0`, list stores, compound ops on
+locals/fields/elements, and BOTH aliasing directions — and returned
+"all checks passed" on the first run, with the tier-picker correctly
+reporting interpreter fallback. Error probes: out-of-bounds store
+traps at runtime; type mismatch is E0208 at compile time; `5 = 6`
+is a parse error naming the valid places.
+
+### Tests + docs
+
+- 6 parser tests (field/index/compound×3/nested/non-place error) +
+  3 checker tests + 2 driver e2e pins
+  (`place_assignment_e2e.rs`: reference semantics + oob trap).
+- grammar.md: `assign_stmt` gains the `place assign_op expr` form
+  with new `place`/`assign_op` productions, PLANNED(45b) marker off,
+  parse-evidence snippet exercises every form.
+- Book ch 05: records + lists sections gain compiling mutation
+  examples with the reference-semantics callout.
+
+### Validation
+
+216 syntax + 260 types + 109 vm + 38 ir + 28+18 codegen-cl + 5
+differential-verify + 41 resolve + 3 book-guard (26 files) + 2 e2e
+pins; corpus verify exits 1 only on the two deliberate fixtures.
+
+Next per track order: 45c-builtin-method-dispatch-machinery (the
+enabling slice for the whole method surface: string/list methods,
+conversions, Grounded unwraps).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

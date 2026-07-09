@@ -493,6 +493,21 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// Place assignment (slice 45b): `x.field = v`, `xs[i] = v`, and
+    /// compound `target op= value`. `local_id` is the ROOT local the
+    /// path starts from; an empty `path` means the statement rebinds
+    /// or compound-updates the local itself (`x += 1`). The compound
+    /// operator lives here (not desugared) so index expressions in
+    /// the path evaluate exactly once.
+    Assign {
+        local_id: LocalId,
+        name: String,
+        path: Vec<IrPathSeg>,
+        op: Option<BinaryOp>,
+        value: IrExpr,
+        span: Span,
+    },
+
     /// `break`, `continue`, `pass` — dedicated IR variants.
     Break {
         span: Span,
@@ -525,6 +540,15 @@ pub enum IrStmt {
         local_id: LocalId,
         span: Span,
     },
+}
+
+/// One segment of a place-assignment path (slice 45b).
+#[derive(Debug, Clone)]
+pub enum IrPathSeg {
+    /// `.field` on a struct value.
+    Field(String),
+    /// `[index]` on a list value; the index expression is lowered IR.
+    Index(IrExpr),
 }
 
 #[derive(Debug, Clone)]

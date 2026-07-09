@@ -463,16 +463,42 @@ impl<'a> Lexer<'a> {
             b',' => (TokKind::Comma, 1),
             b'.' => (TokKind::Dot, 1),
             b'?' => (TokKind::Question, 1),
-            b'+' => (TokKind::Plus, 1),
-            b'*' => (TokKind::Star, 1),
-            b'/' => (TokKind::Slash, 1),
-            b'%' => (TokKind::Percent, 1),
+            b'+' => {
+                if self.peek(1) == Some(b'=') {
+                    (TokKind::PlusEq, 2)
+                } else {
+                    (TokKind::Plus, 1)
+                }
+            }
+            b'*' => {
+                if self.peek(1) == Some(b'=') {
+                    (TokKind::StarEq, 2)
+                } else {
+                    (TokKind::Star, 1)
+                }
+            }
+            b'/' => {
+                if self.peek(1) == Some(b'=') {
+                    (TokKind::SlashEq, 2)
+                } else {
+                    (TokKind::Slash, 1)
+                }
+            }
+            b'%' => {
+                if self.peek(1) == Some(b'=') {
+                    (TokKind::PercentEq, 2)
+                } else {
+                    (TokKind::Percent, 1)
+                }
+            }
             b'@' => (TokKind::At, 1),
             b'\'' => (TokKind::Apostrophe, 1),
             b'$' => (TokKind::Dollar, 1),
             b'-' => {
                 if self.peek(1) == Some(b'>') {
                     (TokKind::Arrow, 2)
+                } else if self.peek(1) == Some(b'=') {
+                    (TokKind::MinusEq, 2)
                 } else {
                     (TokKind::Minus, 1)
                 }

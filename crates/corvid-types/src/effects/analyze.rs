@@ -254,6 +254,10 @@ fn collect_stmt_effects(
         corvid_ast::Stmt::Expr { expr, .. } => {
             collect_expr_effects(expr, file, resolved, registry, effects);
         }
+        corvid_ast::Stmt::Assign { target, value, .. } => {
+            collect_expr_effects(target, file, resolved, registry, effects);
+            collect_expr_effects(value, file, resolved, registry, effects);
+        }
     }
 }
 

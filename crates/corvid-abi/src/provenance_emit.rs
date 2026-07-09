@@ -31,6 +31,10 @@ fn collect_block_dependencies(block: &Block, out: &mut Vec<String>) {
             | Stmt::Return {
                 value: Some(value), ..
             } => collect_expr_dependencies(value, out),
+            Stmt::Assign { target, value, .. } => {
+                collect_expr_dependencies(target, out);
+                collect_expr_dependencies(value, out);
+            }
             Stmt::If {
                 cond,
                 then_block,

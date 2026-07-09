@@ -311,6 +311,22 @@ fn scan_block(block: &IrBlock, max_id: &mut u32) {
 
 fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
     match stmt {
+        IrStmt::Assign {
+            local_id,
+            path,
+            value,
+            ..
+        } => {
+            if local_id.0 != u32::MAX && local_id.0 > *max_id {
+                *max_id = local_id.0;
+            }
+            for seg in path {
+                if let corvid_ir::IrPathSeg::Index(idx) = seg {
+                    scan_expr(idx, max_id);
+                }
+            }
+            scan_expr(value, max_id);
+        }
         IrStmt::Let {
             local_id, value, ..
         } => {

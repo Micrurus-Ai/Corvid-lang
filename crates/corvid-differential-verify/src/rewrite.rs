@@ -283,6 +283,14 @@ fn rename_local_in_block(block: &mut Block, resolved: &Resolved, target: LocalId
                 rename_ident_if_matches(name, resolved, target, fresh);
                 rename_local_in_expr(value, resolved, target, fresh);
             }
+            Stmt::Assign {
+                target: place,
+                value,
+                ..
+            } => {
+                rename_local_in_expr(place, resolved, target, fresh);
+                rename_local_in_expr(value, resolved, target, fresh);
+            }
             Stmt::Return { value, .. } => {
                 if let Some(expr) = value {
                     rename_local_in_expr(expr, resolved, target, fresh);
@@ -413,6 +421,7 @@ fn extract_from_stmt(
 ) -> Option<Stmt> {
     match stmt {
         Stmt::Let { value, .. } => extract_expr_to_let(value, allocator, reserved),
+        Stmt::Assign { value, .. } => extract_expr_to_let(value, allocator, reserved),
         Stmt::Return { value, .. } => value
             .as_mut()
             .and_then(|expr| extract_expr_to_let(expr, allocator, reserved)),
@@ -542,6 +551,10 @@ fn inline_candidate(
 fn direct_local_use(stmt: &Stmt, resolved: &Resolved, local: LocalId) -> bool {
     match stmt {
         Stmt::Let { value, .. } => is_direct_local_expr(value, resolved, local),
+        Stmt::Assign { target, value, .. } => {
+            is_direct_local_expr(target, resolved, local)
+                || is_direct_local_expr(value, resolved, local)
+        }
         Stmt::Return { value, .. } => value
             .as_ref()
             .is_some_and(|expr| is_direct_local_expr(expr, resolved, local)),
@@ -565,7 +578,10 @@ fn is_direct_local_expr(expr: &Expr, resolved: &Resolved, local: LocalId) -> boo
 
 fn apply_inline_to_stmt(stmt: &mut Stmt, resolved: &Resolved, replacement: Expr) {
     match stmt {
-        Stmt::Let { value, .. } | Stmt::Yield { value, .. } | Stmt::Expr { expr: value, .. } => {
+        Stmt::Let { value, .. }
+        | Stmt::Yield { value, .. }
+        | Stmt::Expr { expr: value, .. }
+        | Stmt::Assign { value, .. } => {
             if matches!(value, Expr::Ident { .. }) {
                 *value = replacement;
             }
@@ -874,6 +890,7 @@ fn fold_constants_in_stmt(stmt: &mut Stmt) -> bool {
         Stmt::Let { value, .. }
         | Stmt::Yield { value, .. }
         | Stmt::Expr { expr: value, .. }
+        | Stmt::Assign { value, .. }
         | Stmt::Approve { action: value, .. } => fold_constants_in_expr(value),
         Stmt::Return { value, .. } => value.as_mut().is_some_and(fold_constants_in_expr),
         Stmt::If { cond, .. } => fold_constants_in_expr(cond),

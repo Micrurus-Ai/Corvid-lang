@@ -201,6 +201,11 @@ impl Codegen {
 
     fn emit_stmt(&mut self, s: &IrStmt) {
         match s {
+            IrStmt::Assign { .. } => {
+                self.out.writeln(
+                    "raise NotImplementedError(\"place assignment (x.field = v / xs[i] = v / +=) is interpreter-only in 45b\")",
+                );
+            }
             IrStmt::Let { name, value, .. } => {
                 self.out.write(&format!("{} = ", name));
                 self.emit_expr(value);

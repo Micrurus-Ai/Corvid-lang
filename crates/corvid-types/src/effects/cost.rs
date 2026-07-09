@@ -114,6 +114,31 @@ impl<'a> CostAnalyzer<'a> {
 
     fn analyze_stmt(&mut self, stmt: &corvid_ast::Stmt, agent_name: &str) -> CostEstimate {
         match stmt {
+            // Place assignment (45b): the target's index expressions can
+            // themselves contain calls, so BOTH sides feed the cost
+            // estimate — under-counting the target would let an
+            // over-budget call hide inside `xs[classify(t)] = v`.
+            corvid_ast::Stmt::Assign {
+                target, value, span, ..
+            } => {
+                let target_est = self.analyze_expr(target, agent_name);
+                let value_est = self.analyze_expr(value, agent_name);
+                let sequence = sequence_tree(
+                    "assign",
+                    CostNodeKind::Sequence,
+                    vec![
+                        wrap_if_needed("target", target_est.tree, target.span()),
+                        wrap_if_needed("value", value_est.tree, value.span()),
+                    ],
+                    *span,
+                );
+                CostEstimate {
+                    dimensions: sequence.costs.clone(),
+                    tree: sequence,
+                    warnings: collect_warnings(&[target_est.warnings, value_est.warnings]),
+                    bounded: target_est.bounded && value_est.bounded,
+                }
+            }
             corvid_ast::Stmt::Let { value, span, .. }
             | corvid_ast::Stmt::Yield { value, span }
             | corvid_ast::Stmt::Expr { expr: value, span }
