@@ -289,17 +289,35 @@ an explicit "planned" section. Leaving chapter 13 as-is fails both.
 
 ## ROADMAP coverage check
 
-Covered by existing open slices: strings (33R5c), collections (33R5d),
-datetime (33R5e), math (33R5f), error-code drift (33R12), registry
-(33R4), fmt (33R11), did-you-mean (33R9).
+**RESOLVED 2026-07-09 (same day, commits `4dcbc181` +
+follow-up):** every finding in this audit now has a ROADMAP slice
+in the Language completeness track (Phases 44–47). Traceability:
 
-**Not covered anywhere in the ROADMAP as slices:** match / pattern
-matching, user sum types, Map type, lambdas, generics, `let` +
-annotated locals, field/index/compound assignment, conversation +
-system prompts, parallel fan-out, MCP client, real provider streaming,
-sampling parameters, RAG stdlib dispatch, effect export via `use`,
-doc-honesty pass over book 04/05/11/13 + grammar.md, drift-gate
-strengthening.
+- Blockers B1–B6 → 45i (match), 45h (sum types), 45g (Map),
+  45e (conversions), 45d/45f (string/list methods), 45i+45l
+  (Option/Result inspection).
+- Blockers B7–B9 → 46b/46c (conversation + system prompts),
+  46e (parallel), 46f (MCP).
+- Majors M1–M16 → 45p (generics decision), 45j (lambdas),
+  45k (while), 45a (let), 45b (assignment targets), 44e+46d
+  (streaming), 46a (sampling), 46g (RAG), 45o (effect exports),
+  47c (backend parity), 47a (scaffold), 47b (vendoring),
+  45m (datetime/math), 44a+44d (tool-body doc drift),
+  44c (drift gate), 47d (schedule).
+- Minors → 45n (aliases + named literals), 44a (Unit naming,
+  doc comments claim, overflow docs), 45q (elif, unary `+`,
+  doc-comment token decision, checker leniency), 47e (recursive
+  types, overflow pinning), 44d (error codes), 45k
+  (break/continue AST encoding), 46h (structured-output repair,
+  judge assertions), 47f (contract-only std module disposition).
+- Consciously not slated: `CORVID_HOME` deploy-container
+  ergonomics (minor, already tested — `deploy_cmd.rs:593-595`);
+  WASM-tier gaps (already tracked by the Phase 23 reopen in the
+  post-v1.0 section).
+
+Previously-covered-elsewhere slices now cross-marked as subsumed:
+33R5c→45d, 33R5d→45f/45g/45j, 33R5e/f→45m, 33R12→44d;
+33R5g closed retroactively (the 33S umbrella over-delivered it).
 
 ---
 
