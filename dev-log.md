@@ -4,6 +4,88 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-07-09 - 44a closed: book syntax/types chapters realigned to the shipped language + compile guard
+
+First slice of the Language completeness track (Phases 44-47, filed
+same day from the language gap audit —
+`docs/meta/language-gap-audit-2026-07-09.md`). Chapters 04 + 05 now
+describe the language that exists; every unshipped feature sits under
+an explicit **Planned** marker naming the slice that implements it.
+
+### The fence-tag convention (new, enforced by CI)
+
+- ```` ```corvid ```` — the block MUST compile through
+  `corvid_driver::compile`.
+- ```` ```corvid-planned ```` — designed-but-unimplemented syntax;
+  MUST sit within 12 lines of a "Planned" marker.
+- ```` ```corvid-fragment ```` — illustrative fragment; skipped.
+
+New guard `crates/corvid-driver/tests/book_snippets_compile.rs`
+(3 tests): extracts fenced blocks from guarded chapters, compiles
+`corvid` blocks, enforces the Planned-marker rule, and rejects bare
+untagged fences. Verified the guard actually catches breakage by
+injecting a bogus type into a block (failed) and reverting (passed).
+When a Phase 45/46 slice ships its feature, the chapter's
+`corvid-planned` block flips to `corvid` and starts compiling with
+zero extra test wiring — the doc and language re-converge
+mechanically.
+
+### What changed in ch 04 (syntax)
+
+- Tool section rewritten to the shipped signature-only +
+  registered-host-tool model (executing stdlib / Rust FFI cdylib /
+  tools.py) — the `@host.x.y` inline-body form is gone per the
+  locked design decision.
+- Prompt examples fixed to the real single-template-string body form
+  (`"Summarize: {text}"`); the old `"Summarize: " + text` expression
+  form does NOT parse (`parser/prompt.rs` expects one StringLit) —
+  a NEW drift finding beyond the audit's list.
+- `struct` → `type` in the decl inventory; `Unit` → `Nothing`;
+  `Map` moved to a Planned callout; `fn` moved to a Planned callout
+  (45r); `#:` doc comments marked Planned (45q).
+- Control-flow section split: shipped (`if`/`else`, `for`-in with
+  `break`/`continue`) compiles as a real agent; `while`/`match`/
+  `elif` sit under Planned markers (45k/45i/45q).
+- "Method-call syntax works on any type" corrected to
+  extend-blocks-on-user-types today, builtin methods Planned
+  (45c/45d/45f).
+- All compiling examples verified: `@budget($0.50)` agent
+  annotation, effect declarations with dimension fields, two-effect
+  rows, `?` propagation.
+
+### What changed in ch 05 (types)
+
+- Primitives table: `Unit` → `Nothing`; dropped the false `0x2A`
+  hex-literal claim (the lexer's hex path is a hash-digest special
+  case, not a general Int literal).
+- Every section restructured as shipped-example (compiling `corvid`
+  block) + Planned block: strings (methods → 45d), numbers
+  (conversions → 45e), lists (methods → 45f/45j), maps (entire
+  type → 45g), Option (`match`/`unwrap_or` → 45i/45l), records
+  (named literals + `..` → 45n), sum types (45h/45i), generics
+  (post-v1.0 per 45p), type aliases (45n), inference (`let` → 45a).
+- Overflow paragraph rewritten to the decided semantics: checked in
+  EVERY build mode, traps with a typed error, deliberately no
+  saturating/wrapping mode (replay determinism + LLM-facing data
+  integrity rationale stated inline).
+- All shipped examples use the bare-assignment form that parses
+  today; a Planned note explains `let` lands in 45a.
+- Working `Option`/`Result` examples now demonstrate the REAL
+  consumption story (`?` propagation) instead of the unimplemented
+  `match` form.
+
+### Validation
+
+- 3/3 book-snippet guard tests pass (with a verified
+  deliberate-breakage check).
+- Workspace check + 36 tour topics + corpus verify (exit 1 only on
+  the two deliberate fixtures) all clean.
+
+Next per track order: 44b (ch 13 pattern-matching + ch 11 prompts
+realignment).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

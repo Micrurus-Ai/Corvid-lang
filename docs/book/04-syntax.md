@@ -1,81 +1,113 @@
 # Syntax basics
 
+Every fenced code block in this chapter marked `corvid` compiles
+through the real driver in CI
+(`crates/corvid-driver/tests/book_snippets_compile.rs`). Blocks
+marked as **Planned** show syntax that is designed but not yet
+implemented — each names the roadmap slice that ships it.
+
 ## File structure
 
 A Corvid file is a sequence of declarations. There is no `main()`
 function — the entry point is whichever `agent` you run.
 
-```corvid
+```corvid-fragment
 effect ...        # named effect with dimensions
-tool ...          # side-effecting function
+tool ...          # side-effecting function (signature-only; see below)
 prompt ...        # LLM-backed function
 agent ...         # composable program entry
-fn ...            # pure function
-struct ...        # record type
+type ...          # record type
 import ...        # bring in another module
 ```
 
+> **Planned — `fn` pure-function declarations land in slice 45r.**
+> Until then, an effect-free `agent` is the pure-function shape.
+
 ## Comments
 
-```corvid
+```corvid-fragment
 # single-line comment
-
-#: doc comment for the next declaration; renders in --help and LSP hover
 ```
+
+> **Planned — `#:` doc comments (rendered in `--help` and LSP hover)
+> land with slice 45q.** Today `#:` lexes as an ordinary comment.
 
 ## Identifiers and types
 
 Identifiers are snake_case. Type names are PascalCase. Effect names are
 snake_case (they look like values, not types — they ARE values).
 
-Built-in types: `Int`, `Float`, `Bool`, `String`, `List<T>`, `Map<K,V>`,
-`Option<T>`, `Result<T,E>`, `Grounded<T>`.
+Built-in types: `Int`, `Float`, `Bool`, `String`, `Nothing`,
+`List<T>`, `Stream<T>`, `Option<T>`, `Result<T,E>`, `Grounded<T>`.
+
+> **Planned — `Map<K,V>` lands in slice 45g.**
 
 ## Declarations
-
-### `fn` — pure function
-
-```corvid
-fn double(x: Int) -> Int:
-    return x * 2
-```
-
-Pure functions have no effect row. They cannot call prompts, tools, or
-agents.
 
 ### `prompt` — LLM-backed function
 
 ```corvid
+effect llm_effect:
+    cost: $0.01
+    latency: medium
+    confidence: 0.9
+
 prompt summarize(text: String) -> String uses llm_effect:
-    "Summarize: " + text
+    "Summarize: {text}"
 ```
 
-The body is the prompt template. Variables interpolate. The return
-type tells the compiler what to decode the model output as. Decoding
-failure is a typed error, not a panic.
+The body is a single prompt template string. Parameters interpolate
+with `{param}`. The return type tells the compiler what to decode the
+model output as. Decoding failure is a typed error, not a panic.
 
 ### `tool` — side-effecting function
 
 ```corvid
-tool send_email(to: String, body: String) -> Unit uses email_effect:
-    @host.email.send(to, body)
+effect email_effect:
+    cost: $0.001
+    reversible: false
+
+tool send_email(to: String, body: String) -> Nothing uses email_effect
 ```
 
-The `@host.x.y` syntax is the FFI call to the runtime's host
-interface. The runtime resolves this to the configured connector at
-deploy time.
+Tools are signature-only declarations: the signature carries the type
+contract and the effect row; the implementation is provided by the
+host through the runtime's registered-tool dispatch. Three ways to
+provide one:
+
+1. **Executing stdlib tools** — `std/io`, `std/http`, `std/db`, and
+   `std/json` tools are implemented inside the runtime itself (real
+   Rust: reqwest, rusqlite, serde). No host code at all.
+2. **Rust FFI** — a `#[tool]`-annotated Rust function compiled into a
+   signed cdylib and loaded by the runtime.
+3. **Python host tools** — a matching function in the project's
+   `tools.py`, executed via the embedded Python runtime.
+
+In every case the effect row is enforced by the compiler at the call
+site and by the runtime at dispatch — the implementation cannot
+escape the declared contract.
 
 ### `agent` — composable program entry
 
 ```corvid
+effect llm_call:
+    cost: $0.005
+    latency: medium
+    confidence: 0.9
+
+prompt condense(text: String) -> String uses llm_call:
+    "Condense to one sentence: {text}"
+
 @budget($0.50)
 agent main(input: String) -> String:
-    ...
+    return condense(input)
 ```
 
 Agents compose prompts and tools. They have effect rows that the
 compiler infers from their bodies (you can also write them
-explicitly). Agents can call other agents.
+explicitly). Agents can call other agents. Dimensional annotations
+like `@budget($0.50)` bound the whole subtree of calls beneath the
+agent.
 
 ### `effect` — named effect declaration
 
@@ -93,36 +125,61 @@ catalog.
 
 ## Control flow
 
+Shipped today: `if`/`else`, `for … in` over lists, strings, and
+streams, with `break` and `continue`, plus early `return`.
+
 ```corvid
-if condition:
-    # ...
-else:
-    # ...
+agent count_positives(xs: List<Int>) -> Int:
+    total = 0
+    for x in xs:
+        if x > 0:
+            total = total + 1
+    return total
+```
 
+> **Planned — `while` loops land in slice 45k; `match` expressions
+> land in slice 45i; `elif` chaining lands in slice 45q.** Until
+> then, chained conditions nest `if`/`else`, and counted iteration
+> uses `for` over a list.
+
+```corvid-planned
 while predicate:
-    # ...
-
-for x in xs:
-    # ...
+    # ... (45k)
 
 match value:
     Some(x) -> x
     None -> 0
+# (45i)
 ```
 
 ## Expressions
 
-Strings concatenate with `+`. Numeric ops are conventional. Boolean ops
-are `and`, `or`, `not`.
+Strings concatenate with `+` (both sides must be `String` — see the
+conversion note in **[Types](/docs/types)**). Numeric ops are
+conventional (`+ - * / %`, checked). Boolean ops are `and`, `or`,
+`not`. Postfix `?` on a `Result<T,E>` or `Option<T>` propagates the
+error/none to the caller.
 
-Method-call syntax (`x.method()`) works on any type. Postfix `?` on a
-`Result<T,E>` propagates the error.
+Method-call syntax (`x.method()`) works on user-declared types via
+`extend` blocks.
+
+> **Planned — methods on built-in types (`s.length()`,
+> `xs.append(…)`) land with slices 45c/45d/45f.**
 
 ## Effect rows in signatures
 
 ```corvid
-prompt foo() -> String uses llm_effect, retrieval_effect:
-    ...
+effect llm_effect:
+    cost: $0.01
+    latency: medium
+    confidence: 0.9
+
+effect retrieval_effect:
+    cost: $0.001
+    latency: low
+
+prompt answer(question: String) -> String uses llm_effect, retrieval_effect:
+    "Answer using retrieved context: {question}"
 ```
 
 Effect rows are sets, not tuples. Order doesn't matter. You can union

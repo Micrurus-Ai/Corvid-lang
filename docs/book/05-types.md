@@ -1,38 +1,58 @@
 # Types
 
+Every fenced code block marked `corvid` compiles through the real
+driver in CI. Blocks under a **Planned** marker show designed syntax
+that is not yet implemented — each names the roadmap slice that
+ships it.
+
 ## Built-in primitives
 
 | Type | Description | Literal |
 |---|---|---|
-| `Int` | signed 64-bit integer | `42`, `-1`, `0x2A` |
-| `Float` | 64-bit IEEE-754 | `3.14`, `1.0e6` |
+| `Int` | signed 64-bit integer | `42`, `-1` |
+| `Float` | 64-bit IEEE-754 | `3.14`, `1000000.0` |
 | `Bool` | boolean | `true`, `false` |
 | `String` | UTF-8 string | `"hello"`, `"""multi-line"""` |
-| `Unit` | the unit type | (returned implicitly when nothing is) |
+| `Nothing` | the unit type | (returned implicitly when nothing is) |
 
 ## Generic built-ins
 
 | Type | Description |
 |---|---|
-| `List<T>` | ordered, growable sequence |
-| `Map<K,V>` | key→value map |
+| `List<T>` | ordered sequence |
+| `Stream<T>` | incremental sequence — see **[Streaming](/docs/streaming)** |
 | `Option<T>` | `Some(T)` or `None` |
 | `Result<T,E>` | `Ok(T)` or `Err(E)` |
 | `Grounded<T>` | value with provenance — see **[Grounded](/docs/grounded)** |
+| `Map<K,V>` | key→value map — **Planned, slice 45g** |
 
 ## Strings
 
 ```corvid
-let s = "hello"                          # String
-let multi = """
-    multi-line
-    raw bytes
-"""                                       # String, all bytes preserved
+agent greet(name: String) -> String:
+    greeting = "hello, " + name + "!"
+    return greeting
+```
 
-# concatenation with +
-let greeting = "hello, " + name + "!"
+Multi-line strings use triple quotes; all bytes between the quotes are
+preserved:
 
-# methods
+```corvid
+agent policy_text() -> String:
+    text = """
+        multi-line
+        raw bytes
+    """
+    return text
+```
+
+Concatenation with `+` requires both sides to be `String` — there is
+no implicit number-to-string coercion (explicit conversions are
+Planned, see Numbers below).
+
+> **Planned — string methods land in slice 45d:**
+
+```corvid-planned
 s.length()                                # Int
 s.contains("ell")                         # Bool
 s.split(",")                              # List<String>
@@ -43,88 +63,149 @@ s.trim()                                  # String
 ## Numbers
 
 ```corvid
-let n: Int = 42
-let f: Float = 3.14
+agent ratio(n: Int) -> Float:
+    f = 3.14
+    return f
+```
 
-# conversion is explicit
-let f_from_n: Float = n.to_float()
-let n_from_f: Int = f.to_int_truncated()  # method names spell out behavior
+`Int` widens to `Float` implicitly where a `Float` is expected.
 
-# integer overflow is checked in debug builds; saturates in release with
-# an `--overflow` build flag for explicit semantics
+Integer overflow, division by zero, and modulo by zero are **checked
+in every build mode** and trap with a typed runtime error. There is
+deliberately no saturating or wrapping mode: silent saturation
+corrupts values that feed LLM calls, and a single arithmetic
+semantics keeps deterministic replay byte-identical across the
+interpreter and compiled tiers.
+
+> **Planned — explicit conversions land in slice 45e:**
+
+```corvid-planned
+f_from_n = n.to_float()
+n_from_f = f.to_int_truncated()           # method name spells out behavior
+count_text = n.to_string()                # Int -> String
 ```
 
 ## Lists
 
 ```corvid
-let xs: List<Int> = [1, 2, 3]
-let ys = xs.map(fn (x) -> x * 2)         # List<Int>
-let zs = xs.filter(fn (x) -> x > 1)
-let n = xs.length()
-let head = xs.first()                    # Option<Int>
+agent sum(xs: List<Int>) -> Int:
+    total = 0
+    for x in xs:
+        total = total + x
+    return total
 
-xs.iter()                                # iterable in `for x in ...`
+agent first_of_three() -> Int:
+    xs = [1, 2, 3]
+    return xs[0]
+```
+
+List literals, `Int` indexing, `+` concatenation of two lists, and
+`for … in` iteration are shipped. Out-of-range indexing traps at
+runtime with a typed error.
+
+> **Planned — list methods land in slices 45f (direct) and 45j
+> (lambda-taking):**
+
+```corvid-planned
+n = xs.length()                          # 45f
+head = xs.first()                        # Option<Int>, 45f
+ys = xs.map(fn (x) -> x * 2)             # 45j — needs lambdas
+zs = xs.filter(fn (x) -> x > 1)          # 45j
 ```
 
 ## Maps
 
-```corvid
-let m: Map<String, Int> = {"a": 1, "b": 2}
-let v: Option<Int> = m.get("a")
-let exists: Bool = m.contains_key("a")
-let keys: List<String> = m.keys()
+> **Planned — the `Map<K,V>` type, `{...}` literals, and map methods
+> land in slice 45g.** Until then, the typed key→value shapes are
+> user-declared record types, and dynamic string→value data goes
+> through the `std/json` surface.
+
+```corvid-planned
+m: Map<String, Int> = {"a": 1, "b": 2}
+v: Option<Int> = m.get("a")
+exists: Bool = m.contains_key("a")
+keys: List<String> = m.keys()
 ```
 
 ## Option
 
+Construct with `Some(x)` / `None`; consume with postfix `?`, which
+propagates `None` to a caller that itself returns `Option`:
+
 ```corvid
-fn find(xs: List<Int>, needle: Int) -> Option<Int>:
+agent find_positive(xs: List<Int>) -> Option<Int>:
     for x in xs:
-        if x == needle:
+        if x > 0:
             return Some(x)
     return None
 
-# consume an option
-match find(xs, 5):
-    Some(x) -> "found: " + x.to_string()
+agent double_positive(xs: List<Int>) -> Option<Int>:
+    x = find_positive(xs)?
+    return Some(x * 2)
+```
+
+> **Planned — `match` consumption lands in slice 45i and
+> `unwrap_or` / `is_some` in slice 45l:**
+
+```corvid-planned
+match find_positive(xs):
+    Some(x) -> "found"
     None    -> "not found"
 
-# default with `unwrap_or`
-let x = find(xs, 5).unwrap_or(0)
+x = find_positive(xs).unwrap_or(0)
 ```
 
 ## Result
 
-```corvid
-fn parse_int(s: String) -> Result<Int, String>:
-    if s.matches_int():
-        return Ok(s.to_int())
-    return Err("not an integer: " + s)
+Construct with `Ok(x)` / `Err(e)`; the `?` operator propagates `Err`
+early:
 
-# the ? operator propagates Err
-fn double_parsed(s: String) -> Result<Int, String>:
-    let x = parse_int(s)?     # returns Err early if parse_int errors
-    return Ok(x * 2)
+```corvid
+agent check_amount(amount: Float) -> Result<Float, String>:
+    if amount > 100.0:
+        return Err("amount exceeds the auto-approve limit")
+    return Ok(amount)
+
+agent apply_fee(amount: Float) -> Result<Float, String>:
+    approved = check_amount(amount)?
+    return Ok(approved + 2.5)
 ```
 
-## Structs
+For retry semantics around a fallible call, `try … on error retry N
+times backoff linear|exponential` wraps any expression.
+
+## Record types
+
+Declare with `type`, construct positionally (arguments in field
+order), access with `.field`:
 
 ```corvid
-struct Decision:
+type Decision:
     refund: Bool
     amount: Float
     reason: String
 
-let d = Decision { refund: true, amount: 50.0, reason: "policy match" }
-let amount = d.amount
+agent decide() -> Float:
+    d = Decision(true, 50.0, "policy match")
+    return d.amount
+```
 
-# update syntax
-let d2 = Decision { ..d, amount: 75.0 }
+> **Planned — named-field literals and `..` update syntax land in
+> slice 45n:**
+
+```corvid-planned
+d = Decision { refund: true, amount: 50.0, reason: "policy match" }
+d2 = Decision { ..d, amount: 75.0 }
 ```
 
 ## Sum types (enums)
 
-```corvid
+> **Planned — user-declared sum types land in slice 45h, and `match`
+> over them in slice 45i.** Until then, the built-in `Option` and
+> `Result` are the sum types, and "one of N shapes" is modelled with
+> a record carrying a tag field.
+
+```corvid-planned
 type Status:
     | Pending
     | Approved(approver: String)
@@ -138,7 +219,14 @@ match status:
 
 ## Generics
 
-```corvid
+> **Planned — post-v1.0.** User-declared generics need a
+> type-variable representation in the checker and monomorphization
+> through all backends; the decision and scope live in the ROADMAP's
+> post-v1.0 section (45p resolution). The built-in generic heads
+> (`List`, `Option`, `Result`, `Stream`, `Grounded`) cover the v1.0
+> workload.
+
+```corvid-planned
 fn first<T>(xs: List<T>) -> Option<T>:
     if xs.length() > 0:
         return Some(xs[0])
@@ -147,23 +235,29 @@ fn first<T>(xs: List<T>) -> Option<T>:
 
 ## Type aliases
 
-```corvid
+> **Planned — lands in slice 45n:**
+
+```corvid-planned
 type CustomerId = String
 type Cents = Int
-
-fn refund(amount: Cents, id: CustomerId) -> Result<Unit, String>:
-    ...
 ```
 
 ## Type inference
 
-Most local bindings don't need annotations:
+Local bindings don't need annotations — the type is inferred from the
+initializer:
 
 ```corvid
-let n = 42                               # inferred Int
-let xs = [1, 2, 3]                       # inferred List<Int>
+agent inference_demo() -> Int:
+    n = 42                               # inferred Int
+    xs = [1, 2, 3]                       # inferred List<Int>
+    return n + xs[0]
 ```
 
-Function signatures, struct fields, and effect rows always require
+Function signatures, record fields, and effect rows always require
 explicit types — they're the boundaries where inference would be
 ambiguous and where you want a checker-readable contract.
+
+> **Planned — `let` bindings with optional annotations
+> (`let n: Int = 42`) land in slice 45a.** Today bindings are bare
+> assignments.
