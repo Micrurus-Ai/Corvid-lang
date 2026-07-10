@@ -768,6 +768,63 @@ contains, first/last -> Option, slice, reverse, sort, join, range).
 
 ---
 
+## 2026-07-10 - 45f closed: list methods + range() — generic returns prove the table design
+
+Third batch on the 45c machinery, and the one it was designed for:
+`first()` / `last()` return `Option<T>` COMPUTED from the receiver's
+element type, `slice` returns `List<T>`, `append`/`contains` take
+`T` params — the function-not-static-map table design paying off
+with zero machinery changes.
+
+### What shipped
+
+`length`, `append`, `contains`, `first`/`last -> Option<T>`,
+`slice(start, end)`, `reverse`, `sort`, `List<String>.join(sep)`,
+plus the free builtin function `range(start, end) -> List<Int>`
+(half-open, step 1).
+
+### Design decisions
+
+- **In-place mutation** for append/reverse/sort, returning `Nothing`
+  — Python-coherent and consistent with 45b's reference semantics.
+  The e2e pin proves an alias sees the append.
+- **`sort` is TABLE-GATED** to Int/Float/String element types: the
+  fn-table simply returns no signature for `List<struct>`, so the
+  standard no-builtin-method diagnostic fires (pinned in checker
+  tests). Floats sort by IEEE total order (NaN last).
+- **`range` rides the BuiltinMethod IR** with start-as-receiver:
+  new `BuiltIn::Range` resolver entry + checker arm + one lowering
+  arm — but NO new IrExprKind, so no 15-site exhaustive-match
+  ripple this time. Counted iteration is unblocked ahead of 45k's
+  `while`.
+- `slice` clamps like `substring` and returns a NEW list.
+
+### Verification
+
+Live probe (all methods + aliasing + range-driven for loop +
+sort/join on strings + Option equality): "all list methods pass"
+first try. Sort gate verified live on List<User>. Pinned: 1 e2e
+batch + 3 checker tests (generic returns, sort gate, range
+typing/arg rejection).
+
+Audit blocker B5 is now FULLY CLOSED (strings 45d + lists 45f):
+"no length, no append, no contains" is history. 33R5d's non-lambda
+half is done; the lambda half (map/filter) waits on 45j, and Map
+on 45g.
+
+### Validation
+
+268 types + 109 vm + 6 builtin-method e2e + 3 book-guard; workspace
+--tests clean; corpus verify exits 1 only on the two deliberate
+fixtures. Book ch 05 lists section flipped (only the 45j
+lambda-taking block remains Planned).
+
+Next per track order: 45g-map-type (`Map<K,V>` + literals +
+methods — audit blocker B3, the last data-shape blocker before
+sum types + match).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -140,12 +140,37 @@ storing it in a record field aliases the SAME list; mutation through
 any alias is visible through all of them (reference semantics, as in
 Python).
 
-> **Planned — list methods land in slices 45f (direct) and 45j
-> (lambda-taking):**
+The list method set (compiles in CI):
+
+```corvid
+agent list_demo() -> Int:
+    xs = [3, 1, 2]
+    xs.append(4)                          # in place — every alias sees it
+    xs.sort()                             # in place; Int/Float/String elements
+    xs.reverse()                          # in place
+    n = xs.length()                       # Int
+    head = xs.first()                     # Option<Int>
+    tail = xs.last()                      # Option<Int>
+    has = xs.contains(2)                  # Bool
+    mid = xs.slice(1, 3)                  # new list, clamped indices
+    names = ["a", "b"]
+    csv = names.join(",")                 # List<String> only
+    total = 0
+    for i in range(0, 5):                 # counted iteration: 0,1,2,3,4
+        total = total + i
+    return n + total
+
+```
+
+`append`, `sort`, and `reverse` mutate the shared list in place and
+return `Nothing` (reference semantics — see the callout above).
+`sort` is only offered on `Int`/`Float`/`String` element types.
+`range(start, end)` is a builtin function producing a half-open
+`List<Int>`.
+
+> **Planned — the lambda-taking methods land in slice 45j:**
 
 ```corvid-planned
-n = xs.length()                          # 45f
-head = xs.first()                        # Option<Int>, 45f
 ys = xs.map(fn (x) -> x * 2)             # 45j — needs lambdas
 zs = xs.filter(fn (x) -> x > 1)          # 45j
 ```

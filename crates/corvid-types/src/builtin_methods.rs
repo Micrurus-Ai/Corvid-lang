@@ -101,6 +101,46 @@ pub enum BuiltinMethodKind {
     StringParseInt,
     /// `String.parse_float() -> Result<Float, String>`.
     StringParseFloat,
+
+    // ----- lists (slice 45f) --------------------------------------
+    //
+    // `append`, `reverse`, and `sort` mutate IN PLACE and return
+    // `Nothing` — coherent with the 45b reference-semantics decision
+    // and Python's list API. `sort` is only offered where the
+    // element type has a natural order (Int / Float / String; the
+    // table returns no signature otherwise, so unsortable element
+    // types get the standard "no builtin method" diagnostic).
+    // Floats sort by IEEE total order (NaN last). `slice` clamps
+    // like `substring` and returns a NEW list. `join` is offered on
+    // `List<String>` only. `first`/`last` return `Option<T>` — the
+    // first generic-return methods, computed from the receiver's
+    // element type (the reason the table is a function).
+    /// `List<T>.length() -> Int`.
+    ListLength,
+    /// `List<T>.append(item: T) -> Nothing` — in place.
+    ListAppend,
+    /// `List<T>.contains(item: T) -> Bool` — structural equality.
+    ListContains,
+    /// `List<T>.first() -> Option<T>`.
+    ListFirst,
+    /// `List<T>.last() -> Option<T>`.
+    ListLast,
+    /// `List<T>.slice(start: Int, end: Int) -> List<T>` — clamped,
+    /// new list.
+    ListSlice,
+    /// `List<T>.reverse() -> Nothing` — in place.
+    ListReverse,
+    /// `List<T>.sort() -> Nothing` — in place; Int/Float/String
+    /// elements only (table-gated).
+    ListSort,
+    /// `List<String>.join(sep: String) -> String`.
+    ListJoin,
+
+    /// `range(start: Int, end: Int) -> List<Int>` — the free builtin
+    /// function (half-open, step 1, empty when start >= end). Lowered
+    /// through the BuiltinMethod IR with `start` as the receiver so
+    /// no new IR variant is needed.
+    RangeIntList,
 }
 
 /// A builtin method's checked signature for a CONCRETE receiver
@@ -155,6 +195,25 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![],
             Type::Result(Box::new(Type::Float), Box::new(Type::String)),
         ),
+        (Type::List(_), "length") => sig(ListLength, vec![], Type::Int),
+        (Type::List(elem), "append") => sig(ListAppend, vec![(**elem).clone()], Type::Nothing),
+        (Type::List(elem), "contains") => sig(ListContains, vec![(**elem).clone()], Type::Bool),
+        (Type::List(elem), "first") => sig(ListFirst, vec![], Type::Option(elem.clone())),
+        (Type::List(elem), "last") => sig(ListLast, vec![], Type::Option(elem.clone())),
+        (Type::List(elem), "slice") => sig(
+            ListSlice,
+            vec![Type::Int, Type::Int],
+            Type::List(elem.clone()),
+        ),
+        (Type::List(_), "reverse") => sig(ListReverse, vec![], Type::Nothing),
+        (Type::List(elem), "sort")
+            if matches!(**elem, Type::Int | Type::Float | Type::String) =>
+        {
+            sig(ListSort, vec![], Type::Nothing)
+        }
+        (Type::List(elem), "join") if matches!(**elem, Type::String) => {
+            sig(ListJoin, vec![Type::String], Type::String)
+        }
         _ => None,
     }
 }

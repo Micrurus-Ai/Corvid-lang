@@ -45,6 +45,8 @@ pub enum BuiltIn {
     None,
     Grounded,
     WeakNew,
+    /// `range(start, end) -> List<Int>` (slice 45f).
+    Range,
     WeakUpgrade,
     StreamMerge,
     Resume,
@@ -151,6 +153,7 @@ impl SymbolTable {
         self.builtins.insert("Some".into(), BuiltIn::Some);
         self.builtins.insert("None".into(), BuiltIn::None);
         self.builtins.insert("Weak::new".into(), BuiltIn::WeakNew);
+        self.builtins.insert("range".into(), BuiltIn::Range);
         self.builtins
             .insert("Weak::upgrade".into(), BuiltIn::WeakUpgrade);
         self.builtins.insert("merge".into(), BuiltIn::StreamMerge);

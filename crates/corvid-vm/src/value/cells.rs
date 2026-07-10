@@ -171,6 +171,31 @@ impl ListValue {
         }
     }
 
+    /// Append an element in place (slice 45f `append`).
+    pub fn push(&self, value: Value) {
+        if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
+            items.push(value);
+        }
+    }
+
+    /// Reverse in place (slice 45f `reverse`).
+    pub fn reverse_in_place(&self) {
+        if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
+            items.reverse();
+        }
+    }
+
+    /// Sort in place with the provided comparator (slice 45f
+    /// `sort`; the checker gates element types to Int/Float/String).
+    pub fn sort_in_place_by(
+        &self,
+        cmp: impl FnMut(&Value, &Value) -> std::cmp::Ordering,
+    ) {
+        if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
+            items.sort_by(cmp);
+        }
+    }
+
     pub fn ptr_key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }

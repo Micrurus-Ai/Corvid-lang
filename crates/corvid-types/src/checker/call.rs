@@ -316,6 +316,36 @@ impl<'a> Checker<'a> {
                 };
                 Type::Option(Box::new(final_inner_ty))
             }
+            BuiltIn::Range => {
+                if args.len() != 2 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ArityMismatch {
+                            callee: name.name.clone(),
+                            expected: 2,
+                            got: args.len(),
+                        },
+                        name.span,
+                    ));
+                    for arg in args {
+                        let _ = self.check_expr(arg);
+                    }
+                    return Type::List(Box::new(Type::Int));
+                }
+                for arg in args {
+                    let t = self.check_expr_as(arg, Some(&Type::Int));
+                    if !t.is_assignable_to(&Type::Int) {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::TypeMismatch {
+                                expected: "Int".into(),
+                                got: t.display_name(),
+                                context: "argument to `range`".into(),
+                            },
+                            arg.span(),
+                        ));
+                    }
+                }
+                Type::List(Box::new(Type::Int))
+            }
             BuiltIn::WeakNew => {
                 if args.len() != 1 {
                     self.errors.push(TypeError::new(

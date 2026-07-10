@@ -114,6 +114,54 @@ agent main() -> String:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_method_batch_end_to_end() {
+    // Pins 45f: in-place append/sort/reverse through shared cells
+    // (the alias sees the append — 45b reference semantics), Option
+    // returns from first/last (generic table returns), clamped
+    // slice, join, and range() counted iteration.
+    let source = "
+agent main() -> String:
+    xs = [3, 1, 2]
+    xs.append(4)
+    xs.sort()
+    low = xs[0]
+    xs.reverse()
+    high = xs[0]
+
+    counted = 0
+    for i in range(0, 5):
+        counted = counted + i
+
+    names = [\"b\", \"a\", \"c\"]
+    names.sort()
+    joined = names.join(\"-\")
+
+    sub = range(0, 10).slice(2, 5)
+    alias = xs
+    alias.append(99)
+
+    ok1 = xs.length() == 5 and xs.contains(99)
+    ok2 = low == 1 and high == 4
+    ok3 = counted == 10
+    ok4 = joined == \"a-b-c\"
+    ok5 = sub.first() == Some(2) and sub.last() == Some(4)
+    ok6 = range(0, 0).first() == None
+    if ok1 and ok2 and ok3 and ok4 and ok5 and ok6:
+        return \"ok\"
+    return \"FAILED\"
+";
+    let ir = compile_to_ir(source).expect("45f batch source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45f batch program must run");
+    match out {
+        Value::String(s) => assert_eq!(s.as_ref(), "ok", "a list-method check failed"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn to_int_truncated_traps_on_nan() {
     let source = "
 agent main() -> Int:

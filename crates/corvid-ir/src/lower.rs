@@ -1157,6 +1157,22 @@ impl<'a> Lowerer<'a> {
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::None)) => return IrExprKind::OptionNone,
+                Some(Binding::BuiltIn(BuiltIn::Range)) => {
+                    // range(start, end) rides the BuiltinMethod IR
+                    // with `start` as the receiver.
+                    let mut lowered = args.iter().map(|a| self.lower_expr(a));
+                    let start = lowered.next().unwrap_or_else(|| IrExpr {
+                        kind: IrExprKind::Literal(IrLiteral::Int(0)),
+                        ty: Type::Int,
+                        span: name.span,
+                    });
+                    let rest: Vec<IrExpr> = lowered.collect();
+                    return IrExprKind::BuiltinMethod {
+                        kind: corvid_types::BuiltinMethodKind::RangeIntList,
+                        receiver: Box::new(start),
+                        args: rest,
+                    };
+                }
                 Some(Binding::BuiltIn(BuiltIn::WeakNew)) => {
                     let strong =
                         args.first()

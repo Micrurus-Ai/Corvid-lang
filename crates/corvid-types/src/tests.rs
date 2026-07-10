@@ -3904,6 +3904,88 @@ agent main() -> String:
     );
 }
 
+/// Slice 45f — list methods typecheck with GENERIC result types
+/// computed from the receiver's element type: first() on List<Int>
+/// is Option<Int>; append's param is the element type.
+#[test]
+fn list_method_batch_typechecks_with_generic_returns() {
+    let src = "\
+agent main() -> Int:
+    xs = [1, 2, 3]
+    xs.append(4)
+    xs.sort()
+    xs.reverse()
+    head = xs.first()
+    tail = xs.slice(1, 2)
+    names = [\"a\", \"b\"]
+    joined = names.join(\",\")
+    if xs.contains(2) and head == Some(4) and joined.length() > 0:
+        return xs.length() + tail.length()
+    return 0
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "the 45f list-method batch should typecheck, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45f — sort is table-gated to comparable element types:
+/// List<struct>.sort() gets the standard no-builtin-method error.
+#[test]
+fn sort_on_struct_list_is_rejected() {
+    let src = "\
+type User:
+    id: Int
+
+agent main() -> Int:
+    users = [User(1), User(2)]
+    users.sort()
+    return 0
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
+        "expected NotCallable for List<struct>.sort(), got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45f — range() is a builtin function: two Int args,
+/// List<Int> result; wrong arg types are rejected.
+#[test]
+fn range_builtin_typechecks_and_rejects_bad_args() {
+    let ok = check(
+        "\
+agent main() -> Int:
+    total = 0
+    for i in range(0, 5):
+        total = total + i
+    return total
+",
+    );
+    assert!(ok.errors.is_empty(), "range should typecheck, got {:?}", ok.errors);
+
+    let bad = check(
+        "\
+agent main() -> Int:
+    for i in range(\"a\", 5):
+        pass
+    return 0
+",
+    );
+    assert!(
+        bad.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for range(String, Int), got {:?}",
+        bad.errors
+    );
+}
+
 /// Slice 45b — place assignment typechecks: field/index targets take
 /// values assignable to the slot's type; compound ops run the normal
 /// operator rules and the result must fit back into the slot.

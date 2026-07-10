@@ -550,10 +550,157 @@ pub(super) fn eval_builtin_method(
                 ))),
             }
         }
+        ListLength
+        | ListAppend
+        | ListContains
+        | ListFirst
+        | ListLast
+        | ListSlice
+        | ListReverse
+        | ListSort
+        | ListJoin => {
+            let lv = match &recv {
+                Value::List(l) => l.clone(),
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "List".into(),
+                            got: other.type_name(),
+                        },
+                        span,
+                    ))
+                }
+            };
+            eval_list_method(kind, lv, args, span)
+        }
+        RangeIntList => {
+            let start = want_int(&recv, span)?;
+            let end = want_int(&args[0], span)?;
+            let items: Vec<Value> = (start..end).map(Value::Int).collect();
+            Ok(Value::List(crate::value::ListValue::new(items)))
+        }
         _ => {
             let s = want_string(&recv, span)?;
             eval_string_method(kind, s, args, span)
         }
+    }
+}
+
+/// The list-receiver methods (slice 45f). `append`/`reverse`/`sort`
+/// mutate the shared cell in place and return `Nothing` (the 45b
+/// reference-semantics rule: every alias sees the mutation).
+fn eval_list_method(
+    kind: corvid_types::BuiltinMethodKind,
+    lv: crate::value::ListValue,
+    args: Vec<Value>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    use corvid_types::BuiltinMethodKind::*;
+
+    fn want_int(v: &Value, span: Span) -> Result<i64, InterpError> {
+        match v {
+            Value::Int(i) => Ok(*i),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "Int".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+
+    match kind {
+        ListLength => Ok(Value::Int(lv.len() as i64)),
+        ListAppend => {
+            lv.push(args.into_iter().next().expect("checked arity"));
+            Ok(Value::Nothing)
+        }
+        ListContains => {
+            let needle = &args[0];
+            let found = lv.iter_cloned().iter().any(|v| v == needle);
+            Ok(Value::Bool(found))
+        }
+        ListFirst => Ok(match lv.get(0) {
+            Some(v) => Value::OptionSome(crate::value::BoxedValue::new(v)),
+            None => Value::OptionNone,
+        }),
+        ListLast => {
+            let len = lv.len();
+            Ok(if len == 0 {
+                Value::OptionNone
+            } else {
+                match lv.get(len - 1) {
+                    Some(v) => Value::OptionSome(crate::value::BoxedValue::new(v)),
+                    None => Value::OptionNone,
+                }
+            })
+        }
+        ListSlice => {
+            let len = lv.len() as i64;
+            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
+            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
+            let items = if start >= end {
+                Vec::new()
+            } else {
+                lv.iter_cloned()[start..end].to_vec()
+            };
+            Ok(Value::List(crate::value::ListValue::new(items)))
+        }
+        ListReverse => {
+            lv.reverse_in_place();
+            Ok(Value::Nothing)
+        }
+        ListSort => {
+            lv.sort_in_place_by(|a, b| match (a, b) {
+                (Value::Int(x), Value::Int(y)) => x.cmp(y),
+                (Value::Float(x), Value::Float(y)) => x.total_cmp(y),
+                (Value::String(x), Value::String(y)) => x.cmp(y),
+                // Mixed/unsupported elements keep their order; the
+                // checker gates sort() to Int/Float/String lists.
+                _ => std::cmp::Ordering::Equal,
+            });
+            Ok(Value::Nothing)
+        }
+        ListJoin => {
+            let sep = match &args[0] {
+                Value::String(s) => s.clone(),
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "String".into(),
+                            got: other.type_name(),
+                        },
+                        span,
+                    ))
+                }
+            };
+            let mut pieces: Vec<String> = Vec::with_capacity(lv.len());
+            for v in lv.iter_cloned() {
+                match v {
+                    Value::String(s) => pieces.push(s.to_string()),
+                    other => {
+                        return Err(InterpError::new(
+                            InterpErrorKind::TypeMismatch {
+                                expected: "String".into(),
+                                got: other.type_name(),
+                            },
+                            span,
+                        ))
+                    }
+                }
+            }
+            Ok(Value::String(std::sync::Arc::from(
+                pieces.join(sep.as_ref()),
+            )))
+        }
+        other => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: "a list-receiver builtin method".into(),
+                got: format!("{other:?}"),
+            },
+            span,
+        )),
     }
 }
 

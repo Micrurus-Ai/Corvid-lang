@@ -182,6 +182,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::Range
                 | BuiltIn::Choose => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::BareFunctionReference {
