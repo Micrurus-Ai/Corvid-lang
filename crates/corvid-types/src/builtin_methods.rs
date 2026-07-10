@@ -73,6 +73,34 @@ pub enum BuiltinMethodKind {
     /// `String.substring(start: Int, end: Int) -> String` — Unicode
     /// scalar indices, clamped to bounds; "" when start >= end.
     StringSubstring,
+
+    // ----- conversions (slice 45e) --------------------------------
+    //
+    // Number→String rendering is Python-style: a Float ALWAYS shows
+    // a decimal point or exponent (`42.0` → "42.0", never "42") so
+    // string output round-trips visibly typed — these strings feed
+    // LLM prompts and JSON. `to_int_truncated` truncates toward
+    // zero and TRAPS on NaN / out-of-i64-range (the always-checked
+    // arithmetic rule; no silent wrapping). The parse methods trim
+    // ASCII whitespace first (Python's `int(" 42 ")` convenience)
+    // and return `Result<_, String>` with the offending input named
+    // in the Err.
+    /// `Int.to_string() -> String`.
+    IntToString,
+    /// `Float.to_string() -> String` — always shows `.` or exponent.
+    FloatToString,
+    /// `Bool.to_string() -> String` — "true" / "false".
+    BoolToString,
+    /// `Int.to_float() -> Float` — exact for |n| <= 2^53, nearest
+    /// otherwise.
+    IntToFloat,
+    /// `Float.to_int_truncated() -> Int` — toward zero; traps on
+    /// NaN or out-of-range.
+    FloatToIntTruncated,
+    /// `String.parse_int() -> Result<Int, String>`.
+    StringParseInt,
+    /// `String.parse_float() -> Result<Float, String>`.
+    StringParseFloat,
 }
 
 /// A builtin method's checked signature for a CONCRETE receiver
@@ -112,6 +140,21 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::String, "substring") => {
             sig(StringSubstring, vec![Type::Int, Type::Int], Type::String)
         }
+        (Type::Int, "to_string") => sig(IntToString, vec![], Type::String),
+        (Type::Float, "to_string") => sig(FloatToString, vec![], Type::String),
+        (Type::Bool, "to_string") => sig(BoolToString, vec![], Type::String),
+        (Type::Int, "to_float") => sig(IntToFloat, vec![], Type::Float),
+        (Type::Float, "to_int_truncated") => sig(FloatToIntTruncated, vec![], Type::Int),
+        (Type::String, "parse_int") => sig(
+            StringParseInt,
+            vec![],
+            Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_float") => sig(
+            StringParseFloat,
+            vec![],
+            Type::Result(Box::new(Type::Float), Box::new(Type::String)),
+        ),
         _ => None,
     }
 }

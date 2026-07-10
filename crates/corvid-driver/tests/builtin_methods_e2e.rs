@@ -74,6 +74,69 @@ agent main() -> String:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conversion_batch_end_to_end() {
+    // Pins the 45e semantics: Python-style Float rendering (42.0 ->
+    // "42.0", never bare "42"), truncation toward zero, whitespace-
+    // trimming parses returning Result, and the "count: " + n
+    // papercut being dead.
+    let source = "
+agent parse_pair() -> Result<Float, String>:
+    n = \" 42 \".parse_int()?
+    f = \"2.5\".parse_float()?
+    return Ok(n.to_float() + f)
+
+agent main() -> String:
+    n = 42
+    whole = 42.0
+    neg = 0.0 - 3.9
+
+    ok1 = (\"count: \" + n.to_string()) == \"count: 42\"
+    ok2 = whole.to_string() == \"42.0\"
+    ok3 = true.to_string() == \"true\"
+    ok4 = n.to_float() == 42.0
+    ok5 = 3.9.to_int_truncated() == 3
+    ok6 = neg.to_int_truncated() == -3
+    ok7 = parse_pair() == Ok(44.5)
+    ok8 = \"nope\".parse_int() == Err(\"not an integer: `nope`\")
+    if ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 and ok8:
+        return \"ok\"
+    return \"FAILED\"
+";
+    let ir = compile_to_ir(source).expect("45e batch source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45e batch program must run");
+    match out {
+        Value::String(s) => assert_eq!(s.as_ref(), "ok", "a conversion check failed"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn to_int_truncated_traps_on_nan() {
+    let source = "
+agent main() -> Int:
+    zero = 0.0
+    nan = zero / zero
+    return nan.to_int_truncated()
+";
+    let ir = compile_to_ir(source).expect("source must compile");
+    let runtime = Runtime::builder().build();
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime).await;
+    match result {
+        Err(err) => assert!(
+            format!("{err:?}").contains("to_int_truncated"),
+            "expected the truncation trap, got {err:?}"
+        ),
+        // If Float division 0.0/0.0 itself traps (checked-arithmetic
+        // rule), that is an acceptable earlier trap — but it must
+        // NOT produce an Int.
+        Ok(v) => panic!("NaN truncation must not succeed, got {v:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn split_with_empty_separator_traps() {
     let source = "
 agent main() -> Int:

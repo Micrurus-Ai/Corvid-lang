@@ -720,6 +720,54 @@ the `"count: " + n` papercut).
 
 ---
 
+## 2026-07-10 - 45e closed: conversions — the `"count: " + n` papercut is dead
+
+Second pure-table batch on the 45c machinery: 7 conversion kinds
+(`Int.to_string`, `Float.to_string`, `Bool.to_string` — trivially
+coherent addition, `Int.to_float`, `Float.to_int_truncated`,
+`String.parse_int`, `String.parse_float`), one interpreter dispatch
+extension (the helper now routes by receiver type; string methods
+split into their own fn).
+
+### Semantics decided on the enum docs
+
+- **Float→String is Python-style**: `42.0` renders `"42.0"`, never
+  bare `"42"` (Rust's Display default). Rationale: these strings
+  feed LLM prompts and JSON — output must stay visibly typed so
+  round-trips don't silently change type.
+- **`to_int_truncated` truncates toward zero and TRAPS on NaN /
+  out-of-i64-range** — the always-checked arithmetic rule extended
+  to conversions; no silent wrapping. NaN pin in e2e.
+- **Parses trim whitespace** (`" 42 ".parse_int()` == Ok(42),
+  Python's int() convenience) and return `Result<_, String>` with
+  the offending input named in the Err — which flows through `?`
+  like every other Result in the language.
+
+### Verification
+
+Live probe: all conversions + `?`-chained parse_pair() passed;
+parse error path returns `Err("not an integer: \`not a number\`")`.
+Pinned: 2 e2e tests (batch incl. Err-equality assertion + NaN
+truncation trap) — builtin_methods_e2e.rs now carries 5 tests.
+Book ch 05 Numbers section flipped to a compiling example; the
+corvid-planned conversions block is gone.
+
+Audit blocker B4 is CLOSED (number↔string conversion). Remaining
+in the strings/numbers family: general string interpolation (the
+45e slice notes it as a separate pre-phase-chat decision — prompt
+templates already interpolate; reusing `{x}` in ordinary strings
+is the candidate).
+
+### Validation
+
+265 types + 109 vm + 5 builtin-method e2e + 3 book-guard; corpus
+verify exits 1 only on the two deliberate fixtures.
+
+Next per track order: 45f-list-methods-non-lambda (length, append,
+contains, first/last -> Option, slice, reverse, sort, join, range).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -448,7 +448,150 @@ pub(super) fn eval_builtin_method(
         }
     }
 
-    let s = want_string(&recv, span)?;
+    fn want_float(v: &Value, span: Span) -> Result<f64, InterpError> {
+        match v {
+            Value::Float(f) => Ok(*f),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "Float".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+    fn want_string_recv(
+        v: &Value,
+        span: Span,
+    ) -> Result<std::sync::Arc<str>, InterpError> {
+        match v {
+            Value::String(s) => Ok(s.clone()),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "String".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+    /// Python-style float rendering: always shows a decimal point
+    /// or exponent so string output round-trips visibly typed.
+    fn render_float(f: f64) -> String {
+        let rendered = format!("{f}");
+        if rendered.contains('.')
+            || rendered.contains('e')
+            || rendered.contains('E')
+            || rendered.contains("inf")
+            || rendered.contains("NaN")
+        {
+            rendered
+        } else {
+            format!("{rendered}.0")
+        }
+    }
+
+    match kind {
+        IntToString => Ok(Value::String(std::sync::Arc::from(
+            want_int(&recv, span)?.to_string(),
+        ))),
+        FloatToString => Ok(Value::String(std::sync::Arc::from(render_float(
+            want_float(&recv, span)?,
+        )))),
+        BoolToString => match &recv {
+            Value::Bool(b) => Ok(Value::String(std::sync::Arc::from(
+                if *b { "true" } else { "false" },
+            ))),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "Bool".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        },
+        IntToFloat => Ok(Value::Float(want_int(&recv, span)? as f64)),
+        FloatToIntTruncated => {
+            let f = want_float(&recv, span)?;
+            // Always-checked rule: NaN and out-of-range trap rather
+            // than silently wrapping.
+            if f.is_nan() || f < (i64::MIN as f64) || f >= (i64::MAX as f64) {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "a Float within Int range for `to_int_truncated`".into(),
+                        got: format!("`{}`", render_float(f)),
+                    },
+                    span,
+                ));
+            }
+            Ok(Value::Int(f.trunc() as i64))
+        }
+        StringParseInt => {
+            let s = want_string_recv(&recv, span)?;
+            match s.trim().parse::<i64>() {
+                Ok(n) => Ok(Value::ResultOk(crate::value::BoxedValue::new(Value::Int(n)))),
+                Err(_) => Ok(Value::ResultErr(crate::value::BoxedValue::new(
+                    Value::String(std::sync::Arc::from(format!(
+                        "not an integer: `{s}`"
+                    ))),
+                ))),
+            }
+        }
+        StringParseFloat => {
+            let s = want_string_recv(&recv, span)?;
+            match s.trim().parse::<f64>() {
+                Ok(f) => Ok(Value::ResultOk(crate::value::BoxedValue::new(
+                    Value::Float(f),
+                ))),
+                Err(_) => Ok(Value::ResultErr(crate::value::BoxedValue::new(
+                    Value::String(std::sync::Arc::from(format!(
+                        "not a number: `{s}`"
+                    ))),
+                ))),
+            }
+        }
+        _ => {
+            let s = want_string(&recv, span)?;
+            eval_string_method(kind, s, args, span)
+        }
+    }
+}
+
+/// The string-receiver methods (slice 45d), split out so the
+/// conversion arms above can dispatch on other receiver types.
+fn eval_string_method(
+    kind: corvid_types::BuiltinMethodKind,
+    s: std::sync::Arc<str>,
+    args: Vec<Value>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    use corvid_types::BuiltinMethodKind::*;
+
+    fn want_string(v: &Value, span: Span) -> Result<std::sync::Arc<str>, InterpError> {
+        match v {
+            Value::String(s) => Ok(s.clone()),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "String".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+    fn want_int(v: &Value, span: Span) -> Result<i64, InterpError> {
+        match v {
+            Value::Int(i) => Ok(*i),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "Int".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+
     match kind {
         StringLength => Ok(Value::Int(s.chars().count() as i64)),
         StringToUpper => Ok(Value::String(std::sync::Arc::from(s.to_uppercase()))),
@@ -498,5 +641,15 @@ pub(super) fn eval_builtin_method(
             let piece: String = s.chars().skip(start).take(end - start).collect();
             Ok(Value::String(std::sync::Arc::from(piece)))
         }
+        // Conversion kinds are handled by the caller before
+        // delegating here; reaching this arm is an internal
+        // dispatch bug.
+        other => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: "a string-receiver builtin method".into(),
+                got: format!("{other:?}"),
+            },
+            span,
+        )),
     }
 }

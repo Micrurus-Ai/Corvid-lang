@@ -80,21 +80,32 @@ agent ratio(n: Int) -> Float:
 ```
 
 `Int` widens to `Float` implicitly where a `Float` is expected.
+Every other conversion is explicit, with the method name spelling
+out the behavior:
+
+```corvid
+agent conversions() -> Result<String, String>:
+    n = 42
+    f_from_n = n.to_float()                # Int -> Float
+    n_from_f = 3.9.to_int_truncated()      # toward zero; traps on NaN/overflow
+    count_text = "count: " + n.to_string() # Int -> String
+    price_text = 19.5.to_string()          # "19.5" — Floats always show a `.`
+    parsed = " 42 ".parse_int()?           # Result<Int, String>; trims whitespace
+    ratio = "2.5".parse_float()?           # Result<Float, String>
+    return Ok(count_text)
+```
+
+Float-to-string rendering always shows a decimal point or exponent
+(`42.0` renders as `"42.0"`, never `"42"`) so string output — which
+feeds LLM prompts and JSON — stays visibly typed.
 
 Integer overflow, division by zero, and modulo by zero are **checked
 in every build mode** and trap with a typed runtime error. There is
 deliberately no saturating or wrapping mode: silent saturation
 corrupts values that feed LLM calls, and a single arithmetic
 semantics keeps deterministic replay byte-identical across the
-interpreter and compiled tiers.
-
-> **Planned — explicit conversions land in slice 45e:**
-
-```corvid-planned
-f_from_n = n.to_float()
-n_from_f = f.to_int_truncated()           # method name spells out behavior
-count_text = n.to_string()                # Int -> String
-```
+interpreter and compiled tiers. `to_int_truncated()` follows the
+same rule: NaN or out-of-range Floats trap rather than wrapping.
 
 ## Lists
 
