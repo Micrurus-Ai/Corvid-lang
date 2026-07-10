@@ -302,6 +302,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwTry => self.parse_try_retry_expr(),
             TokKind::KwReplay => self.parse_replay_expr(),
+            TokKind::KwMatch => self.parse_match_expr(),
             TokKind::Ident(name) => {
                 self.bump();
                 let name = self.parse_namespaced_ident_from(name)?;

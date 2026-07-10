@@ -331,6 +331,48 @@ impl<'a> CostAnalyzer<'a> {
                     bounded: estimate.bounded,
                 }
             }
+            corvid_ast::Expr::Match {
+                scrutinee,
+                arms,
+                span,
+            } => {
+                // Conservative over-approximation: cost = scrutinee +
+                // every arm (guards + bodies). Keeps @budget sound
+                // without per-branch max machinery; tighten later if
+                // real programs need it.
+                let mut children = Vec::new();
+                let mut warnings = Vec::new();
+                let mut bounded = true;
+                let s_est = self.analyze_expr(scrutinee, agent_name);
+                if !tree_is_zero(&s_est.tree) {
+                    children.push(s_est.tree);
+                }
+                warnings.extend(s_est.warnings);
+                bounded &= s_est.bounded;
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        let e = self.analyze_expr(g, agent_name);
+                        if !tree_is_zero(&e.tree) {
+                            children.push(e.tree);
+                        }
+                        warnings.extend(e.warnings);
+                        bounded &= e.bounded;
+                    }
+                    let e = self.analyze_expr(&arm.body, agent_name);
+                    if !tree_is_zero(&e.tree) {
+                        children.push(e.tree);
+                    }
+                    warnings.extend(e.warnings);
+                    bounded &= e.bounded;
+                }
+                let sequence = sequence_tree("match", CostNodeKind::Sequence, children, *span);
+                CostEstimate {
+                    dimensions: sequence.costs.clone(),
+                    tree: sequence,
+                    warnings,
+                    bounded,
+                }
+            }
             corvid_ast::Expr::MapLiteral { entries, span } => {
                 let mut children = Vec::new();
                 let mut warnings = Vec::new();

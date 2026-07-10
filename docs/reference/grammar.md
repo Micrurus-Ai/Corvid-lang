@@ -271,7 +271,8 @@ yield_stmt        ::= 'yield' expr NEWLINE
 
 if_stmt           ::= 'if' expr ':' INDENT block DEDENT
                       ('else' ':' INDENT block DEDENT)?
-                      # 'elif' chaining PLANNED(45q); 'while' loops PLANNED(45k)
+                      # 'elif' chaining PLANNED(45q); 'while' loops PLANNED(45k);
+                      # `match` covers multi-way branching today
 
 for_stmt          ::= 'for' IDENT 'in' expr ':' INDENT block DEDENT
 
@@ -333,7 +334,7 @@ primary_expr      ::= literal
                     | list_literal
                     | map_literal
                     | struct_literal                       # PLANNED(45n)
-                    | match_expr                           # PLANNED(45i)
+                    | match_expr
                     | retry_expr
 
 literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
@@ -349,18 +350,26 @@ struct_literal    ::= IDENT '{' field_init (',' field_init)* '}'     # PLANNED(4
 field_init        ::= IDENT (':' expr)?                              # PLANNED(45n)
                     | '..' expr             # spread / update
 
-match_expr        ::= 'match' expr ':' INDENT match_arm+ DEDENT      # PLANNED(45i)
-match_arm         ::= pattern ('if' expr)? '->' expr NEWLINE         # PLANNED(45i)
+# `match` is exhaustiveness-checked: sum scrutinees must cover every
+# variant irrefutably (or carry a catch-all), Option needs Some+None,
+# Result needs Ok+Err, Bool needs true+false, and every other type
+# needs a catch-all. Guarded arms never count toward coverage. A bare
+# IDENT pattern is a unit-variant test when the name resolves to a
+# variant (or None), otherwise it BINDS the scrutinee. `x @ pattern`
+# binds and narrows.
+match_expr        ::= 'match' expr ':' INDENT match_arm+ DEDENT
+match_arm         ::= pattern ('if' expr)? '->' expr NEWLINE
 
-pattern           ::= literal_pattern                                # PLANNED(45i)
-                    | IDENT                                  # binding
-                    | IDENT '(' pattern (',' pattern)* ')'   # sum-type variant
-                    | IDENT '{' field_pattern (',' field_pattern)* (',' '..')? '}'
+pattern           ::= literal_pattern
                     | '_'                                    # wildcard
+                    | IDENT                                  # binding or unit variant
+                    | IDENT '@' pattern                      # bind + narrow
+                    | IDENT '(' pattern (',' pattern)* ')'   # variant / Some / Ok / Err
+                    | IDENT '{' field_pattern (',' field_pattern)* (',' '..')? '}'
 
-literal_pattern   ::= literal                                        # PLANNED(45i)
+literal_pattern   ::= literal | '-' INT | '-' FLOAT
 
-field_pattern     ::= IDENT (':' pattern)?                           # PLANNED(45i)
+field_pattern     ::= IDENT (':' pattern)?      # bare field name binds it
 
 retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
                       'backoff' ('linear' | 'exponential') INT    # base delay in ms; backoff is mandatory

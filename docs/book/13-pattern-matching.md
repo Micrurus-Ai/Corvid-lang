@@ -1,109 +1,107 @@
 # Pattern matching
 
-> **Planned — this entire chapter describes designed syntax that is
-> not yet implemented.** User-declared sum types land in slice 45h
-> and the `match` form + patterns + destructuring land in slice 45i
-> of the Language completeness track (see `ROADMAP.md`). Until those
-> ship, this chapter is the design document for that work; the
-> section at the bottom shows what to use today.
+Every `corvid`-tagged block compiles through the real driver in CI;
+the deliberately-failing block is pinned to keep failing.
 
-## `match` form (Planned — 45i)
+## `match` form
 
-```corvid-planned
-match value:
-    Pattern1 -> expr1
-    Pattern2 -> expr2
-    _        -> default
+`match` is an expression: arms are `pattern -> expr`, tried in
+order. It is **exhaustiveness-checked** — the compiler refuses a sum
+match that doesn't cover every variant (or carry a catch-all).
+
+```corvid
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String, code: Int)
+
+agent describe(s: Status) -> String:
+    return match s:
+        Pending -> "waiting"
+        Approved(who) -> "approved by " + who
+        Denied(reason, code) -> "denied: " + reason + " #" + code.to_string()
 ```
 
-`match` is exhaustive — the compiler refuses to emit if a sum-type
-match doesn't cover every variant or have a wildcard.
+## Patterns
 
-## Patterns (Planned — 45i)
+```corvid
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String, code: Int)
 
-```corvid-planned
-# literal
-match n:
-    0     -> "zero"
-    1     -> "one"
-    _     -> "many"
+type Claim:
+    urgent: Bool
+    amount: Float
 
-# record destructure
-match decision:
-    Decision { refund: true, amount, .. }   -> "refund approved"
-    Decision { refund: false, reason, .. }  -> "denied: " + reason
+agent tour(n: Int, c: Claim, o: Option<Int>, s: Status) -> String:
+    # literal arms + guards + wildcard
+    size = match n:
+        0 -> "zero"
+        x if x > 100 -> "big"
+        _ -> "small"
 
-# sum type (declared per slice 45h)
-match status:
-    Pending          -> "waiting"
-    Approved(who)    -> "by " + who
-    Denied(reason)   -> reason
+    # record destructure: literal fields, shorthand binding, `..` rest
+    claim = match c:
+        Claim { urgent: true, amount } -> "urgent " + amount.to_string()
+        Claim { .. } -> "routine"
 
-# Option / Result (just sum types underneath)
-match find(xs, n):
-    Some(x) -> "got one"
-    None    -> "no match"
+    # Option / Result are just sum types underneath
+    count = match o:
+        Some(x) -> x
+        None -> 0
 
-# binding the matched value
-match status:
-    s @ Approved(_) -> log(s)
-    other           -> log(other)
+    # binding the matched value with `@`
+    kind = match s:
+        v @ Approved(_) -> "an approval"
+        other -> "something else"
 
-# guard
-match x:
-    n if n > 100 -> "big"
-    n if n > 10  -> "medium"
-    _            -> "small"
+    return size + claim + count.to_string() + kind
 ```
 
-## Destructuring bindings and parameters (Planned — 45i)
+A bare name in a pattern is a **unit-variant test** when it resolves
+to a variant (`Pending`), and a **binding** otherwise (`other`).
+Guarded arms never count toward exhaustiveness — a guard can fail.
 
-Destructuring binds without a keyword, matching the shipped
-assignment surface (45a decided against a `let` keyword):
+## Exhaustiveness
+
+This block is compiled in CI and pinned to KEEP failing:
+
+```corvid-error
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String)
+
+agent main(s: Status) -> String:
+    return match s:
+        Pending -> "waiting"
+        Approved(who) -> who
+```
+
+```text
+error: non-exhaustive match: missing variant(s) `Denied`
+    Help: add the missing arm(s), or a final `_ -> ...` catch-all
+```
+
+`Option` needs `Some(_)` + `None`; `Result` needs `Ok(_)` + `Err(_)`;
+`Bool` needs `true` + `false`; every other scrutinee type needs a
+catch-all arm (`_` or a binding).
+
+## Destructuring bindings and parameters (Planned — with 45n)
+
+Keyword-free destructuring in statement position shares the
+`Type { ... }` surface with 45n's named struct literals and ships
+alongside them:
 
 ```corvid-planned
 Decision { refund, amount, .. } = compute_decision(ticket)
-
-fn handle(Decision { refund, amount, reason }: Decision) -> String:
-    ...
 ```
 
-## Exhaustiveness (Planned — 45i)
+## What this replaced
 
-```corvid-planned
-match status:
-    Pending       -> "waiting"
-    Approved(who) -> "by " + who
-    # error: missing variant `Denied`
-```
-
-Add the missing arm or a `_ -> ...` catch-all.
-
-## What ships today
-
-Until `match` lands, the shipped consumption story is postfix `?`
-propagation plus `if`/`else` branching. `?` unwraps an `Ok`/`Some`
-or propagates the `Err`/`None` to a caller whose return type carries
-it:
-
-```corvid
-type Decision:
-    refund: Bool
-    amount: Float
-    reason: String
-
-agent compute_decision(amount: Float) -> Result<Decision, String>:
-    if amount > 100.0:
-        return Err("above the auto-approve limit")
-    return Ok(Decision(true, amount, "policy match"))
-
-agent handle(amount: Float) -> Result<String, String>:
-    decision = compute_decision(amount)?
-    if decision.refund:
-        return Ok("refund approved: " + decision.reason)
-    return Ok("denied: " + decision.reason)
-```
-
-Branching on which *error* occurred (rather than just propagating
-it) and defaulting a `None` at the point of use both need `match` /
-`unwrap_or` — that's exactly the gap slices 45i and 45l close.
+Until this slice, the shipped consumption story for Option/Result
+was `?` propagation only — an `Err` could be forwarded but never
+inspected. `match` closes that gap: branching on WHICH error
+occurred, defaulting a `None` at the point of use, and modelling
+state machines over sum types are all first-class now.

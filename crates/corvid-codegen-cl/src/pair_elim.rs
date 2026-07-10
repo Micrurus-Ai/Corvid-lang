@@ -220,6 +220,19 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             .chain(values)
             .map(|e| count_local_mentions_expr(e, local_id))
             .sum::<usize>(),
+        IrExprKind::Match { scrutinee, arms } => {
+            count_local_mentions_expr(scrutinee, local_id)
+                + arms
+                    .iter()
+                    .map(|arm| {
+                        arm.guard
+                            .as_ref()
+                            .map(|g| count_local_mentions_expr(g, local_id))
+                            .unwrap_or(0)
+                            + count_local_mentions_expr(&arm.body, local_id)
+                    })
+                    .sum::<usize>()
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             count_local_mentions_expr(receiver, local_id)
                 + args
@@ -290,6 +303,15 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_observes_refcount(e, local_id)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_observes_refcount(scrutinee, local_id)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_observes_refcount(g, local_id))
+                        || expr_observes_refcount(&arm.body, local_id)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_observes_refcount(receiver, local_id)
                 || args.iter().any(|a| expr_observes_refcount(a, local_id))

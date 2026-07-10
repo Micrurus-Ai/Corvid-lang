@@ -95,6 +95,11 @@ impl<'a> Checker<'a> {
                 span,
             } => self.check_binop(*op, left, right, *span),
             Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand),
+            Expr::Match {
+                scrutinee,
+                arms,
+                span,
+            } => self.check_match(scrutinee, arms, *span, expected),
             Expr::MapLiteral { entries, span } => {
                 let mut key_ty = Type::Unknown;
                 let mut val_ty = Type::Unknown;

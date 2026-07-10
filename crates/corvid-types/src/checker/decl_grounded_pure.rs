@@ -127,6 +127,17 @@ impl<'a> Checker<'a> {
                 self.walk_grounded_pure_expr(agent, right);
             }
             Expr::UnOp { operand, .. } => self.walk_grounded_pure_expr(agent, operand),
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.walk_grounded_pure_expr(agent, scrutinee);
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.walk_grounded_pure_expr(agent, g);
+                    }
+                    self.walk_grounded_pure_expr(agent, &arm.body);
+                }
+            }
             Expr::MapLiteral { entries, .. } => {
                 for (k, v) in entries {
                     self.walk_grounded_pure_expr(agent, k);

@@ -294,6 +294,15 @@ fn expr_consumes_target(
             .iter()
             .chain(values)
             .any(|e| expr_consumes_target(e, target, sigs)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_consumes_target(scrutinee, target, sigs)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_consumes_target(g, target, sigs))
+                        || expr_consumes_target(&arm.body, target, sigs)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -384,6 +393,15 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_references(e, target)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_references(scrutinee, target)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_references(g, target))
+                        || expr_references(&arm.body, target)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_references(receiver, target) || args.iter().any(|a| expr_references(a, target))
         }

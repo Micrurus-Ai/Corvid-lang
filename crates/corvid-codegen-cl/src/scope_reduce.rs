@@ -210,6 +210,15 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_mentions_local(e, local_id)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_mentions_local(scrutinee, local_id)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_mentions_local(g, local_id))
+                        || expr_mentions_local(&arm.body, local_id)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, local_id)
                 || args.iter().any(|a| expr_mentions_local(a, local_id))
@@ -293,6 +302,15 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
         // 45c table only admits effect-free methods).
         IrExprKind::MapLiteral { keys, values } => {
             keys.iter().chain(values).all(expr_is_effect_free)
+        }
+        // A match is effect-free iff every part is; pattern binding
+        // writes are locals, not shared-state effects.
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_is_effect_free(scrutinee)
+                && arms.iter().all(|arm| {
+                    arm.guard.as_ref().map(expr_is_effect_free).unwrap_or(true)
+                        && expr_is_effect_free(&arm.body)
+                })
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_is_effect_free(receiver) && args.iter().all(expr_is_effect_free)

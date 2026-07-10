@@ -45,7 +45,7 @@ use crate::step::{self, ConfidenceGateStep, StepAction, StepController, StepEven
 use crate::value::{value_confidence, BoxedValue, ListValue, StreamChunk, StreamSender, Value};
 use async_recursion::async_recursion;
 use corvid_ast::{BinaryOp, Span};
-use corvid_ir::{
+use corvid_ir::{IrPattern, 
     IrAgent, IrCallKind, IrExpr, IrExprKind, IrFile, IrFixture, IrMock, IrParam, IrPrompt, IrTool,
     IrType,
 };
@@ -522,6 +522,55 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, true)?))
             }
 
+            // `match` (45i): evaluate the scrutinee once, then try
+            // each arm in order. Pattern bindings write into the flat
+            // function scope (Python-style); a failed guard leaves
+            // its bindings set, matching the flat-scope model. The
+            // checker's exhaustiveness pass makes the no-arm trap
+            // unreachable except through guards.
+            IrExprKind::Match { scrutinee, arms } => {
+                let value = match self.eval_expr(scrutinee).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                };
+                for arm in arms {
+                    let mut bindings: Vec<(corvid_resolve::LocalId, String, Value)> = Vec::new();
+                    if !pattern_matches(&arm.pattern, &value, &mut bindings) {
+                        continue;
+                    }
+                    for (local_id, name, v) in bindings {
+                        self.env.bind(local_id, v);
+                        self.local_names.insert(local_id, name);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        let g = match self.eval_expr(guard).await?.into_value() {
+                            Ok(v) => v,
+                            Err(v) => return Ok(ExprFlow::Propagate(v)),
+                        };
+                        match g {
+                            Value::Bool(true) => {}
+                            Value::Bool(false) => continue,
+                            other => {
+                                return Err(InterpError::new(
+                                    InterpErrorKind::TypeMismatch {
+                                        expected: "Bool".into(),
+                                        got: other.type_name(),
+                                    },
+                                    guard.span,
+                                ))
+                            }
+                        }
+                    }
+                    return self.eval_expr(&arm.body).await;
+                }
+                Err(InterpError::new(
+                    InterpErrorKind::DispatchFailed(
+                        "no match arm matched the scrutinee (guards excluded every arm)"
+                            .to_string(),
+                    ),
+                    expr.span,
+                ))
+            }
             IrExprKind::MapLiteral { keys, values } => {
                 let mut entries = Vec::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values) {
@@ -1826,6 +1875,94 @@ fn dispatch_typed_json_decoder(
             Ok(Value::ResultErr(BoxedValue::new(Value::String(Arc::from(
                 format!("JSON shape mismatch in `{callee_name}`: {err}").as_str(),
             )))))
+        }
+    }
+}
+
+
+/// Try to match a lowered pattern against a value (slice 45i).
+/// Collects bindings without touching the environment so a failed
+/// sibling subpattern can't leave partial state; the caller applies
+/// them on success.
+fn pattern_matches(
+    pattern: &IrPattern,
+    value: &Value,
+    bindings: &mut Vec<(corvid_resolve::LocalId, String, Value)>,
+) -> bool {
+    match pattern {
+        IrPattern::Wildcard => true,
+        IrPattern::Literal(lit) => {
+            let lit_v = eval_literal(lit);
+            lit_v == *value
+        }
+        IrPattern::Bind { local_id, name } => {
+            bindings.push((*local_id, name.clone(), value.clone()));
+            true
+        }
+        IrPattern::At {
+            local_id,
+            name,
+            inner,
+        } => {
+            let checkpoint = bindings.len();
+            bindings.push((*local_id, name.clone(), value.clone()));
+            if pattern_matches(inner, value, bindings) {
+                true
+            } else {
+                bindings.truncate(checkpoint);
+                false
+            }
+        }
+        IrPattern::Variant {
+            owner,
+            variant_index,
+            args,
+            ..
+        } => {
+            let Value::Enum(e) = value else { return false };
+            if e.type_id() != *owner || e.variant_index() != *variant_index {
+                return false;
+            }
+            let fields = e.fields_cloned();
+            if args.len() != fields.len() {
+                return false;
+            }
+            let checkpoint = bindings.len();
+            for (p, v) in args.iter().zip(fields.iter()) {
+                if !pattern_matches(p, v, bindings) {
+                    bindings.truncate(checkpoint);
+                    return false;
+                }
+            }
+            true
+        }
+        IrPattern::Some_(inner) => match value {
+            Value::OptionSome(v) => pattern_matches(inner, &v.get(), bindings),
+            _ => false,
+        },
+        IrPattern::None_ => matches!(value, Value::OptionNone),
+        IrPattern::Ok_(inner) => match value {
+            Value::ResultOk(v) => pattern_matches(inner, &v.get(), bindings),
+            _ => false,
+        },
+        IrPattern::Err_(inner) => match value {
+            Value::ResultErr(v) => pattern_matches(inner, &v.get(), bindings),
+            _ => false,
+        },
+        IrPattern::Record { fields } => {
+            let Value::Struct(sv) = value else { return false };
+            let checkpoint = bindings.len();
+            for (fname, sub) in fields {
+                let Some(fv) = sv.get_field(fname) else {
+                    bindings.truncate(checkpoint);
+                    return false;
+                };
+                if !pattern_matches(sub, &fv, bindings) {
+                    bindings.truncate(checkpoint);
+                    return false;
+                }
+            }
+            true
         }
     }
 }

@@ -932,6 +932,48 @@ and 45i closes it plus B6. Next per track order: 45i-match-expression.
 
 ---
 
+## 2026-07-10 - 45i closed: match — the last core-language blocker falls
+
+The largest single slice of the track. Book ch 13 — 100% fiction
+five days ago — is fully compiling documentation today.
+
+Shipped: `match` as an EXPRESSION with the full pattern grammar
+(literals incl. negatives, `_`, bindings, `x @ pat`, variant
+patterns with recursive subpatterns incl. Some/Ok/Err/None, record
+patterns with literal fields + shorthand + `..`, `if` guards) and
+COMPILER-CHECKED EXHAUSTIVENESS (sums covered irrefutably with the
+error NAMING missing variants; Option/Result/Bool enumerated;
+guarded arms never count). Arm types unify with Int→Float widening.
+
+Design notes: bare-name disambiguation lives in the RESOLVER
+(`Pending` = variant test iff it resolves to a variant, else
+binding — no sigils or case conventions); new
+`block_expr_terminated` parser flag lets `x = match s:` work
+mid-block (arm block's DEDENT terminates the statement; credit
+cleared by any bump); transactional pattern bindings
+(checkpoint/truncate) applied before guards run; nested
+exhaustiveness deliberately conservative in v1 (documented with
+the `Err(_)` idiom); cost analysis over-approximates so `@budget`
+stays sound.
+
+The probe program (describe/classify/unwrap_or_zero/settle/decide/
+tag) returned "MATCH WORKS" — the one probe fix along the way was
+the exhaustiveness checker being RIGHT about two literal-field
+record arms not composing.
+
+**Audit blockers B1 and B6 are CLOSED. Every core-language blocker
+from the gap audit is now shipped: B1 match, B2 sums, B3 Map, B4
+conversions, B5 strings/lists, B6 Option/Result inspection.**
+
+Validation: 274 types + 216 syntax + 109 vm + 9 e2e + 3 book-guard
+over 26 files; corpus verify exits 1 only on the two deliberate
+fixtures.
+
+Next per track order: 45j-lambdas (then map/filter land on the 45c
+table), 45k-while, 45l Option/Result method shorthands.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

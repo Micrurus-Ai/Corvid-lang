@@ -353,6 +353,15 @@ fn visit_expr_types(
                 visit_expr_types(e, seen, order, visit);
             }
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            visit_expr_types(scrutinee, seen, order, visit);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    visit_expr_types(g, seen, order, visit);
+                }
+                visit_expr_types(&arm.body, seen, order, visit);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);
             for a in args {

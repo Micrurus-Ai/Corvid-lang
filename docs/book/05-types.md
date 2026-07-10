@@ -220,14 +220,20 @@ agent double_positive(xs: List<Int>) -> Option<Int>:
     return Some(x * 2)
 ```
 
-> **Planned — `match` consumption lands in slice 45i and
-> `unwrap_or` / `is_some` in slice 45l:**
+`match` consumes an Option exhaustively — defaulting at the point of
+use no longer requires propagation:
+
+```corvid
+agent count_or_zero(o: Option<Int>) -> Int:
+    return match o:
+        Some(x) -> x
+        None -> 0
+```
+
+> **Planned — the `unwrap_or` / `is_some` method shorthands land in
+> slice 45l:**
 
 ```corvid-planned
-match find_positive(xs):
-    Some(x) -> "found"
-    None    -> "not found"
-
 x = find_positive(xs).unwrap_or(0)
 ```
 
@@ -320,14 +326,18 @@ variant lines is a parse error. Variant names are file-scope
 constructors, so two sum types cannot share a variant name (v1
 limitation, diagnosed as a duplicate declaration).
 
-> **Planned — `match` over variants lands in slice 45i** (until
-> then, sum values compare whole with `==`):
+`match` consumes variants with compiler-checked exhaustiveness (see
+**[Pattern matching](/docs/pattern-matching)**):
 
-```corvid-planned
-match status:
-    Pending           -> "waiting"
-    Approved(who)     -> "approved by " + who
-    Denied(reason, c) -> "denied: " + reason
+```corvid
+type Verdict:
+    | Waiting
+    | Cleared(officer: String)
+
+agent report(v: Verdict) -> String:
+    return match v:
+        Waiting -> "waiting"
+        Cleared(who) -> "cleared by " + who
 ```
 
 ## Generics

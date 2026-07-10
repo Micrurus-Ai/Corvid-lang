@@ -2,6 +2,10 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeErrorKind {
+    /// A `match` doesn't cover every case of its scrutinee
+    /// (slice 45i).
+    NonExhaustiveMatch { missing: String },
+
     /// The target of a place assignment (`x.field = v`, `xs[i] = v`,
     /// compound `+=`) is not assignable — e.g. its root is not a
     /// local variable (slice 45b).
@@ -345,6 +349,9 @@ pub enum TypeErrorKind {
 impl TypeErrorKind {
     pub fn message(&self) -> String {
         match self {
+            Self::NonExhaustiveMatch { missing } => {
+                format!("non-exhaustive match: missing {missing}")
+            }
             Self::InvalidAssignTarget { reason } => {
                 format!("invalid assignment target: {reason}")
             }
@@ -670,6 +677,9 @@ impl TypeErrorKind {
 
     pub fn hint(&self) -> Option<String> {
         match self {
+            Self::NonExhaustiveMatch { .. } => Some(
+                "add the missing arm(s), or a final `_ -> ...` catch-all".into(),
+            ),
             Self::InvalidAssignTarget { .. } => Some(
                 "assign through a path rooted at a local variable, e.g. `x.field = v` or `xs[i] = v`".into(),
             ),

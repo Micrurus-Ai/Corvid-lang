@@ -34,6 +34,10 @@ pub(super) fn lower_expr(
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
     match &expr.kind {
+        IrExprKind::Match { .. } => Err(CodegenError::not_supported(
+            "match is interpreter-only in 45i",
+            expr.span,
+        )),
         IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
             "Map<K, V> is interpreter-only in 45g",
             expr.span,

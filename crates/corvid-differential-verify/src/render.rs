@@ -467,6 +467,12 @@ fn render_expr(expr: &Expr) -> String {
             "[{}]",
             items.iter().map(render_expr).collect::<Vec<_>>().join(", ")
         ),
+        Expr::Match { .. } => {
+            // Differential rewrite passes never synthesize or mutate
+            // match expressions; a placeholder keeps the renderer
+            // total (the verifier skips programs containing match).
+            "<match>".to_string()
+        }
         Expr::MapLiteral { entries, .. } => format!(
             "{{{}}}",
             entries

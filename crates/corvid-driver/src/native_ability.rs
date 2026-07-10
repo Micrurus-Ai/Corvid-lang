@@ -241,6 +241,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         // Map is interpreter-only in 45g; a MapLiteral anywhere routes
         // the program to the interpreter tier.
         IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        // match is interpreter-only in 45i.
+        IrExprKind::Match { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

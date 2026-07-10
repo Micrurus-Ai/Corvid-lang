@@ -56,35 +56,59 @@ agent robust(id: String) -> Result<String, String>:
 
 ## Branching on errors
 
-> **Planned.** Inspecting WHICH error occurred at the point of use
-> needs `match` (slice 45i) or the `Result` helper methods
-> `is_ok` / `unwrap_or` / `map_err` (slice 45l). Today an `Err` can
-> be propagated (`?`), retried (`try … retry`), or compared whole
-> (`==`) — it cannot be destructured. This is a known blocker the
-> Language completeness track closes.
+`match` destructures a Result — branching on WHICH error occurred
+is first-class (compiled in CI):
+
+```corvid
+agent check_amount(amount: Float) -> Result<Float, String>:
+    if amount > 100.0:
+        return Err("over limit")
+    return Ok(amount)
+
+agent describe(amount: Float) -> String:
+    return match check_amount(amount):
+        Ok(v) -> "approved: " + v.to_string()
+        Err(msg) -> "rejected: " + msg
+```
+
+> **Planned — the `unwrap_or` / `is_ok` / `map_err` method
+> shorthands land in slice 45l:**
 
 ```corvid-planned
-match fetch_user("u1"):
-    Ok(user)   -> render(user)
-    Err(other) -> render_error(other)
-
 x = parse_int(s).unwrap_or(0)
 ```
 
 ## Typed error enums
 
-> **Planned — slice 45h (sum types) + 45i (match).** Today `E` is a
-> `String` in practice (the stdlib convention), because a typed error
-> variant could be constructed but never inspected. Sum-type error
-> enums become useful the moment `match` lands:
+Sum types and `match` make typed error enums fully usable — declare
+the failure shapes, return them in `Err`, and branch on exactly
+which one occurred (compiled in CI). The stdlib's `Result<_,
+String>` convention predates these and migrates surface-by-surface.
 
-```corvid-planned
+```corvid
 type RefundError:
     | InvalidAmount(amount: Float)
     | CustomerNotFound(id: String)
-    | PaymentFailed(provider_message: String)
     | OverDailyLimit
+
+agent refund_check(amount: Float) -> Result<Float, RefundError>:
+    if amount <= 0.0:
+        return Err(InvalidAmount(amount))
+    if amount > 1000.0:
+        return Err(OverDailyLimit)
+    return Ok(amount)
+
+agent explain(amount: Float) -> String:
+    return match refund_check(amount):
+        Ok(v) -> "refunding " + v.to_string()
+        Err(InvalidAmount(a)) -> "invalid amount: " + a.to_string()
+        Err(CustomerNotFound(id)) -> "no such customer: " + id
+        Err(_) -> "over the daily limit"
 ```
+
+Exhaustiveness over NESTED patterns is conservative in v1: arms
+like `Err(InvalidAmount(_))` don't compose into full `Err`
+coverage, so a nested match ends with an `Err(_)` catch-all.
 
 ## Runtime traps
 

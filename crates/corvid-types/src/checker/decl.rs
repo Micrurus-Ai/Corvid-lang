@@ -225,6 +225,17 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(right, name, spans);
         }
         Expr::UnOp { operand, .. } => collect_ident_spans_by_name_in_expr(operand, name, spans),
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_ident_spans_by_name_in_expr(scrutinee, name, spans);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_ident_spans_by_name_in_expr(g, name, spans);
+                }
+                collect_ident_spans_by_name_in_expr(&arm.body, name, spans);
+            }
+        }
         Expr::MapLiteral { entries, .. } => {
             for (k, v) in entries {
                 collect_ident_spans_by_name_in_expr(k, name, spans);

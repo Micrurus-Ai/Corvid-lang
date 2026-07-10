@@ -405,6 +405,15 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 out.extend(collect_reads(e, false));
             }
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            out.extend(collect_reads(scrutinee, false));
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    out.extend(collect_reads(g, false));
+                }
+                out.extend(collect_reads(&arm.body, false));
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             out.extend(collect_reads(receiver, false));
             for a in args {

@@ -359,6 +359,17 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
                 rename_local_in_expr(v, resolved, target, fresh);
             }
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            rename_local_in_expr(scrutinee, resolved, target, fresh);
+            for arm in arms {
+                if let Some(g) = &mut arm.guard {
+                    rename_local_in_expr(g, resolved, target, fresh);
+                }
+                rename_local_in_expr(&mut arm.body, resolved, target, fresh);
+            }
+        }
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
         Expr::TryRetry { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
         Expr::Replay {
@@ -740,6 +751,17 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
             .any(|(k, v)| {
                 expr_mentions_local(k, resolved, local) || expr_mentions_local(v, resolved, local)
             }),
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            expr_mentions_local(scrutinee, resolved, local)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_mentions_local(g, resolved, local))
+                        || expr_mentions_local(&arm.body, resolved, local)
+                })
+        }
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
         Expr::TryRetry { body, .. } => expr_mentions_local(body, resolved, local),
         Expr::Replay {
@@ -955,6 +977,24 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             }
             false
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            if fold_constants_in_expr(scrutinee) {
+                return true;
+            }
+            for arm in arms {
+                if let Some(g) = &mut arm.guard {
+                    if fold_constants_in_expr(g) {
+                        return true;
+                    }
+                }
+                if fold_constants_in_expr(&mut arm.body) {
+                    return true;
+                }
+            }
+            false
+        }
         Expr::List { items, .. } => {
             for item in items {
                 if fold_constants_in_expr(item) {
@@ -1054,6 +1094,9 @@ fn is_pure_expr(expr: &Expr) -> bool {
         Expr::MapLiteral { entries, .. } => entries
             .iter()
             .all(|(k, v)| is_pure_expr(k) && is_pure_expr(v)),
+        // Conservative: match introduces bindings; keep it out of
+        // pure-expression substitution.
+        Expr::Match { .. } => false,
         Expr::FieldAccess { target, .. } => is_pure_expr(target),
         Expr::Index { target, index, .. } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Call { .. }

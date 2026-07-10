@@ -554,6 +554,48 @@ pub enum IrStmt {
     },
 }
 
+/// One arm of a lowered `match` (slice 45i).
+#[derive(Debug, Clone)]
+pub struct IrMatchArm {
+    pub pattern: IrPattern,
+    pub guard: Option<IrExpr>,
+    pub body: IrExpr,
+    pub span: Span,
+}
+
+/// A lowered `match` pattern (slice 45i). Bindings carry resolved
+/// `LocalId`s; variant patterns carry the owning type's lowered
+/// `DefId` + variant index; builtin patterns cover Option/Result.
+#[derive(Debug, Clone)]
+pub enum IrPattern {
+    Wildcard,
+    Literal(IrLiteral),
+    Bind {
+        local_id: LocalId,
+        name: String,
+    },
+    At {
+        local_id: LocalId,
+        name: String,
+        inner: Box<IrPattern>,
+    },
+    Variant {
+        owner: DefId,
+        variant_index: u32,
+        variant_name: String,
+        args: Vec<IrPattern>,
+    },
+    Some_(Box<IrPattern>),
+    None_,
+    Ok_(Box<IrPattern>),
+    Err_(Box<IrPattern>),
+    Record {
+        /// (field name, subpattern). Shorthand fields lower to a
+        /// `Bind` subpattern.
+        fields: Vec<(String, IrPattern)>,
+    },
+}
+
 /// One segment of a place-assignment path (slice 45b).
 #[derive(Debug, Clone)]
 pub enum IrPathSeg {
@@ -638,6 +680,12 @@ pub enum IrExprKind {
     WrappingUnOp {
         op: UnaryOp,
         operand: Box<IrExpr>,
+    },
+
+    /// `match` expression (slice 45i).
+    Match {
+        scrutinee: Box<IrExpr>,
+        arms: Vec<IrMatchArm>,
     },
 
     /// Map literal (slice 45g): parallel key/value lowered exprs.

@@ -718,6 +718,15 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_mentions_local(e, target)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_mentions_local(scrutinee, target)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_mentions_local(g, target))
+                        || expr_mentions_local(&arm.body, target)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

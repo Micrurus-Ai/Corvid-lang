@@ -83,6 +83,17 @@ fn collect_expr_dependencies(expr: &Expr, out: &mut Vec<String>) {
                 collect_expr_dependencies(v, out);
             }
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_dependencies(scrutinee, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_expr_dependencies(g, out);
+                }
+                collect_expr_dependencies(&arm.body, out);
+            }
+        }
         Expr::List { items, .. } => {
             for item in items {
                 collect_expr_dependencies(item, out);

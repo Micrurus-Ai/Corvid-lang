@@ -230,6 +230,77 @@ agent main() -> String:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn match_expression_full_surface() {
+    // Pins 45i: variant destructuring, guards, Option/Result
+    // patterns, record patterns (literal + shorthand + ..), @
+    // bindings, wildcard, literal arms, arm-type unification.
+    let source = "
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String, code: Int)
+
+type Decision:
+    refund: Bool
+    amount: Float
+
+agent describe(s: Status) -> String:
+    return match s:
+        Pending -> \"waiting\"
+        Approved(who) -> \"approved by \" + who
+        Denied(reason, code) -> \"denied: \" + reason + \" #\" + code.to_string()
+
+agent classify(n: Int) -> String:
+    return match n:
+        0 -> \"zero\"
+        x if x > 100 -> \"big\"
+        _ -> \"small\"
+
+agent unwrap_or_zero(o: Option<Int>) -> Int:
+    return match o:
+        Some(x) -> x
+        None -> 0
+
+agent settle(r: Result<Float, String>) -> String:
+    return match r:
+        Ok(v) -> \"got \" + v.to_string()
+        Err(msg) -> \"failed: \" + msg
+
+agent decide(d: Decision) -> String:
+    return match d:
+        Decision { refund: true, amount } -> \"refund \" + amount.to_string()
+        Decision { .. } -> \"no refund\"
+
+agent tag(s: Status) -> String:
+    return match s:
+        v @ Approved(_) -> \"an approval\"
+        other -> \"something else\"
+
+agent main() -> String:
+    ok1 = describe(Approved(\"alice\")) == \"approved by alice\"
+    ok2 = describe(Denied(\"policy\", 7)) == \"denied: policy #7\"
+    ok3 = classify(0) == \"zero\" and classify(500) == \"big\" and classify(5) == \"small\"
+    ok4 = unwrap_or_zero(Some(42)) == 42 and unwrap_or_zero(None) == 0
+    ok5 = settle(Ok(2.5)) == \"got 2.5\" and settle(Err(\"no\")) == \"failed: no\"
+    ok6 = decide(Decision(true, 50.0)) == \"refund 50.0\"
+    ok7 = decide(Decision(false, 9.0)) == \"no refund\"
+    ok8 = tag(Approved(\"x\")) == \"an approval\" and tag(Pending) == \"something else\"
+    if ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 and ok8:
+        return \"ok\"
+    return \"FAILED\"
+";
+    let ir = compile_to_ir(source).expect("45i source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45i program must run");
+    match out {
+        Value::String(s) => assert_eq!(s.as_ref(), "ok", "a match check failed"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn to_int_truncated_traps_on_nan() {
     let source = "
 agent main() -> Int:

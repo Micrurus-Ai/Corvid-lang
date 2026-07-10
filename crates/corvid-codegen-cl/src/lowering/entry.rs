@@ -46,6 +46,13 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
         IrExprKind::MapLiteral { keys, values } => {
             keys.iter().chain(values).any(expr_uses_runtime)
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_uses_runtime(scrutinee)
+                || arms.iter().any(|arm| {
+                    arm.guard.as_ref().is_some_and(expr_uses_runtime)
+                        || expr_uses_runtime(&arm.body)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }

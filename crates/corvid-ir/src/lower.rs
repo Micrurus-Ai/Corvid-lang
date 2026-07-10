@@ -957,6 +957,20 @@ impl<'a> Lowerer<'a> {
                     IrExprKind::UnOp { op: *op, operand }
                 }
             }
+            Expr::Match {
+                scrutinee, arms, ..
+            } => IrExprKind::Match {
+                scrutinee: Box::new(self.lower_expr(scrutinee)),
+                arms: arms
+                    .iter()
+                    .map(|arm| IrMatchArm {
+                        pattern: self.lower_pattern(&arm.pattern),
+                        guard: arm.guard.as_ref().map(|g| self.lower_expr(g)),
+                        body: self.lower_expr(&arm.body),
+                        span: arm.span,
+                    })
+                    .collect(),
+            },
             Expr::MapLiteral { entries, .. } => IrExprKind::MapLiteral {
                 keys: entries.iter().map(|(k, _)| self.lower_expr(k)).collect(),
                 values: entries.iter().map(|(_, v)| self.lower_expr(v)).collect(),
@@ -1086,6 +1100,104 @@ impl<'a> Lowerer<'a> {
                 let _ = context; // reserved for future debug-assert
                 LocalId(u32::MAX)
             }
+        }
+    }
+
+    /// Lower one `match` pattern (slice 45i). The resolver already
+    /// disambiguated bare names (variant vs binding) via the
+    /// bindings table.
+    fn lower_pattern(&self, pattern: &corvid_ast::Pattern) -> IrPattern {
+        use corvid_ast::Pattern;
+        match pattern {
+            Pattern::Wildcard { .. } => IrPattern::Wildcard,
+            Pattern::Literal { value, .. } => IrPattern::Literal(match value {
+                corvid_ast::Literal::Int(v) => IrLiteral::Int(*v),
+                corvid_ast::Literal::Float(v) => IrLiteral::Float(*v),
+                corvid_ast::Literal::String(s) => IrLiteral::String(s.clone()),
+                corvid_ast::Literal::Bool(b) => IrLiteral::Bool(*b),
+                corvid_ast::Literal::Nothing => IrLiteral::Nothing,
+            }),
+            Pattern::Name { name, .. } => match self.bindings.get(&name.span) {
+                Some(Binding::Decl(def_id)) => {
+                    let (owner, idx) = self
+                        .variant_owners
+                        .get(def_id)
+                        .copied()
+                        .unwrap_or((DefId(u32::MAX), 0));
+                    IrPattern::Variant {
+                        owner: self.remap_def_id(owner),
+                        variant_index: idx,
+                        variant_name: name.name.clone(),
+                        args: Vec::new(),
+                    }
+                }
+                Some(Binding::BuiltIn(_)) => IrPattern::None_,
+                Some(Binding::Local(local_id)) => IrPattern::Bind {
+                    local_id: *local_id,
+                    name: name.name.clone(),
+                },
+                None => IrPattern::Wildcard,
+            },
+            Pattern::At { name, inner, .. } => {
+                let local_id = match self.bindings.get(&name.span) {
+                    Some(Binding::Local(id)) => *id,
+                    _ => LocalId(u32::MAX),
+                };
+                IrPattern::At {
+                    local_id,
+                    name: name.name.clone(),
+                    inner: Box::new(self.lower_pattern(inner)),
+                }
+            }
+            Pattern::Variant { name, args, .. } => {
+                let lowered_args: Vec<IrPattern> =
+                    args.iter().map(|a| self.lower_pattern(a)).collect();
+                match self.bindings.get(&name.span) {
+                    Some(Binding::Decl(def_id)) => {
+                        let (owner, idx) = self
+                            .variant_owners
+                            .get(def_id)
+                            .copied()
+                            .unwrap_or((DefId(u32::MAX), 0));
+                        IrPattern::Variant {
+                            owner: self.remap_def_id(owner),
+                            variant_index: idx,
+                            variant_name: name.name.clone(),
+                            args: lowered_args,
+                        }
+                    }
+                    Some(Binding::BuiltIn(b)) => {
+                        let first = Box::new(
+                            lowered_args.into_iter().next().unwrap_or(IrPattern::Wildcard),
+                        );
+                        match b {
+                            BuiltIn::Some => IrPattern::Some_(first),
+                            BuiltIn::Ok => IrPattern::Ok_(first),
+                            BuiltIn::Err => IrPattern::Err_(first),
+                            _ => IrPattern::Wildcard,
+                        }
+                    }
+                    _ => IrPattern::Wildcard,
+                }
+            }
+            Pattern::Record { fields, .. } => IrPattern::Record {
+                fields: fields
+                    .iter()
+                    .map(|fp| {
+                        let sub = match &fp.pattern {
+                            Some(p) => self.lower_pattern(p),
+                            None => match self.bindings.get(&fp.name.span) {
+                                Some(Binding::Local(id)) => IrPattern::Bind {
+                                    local_id: *id,
+                                    name: fp.name.name.clone(),
+                                },
+                                _ => IrPattern::Wildcard,
+                            },
+                        };
+                        (fp.name.name.clone(), sub)
+                    })
+                    .collect(),
+            },
         }
     }
 

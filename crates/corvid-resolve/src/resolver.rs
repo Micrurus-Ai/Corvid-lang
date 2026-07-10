@@ -801,6 +801,96 @@ impl Resolver {
         }
     }
 
+    /// Resolve one `match` pattern (slice 45i).
+    ///
+    /// The subtle case is `Pattern::Name`: a bare name that resolves
+    /// to a sum-type VARIANT (or the builtin `None`) is a variant
+    /// pattern — record the decl binding so the checker/lowerer see
+    /// it. Any other bare name BINDS the scrutinee: allocate a local
+    /// (reusing an existing same-name local, Python-style).
+    fn resolve_pattern(&mut self, pattern: &corvid_ast::Pattern) {
+        use corvid_ast::Pattern;
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+            Pattern::Name { name, .. } => {
+                if let Some(def_id) = self.symbols.lookup_def(&name.name) {
+                    if self.symbols.get(def_id).kind == DeclKind::Variant {
+                        self.bindings.insert(name.span, Binding::Decl(def_id));
+                        return;
+                    }
+                }
+                if name.name == "None" {
+                    self.bindings
+                        .insert(name.span, Binding::BuiltIn(crate::scope::BuiltIn::None));
+                    return;
+                }
+                self.bind_pattern_local(name);
+            }
+            Pattern::At { name, inner, .. } => {
+                self.bind_pattern_local(name);
+                self.resolve_pattern(inner);
+            }
+            Pattern::Variant { name, args, .. } => {
+                // Resolve the constructor name (variant / Some / Ok /
+                // Err); unknown names get the ordinary undefined-name
+                // diagnostic via resolve of a synthetic ident use.
+                if let Some(def_id) = self.symbols.lookup_def(&name.name) {
+                    self.bindings.insert(name.span, Binding::Decl(def_id));
+                } else if let Some(b) = self.lookup_builtin(&name.name) {
+                    self.bindings.insert(name.span, Binding::BuiltIn(b));
+                } else {
+                    self.errors.push(ResolveError {
+                        kind: ResolveErrorKind::UndefinedName(name.name.clone()),
+                        span: name.span,
+                    });
+                }
+                for arg in args {
+                    self.resolve_pattern(arg);
+                }
+            }
+            Pattern::Record { name, fields, .. } => {
+                if let Some(def_id) = self.symbols.lookup_def(&name.name) {
+                    self.bindings.insert(name.span, Binding::Decl(def_id));
+                } else {
+                    self.errors.push(ResolveError {
+                        kind: ResolveErrorKind::UndefinedName(name.name.clone()),
+                        span: name.span,
+                    });
+                }
+                for fp in fields {
+                    match &fp.pattern {
+                        Some(sub) => self.resolve_pattern(sub),
+                        // Shorthand `{ amount }` binds the field name.
+                        None => self.bind_pattern_local(&fp.name),
+                    }
+                }
+            }
+        }
+    }
+
+    fn bind_pattern_local(&mut self, name: &Ident) {
+        let id = match self.scopes.last().and_then(|s| s.lookup(&name.name)) {
+            Some(existing) => existing,
+            None => {
+                let fresh = self.fresh_local();
+                self.current_scope_mut().insert(&name.name, fresh);
+                fresh
+            }
+        };
+        self.bindings.insert(name.span, Binding::Local(id));
+    }
+
+    fn lookup_builtin(&self, name: &str) -> Option<crate::scope::BuiltIn> {
+        use crate::scope::BuiltIn;
+        Some(match name {
+            "Some" => BuiltIn::Some,
+            "None" => BuiltIn::None,
+            "Ok" => BuiltIn::Ok,
+            "Err" => BuiltIn::Err,
+            _ => return None,
+        })
+    }
+
     /// The action in an `approve Label(args...)` is descriptive — the
     /// top-level callee is a label, not a reference. The arguments are
     /// resolved normally.
@@ -842,6 +932,20 @@ impl Resolver {
                 for (k, v) in entries {
                     self.resolve_expr(k);
                     self.resolve_expr(v);
+                }
+            }
+            // `match` (45i): resolve the scrutinee, then each arm's
+            // pattern (introducing bindings), guard, and body.
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.resolve_expr(scrutinee);
+                for arm in arms {
+                    self.resolve_pattern(&arm.pattern);
+                    if let Some(g) = &arm.guard {
+                        self.resolve_expr(g);
+                    }
+                    self.resolve_expr(&arm.body);
                 }
             }
             Expr::List { items, .. } => {

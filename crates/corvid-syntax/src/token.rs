@@ -111,6 +111,9 @@ pub enum TokKind {
     KwContinue,
     KwPass,
 
+    /// `match` — pattern-matching expression (slice 45i).
+    KwMatch,
+
     // --- keywords: replay language primitive (Phase 21) ---
     /// `replay <trace>:` — opens a replay block that pattern-matches
     /// recorded trace events and dispatches to arm bodies.
@@ -244,6 +247,7 @@ impl TokKind {
             "continue" => TokKind::KwContinue,
             "pass" => TokKind::KwPass,
             "replay" => TokKind::KwReplay,
+            "match" => TokKind::KwMatch,
             "when" => TokKind::KwWhen,
             "true" => TokKind::KwTrue,
             "false" => TokKind::KwFalse,

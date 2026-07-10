@@ -306,6 +306,17 @@ fn collect_expr_deps(expr: &Expr, resolved: &Resolved, deps: &mut HashSet<DefId>
                 collect_expr_deps(v, resolved, deps);
             }
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_deps(scrutinee, resolved, deps);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_expr_deps(g, resolved, deps);
+                }
+                collect_expr_deps(&arm.body, resolved, deps);
+            }
+        }
         Expr::List { items, .. } => {
             for item in items {
                 collect_expr_deps(item, resolved, deps);

@@ -384,6 +384,15 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
                 scan_expr(e, max_id);
             }
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            scan_expr(scrutinee, max_id);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    scan_expr(g, max_id);
+                }
+                scan_expr(&arm.body, max_id);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
             for a in args {
@@ -469,6 +478,15 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_reads_local(e, target)),
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_reads_local(scrutinee, target)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_reads_local(g, target))
+                        || expr_reads_local(&arm.body, target)
+                })
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }

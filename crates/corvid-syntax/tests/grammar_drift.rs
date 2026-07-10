@@ -428,6 +428,28 @@ agent sum_demo() -> Bool:
     a = Approved("alice")
     return a == Pending
 
+type Claim:
+    urgent: Bool
+    amount: Float
+
+agent match_demo(s: Status, c: Claim, o: Option<Int>) -> String:
+    label = match s:
+        Pending -> "waiting"
+        v @ Approved(_) -> "approved"
+        Denied(reason, code) if code > 3 -> reason
+        Denied(reason, _) -> "minor: " + reason
+    claim = match c:
+        Claim { urgent: true, amount } -> amount.to_string()
+        Claim { .. } -> "routine"
+    n = match o:
+        Some(x) -> x
+        None -> 0
+    bucket = match n:
+        0 -> "zero"
+        -1 -> "negative one"
+        _ -> "other"
+    return label + claim + bucket
+
 agent map_demo() -> Int:
     m = {"a": 1, "b": 2}
     m["c"] = 3
@@ -570,6 +592,11 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("list_literal", "expressions"),
     ("map_literal", "statements"),
     ("field_list", "statements"),
+    ("match_expr", "statements"),
+    ("match_arm", "statements"),
+    ("pattern", "statements"),
+    ("literal_pattern", "statements"),
+    ("field_pattern", "statements"),
     ("map_entry", "statements"),
     ("retry_expr", "expressions"),
 ];

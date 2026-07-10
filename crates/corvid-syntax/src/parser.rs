@@ -96,6 +96,12 @@ struct Parser<'a> {
     /// Errors collected during statement/block parsing. Expression-level
     /// errors are fatal and returned via `Result`.
     errors: Vec<ParseError>,
+    /// Set when a block-shaped expression (`match ...: INDENT arms
+    /// DEDENT`) just closed — the enclosing statement's
+    /// `expect_newline` accepts the block end as its terminator.
+    /// Cleared by every `bump`, so the credit only survives when the
+    /// block expression IS the end of the statement.
+    block_expr_terminated: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -104,6 +110,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             errors: Vec::new(),
+        block_expr_terminated: false,
         }
     }
 
@@ -135,6 +142,7 @@ impl<'a> Parser<'a> {
     fn bump(&mut self) -> &'a Token {
         let tok = &self.tokens[self.pos];
         self.pos += 1;
+        self.block_expr_terminated = false;
         tok
     }
 
@@ -188,6 +196,13 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_newline(&mut self) -> Result<(), ParseError> {
+        if self.block_expr_terminated {
+            self.block_expr_terminated = false;
+            if matches!(self.peek(), TokKind::Newline) {
+                self.bump();
+            }
+            return Ok(());
+        }
         match self.peek() {
             TokKind::Newline => {
                 self.bump();
@@ -352,6 +367,7 @@ mod effect_row;
 mod expr;
 mod literals;
 mod prompt;
+mod match_expr;
 mod replay_expr;
 mod stmt;
 mod types;

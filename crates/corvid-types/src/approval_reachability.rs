@@ -249,6 +249,17 @@ impl<'a> ReachabilityPass<'a> {
                 self.check_expr(entrypoint, right, approvals, visiting);
             }
             Expr::UnOp { operand, .. } => self.check_expr(entrypoint, operand, approvals, visiting),
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.check_expr(entrypoint, scrutinee, approvals, visiting);
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.check_expr(entrypoint, g, approvals, visiting);
+                    }
+                    self.check_expr(entrypoint, &arm.body, approvals, visiting);
+                }
+            }
             Expr::MapLiteral { entries, .. } => {
                 for (k, v) in entries {
                     self.check_expr(entrypoint, k, approvals, visiting);

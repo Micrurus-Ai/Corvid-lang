@@ -687,6 +687,15 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
                 collect_called_agents_from_expr(e, stack);
             }
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            collect_called_agents_from_expr(scrutinee, stack);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_called_agents_from_expr(g, stack);
+                }
+                collect_called_agents_from_expr(&arm.body, stack);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_called_agents_from_expr(receiver, stack);
             for arg in args {
@@ -813,6 +822,15 @@ fn walk_ir_expr_for_prompt(
         IrExprKind::MapLiteral { keys, values } => {
             for e in keys.iter().chain(values) {
                 walk_ir_expr_for_prompt(e, prompt_map, found);
+            }
+        }
+        IrExprKind::Match { scrutinee, arms } => {
+            walk_ir_expr_for_prompt(scrutinee, prompt_map, found);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    walk_ir_expr_for_prompt(g, prompt_map, found);
+                }
+                walk_ir_expr_for_prompt(&arm.body, prompt_map, found);
             }
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {

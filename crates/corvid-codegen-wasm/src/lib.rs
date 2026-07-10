@@ -430,6 +430,16 @@ fn collect_expr_imports(
             }
             Ok(())
         }
+        IrExprKind::Match { scrutinee, arms } => {
+            collect_expr_imports(scrutinee, tools, prompts, plan, agent_name)?;
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_expr_imports(g, tools, prompts, plan, agent_name)?;
+                }
+                collect_expr_imports(&arm.body, tools, prompts, plan, agent_name)?;
+            }
+            Ok(())
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
             for arg in args {
@@ -895,6 +905,11 @@ fn emit_expr(
     string_pool: &StringPool,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
+        IrExprKind::Match { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "match is interpreter-only in 45i".to_string(),
+            ));
+        }
         IrExprKind::MapLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "Map<K, V> is interpreter-only in 45g".to_string(),

@@ -3904,6 +3904,75 @@ agent main() -> String:
     );
 }
 
+/// Slice 45i — exhaustiveness: a sum match missing a variant is a
+/// compile error naming the missing variant; adding a catch-all
+/// fixes it.
+#[test]
+fn match_exhaustiveness_over_sum_types() {
+    let missing = check(
+        "type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String)
+
+agent main(s: Status) -> String:
+    return match s:
+        Pending -> \"waiting\"
+        Approved(who) -> who
+",
+    );
+    assert!(
+        missing
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NonExhaustiveMatch { missing } if missing.contains("Denied"))),
+        "expected NonExhaustiveMatch naming Denied, got {:?}",
+        missing.errors
+    );
+    let full = check(
+        "type Status:
+    | Pending
+    | Approved(approver: String)
+
+agent main(s: Status) -> String:
+    return match s:
+        Pending -> \"waiting\"
+        Approved(who) -> who
+",
+    );
+    assert!(full.errors.is_empty(), "exhaustive match should pass, got {:?}", full.errors);
+}
+
+/// Slice 45i — Option/Result exhaustiveness + guarded arms never
+/// count toward coverage.
+#[test]
+fn match_option_result_and_guards() {
+    let ok = check(
+        "agent main(o: Option<Int>) -> Int:
+    return match o:
+        Some(x) if x > 0 -> x
+        Some(x) -> 0 - x
+        None -> 0
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+    let guarded_only = check(
+        "agent main(o: Option<Int>) -> Int:
+    return match o:
+        Some(x) if x > 0 -> x
+        None -> 0
+",
+    );
+    assert!(
+        guarded_only
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NonExhaustiveMatch { .. })),
+        "guarded Some must not count as coverage, got {:?}",
+        guarded_only.errors
+    );
+}
+
 /// Slice 45h — sum types: construction typechecks, the value's type
 /// is the owning sum type, and field types are enforced.
 #[test]

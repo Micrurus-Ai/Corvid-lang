@@ -300,6 +300,11 @@ impl Codegen {
 
     fn emit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
+            IrExprKind::Match { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"match is interpreter-only in 45i\"))",
+                );
+            }
             IrExprKind::MapLiteral { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",

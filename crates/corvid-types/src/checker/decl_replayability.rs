@@ -112,6 +112,17 @@ impl<'a> Checker<'a> {
                 self.walk_deterministic_expr(agent, right);
             }
             Expr::UnOp { operand, .. } => self.walk_deterministic_expr(agent, operand),
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.walk_deterministic_expr(agent, scrutinee);
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.walk_deterministic_expr(agent, g);
+                    }
+                    self.walk_deterministic_expr(agent, &arm.body);
+                }
+            }
             Expr::MapLiteral { entries, .. } => {
                 for (k, v) in entries {
                     self.walk_deterministic_expr(agent, k);
@@ -332,6 +343,17 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
             for (k, v) in entries {
                 collect_replayability_violations_in_expr(k, out);
                 collect_replayability_violations_in_expr(v, out);
+            }
+        }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_replayability_violations_in_expr(scrutinee, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_replayability_violations_in_expr(g, out);
+                }
+                collect_replayability_violations_in_expr(&arm.body, out);
             }
         }
         Expr::List { items, .. } => {

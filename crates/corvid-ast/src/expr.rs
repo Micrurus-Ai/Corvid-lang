@@ -52,6 +52,16 @@ pub enum Expr {
     /// List literal: `[1, 2, 3]`.
     List { items: Vec<Expr>, span: Span },
 
+    /// `match` expression (slice 45i): scrutinee + one or more
+    /// pattern arms. Exhaustiveness is checked by the typechecker
+    /// over sum-type variants, Option, Result, and Bool; other
+    /// scrutinee types require an irrefutable final arm.
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
+
     /// Map literal `{"a": 1, "b": 2}` (slice 45g). Entries are
     /// (key, value) expression pairs; empty `{}` is a valid empty
     /// map with element types inferred from context or Unknown.
@@ -99,6 +109,7 @@ impl Expr {
             | Expr::BinOp { span, .. }
             | Expr::UnOp { span, .. }
             | Expr::List { span, .. }
+            | Expr::Match { span, .. }
             | Expr::MapLiteral { span, .. }
             | Expr::TryPropagate { span, .. }
             | Expr::TryRetry { span, .. }
@@ -121,6 +132,72 @@ pub enum Literal {
     String(String),
     Bool(bool),
     Nothing,
+}
+
+/// One arm of a `match` expression (slice 45i).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+/// A `match` pattern (slice 45i).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Pattern {
+    /// `_` — matches anything, binds nothing.
+    Wildcard { span: Span },
+    /// Literal pattern: `0`, `"x"`, `true`, `-3`.
+    Literal { value: Literal, span: Span },
+    /// A bare name. The RESOLVER disambiguates: if it resolves to a
+    /// sum-type unit variant (or builtin `None`), it is a variant
+    /// pattern; otherwise it BINDS the scrutinee.
+    Name { name: Ident, span: Span },
+    /// `x @ pattern` — bind the whole value, then narrow.
+    At {
+        name: Ident,
+        inner: Box<Pattern>,
+        span: Span,
+    },
+    /// `Approved(p1, ...)` — sum variant with payload subpatterns;
+    /// also `Some(p)`, `Ok(p)`, `Err(p)`.
+    Variant {
+        name: Ident,
+        args: Vec<Pattern>,
+        span: Span,
+    },
+    /// `Decision { refund: true, amount, .. }` — record destructure.
+    /// A field without a subpattern is shorthand for binding the
+    /// field's name; `rest` is the `..` marker.
+    Record {
+        name: Ident,
+        fields: Vec<FieldPattern>,
+        rest: bool,
+        span: Span,
+    },
+}
+
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard { span }
+            | Pattern::Literal { span, .. }
+            | Pattern::Name { span, .. }
+            | Pattern::At { span, .. }
+            | Pattern::Variant { span, .. }
+            | Pattern::Record { span, .. } => *span,
+        }
+    }
+}
+
+/// One field inside a record pattern (slice 45i).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldPattern {
+    pub name: Ident,
+    /// `None` is the shorthand form: `{ amount }` binds `amount`.
+    pub pattern: Option<Pattern>,
+    pub span: Span,
 }
 
 /// Binary operators.
