@@ -300,6 +300,11 @@ impl Codegen {
 
     fn emit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
+            IrExprKind::BuiltinMethod { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"builtin methods are interpreter-only in 45c\"))",
+                );
+            }
             IrExprKind::Literal(lit) => self.emit_literal(lit),
             IrExprKind::Local { name, .. } => self.out.write(name),
             IrExprKind::Decl { name, .. } => self.out.write(name),

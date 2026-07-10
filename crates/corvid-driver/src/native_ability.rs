@@ -50,6 +50,9 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
+    /// Builtin methods on built-in receiver types (`String.length()`
+    /// and the 45d/45e/45f batches) are interpreter-only in 45c.
+    BuiltinMethodNotNative,
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -79,6 +82,9 @@ impl std::fmt::Display for NotNativeReason {
             }
             Self::HumanBoundaryNotNative => {
                 write!(f, "program uses `ask` or `choose` - human input boundaries are interpreter-only in this slice")
+            }
+            Self::BuiltinMethodNotNative => {
+                write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
@@ -231,6 +237,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         return Err(NotNativeReason::StreamLoweringNotImplemented);
     }
     match &expr.kind {
+        IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
             kind,

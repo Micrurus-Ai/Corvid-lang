@@ -424,6 +424,13 @@ fn collect_expr_imports(
     agent_name: &str,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
+            for arg in args {
+                collect_expr_imports(arg, tools, prompts, plan, agent_name)?;
+            }
+            Ok(())
+        }
         IrExprKind::Call {
             kind,
             args,
@@ -879,6 +886,13 @@ fn emit_expr(
     string_pool: &StringPool,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "builtin methods (String.length() and the 45d/45e/45f batches) are \
+                 interpreter-only in 45c"
+                    .to_string(),
+            ));
+        }
         IrExprKind::Literal(IrLiteral::Int(value)) => {
             function.instruction(&Instruction::I64Const(*value));
         }

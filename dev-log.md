@@ -600,6 +600,73 @@ conversions, Grounded unwraps).
 
 ---
 
+## 2026-07-10 - 45c closed: builtin-method dispatch machinery + String.length() pilot
+
+The enabling slice for the entire method surface. From here, adding
+a builtin method = one arm in the shared table + one interpreter arm
++ tests.
+
+### The design
+
+`corvid-types/src/builtin_methods.rs` — ONE table, three consumers:
+
+1. **Checker**: `check_method_call` consults
+   `builtin_method(&recv_ty, name)` before the struct-only
+   restriction; checks arity (E0201) + argument types; returns the
+   signature's result type.
+2. **Lowerer**: `try_builtin_method_call` re-derives the SAME lookup
+   from the receiver's checked type (the per-expression type
+   side-table) and lowers to `IrExprKind::BuiltinMethod { kind }` —
+   the shared table structurally prevents checker/lowerer drift.
+3. **Interpreter**: one match arm per `BuiltinMethodKind`.
+
+The table is a FUNCTION, not a static map — so future generic
+receivers (`List<T>.first() -> Option<T>`) compute their return
+types from the receiver's element type with zero machinery changes.
+
+Deliberate non-scope: Grounded receivers are NOT auto-unwrapped —
+`Grounded<String>.length()` stays an error until the method-call
+contagion rule is decided alongside the Grounded unwrap batch
+(44f addendum on 45c's ROADMAP entry).
+
+### The pilot: String.length()
+
+Counts Unicode scalar values (Python's `len(str)`), NOT UTF-8
+bytes. The e2e pin uses "héllo" — 5 scalars, 6 bytes — so a
+regression to byte counting fails CI. Live probe: 13 + 5 = 18 ✓,
+with the tier-picker printing the new `BuiltinMethodNotNative`
+fallback reason.
+
+### Diagnostics upgraded
+
+The old "methods currently work only on user-declared struct types.
+Built-in receiver methods are not implemented yet." message now
+names the table, what shipped, and the slice map:
+"no builtin method with this name (String.length() shipped in 45c;
+method batches land in 45d/45e/45f/45l), and user methods work on
+user-declared struct types via `extend`".
+
+### Ripple
+
+New `IrExprKind` variant = 15 exhaustive-match sites patched:
+interpreter execution, native_ability tier scan (new reason),
+codegen-cl emit (`not_supported`) + 8 analysis walkers (pure
+value-op semantics: effect-free, non-consuming borrows), codegen-py
+(loud raise), wasm (unsupported + import walker), corvid-abi
+walkers.
+
+### Validation
+
+263 types (3 new) + 216 syntax + 109 vm + 38 ir + 28 codegen-cl +
+3 book-guard + 1 e2e Unicode pin; corpus verify exits 1 only on the
+two deliberate fixtures. Book ch 04/05 notes flipped.
+
+Next per track order: 45d-string-methods (the first method batch —
+contains/split/to_upper/trim/starts_with/ends_with/replace/
+substring on the 45c table).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

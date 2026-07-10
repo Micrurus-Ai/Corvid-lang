@@ -695,13 +695,47 @@ impl<'a> Checker<'a> {
                 return (**inner).clone();
             }
         }
+        // Builtin-method table (slice 45c): methods on built-in
+        // receiver types resolve here — one shared table drives the
+        // checker, the lowerer, and the interpreter.
+        if let Some(sig) = crate::builtin_methods::builtin_method(&recv_ty, &method_name.name) {
+            if args.len() != sig.params.len() {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::ArityMismatch {
+                        callee: method_name.name.clone(),
+                        expected: sig.params.len(),
+                        got: args.len(),
+                    },
+                    span,
+                ));
+                for a in args {
+                    let _ = self.check_expr(a);
+                }
+                return sig.ret;
+            }
+            for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
+                let got = self.check_expr_as(arg, Some(param_ty));
+                if !got.is_assignable_to(param_ty) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::TypeMismatch {
+                            expected: param_ty.display_name(),
+                            got: got.display_name(),
+                            context: format!("argument to `{}`", method_name.name),
+                        },
+                        arg.span(),
+                    ));
+                }
+            }
+            return sig.ret;
+        }
+
         let recv_def_id = match recv_ty {
             Type::Struct(id) => id,
             other => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::NotCallable {
                         got: format!(
-                            "method `{}` on receiver of type `{}` — methods currently work only on user-declared struct types. Built-in receiver methods are not implemented yet.",
+                            "method `{}` on receiver of type `{}` — no builtin method with this name (String.length() shipped in 45c; method batches land in 45d/45e/45f/45l), and user methods work on user-declared struct types via `extend`",
                             method_name.name,
                             other.display_name()
                         ),

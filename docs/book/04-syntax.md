@@ -161,10 +161,12 @@ conventional (`+ - * / %`, checked). Boolean ops are `and`, `or`,
 error/none to the caller.
 
 Method-call syntax (`x.method()`) works on user-declared types via
-`extend` blocks.
+`extend` blocks and on built-in types via the builtin-method table
+(shipped in 45c with `s.length()`; assignment targets like
+`x.field = v` and compound `+=` shipped in 45b).
 
-> **Planned — methods on built-in types (`s.length()`,
-> `xs.append(…)`) land with slices 45c/45d/45f.**
+> **Planned — the string/list method batches (`s.split(…)`,
+> `xs.append(…)`) land with slices 45d/45f.**
 
 ## Effect rows in signatures
 

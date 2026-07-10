@@ -43,6 +43,9 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
 
 fn expr_uses_runtime(expr: &IrExpr) -> bool {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
+        }
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => false,
         IrExprKind::Call { kind, args, .. } => {
             let self_needs = matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. });

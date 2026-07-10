@@ -582,6 +582,16 @@ pub enum IrExprKind {
         args: Vec<IrExpr>,
     },
 
+    /// A builtin method on a built-in receiver type (slice 45c).
+    /// The kind comes from `corvid_types::BuiltinMethodKind` — the
+    /// shared table that also drives the checker; the interpreter
+    /// executes one arm per kind.
+    BuiltinMethod {
+        kind: corvid_types::BuiltinMethodKind,
+        receiver: Box<IrExpr>,
+        args: Vec<IrExpr>,
+    },
+
     FieldAccess {
         target: Box<IrExpr>,
         field: String,

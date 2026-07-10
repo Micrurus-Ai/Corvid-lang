@@ -8,6 +8,7 @@
 //! See `ARCHITECTURE.md` §5–§6.
 
 mod approval_reachability;
+pub mod builtin_methods;
 pub mod checker;
 pub mod config;
 pub mod determinism;
@@ -41,6 +42,7 @@ pub use law_check::{
     DEFAULT_SAMPLES,
 };
 pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_NAME};
+pub use builtin_methods::{builtin_method, BuiltinMethodKind, BuiltinMethodSig};
 pub use types::Type;
 
 #[cfg(test)]

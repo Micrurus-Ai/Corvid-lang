@@ -50,10 +50,18 @@ Concatenation with `+` requires both sides to be `String` — there is
 no implicit number-to-string coercion (explicit conversions are
 Planned, see Numbers below).
 
-> **Planned — string methods land in slice 45d:**
+`length()` counts Unicode scalar values (like Python's `len(str)`),
+not UTF-8 bytes:
+
+```corvid
+agent measure(name: String) -> Int:
+    return name.length()
+```
+
+> **Planned — the remaining string methods land in slice 45d (the
+> builtin-method machinery they ride on shipped in 45c):**
 
 ```corvid-planned
-s.length()                                # Int
 s.contains("ell")                         # Bool
 s.split(",")                              # List<String>
 s.to_upper()                              # String

@@ -682,6 +682,12 @@ fn collect_called_agents_from_block(
 
 fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve::DefId>) {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            collect_called_agents_from_expr(receiver, stack);
+            for arg in args {
+                collect_called_agents_from_expr(arg, stack);
+            }
+        }
         IrExprKind::Call { kind, args, .. } => {
             if let IrCallKind::Agent { def_id } = kind {
                 stack.push(*def_id);
@@ -799,6 +805,12 @@ fn walk_ir_expr_for_prompt(
         return;
     }
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            walk_ir_expr_for_prompt(receiver, prompt_map, found);
+            for arg in args {
+                walk_ir_expr_for_prompt(arg, prompt_map, found);
+            }
+        }
         IrExprKind::Call { kind, args, .. } => {
             if let IrCallKind::Prompt { def_id } = kind {
                 if let Some(prompt) = prompt_map.get(def_id) {

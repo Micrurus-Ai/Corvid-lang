@@ -1,0 +1,65 @@
+//! The builtin-method table (slice 45c) — the single source of truth
+//! for methods on built-in receiver types (`String`, `List<T>`,
+//! `Int`, `Float`, `Option<T>`, `Result<T,E>`, `Grounded<T>`, …).
+//!
+//! Three consumers share this table so a method exists exactly once:
+//!
+//! 1. The **checker** (`check_method_call`) looks up the signature,
+//!    checks arity + argument types, and returns the result type.
+//! 2. The **IR lowerer** re-derives the same lookup from the
+//!    receiver's checked type and lowers to
+//!    `IrExprKind::BuiltinMethod { kind, .. }`.
+//! 3. The **interpreter** executes on the `BuiltinMethodKind` enum —
+//!    one match arm per method.
+//!
+//! Adding a method = one arm in `builtin_method` + one interpreter
+//! arm + tests. The table is a FUNCTION rather than a static map so
+//! generic receivers work naturally (`List<T>.first() -> Option<T>`
+//! computes its return type from the receiver's element type).
+//!
+//! Method batches ship in dedicated slices: strings (45d),
+//! conversions (45e), lists (45f), Option/Result helpers (45l),
+//! `Grounded<T>` named unwraps (44f addendum). This slice ships the
+//! machinery plus one pilot: `String.length()`.
+//!
+//! Grounded receivers are NOT auto-unwrapped by this table in 45c —
+//! `Grounded<String>.length()` stays an error until the contagion
+//! rule for method calls is decided alongside the Grounded unwrap
+//! batch.
+
+use crate::types::Type;
+use serde::{Deserialize, Serialize};
+
+/// Stable identity of a builtin method — the contract between the
+/// checker, the lowerer, and the interpreter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuiltinMethodKind {
+    /// `String.length() -> Int` — the number of Unicode scalar
+    /// values (code points), matching Python's `len(str)`, not the
+    /// UTF-8 byte count.
+    StringLength,
+}
+
+/// A builtin method's checked signature for a CONCRETE receiver
+/// type. Parameter types are the declared types of the call's
+/// arguments (the receiver is not included).
+#[derive(Debug, Clone)]
+pub struct BuiltinMethodSig {
+    pub kind: BuiltinMethodKind,
+    pub params: Vec<Type>,
+    pub ret: Type,
+}
+
+/// Look up `receiver.name(...)` in the builtin-method table.
+/// Returns `None` when no builtin method matches — the caller falls
+/// through to extend-method dispatch or its existing diagnostics.
+pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    match (receiver, name) {
+        (Type::String, "length") => Some(BuiltinMethodSig {
+            kind: BuiltinMethodKind::StringLength,
+            params: Vec::new(),
+            ret: Type::Int,
+        }),
+        _ => None,
+    }
+}

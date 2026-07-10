@@ -379,6 +379,12 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
 
 fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            scan_expr(receiver, max_id);
+            for a in args {
+                scan_expr(a, max_id);
+            }
+        }
         IrExprKind::Local { local_id, .. } => {
             if local_id.0 > *max_id {
                 *max_id = local_id.0;
@@ -454,6 +460,9 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
 /// Used to decide whether a Return's expr forces a synthetic-Let hoist.
 fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
+        }
         IrExprKind::Local { local_id, .. } => *local_id == target,
         IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => false,
         IrExprKind::FieldAccess { target: t, .. } => expr_reads_local(t, target),

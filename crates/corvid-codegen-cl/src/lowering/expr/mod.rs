@@ -34,6 +34,10 @@ pub(super) fn lower_expr(
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
+            "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
+            expr.span,
+        )),
         IrExprKind::Literal(IrLiteral::Int(n)) => Ok(builder.ins().iconst(I64, *n)),
         IrExprKind::Literal(IrLiteral::Bool(b)) => {
             Ok(builder.ins().iconst(I8, if *b { 1 } else { 0 }))

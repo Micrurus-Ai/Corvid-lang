@@ -3809,6 +3809,61 @@ agent main() -> Float:
     );
 }
 
+/// Slice 45c — the builtin-method table's pilot: `String.length()`
+/// typechecks and returns Int.
+#[test]
+fn string_length_builtin_method_typechecks() {
+    let src = "\
+agent main() -> Int:
+    s = \"hello\"
+    return s.length()
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "String.length() should typecheck via the builtin table, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45c — a builtin method on the wrong receiver type still
+/// errors (the table returns None; the improved diagnostic names the
+/// table and the extend path).
+#[test]
+fn builtin_method_on_wrong_receiver_is_rejected() {
+    let src = "\
+agent main() -> Int:
+    n = 42
+    return n.length()
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
+        "expected NotCallable for Int.length(), got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45c — builtin methods arity-check like any call.
+#[test]
+fn builtin_method_arity_is_checked() {
+    let src = "\
+agent main() -> Int:
+    s = \"hi\"
+    return s.length(3)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::ArityMismatch { .. })),
+        "expected ArityMismatch for length(3), got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 45b — place assignment typechecks: field/index targets take
 /// values assignable to the slot's type; compound ops run the normal
 /// operator rules and the result must fit back into the slot.

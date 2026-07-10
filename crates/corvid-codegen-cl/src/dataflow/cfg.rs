@@ -400,6 +400,12 @@ fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
 
 fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            out.extend(collect_reads(receiver, false));
+            for a in args {
+                out.extend(collect_reads(a, false));
+            }
+        }
         IrExprKind::Local { local_id, .. } => {
             if is_refcounted(&expr.ty) {
                 out.push(LocalRead {

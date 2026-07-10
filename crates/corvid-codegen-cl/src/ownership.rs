@@ -288,6 +288,12 @@ fn expr_consumes_target(
     sigs: &HashMap<DefId, Vec<ParamBorrow>>,
 ) -> bool {
     match &expr.kind {
+        // Builtin methods borrow their receiver and args (pure value
+        // ops) — they never consume; recurse for nested consumers.
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            expr_consumes_target(receiver, target, sigs)
+                || args.iter().any(|a| expr_consumes_target(a, target, sigs))
+        }
         IrExprKind::Local { local_id, .. } => *local_id == target,
         IrExprKind::Literal(_) | IrExprKind::Decl { .. } => false,
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
@@ -370,6 +376,9 @@ fn expr_consumes_target(
 /// anywhere? (Weaker than `consumes` — includes borrow positions.)
 fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            expr_references(receiver, target) || args.iter().any(|a| expr_references(a, target))
+        }
         IrExprKind::Local { local_id, .. } => *local_id == target,
         IrExprKind::Literal(_) | IrExprKind::Decl { .. } => false,
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {

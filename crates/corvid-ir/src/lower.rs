@@ -1107,6 +1107,9 @@ impl<'a> Lowerer<'a> {
             if let Some(rewrite) = stream::try_stream_builtin_call(self, target, field, args) {
                 return rewrite;
             }
+            if let Some(rewrite) = self.try_builtin_method_call(target, field, args) {
+                return rewrite;
+            }
             if let Some(rewrite) = self.try_method_call(target, field, args) {
                 return rewrite;
             }
@@ -1331,6 +1334,25 @@ impl<'a> Lowerer<'a> {
             kind,
             callee_name: field.name.clone(),
             args: lowered_args,
+        })
+    }
+
+    /// Builtin-method dispatch (slice 45c): re-derive the same
+    /// lookup the checker performed from the receiver's checked
+    /// type, and lower to `IrExprKind::BuiltinMethod` — the shared
+    /// `corvid_types::builtin_method` table keeps the two in sync.
+    fn try_builtin_method_call(
+        &self,
+        target: &Expr,
+        field: &Ident,
+        args: &[Expr],
+    ) -> Option<IrExprKind> {
+        let recv_ty = self.types.get(&target.span())?;
+        let sig = corvid_types::builtin_method(recv_ty, &field.name)?;
+        Some(IrExprKind::BuiltinMethod {
+            kind: sig.kind,
+            receiver: Box::new(self.lower_expr(target)),
+            args: args.iter().map(|a| self.lower_expr(a)).collect(),
         })
     }
 

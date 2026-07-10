@@ -214,6 +214,32 @@ impl<'ir> Interpreter<'ir> {
     #[async_recursion]
     async fn eval_expr(&mut self, expr: &'ir IrExpr) -> Result<ExprFlow, InterpError> {
         match &expr.kind {
+            // Builtin methods (slice 45c) — one arm per
+            // `BuiltinMethodKind`; the shared corvid_types table
+            // guarantees the checker only let matching receivers
+            // through.
+            IrExprKind::BuiltinMethod { kind, receiver, .. } => {
+                let recv = match self.eval_expr(receiver).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                };
+                match (kind, recv) {
+                    (corvid_types::BuiltinMethodKind::StringLength, Value::String(s)) => {
+                        // Unicode scalar count (Python's len(str)),
+                        // not the UTF-8 byte count.
+                        Ok(ExprFlow::Value(Value::Int(s.chars().count() as i64)))
+                    }
+                    (corvid_types::BuiltinMethodKind::StringLength, other) => {
+                        Err(InterpError::new(
+                            InterpErrorKind::TypeMismatch {
+                                expected: "String".into(),
+                                got: other.type_name(),
+                            },
+                            expr.span,
+                        ))
+                    }
+                }
+            }
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
 
             IrExprKind::Local { local_id, .. } => self

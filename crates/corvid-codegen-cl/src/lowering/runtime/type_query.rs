@@ -347,6 +347,12 @@ fn visit_expr_types(
 ) {
     visit(&e.ty, seen, order);
     match &e.kind {
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            visit_expr_types(receiver, seen, order, visit);
+            for a in args {
+                visit_expr_types(a, seen, order, visit);
+            }
+        }
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => {}
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
             visit_expr_types(left, seen, order, visit);
