@@ -2,6 +2,15 @@
 
 Rules that apply to every piece of work in this repo. Machine-enforceable where possible; otherwise honored by convention.
 
+## Design decision principle
+
+**Every design decision is judged on making Corvid great, innovative, inventive, powerful, and easier than any other language available.** Set by the CTO 2026-07-09; ease bar strengthened 2026-07-10. How to apply:
+
+1. **For commodity features** (strings, lists, maps, bindings), "inventive" means picking the best known semantics and removing every papercut other languages kept — not exotic syntax. The ease bar dominates; coherence with the Python-flavored, effect-typed surface is what makes Corvid easiest. (Precedents: `x = 42` bindings with optional `x: Int = 42` annotation and no `let` keyword; `m[k] -> Option<V>` instead of KeyError/zero-values; `split("")` traps with a hint; Float→String always shows the decimal point.)
+2. **The invention budget concentrates on the moat**: effects, provenance, approval, replay, budgets. Commodity features must **compose** with the moat — e.g. cost analysis covers assignment-target index expressions so `@budget` stays sound; builtin methods are pure so replay stays deterministic; no method path may silently launder `Grounded<T>`.
+3. **Safety choices that remove failure modes count as both "powerful" and "easier"** — checked arithmetic everywhere, compile-time gates over runtime surprises.
+4. Record the rationale per slice in `ROADMAP.md` and `dev-log.md`. No per-decision escalation needed; decide against these criteria and write it down.
+
 ## File responsibility discipline
 
 **Every source file holds exactly one responsibility.** Line count is a *heuristic for where to look* — it is not the rule.
