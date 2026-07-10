@@ -682,6 +682,11 @@ fn collect_called_agents_from_block(
 
 fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve::DefId>) {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                collect_called_agents_from_expr(e, stack);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_called_agents_from_expr(receiver, stack);
             for arg in args {
@@ -805,6 +810,11 @@ fn walk_ir_expr_for_prompt(
         return;
     }
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                walk_ir_expr_for_prompt(e, prompt_map, found);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             walk_ir_expr_for_prompt(receiver, prompt_map, found);
             for arg in args {

@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use super::cells::{BoxedInner, ListInner, StructInner};
+use super::cells::{BoxedInner, ListInner, MapInner, StructInner};
 use super::heap::{Color, HeapMeta};
 use super::Value;
 
@@ -24,6 +24,7 @@ use super::Value;
 pub(crate) enum ObjectRef {
     Struct(Arc<StructInner>),
     List(Arc<ListInner>),
+    Map(Arc<MapInner>),
     Boxed(Arc<BoxedInner>),
 }
 
@@ -31,6 +32,7 @@ pub(crate) enum ObjectRef {
 pub(crate) enum WeakObjectRef {
     Struct(Weak<StructInner>),
     List(Weak<ListInner>),
+    Map(Weak<MapInner>),
     Boxed(Weak<BoxedInner>),
 }
 
@@ -39,6 +41,7 @@ impl ObjectRef {
         match self {
             ObjectRef::Struct(inner) => &inner.meta,
             ObjectRef::List(inner) => &inner.meta,
+            ObjectRef::Map(inner) => &inner.meta,
             ObjectRef::Boxed(inner) => &inner.meta,
         }
     }
@@ -47,6 +50,7 @@ impl ObjectRef {
         match self {
             ObjectRef::Struct(inner) => Arc::as_ptr(inner) as usize,
             ObjectRef::List(inner) => Arc::as_ptr(inner) as usize,
+            ObjectRef::Map(inner) => Arc::as_ptr(inner) as usize,
             ObjectRef::Boxed(inner) => Arc::as_ptr(inner) as usize,
         }
     }
@@ -99,6 +103,7 @@ impl ObjectRef {
         match self {
             ObjectRef::Struct(inner) => WeakObjectRef::Struct(Arc::downgrade(inner)),
             ObjectRef::List(inner) => WeakObjectRef::List(Arc::downgrade(inner)),
+            ObjectRef::Map(inner) => WeakObjectRef::Map(Arc::downgrade(inner)),
             ObjectRef::Boxed(inner) => WeakObjectRef::Boxed(Arc::downgrade(inner)),
         }
     }
@@ -118,6 +123,19 @@ impl ObjectRef {
                 .expect("list items lock poisoned")
                 .as_ref()
                 .map(|items| children_from_slice(items))
+                .unwrap_or_default(),
+            ObjectRef::Map(inner) => inner
+                .entries
+                .lock()
+                .expect("map entries lock poisoned")
+                .as_ref()
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .flat_map(|(k, v)| [k, v])
+                        .filter_map(Value::as_object_ref)
+                        .collect()
+                })
                 .unwrap_or_default(),
             ObjectRef::Boxed(inner) => inner
                 .value
@@ -162,6 +180,14 @@ impl ObjectRef {
                     .take();
                 drop(items);
             }
+            ObjectRef::Map(inner) => {
+                let entries = inner
+                    .entries
+                    .lock()
+                    .expect("map entries lock poisoned")
+                    .take();
+                drop(entries);
+            }
             ObjectRef::Boxed(inner) => {
                 let value = inner
                     .value
@@ -179,6 +205,7 @@ impl WeakObjectRef {
         match self {
             WeakObjectRef::Struct(inner) => inner.upgrade().map(ObjectRef::Struct),
             WeakObjectRef::List(inner) => inner.upgrade().map(ObjectRef::List),
+            WeakObjectRef::Map(inner) => inner.upgrade().map(ObjectRef::Map),
             WeakObjectRef::Boxed(inner) => inner.upgrade().map(ObjectRef::Boxed),
         }
     }

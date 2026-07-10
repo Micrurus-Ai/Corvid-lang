@@ -249,6 +249,12 @@ impl<'a> ReachabilityPass<'a> {
                 self.check_expr(entrypoint, right, approvals, visiting);
             }
             Expr::UnOp { operand, .. } => self.check_expr(entrypoint, operand, approvals, visiting),
+            Expr::MapLiteral { entries, .. } => {
+                for (k, v) in entries {
+                    self.check_expr(entrypoint, k, approvals, visiting);
+                    self.check_expr(entrypoint, v, approvals, visiting);
+                }
+            }
             Expr::List { items, .. } => {
                 for item in items {
                     self.check_expr(entrypoint, item, approvals, visiting);

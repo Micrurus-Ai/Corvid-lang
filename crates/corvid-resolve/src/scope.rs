@@ -33,6 +33,8 @@ pub enum BuiltIn {
     Bool,
     Nothing,
     List,
+    /// `Map<K, V>` (slice 45g).
+    Map,
     Stream,
     Result,
     Option,
@@ -140,6 +142,7 @@ impl SymbolTable {
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);
         self.builtins.insert("List".into(), BuiltIn::List);
+        self.builtins.insert("Map".into(), BuiltIn::Map);
         self.builtins.insert("Stream".into(), BuiltIn::Stream);
         self.builtins.insert("Result".into(), BuiltIn::Result);
         self.builtins.insert("Option".into(), BuiltIn::Option);

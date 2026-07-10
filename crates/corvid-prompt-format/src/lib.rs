@@ -44,6 +44,27 @@ fn schema_for_inner(
         Type::String => json!({ "type": "string" }),
         Type::Bool => json!({ "type": "boolean" }),
         Type::Nothing => json!({ "type": "null" }),
+        Type::Map(key, value) => {
+            if matches!(**key, Type::String) {
+                json!({
+                    "type": "object",
+                    "additionalProperties": schema_for_inner(value, types_by_id, visiting),
+                })
+            } else {
+                // Non-String keys can't be a JSON object; render as an
+                // array of [key, value] pairs.
+                json!({
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "prefixItems": [
+                            schema_for_inner(key, types_by_id, visiting),
+                            schema_for_inner(value, types_by_id, visiting),
+                        ],
+                    },
+                })
+            }
+        }
         Type::List(elem) => json!({
             "type": "array",
             "items": schema_for_inner(elem, types_by_id, visiting),

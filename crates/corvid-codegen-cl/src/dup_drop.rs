@@ -379,6 +379,11 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
 
 fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                scan_expr(e, max_id);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
             for a in args {
@@ -460,6 +465,10 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
 /// Used to decide whether a Return's expr forces a synthetic-Let hoist.
 fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_reads_local(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }

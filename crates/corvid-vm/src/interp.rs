@@ -413,6 +413,12 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 match (t, i) {
+                    // Map read (45g): m[k] returns Option<V> — a
+                    // missing key is None, never a trap.
+                    (Value::Map(m), key) => Ok(ExprFlow::Value(match m.get_by_key(&key) {
+                        Some(v) => Value::OptionSome(crate::value::BoxedValue::new(v)),
+                        None => Value::OptionNone,
+                    })),
                     (Value::List(items), Value::Int(idx)) => {
                         let len = items.len();
                         let in_range = idx >= 0 && (idx as usize) < len;
@@ -516,6 +522,24 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, true)?))
             }
 
+            IrExprKind::MapLiteral { keys, values } => {
+                let mut entries = Vec::with_capacity(keys.len());
+                for (k, v) in keys.iter().zip(values) {
+                    let kv = match self.eval_expr(k).await?.into_value() {
+                        Ok(x) => x,
+                        Err(x) => return Ok(ExprFlow::Propagate(x)),
+                    };
+                    let vv = match self.eval_expr(v).await?.into_value() {
+                        Ok(x) => x,
+                        Err(x) => return Ok(ExprFlow::Propagate(x)),
+                    };
+                    entries.push((kv, vv));
+                }
+                // MapValue::new applies last-duplicate-wins.
+                Ok(ExprFlow::Value(Value::Map(crate::value::MapValue::new(
+                    entries,
+                ))))
+            }
             IrExprKind::List { items } => {
                 let mut out = Vec::with_capacity(items.len());
                 for it in items {

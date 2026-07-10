@@ -326,7 +326,7 @@ primary_expr      ::= literal
                     | IDENT
                     | '(' expr ')'
                     | list_literal
-                    | map_literal                          # PLANNED(45g)
+                    | map_literal
                     | struct_literal                       # PLANNED(45n)
                     | match_expr                           # PLANNED(45i)
                     | retry_expr
@@ -335,8 +335,10 @@ literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
 
 list_literal      ::= '[' (expr (',' expr)*)? ']'
 
-map_literal       ::= '{' (map_entry (',' map_entry)*)? '}'          # PLANNED(45g)
-map_entry         ::= expr ':' expr                                  # PLANNED(45g)
+# Duplicate keys in a literal: the LAST occurrence wins (Python).
+# Trailing comma allowed. `{}` is the empty map.
+map_literal       ::= '{' (map_entry (',' map_entry)* ','?)? '}'
+map_entry         ::= expr ':' expr
 
 struct_literal    ::= IDENT '{' field_init (',' field_init)* '}'     # PLANNED(45n)
 field_init        ::= IDENT (':' expr)?                              # PLANNED(45n)

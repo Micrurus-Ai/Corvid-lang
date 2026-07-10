@@ -331,6 +331,29 @@ impl<'a> CostAnalyzer<'a> {
                     bounded: estimate.bounded,
                 }
             }
+            corvid_ast::Expr::MapLiteral { entries, span } => {
+                let mut children = Vec::new();
+                let mut warnings = Vec::new();
+                let mut bounded = true;
+                for (k, v) in entries {
+                    for e in [k, v] {
+                        let estimate = self.analyze_expr(e, agent_name);
+                        if !tree_is_zero(&estimate.tree) {
+                            children.push(estimate.tree);
+                        }
+                        warnings.extend(estimate.warnings);
+                        bounded &= estimate.bounded;
+                    }
+                }
+                let sequence =
+                    sequence_tree("map", CostNodeKind::Sequence, children, *span);
+                CostEstimate {
+                    dimensions: sequence.costs.clone(),
+                    tree: sequence,
+                    warnings,
+                    bounded,
+                }
+            }
             corvid_ast::Expr::List { items, span } => {
                 let mut children = Vec::new();
                 let mut warnings = Vec::new();

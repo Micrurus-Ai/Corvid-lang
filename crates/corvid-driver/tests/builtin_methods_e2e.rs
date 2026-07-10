@@ -162,6 +162,39 @@ agent main() -> String:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn map_surface_end_to_end() {
+    // Pins 45g: dup-key last-wins literals, Option reads (hit +
+    // miss), insert-or-update + compound place assignment, aliasing
+    // through the shared cell, insertion-order keys, remove.
+    let source = "
+agent main() -> String:
+    m = {\"a\": 1, \"b\": 2, \"a\": 10}
+    m[\"c\"] = 3
+    m[\"b\"] += 5
+    alias = m
+    alias[\"d\"] = 4
+    ks = m.keys()
+    ok1 = m[\"a\"] == Some(10) and m[\"zzz\"] == None
+    ok2 = m[\"b\"] == Some(7) and m[\"c\"] == Some(3)
+    ok3 = m.length() == 4 and m.contains_key(\"d\")
+    ok4 = ks[0] == \"a\" and ks[3] == \"d\"
+    ok5 = m.remove(\"a\") == Some(10) and m.get(\"a\") == None
+    if ok1 and ok2 and ok3 and ok4 and ok5:
+        return \"ok\"
+    return \"FAILED\"
+";
+    let ir = compile_to_ir(source).expect("45g map source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45g map program must run");
+    match out {
+        Value::String(s) => assert_eq!(s.as_ref(), "ok", "a map check failed"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn to_int_truncated_traps_on_nan() {
     let source = "
 agent main() -> Int:

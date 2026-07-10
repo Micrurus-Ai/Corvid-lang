@@ -419,6 +419,11 @@ tool refund(amount: Float) -> Nothing uses pay_eff
 type Wallet:
     balance: Float
 
+agent map_demo() -> Int:
+    m = {"a": 1, "b": 2}
+    m["c"] = 3
+    return m.length()
+
 agent mutate(w: Wallet, xs: List<Int>) -> Float:
     w.balance = 250.0
     w.balance += 50.0
@@ -554,6 +559,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("primary_expr", "expressions"),
     ("literal", "expressions"),
     ("list_literal", "expressions"),
+    ("map_literal", "statements"),
+    ("map_entry", "statements"),
     ("retry_expr", "expressions"),
 ];
 

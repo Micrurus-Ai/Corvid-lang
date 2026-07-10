@@ -34,6 +34,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::String => "String".into(),
         Type::Nothing => "Nothing".into(),
         Type::List(inner) => format!("List_{}", mangle_type_name(inner)),
+        Type::Map(k, v) => format!("Map_{}_{}", mangle_type_name(k), mangle_type_name(v)),
         Type::Stream(inner) => format!("Stream_{}", mangle_type_name(inner)),
         Type::Struct(def_id) => format!("Struct_{}", def_id.0),
         Type::ImportedStruct(imported) => {
@@ -347,6 +348,11 @@ fn visit_expr_types(
 ) {
     visit(&e.ty, seen, order);
     match &e.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                visit_expr_types(e, seen, order, visit);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);
             for a in args {
@@ -468,6 +474,7 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
 
 pub fn is_native_value_type(ty: &Type) -> bool {
     match ty {
+        Type::Map(_, _) => false,
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),

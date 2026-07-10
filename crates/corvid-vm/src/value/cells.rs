@@ -49,6 +49,19 @@ pub struct ListValue(pub(super) Arc<ListInner>);
 #[derive(Debug)]
 pub struct BoxedValue(pub(super) Arc<BoxedInner>);
 
+/// Map cell (slice 45g): insertion-ordered `(key, value)` pairs with
+/// structural key equality. Vec-backed — O(n) lookup is fine for v1
+/// map sizes; the representation can move to an index map later
+/// without changing any semantics.
+#[derive(Debug)]
+pub struct MapValue(pub(super) Arc<MapInner>);
+
+#[derive(Debug)]
+pub(crate) struct MapInner {
+    pub(super) meta: HeapMeta,
+    pub(super) entries: Mutex<Option<Vec<(Value, Value)>>>,
+}
+
 impl StructValue {
     pub fn new(
         type_id: DefId,
@@ -253,6 +266,121 @@ impl Clone for BoxedValue {
 impl Drop for BoxedValue {
     fn drop(&mut self) {
         cycle_collector::release_object(ObjectRef::Boxed(self.0.clone()));
+    }
+}
+
+impl MapValue {
+    /// Build from entries; a later duplicate key WINS (Python dict
+    /// literal semantics).
+    pub fn new(entries: impl IntoIterator<Item = (Value, Value)>) -> Self {
+        let mut out: Vec<(Value, Value)> = Vec::new();
+        for (k, v) in entries {
+            if let Some(slot) = out.iter_mut().find(|(ek, _)| *ek == k) {
+                slot.1 = v;
+            } else {
+                out.push((k, v));
+            }
+        }
+        Self(Arc::new(MapInner {
+            meta: HeapMeta::new(),
+            entries: Mutex::new(Some(out)),
+        }))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0
+            .entries
+            .lock()
+            .expect("map lock")
+            .as_ref()
+            .map(|e| e.len())
+            .unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get_by_key(&self, key: &Value) -> Option<Value> {
+        self.0
+            .entries
+            .lock()
+            .expect("map lock")
+            .as_ref()
+            .and_then(|e| e.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()))
+    }
+
+    pub fn insert_or_update(&self, key: Value, value: Value) {
+        if let Some(entries) = self.0.entries.lock().expect("map lock").as_mut() {
+            if let Some(slot) = entries.iter_mut().find(|(k, _)| *k == key) {
+                slot.1 = value;
+            } else {
+                entries.push((key, value));
+            }
+        }
+    }
+
+    pub fn remove(&self, key: &Value) -> Option<Value> {
+        let mut guard = self.0.entries.lock().expect("map lock");
+        let entries = guard.as_mut()?;
+        let idx = entries.iter().position(|(k, _)| k == key)?;
+        Some(entries.remove(idx).1)
+    }
+
+    pub fn keys_cloned(&self) -> Vec<Value> {
+        self.0
+            .entries
+            .lock()
+            .expect("map lock")
+            .as_ref()
+            .map(|e| e.iter().map(|(k, _)| k.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn values_cloned(&self) -> Vec<Value> {
+        self.0
+            .entries
+            .lock()
+            .expect("map lock")
+            .as_ref()
+            .map(|e| e.iter().map(|(_, v)| v.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn entries_cloned(&self) -> Vec<(Value, Value)> {
+        self.0
+            .entries
+            .lock()
+            .expect("map lock")
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn ptr_key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+}
+
+impl Clone for MapValue {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+/// Structural, ORDER-INSENSITIVE equality (Python dict ==): same
+/// length and every key maps to an equal value.
+impl PartialEq for MapValue {
+    fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        let a = self.entries_cloned();
+        if a.len() != other.len() {
+            return false;
+        }
+        a.iter()
+            .all(|(k, v)| other.get_by_key(k).is_some_and(|ov| ov == *v))
     }
 }
 

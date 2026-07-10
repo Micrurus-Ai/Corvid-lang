@@ -714,6 +714,10 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
 
 fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_mentions_local(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

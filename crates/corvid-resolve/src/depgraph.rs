@@ -300,6 +300,12 @@ fn collect_expr_deps(expr: &Expr, resolved: &Resolved, deps: &mut HashSet<DefId>
         Expr::UnOp { operand, .. } => {
             collect_expr_deps(operand, resolved, deps);
         }
+        Expr::MapLiteral { entries, .. } => {
+            for (k, v) in entries {
+                collect_expr_deps(k, resolved, deps);
+                collect_expr_deps(v, resolved, deps);
+            }
+        }
         Expr::List { items, .. } => {
             for item in items {
                 collect_expr_deps(item, resolved, deps);

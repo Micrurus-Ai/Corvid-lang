@@ -400,6 +400,11 @@ fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
 
 fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                out.extend(collect_reads(e, false));
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             out.extend(collect_reads(receiver, false));
             for a in args {

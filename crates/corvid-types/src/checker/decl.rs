@@ -225,6 +225,12 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(right, name, spans);
         }
         Expr::UnOp { operand, .. } => collect_ident_spans_by_name_in_expr(operand, name, spans),
+        Expr::MapLiteral { entries, .. } => {
+            for (k, v) in entries {
+                collect_ident_spans_by_name_in_expr(k, name, spans);
+                collect_ident_spans_by_name_in_expr(v, name, spans);
+            }
+        }
         Expr::List { items, .. } => {
             for item in items {
                 collect_ident_spans_by_name_in_expr(item, name, spans);

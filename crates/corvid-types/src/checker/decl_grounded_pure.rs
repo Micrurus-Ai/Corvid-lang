@@ -127,6 +127,12 @@ impl<'a> Checker<'a> {
                 self.walk_grounded_pure_expr(agent, right);
             }
             Expr::UnOp { operand, .. } => self.walk_grounded_pure_expr(agent, operand),
+            Expr::MapLiteral { entries, .. } => {
+                for (k, v) in entries {
+                    self.walk_grounded_pure_expr(agent, k);
+                    self.walk_grounded_pure_expr(agent, v);
+                }
+            }
             Expr::List { items, .. } => {
                 for item in items {
                     self.walk_grounded_pure_expr(agent, item);

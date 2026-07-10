@@ -136,6 +136,25 @@ pub enum BuiltinMethodKind {
     /// `List<String>.join(sep: String) -> String`.
     ListJoin,
 
+    // ----- maps (slice 45g) --------------------------------------
+    //
+    // `m[k] = v` is the insert-or-update path (place assignment);
+    // `get` is the method spelling of the `m[k]` Option read.
+    // `remove` returns the removed value as Option<V>. `keys` /
+    // `values` return snapshot lists in insertion order.
+    /// `Map<K,V>.length() -> Int`.
+    MapLength,
+    /// `Map<K,V>.get(key: K) -> Option<V>`.
+    MapGet,
+    /// `Map<K,V>.contains_key(key: K) -> Bool`.
+    MapContainsKey,
+    /// `Map<K,V>.keys() -> List<K>` — insertion order.
+    MapKeys,
+    /// `Map<K,V>.values() -> List<V>` — insertion order.
+    MapValues,
+    /// `Map<K,V>.remove(key: K) -> Option<V>`.
+    MapRemove,
+
     /// `range(start: Int, end: Int) -> List<Int>` — the free builtin
     /// function (half-open, step 1, empty when start >= end). Lowered
     /// through the BuiltinMethod IR with `start` as the receiver so
@@ -213,6 +232,16 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         }
         (Type::List(elem), "join") if matches!(**elem, Type::String) => {
             sig(ListJoin, vec![Type::String], Type::String)
+        }
+        (Type::Map(_, _), "length") => sig(MapLength, vec![], Type::Int),
+        (Type::Map(k, v), "get") => sig(MapGet, vec![(**k).clone()], Type::Option(v.clone())),
+        (Type::Map(k, _), "contains_key") => {
+            sig(MapContainsKey, vec![(**k).clone()], Type::Bool)
+        }
+        (Type::Map(k, _), "keys") => sig(MapKeys, vec![], Type::List(k.clone())),
+        (Type::Map(_, v), "values") => sig(MapValues, vec![], Type::List(v.clone())),
+        (Type::Map(k, v), "remove") => {
+            sig(MapRemove, vec![(**k).clone()], Type::Option(v.clone()))
         }
         _ => None,
     }

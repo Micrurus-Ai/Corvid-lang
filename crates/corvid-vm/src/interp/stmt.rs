@@ -484,6 +484,32 @@ impl<'ir> Interpreter<'ir> {
                         };
                         sv.set_field(field.clone(), new_v);
                     }
+                    // Map store (45g): m[k] = v inserts or updates;
+                    // compound (m[k] += v) reads the current value or
+                    // traps when the key is missing.
+                    (IrPathSeg::Index(_), Value::Map(mv)) => {
+                        let key = last_idx
+                            .as_ref()
+                            .expect("index segment has a value")
+                            .clone();
+                        let new_v = match op {
+                            Some(op) => {
+                                let current = mv.get_by_key(&key).ok_or_else(|| {
+                                    InterpError::new(
+                                        InterpErrorKind::TypeMismatch {
+                                            expected: "an existing key for compound assignment"
+                                                .into(),
+                                            got: format!("missing key `{key}`"),
+                                        },
+                                        *span,
+                                    )
+                                })?;
+                                eval_binop(*op, current, rhs, *span, false)?
+                            }
+                            None => rhs,
+                        };
+                        mv.insert_or_update(key, new_v);
+                    }
                     (IrPathSeg::Index(_), Value::List(lv)) => {
                         let idx = match last_idx.as_ref().expect("index segment has a value") {
                             Value::Int(i) => *i,
@@ -560,6 +586,18 @@ fn assign_path_read(
                     InterpErrorKind::UnknownField {
                         struct_name: sv.type_name().to_string(),
                         field: field.clone(),
+                    },
+                    span,
+                )
+            })
+        }
+        (IrPathSeg::Index(_), Value::Map(mv)) => {
+            let key = idx_v.as_ref().expect("index segment has a value");
+            mv.get_by_key(key).ok_or_else(|| {
+                InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "an existing key on the assignment path".into(),
+                        got: format!("missing key `{key}`"),
                     },
                     span,
                 )

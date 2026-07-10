@@ -44,6 +44,22 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let target_ty = self.check_expr(target);
+                // Map read (45g): m[k] types the key against K and
+                // returns Option<V> — absence is a value, not a trap.
+                if let Type::Map(key_ty, val_ty) = &target_ty {
+                    let kt = self.check_expr_as(index, Some(key_ty));
+                    if !kt.is_assignable_to(key_ty) {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::TypeMismatch {
+                                expected: key_ty.display_name(),
+                                got: kt.display_name(),
+                                context: "map key".into(),
+                            },
+                            index.span(),
+                        ));
+                    }
+                    return Type::Option(val_ty.clone());
+                }
                 let index_ty = self.check_expr(index);
                 // Index must be Int.
                 if !matches!(index_ty, Type::Int | Type::Unknown) {
@@ -79,6 +95,51 @@ impl<'a> Checker<'a> {
                 span,
             } => self.check_binop(*op, left, right, *span),
             Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand),
+            Expr::MapLiteral { entries, span } => {
+                let mut key_ty = Type::Unknown;
+                let mut val_ty = Type::Unknown;
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    let kt = self.check_expr(k);
+                    let vt = self.check_expr(v);
+                    if i == 0 {
+                        key_ty = kt;
+                        val_ty = vt;
+                        continue;
+                    }
+                    if !kt.is_assignable_to(&key_ty)
+                        && !matches!(key_ty, Type::Unknown)
+                        && !matches!(kt, Type::Unknown)
+                    {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::TypeMismatch {
+                                expected: key_ty.display_name(),
+                                got: kt.display_name(),
+                                context: format!("map key {}", i + 1),
+                            },
+                            k.span(),
+                        ));
+                    }
+                    if !vt.is_assignable_to(&val_ty)
+                        && !matches!(val_ty, Type::Unknown)
+                        && !matches!(vt, Type::Unknown)
+                    {
+                        if matches!(val_ty, Type::Int) && matches!(vt, Type::Float) {
+                            val_ty = Type::Float;
+                        } else if !(matches!(val_ty, Type::Float) && matches!(vt, Type::Int)) {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::TypeMismatch {
+                                    expected: val_ty.display_name(),
+                                    got: vt.display_name(),
+                                    context: format!("map value {}", i + 1),
+                                },
+                                v.span(),
+                            ));
+                        }
+                    }
+                }
+                let _ = span;
+                Type::Map(Box::new(key_ty), Box::new(val_ty))
+            }
             Expr::List { items, span } => {
                 // Infer element type from the first item; every other
                 // item must be assignable to it.
@@ -147,6 +208,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Bool
                 | BuiltIn::Nothing
                 | BuiltIn::List
+                | BuiltIn::Map
                 | BuiltIn::Stream
                 | BuiltIn::Result
                 | BuiltIn::Option

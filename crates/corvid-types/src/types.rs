@@ -41,6 +41,11 @@ pub enum Type {
     /// A list of homogeneous elements.
     List(Box<Type>),
 
+    /// A key->value map with homogeneous keys and values
+    /// (slice 45g). Insertion-order iteration; structural key
+    /// equality; reads return `Option<V>`.
+    Map(Box<Type>, Box<Type>),
+
     /// Compiler-known `Stream<T>`.
     Stream(Box<Type>),
 
@@ -157,6 +162,7 @@ impl Type {
             Type::ImportedStruct(imported) => imported.name.clone(),
             Type::Function { .. } => "function".into(),
             Type::List(inner) => format!("List<{}>", inner.display_name()),
+            Type::Map(k, v) => format!("Map<{}, {}>", k.display_name(), v.display_name()),
             Type::Stream(inner) => format!("Stream<{}>", inner.display_name()),
             Type::Result(ok, err) => {
                 format!("Result<{}, {}>", ok.display_name(), err.display_name())
@@ -220,6 +226,9 @@ impl Type {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
             (Type::Int, Type::Float) => true, // widening
             (Type::List(a), Type::List(b)) => a.is_assignable_to(b),
+            (Type::Map(ka, va), Type::Map(kb, vb)) => {
+                ka.is_assignable_to(kb) && va.is_assignable_to(vb)
+            }
             (Type::Stream(a), Type::Stream(b)) => a.is_assignable_to(b),
             (Type::Option(a), Type::Option(b)) => a.is_assignable_to(b),
             (Type::Result(ok_a, err_a), Type::Result(ok_b, err_b)) => {

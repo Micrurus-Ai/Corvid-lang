@@ -467,6 +467,14 @@ fn render_expr(expr: &Expr) -> String {
             "[{}]",
             items.iter().map(render_expr).collect::<Vec<_>>().join(", ")
         ),
+        Expr::MapLiteral { entries, .. } => format!(
+            "{{{}}}",
+            entries
+                .iter()
+                .map(|(k, v)| format!("{}: {}", render_expr(k), render_expr(v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Expr::TryPropagate { inner, .. } => format!("{}?", render_expr(inner)),
         Expr::TryRetry {
             body,

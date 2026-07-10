@@ -149,6 +149,11 @@ fn collect_prompt_pins_in_expr(
     out: &mut PromptPinInfo,
 ) {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            for e in keys.iter().chain(values) {
+                collect_prompt_pins_in_expr(e, borrowed_reads, out);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_prompt_pins_in_expr(receiver, borrowed_reads, out);
             for a in args {

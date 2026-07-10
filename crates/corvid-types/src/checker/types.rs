@@ -287,6 +287,25 @@ impl<'a> Checker<'a> {
                     _ => unreachable!(),
                 }
             }
+            "Map" => {
+                if args.len() != 2 {
+                    if matches!(context, TypeContext::Root) {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::GenericArityMismatch {
+                                name: name.to_string(),
+                                expected: 2,
+                                got: args.len(),
+                            },
+                            span,
+                        ));
+                    }
+                    return Type::Unknown;
+                }
+                Type::Map(
+                    Box::new(resolve_arg(self, &args[0])),
+                    Box::new(resolve_arg(self, &args[1])),
+                )
+            }
             "Result" => {
                 if args.len() != 2 {
                     if matches!(context, TypeContext::Root) {

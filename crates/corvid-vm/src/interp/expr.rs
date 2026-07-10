@@ -573,6 +573,36 @@ pub(super) fn eval_builtin_method(
             };
             eval_list_method(kind, lv, args, span)
         }
+        MapLength | MapGet | MapContainsKey | MapKeys | MapValues | MapRemove => {
+            let mv = match &recv {
+                Value::Map(m) => m.clone(),
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "Map".into(),
+                            got: other.type_name(),
+                        },
+                        span,
+                    ))
+                }
+            };
+            let mut args = args;
+            Ok(match kind {
+                MapLength => Value::Int(mv.len() as i64),
+                MapGet => match mv.get_by_key(&args[0]) {
+                    Some(v) => Value::OptionSome(crate::value::BoxedValue::new(v)),
+                    None => Value::OptionNone,
+                },
+                MapContainsKey => Value::Bool(mv.get_by_key(&args[0]).is_some()),
+                MapKeys => Value::List(crate::value::ListValue::new(mv.keys_cloned())),
+                MapValues => Value::List(crate::value::ListValue::new(mv.values_cloned())),
+                MapRemove => match mv.remove(&args.remove(0)) {
+                    Some(v) => Value::OptionSome(crate::value::BoxedValue::new(v)),
+                    None => Value::OptionNone,
+                },
+                _ => unreachable!("gated above"),
+            })
+        }
         RangeIntList => {
             let start = want_int(&recv, span)?;
             let end = want_int(&args[0], span)?;

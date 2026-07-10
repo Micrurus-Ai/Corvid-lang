@@ -53,6 +53,26 @@ fn render_value_inner(
             visited.remove(&key);
             format!("{}({rendered})", s.type_name())
         }
+        Value::Map(m) => {
+            let key = m.ptr_key();
+            if !visited.insert(key) {
+                return "<cycle>".to_string();
+            }
+            let rendered = m
+                .entries_cloned()
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "{}: {}",
+                        render_value_inner(k, depth + 1, visited),
+                        render_value_inner(v, depth + 1, visited)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            visited.remove(&key);
+            format!("{{{rendered}}}")
+        }
         Value::List(items) => {
             let key = items.ptr_key();
             if !visited.insert(key) {

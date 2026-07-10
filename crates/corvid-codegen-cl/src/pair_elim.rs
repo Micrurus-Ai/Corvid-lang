@@ -215,6 +215,11 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
 
 fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .map(|e| count_local_mentions_expr(e, local_id))
+            .sum::<usize>(),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             count_local_mentions_expr(receiver, local_id)
                 + args
@@ -281,6 +286,10 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
 
 fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_observes_refcount(e, local_id)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_observes_refcount(receiver, local_id)
                 || args.iter().any(|a| expr_observes_refcount(a, local_id))

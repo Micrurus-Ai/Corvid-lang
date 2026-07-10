@@ -52,6 +52,14 @@ pub enum Expr {
     /// List literal: `[1, 2, 3]`.
     List { items: Vec<Expr>, span: Span },
 
+    /// Map literal `{"a": 1, "b": 2}` (slice 45g). Entries are
+    /// (key, value) expression pairs; empty `{}` is a valid empty
+    /// map with element types inferred from context or Unknown.
+    MapLiteral {
+        entries: Vec<(Expr, Expr)>,
+        span: Span,
+    },
+
     /// Postfix propagation: `expr?`.
     TryPropagate {
         inner: Box<Expr>,
@@ -91,6 +99,7 @@ impl Expr {
             | Expr::BinOp { span, .. }
             | Expr::UnOp { span, .. }
             | Expr::List { span, .. }
+            | Expr::MapLiteral { span, .. }
             | Expr::TryPropagate { span, .. }
             | Expr::TryRetry { span, .. }
             | Expr::Replay { span, .. } => *span,

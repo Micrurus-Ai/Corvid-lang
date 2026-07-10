@@ -3904,6 +3904,60 @@ agent main() -> String:
     );
 }
 
+/// Slice 45g — map literals type as Map<K,V>; reads are Option<V>;
+/// stores take V; methods compute generic returns.
+#[test]
+fn map_surface_typechecks() {
+    let src = "agent main() -> Int:
+    m = {\"a\": 1}
+    m[\"b\"] = 2
+    v = m[\"a\"]
+    ks = m.keys()
+    if v == Some(1) and m.contains_key(\"b\"):
+        return m.length() + ks.length()
+    return 0
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "map surface should typecheck, got {:?}", c.errors);
+}
+
+/// Slice 45g — key and value types are enforced: an Int key into a
+/// String-keyed map and a String value into an Int-valued slot both
+/// reject.
+#[test]
+fn map_key_and_value_types_are_enforced() {
+    let bad_key = check(
+        "agent main() -> Int:
+    m = {\"a\": 1}
+    v = m[42]
+    return 0
+",
+    );
+    assert!(
+        bad_key
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for Int key, got {:?}",
+        bad_key.errors
+    );
+    let bad_val = check(
+        "agent main() -> Int:
+    m = {\"a\": 1}
+    m[\"b\"] = \"nope\"
+    return 0
+",
+    );
+    assert!(
+        bad_val
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for String value into Int slot, got {:?}",
+        bad_val.errors
+    );
+}
+
 /// Slice 45f — list methods typecheck with GENERIC result types
 /// computed from the receiver's element type: first() on List<Int>
 /// is Option<Int>; append's param is the element type.

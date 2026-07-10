@@ -37,6 +37,16 @@ impl fmt::Display for Value {
                 });
                 write!(f, ")")
             }
+            Value::Map(m) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in m.entries_cloned().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
+            }
             Value::List(items) => {
                 write!(f, "[")?;
                 for (i, v) in items.iter_cloned().iter().enumerate() {

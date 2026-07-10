@@ -207,7 +207,59 @@ impl<'a> Checker<'a> {
                         target.span(),
                     ));
                 }
-                let target_ty = self.check_expr(target);
+                let mut target_ty = self.check_expr(target);
+                // Map store (45g): the READ type of m[k] is Option<V>
+                // but the assignment SLOT is V — `m[k] = v` inserts or
+                // updates, so the value must be a V, not an Option.
+                let mut map_slot = false;
+                if let Expr::Index { target: base, .. } = target {
+                    if let Type::Map(_, val_ty) = self.check_expr(base) {
+                        target_ty = (*val_ty).clone();
+                        map_slot = true;
+                    }
+                }
+                // Compound on a map slot can't reuse check_binop (it
+                // would see the Option<V> read type). Type the value
+                // against the slot and apply the operator rule at the
+                // type level: numeric slots take all five ops;
+                // String/List take only `+`.
+                if map_slot {
+                    if let Some(op) = op {
+                        let value_ty = self.check_expr_as(value, Some(&target_ty));
+                        let op_ok = match (&target_ty, op) {
+                            (Type::Int | Type::Float, _) => true,
+                            (
+                                Type::String | Type::List(_),
+                                corvid_ast::BinaryOp::Add,
+                            ) => true,
+                            _ => false,
+                        };
+                        if !op_ok {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::TypeMismatch {
+                                    expected: format!(
+                                        "a compound operator valid for `{}`",
+                                        target_ty.display_name()
+                                    ),
+                                    got: format!("`{op:?}=`"),
+                                    context: "map compound assignment".into(),
+                                },
+                                s.span(),
+                            ));
+                        }
+                        if !value_ty.is_assignable_to(&target_ty) {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::TypeMismatch {
+                                    expected: target_ty.display_name(),
+                                    got: value_ty.display_name(),
+                                    context: "assignment target".into(),
+                                },
+                                value.span(),
+                            ));
+                        }
+                        return;
+                    }
+                }
                 let result_ty = match op {
                     // Compound: the operator's normal type rule runs on
                     // (target, value); `check_binop` re-checks both

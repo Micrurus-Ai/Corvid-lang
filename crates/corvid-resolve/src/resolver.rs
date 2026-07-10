@@ -784,6 +784,12 @@ impl Resolver {
                 self.resolve_expr(right);
             }
             Expr::UnOp { operand, .. } => self.resolve_expr(operand),
+            Expr::MapLiteral { entries, .. } => {
+                for (k, v) in entries {
+                    self.resolve_expr(k);
+                    self.resolve_expr(v);
+                }
+            }
             Expr::List { items, .. } => {
                 for item in items {
                     self.resolve_expr(item);

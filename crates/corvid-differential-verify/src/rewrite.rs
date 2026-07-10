@@ -353,6 +353,12 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
                 rename_local_in_expr(item, resolved, target, fresh);
             }
         }
+        Expr::MapLiteral { entries, .. } => {
+            for (k, v) in entries {
+                rename_local_in_expr(k, resolved, target, fresh);
+                rename_local_in_expr(v, resolved, target, fresh);
+            }
+        }
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
         Expr::TryRetry { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
         Expr::Replay {
@@ -729,6 +735,11 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
         Expr::List { items, .. } => items
             .iter()
             .any(|item| expr_mentions_local(item, resolved, local)),
+        Expr::MapLiteral { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| {
+                expr_mentions_local(k, resolved, local) || expr_mentions_local(v, resolved, local)
+            }),
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
         Expr::TryRetry { body, .. } => expr_mentions_local(body, resolved, local),
         Expr::Replay {
@@ -936,6 +947,14 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             fold_constants_in_expr(left) || fold_constants_in_expr(right)
         }
         Expr::UnOp { operand, .. } => fold_constants_in_expr(operand),
+        Expr::MapLiteral { entries, .. } => {
+            for (k, v) in entries {
+                if fold_constants_in_expr(k) || fold_constants_in_expr(v) {
+                    return true;
+                }
+            }
+            false
+        }
         Expr::List { items, .. } => {
             for item in items {
                 if fold_constants_in_expr(item) {
@@ -1032,6 +1051,9 @@ fn is_pure_expr(expr: &Expr) -> bool {
         Expr::BinOp { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
         Expr::UnOp { operand, .. } => is_pure_expr(operand),
         Expr::List { items, .. } => items.iter().all(is_pure_expr),
+        Expr::MapLiteral { entries, .. } => entries
+            .iter()
+            .all(|(k, v)| is_pure_expr(k) && is_pure_expr(v)),
         Expr::FieldAccess { target, .. } => is_pure_expr(target),
         Expr::Index { target, index, .. } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Call { .. }

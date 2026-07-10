@@ -206,6 +206,10 @@ fn stmt_mentions_local(stmt: &IrStmt, local_id: LocalId) -> bool {
 
 fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_mentions_local(e, local_id)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, local_id)
                 || args.iter().any(|a| expr_mentions_local(a, local_id))
@@ -287,6 +291,9 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
     match &expr.kind {
         // Builtin methods are pure value operations by design (the
         // 45c table only admits effect-free methods).
+        IrExprKind::MapLiteral { keys, values } => {
+            keys.iter().chain(values).all(expr_is_effect_free)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_is_effect_free(receiver) && args.iter().all(expr_is_effect_free)
         }

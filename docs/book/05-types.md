@@ -24,7 +24,7 @@ ships it.
 | `Option<T>` | `Some(T)` or `None` |
 | `Result<T,E>` | `Ok(T)` or `Err(E)` |
 | `Grounded<T>` | value with provenance — see **[Grounded](/docs/grounded)** |
-| `Map<K,V>` | key→value map — **Planned, slice 45g** |
+| `Map<K,V>` | key→value map — `m[k]` reads as `Option<V>`, `m[k] = v` inserts or updates |
 
 ## Strings
 
@@ -177,17 +177,31 @@ zs = xs.filter(fn (x) -> x > 1)          # 45j
 
 ## Maps
 
-> **Planned — the `Map<K,V>` type, `{...}` literals, and map methods
-> land in slice 45g.** Until then, the typed key→value shapes are
-> user-declared record types, and dynamic string→value data goes
-> through the `std/json` surface.
+Maps are Python-style literals with typed reads that can never
+throw a KeyError or hand back a silent zero-value (every block
+compiles in CI):
 
-```corvid-planned
-m: Map<String, Int> = {"a": 1, "b": 2}
-v: Option<Int> = m.get("a")
-exists: Bool = m.contains_key("a")
-keys: List<String> = m.keys()
+```corvid
+agent map_demo() -> Int:
+    m = {"a": 1, "b": 2}
+    m["c"] = 3                        # insert-or-update place assignment
+    m["b"] += 5                       # compound on an existing key
+    v = m["a"]                        # Option<Int> — absence is None, never a trap
+    exists = m.contains_key("a")      # Bool
+    gone = m.remove("a")              # Option<Int>
+    total = 0
+    for k in m.keys():                # insertion-order List<String>
+        total = total + 1
+    return m.length() + total
 ```
+
+Semantics worth knowing: `m[k]` READS as `Option<V>` (handle absence
+with `?` or `==`), while `m[k] = v` WRITES as insert-or-update — the
+safest read and the easiest write. Duplicate keys in a literal: the
+last one wins. Maps are shared heap cells (reference semantics, like
+lists) with structural key equality and insertion-order iteration.
+`Map<String, V>` round-trips with JSON objects. Values with
+non-comparable types work as keys too (structural equality).
 
 ## Option
 

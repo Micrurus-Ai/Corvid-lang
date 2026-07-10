@@ -300,6 +300,11 @@ impl Codegen {
 
     fn emit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
+            IrExprKind::MapLiteral { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",
+                );
+            }
             IrExprKind::BuiltinMethod { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"builtin methods are interpreter-only in 45c\"))",
@@ -518,6 +523,11 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         T::String => "str".into(),
         T::Bool => "bool".into(),
         T::Nothing => "None".into(),
+        T::Map(k, v) => format!(
+            "dict[{}, {}]",
+            python_type_hint_of(k, types),
+            python_type_hint_of(v, types)
+        ),
         T::Struct(def_id) => types
             .iter()
             .find(|decl| decl.id == *def_id)

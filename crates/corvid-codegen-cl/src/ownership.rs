@@ -290,6 +290,10 @@ fn expr_consumes_target(
     match &expr.kind {
         // Builtin methods borrow their receiver and args (pure value
         // ops) — they never consume; recurse for nested consumers.
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_consumes_target(e, target, sigs)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -376,6 +380,10 @@ fn expr_consumes_target(
 /// anywhere? (Weaker than `consumes` — includes borrow positions.)
 fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => keys
+            .iter()
+            .chain(values)
+            .any(|e| expr_references(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_references(receiver, target) || args.iter().any(|a| expr_references(a, target))
         }

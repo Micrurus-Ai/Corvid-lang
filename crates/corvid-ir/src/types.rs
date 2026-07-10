@@ -628,6 +628,12 @@ pub enum IrExprKind {
         operand: Box<IrExpr>,
     },
 
+    /// Map literal (slice 45g): parallel key/value lowered exprs.
+    MapLiteral {
+        keys: Vec<IrExpr>,
+        values: Vec<IrExpr>,
+    },
+
     List {
         items: Vec<IrExpr>,
     },

@@ -44,6 +44,13 @@ pub fn emit_type_description(
         Type::ImportedStruct(imported) => TypeDescription::Struct {
             name: imported.name.clone(),
         },
+        // Map<K,V> has no dedicated ABI shape yet (45g is
+        // interpreter-first); describe as a named opaque struct so
+        // signed manifests stay total. Codegen tiers reject Map
+        // separately.
+        Type::Map(_, _) => TypeDescription::Struct {
+            name: "Map".to_string(),
+        },
         Type::List(inner) | Type::Stream(inner) => TypeDescription::List {
             list: AbiListType {
                 element: Box::new(emit_type_description(inner, resolved, names)),

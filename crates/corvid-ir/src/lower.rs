@@ -937,6 +937,10 @@ impl<'a> Lowerer<'a> {
                     IrExprKind::UnOp { op: *op, operand }
                 }
             }
+            Expr::MapLiteral { entries, .. } => IrExprKind::MapLiteral {
+                keys: entries.iter().map(|(k, _)| self.lower_expr(k)).collect(),
+                values: entries.iter().map(|(_, v)| self.lower_expr(v)).collect(),
+            },
             Expr::List { items, .. } => IrExprKind::List {
                 items: items.iter().map(|i| self.lower_expr(i)).collect(),
             },

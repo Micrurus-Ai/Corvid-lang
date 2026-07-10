@@ -347,6 +347,38 @@ impl<'a> Parser<'a> {
                 let span = start_span.merge(end_span);
                 Ok(Expr::List { items, span })
             }
+            // Map literal `{"a": 1}` (slice 45g). `{}` is the empty
+            // map; entries are `expr ':' expr`, comma-separated with
+            // an optional trailing comma.
+            TokKind::LBrace => {
+                self.bump();
+                let mut entries = Vec::new();
+                if !matches!(self.peek(), TokKind::RBrace) {
+                    loop {
+                        let key = self.parse_expr()?;
+                        self.expect(TokKind::Colon, "`:` between map key and value")?;
+                        let value = self.parse_expr()?;
+                        entries.push((key, value));
+                        if !matches!(self.peek(), TokKind::Comma) {
+                            break;
+                        }
+                        self.bump();
+                        if matches!(self.peek(), TokKind::RBrace) {
+                            break;
+                        }
+                    }
+                }
+                let end_span = self.peek_span();
+                if !matches!(self.peek(), TokKind::RBrace) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnclosedBracket,
+                        span: end_span,
+                    });
+                }
+                self.bump();
+                let span = start_span.merge(end_span);
+                Ok(Expr::MapLiteral { entries, span })
+            }
             TokKind::Eof | TokKind::Newline | TokKind::Indent | TokKind::Dedent => {
                 Err(ParseError {
                     kind: ParseErrorKind::UnexpectedEof,

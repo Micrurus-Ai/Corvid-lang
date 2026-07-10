@@ -77,6 +77,12 @@ fn collect_expr_dependencies(expr: &Expr, out: &mut Vec<String>) {
             collect_expr_dependencies(right, out);
         }
         Expr::UnOp { operand, .. } => collect_expr_dependencies(operand, out),
+        Expr::MapLiteral { entries, .. } => {
+            for (k, v) in entries {
+                collect_expr_dependencies(k, out);
+                collect_expr_dependencies(v, out);
+            }
+        }
         Expr::List { items, .. } => {
             for item in items {
                 collect_expr_dependencies(item, out);

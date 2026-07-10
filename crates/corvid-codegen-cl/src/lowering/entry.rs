@@ -43,6 +43,9 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
 
 fn expr_uses_runtime(expr: &IrExpr) -> bool {
     match &expr.kind {
+        IrExprKind::MapLiteral { keys, values } => {
+            keys.iter().chain(values).any(expr_uses_runtime)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }
@@ -411,6 +414,10 @@ pub(super) fn emit_entry_main(
 /// paths and are filed as later slices.
 fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), CodegenError> {
     match ty {
+        Type::Map(_, _) => Err(CodegenError::not_supported(
+            format!("entry agent {role} of type `Map<K, V>` - interpreter-only in 45g"),
+            Span::new(0, 0),
+        )),
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),
         Type::Struct(_) => Ok(()),
         Type::ImportedStruct(_) => Err(CodegenError::not_supported(

@@ -41,6 +41,29 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::List(items) => {
             serde_json::Value::Array(items.iter_cloned().iter().map(value_to_json).collect())
         }
+        Value::Map(m) => {
+            let entries = m.entries_cloned();
+            if entries.iter().all(|(k, _)| matches!(k, Value::String(_))) {
+                let mut obj = serde_json::Map::new();
+                for (k, v) in &entries {
+                    if let Value::String(s) = k {
+                        obj.insert(s.to_string(), value_to_json(v));
+                    }
+                }
+                serde_json::Value::Object(obj)
+            } else {
+                // Non-String keys can't be a JSON object; render as an
+                // array of [key, value] pairs.
+                serde_json::Value::Array(
+                    entries
+                        .iter()
+                        .map(|(k, v)| {
+                            serde_json::Value::Array(vec![value_to_json(k), value_to_json(v)])
+                        })
+                        .collect(),
+                )
+            }
+        }
         Value::Weak(w) => match w.upgrade() {
             Some(value) => serde_json::json!({ "tag": "weak", "value": value_to_json(&value) }),
             None => serde_json::json!({ "tag": "weak", "value": serde_json::Value::Null }),
@@ -150,6 +173,41 @@ pub fn json_to_value(
                 expected: "Int".into(),
                 got: "non-integer number".into(),
             }),
+        // Map<String, V> (45g) decodes from a JSON object; other key
+        // types decode from an array of [key, value] pairs (the same
+        // shapes value_to_json emits).
+        (Type::Map(key_ty, val_ty), J::Object(obj)) if matches!(**key_ty, Type::String) => {
+            let mut entries = Vec::with_capacity(obj.len());
+            for (k, v) in obj {
+                entries.push((
+                    Value::String(std::sync::Arc::from(k.as_str())),
+                    json_to_value(v.clone(), val_ty, types_by_id)?,
+                ));
+            }
+            Ok(Value::Map(crate::value::MapValue::new(entries)))
+        }
+        (Type::Map(key_ty, val_ty), J::Array(pairs)) => {
+            let mut entries = Vec::with_capacity(pairs.len());
+            for pair in pairs {
+                let J::Array(kv) = pair else {
+                    return Err(ConvError::TypeMismatch {
+                        expected: "a [key, value] pair".into(),
+                        got: "a non-array element".into(),
+                    });
+                };
+                if kv.len() != 2 {
+                    return Err(ConvError::TypeMismatch {
+                        expected: "a [key, value] pair".into(),
+                        got: format!("an array of length {}", kv.len()),
+                    });
+                }
+                entries.push((
+                    json_to_value(kv[0].clone(), key_ty, types_by_id)?,
+                    json_to_value(kv[1].clone(), val_ty, types_by_id)?,
+                ));
+            }
+            Ok(Value::Map(crate::value::MapValue::new(entries)))
+        }
         // Float absorbs both JSON floats and JSON integers (LLMs often
         // emit `1` where a float field is declared).
         (Type::Float, J::Number(n)) => n
@@ -317,6 +375,7 @@ fn type_label(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::Nothing => "Nothing".into(),
+        Type::Map(_, _) => "Map".into(),
         Type::Struct(_) => "struct".into(),
         Type::ImportedStruct(imported) => imported.name.clone(),
         Type::List(elem) => format!("List<{}>", type_label(elem)),

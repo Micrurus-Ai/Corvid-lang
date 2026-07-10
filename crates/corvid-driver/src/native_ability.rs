@@ -110,6 +110,7 @@ fn is_refcounted_type(ty: &Type) -> bool {
 
 fn is_native_value_type(ty: &Type) -> bool {
     match ty {
+        Type::Map(_, _) => false,
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),
@@ -237,6 +238,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         return Err(NotNativeReason::StreamLoweringNotImplemented);
     }
     match &expr.kind {
+        // Map is interpreter-only in 45g; a MapLiteral anywhere routes
+        // the program to the interpreter tier.
+        IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

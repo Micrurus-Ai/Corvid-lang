@@ -825,6 +825,65 @@ sum types + match).
 
 ---
 
+## 2026-07-10 - 45g closed: Map<K,V> — the safest read and the easiest write
+
+The biggest slice since 45b: a full new data shape through every
+layer (type system, parser, IR, heap cell with cycle-collector
+integration, interpreter, JSON conversion, all codegen degradations).
+Audit blocker B3 is CLOSED — Corvid now has all its core data shapes
+except sum types (45h, next-but-one).
+
+### The design, judged under the principle
+
+- **`m[k]` reads as `Option<V>`** — no KeyError (Python), no silent
+  zero-value (Go), no `.get(&k).cloned()` ceremony (Rust). Absence
+  is a typed value, handled with `?` or `==`. Safer than all three,
+  terser than two.
+- **`m[k] = v` writes as insert-or-update** — the easy Python write
+  through the 45b place-assignment machinery. Compound
+  (`m[k] += v`) requires the key to exist (traps with a clear
+  message). The checker types the READ as Option<V> but the
+  assignment SLOT as V, with a type-level compound rule (numeric
+  slots take all five ops; String/List only `+`).
+- Python literals (`{"a": 1}`, dup key last-wins, trailing comma),
+  insertion-order iteration via `m.keys()`, structural key equality
+  (any key type), reference semantics coherent with 45b.
+- **Full cycle-collector integration**: `ObjectRef::Map` walks keys
+  AND values as children — a Map in a struct in a Map collects
+  correctly. No leak-by-omission shortcut.
+- **JSON both directions**: `Map<String, V>` ↔ JSON object; other
+  key types ↔ `[key, value]` pair arrays. The typed read-write
+  counterpart to 33R5b's opaque JsonBuilder.
+- Prompt schemas: String-keyed maps render as `additionalProperties`
+  objects; others as pair-array schemas.
+
+### The one mid-slice fix
+
+Compound assignment through a map slot initially failed typecheck:
+`check_binop` saw the Option<V> READ type. Fixed with an explicit
+slot-typed compound rule in the Assign arm rather than re-plumbing
+the operator table.
+
+### Verification
+
+Live probe (12 checks in one program: dup-key, Option hit/miss,
+insert/update/compound, aliasing, contains_key, insertion order,
+remove, keys-iteration, empty literal) passed after the compound
+fix. Pinned: 1 e2e + 2 checker tests (surface + key/value type
+enforcement). Grammar PLANNED markers off with parse evidence; book
+ch 05 Maps section flipped.
+
+### Validation
+
+270 types + 216 syntax + 109 vm + 7 builtin-method e2e + 3
+book-guard; workspace --tests clean; corpus verify exits 1 only on
+the two deliberate fixtures.
+
+Next per track order: 45h-user-sum-types, then 45i-match — the two
+biggest remaining slices of the track.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
