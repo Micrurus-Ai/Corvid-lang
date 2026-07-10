@@ -50,23 +50,26 @@ Concatenation with `+` requires both sides to be `String` — there is
 no implicit number-to-string coercion (explicit conversions are
 Planned, see Numbers below).
 
-`length()` counts Unicode scalar values (like Python's `len(str)`),
-not UTF-8 bytes:
+The string method set (every block below compiles in CI):
 
 ```corvid
-agent measure(name: String) -> Int:
-    return name.length()
+agent demo(s: String) -> String:
+    n = s.length()                        # Int — Unicode scalars, not bytes
+    parts = "a,b,c".split(",")            # List<String>
+    has = s.contains("ell")               # Bool
+    starts = s.starts_with("he")          # Bool
+    ends = s.ends_with("!")               # Bool
+    cleaned = s.trim()                    # strip Unicode whitespace
+    swapped = s.replace("old", "new")     # every occurrence
+    piece = s.substring(0, 5)             # scalar indices, clamped
+    return cleaned.to_upper() + piece.to_lower()
 ```
 
-> **Planned — the remaining string methods land in slice 45d (the
-> builtin-method machinery they ride on shipped in 45c):**
-
-```corvid-planned
-s.contains("ell")                         # Bool
-s.split(",")                              # List<String>
-s.to_upper()                              # String
-s.trim()                                  # String
-```
+Semantics worth knowing: indices and lengths count Unicode scalar
+values (like Python's `len(str)`), never UTF-8 bytes; casing is full
+Unicode; `split` with an empty separator traps at runtime (iterate
+with `for c in s` to walk characters); `substring` clamps
+out-of-range indices and returns `""` when `start >= end`.
 
 ## Numbers
 

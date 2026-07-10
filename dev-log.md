@@ -667,6 +667,59 @@ substring on the 45c table).
 
 ---
 
+## 2026-07-10 - 45d closed: the string-method batch — "uppercase a string without Python" is finally true
+
+The first method batch on the 45c machinery, and proof the machinery
+works as designed: NINE methods shipped as table arms + one
+interpreter helper, with zero new plumbing.
+
+### What shipped
+
+`length` (45c pilot) joined by `to_upper`, `to_lower`, `trim`,
+`contains`, `starts_with`, `ends_with`, `split(sep) -> List<String>`,
+`replace(from, to)`, `substring(start, end)`.
+
+### Semantics decided once, on the BuiltinMethodKind docs
+
+- Indices and lengths count Unicode scalar values everywhere —
+  consistent with the 45c length() decision.
+- Casing is full Unicode ("héllo".to_upper() == "HÉLLO", pinned).
+- `split("")` TRAPS with a diagnostic pointing at `for c in s`
+  (Python-like; Rust's empty-pattern split yields surprising empty
+  edge pieces).
+- `replace` replaces ALL occurrences (Python/Rust convention).
+- `substring` clamps out-of-range indices to bounds and returns ""
+  when start >= end (Python slice behavior); no negative indices.
+- The slice's named "chars-iteration decision": NO `chars()` method —
+  strings are already `for c in s` iterable at the statement level.
+
+### Verification
+
+Live probe exercised all nine + edge cases in one program ("all
+string methods pass" first try): trim/casing round-trips, split +
+index + concat, replace, substring at exact/clamped/inverted ranges,
+Unicode casing. Empty-split trap verified live. Pinned permanently:
+2 e2e tests (batch + trap) + 2 checker tests (batch typechecks with
+correct result types incl. List<String> from split; substring's Int
+params reject Strings).
+
+Audit blocker B5's string half is CLOSED: a Corvid program can
+uppercase, split, search, and slice strings with zero Python. Book
+ch 05's strings section now shows the full compiling method set with
+the semantics callout (the corvid-planned block is gone).
+
+### Validation
+
+265 types + 109 vm + 3 builtin-method e2e + 3 book-guard; workspace
+--tests clean; corpus verify exits 1 only on the two deliberate
+fixtures. 33R5c ticks with this slice.
+
+Next per track order: 45e-number-string-conversions
+(to_string/to_float/to_int_truncated/parse_int/parse_float — kills
+the `"count: " + n` papercut).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -32,12 +32,47 @@ use serde::{Deserialize, Serialize};
 
 /// Stable identity of a builtin method — the contract between the
 /// checker, the lowerer, and the interpreter.
+///
+/// String-method semantics (slice 45d), decided once here:
+/// - Indices and lengths count Unicode scalar values (Python's
+///   `len(str)`), never UTF-8 bytes.
+/// - `to_upper`/`to_lower` are full Unicode case mappings.
+/// - `split` with an empty separator TRAPS at runtime (Python-like;
+///   Rust's empty-pattern split yields surprising empty pieces).
+/// - `replace` replaces ALL occurrences (Python/Rust behavior).
+/// - `substring(start, end)` clamps out-of-range indices to the
+///   string bounds and returns "" when start >= end (Python slice
+///   behavior); negative indices are not supported in 45d.
+/// - There is no `chars()` — strings are already `for c in s`
+///   iterable at the statement level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuiltinMethodKind {
     /// `String.length() -> Int` — the number of Unicode scalar
     /// values (code points), matching Python's `len(str)`, not the
     /// UTF-8 byte count.
     StringLength,
+    /// `String.to_upper() -> String` — Unicode uppercase mapping.
+    StringToUpper,
+    /// `String.to_lower() -> String` — Unicode lowercase mapping.
+    StringToLower,
+    /// `String.trim() -> String` — strip Unicode whitespace from
+    /// both ends.
+    StringTrim,
+    /// `String.contains(needle: String) -> Bool`.
+    StringContains,
+    /// `String.starts_with(prefix: String) -> Bool`.
+    StringStartsWith,
+    /// `String.ends_with(suffix: String) -> Bool`.
+    StringEndsWith,
+    /// `String.split(sep: String) -> List<String>` — empty separator
+    /// traps at runtime.
+    StringSplit,
+    /// `String.replace(from: String, to: String) -> String` — every
+    /// occurrence.
+    StringReplace,
+    /// `String.substring(start: Int, end: Int) -> String` — Unicode
+    /// scalar indices, clamped to bounds; "" when start >= end.
+    StringSubstring,
 }
 
 /// A builtin method's checked signature for a CONCRETE receiver
@@ -54,12 +89,29 @@ pub struct BuiltinMethodSig {
 /// Returns `None` when no builtin method matches — the caller falls
 /// through to extend-method dispatch or its existing diagnostics.
 pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    use BuiltinMethodKind::*;
+    let sig = |kind, params, ret| Some(BuiltinMethodSig { kind, params, ret });
     match (receiver, name) {
-        (Type::String, "length") => Some(BuiltinMethodSig {
-            kind: BuiltinMethodKind::StringLength,
-            params: Vec::new(),
-            ret: Type::Int,
-        }),
+        (Type::String, "length") => sig(StringLength, vec![], Type::Int),
+        (Type::String, "to_upper") => sig(StringToUpper, vec![], Type::String),
+        (Type::String, "to_lower") => sig(StringToLower, vec![], Type::String),
+        (Type::String, "trim") => sig(StringTrim, vec![], Type::String),
+        (Type::String, "contains") => sig(StringContains, vec![Type::String], Type::Bool),
+        (Type::String, "starts_with") => sig(StringStartsWith, vec![Type::String], Type::Bool),
+        (Type::String, "ends_with") => sig(StringEndsWith, vec![Type::String], Type::Bool),
+        (Type::String, "split") => sig(
+            StringSplit,
+            vec![Type::String],
+            Type::List(Box::new(Type::String)),
+        ),
+        (Type::String, "replace") => sig(
+            StringReplace,
+            vec![Type::String, Type::String],
+            Type::String,
+        ),
+        (Type::String, "substring") => {
+            sig(StringSubstring, vec![Type::Int, Type::Int], Type::String)
+        }
         _ => None,
     }
 }

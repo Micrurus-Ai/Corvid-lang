@@ -3864,6 +3864,46 @@ agent main() -> Int:
     );
 }
 
+/// Slice 45d — the string-method batch typechecks with correct
+/// result types (split returns List<String>, indexable; contains
+/// returns Bool, usable in `if`).
+#[test]
+fn string_method_batch_typechecks() {
+    let src = "\
+agent main() -> String:
+    s = \"  hi  \"
+    parts = \"a,b\".split(\",\")
+    first = parts[0]
+    if s.trim().contains(\"h\") and s.starts_with(\" \"):
+        return s.to_upper().replace(\"HI\", first).substring(0, 2)
+    return s.to_lower()
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "the 45d string-method batch should typecheck, got {:?}",
+        c.errors
+    );
+}
+
+/// Slice 45d — argument types are checked against the table's
+/// signature: `substring` takes Ints, not Strings.
+#[test]
+fn string_method_argument_types_are_checked() {
+    let src = "\
+agent main() -> String:
+    return \"hello\".substring(\"a\", \"b\")
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for substring(String, String), got {:?}",
+        c.errors
+    );
+}
+
 /// Slice 45b — place assignment typechecks: field/index targets take
 /// values assignable to the slot's type; compound ops run the normal
 /// operator rules and the result must fit back into the slot.

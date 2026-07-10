@@ -409,3 +409,94 @@ mod tests {
         assert!(require_bool(&Value::Int(1), span, "test").is_err());
     }
 }
+
+/// Execute a builtin method (slices 45c/45d) on already-evaluated
+/// receiver and argument values. Pure value operations — semantics
+/// documented on `corvid_types::BuiltinMethodKind`. The checker
+/// guarantees receiver/argument types, so mismatches here indicate
+/// an internal inconsistency and surface as typed runtime errors.
+pub(super) fn eval_builtin_method(
+    kind: corvid_types::BuiltinMethodKind,
+    recv: Value,
+    args: Vec<Value>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    use corvid_types::BuiltinMethodKind::*;
+
+    fn want_string(v: &Value, span: Span) -> Result<std::sync::Arc<str>, InterpError> {
+        match v {
+            Value::String(s) => Ok(s.clone()),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "String".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+    fn want_int(v: &Value, span: Span) -> Result<i64, InterpError> {
+        match v {
+            Value::Int(i) => Ok(*i),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "Int".into(),
+                    got: other.type_name(),
+                },
+                span,
+            )),
+        }
+    }
+
+    let s = want_string(&recv, span)?;
+    match kind {
+        StringLength => Ok(Value::Int(s.chars().count() as i64)),
+        StringToUpper => Ok(Value::String(std::sync::Arc::from(s.to_uppercase()))),
+        StringToLower => Ok(Value::String(std::sync::Arc::from(s.to_lowercase()))),
+        StringTrim => Ok(Value::String(std::sync::Arc::from(s.trim()))),
+        StringContains => {
+            let needle = want_string(&args[0], span)?;
+            Ok(Value::Bool(s.contains(needle.as_ref())))
+        }
+        StringStartsWith => {
+            let prefix = want_string(&args[0], span)?;
+            Ok(Value::Bool(s.starts_with(prefix.as_ref())))
+        }
+        StringEndsWith => {
+            let suffix = want_string(&args[0], span)?;
+            Ok(Value::Bool(s.ends_with(suffix.as_ref())))
+        }
+        StringSplit => {
+            let sep = want_string(&args[0], span)?;
+            if sep.is_empty() {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "a non-empty separator for `split` (iterate the string with `for c in s` to walk characters)".into(),
+                        got: "an empty String".into(),
+                    },
+                    span,
+                ));
+            }
+            let pieces: Vec<Value> = s
+                .split(sep.as_ref())
+                .map(|piece| Value::String(std::sync::Arc::from(piece)))
+                .collect();
+            Ok(Value::List(crate::value::ListValue::new(pieces)))
+        }
+        StringReplace => {
+            let from = want_string(&args[0], span)?;
+            let to = want_string(&args[1], span)?;
+            Ok(Value::String(std::sync::Arc::from(s.replace(from.as_ref(), to.as_ref()))))
+        }
+        StringSubstring => {
+            let len = s.chars().count() as i64;
+            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
+            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
+            if start >= end {
+                return Ok(Value::String(std::sync::Arc::from(String::new())));
+            }
+            let piece: String = s.chars().skip(start).take(end - start).collect();
+            Ok(Value::String(std::sync::Arc::from(piece)))
+        }
+    }
+}

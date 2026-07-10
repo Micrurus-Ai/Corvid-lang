@@ -36,7 +36,7 @@ pub use test_runner::{
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
 };
 
-use self::expr::{eval_binop, eval_literal, eval_unop, require_bool};
+use self::expr::{eval_binop, eval_builtin_method, eval_literal, eval_unop, require_bool};
 use self::grounding::{maybe_ground_tool_result, tool_has_retrieval_effect};
 use crate::conv::{json_to_value, value_to_json};
 use crate::env::Env;
@@ -218,27 +218,25 @@ impl<'ir> Interpreter<'ir> {
             // `BuiltinMethodKind`; the shared corvid_types table
             // guarantees the checker only let matching receivers
             // through.
-            IrExprKind::BuiltinMethod { kind, receiver, .. } => {
+            IrExprKind::BuiltinMethod {
+                kind,
+                receiver,
+                args,
+            } => {
                 let recv = match self.eval_expr(receiver).await?.into_value() {
                     Ok(v) => v,
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
-                match (kind, recv) {
-                    (corvid_types::BuiltinMethodKind::StringLength, Value::String(s)) => {
-                        // Unicode scalar count (Python's len(str)),
-                        // not the UTF-8 byte count.
-                        Ok(ExprFlow::Value(Value::Int(s.chars().count() as i64)))
-                    }
-                    (corvid_types::BuiltinMethodKind::StringLength, other) => {
-                        Err(InterpError::new(
-                            InterpErrorKind::TypeMismatch {
-                                expected: "String".into(),
-                                got: other.type_name(),
-                            },
-                            expr.span,
-                        ))
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for a in args {
+                    match self.eval_expr(a).await?.into_value() {
+                        Ok(v) => arg_vals.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
                     }
                 }
+                Ok(ExprFlow::Value(eval_builtin_method(
+                    *kind, recv, arg_vals, expr.span,
+                )?))
             }
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
 
