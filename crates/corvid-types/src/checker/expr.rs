@@ -264,6 +264,32 @@ impl<'a> Checker<'a> {
     pub(super) fn type_of_decl(&mut self, id: DefId, ident: &Ident) -> Type {
         let entry = self.symbols.get(id);
         match entry.kind {
+            DeclKind::Variant => {
+                // Bare unit variant (`Pending`) is a value of the
+                // owning sum type; a payload variant must be called.
+                if let Some((owner_id, idx)) = self.variant_owners.get(&id).copied() {
+                    if let Some(ty_decl) = self.types_by_id.get(&owner_id) {
+                        if let Some(variant) = ty_decl.variants.get(idx as usize) {
+                            if variant.fields.is_empty() {
+                                return Type::Struct(owner_id);
+                            }
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::NotCallable {
+                                    got: format!(
+                                        "bare reference to variant `{}` — it carries {} field(s); construct it with `{}(...)`",
+                                        ident.name,
+                                        variant.fields.len(),
+                                        ident.name
+                                    ),
+                                },
+                                ident.span,
+                            ));
+                            return Type::Struct(owner_id);
+                        }
+                    }
+                }
+                Type::Unknown
+            }
             DeclKind::Tool | DeclKind::Prompt | DeclKind::Agent | DeclKind::Fixture => {
                 // Referencing without a call is currently an error.
                 // (Callers that need the function signature look it up by id.)

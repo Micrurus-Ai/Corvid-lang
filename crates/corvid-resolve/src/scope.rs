@@ -94,6 +94,10 @@ pub enum BuiltIn {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeclKind {
     Import,
+    /// One variant of a sum type (slice 45h). The variant is a
+    /// file-scope constructor; `variant_owners` in `Resolved` maps
+    /// it back to its owning type and index.
+    Variant,
     ImportedUse,
     Type,
     Store,

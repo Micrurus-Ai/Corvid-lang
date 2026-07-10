@@ -41,6 +41,12 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::List(items) => {
             serde_json::Value::Array(items.iter_cloned().iter().map(value_to_json).collect())
         }
+        Value::Enum(e) => serde_json::json!({
+            "tag": "variant",
+            "type": e.type_name(),
+            "variant": e.variant_name(),
+            "fields": e.fields_cloned().iter().map(value_to_json).collect::<Vec<_>>(),
+        }),
         Value::Map(m) => {
             let entries = m.entries_cloned();
             if entries.iter().all(|(k, _)| matches!(k, Value::String(_))) {
@@ -654,6 +660,7 @@ mod tests {
         // Build a fake IrType for `Decision { should_refund: Bool }`.
         let id = DefId(7);
         let ir_type = IrType {
+            variants: Vec::new(),
             id,
             name: "Decision".into(),
             fields: vec![corvid_ir::IrField {
@@ -682,6 +689,7 @@ mod tests {
     fn missing_field_errors() {
         let id = DefId(1);
         let ir_type = IrType {
+            variants: Vec::new(),
             id,
             name: "X".into(),
             fields: vec![corvid_ir::IrField {

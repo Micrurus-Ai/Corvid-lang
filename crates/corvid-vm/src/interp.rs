@@ -1142,6 +1142,50 @@ impl<'ir> Interpreter<'ir> {
                         )),
                     })
             }
+            // Sum-variant construction (45h): positional payload,
+            // variant metadata from the owning IrType.
+            IrCallKind::EnumConstructor {
+                def_id,
+                variant_index,
+            } => {
+                let ir_type = self.types_by_id.get(def_id).copied().ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!(
+                            "sum type for variant `{callee_name}` is missing from the IR"
+                        )),
+                        span,
+                    )
+                })?;
+                let variant = ir_type
+                    .variants
+                    .get(*variant_index as usize)
+                    .ok_or_else(|| {
+                        InterpError::new(
+                            InterpErrorKind::DispatchFailed(format!(
+                                "variant index {variant_index} out of range for `{}`",
+                                ir_type.name
+                            )),
+                            span,
+                        )
+                    })?;
+                if arg_values.len() != variant.fields.len() {
+                    return Err(InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!(
+                            "variant `{callee_name}` expects {} field(s), got {}",
+                            variant.fields.len(),
+                            arg_values.len(),
+                        )),
+                        span,
+                    ));
+                }
+                Ok(ExprFlow::Value(Value::Enum(crate::value::EnumValue::new(
+                    ir_type.id,
+                    ir_type.name.clone(),
+                    *variant_index,
+                    variant.name.clone(),
+                    arg_values,
+                ))))
+            }
             IrCallKind::StructConstructor { def_id } => {
                 // Build a `Value::Struct` from the constructor args, in
                 // field declaration order (mirrors the codegen-cl

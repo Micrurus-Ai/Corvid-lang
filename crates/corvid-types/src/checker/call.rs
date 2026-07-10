@@ -85,6 +85,7 @@ impl<'a> Checker<'a> {
                         Type::Unknown
                     }
                     DeclKind::Type => self.check_struct_constructor(def_id, &name.name, args),
+                    DeclKind::Variant => self.check_variant_constructor(def_id, &name.name, args),
                 }
             }
             Binding::BuiltIn(builtin) => {
@@ -825,6 +826,61 @@ impl<'a> Checker<'a> {
     /// `TypeName(field0, field1, ...)` — construct a struct. Field
     /// values must be assignable to each field's declared type.
     /// Returns `Struct(def_id)`.
+    /// Sum-variant construction (slice 45h): `Approved("alice")`.
+    /// Fields check positionally against the variant declaration;
+    /// the value's type is the OWNING sum type.
+    pub(super) fn check_variant_constructor(
+        &mut self,
+        variant_id: DefId,
+        name: &str,
+        args: &[Expr],
+    ) -> Type {
+        let Some((owner_id, idx)) = self.variant_owners.get(&variant_id).copied() else {
+            for a in args {
+                let _ = self.check_expr(a);
+            }
+            return Type::Unknown;
+        };
+        let Some(ty_decl) = self.types_by_id.get(&owner_id).copied() else {
+            for a in args {
+                let _ = self.check_expr(a);
+            }
+            return Type::Struct(owner_id);
+        };
+        let Some(variant) = ty_decl.variants.get(idx as usize) else {
+            return Type::Struct(owner_id);
+        };
+        if args.len() != variant.fields.len() {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::ArityMismatch {
+                    callee: name.to_string(),
+                    expected: variant.fields.len(),
+                    got: args.len(),
+                },
+                args.first().map(|a| a.span()).unwrap_or(variant.span),
+            ));
+        }
+        for (i, arg) in args.iter().enumerate() {
+            if let Some(field) = variant.fields.get(i) {
+                let field_ty = self.type_ref_to_type(&field.ty);
+                let arg_ty = self.check_expr_as(arg, Some(&field_ty));
+                if !arg_ty.is_assignable_to(&field_ty) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::TypeMismatch {
+                            expected: field_ty.display_name(),
+                            got: arg_ty.display_name(),
+                            context: format!("field `{}` of `{name}`", field.name.name),
+                        },
+                        arg.span(),
+                    ));
+                }
+            } else {
+                let _ = self.check_expr(arg);
+            }
+        }
+        Type::Struct(owner_id)
+    }
+
     pub(super) fn check_struct_constructor(
         &mut self,
         def_id: DefId,

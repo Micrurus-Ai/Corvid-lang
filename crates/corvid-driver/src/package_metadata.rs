@@ -130,6 +130,7 @@ fn notes_cell(agent: Option<&corvid_resolve::AgentSemanticSummary>) -> String {
 fn kind_label(kind: DeclKind) -> &'static str {
     match kind {
         DeclKind::Import => "import",
+        DeclKind::Variant => "sum-type variant",
         DeclKind::ImportedUse => "imported use",
         DeclKind::Type => "type",
         DeclKind::Store => "store",

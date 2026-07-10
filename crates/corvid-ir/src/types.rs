@@ -97,6 +97,18 @@ pub struct IrType {
     pub id: DefId,
     pub name: String,
     pub fields: Vec<IrField>,
+    /// Sum-type variants (slice 45h); empty for record types. The
+    /// declared field names/types are 45i pattern + exhaustiveness
+    /// metadata; runtime payloads are positional.
+    pub variants: Vec<IrEnumVariant>,
+    pub span: Span,
+}
+
+/// One lowered sum-type variant (slice 45h).
+#[derive(Debug, Clone)]
+pub struct IrEnumVariant {
+    pub name: String,
+    pub fields: Vec<IrField>,
     pub span: Span,
 }
 
@@ -830,6 +842,13 @@ pub enum IrCallKind {
     /// Struct constructor — `Order(id, amount)` builds an `Order`.
     /// Args are field values in declaration order. Codegen lowers as
     /// an allocation followed by per-field stores.
+    /// Sum-variant construction (slice 45h): `Approved("alice")`.
+    /// `def_id` is the OWNING sum type (lowered); the index selects
+    /// the variant.
+    EnumConstructor {
+        def_id: DefId,
+        variant_index: u32,
+    },
     StructConstructor {
         def_id: DefId,
     },

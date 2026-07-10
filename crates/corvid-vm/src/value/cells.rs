@@ -49,6 +49,24 @@ pub struct ListValue(pub(super) Arc<ListInner>);
 #[derive(Debug)]
 pub struct BoxedValue(pub(super) Arc<BoxedInner>);
 
+/// Sum-type value cell (slice 45h): owning type id/name, variant
+/// index/name, and POSITIONAL payload fields. Immutable after
+/// construction at the language level, but stored behind the same
+/// Mutex-cell shape so the cycle collector's clear-payload path
+/// works uniformly.
+#[derive(Debug)]
+pub struct EnumValue(pub(super) Arc<EnumInner>);
+
+#[derive(Debug)]
+pub(crate) struct EnumInner {
+    pub(super) meta: HeapMeta,
+    pub(super) type_id: DefId,
+    pub(super) type_name: String,
+    pub(super) variant_index: u32,
+    pub(super) variant_name: String,
+    pub(super) fields: Mutex<Option<Vec<Value>>>,
+}
+
 /// Map cell (slice 45g): insertion-ordered `(key, value)` pairs with
 /// structural key equality. Vec-backed — O(n) lookup is fine for v1
 /// map sizes; the representation can move to an index map later
@@ -266,6 +284,74 @@ impl Clone for BoxedValue {
 impl Drop for BoxedValue {
     fn drop(&mut self) {
         cycle_collector::release_object(ObjectRef::Boxed(self.0.clone()));
+    }
+}
+
+impl EnumValue {
+    pub fn new(
+        type_id: DefId,
+        type_name: impl Into<String>,
+        variant_index: u32,
+        variant_name: impl Into<String>,
+        fields: Vec<Value>,
+    ) -> Self {
+        Self(Arc::new(EnumInner {
+            meta: HeapMeta::new(),
+            type_id,
+            type_name: type_name.into(),
+            variant_index,
+            variant_name: variant_name.into(),
+            fields: Mutex::new(Some(fields)),
+        }))
+    }
+
+    pub fn type_id(&self) -> DefId {
+        self.0.type_id
+    }
+
+    pub fn type_name(&self) -> &str {
+        &self.0.type_name
+    }
+
+    pub fn variant_index(&self) -> u32 {
+        self.0.variant_index
+    }
+
+    pub fn variant_name(&self) -> &str {
+        &self.0.variant_name
+    }
+
+    pub fn fields_cloned(&self) -> Vec<Value> {
+        self.0
+            .fields
+            .lock()
+            .expect("enum lock")
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn ptr_key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+}
+
+impl Clone for EnumValue {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+/// Structural equality: same owning type, same variant, equal
+/// payload fields.
+impl PartialEq for EnumValue {
+    fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        self.0.type_id == other.0.type_id
+            && self.0.variant_index == other.0.variant_index
+            && self.fields_cloned() == other.fields_cloned()
     }
 }
 

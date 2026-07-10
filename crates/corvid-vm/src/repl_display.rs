@@ -53,6 +53,19 @@ fn render_value_inner(
             visited.remove(&key);
             format!("{}({rendered})", s.type_name())
         }
+        Value::Enum(e) => {
+            let fields = e.fields_cloned();
+            if fields.is_empty() {
+                e.variant_name().to_string()
+            } else {
+                let inner = fields
+                    .iter()
+                    .map(|v| render_value_inner(v, depth + 1, visited))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", e.variant_name())
+            }
+        }
         Value::Map(m) => {
             let key = m.ptr_key();
             if !visited.insert(key) {

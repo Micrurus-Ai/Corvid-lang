@@ -91,10 +91,15 @@ import_item       ::= IDENT ('as' IDENT)?
 type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
                     | 'type' IDENT '=' type_alias_body NEWLINE      # PLANNED(45n)
 
+# A type declaration is a record (field lines) XOR a sum (variant
+# lines) — mixing is a parse error. Unit variants (`| Pending`) are
+# bare values; payload variants construct with `Approved("alice")`.
+# Variant names are file-scope constructors (duplicates across types
+# are duplicate-declaration errors).
 type_field        ::= IDENT ':' type_ref NEWLINE
-                    | '|' IDENT ('(' field_list ')')? NEWLINE       # PLANNED(45h) sum-type variant
+                    | '|' IDENT ('(' field_list ')')? NEWLINE       # sum-type variant
 
-field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*  # PLANNED(45h)
+field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
 
 type_alias_body   ::= type_ref                                      # PLANNED(45n)
 

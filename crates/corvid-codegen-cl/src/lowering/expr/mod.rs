@@ -175,6 +175,12 @@ pub(super) fn lower_expr(
             )
         }
         IrExprKind::Call { kind, callee_name, args } => match kind {
+            IrCallKind::EnumConstructor { .. } => {
+                return Err(CodegenError::not_supported(
+                    "sum-type variants are interpreter-only in 45h",
+                    expr.span,
+                ));
+            }
             IrCallKind::Agent { def_id } => {
                 let callee_id = func_ids_by_def.get(def_id).ok_or_else(|| {
                     CodegenError::cranelift(

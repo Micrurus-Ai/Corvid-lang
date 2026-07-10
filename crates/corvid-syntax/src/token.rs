@@ -159,6 +159,9 @@ pub enum TokKind {
     Slash,   // /
     Percent, // %
 
+    /// `|` — sum-type variant introducer (slice 45h).
+    Pipe,
+
     // --- compound assignment (slice 45b) ---
     PlusEq,    // +=
     MinusEq,   // -=

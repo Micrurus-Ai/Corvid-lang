@@ -326,6 +326,14 @@ pub struct ImportUseItem {
 pub struct TypeDecl {
     pub name: Ident,
     pub fields: Vec<Field>,
+    /// Sum-type variants (slice 45h): `| Pending` /
+    /// `| Approved(approver: String)`. A type declaration is a
+    /// record (fields, no variants) XOR a sum (variants, no
+    /// fields) — the parser rejects mixing. Variant payload fields
+    /// are stored positionally at runtime; the declared names are
+    /// metadata for diagnostics and 45i pattern destructuring.
+    #[serde(default)]
+    pub variants: Vec<SumVariant>,
     /// Module-level visibility. Defaults to [`Visibility::Private`]
     /// (file-scoped). Marked `public` to be visible to importers
     /// once cross-file `.cor` imports land in `lang-cor-imports-basic`.
@@ -333,6 +341,16 @@ pub struct TypeDecl {
     /// the field's value.
     #[serde(default)]
     pub visibility: Visibility,
+    pub span: Span,
+}
+
+/// One variant of a sum type (slice 45h).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SumVariant {
+    pub name: Ident,
+    /// Payload fields: `(name, type)` pairs; empty for unit
+    /// variants like `| Pending`.
+    pub fields: Vec<Field>,
     pub span: Span,
 }
 

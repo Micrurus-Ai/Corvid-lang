@@ -492,6 +492,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             b'@' => (TokKind::At, 1),
+            b'|' => (TokKind::Pipe, 1),
             b'\'' => (TokKind::Apostrophe, 1),
             b'$' => (TokKind::Dollar, 1),
             b'-' => {

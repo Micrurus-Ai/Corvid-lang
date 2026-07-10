@@ -23,7 +23,7 @@ mod heap;
 mod object_ref;
 mod stream;
 mod weak;
-pub use cells::{BoxedValue, ListValue, MapValue, StructValue};
+pub use cells::{BoxedValue, EnumValue, ListValue, MapValue, StructValue};
 pub use display::value_confidence;
 pub(crate) use heap::Color;
 pub(crate) use object_ref::{ObjectRef, WeakObjectRef};
@@ -43,6 +43,9 @@ pub enum Value {
     List(ListValue),
     /// Map cell (slice 45g): insertion-ordered, structurally-keyed.
     Map(MapValue),
+    /// Sum-type value (slice 45h): owning type + variant + positional
+    /// payload.
+    Enum(EnumValue),
     Weak(WeakValue),
     ResultOk(BoxedValue),
     ResultErr(BoxedValue),
@@ -221,6 +224,7 @@ impl Clone for Value {
             Value::Struct(s) => Value::Struct(s.clone()),
             Value::List(items) => Value::List(items.clone()),
             Value::Map(m) => Value::Map(m.clone()),
+            Value::Enum(e) => Value::Enum(e.clone()),
             Value::Weak(w) => Value::Weak(w.clone()),
             Value::ResultOk(v) => Value::ResultOk(v.clone()),
             Value::ResultErr(v) => Value::ResultErr(v.clone()),
@@ -259,6 +263,7 @@ impl Value {
             Value::Struct(s) => s.type_name().to_string(),
             Value::List(_) => "List".into(),
             Value::Map(_) => "Map".into(),
+            Value::Enum(e) => e.type_name().to_string(),
             Value::Weak(_) => "Weak".into(),
             Value::ResultOk(_) | Value::ResultErr(_) => "Result".into(),
             Value::OptionSome(_) | Value::OptionNone => "Option".into(),
@@ -296,6 +301,7 @@ impl Value {
             Value::Struct(s) => Some(ObjectRef::Struct(s.0.clone())),
             Value::List(items) => Some(ObjectRef::List(items.0.clone())),
             Value::Map(m) => Some(ObjectRef::Map(m.0.clone())),
+            Value::Enum(e) => Some(ObjectRef::Enum(e.0.clone())),
             Value::ResultOk(v) | Value::ResultErr(v) | Value::OptionSome(v) => {
                 Some(ObjectRef::Boxed(v.0.clone()))
             }
@@ -322,6 +328,7 @@ impl PartialEq for Value {
             (Value::Struct(a), Value::Struct(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Map(a), Value::Map(b)) => a == b,
+            (Value::Enum(a), Value::Enum(b)) => a == b,
             (Value::Weak(a), Value::Weak(b)) => a.ptr_eq(b),
             (Value::ResultOk(a), Value::ResultOk(b)) => a == b,
             (Value::ResultErr(a), Value::ResultErr(b)) => a == b,

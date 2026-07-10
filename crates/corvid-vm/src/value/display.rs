@@ -37,6 +37,21 @@ impl fmt::Display for Value {
                 });
                 write!(f, ")")
             }
+            Value::Enum(e) => {
+                let fields = e.fields_cloned();
+                if fields.is_empty() {
+                    write!(f, "{}", e.variant_name())
+                } else {
+                    write!(f, "{}(", e.variant_name())?;
+                    for (i, v) in fields.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{v}")?;
+                    }
+                    write!(f, ")")
+                }
+            }
             Value::Map(m) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in m.entries_cloned().iter().enumerate() {

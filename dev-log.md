@@ -884,6 +884,54 @@ biggest remaining slices of the track.
 
 ---
 
+## 2026-07-10 - 45h closed: user sum types — audit blocker B2 falls
+
+`type Status: | Pending | Approved(approver: String)` is real. The
+"v0.2" the AST comment promised since Phase 1 shipped today.
+
+### Design highlights
+
+- **Nominal reuse, zero Type-enum ripple**: a sum value's static
+  type is `Type::Struct(owner DefId)` — the same nominal indirection
+  records use. No new Type variant, no 20-site walker ripple at the
+  type level. The variant table lives in a resolver side-table
+  (`variant_owners: variant DefId -> (owner, index)`).
+- **Unit variants are bare VALUES** (`p = Pending` — no parens, no
+  `Status::` prefix ceremony); payload variants construct like calls
+  with positional fields and field-name-bearing diagnostics. A bare
+  payload reference errors with "construct it with `Approved(...)`".
+- **Record XOR sum** enforced by the parser (new `Pipe` token).
+- **`IrCallKind::EnumConstructor`** instead of a new expr kind — the
+  call-kind ripple is ~6 sites vs the ~20 an IrExprKind costs.
+- **Value::Enum** cell: positional payload, structural equality
+  (type + variant + fields), full cycle-collector integration
+  (`ObjectRef::Enum`), `Approved("alice")` display, tagged JSON.
+- **`IrType.variants` metadata** staged: 45i's exhaustiveness
+  checking reads variant names/field-shapes from here.
+- v1 limitation, documented: variant names are file-scope, so two
+  sum types can't share one (duplicate-decl diagnostic).
+
+### Verification
+
+Live probes: 7-check batch (construction, ==, cross-variant and
+cross-payload !=, unit-variant equality, sums inside lists) passed
+first try; field-type error names the field; bare-payload error
+tells you exactly what to type. Pinned: 1 e2e + 2 checker tests.
+Grammar variant productions PLANNED-off with parse evidence; book
+ch 05 sums section shows compiling construction/equality with only
+the `match` block still 45i-planned.
+
+### Validation
+
+272 types + 216 syntax + 109 vm + 8 e2e + 3 book-guard; workspace
+--tests clean; corpus verify exits 1 only on the two deliberate
+fixtures.
+
+Audit blockers now: B1 (match) is the LAST core-language blocker,
+and 45i closes it plus B6. Next per track order: 45i-match-expression.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

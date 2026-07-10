@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use super::cells::{BoxedInner, ListInner, MapInner, StructInner};
+use super::cells::{BoxedInner, EnumInner, ListInner, MapInner, StructInner};
 use super::heap::{Color, HeapMeta};
 use super::Value;
 
@@ -25,6 +25,7 @@ pub(crate) enum ObjectRef {
     Struct(Arc<StructInner>),
     List(Arc<ListInner>),
     Map(Arc<MapInner>),
+    Enum(Arc<EnumInner>),
     Boxed(Arc<BoxedInner>),
 }
 
@@ -33,6 +34,7 @@ pub(crate) enum WeakObjectRef {
     Struct(Weak<StructInner>),
     List(Weak<ListInner>),
     Map(Weak<MapInner>),
+    Enum(Weak<EnumInner>),
     Boxed(Weak<BoxedInner>),
 }
 
@@ -42,6 +44,7 @@ impl ObjectRef {
             ObjectRef::Struct(inner) => &inner.meta,
             ObjectRef::List(inner) => &inner.meta,
             ObjectRef::Map(inner) => &inner.meta,
+            ObjectRef::Enum(inner) => &inner.meta,
             ObjectRef::Boxed(inner) => &inner.meta,
         }
     }
@@ -51,6 +54,7 @@ impl ObjectRef {
             ObjectRef::Struct(inner) => Arc::as_ptr(inner) as usize,
             ObjectRef::List(inner) => Arc::as_ptr(inner) as usize,
             ObjectRef::Map(inner) => Arc::as_ptr(inner) as usize,
+            ObjectRef::Enum(inner) => Arc::as_ptr(inner) as usize,
             ObjectRef::Boxed(inner) => Arc::as_ptr(inner) as usize,
         }
     }
@@ -104,6 +108,7 @@ impl ObjectRef {
             ObjectRef::Struct(inner) => WeakObjectRef::Struct(Arc::downgrade(inner)),
             ObjectRef::List(inner) => WeakObjectRef::List(Arc::downgrade(inner)),
             ObjectRef::Map(inner) => WeakObjectRef::Map(Arc::downgrade(inner)),
+            ObjectRef::Enum(inner) => WeakObjectRef::Enum(Arc::downgrade(inner)),
             ObjectRef::Boxed(inner) => WeakObjectRef::Boxed(Arc::downgrade(inner)),
         }
     }
@@ -136,6 +141,13 @@ impl ObjectRef {
                         .filter_map(Value::as_object_ref)
                         .collect()
                 })
+                .unwrap_or_default(),
+            ObjectRef::Enum(inner) => inner
+                .fields
+                .lock()
+                .expect("enum fields lock poisoned")
+                .as_ref()
+                .map(|fields| children_from_slice(fields))
                 .unwrap_or_default(),
             ObjectRef::Boxed(inner) => inner
                 .value
@@ -188,6 +200,14 @@ impl ObjectRef {
                     .take();
                 drop(entries);
             }
+            ObjectRef::Enum(inner) => {
+                let fields = inner
+                    .fields
+                    .lock()
+                    .expect("enum fields lock poisoned")
+                    .take();
+                drop(fields);
+            }
             ObjectRef::Boxed(inner) => {
                 let value = inner
                     .value
@@ -206,6 +226,7 @@ impl WeakObjectRef {
             WeakObjectRef::Struct(inner) => inner.upgrade().map(ObjectRef::Struct),
             WeakObjectRef::List(inner) => inner.upgrade().map(ObjectRef::List),
             WeakObjectRef::Map(inner) => inner.upgrade().map(ObjectRef::Map),
+            WeakObjectRef::Enum(inner) => inner.upgrade().map(ObjectRef::Enum),
             WeakObjectRef::Boxed(inner) => inner.upgrade().map(ObjectRef::Boxed),
         }
     }

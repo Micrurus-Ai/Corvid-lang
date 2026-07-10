@@ -446,6 +446,9 @@ fn collect_expr_imports(
                 collect_expr_imports(arg, tools, prompts, plan, agent_name)?;
             }
             match kind {
+                IrCallKind::EnumConstructor { .. } => Err(WasmCodegenError::unsupported(
+                    "sum-type variants are interpreter-only in 45h".to_string(),
+                )),
                 IrCallKind::Agent { .. } => Ok(()),
                 IrCallKind::Fixture { .. } => Err(WasmCodegenError::unsupported(format!(
                     "wasm target cannot lower test fixture call `{callee_name}`"
@@ -942,6 +945,11 @@ fn emit_expr(
             args,
             callee_name,
         } => match kind {
+            IrCallKind::EnumConstructor { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "sum-type variants are interpreter-only in 45h".to_string(),
+                ));
+            }
             IrCallKind::Agent { def_id } => {
                 for arg in args {
                     emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;

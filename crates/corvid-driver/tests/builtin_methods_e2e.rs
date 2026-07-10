@@ -195,6 +195,41 @@ agent main() -> String:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sum_type_construction_and_equality() {
+    // Pins 45h: unit variants as bare values, payload construction,
+    // structural equality (same variant + fields), cross-variant and
+    // cross-payload inequality, sums inside lists.
+    let source = "
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String, code: Int)
+
+agent main() -> String:
+    a = Approved(\"alice\")
+    ok1 = a == Approved(\"alice\")
+    ok2 = not (a == Approved(\"bob\"))
+    ok3 = not (a == Pending)
+    ok4 = Denied(\"policy\", 42) == Denied(\"policy\", 42)
+    ok5 = not (Denied(\"policy\", 42) == Denied(\"policy\", 7))
+    xs = [Pending, Approved(\"x\")]
+    ok6 = xs.length() == 2 and xs[0] == Pending
+    if ok1 and ok2 and ok3 and ok4 and ok5 and ok6:
+        return \"ok\"
+    return \"FAILED\"
+";
+    let ir = compile_to_ir(source).expect("45h source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45h program must run");
+    match out {
+        Value::String(s) => assert_eq!(s.as_ref(), "ok", "a sum-type check failed"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn to_int_truncated_traps_on_nan() {
     let source = "
 agent main() -> Int:

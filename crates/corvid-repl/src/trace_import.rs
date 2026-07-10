@@ -295,6 +295,7 @@ fn infer_typeref(
             }).collect();
 
             type_decls.push(TypeDecl {
+                variants: Vec::new(),
                 name: Ident::new(type_name.clone(), *sp),
                 fields,
                 visibility: Visibility::Private,

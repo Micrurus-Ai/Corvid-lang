@@ -249,6 +249,10 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             args,
         } => {
             match kind {
+                // Sum-type construction is interpreter-only in 45h.
+                IrCallKind::EnumConstructor { .. } => {
+                    return Err(NotNativeReason::PlaceAssignmentNotNative)
+                }
                 IrCallKind::Tool { .. } => {
                     return Err(NotNativeReason::ToolCall {
                         name: callee_name.clone(),

@@ -474,7 +474,8 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 | corvid_ir::IrCallKind::Fixture { .. }
                 | corvid_ir::IrCallKind::Unknown => false,
                 corvid_ir::IrCallKind::Agent { .. }
-                | corvid_ir::IrCallKind::StructConstructor { .. } => true,
+                | corvid_ir::IrCallKind::StructConstructor { .. }
+                | corvid_ir::IrCallKind::EnumConstructor { .. } => true,
             };
             for a in args {
                 walk_expr(a, args_consumed, out);

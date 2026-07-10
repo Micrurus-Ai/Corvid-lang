@@ -419,6 +419,15 @@ tool refund(amount: Float) -> Nothing uses pay_eff
 type Wallet:
     balance: Float
 
+type Status:
+    | Pending
+    | Approved(approver: String)
+    | Denied(reason: String, code: Int)
+
+agent sum_demo() -> Bool:
+    a = Approved("alice")
+    return a == Pending
+
 agent map_demo() -> Int:
     m = {"a": 1, "b": 2}
     m["c"] = 3
@@ -560,6 +569,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("literal", "expressions"),
     ("list_literal", "expressions"),
     ("map_literal", "statements"),
+    ("field_list", "statements"),
     ("map_entry", "statements"),
     ("retry_expr", "expressions"),
 ];

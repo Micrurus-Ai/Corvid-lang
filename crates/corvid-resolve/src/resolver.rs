@@ -35,6 +35,11 @@ pub struct Resolved {
     /// can look up the resolution without re-walking string
     /// literals. See [`ReplayPatternBinding`].
     pub replay_pattern_bindings: HashMap<Span, ReplayPatternBinding>,
+    /// Sum-type side-table (slice 45h): variant `DefId` ->
+    /// (owning type `DefId`, variant index). Populated during decl
+    /// collection; the checker and lowerer use it to type/construct
+    /// variant calls.
+    pub variant_owners: HashMap<DefId, (DefId, u32)>,
 }
 
 /// Resolver-side handle for a replay pattern.
@@ -88,6 +93,7 @@ pub fn resolve(file: &File) -> Resolved {
         errors: r.errors,
         methods: r.methods,
         replay_pattern_bindings: r.replay_pattern_bindings,
+        variant_owners: r.variant_owners,
     }
 }
 
@@ -113,6 +119,7 @@ struct Resolver {
     /// `replay ... when approve("Label") -> ...` can be
     /// presence-checked without walking the file a second time.
     known_approval_labels: HashSet<String>,
+    variant_owners: HashMap<DefId, (DefId, u32)>,
 }
 
 impl Resolver {
@@ -126,6 +133,7 @@ impl Resolver {
             methods: HashMap::new(),
             replay_pattern_bindings: HashMap::new(),
             known_approval_labels: HashSet::new(),
+            variant_owners: HashMap::new(),
         }
     }
 
@@ -172,7 +180,53 @@ impl Resolver {
                     }
                     continue;
                 }
-                Decl::Type(t) => (t.name.name.clone(), DeclKind::Type, t.span),
+                Decl::Type(t) => {
+                    if t.variants.is_empty() {
+                        (t.name.name.clone(), DeclKind::Type, t.span)
+                    } else {
+                        // Sum type (45h): declare the type, then each
+                        // variant as a file-scope constructor.
+                        // Duplicate variant names (across any decls)
+                        // surface as ordinary duplicate-decl errors.
+                        let owner_id = match self
+                            .symbols
+                            .declare(&t.name.name, DeclKind::Type, t.span)
+                        {
+                            Ok(id) => id,
+                            Err(first_span) => {
+                                self.errors.push(ResolveError {
+                                    kind: ResolveErrorKind::DuplicateDecl {
+                                        name: t.name.name.clone(),
+                                        first_span,
+                                    },
+                                    span: t.span,
+                                });
+                                continue;
+                            }
+                        };
+                        for (idx, variant) in t.variants.iter().enumerate() {
+                            match self.symbols.declare(
+                                &variant.name.name,
+                                DeclKind::Variant,
+                                variant.span,
+                            ) {
+                                Ok(vid) => {
+                                    self.variant_owners.insert(vid, (owner_id, idx as u32));
+                                }
+                                Err(first_span) => {
+                                    self.errors.push(ResolveError {
+                                        kind: ResolveErrorKind::DuplicateDecl {
+                                            name: variant.name.name.clone(),
+                                            first_span,
+                                        },
+                                        span: variant.span,
+                                    });
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                }
                 Decl::Store(s) => (s.name.name.clone(), DeclKind::Store, s.span),
                 Decl::Tool(t) => (t.name.name.clone(), DeclKind::Tool, t.span),
                 Decl::Prompt(p) => (p.name.name.clone(), DeclKind::Prompt, p.span),
@@ -1003,6 +1057,7 @@ impl Resolver {
 fn decl_kind_label(kind: DeclKind) -> &'static str {
     match kind {
         DeclKind::Import => "import",
+        DeclKind::Variant => "sum-type variant",
         DeclKind::ImportedUse => "imported use",
         DeclKind::Type => "type",
         DeclKind::Store => "store",

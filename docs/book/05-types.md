@@ -298,21 +298,36 @@ d2 = Decision { ..d, amount: 75.0 }
 
 ## Sum types (enums)
 
-> **Planned — user-declared sum types land in slice 45h, and `match`
-> over them in slice 45i.** Until then, the built-in `Option` and
-> `Result` are the sum types, and "one of N shapes" is modelled with
-> a record carrying a tag field.
+Sum types declare "one of N shapes" — unit variants are bare
+values, payload variants construct like calls, and equality is
+structural (this block compiles in CI):
 
-```corvid-planned
+```corvid
 type Status:
     | Pending
     | Approved(approver: String)
-    | Denied(reason: String)
+    | Denied(reason: String, code: Int)
 
+agent triage() -> Bool:
+    s = Approved("alice")
+    p = Pending
+    d = Denied("policy", 42)
+    return s == Approved("alice") and not (s == p)
+```
+
+A type declaration is a record XOR a sum — mixing field lines and
+variant lines is a parse error. Variant names are file-scope
+constructors, so two sum types cannot share a variant name (v1
+limitation, diagnosed as a duplicate declaration).
+
+> **Planned — `match` over variants lands in slice 45i** (until
+> then, sum values compare whole with `==`):
+
+```corvid-planned
 match status:
     Pending           -> "waiting"
     Approved(who)     -> "approved by " + who
-    Denied(reason)    -> "denied: " + reason
+    Denied(reason, c) -> "denied: " + reason
 ```
 
 ## Generics

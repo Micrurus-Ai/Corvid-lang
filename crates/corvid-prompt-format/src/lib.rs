@@ -296,6 +296,7 @@ mod tests {
     fn struct_emits_object_with_required_fields() {
         let id = DefId(11);
         let ir_type: IrT = IrT {
+            variants: Vec::new(),
             id,
             name: "Decision".into(),
             fields: vec![
@@ -336,6 +337,7 @@ mod tests {
         let inner_id = DefId(20);
         let outer_id = DefId(21);
         let inner: &'static IrT = Box::leak(Box::new(IrT {
+            variants: Vec::new(),
             id: inner_id,
             name: "Order".into(),
             fields: vec![IrField {
@@ -346,6 +348,7 @@ mod tests {
             span: Span::new(0, 0),
         }));
         let outer: &'static IrT = Box::leak(Box::new(IrT {
+            variants: Vec::new(),
             id: outer_id,
             name: "Wrap".into(),
             fields: vec![IrField {
@@ -368,6 +371,7 @@ mod tests {
     fn partial_struct_schema_marks_each_field_complete_or_streaming() {
         let id = DefId(30);
         let ir_type: &'static IrT = Box::leak(Box::new(IrT {
+            variants: Vec::new(),
             id,
             name: "Plan".into(),
             fields: vec![

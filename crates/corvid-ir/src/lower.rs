@@ -79,6 +79,7 @@ struct Lowerer<'a> {
     /// up each method's allocated DefId here so the IR emits methods
     /// alongside free decls in the per-kind vectors.
     methods: &'a HashMap<DefId, HashMap<String, MethodEntry>>,
+    variant_owners: &'a HashMap<DefId, (DefId, u32)>,
     /// Effect name → confidence gate threshold, populated from
     /// `EffectDecl`s with `trust: autonomous_if_confident(T)` dimension.
     /// Used during tool lowering to set `IrTool.confidence_gate`.
@@ -111,6 +112,7 @@ impl<'a> Lowerer<'a> {
             bindings: &resolved.bindings,
             types: &checked.types,
             methods: &resolved.methods,
+            variant_owners: &resolved.variant_owners,
             confidence_gates: HashMap::new(),
             effect_registry: EffectRegistry::default(),
             module_resolution,
@@ -439,10 +441,28 @@ impl<'a> Lowerer<'a> {
                 span: f.span,
             })
             .collect();
+        let variants = t
+            .variants
+            .iter()
+            .map(|v| IrEnumVariant {
+                name: v.name.name.clone(),
+                fields: v
+                    .fields
+                    .iter()
+                    .map(|f| IrField {
+                        name: f.name.name.clone(),
+                        ty: self.type_ref_to_type(&f.ty),
+                        span: f.span,
+                    })
+                    .collect(),
+                span: v.span,
+            })
+            .collect();
         IrType {
             id: self.remap_def_id(id),
             name: t.name.name.clone(),
             fields,
+            variants,
             span: t.span,
         }
     }
@@ -1075,6 +1095,26 @@ impl<'a> Lowerer<'a> {
                 local_id: *local_id,
                 name: id.name.clone(),
             },
+            // Bare unit variant (45h): `Pending` constructs the
+            // zero-field variant value directly.
+            Some(Binding::Decl(def_id))
+                if self.symbols.get(*def_id).kind
+                    == corvid_resolve::DeclKind::Variant =>
+            {
+                let (owner, idx) = self
+                    .variant_owners
+                    .get(def_id)
+                    .copied()
+                    .unwrap_or((DefId(u32::MAX), 0));
+                IrExprKind::Call {
+                    kind: IrCallKind::EnumConstructor {
+                        def_id: self.remap_def_id(owner),
+                        variant_index: idx,
+                    },
+                    callee_name: id.name.clone(),
+                    args: Vec::new(),
+                }
+            }
             Some(Binding::Decl(def_id)) => IrExprKind::Decl {
                 def_id: self.remap_def_id(*def_id),
                 name: id.name.clone(),
@@ -1305,6 +1345,17 @@ impl<'a> Lowerer<'a> {
                         DeclKind::Type => IrCallKind::StructConstructor {
                             def_id: lowered_def_id,
                         },
+                        DeclKind::Variant => {
+                            let (owner, idx) = self
+                                .variant_owners
+                                .get(def_id)
+                                .copied()
+                                .unwrap_or((DefId(u32::MAX), 0));
+                            IrCallKind::EnumConstructor {
+                                def_id: self.remap_def_id(owner),
+                                variant_index: idx,
+                            }
+                        }
                         _ => IrCallKind::Unknown,
                     };
                     (kind, name.name.clone())

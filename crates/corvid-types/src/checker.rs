@@ -371,6 +371,8 @@ struct Checker<'a> {
     /// type then this map to find the method's `DefId`, after which
     /// dispatch reuses the existing tool / prompt / agent call paths.
     methods: &'a HashMap<DefId, HashMap<String, MethodEntry>>,
+    /// Sum-type side-table (45h): variant DefId -> (owner, index).
+    variant_owners: &'a HashMap<DefId, (DefId, u32)>,
 
     /// Replay-pattern side-table from the resolver. Gives the
     /// `DefId` (for prompt/tool resolutions) or the `Approve`
@@ -593,6 +595,7 @@ impl<'a> Checker<'a> {
             types_by_id: types,
             models_by_id: models,
             methods: &resolved.methods,
+            variant_owners: &resolved.variant_owners,
             replay_pattern_bindings: &resolved.replay_pattern_bindings,
             module_resolution,
             registry,

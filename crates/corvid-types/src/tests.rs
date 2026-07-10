@@ -3904,6 +3904,62 @@ agent main() -> String:
     );
 }
 
+/// Slice 45h — sum types: construction typechecks, the value's type
+/// is the owning sum type, and field types are enforced.
+#[test]
+fn sum_type_construction_typechecks() {
+    let src = "type Status:
+    | Pending
+    | Approved(approver: String)
+
+agent main() -> Bool:
+    a = Approved(\"alice\")
+    p = Pending
+    return a == p
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "sum construction should typecheck, got {:?}", c.errors);
+}
+
+/// Slice 45h — variant field types and bare-payload references are
+/// enforced.
+#[test]
+fn sum_type_errors_are_enforced() {
+    let bad_field = check(
+        "type Status:
+    | Approved(approver: String)
+
+agent main() -> Int:
+    a = Approved(42)
+    return 0
+",
+    );
+    assert!(
+        bad_field
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected TypeMismatch for Approved(42), got {:?}",
+        bad_field.errors
+    );
+    let bare = check(
+        "type Status:
+    | Approved(approver: String)
+
+agent main() -> Int:
+    a = Approved
+    return 0
+",
+    );
+    assert!(
+        bare.errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
+        "expected NotCallable for bare payload variant, got {:?}",
+        bare.errors
+    );
+}
+
 /// Slice 45g — map literals type as Map<K,V>; reads are Option<V>;
 /// stores take V; methods compute generic returns.
 #[test]

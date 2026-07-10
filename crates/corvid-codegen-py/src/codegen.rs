@@ -423,6 +423,11 @@ impl Codegen {
 
     fn emit_call(&mut self, kind: &IrCallKind, name: &str, args: &[IrExpr]) {
         match kind {
+            IrCallKind::EnumConstructor { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"sum-type variants are interpreter-only in 45h\"))",
+                );
+            }
             IrCallKind::Tool { .. } => {
                 self.out
                     .write(&format!("await tool_call(\"{}\", [", escape_string(name)));
