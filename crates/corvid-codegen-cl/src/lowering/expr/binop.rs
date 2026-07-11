@@ -209,6 +209,8 @@ pub fn lower_unop(
                 b.ins().ssub_overflow(zero, v)
             })
         }
+        // Elided at IR lowering (numeric identity).
+        UnaryOp::Pos => Ok(v),
         UnaryOp::Neg => Err(CodegenError::cranelift(
             format!("unary `-` applied to value of width {vt:?} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"),
             span,
@@ -227,6 +229,7 @@ pub fn lower_unop_wrapping(
             let zero = builder.ins().iconst(I64, 0);
             Ok(builder.ins().isub(zero, v))
         }
+        UnaryOp::Pos => Ok(v),
         UnaryOp::Not => Err(CodegenError::cranelift(
             "`not` has no wrapping arithmetic form",
             span,

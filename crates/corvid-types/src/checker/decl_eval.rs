@@ -2,6 +2,12 @@
 use crate::errors::{TypeError, TypeErrorKind};
 use crate::types::Type;
 use corvid_ast::{Block, EvalAssert, EvalDecl, FixtureDecl, Ident, MockDecl, Span, TestDecl};
+
+/// The signature a mock is checked against — tool or prompt.
+struct MockTargetSig {
+    params: Vec<corvid_ast::Param>,
+    return_ty: corvid_ast::TypeRef,
+}
 use corvid_resolve::{Binding, DeclKind};
 
 impl<'a> Checker<'a> {
@@ -30,9 +36,17 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_mock(&mut self, m: &MockDecl) {
+        // A mock replaces a TOOL or a PROMPT (slice 45q — prompt
+        // targets used to be rejected with E0203, making prompt
+        // mocks unusable).
         let target = match self.bindings.get(&m.target.span) {
-            Some(Binding::Decl(def_id)) if self.symbols.get(*def_id).kind == DeclKind::Tool => {
-                Some(*def_id)
+            Some(Binding::Decl(def_id))
+                if matches!(
+                    self.symbols.get(*def_id).kind,
+                    DeclKind::Tool | DeclKind::Prompt
+                ) =>
+            {
+                Some((*def_id, self.symbols.get(*def_id).kind))
             }
             _ => {
                 self.errors.push(TypeError::new(
@@ -44,11 +58,27 @@ impl<'a> Checker<'a> {
                 None
             }
         };
-        if let Some(def_id) = target {
-            let tool = *self
-                .tools_by_id
-                .get(&def_id)
-                .expect("tool DefId not indexed");
+        if let Some((def_id, kind)) = target {
+            let (target_params, target_return) = match kind {
+                DeclKind::Tool => {
+                    let tool = *self
+                        .tools_by_id
+                        .get(&def_id)
+                        .expect("tool DefId not indexed");
+                    (tool.params.clone(), tool.return_ty.clone())
+                }
+                _ => {
+                    let prompt = *self
+                        .prompts_by_id
+                        .get(&def_id)
+                        .expect("prompt DefId not indexed");
+                    (prompt.params.clone(), prompt.return_ty.clone())
+                }
+            };
+            let tool = MockTargetSig {
+                params: target_params,
+                return_ty: target_return,
+            };
             if tool.params.len() != m.params.len() {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::ArityMismatch {

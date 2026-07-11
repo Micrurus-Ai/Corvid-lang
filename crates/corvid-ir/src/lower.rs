@@ -713,6 +713,25 @@ impl<'a> Lowerer<'a> {
             cost_budget: agent_cost_budget(a),
             wrapping_arithmetic: AgentAttribute::is_wrapping(&a.attributes),
             is_replayable: AgentAttribute::is_replayable(&a.attributes),
+            retry_max_attempts: a.attributes.iter().find_map(|attr| match attr {
+                AgentAttribute::Retry { max_attempts, .. } => Some(*max_attempts),
+                _ => None,
+            }),
+            retry_backoff_ms: a.attributes.iter().find_map(|attr| match attr {
+                AgentAttribute::Retry {
+                    backoff: Some(corvid_ast::Backoff::Linear(ms)),
+                    ..
+                } => Some((false, *ms)),
+                AgentAttribute::Retry {
+                    backoff: Some(corvid_ast::Backoff::Exponential(ms)),
+                    ..
+                } => Some((true, *ms)),
+                _ => None,
+            }),
+            idempotency_key_param: a.attributes.iter().find_map(|attr| match attr {
+                AgentAttribute::Idempotency { key, .. } => Some(key.name.clone()),
+                _ => None,
+            }),
             body,
             span: a.span,
             // Populated by corvid-codegen-cl's ownership pass. `None`
@@ -1010,6 +1029,12 @@ impl<'a> Lowerer<'a> {
                 }
             }
             Expr::UnOp { op, operand, span } => {
+                // Unary `+` (45q) is numeric identity: the CHECKER
+                // enforced Int/Float; lowering elides it entirely,
+                // so no backend or interpreter arm exists for it.
+                if matches!(op, UnaryOp::Pos) {
+                    return self.lower_expr(operand);
+                }
                 let operand = Box::new(self.lower_expr(operand));
                 if self.wrapping_arithmetic && is_wrapping_int_unop(*op, self.types.get(span)) {
                     IrExprKind::WrappingUnOp { op: *op, operand }

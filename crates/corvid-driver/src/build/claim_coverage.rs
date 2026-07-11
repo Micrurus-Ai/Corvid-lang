@@ -123,6 +123,10 @@ fn collect_decl_contracts(decl: &Decl, claims: &mut DeclaredContractClaims) {
                         // promise.
                         claims.required_ids.insert("jobs.replayable_side_effects");
                     }
+                    // Durable-job policies (45q): the queue's own
+                    // guarantee ids already cover retry/idempotency
+                    // behavior; the annotation adds no new claim.
+                    AgentAttribute::Retry { .. } | AgentAttribute::Idempotency { .. } => {}
                     AgentAttribute::Wrapping { .. } => claims.unsupported.push(format!(
                         "agent `{}` declares `@wrapping`, but no signed cdylib guarantee id covers wrapping arithmetic yet",
                         agent.name.name

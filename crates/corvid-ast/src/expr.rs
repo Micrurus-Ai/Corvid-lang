@@ -278,5 +278,9 @@ pub enum BinaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnaryOp {
     Neg,
+    /// Unary `+` (slice 45q): numeric identity. Type-checked like
+    /// `Neg` (Int/Float only — `+"s"` is a type error), then
+    /// lowered to the bare operand (no IR footprint).
+    Pos,
     Not,
 }

@@ -273,6 +273,11 @@ impl MiniApproverProgram {
                         MiniValue::Float(value) => Ok(MiniValue::Float(-value)),
                         _ => Err("negation expects Int or Float".to_string()),
                     },
+                    // Numeric identity (45q).
+                    UnaryOp::Pos => match value {
+                        v @ (MiniValue::Int(_) | MiniValue::Float(_)) => Ok(v),
+                        _ => Err("unary `+` expects Int or Float".to_string()),
+                    },
                 }
             }
             other => Err(format!("unsupported approver expression `{other:?}`")),

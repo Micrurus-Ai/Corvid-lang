@@ -115,6 +115,20 @@ impl<'a> Checker<'a> {
                         "effect_row.import_boundary",
                     ));
                 }
+                AgentAttribute::Retry { .. } | AgentAttribute::Idempotency { .. } => {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::EffectConstraintViolation {
+                            agent: format!("import `{}`", import.module),
+                            dimension: attr.name().to_string(),
+                            message: format!(
+                                "`@{}` is a durable-job policy on the agent itself and cannot be required at an import boundary",
+                                attr.name()
+                            ),
+                        },
+                        import.span,
+                        "effect_row.import_boundary",
+                    ));
+                }
                 AgentAttribute::GroundedPure { .. } => {
                     // Provenance Propagation slice 8: front end only.
                     // Cross-module composition for `@grounded_pure`

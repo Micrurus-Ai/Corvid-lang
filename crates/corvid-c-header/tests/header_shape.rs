@@ -33,6 +33,9 @@ fn scalar_ir() -> IrFile {
                 cost_budget: None,
                 wrapping_arithmetic: false,
                 is_replayable: false,
+                retry_max_attempts: None,
+                retry_backoff_ms: None,
+                idempotency_key_param: None,
                 body: corvid_ir::IrBlock {
                     stmts: vec![],
                     span: Span::new(0, 0),
@@ -54,6 +57,9 @@ fn scalar_ir() -> IrFile {
                 cost_budget: None,
                 wrapping_arithmetic: false,
                 is_replayable: false,
+                retry_max_attempts: None,
+                retry_backoff_ms: None,
+                idempotency_key_param: None,
                 body: corvid_ir::IrBlock {
                     stmts: vec![],
                     span: Span::new(0, 0),
@@ -70,6 +76,9 @@ fn scalar_ir() -> IrFile {
                 cost_budget: None,
                 wrapping_arithmetic: false,
                 is_replayable: false,
+                retry_max_attempts: None,
+                retry_backoff_ms: None,
+                idempotency_key_param: None,
                 body: corvid_ir::IrBlock {
                     stmts: vec![],
                     span: Span::new(0, 0),
@@ -91,6 +100,9 @@ fn scalar_ir() -> IrFile {
                 cost_budget: None,
                 wrapping_arithmetic: false,
                 is_replayable: false,
+                retry_max_attempts: None,
+                retry_backoff_ms: None,
+                idempotency_key_param: None,
                 body: corvid_ir::IrBlock {
                     stmts: vec![],
                     span: Span::new(0, 0),

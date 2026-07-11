@@ -26,6 +26,16 @@ pub enum TypeWarningKind {
     /// Filed alongside the eventual scheduler-runner slice as the
     /// load-bearing user-visible diagnostic that pins the gap.
     ScheduleNotExecutable { agent: String, cron: String },
+    /// An unannotated binding whose initializer cannot determine
+    /// its full type (slice 45q): `x = []` (element type Unknown)
+    /// or `x = None` (payload type Unknown). Downstream checking
+    /// weakens to Unknown-accepts-everything; an annotation
+    /// restores full checking.
+    InferenceNeedsAnnotation {
+        binding: String,
+        construct: String,
+        hint: String,
+    },
 }
 
 impl TypeWarningKind {
@@ -48,6 +58,15 @@ impl TypeWarningKind {
             }
             Self::UnsafePythonImport { module, message } => {
                 format!("python import `{module}` declares `effects: unsafe`: {message}")
+            }
+            Self::InferenceNeedsAnnotation {
+                binding,
+                construct,
+                hint,
+            } => {
+                format!(
+                    "W0290: `{binding}` is bound to {construct}, so its full type is unknown and later checks weaken — annotate it (`{hint}`) to keep full type checking"
+                )
             }
             Self::ScheduleNotExecutable { agent, cron } => {
                 format!(
@@ -74,6 +93,9 @@ impl TypeWarningKind {
             Self::UnsafePythonImport { .. } => Some(
                 "replace `unsafe` with narrower effects such as `network`, `filesystem`, `subprocess`, `environment`, or `native_extension` when possible".into(),
             ),
+            Self::InferenceNeedsAnnotation { hint, .. } => {
+                Some(format!("write `{hint}` with the real inner type"))
+            }
             Self::ScheduleNotExecutable { .. } => Some(
                 "until the scheduler runner ships, drive scheduled work from an external cron / k8s CronJob that POSTs to a Corvid HTTP route (the `server` block), OR call the agent directly via `corvid run` from your own scheduler".into(),
             ),

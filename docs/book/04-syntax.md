@@ -29,8 +29,11 @@ import ...        # bring in another module
 # single-line comment
 ```
 
-> **Planned — `#:` doc comments (rendered in `--help` and LSP hover)
-> land with slice 45q.** Today `#:` lexes as an ordinary comment.
+> **Post-v1.0.** `#:` doc comments (rendered in `--help` and LSP
+> hover) were considered for slice 45q and deferred: the rendering
+> surface belongs with the post-v1.0 LSP-hover work, so shipping the
+> token alone would be a hidden no-op. Today `#:` lexes as an
+> ordinary comment.
 
 ## Identifiers and types
 
@@ -159,8 +162,20 @@ agent drain(limit: Int) -> Int:
 `match` gives multi-way branching over sums, `Option`, `Result`,
 and literals — see [Pattern matching](./13-pattern-matching.md).
 
-> **Planned — `elif` chaining lands in slice 45q.** Until then,
-> chained conditions nest `if`/`else`.
+`elif` chains conditions without nesting, exactly as in Python
+(compiled in CI):
+
+```corvid
+agent grade(n: Int) -> String:
+    if n > 8:
+        return "high"
+    elif n > 5:
+        return "mid"
+    elif n > 2:
+        return "low"
+    else:
+        return "none"
+```
 
 ## Expressions
 

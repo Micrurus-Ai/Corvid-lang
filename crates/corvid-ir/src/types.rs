@@ -322,6 +322,15 @@ pub struct IrAgent {
     /// `35V2-P38-C-3` onward) to decide whether a job is safely
     /// replayable.
     pub is_replayable: bool,
+    /// `@retry(max_attempts: N, ...)` (slice 45q) — the agent-side
+    /// default retry policy for durable jobs executing this agent.
+    /// Enqueue-time values take precedence.
+    pub retry_max_attempts: Option<u64>,
+    /// Backoff from `@retry(..., backoff: ...)`: (exponential?, ms).
+    pub retry_backoff_ms: Option<(bool, u64)>,
+    /// `@idempotency(key: param)` (slice 45q) — the parameter whose
+    /// value derives the durable job's idempotency key.
+    pub idempotency_key_param: Option<String>,
     pub body: IrBlock,
     pub span: Span,
     /// Per-parameter ownership at the callee ABI.

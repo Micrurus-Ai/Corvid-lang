@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
         let t = t.ungrounded().clone();
 
         let result = match op {
-            UnaryOp::Neg => match t {
+            UnaryOp::Neg | UnaryOp::Pos => match t {
                 Type::Int => Type::Int,
                 Type::Float => Type::Float,
                 Type::Unknown => Type::Unknown,
@@ -150,7 +150,10 @@ impl<'a> Checker<'a> {
                         TypeErrorKind::TypeMismatch {
                             expected: "Int or Float".into(),
                             got: other.display_name(),
-                            context: "unary `-`".into(),
+                            context: match op {
+                                UnaryOp::Pos => "unary `+`".into(),
+                                _ => "unary `-`".into(),
+                            },
                         },
                         operand.span(),
                     ));

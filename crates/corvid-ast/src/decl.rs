@@ -761,6 +761,21 @@ pub enum AgentAttribute {
     /// call other `@grounded_pure` (or laundering-free built-in)
     /// agents.
     GroundedPure { span: Span },
+    /// `@retry(max_attempts: 3)` or `@retry(max_attempts: 3,
+    /// backoff: exponential 250)` (slice 45q). Declares the durable
+    /// job runner's retry policy for jobs that execute this agent.
+    /// Enqueue-time flag values take precedence; the annotation is
+    /// the agent-side default.
+    Retry {
+        max_attempts: u64,
+        backoff: Option<crate::expr::Backoff>,
+        span: Span,
+    },
+    /// `@idempotency(key: order_id)` (slice 45q). Names the agent
+    /// PARAMETER whose value derives the durable job's idempotency
+    /// key. The checker verifies the name matches a declared
+    /// parameter of String or Int type.
+    Idempotency { key: Ident, span: Span },
 }
 
 impl AgentAttribute {
@@ -771,6 +786,8 @@ impl AgentAttribute {
             Self::Deterministic { span } => *span,
             Self::Wrapping { span } => *span,
             Self::GroundedPure { span } => *span,
+            Self::Retry { span, .. } => *span,
+            Self::Idempotency { span, .. } => *span,
         }
     }
 
@@ -781,6 +798,8 @@ impl AgentAttribute {
             Self::Deterministic { .. } => "deterministic",
             Self::Wrapping { .. } => "wrapping",
             Self::GroundedPure { .. } => "grounded_pure",
+            Self::Retry { .. } => "retry",
+            Self::Idempotency { .. } => "idempotency",
         }
     }
 

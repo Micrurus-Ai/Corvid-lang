@@ -203,10 +203,16 @@ agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref
 
 # Annotation arguments are dimensional constraint values, not general
 # expressions: `@budget($0.50)`, `@trust(autonomous)`, `@max_steps(10)`.
-# Named arguments (`@idempotency(key: expr)`, `@retry(max_attempts: 3)`)
-# are documented in earlier book drafts but DO NOT PARSE — filed with
-# slice 45q alongside the keyword-collision fix for `@retry`.
+# Two named-argument annotations exist (slice 45q): `@retry` and
+# `@idempotency`. Their names may collide with reserved keywords
+# (`retry`); the parser accepts the keyword token there. The checker
+# validates max_attempts >= 1 and that `key` names a String/Int
+# parameter of the annotated agent. Both are durable-job policies:
+# the agent-side defaults for `corvid jobs` enqueue (flag values win).
 annotation        ::= '@' IDENT ('(' annotation_args ')')?
+                    | '@retry' '(' 'max_attempts' ':' INT
+                      (',' 'backoff' ':' ('linear' | 'exponential') INT)? ')'
+                    | '@idempotency' '(' 'key' ':' IDENT ')'
 
 annotation_args   ::= dimension_value
 
@@ -283,10 +289,11 @@ return_stmt       ::= 'return' expr? NEWLINE
 
 yield_stmt        ::= 'yield' expr NEWLINE
 
+# `elif` desugars in the parser to `else:` holding a nested `if`,
+# so downstream stages see plain if/else trees.
 if_stmt           ::= 'if' expr ':' INDENT block DEDENT
+                      ('elif' expr ':' INDENT block DEDENT)*
                       ('else' ':' INDENT block DEDENT)?
-                      # 'elif' chaining PLANNED(45q);
-                      # `match` covers multi-way branching today
 
 for_stmt          ::= 'for' IDENT 'in' expr ':' INDENT block DEDENT
 
@@ -340,8 +347,9 @@ cmp_expr          ::= add_expr (cmp_op add_expr)?         # no chaining
 cmp_op            ::= '==' | '!=' | '<' | '<=' | '>' | '>='
 add_expr          ::= mul_expr (('+' | '-') mul_expr)*
 mul_expr          ::= unary_expr (('*' | '/' | '%') unary_expr)*
-# unary '+' PLANNED(45q)
-unary_expr        ::= '-'? postfix_expr
+# Unary `+` is numeric identity — type-checked like `-` (Int/Float
+# only), then elided at IR lowering.
+unary_expr        ::= ('-' | '+')* postfix_expr
 postfix_expr      ::= primary_expr postfix_op*
 postfix_op        ::= '(' arg_list? ')'                    # call
                     | '.' IDENT                            # field/method

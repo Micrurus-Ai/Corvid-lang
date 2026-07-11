@@ -363,7 +363,38 @@ impl<'a> Checker<'a> {
                     Box::new(resolve_arg(self, &args[1])),
                 )
             }
-            _ => Type::Unknown,
+            _ => {
+                // Slice 45q leniency hardening: an unknown generic
+                // head is an ERROR (it used to silently become
+                // `Type::Unknown`, which is assignable to
+                // everything). Only in root context — imported
+                // modules are validated by their own check.
+                if matches!(context, TypeContext::Root) {
+                    const HEADS: [&str; 9] = [
+                        "List",
+                        "Map",
+                        "Option",
+                        "Result",
+                        "Stream",
+                        "Weak",
+                        "Grounded",
+                        "Partial",
+                        "ResumeToken",
+                    ];
+                    let suggestion = HEADS
+                        .iter()
+                        .find(|h| edit_distance(&h.to_lowercase(), &name.to_lowercase()) <= 2)
+                        .map(|h| h.to_string());
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::UnknownGenericHead {
+                            name: name.to_string(),
+                            suggestion,
+                        },
+                        span,
+                    ));
+                }
+                Type::Unknown
+            }
         }
     }
 }
@@ -417,4 +448,22 @@ fn imported_module_alias_target<'a>(
         corvid_ast::ImportSource::Python => return None,
     };
     modules.lookup_by_path(&child)
+}
+
+
+/// Small Levenshtein distance for did-you-mean suggestions (45q).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
 }

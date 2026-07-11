@@ -162,15 +162,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // unary_expr := '-' unary_expr | postfix_expr
+    // unary_expr := ('-' | '+') unary_expr | postfix_expr
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        if matches!(self.peek(), TokKind::Minus) {
+        let op = match self.peek() {
+            TokKind::Minus => Some(UnaryOp::Neg),
+            TokKind::Plus => Some(UnaryOp::Pos),
+            _ => None,
+        };
+        if let Some(op) = op {
             let start = self.peek_span().start;
             self.bump();
             let operand = self.parse_unary()?;
             let span = Span::new(start, operand.span().end);
             Ok(Expr::UnOp {
-                op: UnaryOp::Neg,
+                op,
                 operand: Box::new(operand),
                 span,
             })

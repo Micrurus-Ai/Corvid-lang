@@ -28,6 +28,33 @@ impl<'a> Checker<'a> {
             Stmt::Let {
                 name, ty, value, ..
             } => {
+                // Slice 45q: the two known inference limits, made
+                // visible. `[]` and bare `None` without an
+                // annotation bind Unknown inner types; downstream
+                // checks weaken silently.
+                if ty.is_none() {
+                    let construct_hint = match value {
+                        corvid_ast::Expr::List { items, .. } if items.is_empty() => Some((
+                            "an empty list literal `[]`".to_string(),
+                            format!("{}: List<T> = []", name.name),
+                        )),
+                        corvid_ast::Expr::Ident { name: n, .. } if n.name == "None" => Some((
+                            "a bare `None`".to_string(),
+                            format!("{}: Option<T> = None", name.name),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((construct, hint)) = construct_hint {
+                        self.warnings.push(crate::errors::TypeWarning::new(
+                            crate::errors::TypeWarningKind::InferenceNeedsAnnotation {
+                                binding: name.name.clone(),
+                                construct,
+                                hint,
+                            },
+                            s.span(),
+                        ));
+                    }
+                }
                 let explicit_ty = ty.as_ref().map(|t| self.type_ref_to_type(t));
                 let value_ty = self.check_expr_as(value, explicit_ty.as_ref());
                 let local_ty = match ty {

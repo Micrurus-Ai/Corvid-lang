@@ -488,3 +488,54 @@ agent main() -> String:
         other => panic!("expected String, got {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn elif_unary_plus_annotations_end_to_end() {
+    // Slice 45q: elif chains (parser desugar), unary `+` (checked
+    // identity, elided at lowering), keyword-named + named-arg
+    // annotations, and a prompt mock compiling alongside its target.
+    let source = "
+@retry(max_attempts: 3, backoff: exponential 250)
+@idempotency(key: order_id)
+agent process(order_id: String) -> String:
+    n = 7
+    grade = \"\"
+    if n > 8:
+        grade = \"high\"
+    elif n > 5:
+        grade = \"mid\"
+    elif n > 2:
+        grade = \"low\"
+    else:
+        grade = \"none\"
+    pos = +5
+    posf = +2.5
+    return grade + pos.to_string() + posf.to_string()
+
+prompt summarize(text: String) -> String:
+    \"Summarize {text}\"
+
+mock summarize(text: String) -> String:
+    return \"mocked summary\"
+
+agent main() -> String:
+    return process(\"o-1\")
+";
+    let ir = compile_to_ir(source).expect("45q e2e source must compile");
+    let agent = ir
+        .agents
+        .iter()
+        .find(|a| a.name == "process")
+        .expect("process agent lowered");
+    assert_eq!(agent.retry_max_attempts, Some(3));
+    assert_eq!(agent.retry_backoff_ms, Some((true, 250)));
+    assert_eq!(agent.idempotency_key_param.as_deref(), Some("order_id"));
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45q e2e program must run");
+    match out {
+        Value::String(s) => assert_eq!(&*s, "mid52.5"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}

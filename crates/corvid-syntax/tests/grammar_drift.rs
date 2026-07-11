@@ -492,6 +492,18 @@ agent literal_demo(base: Claim2) -> Float:
         return final_amount + c.amount
     return c2.amount
 
+@retry(max_attempts: 3, backoff: exponential 250)
+@idempotency(key: order_id)
+agent chained(order_id: String, n: Int) -> Int:
+    if n > 8:
+        return +9
+    elif n > 5:
+        return 6
+    elif n > 2:
+        return 3
+    else:
+        return -0
+
 agent while_demo(limit: Int) -> Int:
     n = 0
     total = 0

@@ -54,12 +54,18 @@ Each annotation produces a compile-time or runtime guarantee:
 - `@replayable` — the agent's run is recorded as a deterministic
   trace; replay reproduces it byte-for-byte.
 
-> **Planned — slice 45q.** `@retry(max_attempts: 3, backoff: …)` and
-> `@idempotency(key: …)` are designed (and honored by the Phase 38
-> durable job runner when configured through its own surface) but do
-> not parse as annotations today: `retry` collides with the reserved
-> keyword, and named annotation arguments (`key: expr`) are not in
-> the annotation grammar. Both fixes are filed with slice 45q.
+- `@retry(max_attempts: 3, backoff: exponential 250)` — the
+  agent-side default retry policy for durable jobs executing this
+  agent (`backoff` takes `linear` or `exponential` with a
+  milliseconds base; enqueue-time flags take precedence).
+- `@idempotency(key: order_id)` — names the agent PARAMETER whose
+  value derives the durable job's idempotency key. The checker
+  verifies the name matches a declared String or Int parameter.
+
+Both compile into the agent's IR metadata; the durable job queue's
+enqueue surface (`corvid jobs enqueue`) reads its values from flags
+today — annotation-derived defaults at enqueue time are the queue's
+follow-up (tracked in ROADMAP).
 
 ## Calling other agents
 

@@ -3973,6 +3973,95 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45q — papercuts: annotation validation, unknown generic
+/// heads error with a did-you-mean, and the W0290 inference
+/// diagnostics for `[]` / bare `None` bindings.
+#[test]
+fn papercut_validations() {
+    let bad_key = check(
+        "@idempotency(key: nosuch)
+agent a(x: String) -> Int:
+    return 1
+",
+    );
+    assert!(
+        bad_key.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::AnnotationInvalid { annotation, .. } if annotation == "idempotency"
+        )),
+        "expected idempotency error, got {:?}",
+        bad_key.errors
+    );
+
+    // `Lst<Int>` errors at RESOLVE too, so bypass the strict
+    // helper: run the checker over the resolve-failed file and
+    // assert the did-you-mean fires.
+    {
+        let tokens = corvid_syntax::lex(
+            "agent main(x: Lst<Int>) -> Int:
+    return 0
+",
+        )
+        .expect("lex failed");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse errors: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let bad_head = typecheck(&file, &resolved);
+        assert!(
+            bad_head.errors.iter().any(|e| matches!(
+                &e.kind,
+                TypeErrorKind::UnknownGenericHead { suggestion: Some(s), .. } if s == "List"
+            )),
+            "expected List suggestion, got {:?}",
+            bad_head.errors
+        );
+    }
+
+    let warns = check(
+        "agent main() -> Int:
+    xs = []
+    v = None
+    return 0
+",
+    );
+    assert_eq!(
+        warns
+            .warnings
+            .iter()
+            .filter(|w| matches!(
+                &w.kind,
+                crate::errors::TypeWarningKind::InferenceNeedsAnnotation { .. }
+            ))
+            .count(),
+        2,
+        "expected two W0290 warnings, got {:?}",
+        warns.warnings
+    );
+
+    // Annotated forms are quiet.
+    let quiet = check(
+        "agent main() -> Int:
+    xs: List<Int> = []
+    v: Option<String> = None
+    return 0
+",
+    );
+    assert!(
+        quiet.warnings.is_empty() && quiet.errors.is_empty(),
+        "annotated bindings must not warn: {:?} {:?}",
+        quiet.warnings,
+        quiet.errors
+    );
+
+    // Unary `+` is Int/Float only.
+    let bad_pos = check(
+        "agent main() -> String:
+    return +\"abc\"
+",
+    );
+    assert!(!bad_pos.errors.is_empty(), "unary + on String must error");
+}
+
 /// Slice 45n — type aliases are transparent (CustomerId IS
 /// String); alias cycles error; named literals enforce full field
 /// coverage; spread must match the struct type.

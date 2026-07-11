@@ -109,6 +109,19 @@ pub enum TypeErrorKind {
     /// (slice 45n): `type A = B` / `type B = A`.
     AliasCycle { name: String },
 
+    /// A malformed `@retry(...)` / `@idempotency(...)` annotation
+    /// (slice 45q): zero attempts, key naming no parameter, or a
+    /// key parameter of non-derivable type.
+    AnnotationInvalid { annotation: String, message: String },
+
+    /// A generic type application whose head is not a known
+    /// generic type (slice 45q): `Lst<Int>`, `option<T>`. Unknown
+    /// heads used to silently resolve to `Type::Unknown`.
+    UnknownGenericHead {
+        name: String,
+        suggestion: Option<String>,
+    },
+
     /// A malformed named struct literal or destructuring pattern
     /// (slice 45n): unknown/duplicate/missing fields, non-record
     /// targets, bare `..` in expression position.
@@ -463,6 +476,13 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::AnnotationInvalid { annotation, message } => {
+                format!("invalid `@{annotation}(...)`: {message}")
+            }
+            Self::UnknownGenericHead { name, suggestion } => match suggestion {
+                Some(s) => format!("`{name}` is not a generic type — did you mean `{s}`?"),
+                None => format!("`{name}` is not a generic type"),
+            },
             Self::AliasCycle { name } => {
                 format!("type alias `{name}` never reaches a concrete type (alias cycle)")
             }
@@ -771,6 +791,12 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::AnnotationInvalid { .. } => Some(
+                "see `@retry(max_attempts: N, backoff: linear|exponential MS)` and `@idempotency(key: param_name)`".into(),
+            ),
+            Self::UnknownGenericHead { .. } => Some(
+                "the generic heads are List, Map, Option, Result, Stream, Weak, Grounded, Partial, and ResumeToken; user-defined generics are post-v1.0".into(),
+            ),
             Self::AliasCycle { .. } => Some(
                 "make the alias chain end at a concrete type (a record, sum, or builtin)".into(),
             ),

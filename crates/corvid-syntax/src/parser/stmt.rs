@@ -113,12 +113,22 @@ impl<'a> Parser<'a> {
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.peek_span();
-        self.bump(); // if
+        self.bump(); // `if` (or `elif` in the chained form)
         let cond = self.parse_expr()?;
         self.expect(TokKind::Colon, "`:` after `if` condition")?;
         self.expect_newline()?;
         let then_block = self.parse_indented_block()?;
-        let else_block = if matches!(self.peek(), TokKind::KwElse) {
+        // `elif` (slice 45q): Python's chained-condition form.
+        // Desugars in the parser to `else:` holding a nested `if`,
+        // so no downstream stage knows `elif` exists.
+        let else_block = if matches!(self.peek(), TokKind::KwElif) {
+            let nested = self.parse_if_stmt()?;
+            let span = nested.span();
+            Some(corvid_ast::Block {
+                stmts: vec![nested],
+                span,
+            })
+        } else if matches!(self.peek(), TokKind::KwElse) {
             self.bump();
             self.expect(TokKind::Colon, "`:` after `else`")?;
             self.expect_newline()?;

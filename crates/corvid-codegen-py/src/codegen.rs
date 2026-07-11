@@ -545,6 +545,9 @@ fn binary_op_str(op: BinaryOp) -> &'static str {
 fn unary_op_str(op: UnaryOp) -> &'static str {
     match op {
         UnaryOp::Neg => "-",
+        // Elided at IR lowering (numeric identity); kept for match
+        // exhaustiveness — "+" is valid Python if it ever arrives.
+        UnaryOp::Pos => "+",
         UnaryOp::Not => "not ",
     }
 }

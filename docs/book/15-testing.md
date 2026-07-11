@@ -115,12 +115,9 @@ mock summarize(text: String) -> String:
     return "mocked summary"
 ```
 
-> **Known defect (filed with slice 45q):** declaring a `mock`
-> alongside its target in the same compile currently fails
-> typechecking with E0203 ("cannot call a value of type mock
-> target"), so mocks are not usable end-to-end today. The
-> declaration form above parses and is grammar-locked; the checker
-> integration is the open bug.
+A mock's target may be a tool or a prompt; the checker verifies
+the mock's signature matches the target's declaration (fixed in
+slice 45q — prompt targets used to be rejected with E0203).
 
 ## CI integration
 

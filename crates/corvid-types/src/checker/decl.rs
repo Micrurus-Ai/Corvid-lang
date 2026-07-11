@@ -61,6 +61,58 @@ impl<'a> Checker<'a> {
         // source does not yet expose any nondeterministic builtins.
         // The walk runs anyway so the enforcement path is live and
         // ready to fire the moment an entry lands.
+        // Durable-job policy annotations (slice 45q).
+        for attr in &a.attributes {
+            match attr {
+                AgentAttribute::Retry {
+                    max_attempts, span, ..
+                } => {
+                    if *max_attempts == 0 {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::AnnotationInvalid {
+                                annotation: "retry".into(),
+                                message: "max_attempts must be at least 1".into(),
+                            },
+                            *span,
+                        ));
+                    }
+                }
+                AgentAttribute::Idempotency { key, span } => {
+                    match a.params.iter().find(|p| p.name.name == key.name) {
+                        None => {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::AnnotationInvalid {
+                                    annotation: "idempotency".into(),
+                                    message: format!(
+                                        "`{}` names no parameter of agent `{}`",
+                                        key.name, a.name.name
+                                    ),
+                                },
+                                *span,
+                            ));
+                        }
+                        Some(p) => {
+                            let ty = self.type_ref_to_type(&p.ty);
+                            if !matches!(ty, Type::String | Type::Int | Type::Unknown) {
+                                self.errors.push(TypeError::new(
+                                    TypeErrorKind::AnnotationInvalid {
+                                        annotation: "idempotency".into(),
+                                        message: format!(
+                                            "key parameter `{}` must be String or Int (a stable, hashable job key), got {}",
+                                            key.name,
+                                            ty.display_name()
+                                        ),
+                                    },
+                                    *span,
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         if AgentAttribute::is_replayable(&a.attributes) {
             self.check_replayable_body(&a.name.name, &a.body);
         }

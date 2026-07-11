@@ -246,6 +246,9 @@ pub(super) fn eval_unop(
                 span,
             )),
         },
+        // Elided at IR lowering (numeric identity); kept for match
+        // exhaustiveness.
+        UnaryOp::Pos => Ok(v),
         UnaryOp::Not => {
             let b = require_bool(&v, span, "operand of `not`")?;
             Ok(Value::Bool(!b))

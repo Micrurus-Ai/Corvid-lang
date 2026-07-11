@@ -12,7 +12,7 @@ use super::{describe_token, Parser};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
 use corvid_ast::{
-    AgentAttribute, BackpressurePolicy, EffectConstraint, EffectRef, EffectRow, Ident,
+    AgentAttribute, Backoff, BackpressurePolicy, EffectConstraint, EffectRef, EffectRow, Ident,
     PromptStreamSettings, Span,
 };
 
@@ -147,7 +147,25 @@ impl<'a> Parser<'a> {
         while matches!(self.peek(), TokKind::At) {
             let start = self.peek_span();
             self.bump(); // @
-            let (name, name_span) = self.expect_ident()?;
+            // Annotation names may collide with reserved keywords
+            // (`@retry` — slice 45q). Accept the keyword token and
+            // recover its text instead of demanding a bare ident.
+            let (name, name_span) = if matches!(self.peek(), TokKind::KwRetry) {
+                let span = self.peek_span();
+                self.bump();
+                ("retry".to_string(), span)
+            } else {
+                self.expect_ident()?
+            };
+
+            // Named-argument annotations (slice 45q): `@retry(...)`
+            // and `@idempotency(...)` take `name: value` pairs.
+            if name == "retry" || name == "idempotency" {
+                let attribute =
+                    self.parse_named_arg_attribute(&name, start, name_span, expect_newline)?;
+                attributes.push(attribute);
+                continue;
+            }
 
             // Agent attributes: marker-style annotations with no
             // arguments. Optional empty parens are tolerated so
@@ -192,6 +210,124 @@ impl<'a> Parser<'a> {
             });
         }
         Ok((attributes, constraints))
+    }
+
+    /// `@retry(max_attempts: 3[, backoff: linear|exponential N])`
+    /// and `@idempotency(key: param_name)` — named-argument
+    /// annotations (slice 45q).
+    fn parse_named_arg_attribute(
+        &mut self,
+        name: &str,
+        start: Span,
+        _name_span: Span,
+        expect_newline: bool,
+    ) -> Result<AgentAttribute, ParseError> {
+        self.expect(TokKind::LParen, "`(` after the annotation name")?;
+        let mut max_attempts: Option<u64> = None;
+        let mut backoff: Option<Backoff> = None;
+        let mut key: Option<Ident> = None;
+        loop {
+            // Argument names may also collide with keywords
+            // (`backoff` is KwBackoff).
+            let (arg, arg_span) = if matches!(self.peek(), TokKind::KwBackoff) {
+                let span = self.peek_span();
+                self.bump();
+                ("backoff".to_string(), span)
+            } else {
+                self.expect_ident()?
+            };
+            self.expect(TokKind::Colon, "`:` after the argument name")?;
+            match (name, arg.as_str()) {
+                ("retry", "max_attempts") => {
+                    max_attempts = Some(self.parse_u64_literal("max_attempts")?);
+                }
+                ("retry", "backoff") => {
+                    // Same shape as the `try ... retry` expression:
+                    // `linear <ms>` or `exponential <ms>`.
+                    backoff = Some(match self.peek() {
+                        TokKind::KwLinear => {
+                            self.bump();
+                            Backoff::Linear(self.parse_u64_literal("linear backoff delay in ms")?)
+                        }
+                        TokKind::KwExponential => {
+                            self.bump();
+                            Backoff::Exponential(
+                                self.parse_u64_literal("exponential backoff base delay in ms")?,
+                            )
+                        }
+                        other => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: describe_token(other),
+                                    expected: "`linear <ms>` or `exponential <ms>`".into(),
+                                },
+                                span: self.peek_span(),
+                            });
+                        }
+                    });
+                }
+                ("idempotency", "key") => {
+                    let (k, k_span) = self.expect_ident()?;
+                    key = Some(Ident::new(k, k_span));
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("annotation argument `{arg}`"),
+                            expected: match name {
+                                "retry" => "`max_attempts:` or `backoff:` in `@retry(...)`",
+                                _ => "`key:` in `@idempotency(...)`",
+                            }
+                            .into(),
+                        },
+                        span: arg_span,
+                    });
+                }
+            }
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(TokKind::RParen, "`)` closing the annotation arguments")?;
+        let end = self.prev_span();
+        if expect_newline {
+            self.expect_newline()?;
+        }
+        let span = start.merge(end);
+        match name {
+            "retry" => {
+                let Some(max_attempts) = max_attempts else {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "`@retry` without `max_attempts`".into(),
+                            expected: "`@retry(max_attempts: N)` — the attempt count is required"
+                                .into(),
+                        },
+                        span,
+                    });
+                };
+                Ok(AgentAttribute::Retry {
+                    max_attempts,
+                    backoff,
+                    span,
+                })
+            }
+            _ => {
+                let Some(key) = key else {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "`@idempotency` without `key`".into(),
+                            expected: "`@idempotency(key: param_name)` — the key is required"
+                                .into(),
+                        },
+                        span,
+                    });
+                };
+                Ok(AgentAttribute::Idempotency { key, span })
+            }
+        }
     }
 
     /// Try to parse the current `@name` as a known agent

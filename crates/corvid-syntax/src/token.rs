@@ -103,6 +103,7 @@ pub enum TokKind {
     // --- keywords: control flow ---
     KwIf,
     KwElse,
+    KwElif,
     KwFor,
     /// `while` — conditional loop (slice 45k).
     KwWhile,
@@ -245,6 +246,7 @@ impl TokKind {
             "adjudicate" => TokKind::KwAdjudicate,
             "if" => TokKind::KwIf,
             "else" => TokKind::KwElse,
+            "elif" => TokKind::KwElif,
             "for" => TokKind::KwFor,
             "while" => TokKind::KwWhile,
             "in" => TokKind::KwIn,

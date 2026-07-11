@@ -1170,6 +1170,35 @@ Next per track order: 45q-parser-checker-papercuts.
 
 ---
 
+## 2026-07-11 - 45q closed: eight papercuts, one slice
+
+`elif` (Python form — the decision principle picks coherence over
+novelty on commodity features; parser-level desugar to else+if, so
+no downstream stage knows). `@retry(max_attempts: 3, backoff:
+exponential 250)` and `@idempotency(key: param)` parse (keyword
+tokens accepted as annotation AND argument names — `retry` and
+`backoff` are both keywords), validate (attempts >= 1; key names a
+String/Int param), and lower into IrAgent metadata next to
+is_replayable; jobs-enqueue reading them is the queue's recorded
+follow-up. Prompt mocks fixed (E0203 gone — targets may be tools
+or prompts). Unary `+` checks like Neg and is elided at lowering.
+Doc comments `#:` decided post-v1.0 (token without rendering
+surface = hidden no-op); ch 04 claim struck.
+
+Leniency hardening: unknown generic heads now ERROR with a
+Levenshtein did-you-mean; W0290 warnings on `x = []` / `x = None`
+without annotations (the exact fix in the message); the
+Unknown-assignability audit concluded KEEP — it is the
+error-recovery spine, and the two real leak paths are now closed.
+
+Validation: 281 types + 216 syntax + 109 vm + 14 e2e + book guard
++ grammar gate; corpus verify exits 1.
+
+Next per track order: 45r-fn-pure-function-declarations (final
+Phase 45 slice).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -737,6 +737,7 @@ fn render_binary_op(op: BinaryOp) -> &'static str {
 fn render_unary_op(op: UnaryOp) -> &'static str {
     match op {
         UnaryOp::Neg => "-",
+        UnaryOp::Pos => "+",
         UnaryOp::Not => "not ",
     }
 }
