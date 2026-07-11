@@ -45,7 +45,10 @@ agent fetch_user(text: String) -> Result<User, String>:
 ```
 
 The user declares the target struct + a tool matching the
-`decode_<X>_from_json` pattern. The runtime intercepts the call
+`decode_<X>_from_json` pattern. (Declaring your own effect works,
+as here; since slice 45o you can also import the module's own row —
+`import "./std/json" use json_parse, json_egress_read` — and write
+`uses json_egress_read` directly.) The runtime intercepts the call
 (via `is_typed_json_decoder_tool_call`) and routes through
 `serde_json::from_str` + `json_to_value` against the declared
 target type. **No per-type runtime handler exists** — the

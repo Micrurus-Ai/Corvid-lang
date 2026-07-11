@@ -157,8 +157,28 @@ fn typecheck_with_everything(
             }
         })
         .collect();
-    let owned_decls: Vec<corvid_ast::EffectDecl> =
+    let mut owned_decls: Vec<corvid_ast::EffectDecl> =
         effect_decls.iter().cloned().cloned().collect();
+    // Slice 45o: imported PUBLIC effects join the registry so
+    // `import "./std/json" use json_egress_read` + `uses
+    // json_egress_read` composes exactly like a locally-declared
+    // effect. Local declarations win on name collisions (they are
+    // pushed after, and `from_decls` is last-wins), matching the
+    // shadowing story everywhere else.
+    if let Some(modules) = modules {
+        let mut imported: Vec<corvid_ast::EffectDecl> = Vec::new();
+        for module in modules.root_imports.values() {
+            for decl in &module.file.decls {
+                if let Decl::Effect(e) = decl {
+                    if !matches!(e.visibility, corvid_ast::Visibility::Private) {
+                        imported.push(e.clone());
+                    }
+                }
+            }
+        }
+        imported.extend(owned_decls);
+        owned_decls = imported;
+    }
     let registry = crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config);
 
     let mut c = Checker::new(file, resolved, modules, &registry);

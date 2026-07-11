@@ -1143,6 +1143,33 @@ Next per track order: 45o-effect-and-model-exports.
 
 ---
 
+## 2026-07-11 - 45o closed: effects and models cross module boundaries
+
+`public effect` / `public model` ship end-to-end: visibility on
+the decls, parser prefix, export arms in collect_public_exports,
+and — the half that makes it real — imported public effects JOIN
+the importing file's effect registry, so `uses json_egress_read`
+composes dimensions exactly like a local declaration. Local
+declarations win on name collisions (last-wins, consistent with
+shadowing everywhere else). Private effects stay unimportable
+(e2e-pinned).
+
+Model refs (route/requires/escalate/rollout/ensemble — six sites)
+accept use-imports whose target is a model; field-level validation
+runs where the model is declared. Extend audit: methods ride the
+type's export; nothing to do.
+
+Migration: all 13 stdlib effect rows are now public; the
+typed-decoder docs note the import path; book ch 06 + grammar
+visibility notes flipped.
+
+Ops: full cargo clean (11GB) + CARGO_INCREMENTAL=0 rebuild to
+stabilize the disk.
+
+Next per track order: 45q-parser-checker-papercuts.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

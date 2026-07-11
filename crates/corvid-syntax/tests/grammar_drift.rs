@@ -409,10 +409,13 @@ mock summarize(text: String) -> String:
     ),
     (
         "statements",
-        r#"effect pay_eff:
+        r#"public effect pay_eff:
     cost: $10.00
     trust: supervisor_required
     reversible: false
+
+public model exported_model:
+    capability: expert
 
 tool refund(amount: Float) -> Nothing uses pay_eff
 

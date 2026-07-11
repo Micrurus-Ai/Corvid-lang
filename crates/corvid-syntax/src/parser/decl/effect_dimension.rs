@@ -8,7 +8,10 @@ use crate::token::TokKind;
 use corvid_ast::{DimensionDecl, EffectDecl, Ident};
 
 impl<'a> Parser<'a> {
-    pub(super) fn parse_effect_decl(&mut self) -> Result<EffectDecl, ParseError> {
+    pub(super) fn parse_effect_decl(
+        &mut self,
+        visibility: corvid_ast::Visibility,
+    ) -> Result<EffectDecl, ParseError> {
         let start = self.peek_span();
         self.bump(); // effect
 
@@ -41,6 +44,7 @@ impl<'a> Parser<'a> {
         Ok(EffectDecl {
             name: Ident::new(name, name_span),
             dimensions,
+            visibility,
             span: start.merge(end),
         })
     }

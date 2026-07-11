@@ -320,13 +320,13 @@ public agent db_replay_redacted(summary: DbReplaySummary) -> Bool:
 # collide with the effect names — effects and tools share a
 # namespace at the resolver level (same trap as 33S2's HTTP
 # rename and 33S1's IO rename).
-effect db_egress_open:
+public effect db_egress_open:
     reversible: true
 
-effect db_egress_read:
+public effect db_egress_read:
     reversible: true
 
-effect db_egress_write:
+public effect db_egress_write:
     reversible: false
 
 public tool db_open(path: String) -> DbHandle uses db_egress_open

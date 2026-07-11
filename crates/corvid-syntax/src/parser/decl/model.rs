@@ -8,7 +8,10 @@ use crate::token::TokKind;
 use corvid_ast::{Ident, ModelDecl, ModelField};
 
 impl<'a> Parser<'a> {
-    pub(super) fn parse_model_decl(&mut self) -> Result<ModelDecl, ParseError> {
+    pub(super) fn parse_model_decl(
+        &mut self,
+        visibility: corvid_ast::Visibility,
+    ) -> Result<ModelDecl, ParseError> {
         let start = self.peek_span();
         self.bump(); // model
 
@@ -41,6 +44,7 @@ impl<'a> Parser<'a> {
         Ok(ModelDecl {
             name: Ident::new(name, name_span),
             fields,
+            visibility,
             span: start.merge(end),
         })
     }

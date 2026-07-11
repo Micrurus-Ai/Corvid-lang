@@ -65,13 +65,13 @@ public agent directory_entry(path_value: String, name: String, is_dir: Bool) -> 
 # inline here so the resolver in standalone-module compilation
 # sees them as named identifiers (the resolver's name table is
 # source-driven, not registry-driven).
-effect io_read:
+public effect io_read:
     reversible: true
 
-effect io_write:
+public effect io_write:
     reversible: false
 
-effect io_list:
+public effect io_list:
     reversible: true
 
 public tool io_read_text(path: String) -> FileReadEnvelope uses io_read

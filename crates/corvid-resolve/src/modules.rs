@@ -245,10 +245,18 @@ pub fn collect_public_exports(file: &File, resolved: &Resolved) -> HashMap<Strin
             corvid_ast::Decl::Agent(a) => {
                 (a.name.name.as_str(), a.visibility, DeclKind::Agent, None)
             }
-            // Imports, effects, models, evals, extends don't carry
-            // module-level visibility today. `extend` methods do, but
-            // those ride on the underlying type's visibility and
-            // aren't top-level exports themselves.
+            // Slice 45o: effects and models are exportable.
+            corvid_ast::Decl::Effect(e) => {
+                (e.name.name.as_str(), e.visibility, DeclKind::Effect, None)
+            }
+            corvid_ast::Decl::Model(m) => {
+                (m.name.name.as_str(), m.visibility, DeclKind::Model, None)
+            }
+            // Imports, evals, extends don't carry module-level
+            // visibility. `extend` methods do, but those ride on the
+            // underlying type's visibility and aren't top-level
+            // exports themselves (audited in slice 45o — the method
+            // path already flows through the type's export).
             _ => continue,
         };
         if matches!(visibility, Visibility::Private) {

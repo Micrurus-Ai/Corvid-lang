@@ -917,6 +917,10 @@ pub enum EvalAssert {
 pub struct ModelDecl {
     pub name: Ident,
     pub fields: Vec<ModelField>,
+    /// Module-level visibility (slice 45o): `public model x:`
+    /// makes the model importable via `use`.
+    #[serde(default)]
+    pub visibility: Visibility,
     pub span: Span,
 }
 

@@ -42,11 +42,13 @@ NEWLINE         — physical newline (after continuation rules apply)
 ```ebnf
 program           ::= (decl | NEWLINE)* EOF
 
-# `visibility` applies ONLY to type / store / tool / prompt / agent
-# declarations (and annotation-prefixed agents). Effects, models,
-# imports, extends, and the test surface cannot be `public` —
-# `public effect …` / `public import …` are parse errors. Effect
-# re-export is PLANNED(45o); import re-export is not scheduled.
+# `visibility` applies to type / store / tool / prompt / agent /
+# effect / model declarations (and annotation-prefixed agents).
+# `public effect x:` / `public model m:` (slice 45o) make the row
+# importable via `use`; imported PUBLIC effects join the importing
+# file's effect registry, so `uses <imported_effect>` composes
+# exactly like a local declaration. Imports, extends, and the test
+# surface cannot be `public`; import re-export is not scheduled.
 decl              ::= visibility? (
                         type_decl
                       | store_decl

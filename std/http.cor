@@ -82,10 +82,10 @@ public agent http_ok(response: HttpResponseEnvelope) -> Bool:
 # tool names (`http_get` / `http_post_json`) don't collide with
 # the effect names — effects and tools share a namespace at
 # the resolver level.
-effect http_egress_get:
+public effect http_egress_get:
     reversible: true
 
-effect http_egress_post:
+public effect http_egress_post:
     reversible: false
 
 public tool http_get(url: String) -> HttpResponseEnvelope uses http_egress_get

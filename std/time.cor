@@ -35,10 +35,10 @@ public agent time_instant(epoch_ms: Int, iso: String) -> TimeInstant:
 # Clock effect rows. Reads are reversible (they change nothing);
 # they are still effects because their RESULTS are nondeterministic
 # and must be traced for replay.
-effect time_wall:
+public effect time_wall:
     reversible: true
 
-effect time_monotonic:
+public effect time_monotonic:
     reversible: true
 
 # Wall-clock now, UTC. Nondeterministic; replay substitutes the

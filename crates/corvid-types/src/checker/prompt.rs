@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
             match self.bindings.get(&model.span) {
                 Some(Binding::Decl(def_id)) => {
                     let entry = self.symbols.get(*def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &model.name) {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
                                 prompt: p.name.name.clone(),
@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Decl(def_id)) = self.bindings.get(&arm.model.span) {
                     let def_id = *def_id;
                     let entry = self.symbols.get(def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &arm.model.name) {
                         let got = format!("{:?}", entry.kind).to_lowercase();
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Decl(def_id)) = self.bindings.get(&stage.model.span) {
                     let def_id = *def_id;
                     let entry = self.symbols.get(def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &stage.model.name) {
                         let got = format!("{:?}", entry.kind).to_lowercase();
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
@@ -182,7 +182,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Decl(def_id)) = self.bindings.get(&ident.span) {
                     let def_id = *def_id;
                     let entry = self.symbols.get(def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &ident.name) {
                         let got = format!("{:?}", entry.kind).to_lowercase();
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
@@ -219,7 +219,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Decl(def_id)) = self.bindings.get(&model.span) {
                     let def_id = *def_id;
                     let entry = self.symbols.get(def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &model.name) {
                         let got = format!("{:?}", entry.kind).to_lowercase();
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
                 if let Some(Binding::Decl(def_id)) = self.bindings.get(&model.span) {
                     let def_id = *def_id;
                     let entry = self.symbols.get(def_id);
-                    if entry.kind != corvid_resolve::DeclKind::Model {
+                    if !self.entry_kind_is_model(entry.kind, &model.name) {
                         let got = format!("{:?}", entry.kind).to_lowercase();
                         self.errors.push(TypeError::new(
                             TypeErrorKind::RouteTargetNotModel {
@@ -519,6 +519,24 @@ impl<'a> Checker<'a> {
                 },
                 model_ident.span,
             ));
+        }
+    }
+
+
+    /// A model reference is valid when it names a LOCAL `model`
+    /// declaration or a use-import whose target is a model
+    /// (slice 45o). Field-level validation (`output_format`,
+    /// capability tiers) runs where the model is DECLARED; the
+    /// importing file trusts the defining module's check.
+    fn entry_kind_is_model(&self, kind: corvid_resolve::DeclKind, name: &str) -> bool {
+        match kind {
+            corvid_resolve::DeclKind::Model => true,
+            corvid_resolve::DeclKind::ImportedUse => self
+                .module_resolution
+                .and_then(|m| m.lookup_imported_use(name))
+                .map(|t| t.export.kind == corvid_resolve::DeclKind::Model)
+                .unwrap_or(false),
+            _ => false,
         }
     }
 

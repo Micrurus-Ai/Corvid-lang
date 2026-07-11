@@ -459,7 +459,11 @@ impl Resolver {
             match self.symbols.lookup(&effect_ref.name.name) {
                 Some(Binding::Decl(id)) => {
                     let entry = self.symbols.get(id);
-                    if entry.kind != DeclKind::Effect {
+                    // A `uses` name is a local effect declaration OR
+                    // a use-import (slice 45o) — the CHECKER verifies
+                    // the imported target's kind and merges its
+                    // dimensions into the effect registry.
+                    if entry.kind != DeclKind::Effect && entry.kind != DeclKind::ImportedUse {
                         self.errors.push(ResolveError {
                             kind: ResolveErrorKind::UndefinedName(
                                 effect_ref.name.name.clone(),

@@ -11,7 +11,7 @@
 # The pure math methods (`abs`, `min`, `pow`, `sqrt`, ...) live on
 # the builtin-method table — see docs/book/05-types.md.
 
-effect rand_draw:
+public effect rand_draw:
     reversible: true
 
 # Uniform draw in [0.0, 1.0). Nondeterministic; replay substitutes

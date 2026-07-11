@@ -20,11 +20,13 @@ Three levels:
 - `public(package)` — visible to other modules in the same package
   but not to consumers outside the package.
 
-`public` applies to `type`, `tool`, `prompt`, `agent`, and store
-declarations. **Effects cannot be `public`** — an effect is private
-to its file today, so a module exposing a public tool declares the
-tool's effect in the same file. (Effect export via `use` lands with
-slice 45o.)
+`public` applies to `type`, `tool`, `prompt`, `agent`, `effect`,
+`model`, and store declarations. A `public effect` (or `public
+model`) is importable via `use` — the imported effect joins your
+file's effect registry, so `uses json_egress_read` composes
+exactly like a locally-declared effect. Every executing stdlib
+module (`std/io`, `std/http`, `std/db`, `std/json`, `std/time`,
+`std/random`) exports its effect rows this way.
 
 ```corvid-fragment
 # src/refund.cor
@@ -92,6 +94,7 @@ embedded PyO3 runtime (see the [Python FFI guide](../guides/ffi-python.md)).
 
 > **Planned.** `public import … use …` re-export syntax does not
 > parse today — a module cannot re-export another module's surface.
-> Consumers import the defining module directly. (Effect re-export
-> is slice 45o; declaration re-export is unscheduled and will be
-> designed alongside it.)
+> Consumers import the defining module directly. (Direct effect and
+> model EXPORT shipped in slice 45o — this note is about
+> RE-exporting a surface imported from somewhere else, which is
+> unscheduled.)

@@ -47,6 +47,8 @@ impl<'a> Parser<'a> {
                 | TokKind::KwPrompt
                 | TokKind::KwServer
                 | TokKind::KwAgent
+                | TokKind::KwEffect
+                | TokKind::KwModel
                 | TokKind::At => {}
                 other => {
                     return Err(ParseError {
@@ -81,8 +83,8 @@ impl<'a> Parser<'a> {
             TokKind::KwAgent => self.parse_agent_decl(visibility).map(Decl::Agent),
             TokKind::KwPub => self.parse_extern_agent_decl().map(Decl::Agent),
             TokKind::KwExtend => self.parse_extend_decl().map(Decl::Extend),
-            TokKind::KwEffect => self.parse_effect_decl().map(Decl::Effect),
-            TokKind::KwModel => self.parse_model_decl().map(Decl::Model),
+            TokKind::KwEffect => self.parse_effect_decl(visibility).map(Decl::Effect),
+            TokKind::KwModel => self.parse_model_decl(visibility).map(Decl::Model),
             TokKind::At => {
                 let (attributes, constraints) = self.parse_agent_annotations()?;
                 let extern_abi = if matches!(self.peek(), TokKind::KwPub) {

@@ -37,10 +37,10 @@
 # names don't collide with the effect names (effects and tools
 # share a namespace at the resolver level — same trap as 33S1's
 # io_*, 33S2's http_*, 33S3's db_egress_*).
-effect json_egress_read:
+public effect json_egress_read:
     reversible: true
 
-effect json_egress_build:
+public effect json_egress_build:
     reversible: true
 
 public tool json_parse(text: String) -> Result<JsonValue, String> uses json_egress_read

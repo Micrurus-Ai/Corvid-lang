@@ -91,6 +91,10 @@ pub struct DimensionDecl {
 pub struct EffectDecl {
     pub name: Ident,
     pub dimensions: Vec<DimensionDecl>,
+    /// Module-level visibility (slice 45o): `public effect x:`
+    /// makes the effect importable via `use`.
+    #[serde(default)]
+    pub visibility: crate::decl::Visibility,
     pub span: Span,
 }
 
