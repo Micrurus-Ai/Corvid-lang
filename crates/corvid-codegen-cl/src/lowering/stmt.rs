@@ -727,6 +727,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
                         || expr_mentions_local(&arm.body, target)
                 })
         }
+        IrExprKind::Lambda { body, .. } => expr_mentions_local(body, target),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

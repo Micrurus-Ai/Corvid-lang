@@ -168,11 +168,27 @@ return `Nothing` (reference semantics — see the callout above).
 `range(start, end)` is a builtin function producing a half-open
 `List<Int>`.
 
-> **Planned — the lambda-taking methods land in slice 45j:**
+The lambda-taking methods take `fn (x) -> expr` lambdas and are
+fully checked — `filter`'s predicate must return `Bool`, `map`'s
+result element type is inferred from the lambda body, and `fold`'s
+accumulator type comes from its `init` argument. `any`/`all`
+short-circuit. Lambdas are first-class values: store one in a
+variable (with an optional `(Int) -> Int` function-type annotation)
+and call it like any function. Captures are by-value snapshots
+taken when the lambda is created — heap cells still share, so a
+captured list observes later mutations (compiled in CI):
 
-```corvid-planned
-ys = xs.map(fn (x) -> x * 2)             # 45j — needs lambdas
-zs = xs.filter(fn (x) -> x > 1)          # 45j
+```corvid
+agent transform(xs: List<Int>) -> Int:
+    ys = xs.map(fn (x) -> x * 2)
+    zs = xs.filter(fn (x) -> x > 1)
+    total = xs.fold(0, fn (acc, x) -> acc + x)
+    has_big = xs.any(fn (x) -> x > 100)
+    base = 10
+    add_base: (Int) -> Int = fn (n) -> n + base
+    if has_big and xs.all(fn (x) -> x > 0):
+        return total
+    return add_base(ys.length() + zs.length())
 ```
 
 ## Maps

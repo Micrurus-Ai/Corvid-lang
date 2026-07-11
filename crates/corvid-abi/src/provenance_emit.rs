@@ -68,6 +68,7 @@ fn collect_expr_dependencies(expr: &Expr, out: &mut Vec<String>) {
             }
         }
         Expr::FieldAccess { target, .. } => collect_expr_dependencies(target, out),
+        Expr::Lambda { body, .. } => collect_expr_dependencies(body, out),
         Expr::Index { target, index, .. } => {
             collect_expr_dependencies(target, out);
             collect_expr_dependencies(index, out);

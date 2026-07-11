@@ -473,6 +473,11 @@ fn render_expr(expr: &Expr) -> String {
             // total (the verifier skips programs containing match).
             "<match>".to_string()
         }
+        Expr::Lambda { .. } => {
+            // Same treatment as match: never synthesized by rewrite
+            // passes; the placeholder keeps the renderer total.
+            "<fn>".to_string()
+        }
         Expr::MapLiteral { entries, .. } => format!(
             "{{{}}}",
             entries

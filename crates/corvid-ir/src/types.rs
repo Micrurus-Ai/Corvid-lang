@@ -554,6 +554,14 @@ pub enum IrStmt {
     },
 }
 
+/// One lambda parameter (slice 45j): the resolver-assigned local
+/// slot the argument binds to when the closure is applied.
+#[derive(Debug, Clone)]
+pub struct IrLambdaParam {
+    pub local_id: LocalId,
+    pub name: String,
+}
+
 /// One arm of a lowered `match` (slice 45i).
 #[derive(Debug, Clone)]
 pub struct IrMatchArm {
@@ -686,6 +694,16 @@ pub enum IrExprKind {
     Match {
         scrutinee: Box<IrExpr>,
         arms: Vec<IrMatchArm>,
+    },
+
+    /// Lambda expression (slice 45j). Evaluates to a closure value
+    /// that snapshots the visible environment BY VALUE at creation
+    /// (shared heap cells still share — the snapshot copies handles,
+    /// not cells). Interpreter-only in v1; compiled tiers degrade
+    /// loudly.
+    Lambda {
+        params: Vec<IrLambdaParam>,
+        body: Box<IrExpr>,
     },
 
     /// Map literal (slice 45g): parallel key/value lowered exprs.
@@ -899,6 +917,12 @@ pub enum IrCallKind {
     },
     StructConstructor {
         def_id: DefId,
+    },
+    /// Call of a function-typed LOCAL (slice 45j): `f(1)` where `f`
+    /// holds a closure value. The interpreter looks the local up in
+    /// the environment and applies the closure.
+    ClosureLocal {
+        local_id: LocalId,
     },
     /// Something we couldn't resolve (graceful degradation).
     Unknown,

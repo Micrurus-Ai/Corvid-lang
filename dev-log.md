@@ -974,6 +974,47 @@ table), 45k-while, 45l Option/Result method shorthands.
 
 ---
 
+## 2026-07-11 - 45j closed: lambdas — functions become values
+
+`fn (x) -> x * 2` ships end-to-end, and with it the last of the
+audit's "collections are write-only" complaints: `map` / `filter` /
+`fold` / `any` / `all` land on the 45c table.
+
+The audit hole was deeper than reported: function types weren't
+"silently Unknown" — `(Int) -> Int` was never even PARSED. 45j adds
+the type-grammar production, real `Type::Function` resolution, and
+assignability (contravariant params, covariant ret).
+
+Design calls under the principle:
+- CAPTURE-BY-VALUE SNAPSHOT at creation — no Python late-binding
+  footgun; heap cells still share (a captured list observes
+  in-place mutation). Both halves e2e-pinned.
+- CONTEXTUAL CHECKING: the use site's expected function type types
+  unannotated params and checks the body (`filter`'s non-Bool body
+  errors at the body). Sequential signature refinement gives `map`
+  a real result element type from the lambda body and `fold` its
+  accumulator type from `init` — no generics machinery needed.
+- FIRST-CLASS: closures store in locals, annotate as
+  `(Int) -> Int`, and CALL (`IrCallKind::ClosureLocal`). The old
+  `cannot call <local value>` diagnostic now names the actual type.
+- `Value::Closure` gets full cycle-collector integration (env is
+  the child set; clear_payload breaks closure-in-captured-list
+  cycles) and identity equality, like Python function objects.
+- Cost stays sound: an effectful lambda body marks the estimate
+  unbounded (call count is statically unknown).
+
+One interpreter architecture change: `eval_expr` no longer requires
+`&'ir` exprs — closure bodies live in values, not the IR arena.
+
+Probe returned "LAMBDAS WORK" on the first run. 2 checker tests +
+2 e2e pins + grammar parse evidence; book ch 05 flipped its last
+Planned block in the lists section.
+
+Next per track order: 45k-while-loop (+ promote break/continue/pass
+to real AST variants), 45l Option/Result method shorthands.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

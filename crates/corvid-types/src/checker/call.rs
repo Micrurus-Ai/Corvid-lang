@@ -91,17 +91,63 @@ impl<'a> Checker<'a> {
             Binding::BuiltIn(builtin) => {
                 self.check_builtin_constructor_call(*builtin, name, args, expected)
             }
-            Binding::Local(_) => {
-                self.errors.push(TypeError::new(
-                    TypeErrorKind::NotCallable {
-                        got: "<local value>".into(),
-                    },
-                    callee.span(),
-                ));
-                for a in args {
-                    let _ = self.check_expr(a);
+            Binding::Local(lid) => {
+                // First-class function values (45j): a local of
+                // function type is callable, with args checked
+                // against its parameter types. Unknown-typed locals
+                // stay lenient; anything else is not callable.
+                let lid = *lid;
+                let callee_ty = self.local_types.get(&lid).cloned().unwrap_or(Type::Unknown);
+                match callee_ty {
+                    Type::Function { params, ret, .. } => {
+                        if args.len() != params.len() {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::ArityMismatch {
+                                    callee: name.name.clone(),
+                                    expected: params.len(),
+                                    got: args.len(),
+                                },
+                                span,
+                            ));
+                            for a in args {
+                                let _ = self.check_expr(a);
+                            }
+                            return (*ret).clone();
+                        }
+                        for (arg, pty) in args.iter().zip(params.iter()) {
+                            let got = self.check_expr_as(arg, Some(pty));
+                            if !got.is_assignable_to(pty) {
+                                self.errors.push(TypeError::new(
+                                    TypeErrorKind::TypeMismatch {
+                                        expected: pty.display_name(),
+                                        got: got.display_name(),
+                                        context: format!("argument to `{}`", name.name),
+                                    },
+                                    arg.span(),
+                                ));
+                            }
+                        }
+                        (*ret).clone()
+                    }
+                    Type::Unknown => {
+                        for a in args {
+                            let _ = self.check_expr(a);
+                        }
+                        Type::Unknown
+                    }
+                    other => {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::NotCallable {
+                                got: other.display_name(),
+                            },
+                            callee.span(),
+                        ));
+                        for a in args {
+                            let _ = self.check_expr(a);
+                        }
+                        Type::Unknown
+                    }
                 }
-                Type::Unknown
             }
         }
     }
@@ -744,9 +790,32 @@ impl<'a> Checker<'a> {
                 }
                 return sig.ret;
             }
-            for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
-                let got = self.check_expr_as(arg, Some(param_ty));
-                if !got.is_assignable_to(param_ty) {
+            // Sequential signature refinement (45j): `fold`'s
+            // accumulator type comes from its checked `init`
+            // argument, and `map`'s result element type from the
+            // lambda argument's checked return type — neither can
+            // come from the receiver alone, so the signature is
+            // refined as arguments are checked, in order.
+            use crate::builtin_methods::BuiltinMethodKind;
+            let mut sig = sig;
+            let mut first_arg_ty = Type::Unknown;
+            for i in 0..args.len() {
+                let param_ty = sig.params[i].clone();
+                let arg = &args[i];
+                let got = self.check_expr_as(arg, Some(&param_ty));
+                if i == 0 {
+                    first_arg_ty = got.clone();
+                }
+                if sig.kind == BuiltinMethodKind::ListFold && i == 0 {
+                    if let Type::Function { params, ret, .. } = &mut sig.params[1] {
+                        if let Some(acc) = params.get_mut(0) {
+                            *acc = got.clone();
+                        }
+                        **ret = got.clone();
+                    }
+                    sig.ret = got.clone();
+                }
+                if !got.is_assignable_to(&param_ty) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeMismatch {
                             expected: param_ty.display_name(),
@@ -755,6 +824,11 @@ impl<'a> Checker<'a> {
                         },
                         arg.span(),
                     ));
+                }
+            }
+            if sig.kind == BuiltinMethodKind::ListMap {
+                if let Type::Function { ret, .. } = &first_arg_ty {
+                    sig.ret = Type::List(ret.clone());
                 }
             }
             return sig.ret;

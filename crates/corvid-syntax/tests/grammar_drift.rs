@@ -455,6 +455,15 @@ agent map_demo() -> Int:
     m["c"] = 3
     return m.length()
 
+agent lambda_demo(xs: List<Int>) -> Int:
+    doubled = xs.map(fn (x) -> x * 2)
+    evens = xs.filter(fn (x) -> x % 2 == 0)
+    total = xs.fold(0, fn (acc, x) -> acc + x)
+    base = 10
+    add_base = fn (n: Int) -> n + base
+    scale: (Int) -> Int = fn (m) -> m * 2
+    return total + add_base(doubled.length()) + scale(evens.length())
+
 agent mutate(w: Wallet, xs: List<Int>) -> Float:
     w.balance = 250.0
     w.balance += 50.0
@@ -598,6 +607,9 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("literal_pattern", "statements"),
     ("field_pattern", "statements"),
     ("map_entry", "statements"),
+    ("lambda_expr", "statements"),
+    ("lambda_param", "statements"),
+    ("function_type", "statements"),
     ("retry_expr", "expressions"),
 ];
 

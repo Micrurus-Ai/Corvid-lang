@@ -603,6 +603,15 @@ pub(super) fn eval_builtin_method(
                 _ => unreachable!("gated above"),
             })
         }
+        // The lambda-taking methods (45j) are intercepted in the
+        // ASYNC evaluator (applying a closure re-enters eval); this
+        // arm is a loud backstop, not a code path.
+        ListMap | ListFilter | ListFold | ListAny | ListAll => Err(InterpError::new(
+            InterpErrorKind::DispatchFailed(
+                "higher-order list methods dispatch through the async evaluator".into(),
+            ),
+            span,
+        )),
         RangeIntList => {
             let start = want_int(&recv, span)?;
             let end = want_int(&args[0], span)?;

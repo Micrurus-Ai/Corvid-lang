@@ -216,6 +216,9 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
         Expr::FieldAccess { target, .. } | Expr::TryPropagate { inner: target, .. } => {
             collect_ident_spans_by_name_in_expr(target, name, spans);
         }
+        Expr::Lambda { body, .. } => {
+            collect_ident_spans_by_name_in_expr(body, name, spans);
+        }
         Expr::Index { target, index, .. } => {
             collect_ident_spans_by_name_in_expr(target, name, spans);
             collect_ident_spans_by_name_in_expr(index, name, spans);

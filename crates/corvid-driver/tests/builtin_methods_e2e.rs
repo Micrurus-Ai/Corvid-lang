@@ -339,3 +339,69 @@ agent main() -> Int:
         "expected the empty-separator trap, got {err:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lambda_full_surface_end_to_end() {
+    // Slice 45j: map / filter / fold / any / all, first-class
+    // closures (stored, annotated, called), capture-by-value of an
+    // outer local, and map producing a DIFFERENT element type
+    // (Int -> String, exercised through join).
+    let source = "
+agent main() -> String:
+    xs = [1, 2, 3, 4]
+    doubled = xs.map(fn (x) -> x * 2)
+    evens = xs.filter(fn (x) -> x % 2 == 0)
+    total = xs.fold(0, fn (acc, x) -> acc + x)
+    has_big = xs.any(fn (x) -> x > 3)
+    all_pos = xs.all(fn (x) -> x > 0)
+    base = 100
+    add_base = fn (n) -> n + base
+    shifted = add_base(5)
+    scale: (Int) -> Int = fn (m: Int) -> m * 10
+    labels = xs.map(fn (x) -> x.to_string())
+    ok1 = doubled.length() == 4 and doubled.last() == Some(8)
+    ok2 = evens.length() == 2 and total == 10
+    ok3 = has_big and all_pos
+    ok4 = shifted == 105 and scale(7) == 70
+    ok5 = labels.join(\",\") == \"1,2,3,4\"
+    if ok1 and ok2 and ok3 and ok4 and ok5:
+        return \"LAMBDAS WORK\"
+    return \"MISMATCH\"
+";
+    let ir = compile_to_ir(source).expect("45j e2e source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45j e2e program must run");
+    match out {
+        Value::String(s) => assert_eq!(&*s, "LAMBDAS WORK"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lambda_capture_is_snapshot_but_cells_share() {
+    // Rebinding an outer Int AFTER the lambda is created must not
+    // change what the closure sees (by-value snapshot, no Python
+    // late-binding footgun) — but a captured LIST is a shared cell,
+    // so in-place mutation IS visible through the capture.
+    let source = "
+agent main() -> Int:
+    n = 1
+    xs = [10]
+    f = fn (k) -> k + n + xs.length()
+    n = 100
+    xs.append(20)
+    return f(0)
+";
+    let ir = compile_to_ir(source).expect("45j capture source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45j capture program must run");
+    match out {
+        // n snapshots at 1; xs.length() sees the shared cell (2).
+        Value::Int(v) => assert_eq!(v, 3, "snapshot Int + shared list cell"),
+        other => panic!("expected Int, got {other:?}"),
+    }
+}

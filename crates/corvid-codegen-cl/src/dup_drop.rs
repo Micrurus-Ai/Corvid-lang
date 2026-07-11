@@ -393,6 +393,9 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
                 scan_expr(&arm.body, max_id);
             }
         }
+        IrExprKind::Lambda { body, .. } => {
+            scan_expr(body, max_id);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
             for a in args {
@@ -487,6 +490,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
                         || expr_reads_local(&arm.body, target)
                 })
         }
+        IrExprKind::Lambda { body, .. } => expr_reads_local(body, target),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }

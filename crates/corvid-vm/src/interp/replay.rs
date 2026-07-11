@@ -13,9 +13,9 @@ use corvid_types::Type;
 impl<'ir> Interpreter<'ir> {
     pub(super) async fn eval_replay_expr(
         &mut self,
-        trace: &'ir IrExpr,
-        arms: &'ir [IrReplayArm],
-        else_body: &'ir IrExpr,
+        trace: &IrExpr,
+        arms: &[IrReplayArm],
+        else_body: &IrExpr,
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
         let trace_value = match self.eval_expr(trace).await?.into_value() {
@@ -72,7 +72,7 @@ impl<'ir> Interpreter<'ir> {
 
     async fn eval_replay_arm_with_bindings(
         &mut self,
-        arm: &'ir IrReplayArm,
+        arm: &IrReplayArm,
         whole_value_json: serde_json::Value,
         tool_arg_json: Option<serde_json::Value>,
     ) -> Result<ExprFlow, InterpError> {

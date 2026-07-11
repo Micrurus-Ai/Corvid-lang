@@ -220,6 +220,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             .chain(values)
             .map(|e| count_local_mentions_expr(e, local_id))
             .sum::<usize>(),
+        IrExprKind::Lambda { body, .. } => count_local_mentions_expr(body, local_id),
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -303,6 +304,9 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_observes_refcount(e, local_id)),
+        // A lambda snapshots the visible environment (handle
+        // clones), so treat it as observing every local's refcount.
+        IrExprKind::Lambda { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

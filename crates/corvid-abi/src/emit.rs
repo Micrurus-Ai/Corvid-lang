@@ -696,6 +696,9 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
                 collect_called_agents_from_expr(&arm.body, stack);
             }
         }
+        IrExprKind::Lambda { body, .. } => {
+            collect_called_agents_from_expr(body, stack);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_called_agents_from_expr(receiver, stack);
             for arg in args {
@@ -832,6 +835,9 @@ fn walk_ir_expr_for_prompt(
                 }
                 walk_ir_expr_for_prompt(&arm.body, prompt_map, found);
             }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            walk_ir_expr_for_prompt(body, prompt_map, found);
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             walk_ir_expr_for_prompt(receiver, prompt_map, found);

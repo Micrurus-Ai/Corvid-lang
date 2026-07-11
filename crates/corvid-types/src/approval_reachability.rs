@@ -240,6 +240,9 @@ impl<'a> ReachabilityPass<'a> {
             Expr::FieldAccess { target, .. } | Expr::TryPropagate { inner: target, .. } => {
                 self.check_expr(entrypoint, target, approvals, visiting);
             }
+            Expr::Lambda { body, .. } => {
+                self.check_expr(entrypoint, body, approvals, visiting);
+            }
             Expr::Index { target, index, .. } => {
                 self.check_expr(entrypoint, target, approvals, visiting);
                 self.check_expr(entrypoint, index, approvals, visiting);

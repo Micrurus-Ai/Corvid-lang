@@ -440,6 +440,9 @@ fn collect_expr_imports(
             }
             Ok(())
         }
+        IrExprKind::Lambda { body, .. } => {
+            collect_expr_imports(body, tools, prompts, plan, agent_name)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
             for arg in args {
@@ -458,6 +461,9 @@ fn collect_expr_imports(
             match kind {
                 IrCallKind::EnumConstructor { .. } => Err(WasmCodegenError::unsupported(
                     "sum-type variants are interpreter-only in 45h".to_string(),
+                )),
+                IrCallKind::ClosureLocal { .. } => Err(WasmCodegenError::unsupported(
+                    "closure calls are interpreter-only in 45j".to_string(),
                 )),
                 IrCallKind::Agent { .. } => Ok(()),
                 IrCallKind::Fixture { .. } => Err(WasmCodegenError::unsupported(format!(
@@ -910,6 +916,11 @@ fn emit_expr(
                 "match is interpreter-only in 45i".to_string(),
             ));
         }
+        IrExprKind::Lambda { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "lambdas are interpreter-only in 45j".to_string(),
+            ));
+        }
         IrExprKind::MapLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "Map<K, V> is interpreter-only in 45g".to_string(),
@@ -963,6 +974,11 @@ fn emit_expr(
             IrCallKind::EnumConstructor { .. } => {
                 return Err(WasmCodegenError::unsupported(
                     "sum-type variants are interpreter-only in 45h".to_string(),
+                ));
+            }
+            IrCallKind::ClosureLocal { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "closure calls are interpreter-only in 45j".to_string(),
                 ));
             }
             IrCallKind::Agent { def_id } => {

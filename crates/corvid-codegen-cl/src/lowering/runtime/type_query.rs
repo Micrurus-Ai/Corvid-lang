@@ -362,6 +362,9 @@ fn visit_expr_types(
                 visit_expr_types(&arm.body, seen, order, visit);
             }
         }
+        IrExprKind::Lambda { body, .. } => {
+            visit_expr_types(body, seen, order, visit);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);
             for a in args {

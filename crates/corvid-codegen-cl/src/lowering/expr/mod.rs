@@ -38,6 +38,10 @@ pub(super) fn lower_expr(
             "match is interpreter-only in 45i",
             expr.span,
         )),
+        IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
+            "lambdas are interpreter-only in 45j",
+            expr.span,
+        )),
         IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
             "Map<K, V> is interpreter-only in 45g",
             expr.span,
@@ -179,6 +183,12 @@ pub(super) fn lower_expr(
             )
         }
         IrExprKind::Call { kind, callee_name, args } => match kind {
+            IrCallKind::ClosureLocal { .. } => {
+                return Err(CodegenError::not_supported(
+                    "closure calls are interpreter-only in 45j",
+                    expr.span,
+                ));
+            }
             IrCallKind::EnumConstructor { .. } => {
                 return Err(CodegenError::not_supported(
                     "sum-type variants are interpreter-only in 45h",

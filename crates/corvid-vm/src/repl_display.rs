@@ -20,6 +20,7 @@ fn render_value_inner(
     }
 
     match value {
+        Value::Closure(c) => format!("<fn/{}>", c.arity()),
         Value::Int(n) => n.to_string(),
         Value::Float(f) => f.to_string(),
         Value::String(s) => format!("\"{}\"", escape_display(s)),

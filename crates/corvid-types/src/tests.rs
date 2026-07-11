@@ -3973,6 +3973,86 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45j — lambdas typecheck contextually: the builtin-method
+/// table's function-typed parameters supply unannotated param types
+/// and check the body's return type; `map`'s result element type and
+/// `fold`'s accumulator type are refined from the checked arguments.
+#[test]
+fn lambda_contextual_typing_and_refinement() {
+    // filter's predicate must return Bool — an Int body is an error
+    // AT THE LAMBDA BODY, not a downstream surprise.
+    let bad = check(
+        "agent main(xs: List<Int>) -> Int:
+    ys = xs.filter(fn (x) -> x + 1)
+    return ys.length()
+",
+    );
+    assert!(
+        bad.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::TypeMismatch { context, .. } if context == "lambda body"
+        )),
+        "expected lambda-body mismatch, got {:?}",
+        bad.errors
+    );
+
+    // The full higher-order surface + a function-type annotation +
+    // a first-class call typecheck cleanly. `map` to String feeds
+    // `join` — this only checks if map's result type was refined to
+    // List<String> from the lambda body.
+    let ok = check(
+        "agent main(xs: List<Int>) -> String:
+    labels = xs.map(fn (x) -> x.to_string())
+    total = xs.fold(0, fn (acc, x) -> acc + x)
+    keep = xs.filter(fn (x) -> x > 0)
+    both = xs.any(fn (x) -> x > 3) and xs.all(fn (x) -> x > 0)
+    base = 100
+    add_base: (Int) -> Int = fn (n) -> n + base
+    m = add_base(total + keep.length())
+    if both:
+        return labels.join(\",\") + m.to_string()
+    return labels.join(\",\")
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+}
+
+/// Slice 45j — first-class calls: a non-function local is not
+/// callable (the error names its actual type), and a lambda's arity
+/// is checked against the expected function type at the use site.
+#[test]
+fn lambda_first_class_call_errors() {
+    let not_callable = check(
+        "agent main() -> Int:
+    n = 5
+    return n(1)
+",
+    );
+    assert!(
+        not_callable.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::NotCallable { got } if got == "Int"
+        )),
+        "expected NotCallable naming Int, got {:?}",
+        not_callable.errors
+    );
+
+    let wrong_arity = check(
+        "agent main(xs: List<Int>) -> Int:
+    ys = xs.map(fn (a, b) -> a)
+    return ys.length()
+",
+    );
+    assert!(
+        wrong_arity.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ArityMismatch { callee, expected: 1, got: 2 } if callee == "lambda"
+        )),
+        "expected lambda arity mismatch, got {:?}",
+        wrong_arity.errors
+    );
+}
+
 /// Slice 45h — sum types: construction typechecks, the value's type
 /// is the owning sum type, and field types are enforced.
 #[test]

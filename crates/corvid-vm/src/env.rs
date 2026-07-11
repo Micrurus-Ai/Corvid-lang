@@ -30,4 +30,12 @@ impl Env {
     pub fn lookup(&self, id: LocalId) -> Option<Value> {
         self.locals.get(&id).cloned()
     }
+
+    /// Snapshot every binding — the BY-VALUE capture set for a
+    /// closure (slice 45j). Values clone; heap cells share, so a
+    /// captured list still observes later mutations through any
+    /// handle.
+    pub fn entries_snapshot(&self) -> Vec<(LocalId, Value)> {
+        self.locals.iter().map(|(k, v)| (*k, v.clone())).collect()
+    }
 }

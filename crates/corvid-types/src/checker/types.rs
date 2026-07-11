@@ -44,7 +44,13 @@ impl<'a> Checker<'a> {
                     effects.unwrap_or_else(WeakEffectRow::any),
                 )
             }
-            TypeRef::Function { .. } => Type::Unknown,
+            // `(Int, Int) -> Int` (slice 45j) — resolves to a real
+            // function type; lambdas are the values that inhabit it.
+            TypeRef::Function { params, ret, .. } => Type::Function {
+                params: params.iter().map(|p| self.type_ref_to_type(p)).collect(),
+                ret: Box::new(self.type_ref_to_type(ret)),
+                effect: corvid_ast::Effect::Safe,
+            },
         }
     }
 
@@ -90,7 +96,14 @@ impl<'a> Checker<'a> {
                 Box::new(self.imported_type_ref_to_type(inner, module)),
                 effects.unwrap_or_else(WeakEffectRow::any),
             ),
-            TypeRef::Function { .. } => Type::Unknown,
+            TypeRef::Function { params, ret, .. } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| self.imported_type_ref_to_type(p, module))
+                    .collect(),
+                ret: Box::new(self.imported_type_ref_to_type(ret, module)),
+                effect: corvid_ast::Effect::Safe,
+            },
         }
     }
 

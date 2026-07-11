@@ -13,7 +13,7 @@
 use super::{describe_token, Parser};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
-use corvid_ast::{Backoff, BinaryOp, Expr, Ident, Literal, Span, UnaryOp};
+use corvid_ast::{Backoff, BinaryOp, Expr, Ident, LambdaParam, Literal, Span, UnaryOp};
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------
@@ -303,6 +303,7 @@ impl<'a> Parser<'a> {
             TokKind::KwTry => self.parse_try_retry_expr(),
             TokKind::KwReplay => self.parse_replay_expr(),
             TokKind::KwMatch => self.parse_match_expr(),
+            TokKind::KwFn => self.parse_lambda_expr(),
             TokKind::Ident(name) => {
                 self.bump();
                 let name = self.parse_namespaced_ident_from(name)?;
@@ -394,6 +395,49 @@ impl<'a> Parser<'a> {
                 span: start_span,
             }),
         }
+    }
+
+    /// `fn (x, y) -> expr` — lambda expression (slice 45j).
+    /// Parameters may carry optional annotations: `fn (x: Int) -> x + 1`.
+    fn parse_lambda_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // `fn`
+        self.expect(TokKind::LParen, "`(` after `fn` in a lambda")?;
+        let mut params: Vec<LambdaParam> = Vec::new();
+        if !matches!(self.peek(), TokKind::RParen) {
+            loop {
+                let pstart = self.peek_span();
+                let (pname, pname_span) = self.expect_ident()?;
+                let ty = if matches!(self.peek(), TokKind::Colon) {
+                    self.bump();
+                    Some(self.parse_type_ref()?)
+                } else {
+                    None
+                };
+                params.push(LambdaParam {
+                    name: Ident::new(pname, pname_span),
+                    ty,
+                    span: pstart.merge(self.prev_span()),
+                });
+                if matches!(self.peek(), TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek(), TokKind::RParen) {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(TokKind::RParen, "`)` after lambda parameters")?;
+        self.expect(TokKind::Arrow, "`->` before the lambda body")?;
+        let body = self.parse_expr()?;
+        let span = start.merge(body.span());
+        Ok(Expr::Lambda {
+            params,
+            body: Box::new(body),
+            span,
+        })
     }
 
     fn parse_try_retry_expr(&mut self) -> Result<Expr, ParseError> {

@@ -37,6 +37,7 @@ impl fmt::Display for Value {
                 });
                 write!(f, ")")
             }
+            Value::Closure(c) => write!(f, "<fn/{}>", c.arity()),
             Value::Enum(e) => {
                 let fields = e.fields_cloned();
                 if fields.is_empty() {

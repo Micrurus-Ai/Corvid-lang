@@ -118,6 +118,9 @@ impl<'a> Checker<'a> {
             Expr::FieldAccess { target, .. } | Expr::TryPropagate { inner: target, .. } => {
                 self.walk_grounded_pure_expr(agent, target);
             }
+            Expr::Lambda { body, .. } => {
+                self.walk_grounded_pure_expr(agent, body);
+            }
             Expr::Index { target, index, .. } => {
                 self.walk_grounded_pure_expr(agent, target);
                 self.walk_grounded_pure_expr(agent, index);

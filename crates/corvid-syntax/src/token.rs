@@ -114,6 +114,10 @@ pub enum TokKind {
     /// `match` — pattern-matching expression (slice 45i).
     KwMatch,
 
+    /// `fn` — lambda expressions `fn (x) -> expr` (slice 45j) and
+    /// pure function declarations (slice 45r).
+    KwFn,
+
     // --- keywords: replay language primitive (Phase 21) ---
     /// `replay <trace>:` — opens a replay block that pattern-matches
     /// recorded trace events and dispatches to arm bodies.
@@ -248,6 +252,7 @@ impl TokKind {
             "pass" => TokKind::KwPass,
             "replay" => TokKind::KwReplay,
             "match" => TokKind::KwMatch,
+            "fn" => TokKind::KwFn,
             "when" => TokKind::KwWhen,
             "true" => TokKind::KwTrue,
             "false" => TokKind::KwFalse,

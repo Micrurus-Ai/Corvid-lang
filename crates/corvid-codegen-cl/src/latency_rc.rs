@@ -163,6 +163,9 @@ fn collect_prompt_pins_in_expr(
                 collect_prompt_pins_in_expr(&arm.body, borrowed_reads, out);
             }
         }
+        IrExprKind::Lambda { body, .. } => {
+            collect_prompt_pins_in_expr(body, borrowed_reads, out);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_prompt_pins_in_expr(receiver, borrowed_reads, out);
             for a in args {

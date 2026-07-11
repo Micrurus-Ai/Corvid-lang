@@ -305,6 +305,11 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"match is interpreter-only in 45i\"))",
                 );
             }
+            IrExprKind::Lambda { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"lambdas are interpreter-only in 45j\"))",
+                );
+            }
             IrExprKind::MapLiteral { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",
@@ -431,6 +436,11 @@ impl Codegen {
             IrCallKind::EnumConstructor { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"sum-type variants are interpreter-only in 45h\"))",
+                );
+            }
+            IrCallKind::ClosureLocal { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"closure calls are interpreter-only in 45j\"))",
                 );
             }
             IrCallKind::Tool { .. } => {

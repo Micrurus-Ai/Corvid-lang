@@ -303,6 +303,10 @@ fn expr_consumes_target(
                         || expr_consumes_target(&arm.body, target, sigs)
                 })
         }
+        // A lambda CAPTURES the visible environment by value at
+        // creation, so a body mention counts as a consume of the
+        // captured handle.
+        IrExprKind::Lambda { body, .. } => expr_consumes_target(body, target, sigs),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -393,6 +397,7 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             .iter()
             .chain(values)
             .any(|e| expr_references(e, target)),
+        IrExprKind::Lambda { body, .. } => expr_references(body, target),
         IrExprKind::Match { scrutinee, arms } => {
             expr_references(scrutinee, target)
                 || arms.iter().any(|arm| {

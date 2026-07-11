@@ -918,6 +918,19 @@ impl<'a> Lowerer<'a> {
                 Literal::Nothing => IrLiteral::Nothing,
             }),
             Expr::Ident { name, .. } => self.lower_ident(name),
+            Expr::Lambda { params, body, .. } => IrExprKind::Lambda {
+                params: params
+                    .iter()
+                    .map(|p| IrLambdaParam {
+                        local_id: match self.bindings.get(&p.name.span) {
+                            Some(Binding::Local(id)) => *id,
+                            _ => LocalId(u32::MAX),
+                        },
+                        name: p.name.name.clone(),
+                    })
+                    .collect(),
+                body: Box::new(self.lower_expr(body)),
+            },
             Expr::Call { callee, args, .. } => self.lower_call(callee, args),
             Expr::FieldAccess { target, field, .. } => IrExprKind::FieldAccess {
                 target: Box::new(self.lower_expr(target)),
@@ -1472,6 +1485,12 @@ impl<'a> Lowerer<'a> {
                     };
                     (kind, name.name.clone())
                 }
+                Some(Binding::Local(local_id)) => (
+                    IrCallKind::ClosureLocal {
+                        local_id: *local_id,
+                    },
+                    name.name.clone(),
+                ),
                 _ => (IrCallKind::Unknown, name.name.clone()),
             },
             _ => (IrCallKind::Unknown, "<indirect>".to_string()),

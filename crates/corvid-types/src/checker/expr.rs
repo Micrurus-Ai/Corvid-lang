@@ -100,6 +100,9 @@ impl<'a> Checker<'a> {
                 arms,
                 span,
             } => self.check_match(scrutinee, arms, *span, expected),
+            Expr::Lambda { params, body, span } => {
+                self.check_lambda(params, body, *span, expected)
+            }
             Expr::MapLiteral { entries, span } => {
                 let mut key_ty = Type::Unknown;
                 let mut val_ty = Type::Unknown;

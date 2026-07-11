@@ -103,6 +103,9 @@ impl<'a> Checker<'a> {
             Expr::FieldAccess { target, .. } | Expr::TryPropagate { inner: target, .. } => {
                 self.walk_deterministic_expr(agent, target);
             }
+            Expr::Lambda { body, .. } => {
+                self.walk_deterministic_expr(agent, body);
+            }
             Expr::Index { target, index, .. } => {
                 self.walk_deterministic_expr(agent, target);
                 self.walk_deterministic_expr(agent, index);
@@ -327,6 +330,9 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
         }
         Expr::FieldAccess { target, .. } | Expr::TryPropagate { inner: target, .. } => {
             collect_replayability_violations_in_expr(target, out);
+        }
+        Expr::Lambda { body, .. } => {
+            collect_replayability_violations_in_expr(body, out);
         }
         Expr::Index { target, index, .. } => {
             collect_replayability_violations_in_expr(target, out);

@@ -109,7 +109,13 @@ store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
 ## Type references
 
 ```ebnf
-type_ref          ::= IDENT ('.' IDENT)? type_args?
+# `(Int, Int) -> Int` is a function type (slice 45j) — the type of
+# lambdas and of function-typed locals. Parameters are checked
+# contravariantly, the return type covariantly.
+type_ref          ::= function_type
+                    | IDENT ('.' IDENT)? type_args?
+
+function_type     ::= '(' (type_ref (',' type_ref)*)? ')' '->' type_ref
 
 type_args         ::= '<' type_arg (',' type_arg)* '>'
 
@@ -335,6 +341,7 @@ primary_expr      ::= literal
                     | map_literal
                     | struct_literal                       # PLANNED(45n)
                     | match_expr
+                    | lambda_expr
                     | retry_expr
 
 literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
@@ -371,6 +378,17 @@ literal_pattern   ::= literal | '-' INT | '-' FLOAT
 
 field_pattern     ::= IDENT (':' pattern)?      # bare field name binds it
 
+# A lambda is an EXPRESSION-BODIED anonymous function value.
+# Captured outer locals are snapshotted BY VALUE when the lambda
+# expression evaluates (heap cells share — the capture copies
+# handles, not cells). Unannotated parameter types come from the
+# expected function type at the use site (e.g. `map`'s parameter);
+# annotations win when both exist. Lambda parameters shadow outer
+# locals inside the body.
+lambda_expr       ::= 'fn' '(' (lambda_param (',' lambda_param)*)? ')' '->' expr
+
+lambda_param      ::= IDENT (':' type_ref)?
+
 retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
                       'backoff' ('linear' | 'exponential') INT    # base delay in ms; backoff is mandatory
 ```
@@ -385,8 +403,8 @@ Keywords (reserved): `agent`, `tool`, `prompt`, `eval`, `test`,
 `uses`, `assert`, `assert_snapshot`, `model`, `requires`,
 `progressive`, `below`, `rollout`, `ensemble`, `vote`, `adversarial`,
 `propose`, `challenge`, `adjudicate`, `if`, `else`, `for`, `in`,
-`return`, `yield`, `break`, `continue`, `pass`, `replay`, `when`,
-`true`, `false`, `and`, `or`, `not`.
+`return`, `yield`, `break`, `continue`, `pass`, `match`, `fn`,
+`replay`, `when`, `true`, `false`, `and`, `or`, `not`.
 
 Contextual words (parsed positionally, NOT reserved — they are valid
 identifiers elsewhere): `use` (import lists), `Nothing` (the unit

@@ -948,6 +948,18 @@ impl Resolver {
                     self.resolve_expr(&arm.body);
                 }
             }
+            Expr::Lambda { params, body, .. } => {
+                // Lambda params live in their own scope: they shadow
+                // outer locals inside the body and vanish after it.
+                self.push_scope();
+                for p in params {
+                    let id = self.fresh_local();
+                    self.current_scope_mut().insert(&p.name.name, id);
+                    self.bindings.insert(p.name.span, Binding::Local(id));
+                }
+                self.resolve_expr(body);
+                self.pop_scope();
+            }
             Expr::List { items, .. } => {
                 for item in items {
                     self.resolve_expr(item);

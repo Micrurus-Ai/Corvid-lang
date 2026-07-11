@@ -28,6 +28,7 @@
 //! batch.
 
 use crate::types::Type;
+use corvid_ast::Effect;
 use serde::{Deserialize, Serialize};
 
 /// Stable identity of a builtin method — the contract between the
@@ -155,6 +156,27 @@ pub enum BuiltinMethodKind {
     /// `Map<K,V>.remove(key: K) -> Option<V>`.
     MapRemove,
 
+    // ----- higher-order list methods (slice 45j) ------------------
+    //
+    // The lambda-taking batch. `map`'s result element type and
+    // `fold`'s accumulator type cannot come from the receiver alone,
+    // so the CHECKER refines these signatures while checking the
+    // arguments in order: `fold`'s `init` argument fixes `U` in both
+    // the lambda parameter and the result; `map`'s checked lambda
+    // return type fixes the result element type. The interpreter
+    // applies the closure once per element, left to right; `any` /
+    // `all` short-circuit.
+    /// `List<T>.map(f: (T) -> U) -> List<U>`.
+    ListMap,
+    /// `List<T>.filter(pred: (T) -> Bool) -> List<T>`.
+    ListFilter,
+    /// `List<T>.fold(init: U, f: (U, T) -> U) -> U`.
+    ListFold,
+    /// `List<T>.any(pred: (T) -> Bool) -> Bool` — short-circuits.
+    ListAny,
+    /// `List<T>.all(pred: (T) -> Bool) -> Bool` — short-circuits.
+    ListAll,
+
     /// `range(start: Int, end: Int) -> List<Int>` — the free builtin
     /// function (half-open, step 1, empty when start >= end). Lowered
     /// through the BuiltinMethod IR with `start` as the receiver so
@@ -178,6 +200,11 @@ pub struct BuiltinMethodSig {
 pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
     use BuiltinMethodKind::*;
     let sig = |kind, params, ret| Some(BuiltinMethodSig { kind, params, ret });
+    let func = |params: Vec<Type>, ret: Type| Type::Function {
+        params,
+        ret: Box::new(ret),
+        effect: Effect::Safe,
+    };
     match (receiver, name) {
         (Type::String, "length") => sig(StringLength, vec![], Type::Int),
         (Type::String, "to_upper") => sig(StringToUpper, vec![], Type::String),
@@ -233,6 +260,34 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::List(elem), "join") if matches!(**elem, Type::String) => {
             sig(ListJoin, vec![Type::String], Type::String)
         }
+        (Type::List(elem), "map") => sig(
+            ListMap,
+            vec![func(vec![(**elem).clone()], Type::Unknown)],
+            Type::List(Box::new(Type::Unknown)),
+        ),
+        (Type::List(elem), "filter") => sig(
+            ListFilter,
+            vec![func(vec![(**elem).clone()], Type::Bool)],
+            Type::List(elem.clone()),
+        ),
+        (Type::List(elem), "fold") => sig(
+            ListFold,
+            vec![
+                Type::Unknown,
+                func(vec![Type::Unknown, (**elem).clone()], Type::Unknown),
+            ],
+            Type::Unknown,
+        ),
+        (Type::List(elem), "any") => sig(
+            ListAny,
+            vec![func(vec![(**elem).clone()], Type::Bool)],
+            Type::Bool,
+        ),
+        (Type::List(elem), "all") => sig(
+            ListAll,
+            vec![func(vec![(**elem).clone()], Type::Bool)],
+            Type::Bool,
+        ),
         (Type::Map(_, _), "length") => sig(MapLength, vec![], Type::Int),
         (Type::Map(k, v), "get") => sig(MapGet, vec![(**k).clone()], Type::Option(v.clone())),
         (Type::Map(k, _), "contains_key") => {

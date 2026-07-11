@@ -122,6 +122,14 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
             "tag": "stream",
             "backpressure": stream.backpressure().label()
         }),
+        // Closures (slice 45j) are opaque: JSON cannot carry code +
+        // captured environment, and tools must never receive one.
+        // The sentinel exists purely for trace-debug visibility;
+        // `json_to_value` has no inverse for this shape.
+        Value::Closure(c) => serde_json::json!({
+            "tag": "closure_opaque_sentinel",
+            "arity": c.arity(),
+        }),
         // Phase 33S3a — `Value::DbHandle` cannot be represented as
         // JSON in a way that survives `json_to_value`'s inverse
         // round-trip: the underlying `Arc<DbHandleInner>` carries

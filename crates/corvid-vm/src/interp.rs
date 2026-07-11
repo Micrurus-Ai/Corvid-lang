@@ -42,7 +42,9 @@ use crate::conv::{json_to_value, value_to_json};
 use crate::env::Env;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::step::{self, ConfidenceGateStep, StepAction, StepController, StepEvent};
-use crate::value::{value_confidence, BoxedValue, ListValue, StreamChunk, StreamSender, Value};
+use crate::value::{
+    value_confidence, BoxedValue, ClosureValue, ListValue, StreamChunk, StreamSender, Value,
+};
 use async_recursion::async_recursion;
 use corvid_ast::{BinaryOp, Span};
 use corvid_ir::{IrPattern, 
@@ -212,7 +214,10 @@ impl<'ir> Interpreter<'ir> {
     }
 
     #[async_recursion]
-    async fn eval_expr(&mut self, expr: &'ir IrExpr) -> Result<ExprFlow, InterpError> {
+    // NOTE: `expr` is NOT tied to the `'ir` file lifetime — closure
+    // bodies (slice 45j) live inside `Value::Closure` cells and are
+    // evaluated through this same entry point.
+    async fn eval_expr(&mut self, expr: &IrExpr) -> Result<ExprFlow, InterpError> {
         match &expr.kind {
             // Builtin methods (slice 45c) — one arm per
             // `BuiltinMethodKind`; the shared corvid_types table
@@ -234,11 +239,41 @@ impl<'ir> Interpreter<'ir> {
                         Err(v) => return Ok(ExprFlow::Propagate(v)),
                     }
                 }
+                // The lambda-taking methods (slice 45j) re-enter
+                // the evaluator to apply the closure, so they
+                // dispatch here in the async path instead of the
+                // sync helper.
+                {
+                    use corvid_types::BuiltinMethodKind as Bmk;
+                    if matches!(
+                        kind,
+                        Bmk::ListMap | Bmk::ListFilter | Bmk::ListFold | Bmk::ListAny | Bmk::ListAll
+                    ) {
+                        return self
+                            .eval_higher_order_list_method(*kind, recv, arg_vals, expr.span)
+                            .await
+                            .map(ExprFlow::Value);
+                    }
+                }
                 Ok(ExprFlow::Value(eval_builtin_method(
                     *kind, recv, arg_vals, expr.span,
                 )?))
             }
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
+
+            // Lambda (slice 45j): evaluate to a closure that
+            // snapshots the visible environment BY VALUE. Values
+            // clone; heap cells share.
+            IrExprKind::Lambda { params, body } => {
+                Ok(ExprFlow::Value(Value::Closure(ClosureValue::new(
+                    params
+                        .iter()
+                        .map(|p| (p.local_id, p.name.clone()))
+                        .collect(),
+                    (**body).clone(),
+                    self.env.entries_snapshot(),
+                ))))
+            }
 
             IrExprKind::Local { local_id, .. } => self
                 .env
@@ -839,14 +874,162 @@ impl<'ir> Interpreter<'ir> {
         }
     }
 
+    /// Apply a closure (slice 45j): install its captured
+    /// environment, bind parameters, evaluate the body, restore the
+    /// caller's environment (also on error). `?` propagation inside
+    /// a lambda body is rejected loudly — the closure boundary is
+    /// not a Result-returning function.
+    #[async_recursion]
+    async fn apply_closure(
+        &mut self,
+        closure: &ClosureValue,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        if args.len() != closure.arity() {
+            return Err(InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "closure expects {} argument(s), got {}",
+                    closure.arity(),
+                    args.len()
+                )),
+                span,
+            ));
+        }
+        let mut call_env = Env::new();
+        for (lid, v) in closure.env_cloned() {
+            call_env.bind(lid, v);
+        }
+        for ((lid, _), v) in closure.params().iter().zip(args) {
+            call_env.bind(*lid, v);
+        }
+        let saved = std::mem::replace(&mut self.env, call_env);
+        let result = self.eval_expr(closure.body()).await;
+        self.env = saved;
+        match result?.into_value() {
+            Ok(v) => Ok(v),
+            Err(_) => Err(InterpError::new(
+                InterpErrorKind::NotImplemented(
+                    "`?` propagation inside a lambda body (return the Result and branch at the call site instead)"
+                        .into(),
+                ),
+                span,
+            )),
+        }
+    }
+
+    /// The lambda-taking `List` methods (slice 45j): `map`,
+    /// `filter`, `fold`, `any`, `all`. Applies the closure once per
+    /// element, left to right; `any`/`all` short-circuit.
+    async fn eval_higher_order_list_method(
+        &mut self,
+        kind: corvid_types::BuiltinMethodKind,
+        recv: Value,
+        mut args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        use corvid_types::BuiltinMethodKind as Bmk;
+        let Value::List(list) = &recv else {
+            return Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: "List".into(),
+                    got: recv.type_name(),
+                },
+                span,
+            ));
+        };
+        let items = list.iter_cloned();
+        let want_closure = |v: Value, span: Span| -> Result<ClosureValue, InterpError> {
+            match v {
+                Value::Closure(c) => Ok(c),
+                other => Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "Function".into(),
+                        got: other.type_name(),
+                    },
+                    span,
+                )),
+            }
+        };
+        match kind {
+            Bmk::ListMap => {
+                let f = want_closure(args.remove(0), span)?;
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(self.apply_closure(&f, vec![item], span).await?);
+                }
+                Ok(Value::List(ListValue::new(out)))
+            }
+            Bmk::ListFilter => {
+                let f = want_closure(args.remove(0), span)?;
+                let mut out = Vec::new();
+                for item in items {
+                    match self.apply_closure(&f, vec![item.clone()], span).await? {
+                        Value::Bool(true) => out.push(item),
+                        Value::Bool(false) => {}
+                        other => {
+                            return Err(InterpError::new(
+                                InterpErrorKind::TypeMismatch {
+                                    expected: "Bool (from the filter predicate)".into(),
+                                    got: other.type_name(),
+                                },
+                                span,
+                            ));
+                        }
+                    }
+                }
+                Ok(Value::List(ListValue::new(out)))
+            }
+            Bmk::ListFold => {
+                let mut acc = args.remove(0);
+                let f = want_closure(args.remove(0), span)?;
+                for item in items {
+                    acc = self.apply_closure(&f, vec![acc, item], span).await?;
+                }
+                Ok(acc)
+            }
+            Bmk::ListAny | Bmk::ListAll => {
+                let f = want_closure(args.remove(0), span)?;
+                let is_all = kind == Bmk::ListAll;
+                for item in items {
+                    match self.apply_closure(&f, vec![item], span).await? {
+                        Value::Bool(b) => {
+                            if b != is_all {
+                                // any: first true wins; all: first
+                                // false loses. Short-circuit.
+                                return Ok(Value::Bool(!is_all));
+                            }
+                        }
+                        other => {
+                            return Err(InterpError::new(
+                                InterpErrorKind::TypeMismatch {
+                                    expected: "Bool (from the predicate)".into(),
+                                    got: other.type_name(),
+                                },
+                                span,
+                            ));
+                        }
+                    }
+                }
+                Ok(Value::Bool(is_all))
+            }
+            other => Err(InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "{other:?} is not a higher-order list method"
+                )),
+                span,
+            )),
+        }
+    }
+
     /// Dispatch a call expression. Routes Tool / Prompt / Agent through
     /// the right runtime path; an `Unknown` kind is a hard error
     /// (typecheck should have caught it).
     async fn eval_call(
         &mut self,
-        kind: &'ir IrCallKind,
+        kind: &IrCallKind,
         callee_name: &str,
-        args: &'ir [IrExpr],
+        args: &[IrExpr],
         result_ty: &Type,
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
@@ -1266,6 +1449,24 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Struct(
                     crate::value::StructValue::new(ir_type.id, ir_type.name.clone(), fields),
                 )))
+            }
+            // Closure call (slice 45j): `f(x)` where `f` is a
+            // function-typed local holding a closure value.
+            IrCallKind::ClosureLocal { local_id } => {
+                let callee = self.env.lookup(*local_id).ok_or_else(|| {
+                    InterpError::new(InterpErrorKind::UndefinedLocal(*local_id), span)
+                })?;
+                let Value::Closure(closure) = callee else {
+                    return Err(InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!(
+                            "`{callee_name}` is not a function (runtime type `{}`)",
+                            callee.type_name()
+                        )),
+                        span,
+                    ));
+                };
+                let result = self.apply_closure(&closure, arg_values, span).await?;
+                Ok(ExprFlow::Value(result))
             }
             IrCallKind::Unknown => {
                 let _ = result_ty;

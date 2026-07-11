@@ -11,6 +11,32 @@ use corvid_ast::{Ident, TypeRef, WeakEffect, WeakEffectRow};
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_ref(&mut self) -> Result<TypeRef, ParseError> {
+        // Function type: `(Int, Int) -> Int` (slice 45j).
+        if matches!(self.peek(), TokKind::LParen) {
+            let start = self.peek_span();
+            self.bump(); // (
+            let mut params = Vec::new();
+            if !matches!(self.peek(), TokKind::RParen) {
+                params.push(self.parse_type_ref()?);
+                while matches!(self.peek(), TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek(), TokKind::RParen) {
+                        break;
+                    }
+                    params.push(self.parse_type_ref()?);
+                }
+            }
+            self.expect(TokKind::RParen, "`)` after function-type parameters")?;
+            self.expect(TokKind::Arrow, "`->` between function-type parameters and return type")?;
+            let ret = self.parse_type_ref()?;
+            let span = start.merge(ret.span());
+            return Ok(TypeRef::Function {
+                params,
+                ret: Box::new(ret),
+                span,
+            });
+        }
+
         let (name, name_span) = self.expect_ident()?;
         let name_ident = Ident::new(name, name_span);
 

@@ -286,6 +286,9 @@ fn collect_expr_deps(expr: &Expr, resolved: &Resolved, deps: &mut HashSet<DefId>
                 collect_expr_deps(arg, resolved, deps);
             }
         }
+        Expr::Lambda { body, .. } => {
+            collect_expr_deps(body, resolved, deps);
+        }
         Expr::FieldAccess { target, .. } => {
             collect_expr_deps(target, resolved, deps);
         }

@@ -414,6 +414,9 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 out.extend(collect_reads(&arm.body, false));
             }
         }
+        IrExprKind::Lambda { body, .. } => {
+            out.extend(collect_reads(body, false));
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             out.extend(collect_reads(receiver, false));
             for a in args {
@@ -481,6 +484,7 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 corvid_ir::IrCallKind::Tool { .. }
                 | corvid_ir::IrCallKind::Prompt { .. }
                 | corvid_ir::IrCallKind::Fixture { .. }
+                | corvid_ir::IrCallKind::ClosureLocal { .. }
                 | corvid_ir::IrCallKind::Unknown => false,
                 corvid_ir::IrCallKind::Agent { .. }
                 | corvid_ir::IrCallKind::StructConstructor { .. }

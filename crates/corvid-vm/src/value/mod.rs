@@ -23,7 +23,7 @@ mod heap;
 mod object_ref;
 mod stream;
 mod weak;
-pub use cells::{BoxedValue, EnumValue, ListValue, MapValue, StructValue};
+pub use cells::{BoxedValue, ClosureValue, EnumValue, ListValue, MapValue, StructValue};
 pub use display::value_confidence;
 pub(crate) use heap::Color;
 pub(crate) use object_ref::{ObjectRef, WeakObjectRef};
@@ -46,6 +46,9 @@ pub enum Value {
     /// Sum-type value (slice 45h): owning type + variant + positional
     /// payload.
     Enum(EnumValue),
+    /// Closure value (slice 45j): a lambda's parameters + body + the
+    /// by-value snapshot of the environment visible at creation.
+    Closure(ClosureValue),
     Weak(WeakValue),
     ResultOk(BoxedValue),
     ResultErr(BoxedValue),
@@ -225,6 +228,7 @@ impl Clone for Value {
             Value::List(items) => Value::List(items.clone()),
             Value::Map(m) => Value::Map(m.clone()),
             Value::Enum(e) => Value::Enum(e.clone()),
+            Value::Closure(c) => Value::Closure(c.clone()),
             Value::Weak(w) => Value::Weak(w.clone()),
             Value::ResultOk(v) => Value::ResultOk(v.clone()),
             Value::ResultErr(v) => Value::ResultErr(v.clone()),
@@ -264,6 +268,7 @@ impl Value {
             Value::List(_) => "List".into(),
             Value::Map(_) => "Map".into(),
             Value::Enum(e) => e.type_name().to_string(),
+            Value::Closure(_) => "Function".into(),
             Value::Weak(_) => "Weak".into(),
             Value::ResultOk(_) | Value::ResultErr(_) => "Result".into(),
             Value::OptionSome(_) | Value::OptionNone => "Option".into(),
@@ -302,6 +307,7 @@ impl Value {
             Value::List(items) => Some(ObjectRef::List(items.0.clone())),
             Value::Map(m) => Some(ObjectRef::Map(m.0.clone())),
             Value::Enum(e) => Some(ObjectRef::Enum(e.0.clone())),
+            Value::Closure(c) => Some(ObjectRef::Closure(c.0.clone())),
             Value::ResultOk(v) | Value::ResultErr(v) | Value::OptionSome(v) => {
                 Some(ObjectRef::Boxed(v.0.clone()))
             }
@@ -329,6 +335,7 @@ impl PartialEq for Value {
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Map(a), Value::Map(b)) => a == b,
             (Value::Enum(a), Value::Enum(b)) => a == b,
+            (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Weak(a), Value::Weak(b)) => a.ptr_eq(b),
             (Value::ResultOk(a), Value::ResultOk(b)) => a == b,
             (Value::ResultErr(a), Value::ResultErr(b)) => a == b,

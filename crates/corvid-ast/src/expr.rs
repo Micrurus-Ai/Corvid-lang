@@ -62,6 +62,19 @@ pub enum Expr {
         span: Span,
     },
 
+    /// Lambda expression: `fn (x) -> x * 2` (slice 45j). Parameters
+    /// may carry optional type annotations (`fn (x: Int) -> x + 1`);
+    /// unannotated parameter types come from the expected function
+    /// type at the use site. The body is a single expression.
+    /// Captured outer locals are snapshotted BY VALUE when the
+    /// lambda is evaluated — shared heap cells still share, because
+    /// the capture copies the handle, not the cell.
+    Lambda {
+        params: Vec<LambdaParam>,
+        body: Box<Expr>,
+        span: Span,
+    },
+
     /// Map literal `{"a": 1, "b": 2}` (slice 45g). Entries are
     /// (key, value) expression pairs; empty `{}` is a valid empty
     /// map with element types inferred from context or Unknown.
@@ -110,6 +123,7 @@ impl Expr {
             | Expr::UnOp { span, .. }
             | Expr::List { span, .. }
             | Expr::Match { span, .. }
+            | Expr::Lambda { span, .. }
             | Expr::MapLiteral { span, .. }
             | Expr::TryPropagate { span, .. }
             | Expr::TryRetry { span, .. }
@@ -132,6 +146,15 @@ pub enum Literal {
     String(String),
     Bool(bool),
     Nothing,
+}
+
+/// One parameter of a lambda expression (slice 45j).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LambdaParam {
+    pub name: Ident,
+    /// Optional annotation: `fn (x: Int) -> …`.
+    pub ty: Option<crate::ty::TypeRef>,
+    pub span: Span,
 }
 
 /// One arm of a `match` expression (slice 45i).

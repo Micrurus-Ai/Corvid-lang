@@ -702,6 +702,7 @@ mod decl_extern_c;
 mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
+mod lambda_check;
 mod match_check;
 mod expr;
 mod import_call;

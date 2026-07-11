@@ -243,6 +243,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // match is interpreter-only in 45i.
         IrExprKind::Match { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        // Lambdas are interpreter-only in 45j.
+        IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
@@ -253,6 +255,10 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             match kind {
                 // Sum-type construction is interpreter-only in 45h.
                 IrCallKind::EnumConstructor { .. } => {
+                    return Err(NotNativeReason::PlaceAssignmentNotNative)
+                }
+                // Closure calls are interpreter-only in 45j.
+                IrCallKind::ClosureLocal { .. } => {
                     return Err(NotNativeReason::PlaceAssignmentNotNative)
                 }
                 IrCallKind::Tool { .. } => {

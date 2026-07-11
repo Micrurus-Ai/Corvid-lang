@@ -241,6 +241,25 @@ impl Type {
             (Type::Partial(a), Type::Partial(b)) => a.is_assignable_to(b),
             (Type::ResumeToken(a), Type::ResumeToken(b)) => a.is_assignable_to(b),
             (Type::RouteParams(a), Type::RouteParams(b)) => a == b,
+            // Function types (45j): parameters are contravariant,
+            // the return type covariant. The legacy binary effect is
+            // ignored for assignability — lambdas are always Safe.
+            (
+                Type::Function {
+                    params: pa,
+                    ret: ra,
+                    ..
+                },
+                Type::Function {
+                    params: pb,
+                    ret: rb,
+                    ..
+                },
+            ) => {
+                pa.len() == pb.len()
+                    && pb.iter().zip(pa.iter()).all(|(b, a)| b.is_assignable_to(a))
+                    && ra.is_assignable_to(rb)
+            }
             // Legacy compatibility: Grounded<T> remains assignable to T.
             // New code should prefer `.unwrap_discarding_sources()` so the
             // provenance drop is visible in source and IR.

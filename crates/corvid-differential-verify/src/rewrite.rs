@@ -370,6 +370,7 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
                 rename_local_in_expr(&mut arm.body, resolved, target, fresh);
             }
         }
+        Expr::Lambda { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
         Expr::TryRetry { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
         Expr::Replay {
@@ -762,6 +763,7 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
                         || expr_mentions_local(&arm.body, resolved, local)
                 })
         }
+        Expr::Lambda { body, .. } => expr_mentions_local(body, resolved, local),
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
         Expr::TryRetry { body, .. } => expr_mentions_local(body, resolved, local),
         Expr::Replay {
@@ -977,6 +979,7 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             }
             false
         }
+        Expr::Lambda { .. } => false,
         Expr::Match {
             scrutinee, arms, ..
         } => {
@@ -1097,6 +1100,9 @@ fn is_pure_expr(expr: &Expr) -> bool {
         // Conservative: match introduces bindings; keep it out of
         // pure-expression substitution.
         Expr::Match { .. } => false,
+        // Conservative: lambdas capture the environment; keep them
+        // out of pure-expression substitution.
+        Expr::Lambda { .. } => false,
         Expr::FieldAccess { target, .. } => is_pure_expr(target),
         Expr::Index { target, index, .. } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Call { .. }

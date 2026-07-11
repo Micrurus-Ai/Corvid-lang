@@ -53,6 +53,7 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
                         || expr_uses_runtime(&arm.body)
                 })
         }
+        IrExprKind::Lambda { body, .. } => expr_uses_runtime(body),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }

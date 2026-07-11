@@ -13,7 +13,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use corvid_resolve::DefId;
+use corvid_ir::IrExpr;
+use corvid_resolve::{DefId, LocalId};
 
 use crate::cycle_collector;
 
@@ -65,6 +66,65 @@ pub(crate) struct EnumInner {
     pub(super) variant_index: u32,
     pub(super) variant_name: String,
     pub(super) fields: Mutex<Option<Vec<Value>>>,
+}
+
+/// Closure cell (slice 45j): a lambda's parameter slots + body +
+/// the BY-VALUE environment snapshot taken when the lambda
+/// expression was evaluated. Snapshot values clone; heap cells
+/// share (the capture copies handles, not cells). The env rides
+/// the same `Mutex<Option<...>>` discipline as the other cells so
+/// the cycle collector can clear it — a closure stored inside a
+/// list it captured is a genuine cycle.
+#[derive(Debug)]
+pub struct ClosureValue(pub(super) Arc<ClosureInner>);
+
+#[derive(Debug)]
+pub(crate) struct ClosureInner {
+    pub(super) meta: HeapMeta,
+    pub(super) params: Vec<(LocalId, String)>,
+    pub(super) body: IrExpr,
+    pub(super) env: Mutex<Option<Vec<(LocalId, Value)>>>,
+}
+
+impl ClosureValue {
+    pub fn new(
+        params: Vec<(LocalId, String)>,
+        body: IrExpr,
+        env: Vec<(LocalId, Value)>,
+    ) -> Self {
+        Self(Arc::new(ClosureInner {
+            meta: HeapMeta::new(),
+            params,
+            body,
+            env: Mutex::new(Some(env)),
+        }))
+    }
+
+    pub fn params(&self) -> &[(LocalId, String)] {
+        &self.0.params
+    }
+
+    pub fn body(&self) -> &IrExpr {
+        &self.0.body
+    }
+
+    pub fn env_cloned(&self) -> Vec<(LocalId, Value)> {
+        self.0
+            .env
+            .lock()
+            .expect("closure env lock poisoned")
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn arity(&self) -> usize {
+        self.0.params.len()
+    }
+
+    pub fn ptr_key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
 }
 
 /// Map cell (slice 45g): insertion-ordered `(key, value)` pairs with
@@ -445,6 +505,21 @@ impl MapValue {
 
     pub fn ptr_key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
+    }
+}
+
+impl Clone for ClosureValue {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+/// IDENTITY equality: a closure only equals itself (and its
+/// clones). Structural function equality is undecidable; identity
+/// matches Python's behavior for function objects.
+impl PartialEq for ClosureValue {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 

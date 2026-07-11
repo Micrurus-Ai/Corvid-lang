@@ -373,6 +373,50 @@ impl<'a> CostAnalyzer<'a> {
                     bounded,
                 }
             }
+            corvid_ast::Expr::Lambda { body, span, .. } => {
+                // A lambda's body runs once per CALL, and the call
+                // count is statically unknown at the creation site.
+                // A body with zero static cost keeps the lambda
+                // free; any nonzero cost makes the estimate
+                // unbounded (the same rule as a loop without a
+                // static iteration count) so `@budget` stays sound.
+                let body_est = self.analyze_expr(body, agent_name);
+                if tree_is_zero(&body_est.tree) && body_est.bounded {
+                    let tree =
+                        sequence_tree("lambda", CostNodeKind::Sequence, Vec::new(), *span);
+                    CostEstimate {
+                        dimensions: tree.costs.clone(),
+                        tree,
+                        warnings: body_est.warnings,
+                        bounded: true,
+                    }
+                } else {
+                    let warning = CostWarning {
+                        kind: CostWarningKind::UnboundedLoop {
+                            agent: agent_name.to_string(),
+                            message: format!(
+                                "lambda with effectful body at {}..{} — static call count unknown",
+                                span.start, span.end
+                            ),
+                        },
+                        span: *span,
+                    };
+                    let tree = sequence_tree(
+                        "lambda",
+                        CostNodeKind::Sequence,
+                        vec![body_est.tree],
+                        *span,
+                    );
+                    let mut warnings = body_est.warnings;
+                    warnings.push(warning);
+                    CostEstimate {
+                        dimensions: tree.costs.clone(),
+                        tree,
+                        warnings,
+                        bounded: false,
+                    }
+                }
+            }
             corvid_ast::Expr::MapLiteral { entries, span } => {
                 let mut children = Vec::new();
                 let mut warnings = Vec::new();
