@@ -3973,6 +3973,54 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45r — `fn` pure functions: bodies typecheck like agents,
+/// purity is enforced (tool/prompt/agent calls rejected with the
+/// callee named), fn-to-fn calls compose, and `@deterministic`
+/// agents may call fns.
+#[test]
+fn fn_purity_and_calls() {
+    let ok = check(
+        "fn add(a: Int, b: Int) -> Int:
+    return a + b
+
+fn double_add(a: Int, b: Int) -> Int:
+    return add(a, b) * 2
+
+@deterministic
+agent main(x: Int) -> Int:
+    return double_add(x, 1)
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+
+    let impure = check(
+        "public effect net_eff:
+    reversible: true
+
+tool fetch(id: String) -> String uses net_eff
+
+fn bad(id: String) -> String:
+    return fetch(id)
+",
+    );
+    assert!(
+        impure.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::FnBodyNotPure { name, what } if name == "bad" && what.contains("fetch")
+        )),
+        "expected purity violation, got {:?}",
+        impure.errors
+    );
+
+    // Return-type checking works like agents.
+    let bad_ret = check(
+        "fn f(a: Int) -> String:
+    return a
+",
+    );
+    assert!(!bad_ret.errors.is_empty(), "Int return into String must error");
+}
+
 /// Slice 45q — papercuts: annotation validation, unknown generic
 /// heads error with a did-you-mean, and the W0290 inference
 /// diagnostics for `[]` / bare `None` bindings.

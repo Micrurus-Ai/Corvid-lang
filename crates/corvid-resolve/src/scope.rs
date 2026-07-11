@@ -100,6 +100,8 @@ pub enum DeclKind {
     Tool,
     Prompt,
     Agent,
+    /// `fn` pure function (slice 45r).
+    Fn,
     Eval,
     Test,
     Fixture,

@@ -304,7 +304,11 @@ impl<'a> Checker<'a> {
                 }
                 Type::Unknown
             }
-            DeclKind::Tool | DeclKind::Prompt | DeclKind::Agent | DeclKind::Fixture => {
+            DeclKind::Tool
+            | DeclKind::Prompt
+            | DeclKind::Agent
+            | DeclKind::Fn
+            | DeclKind::Fixture => {
                 // Referencing without a call is currently an error.
                 // (Callers that need the function signature look it up by id.)
                 self.errors.push(TypeError::new(

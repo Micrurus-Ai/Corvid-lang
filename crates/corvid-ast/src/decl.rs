@@ -23,6 +23,12 @@ pub enum Decl {
     Tool(ToolDecl),
     Prompt(PromptDecl),
     Agent(AgentDecl),
+    /// `fn name(params) -> Ty:` — pure function (slice 45r). The
+    /// fourth callable kind: statically EFFECT-FREE (the checker
+    /// rejects tool/prompt/agent calls and effectful builtins in
+    /// the body), synchronous in semantics, callable from
+    /// `@deterministic` contexts and everywhere agents can call.
+    Fn(FnDecl),
     Eval(EvalDecl),
     Test(TestDecl),
     Fixture(FixtureDecl),
@@ -49,6 +55,7 @@ impl Decl {
             Decl::Tool(d) => d.span,
             Decl::Prompt(d) => d.span,
             Decl::Agent(d) => d.span,
+            Decl::Fn(d) => d.span,
             Decl::Eval(d) => d.span,
             Decl::Test(d) => d.span,
             Decl::Fixture(d) => d.span,
@@ -668,6 +675,22 @@ pub enum RoutePattern {
 /// agent refund_bot(ticket: Ticket) -> Decision:
 ///     ...
 /// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A pure function declaration (slice 45r): `fn add(a: Int,
+/// b: Int) -> Int:`. No effect row (the body is checked
+/// effect-free), no annotations, no extern ABI. Lowered into the
+/// agent IR with `pure_fn: true`, so every execution tier runs it
+/// without new machinery.
+pub struct FnDecl {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_ty: TypeRef,
+    pub body: Block,
+    #[serde(default)]
+    pub visibility: Visibility,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDecl {
     pub name: Ident,

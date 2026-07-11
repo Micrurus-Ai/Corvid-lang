@@ -79,6 +79,7 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Tool(d) => Some(&d.name.name),
         Decl::Prompt(d) => Some(&d.name.name),
         Decl::Agent(d) => Some(&d.name.name),
+        Decl::Fn(d) => Some(&d.name.name),
         Decl::Eval(d) => Some(&d.name.name),
         Decl::Test(d) => Some(&d.name.name),
         Decl::Fixture(d) => Some(&d.name.name),
@@ -95,6 +96,11 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
             collect_params_deps(&agent.params, resolved, deps);
             collect_typeref_dep(&agent.return_ty, resolved, deps);
             collect_block_deps(&agent.body, resolved, deps);
+        }
+        Decl::Fn(f) => {
+            collect_params_deps(&f.params, resolved, deps);
+            collect_typeref_dep(&f.return_ty, resolved, deps);
+            collect_block_deps(&f.body, resolved, deps);
         }
         Decl::Eval(eval) => {
             collect_block_deps(&eval.body, resolved, deps);

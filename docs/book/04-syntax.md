@@ -20,8 +20,27 @@ type ...          # record type
 import ...        # bring in another module
 ```
 
-> **Planned — `fn` pure-function declarations land in slice 45r.**
-> Until then, an effect-free `agent` is the pure-function shape.
+`fn` declares a **pure function** — the body is statically
+effect-free (no tools, prompts, agents, `approve`, `ask`, or
+`replay`), so a `fn` is callable from `@deterministic` contexts
+with zero ceremony and composes into every agent (compiled in CI):
+
+```corvid
+fn clamp(x: Int, lo: Int, hi: Int) -> Int:
+    if x < lo:
+        return lo
+    elif x > hi:
+        return hi
+    return x
+
+@deterministic
+agent score(x: Int) -> Int:
+    return clamp(x, 0, 100)
+```
+
+Calling a tool from a `fn` body is a compile error naming the call;
+generic `fn first<T>(...)` forms stay post-v1.0 (see
+[Types](./05-types.md#generics)).
 
 ## Comments
 
@@ -43,7 +62,7 @@ snake_case (they look like values, not types — they ARE values).
 Built-in types: `Int`, `Float`, `Bool`, `String`, `Nothing`,
 `List<T>`, `Stream<T>`, `Option<T>`, `Result<T,E>`, `Grounded<T>`.
 
-> **Planned — `Map<K,V>` lands in slice 45g.**
+`Map<K,V>` (shipped in 45g) rounds out the container heads.
 
 ## Declarations
 

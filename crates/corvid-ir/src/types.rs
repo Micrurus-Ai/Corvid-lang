@@ -322,6 +322,13 @@ pub struct IrAgent {
     /// `35V2-P38-C-3` onward) to decide whether a job is safely
     /// replayable.
     pub is_replayable: bool,
+    /// True when this entry lowered from a `fn` pure-function
+    /// declaration (slice 45r): the checker proved the body
+    /// effect-free, so every tier may treat calls as direct,
+    /// trace-free invocations. `fn`s share the agent IR so no
+    /// execution tier needs new machinery.
+    #[allow(dead_code)]
+    pub pure_fn: bool,
     /// `@retry(max_attempts: N, ...)` (slice 45q) — the agent-side
     /// default retry policy for durable jobs executing this agent.
     /// Enqueue-time values take precedence.

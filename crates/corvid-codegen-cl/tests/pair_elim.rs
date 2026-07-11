@@ -171,6 +171,7 @@ fn benchmark_shaped_fixture_has_nonzero_dup_drop_reduction() {
         cost_budget: None,
         wrapping_arithmetic: false,
         is_replayable: false,
+        pure_fn: false,
         retry_max_attempts: None,
         retry_backoff_ms: None,
         idempotency_key_param: None,

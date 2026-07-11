@@ -49,6 +49,7 @@ impl<'a> Parser<'a> {
                 | TokKind::KwAgent
                 | TokKind::KwEffect
                 | TokKind::KwModel
+                | TokKind::KwFn
                 | TokKind::At => {}
                 other => {
                     return Err(ParseError {
@@ -81,6 +82,7 @@ impl<'a> Parser<'a> {
             TokKind::KwFixture => self.parse_fixture_decl().map(Decl::Fixture),
             TokKind::KwMock => self.parse_mock_decl().map(Decl::Mock),
             TokKind::KwAgent => self.parse_agent_decl(visibility).map(Decl::Agent),
+            TokKind::KwFn => self.parse_fn_decl(visibility).map(Decl::Fn),
             TokKind::KwPub => self.parse_extern_agent_decl().map(Decl::Agent),
             TokKind::KwExtend => self.parse_extend_decl().map(Decl::Extend),
             TokKind::KwEffect => self.parse_effect_decl(visibility).map(Decl::Effect),
@@ -337,6 +339,34 @@ impl<'a> Parser<'a> {
             attributes: Vec::new(),
             visibility,
             span: start.merge(end),
+        })
+    }
+
+    /// `fn name(params) -> Ty:` — pure function declaration
+    /// (slice 45r). Same signature surface as an agent minus the
+    /// effect row, annotations, and extern ABI: a `fn` is
+    /// statically effect-free, so none of those apply.
+    fn parse_fn_decl(
+        &mut self,
+        visibility: corvid_ast::Visibility,
+    ) -> Result<corvid_ast::FnDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // fn
+        let (name, name_span) = self.expect_ident()?;
+        let params = self.parse_params()?;
+        self.expect(TokKind::Arrow, "`->` before the fn return type")?;
+        let return_ty = self.parse_type_ref()?;
+        self.expect(TokKind::Colon, "`:` after the fn signature")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let span = start.merge(body.span);
+        Ok(corvid_ast::FnDecl {
+            name: corvid_ast::Ident::new(name, name_span),
+            params,
+            return_ty,
+            body,
+            visibility,
+            span,
         })
     }
 

@@ -539,3 +539,45 @@ agent main() -> String:
         other => panic!("expected String, got {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pure_functions_end_to_end() {
+    // Slice 45r: fn decls compile, chain, and run through the
+    // normal pipeline; the lowered IR entry carries pure_fn.
+    let source = "
+fn add(a: Int, b: Int) -> Int:
+    return a + b
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int:
+    if x < lo:
+        return lo
+    elif x > hi:
+        return hi
+    return x
+
+@deterministic
+agent scored(x: Int) -> Int:
+    return clamp(add(x, 10), 0, 100)
+
+agent main() -> String:
+    t = scored(95)
+    if t == 100:
+        return \"PURE FUNCTIONS WORK\"
+    return \"MISMATCH\"
+";
+    let ir = compile_to_ir(source).expect("45r e2e source must compile");
+    let f = ir
+        .agents
+        .iter()
+        .find(|a| a.name == "add")
+        .expect("fn lowered into agent IR");
+    assert!(f.pure_fn, "fn entries must carry pure_fn");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45r e2e program must run");
+    match out {
+        Value::String(s) => assert_eq!(&*s, "PURE FUNCTIONS WORK"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}

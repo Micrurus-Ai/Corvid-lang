@@ -485,6 +485,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
             cost_budget: Some(0.50),
             wrapping_arithmetic: false,
             is_replayable: false,
+            pure_fn: false,
             retry_max_attempts: None,
             retry_backoff_ms: None,
             idempotency_key_param: None,

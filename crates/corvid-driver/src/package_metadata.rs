@@ -137,6 +137,7 @@ fn kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Tool => "tool",
         DeclKind::Prompt => "prompt",
         DeclKind::Agent => "agent",
+        DeclKind::Fn => "fn",
         DeclKind::Eval => "eval",
         DeclKind::Test => "test",
         DeclKind::Fixture => "fixture",

@@ -534,6 +534,7 @@ fn transform_agent(
         cost_budget: agent.cost_budget,
         wrapping_arithmetic: agent.wrapping_arithmetic,
         is_replayable: agent.is_replayable,
+        pure_fn: false,
         retry_max_attempts: None,
         retry_backoff_ms: None,
         idempotency_key_param: None,

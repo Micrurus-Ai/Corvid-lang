@@ -492,6 +492,14 @@ agent literal_demo(base: Claim2) -> Float:
         return final_amount + c.amount
     return c2.amount
 
+fn pure_add(a: Int, b: Int) -> Int:
+    return a + b
+
+public fn pure_clamp(x: Int, lo: Int, hi: Int) -> Int:
+    if x < lo:
+        return lo
+    return x.min(hi)
+
 @retry(max_attempts: 3, backoff: exponential 250)
 @idempotency(key: order_id)
 agent chained(order_id: String, n: Int) -> Int:
@@ -649,6 +657,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("struct_literal", "statements"),
     ("field_init", "statements"),
     ("destructure_stmt", "statements"),
+    ("fn_decl", "statements"),
     ("match_expr", "statements"),
     ("match_arm", "statements"),
     ("pattern", "statements"),

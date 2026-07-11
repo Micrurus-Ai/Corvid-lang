@@ -22,6 +22,13 @@ pub fn render_file(file: &File) -> String {
 
 fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
     match decl {
+        Decl::Fn(_) => {
+            // Never synthesized by rewrite passes; placeholder keeps
+            // the renderer total.
+            push_indent(indent, out);
+            out.push_str("<fn decl>
+");
+        }
         Decl::Import(import) => {
             push_indent(indent, out);
             out.push_str("import ");

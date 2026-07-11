@@ -231,6 +231,7 @@ impl Resolver {
                 Decl::Tool(t) => (t.name.name.clone(), DeclKind::Tool, t.span),
                 Decl::Prompt(p) => (p.name.name.clone(), DeclKind::Prompt, p.span),
                 Decl::Agent(a) => (a.name.name.clone(), DeclKind::Agent, a.span),
+                Decl::Fn(f) => (f.name.name.clone(), DeclKind::Fn, f.span),
                 Decl::Eval(e) => (e.name.name.clone(), DeclKind::Eval, e.span),
                 Decl::Test(t) => (t.name.name.clone(), DeclKind::Test, t.span),
                 Decl::Fixture(f) => (f.name.name.clone(), DeclKind::Fixture, f.span),
@@ -393,6 +394,7 @@ impl Resolver {
                 Decl::Tool(t) => self.resolve_tool_decl(t),
                 Decl::Prompt(p) => self.resolve_prompt_decl(p),
                 Decl::Agent(a) => self.resolve_agent_decl(a),
+                Decl::Fn(f) => self.resolve_fn_decl(f),
                 Decl::Eval(e) => self.resolve_eval_decl(e),
                 Decl::Test(t) => self.resolve_test_decl(t),
                 Decl::Fixture(f) => self.resolve_fixture_decl(f),
@@ -614,6 +616,21 @@ impl Resolver {
         self.resolve_type_ref(&a.return_ty);
         self.resolve_effect_row(&a.effect_row);
         self.resolve_block(&a.body);
+        self.pop_scope();
+    }
+
+    /// `fn` pure function (slice 45r) — params + body, no effect
+    /// row (purity is CHECKER-enforced; nothing to resolve here).
+    fn resolve_fn_decl(&mut self, f: &corvid_ast::FnDecl) {
+        self.push_scope();
+        for param in &f.params {
+            self.resolve_type_ref(&param.ty);
+            let id = self.fresh_local();
+            self.current_scope_mut().insert(&param.name.name, id);
+            self.bindings.insert(param.name.span, Binding::Local(id));
+        }
+        self.resolve_type_ref(&f.return_ty);
+        self.resolve_block(&f.body);
         self.pop_scope();
     }
 
@@ -1213,6 +1230,7 @@ fn decl_kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Tool => "tool",
         DeclKind::Prompt => "prompt",
         DeclKind::Agent => "agent",
+        DeclKind::Fn => "fn",
         DeclKind::Eval => "eval",
         DeclKind::Test => "test",
         DeclKind::Fixture => "fixture",

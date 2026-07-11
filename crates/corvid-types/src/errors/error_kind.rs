@@ -109,6 +109,11 @@ pub enum TypeErrorKind {
     /// (slice 45n): `type A = B` / `type B = A`.
     AliasCycle { name: String },
 
+    /// A `fn` body containing an effectful construct (slice 45r):
+    /// tool/prompt/agent/fixture calls, `approve`, `ask`/`choose`,
+    /// `replay`, or `yield`. A `fn` is statically effect-free.
+    FnBodyNotPure { name: String, what: String },
+
     /// A malformed `@retry(...)` / `@idempotency(...)` annotation
     /// (slice 45q): zero attempts, key naming no parameter, or a
     /// key parameter of non-derivable type.
@@ -476,6 +481,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::FnBodyNotPure { name, what } => {
+                format!("`fn {name}` must be effect-free, but its body contains {what}")
+            }
             Self::AnnotationInvalid { annotation, message } => {
                 format!("invalid `@{annotation}(...)`: {message}")
             }
@@ -791,6 +799,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::FnBodyNotPure { .. } => Some(
+                "move the effectful call into an agent, or pass its result into the fn as a parameter".into(),
+            ),
             Self::AnnotationInvalid { .. } => Some(
                 "see `@retry(max_attempts: N, backoff: linear|exponential MS)` and `@idempotency(key: param_name)`".into(),
             ),

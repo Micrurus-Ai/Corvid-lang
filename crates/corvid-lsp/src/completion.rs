@@ -157,6 +157,12 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 "agent",
                 format!("agent {}(...) -> {}", agent.name.name, type_name(&agent.return_ty)),
             )),
+            Decl::Fn(f) => items.add(symbol_item(
+                &f.name.name,
+                CompletionItemKind::FUNCTION,
+                "fn",
+                format!("fn {}(...) -> {}", f.name.name, type_name(&f.return_ty)),
+            )),
             Decl::Tool(tool) => items.add(symbol_item(
                 &tool.name.name,
                 CompletionItemKind::FUNCTION,

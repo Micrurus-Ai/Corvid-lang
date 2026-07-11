@@ -55,6 +55,7 @@ decl              ::= visibility? (
                       | tool_decl
                       | prompt_decl
                       | agent_decl
+                      | fn_decl
                       )
                     | import_decl
                     | server_decl
@@ -200,6 +201,14 @@ model_field       ::= IDENT ':' dimension_value NEWLINE
 
 ```ebnf
 agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref uses_clause? ':' INDENT block DEDENT
+
+# Pure function (slice 45r) — the fourth callable kind. The body is
+# statically EFFECT-FREE: it may call other fns and pure builtins,
+# but no tools/prompts/agents/fixtures, no `approve`, no
+# `ask`/`choose`, no `replay`, no `yield`. Always callable from
+# `@deterministic` bodies. No effect row, annotations, or extern
+# ABI — none of those apply to a pure function.
+fn_decl           ::= 'fn' IDENT params '->' type_ref ':' INDENT block DEDENT
 
 # Annotation arguments are dimensional constraint values, not general
 # expressions: `@budget($0.50)`, `@trust(autonomous)`, `@max_steps(10)`.

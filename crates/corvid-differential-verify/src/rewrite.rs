@@ -1183,6 +1183,12 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
                     names.insert(dimension.name.name.clone());
                 }
             }
+            Decl::Fn(f) => {
+                names.insert(f.name.name.clone());
+                for p in &f.params {
+                    names.insert(p.name.name.clone());
+                }
+            }
             Decl::Type(ty) => {
                 names.insert(ty.name.name.clone());
                 for field in &ty.fields {

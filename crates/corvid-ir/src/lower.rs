@@ -217,6 +217,7 @@ impl<'a> Lowerer<'a> {
                 Decl::Tool(t) => tools.push(self.lower_tool(t)),
                 Decl::Prompt(p) => prompts.push(self.lower_prompt(p)),
                 Decl::Agent(a) => agents.push(self.lower_agent(a)),
+                Decl::Fn(f) => agents.push(self.lower_fn(f)),
                 Decl::Eval(e) => evals.push(self.lower_eval(e)),
                 Decl::Test(t) => tests.push(self.lower_test(t)),
                 Decl::Fixture(f) => fixtures.push(self.lower_fixture(f)),
@@ -713,6 +714,7 @@ impl<'a> Lowerer<'a> {
             cost_budget: agent_cost_budget(a),
             wrapping_arithmetic: AgentAttribute::is_wrapping(&a.attributes),
             is_replayable: AgentAttribute::is_replayable(&a.attributes),
+            pure_fn: false,
             retry_max_attempts: a.attributes.iter().find_map(|attr| match attr {
                 AgentAttribute::Retry { max_attempts, .. } => Some(*max_attempts),
                 _ => None,
@@ -737,6 +739,33 @@ impl<'a> Lowerer<'a> {
             // Populated by corvid-codegen-cl's ownership pass. `None`
             // at lowering time means "every parameter is
             // Owned" at codegen (matches pre-17b semantics).
+            borrow_sig: None,
+        }
+    }
+
+    /// `fn` pure function (slice 45r): shares the agent IR with
+    /// `pure_fn: true`. No attributes, no effect row, no extern ABI
+    /// — the checker proved the body effect-free.
+    fn lower_fn(&mut self, f: &corvid_ast::FnDecl) -> IrAgent {
+        let id = self
+            .symbols
+            .lookup_def(&f.name.name)
+            .expect("fn missing from symbol table");
+        IrAgent {
+            id: self.remap_def_id(id),
+            name: f.name.name.clone(),
+            extern_abi: None,
+            params: self.lower_params(&f.params),
+            return_ty: self.type_ref_to_type(&f.return_ty),
+            cost_budget: None,
+            wrapping_arithmetic: false,
+            is_replayable: false,
+            pure_fn: true,
+            retry_max_attempts: None,
+            retry_backoff_ms: None,
+            idempotency_key_param: None,
+            body: self.lower_block(&f.body),
+            span: f.span,
             borrow_sig: None,
         }
     }
@@ -1531,6 +1560,12 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                         DeclKind::Prompt => IrCallKind::Prompt {
+                            def_id: lowered_def_id,
+                        },
+                        // A `fn` call (45r) lowers as an agent
+                        // call: fns share the agent IR, so every
+                        // tier's existing call path executes them.
+                        DeclKind::Fn => IrCallKind::Agent {
                             def_id: lowered_def_id,
                         },
                         DeclKind::Agent => IrCallKind::Agent {

@@ -149,6 +149,7 @@ fn decl_kind_name(decl: &Decl) -> String {
         Decl::Tool(_) => "tool".into(),
         Decl::Prompt(_) => "prompt".into(),
         Decl::Agent(_) => "agent".into(),
+        Decl::Fn(_) => "fn".into(),
         Decl::Eval(_) => "eval".into(),
         Decl::Test(_) => "test".into(),
         Decl::Fixture(_) => "fixture".into(),

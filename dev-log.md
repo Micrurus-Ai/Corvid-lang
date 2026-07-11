@@ -1199,6 +1199,33 @@ Phase 45 slice).
 
 ---
 
+## 2026-07-11 - 45r closed: fn pure functions — AND PHASE 45 CLOSED
+
+`fn add(a: Int, b: Int) -> Int:` — the fourth callable kind. Own
+decl kind through the front end (purity is a checker guarantee:
+the walk rejects tool/prompt/agent calls with the callee named,
+plus approve/ask/choose/replay/yield), then lowered into the agent
+IR with pure_fn: true — every tier executes fns through machinery
+that already passes its gates. @deterministic bodies call fns
+freely; fn calls bump zero weak effects; `public fn` exports.
+
+PHASE 45 IS CLOSED. Seventeen slices in three days
+(2026-07-09 → 2026-07-11): annotated assignment, place
+assignment, builtin-method machinery + strings + Grounded unwraps
++ collections, range/iteration, maps, sum types, match,
+lambdas, while, Option/Result ergonomics, time/random/math with
+the determinism proof, aliases + named literals + destructuring,
+effect/model exports, eight papercuts, and fn. The audit's six
+core-language blockers (B1-B6) are all closed. The book has zero
+Planned blocks inside Phase 45 scope; the grammar gate holds
+75 productions to parse evidence; corpus verify still exits 1
+only on its two deliberate fixtures.
+
+Phase 46 (AI-native expressiveness) requires a pre-phase chat
+before any code.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

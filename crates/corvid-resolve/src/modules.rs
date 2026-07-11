@@ -245,6 +245,8 @@ pub fn collect_public_exports(file: &File, resolved: &Resolved) -> HashMap<Strin
             corvid_ast::Decl::Agent(a) => {
                 (a.name.name.as_str(), a.visibility, DeclKind::Agent, None)
             }
+            // Slice 45r: `public fn` exports like an agent.
+            corvid_ast::Decl::Fn(f) => (f.name.name.as_str(), f.visibility, DeclKind::Fn, None),
             // Slice 45o: effects and models are exportable.
             corvid_ast::Decl::Effect(e) => {
                 (e.name.name.as_str(), e.visibility, DeclKind::Effect, None)

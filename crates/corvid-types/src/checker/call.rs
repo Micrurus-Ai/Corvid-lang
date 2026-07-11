@@ -67,6 +67,7 @@ impl<'a> Checker<'a> {
                     DeclKind::Tool => self.check_tool_call(def_id, &name.name, args, span),
                     DeclKind::Prompt => self.check_prompt_call(def_id, &name.name, args),
                     DeclKind::Agent => self.check_agent_call(def_id, &name.name, args),
+                    DeclKind::Fn => self.check_fn_call(def_id, &name.name, args),
                     DeclKind::Fixture => self.check_fixture_call(def_id, &name.name, args, span),
                     DeclKind::ImportedUse => {
                         self.check_imported_use_call(def_id, &name.name, args, name.span, span)
@@ -278,6 +279,15 @@ impl<'a> Checker<'a> {
         self.bump_effect(WeakEffect::Approve);
         let ret = self.type_ref_to_type(&agent.return_ty);
         self.ground_if_effect_grounded(&agent.effect_row, ret)
+    }
+
+    /// `fn` call (slice 45r): args against params, return type
+    /// out. NO effect bumps — a pure function is exactly the call
+    /// that leaves the weak-effect row untouched.
+    fn check_fn_call(&mut self, def_id: DefId, name: &str, args: &[Expr]) -> Type {
+        let f = *self.fns_by_id.get(&def_id).expect("fn DefId not indexed");
+        self.check_args_against_params(name, &f.params, args);
+        self.type_ref_to_type(&f.return_ty)
     }
 
     fn check_builtin_constructor_call(

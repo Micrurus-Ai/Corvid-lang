@@ -236,6 +236,9 @@ impl<'a> Checker<'a> {
                         Some("non-`@deterministic` agent")
                     }
                 }
+                // `fn`s (45r) are statically effect-free — always
+                // callable from `@deterministic` bodies.
+                DeclKind::Fn => None,
                 _ => None,
             };
             if let Some(kind) = call_kind {

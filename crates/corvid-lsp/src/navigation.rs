@@ -206,6 +206,14 @@ fn top_level_definitions(file: &File, resolved: &Resolved) -> Vec<Definition> {
                 name.span,
                 SymbolKind::STRUCT,
             ),
+            Decl::Fn(f) => push_definition(
+                &mut out,
+                resolved,
+                &f.name.name,
+                DeclKind::Fn,
+                f.name.span,
+                SymbolKind::FUNCTION,
+            ),
             Decl::Store(store) => push_definition(
                 &mut out,
                 resolved,

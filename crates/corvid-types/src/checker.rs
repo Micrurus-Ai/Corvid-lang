@@ -382,6 +382,7 @@ struct Checker<'a> {
     tools_by_id: HashMap<DefId, &'a ToolDecl>,
     prompts_by_id: HashMap<DefId, &'a PromptDecl>,
     agents_by_id: HashMap<DefId, &'a AgentDecl>,
+    fns_by_id: HashMap<DefId, &'a corvid_ast::FnDecl>,
     fixtures_by_id: HashMap<DefId, &'a FixtureDecl>,
     types_by_id: HashMap<DefId, &'a TypeDecl>,
     models_by_id: HashMap<DefId, &'a ModelDecl>,
@@ -534,6 +535,7 @@ impl<'a> Checker<'a> {
         let mut tools = HashMap::new();
         let mut prompts = HashMap::new();
         let mut agents = HashMap::new();
+        let mut fns = HashMap::new();
         let mut fixtures = HashMap::new();
         let mut types = HashMap::new();
         let mut models = HashMap::new();
@@ -553,6 +555,11 @@ impl<'a> Checker<'a> {
                 Decl::Agent(a) => {
                     if let Some(id) = resolved.symbols.lookup_def(&a.name.name) {
                         agents.insert(id, a);
+                    }
+                }
+                Decl::Fn(f) => {
+                    if let Some(id) = resolved.symbols.lookup_def(&f.name.name) {
+                        fns.insert(id, f);
                     }
                 }
                 Decl::Fixture(f) => {
@@ -619,6 +626,7 @@ impl<'a> Checker<'a> {
             tools_by_id: tools,
             prompts_by_id: prompts,
             agents_by_id: agents,
+            fns_by_id: fns,
             fixtures_by_id: fixtures,
             types_by_id: types,
             models_by_id: models,
@@ -649,6 +657,7 @@ impl<'a> Checker<'a> {
         for decl in &file.decls {
             match decl {
                 Decl::Agent(a) => self.check_agent(a),
+                Decl::Fn(f) => self.check_fn(f),
                 Decl::Eval(e) => self.check_eval(e),
                 Decl::Test(t) => self.check_test(t),
                 Decl::Fixture(f) => self.check_fixture(f),
@@ -733,6 +742,7 @@ mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
 mod lambda_check;
+mod fn_check;
 mod struct_literal_check;
 mod match_check;
 mod expr;
