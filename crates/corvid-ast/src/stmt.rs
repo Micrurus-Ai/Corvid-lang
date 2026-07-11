@@ -52,6 +52,17 @@ pub enum Stmt {
         span: Span,
     },
 
+    /// Destructuring binding (slice 45n): `Decision { refund,
+    /// amount, .. } = compute()`. The pattern must be IRREFUTABLE —
+    /// shorthand field bindings, renamed bindings (`field: name`),
+    /// and `..` only; literal or nested sub-patterns are rejected
+    /// by the checker (use `match` for refutable shapes).
+    Destructure {
+        pattern: crate::expr::Pattern,
+        value: Expr,
+        span: Span,
+    },
+
     /// Conditional loop: `while cond:` (slice 45k). The condition
     /// is re-evaluated before every iteration; `break`/`continue`
     /// apply to the innermost enclosing loop of either kind.
@@ -111,6 +122,7 @@ impl Stmt {
             | Stmt::Yield { span, .. }
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::Destructure { span, .. }
             | Stmt::While { span, .. }
             | Stmt::Break { span }
             | Stmt::Continue { span }

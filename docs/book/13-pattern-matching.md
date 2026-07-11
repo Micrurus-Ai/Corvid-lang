@@ -88,14 +88,23 @@ error: non-exhaustive match: missing variant(s) `Denied`
 `Bool` needs `true` + `false`; every other scrutinee type needs a
 catch-all arm (`_` or a binding).
 
-## Destructuring bindings and parameters (Planned — with 45n)
+## Destructuring bindings
 
 Keyword-free destructuring in statement position shares the
-`Type { ... }` surface with 45n's named struct literals and ships
-alongside them:
+`Type { ... }` surface with named struct literals (compiled in
+CI). The pattern must be IRREFUTABLE — bare names, `field: name`
+renames, and `..` only; anything refutable belongs in `match`:
 
-```corvid-planned
-Decision { refund, amount, .. } = compute_decision(ticket)
+```corvid
+type Decision:
+    refund: Bool
+    amount: Float
+
+agent apply(d: Decision) -> Float:
+    Decision { refund, amount, .. } = d
+    if refund:
+        return amount
+    return 0.0
 ```
 
 ## What this replaced

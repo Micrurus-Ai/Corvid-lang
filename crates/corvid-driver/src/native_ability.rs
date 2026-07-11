@@ -216,6 +216,8 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
             scan_expr(iter, current_return_ty)?;
             scan_block(body, current_return_ty)
         }
+        // Destructuring is interpreter-only in 45n.
+        IrStmt::Destructure { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `while` (45k) lowers natively like `for` — walk cond + body.
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, current_return_ty)?;
@@ -250,6 +252,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         IrExprKind::Match { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // Lambdas are interpreter-only in 45j.
         IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        // Named struct literals are interpreter-only in 45n.
+        IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

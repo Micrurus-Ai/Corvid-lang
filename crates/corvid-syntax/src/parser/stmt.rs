@@ -264,6 +264,27 @@ impl<'a> Parser<'a> {
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
 
+        // Destructuring binding (slice 45n): a struct literal
+        // followed by `=` is a PATTERN — `Decision { refund, .. } =
+        // compute()`. Reinterpret the parsed literal; only bare
+        // names, `field: name` renames, and `..` survive the
+        // conversion (anything refutable belongs in `match`).
+        if matches!(self.peek(), TokKind::Assign) {
+            if let Expr::StructLiteral { .. } = &expr {
+                self.bump(); // =
+                let pattern = struct_literal_to_pattern(expr)?;
+                let value = self.parse_expr()?;
+                let end = value.span();
+                self.expect_newline()?;
+                let span = pattern.span().merge(end);
+                return Ok(Stmt::Destructure {
+                    pattern,
+                    value,
+                    span,
+                });
+            }
+        }
+
         // Slice 45b — place assignment. If the parsed expression is
         // followed by `=` or a compound-assignment operator, it is an
         // assignment target rather than an expression statement.
@@ -310,6 +331,66 @@ impl<'a> Parser<'a> {
 /// An assignable place is a variable, a field access, or an index
 /// expression. Anything else (calls, literals, `?`-propagation, …)
 /// cannot be assigned through.
+/// Convert a parsed struct literal into an irrefutable
+/// destructuring pattern (slice 45n). Shorthand fields bind the
+/// field name; `field: name` renames; `..` marks the rest. Any
+/// other field value or a `..base` spread is a parse error here —
+/// refutable destructuring belongs in `match`.
+fn struct_literal_to_pattern(expr: Expr) -> Result<corvid_ast::Pattern, ParseError> {
+    use corvid_ast::{FieldPattern, Pattern};
+    let Expr::StructLiteral {
+        name,
+        fields,
+        spread,
+        rest,
+        span,
+    } = expr
+    else {
+        unreachable!("caller matched StructLiteral");
+    };
+    if let Some(spread) = spread {
+        return Err(ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: "`..base` spread in a destructuring pattern".into(),
+                expected: "a bare `..` (destructuring ignores remaining fields; it cannot source them)"
+                    .into(),
+            },
+            span: spread.span(),
+        });
+    }
+    let mut out = Vec::with_capacity(fields.len());
+    for f in fields {
+        let sub = match f.value {
+            None => None, // shorthand binds the field name
+            Some(Expr::Ident { name: bind, span }) => Some(Pattern::Name {
+                name: bind,
+                span,
+            }),
+            Some(other) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "an expression in a destructuring field".into(),
+                        expected: "a bare binding name (`field: new_name`) — refutable patterns belong in `match`"
+                            .into(),
+                    },
+                    span: other.span(),
+                });
+            }
+        };
+        out.push(FieldPattern {
+            name: f.name,
+            pattern: sub,
+            span: f.span,
+        });
+    }
+    Ok(Pattern::Record {
+        name,
+        fields: out,
+        rest,
+        span,
+    })
+}
+
 fn is_assignable_place(expr: &Expr) -> bool {
     matches!(
         expr,

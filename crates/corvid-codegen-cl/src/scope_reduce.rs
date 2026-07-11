@@ -193,6 +193,7 @@ fn stmt_mentions_local(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::If { cond, .. } => expr_mentions_local(cond, local_id),
         IrStmt::For { iter, .. } => expr_mentions_local(iter, local_id),
         IrStmt::While { cond, .. } => expr_mentions_local(cond, local_id),
+        IrStmt::Destructure { value, .. } => expr_mentions_local(value, local_id),
         IrStmt::Approve { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, local_id)),
         IrStmt::Expr { expr, .. } => expr_mentions_local(expr, local_id),
         IrStmt::Dup {
@@ -214,6 +215,10 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         // A lambda's env snapshot keeps every visible local alive,
         // so it mentions all of them conservatively.
         IrExprKind::Lambda { .. } => true,
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|(_, v)| expr_mentions_local(v, local_id))
+                || spread.as_ref().is_some_and(|s| expr_mentions_local(s, local_id))
+        }
         IrExprKind::Match { scrutinee, arms } => {
             expr_mentions_local(scrutinee, local_id)
                 || arms.iter().any(|arm| {
@@ -284,6 +289,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
 fn stmt_is_effect_barrier(stmt: &IrStmt) -> bool {
     match stmt {
         IrStmt::Let { value, .. } => !expr_is_effect_free(value),
+        IrStmt::Destructure { value, .. } => !expr_is_effect_free(value),
         // Place assignment mutates shared state — always a barrier.
         IrStmt::Assign { .. } => true,
         IrStmt::Expr { expr, .. } => !expr_is_effect_free(expr),
@@ -312,6 +318,11 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
         // CALL sites, and closure calls never reach this backend
         // (interpreter-only in 45j).
         IrExprKind::Lambda { .. } => true,
+        // Building a struct from pure parts is pure.
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().all(|(_, v)| expr_is_effect_free(v))
+                && spread.as_ref().is_none_or(|s| expr_is_effect_free(s))
+        }
         // A match is effect-free iff every part is; pattern binding
         // writes are locals, not shared-state effects.
         IrExprKind::Match { scrutinee, arms } => {

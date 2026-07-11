@@ -264,6 +264,9 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
             collect_expr_deps(cond, resolved, deps);
             collect_block_deps(body, resolved, deps);
         }
+        Stmt::Destructure { value, .. } => {
+            collect_expr_deps(value, resolved, deps);
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => {
             collect_expr_deps(action, resolved, deps);
@@ -293,6 +296,24 @@ fn collect_expr_deps(expr: &Expr, resolved: &Resolved, deps: &mut HashSet<DefId>
         }
         Expr::Lambda { body, .. } => {
             collect_expr_deps(body, resolved, deps);
+        }
+        Expr::StructLiteral {
+            name,
+            fields,
+            spread,
+            ..
+        } => {
+            if let Some(Binding::Decl(id)) = resolved.bindings.get(&name.span) {
+                deps.insert(*id);
+            }
+            for f in fields {
+                if let Some(v) = &f.value {
+                    collect_expr_deps(v, resolved, deps);
+                }
+            }
+            if let Some(s) = spread {
+                collect_expr_deps(s, resolved, deps);
+            }
         }
         Expr::FieldAccess { target, .. } => {
             collect_expr_deps(target, resolved, deps);

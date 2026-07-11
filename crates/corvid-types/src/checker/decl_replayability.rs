@@ -73,6 +73,9 @@ impl<'a> Checker<'a> {
                 self.walk_deterministic_expr(agent, cond);
                 self.walk_deterministic_block(agent, body);
             }
+            Stmt::Destructure { value, .. } => {
+                self.walk_deterministic_expr(agent, value);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Expr { expr, .. } => self.walk_deterministic_expr(agent, expr),
             Stmt::Assign { target, value, .. } => {
@@ -110,6 +113,16 @@ impl<'a> Checker<'a> {
             }
             Expr::Lambda { body, .. } => {
                 self.walk_deterministic_expr(agent, body);
+            }
+            Expr::StructLiteral { fields, spread, .. } => {
+                for f in fields {
+                    if let Some(v) = &f.value {
+                        self.walk_deterministic_expr(agent, v);
+                    }
+                }
+                if let Some(s) = spread {
+                    self.walk_deterministic_expr(agent, s);
+                }
             }
             Expr::Index { target, index, .. } => {
                 self.walk_deterministic_expr(agent, target);
@@ -307,6 +320,9 @@ fn collect_replayability_violations_in_stmt(stmt: &Stmt, out: &mut Vec<Replayabi
             collect_replayability_violations_in_expr(cond, out);
             collect_replayability_violations_in_block(body, out);
         }
+        Stmt::Destructure { value, .. } => {
+            collect_replayability_violations_in_expr(value, out);
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Expr { expr, .. } => {
             collect_replayability_violations_in_expr(expr, out);
@@ -343,6 +359,16 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
         }
         Expr::Lambda { body, .. } => {
             collect_replayability_violations_in_expr(body, out);
+        }
+        Expr::StructLiteral { fields, spread, .. } => {
+            for f in fields {
+                if let Some(v) = &f.value {
+                    collect_replayability_violations_in_expr(v, out);
+                }
+            }
+            if let Some(s) = spread {
+                collect_replayability_violations_in_expr(s, out);
+            }
         }
         Expr::Index { target, index, .. } => {
             collect_replayability_violations_in_expr(target, out);

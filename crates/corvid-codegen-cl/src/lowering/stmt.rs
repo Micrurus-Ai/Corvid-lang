@@ -281,6 +281,10 @@ fn lower_stmt(
             module,
             runtime,
         ),
+        IrStmt::Destructure { span, .. } => Err(CodegenError::not_supported(
+            "destructuring is interpreter-only in 45n",
+            *span,
+        )),
         IrStmt::While { cond, body, span } => lower_while(
             builder,
             cond,
@@ -808,6 +812,7 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
         IrStmt::While { cond, body, .. } => {
             expr_mentions_local(cond, target) || block_mentions_local(body, target)
         }
+        IrStmt::Destructure { value, .. } => expr_mentions_local(value, target),
         IrStmt::Approve { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
         IrStmt::Break { .. }
         | IrStmt::Continue { .. }
@@ -833,6 +838,10 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
                 })
         }
         IrExprKind::Lambda { body, .. } => expr_mentions_local(body, target),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|(_, v)| expr_mentions_local(v, target))
+                || spread.as_ref().is_some_and(|s| expr_mentions_local(s, target))
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

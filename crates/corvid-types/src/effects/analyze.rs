@@ -164,6 +164,9 @@ fn collect_stmt_capabilities(
             collect_expr_capabilities(cond, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
         }
+        corvid_ast::Stmt::Destructure { value, .. } => {
+            collect_expr_capabilities(value, file, resolved, caps);
+        }
         corvid_ast::Stmt::Break { .. }
         | corvid_ast::Stmt::Continue { .. }
         | corvid_ast::Stmt::Pass { .. } => {}
@@ -257,6 +260,9 @@ fn collect_stmt_effects(
         corvid_ast::Stmt::While { cond, body, .. } => {
             collect_expr_effects(cond, file, resolved, registry, effects);
             collect_body_effects(body, file, resolved, registry, effects);
+        }
+        corvid_ast::Stmt::Destructure { value, .. } => {
+            collect_expr_effects(value, file, resolved, registry, effects);
         }
         corvid_ast::Stmt::Break { .. }
         | corvid_ast::Stmt::Continue { .. }

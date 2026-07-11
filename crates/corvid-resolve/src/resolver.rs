@@ -793,6 +793,10 @@ impl Resolver {
                 self.resolve_expr(cond);
                 self.resolve_block(body);
             }
+            Stmt::Destructure { pattern, value, .. } => {
+                self.resolve_expr(value);
+                self.resolve_pattern(pattern);
+            }
             // Loop-flow statements bind and reference nothing.
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => self.resolve_approve_action(action),
@@ -952,6 +956,25 @@ impl Resolver {
                         self.resolve_expr(g);
                     }
                     self.resolve_expr(&arm.body);
+                }
+            }
+            Expr::StructLiteral {
+                name,
+                fields,
+                spread,
+                ..
+            } => {
+                self.resolve_ident(name);
+                for f in fields {
+                    match &f.value {
+                        Some(v) => self.resolve_expr(v),
+                        // Shorthand `{ amount }` reads the local
+                        // named `amount`.
+                        None => self.resolve_ident(&f.name),
+                    }
+                }
+                if let Some(s) = spread {
+                    self.resolve_expr(s);
                 }
             }
             Expr::Lambda { params, body, .. } => {

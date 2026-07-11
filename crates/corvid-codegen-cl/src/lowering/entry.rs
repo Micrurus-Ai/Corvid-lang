@@ -32,6 +32,7 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
         }
         IrStmt::For { iter, body, .. } => expr_uses_runtime(iter) || block_uses_runtime(body),
         IrStmt::While { cond, body, .. } => expr_uses_runtime(cond) || block_uses_runtime(body),
+        IrStmt::Destructure { value, .. } => expr_uses_runtime(value),
         IrStmt::Approve { .. } => true,
         IrStmt::Expr { expr, .. } => expr_uses_runtime(expr),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => false,
@@ -55,6 +56,10 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
                 })
         }
         IrExprKind::Lambda { body, .. } => expr_uses_runtime(body),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|(_, v)| expr_uses_runtime(v))
+                || spread.as_ref().is_some_and(|s| expr_uses_runtime(s))
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }

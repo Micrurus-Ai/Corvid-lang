@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
 
     /// Type one pattern against the scrutinee type, binding pattern
     /// variables.
-    fn check_pattern(&mut self, pattern: &Pattern, scrut_ty: &Type) {
+    pub(super) fn check_pattern(&mut self, pattern: &Pattern, scrut_ty: &Type) {
         match pattern {
             Pattern::Wildcard { .. } => {}
             Pattern::Literal { value, span } => {
@@ -424,7 +424,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Does this pattern match EVERY value of its type?
-    fn pattern_is_irrefutable(&self, pattern: &Pattern) -> bool {
+    pub(super) fn pattern_is_irrefutable(&self, pattern: &Pattern) -> bool {
         match pattern {
             Pattern::Wildcard { .. } => true,
             Pattern::Name { name, .. } => {

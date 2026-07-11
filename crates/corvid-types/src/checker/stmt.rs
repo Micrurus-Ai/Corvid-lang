@@ -188,6 +188,32 @@ impl<'a> Checker<'a> {
                     &body_refresh,
                 );
             }
+            Stmt::Destructure {
+                pattern,
+                value,
+                span,
+            } => {
+                let val_ty = self.check_expr(value);
+                // Reuse the match machinery: types every binding
+                // against the value's field types.
+                self.check_pattern(pattern, &val_ty);
+                // Statement-position destructuring must be
+                // IRREFUTABLE — refutable shapes belong in `match`.
+                if !self.pattern_is_irrefutable(pattern) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::StructLiteralInvalid {
+                            type_name: match pattern {
+                                corvid_ast::Pattern::Record { name, .. } => name.name.clone(),
+                                _ => "<pattern>".into(),
+                            },
+                            message:
+                                "destructuring patterns must be irrefutable (bare names and `..` only)"
+                                    .into(),
+                        },
+                        *span,
+                    ));
+                }
+            }
             Stmt::While { cond, body, .. } => {
                 // Same Grounded<Bool> acceptance rule as `if`: the
                 // branch consumes the bool, it does not launder it.

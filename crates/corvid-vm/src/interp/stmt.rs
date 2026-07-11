@@ -322,6 +322,35 @@ impl<'ir> Interpreter<'ir> {
                 }
                 Ok(Flow::Normal)
             }
+            // Destructuring binding (slice 45n): evaluate once,
+            // bind every pattern binding transactionally through
+            // the 45i pattern machinery. The checker guarantees
+            // irrefutability, so a non-match here is a hard error
+            // (type confusion), not a silent skip.
+            IrStmt::Destructure {
+                pattern,
+                value,
+                span,
+            } => {
+                let v = match self.eval_expr(value).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(Flow::Return(v)),
+                };
+                let mut binds = Vec::new();
+                if !crate::interp::pattern_matches(pattern, &v, &mut binds) {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "a value matching the destructuring pattern".into(),
+                            got: v.type_name(),
+                        },
+                        *span,
+                    ));
+                }
+                for (local_id, _, bound) in binds {
+                    self.env.bind(local_id, bound);
+                }
+                Ok(Flow::Normal)
+            }
             // `while cond:` (slice 45k) — re-evaluate the condition
             // before every iteration; a non-Bool condition traps
             // (the checker only lets Bool/Unknown through).

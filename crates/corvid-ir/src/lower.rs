@@ -813,6 +813,15 @@ impl<'a> Lowerer<'a> {
                     span: *span,
                 }
             }
+            Stmt::Destructure {
+                pattern,
+                value,
+                span,
+            } => IrStmt::Destructure {
+                pattern: self.lower_pattern(pattern),
+                value: self.lower_expr(value),
+                span: *span,
+            },
             Stmt::While { cond, body, span } => IrStmt::While {
                 cond: self.lower_expr(cond),
                 body: self.lower_block(body),
@@ -913,6 +922,49 @@ impl<'a> Lowerer<'a> {
                 Literal::Nothing => IrLiteral::Nothing,
             }),
             Expr::Ident { name, .. } => self.lower_ident(name),
+            Expr::StructLiteral {
+                name,
+                fields,
+                spread,
+                ..
+            } => {
+                // The checker recorded the (alias-expanded) struct
+                // type on this expression's span.
+                let def_id = match self.types.get(&e.span()) {
+                    Some(Type::Struct(id)) => self.remap_def_id(*id),
+                    _ => DefId(u32::MAX),
+                };
+                IrExprKind::StructLiteral {
+                    def_id,
+                    type_name: name.name.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|f| {
+                            let value = match &f.value {
+                                Some(v) => self.lower_expr(v),
+                                // Shorthand reads the local of the
+                                // same name.
+                                None => IrExpr {
+                                    kind: match self.bindings.get(&f.name.span) {
+                                        Some(Binding::Local(id)) => IrExprKind::Local {
+                                            local_id: *id,
+                                            name: f.name.name.clone(),
+                                        },
+                                        _ => IrExprKind::Local {
+                                            local_id: LocalId(u32::MAX),
+                                            name: f.name.name.clone(),
+                                        },
+                                    },
+                                    ty: Type::Unknown,
+                                    span: f.name.span,
+                                },
+                            };
+                            (f.name.name.clone(), value)
+                        })
+                        .collect(),
+                    spread: spread.as_ref().map(|s| Box::new(self.lower_expr(s))),
+                }
+            }
             Expr::Lambda { params, body, .. } => IrExprKind::Lambda {
                 params: params
                     .iter()

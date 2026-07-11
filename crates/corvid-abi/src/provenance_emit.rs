@@ -55,6 +55,9 @@ fn collect_block_dependencies(block: &Block, out: &mut Vec<String>) {
                 collect_expr_dependencies(cond, out);
                 collect_block_dependencies(body, out);
             }
+            Stmt::Destructure { value, .. } => {
+                collect_expr_dependencies(value, out);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => collect_expr_dependencies(action, out),
             Stmt::Return { value: None, .. } => {}
@@ -74,6 +77,16 @@ fn collect_expr_dependencies(expr: &Expr, out: &mut Vec<String>) {
         }
         Expr::FieldAccess { target, .. } => collect_expr_dependencies(target, out),
         Expr::Lambda { body, .. } => collect_expr_dependencies(body, out),
+        Expr::StructLiteral { fields, spread, .. } => {
+            for f in fields {
+                if let Some(v) = &f.value {
+                    collect_expr_dependencies(v, out);
+                }
+            }
+            if let Some(s) = spread {
+                collect_expr_dependencies(s, out);
+            }
+        }
         Expr::Index { target, index, .. } => {
             collect_expr_dependencies(target, out);
             collect_expr_dependencies(index, out);

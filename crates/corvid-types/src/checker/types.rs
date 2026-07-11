@@ -139,11 +139,36 @@ impl<'a> Checker<'a> {
                     if entry.kind == corvid_resolve::DeclKind::ImportedUse {
                         return self.imported_use_type_to_type(name, span);
                     }
-                    Type::Struct(id)
+                    self.expand_possible_alias(id, span)
                 }
                 None => Type::Unknown,
             },
         }
+    }
+
+    /// Expand a transparent type alias (slice 45n): a def whose
+    /// declaration is `type X = T` resolves to T everywhere. Chains
+    /// expand recursively; a cycle errors instead of recursing
+    /// forever.
+    pub(super) fn expand_possible_alias(&mut self, id: corvid_resolve::DefId, span: corvid_ast::Span) -> Type {
+        let target = match self.types_by_id.get(&id) {
+            Some(decl) => match &decl.alias {
+                Some(tr) => (tr.clone(), decl.name.name.clone()),
+                None => return Type::Struct(id),
+            },
+            None => return Type::Struct(id),
+        };
+        if self.alias_depth >= 32 {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::AliasCycle { name: target.1 },
+                span,
+            ));
+            return Type::Unknown;
+        }
+        self.alias_depth += 1;
+        let ty = self.type_ref_to_type(&target.0);
+        self.alias_depth -= 1;
+        ty
     }
 
     fn imported_use_type_to_type(&mut self, name: &str, span: corvid_ast::Span) -> Type {

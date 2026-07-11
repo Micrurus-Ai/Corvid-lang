@@ -407,6 +407,10 @@ struct Checker<'a> {
     /// being checked — `break`/`continue` require depth > 0
     /// (slice 45k).
     loop_depth: usize,
+    /// Alias-expansion depth guard (slice 45n): `type A = B` chains
+    /// expand through `named_type_to_type`; a cycle would recurse
+    /// forever without this.
+    alias_depth: usize,
     in_test_body: bool,
     saw_yield: bool,
 
@@ -607,6 +611,7 @@ impl<'a> Checker<'a> {
             current_return: None,
             in_agent_body: false,
             loop_depth: 0,
+            alias_depth: 0,
             in_test_body: false,
             saw_yield: false,
             approvals: Vec::new(),
@@ -708,6 +713,7 @@ mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
 mod lambda_check;
+mod struct_literal_check;
 mod match_check;
 mod expr;
 mod import_call;

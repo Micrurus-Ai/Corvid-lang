@@ -133,6 +133,7 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::If { .. }
         | IrStmt::For { .. }
         | IrStmt::While { .. }
+        | IrStmt::Destructure { .. }
         | IrStmt::Return { .. }
         | IrStmt::Yield { .. }
         | IrStmt::Break { .. }
@@ -188,6 +189,7 @@ fn stmt_local_mentions(stmt: &IrStmt, local_id: LocalId) -> usize {
         IrStmt::If { cond, .. } => count_local_mentions_expr(cond, local_id),
         IrStmt::For { iter, .. } => count_local_mentions_expr(iter, local_id),
         IrStmt::While { cond, .. } => count_local_mentions_expr(cond, local_id),
+        IrStmt::Destructure { value, .. } => count_local_mentions_expr(value, local_id),
         IrStmt::Approve { args, .. } => args
             .iter()
             .map(|expr| count_local_mentions_expr(expr, local_id))
@@ -223,6 +225,16 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             .map(|e| count_local_mentions_expr(e, local_id))
             .sum::<usize>(),
         IrExprKind::Lambda { body, .. } => count_local_mentions_expr(body, local_id),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields
+                .iter()
+                .map(|(_, v)| count_local_mentions_expr(v, local_id))
+                .sum::<usize>()
+                + spread
+                    .as_ref()
+                    .map(|s| count_local_mentions_expr(s, local_id))
+                    .unwrap_or(0)
+        }
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -309,6 +321,9 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         // A lambda snapshots the visible environment (handle
         // clones), so treat it as observing every local's refcount.
         IrExprKind::Lambda { .. } => true,
+        // A struct literal clones field handles into a new cell —
+        // conservative: observes refcounts.
+        IrExprKind::StructLiteral { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

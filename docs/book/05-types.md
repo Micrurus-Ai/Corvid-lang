@@ -336,13 +336,33 @@ account, and `alias.wallet.balance *= 2.0` is visible through
 `acct` too (reference semantics, as in Python). A compound
 assignment evaluates its target path exactly once.
 
-> **Planned — named-field literals and `..` update syntax land in
-> slice 45n:**
+Named-field literals construct records with every field labeled
+(any order), and `..base` copies the remaining fields from an
+existing value into a NEW cell — the base is untouched. A bare
+field name is shorthand for `field: field`. The spread goes last
+(compiled in CI):
 
-```corvid-planned
-d = Decision { refund: true, amount: 50.0, reason: "policy match" }
-d2 = Decision { ..d, amount: 75.0 }
+```corvid
+type Decision:
+    refund: Bool
+    amount: Float
+    reason: String
+
+agent build(base: Decision) -> Float:
+    amount = 50.0
+    d = Decision { refund: true, amount, reason: "policy match" }
+    d2 = Decision { amount: 75.0, ..d }
+    Decision { refund, amount: final_amount, .. } = d2
+    if refund:
+        return final_amount
+    return base.amount
 ```
+
+The last line is a **destructuring binding** — the same
+`Type { ... }` surface, on the left of `=`, binding fields to
+locals (`amount: final_amount` renames; `..` ignores the rest).
+Destructuring must be irrefutable: literal or nested patterns
+belong in `match`.
 
 ## Sum types (enums)
 
@@ -400,11 +420,20 @@ fn first<T>(xs: List<T>) -> Option<T>:
 
 ## Type aliases
 
-> **Planned — lands in slice 45n:**
+Aliases name a type without wrapping it — `CustomerId` IS
+`String`, everywhere (transparent, not a newtype). Alias cycles
+are a compile error, and an alias is not a constructor (compiled
+in CI):
 
-```corvid-planned
+```corvid
 type CustomerId = String
 type Cents = Int
+
+agent describe(id: CustomerId, price: Cents) -> String:
+    return id.to_upper() + ": " + price.to_string()
+
+agent main() -> String:
+    return describe("c-42", 1999)
 ```
 
 ## Type inference and annotations

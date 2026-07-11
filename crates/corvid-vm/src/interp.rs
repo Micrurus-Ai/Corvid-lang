@@ -266,6 +266,57 @@ impl<'ir> Interpreter<'ir> {
             }
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
 
+            // Named struct literal (slice 45n): build the cell from
+            // the spread's fields first (handle copies into a NEW
+            // cell), then apply the named overrides.
+            IrExprKind::StructLiteral {
+                def_id,
+                type_name,
+                fields,
+                spread,
+            } => {
+                let mut out: Vec<(String, Value)> = Vec::new();
+                if let Some(s) = spread {
+                    let base = match self.eval_expr(s).await?.into_value() {
+                        Ok(v) => v,
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    };
+                    match base {
+                        Value::Struct(sv) => {
+                            sv.with_fields(|m| {
+                                for (k, v) in m {
+                                    out.push((k.clone(), v.clone()));
+                                }
+                            });
+                        }
+                        other => {
+                            return Err(InterpError::new(
+                                InterpErrorKind::TypeMismatch {
+                                    expected: type_name.clone(),
+                                    got: other.type_name(),
+                                },
+                                expr.span,
+                            ));
+                        }
+                    }
+                }
+                for (fname, fexpr) in fields {
+                    let v = match self.eval_expr(fexpr).await?.into_value() {
+                        Ok(v) => v,
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    };
+                    if let Some(slot) = out.iter_mut().find(|(k, _)| k == fname) {
+                        slot.1 = v;
+                    } else {
+                        out.push((fname.clone(), v));
+                    }
+                }
+                Ok(ExprFlow::Value(Value::new_struct(
+                    *def_id,
+                    type_name.clone(),
+                    out,
+                )))
+            }
             // Lambda (slice 45j): evaluate to a closure that
             // snapshots the visible environment BY VALUE. Values
             // clone; heap cells share.
@@ -2121,7 +2172,7 @@ fn dispatch_typed_json_decoder(
 /// Collects bindings without touching the environment so a failed
 /// sibling subpattern can't leave partial state; the caller applies
 /// them on success.
-fn pattern_matches(
+pub(crate) fn pattern_matches(
     pattern: &IrPattern,
     value: &Value,
     bindings: &mut Vec<(corvid_resolve::LocalId, String, Value)>,

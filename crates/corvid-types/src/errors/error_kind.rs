@@ -105,6 +105,15 @@ pub enum TypeErrorKind {
     /// `break` or `continue` outside any enclosing loop (slice 45k).
     LoopFlowOutsideLoop { keyword: String },
 
+    /// A type-alias chain that never reaches a concrete type
+    /// (slice 45n): `type A = B` / `type B = A`.
+    AliasCycle { name: String },
+
+    /// A malformed named struct literal or destructuring pattern
+    /// (slice 45n): unknown/duplicate/missing fields, non-record
+    /// targets, bare `..` in expression position.
+    StructLiteralInvalid { type_name: String, message: String },
+
     /// An agent body used `yield` without declaring `Stream<T>`.
     YieldRequiresStreamReturn { declared: String },
 
@@ -454,6 +463,12 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::AliasCycle { name } => {
+                format!("type alias `{name}` never reaches a concrete type (alias cycle)")
+            }
+            Self::StructLiteralInvalid { type_name, message } => {
+                format!("invalid `{type_name} {{ ... }}`: {message}")
+            }
             Self::YieldRequiresStreamReturn { declared } => {
                 format!(
                     "`yield` requires the enclosing agent to declare `Stream<T>`, got `{declared}`"
@@ -756,6 +771,12 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::AliasCycle { .. } => Some(
+                "make the alias chain end at a concrete type (a record, sum, or builtin)".into(),
+            ),
+            Self::StructLiteralInvalid { .. } => Some(
+                "named literals need every declared field (or `..base` to fill the rest); destructuring needs bare names and `..` only".into(),
+            ),
             Self::YieldOutsideAgent => Some(
                 "move `yield` into an `agent ... -> Stream<T>` body, or replace it with `return`".into(),
             ),

@@ -208,6 +208,9 @@ impl<'a> ReachabilityPass<'a> {
                 self.check_expr(entrypoint, cond, approvals, visiting);
                 self.check_block(entrypoint, body, approvals.clone(), visiting);
             }
+            Stmt::Destructure { value, .. } => {
+                self.check_expr(entrypoint, value, approvals, visiting);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => {
                 if let Expr::Call { callee, args, .. } = action {
@@ -247,6 +250,16 @@ impl<'a> ReachabilityPass<'a> {
             }
             Expr::Lambda { body, .. } => {
                 self.check_expr(entrypoint, body, approvals, visiting);
+            }
+            Expr::StructLiteral { fields, spread, .. } => {
+                for f in fields {
+                    if let Some(v) = &f.value {
+                        self.check_expr(entrypoint, v, approvals, visiting);
+                    }
+                }
+                if let Some(s) = spread {
+                    self.check_expr(entrypoint, s, approvals, visiting);
+                }
             }
             Expr::Index { target, index, .. } => {
                 self.check_expr(entrypoint, target, approvals, visiting);

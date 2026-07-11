@@ -492,6 +492,16 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// Destructuring binding (slice 45n): `Decision { refund, .. }
+    /// = value`. The pattern is IRREFUTABLE (checker-enforced);
+    /// the interpreter evaluates the value once and binds every
+    /// pattern binding through the 45i pattern machinery.
+    Destructure {
+        pattern: IrPattern,
+        value: IrExpr,
+        span: Span,
+    },
+
     /// `while cond: body` (slice 45k). The condition re-evaluates
     /// before every iteration.
     While {
@@ -702,6 +712,20 @@ pub enum IrExprKind {
     Match {
         scrutinee: Box<IrExpr>,
         arms: Vec<IrMatchArm>,
+    },
+
+    /// Named struct literal (slice 45n): `Decision { refund: true,
+    /// amount, ..base }` lowered with fields in SOURCE order plus an
+    /// optional spread. The interpreter builds the new cell from the
+    /// spread's field values first (handle copies — a NEW cell whose
+    /// fields share), then applies the named overrides.
+    /// Interpreter-only in v1; compiled tiers degrade loudly (the
+    /// positional constructor stays native).
+    StructLiteral {
+        def_id: DefId,
+        type_name: String,
+        fields: Vec<(String, IrExpr)>,
+        spread: Option<Box<IrExpr>>,
     },
 
     /// Lambda expression (slice 45j). Evaluates to a closure value

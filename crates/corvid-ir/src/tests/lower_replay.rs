@@ -55,6 +55,7 @@ use super::*;
             IrStmt::While { cond, body, .. } => {
                 find_replay_in_expr(cond).or_else(|| find_replay_in_block(body))
             }
+            IrStmt::Destructure { value, .. } => find_replay_in_expr(value),
             IrStmt::Break { .. }
             | IrStmt::Continue { .. }
             | IrStmt::Pass { .. }

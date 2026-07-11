@@ -473,6 +473,22 @@ agent mutate(w: Wallet, xs: List<Int>) -> Float:
     n += 37
     return w.balance
 
+type CustomerId = String
+
+type Claim2:
+    urgent: Bool
+    amount: Float
+
+agent literal_demo(base: Claim2) -> Float:
+    amount = 12.5
+    c = Claim2 { urgent: true, amount }
+    c2 = Claim2 { amount: 99.0, ..base }
+    Claim2 { urgent, amount: final_amount, .. } = c2
+    cid: CustomerId = "c-1"
+    if urgent:
+        return final_amount + c.amount
+    return c2.amount
+
 agent while_demo(limit: Int) -> Int:
     n = 0
     total = 0
@@ -614,6 +630,10 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("map_literal", "statements"),
     ("field_list", "statements"),
     ("while_stmt", "statements"),
+    ("type_alias_body", "statements"),
+    ("struct_literal", "statements"),
+    ("field_init", "statements"),
+    ("destructure_stmt", "statements"),
     ("match_expr", "statements"),
     ("match_arm", "statements"),
     ("pattern", "statements"),

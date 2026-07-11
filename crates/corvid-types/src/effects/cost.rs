@@ -239,6 +239,11 @@ impl<'a> CostAnalyzer<'a> {
                     bounded: zero,
                 }
             }
+            corvid_ast::Stmt::Destructure { value, span, .. } => {
+                let mut estimate = self.analyze_expr(value, agent_name);
+                estimate.tree = wrap_if_needed("destructure", estimate.tree, *span);
+                estimate
+            }
             corvid_ast::Stmt::Break { span }
             | corvid_ast::Stmt::Continue { span }
             | corvid_ast::Stmt::Pass { span } => {
@@ -420,6 +425,41 @@ impl<'a> CostAnalyzer<'a> {
                 CostEstimate {
                     dimensions: sequence.costs.clone(),
                     tree: sequence,
+                    warnings,
+                    bounded,
+                }
+            }
+            corvid_ast::Expr::StructLiteral {
+                fields,
+                spread,
+                span,
+                ..
+            } => {
+                let mut children = Vec::new();
+                let mut warnings = Vec::new();
+                let mut bounded = true;
+                for f in fields {
+                    if let Some(v) = &f.value {
+                        let e = self.analyze_expr(v, agent_name);
+                        if !tree_is_zero(&e.tree) {
+                            children.push(e.tree);
+                        }
+                        warnings.extend(e.warnings);
+                        bounded &= e.bounded;
+                    }
+                }
+                if let Some(s) = spread {
+                    let e = self.analyze_expr(s, agent_name);
+                    if !tree_is_zero(&e.tree) {
+                        children.push(e.tree);
+                    }
+                    warnings.extend(e.warnings);
+                    bounded &= e.bounded;
+                }
+                let tree = sequence_tree("struct_literal", CostNodeKind::Sequence, children, *span);
+                CostEstimate {
+                    dimensions: tree.costs.clone(),
+                    tree,
                     warnings,
                     bounded,
                 }

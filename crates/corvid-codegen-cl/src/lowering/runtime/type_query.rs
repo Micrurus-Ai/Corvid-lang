@@ -329,6 +329,9 @@ fn visit_block_types(
                 visit_expr_types(cond, seen, order, visit);
                 visit_block_types(body, seen, order, visit);
             }
+            IrStmt::Destructure { value, .. } => {
+                visit_expr_types(value, seen, order, visit);
+            }
             IrStmt::For { iter, body, .. } => {
                 visit_expr_types(iter, seen, order, visit);
                 visit_block_types(body, seen, order, visit);
@@ -368,6 +371,14 @@ fn visit_expr_types(
         }
         IrExprKind::Lambda { body, .. } => {
             visit_expr_types(body, seen, order, visit);
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            for (_, v) in fields {
+                visit_expr_types(v, seen, order, visit);
+            }
+            if let Some(s) = spread {
+                visit_expr_types(s, seen, order, visit);
+            }
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);

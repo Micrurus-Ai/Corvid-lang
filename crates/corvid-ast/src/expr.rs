@@ -62,6 +62,23 @@ pub enum Expr {
         span: Span,
     },
 
+    /// Named struct literal (slice 45n): `Decision { refund: true,
+    /// amount }` with optional `..base` update spread (spread must
+    /// be last; fields left unnamed come from `base`). A field
+    /// without a value is SHORTHAND for `field: field` (binds the
+    /// local of the same name). `rest` marks a bare `..` with no
+    /// expression — only meaningful when the literal is
+    /// reinterpreted as a DESTRUCTURING pattern in statement
+    /// position (`Decision { refund, .. } = e`); as an expression
+    /// it is rejected by the checker.
+    StructLiteral {
+        name: Ident,
+        fields: Vec<StructLiteralField>,
+        spread: Option<Box<Expr>>,
+        rest: bool,
+        span: Span,
+    },
+
     /// Lambda expression: `fn (x) -> x * 2` (slice 45j). Parameters
     /// may carry optional type annotations (`fn (x: Int) -> x + 1`);
     /// unannotated parameter types come from the expected function
@@ -124,6 +141,7 @@ impl Expr {
             | Expr::List { span, .. }
             | Expr::Match { span, .. }
             | Expr::Lambda { span, .. }
+            | Expr::StructLiteral { span, .. }
             | Expr::MapLiteral { span, .. }
             | Expr::TryPropagate { span, .. }
             | Expr::TryRetry { span, .. }
@@ -146,6 +164,16 @@ pub enum Literal {
     String(String),
     Bool(bool),
     Nothing,
+}
+
+/// One field of a named struct literal (slice 45n). `value: None`
+/// is the shorthand form — `Decision { refund }` reads the local
+/// named `refund`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StructLiteralField {
+    pub name: Ident,
+    pub value: Option<Expr>,
+    pub span: Span,
 }
 
 /// One parameter of a lambda expression (slice 45j).

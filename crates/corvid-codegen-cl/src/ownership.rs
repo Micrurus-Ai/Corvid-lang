@@ -307,6 +307,14 @@ fn expr_consumes_target(
         // creation, so a body mention counts as a consume of the
         // captured handle.
         IrExprKind::Lambda { body, .. } => expr_consumes_target(body, target, sigs),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields
+                .iter()
+                .any(|(_, v)| expr_consumes_target(v, target, sigs))
+                || spread
+                    .as_ref()
+                    .is_some_and(|s| expr_consumes_target(s, target, sigs))
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -398,6 +406,10 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             .chain(values)
             .any(|e| expr_references(e, target)),
         IrExprKind::Lambda { body, .. } => expr_references(body, target),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|(_, v)| expr_references(v, target))
+                || spread.as_ref().is_some_and(|s| expr_references(s, target))
+        }
         IrExprKind::Match { scrutinee, arms } => {
             expr_references(scrutinee, target)
                 || arms.iter().any(|arm| {

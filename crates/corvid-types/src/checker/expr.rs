@@ -103,6 +103,13 @@ impl<'a> Checker<'a> {
             Expr::Lambda { params, body, span } => {
                 self.check_lambda(params, body, *span, expected)
             }
+            Expr::StructLiteral {
+                name,
+                fields,
+                spread,
+                rest,
+                span,
+            } => self.check_struct_literal(name, fields, spread.as_deref(), *rest, *span),
             Expr::MapLiteral { entries, span } => {
                 let mut key_ty = Type::Unknown;
                 let mut val_ty = Type::Unknown;

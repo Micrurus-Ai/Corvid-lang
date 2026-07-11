@@ -447,3 +447,44 @@ agent main() -> String:
         other => panic!("expected String, got {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn aliases_literals_destructuring_end_to_end() {
+    // Slice 45n: transparent type aliases, named struct literals
+    // with shorthand + `..base` spread (a NEW cell — the base is
+    // untouched), and irrefutable destructuring bindings with
+    // rename + rest.
+    let source = "
+type CustomerId = String
+
+type Decision:
+    refund: Bool
+    amount: Float
+    customer: CustomerId
+
+agent main() -> String:
+    d = Decision { customer: \"c-42\", refund: true, amount: 125.0 }
+    amount = 99.5
+    d2 = Decision { amount, ..d }
+    cid: CustomerId = d.customer
+    tail = cid.substring(2, 4)
+    Decision { refund, amount: final_amount, .. } = d2
+    ok1 = d.refund and d.amount == 125.0 and d.customer == \"c-42\"
+    ok2 = d2.amount == 99.5 and d2.refund and d2.customer == \"c-42\"
+    ok3 = refund and final_amount == 99.5
+    ok4 = tail == \"42\"
+    ok5 = d.amount == 125.0
+    if ok1 and ok2 and ok3 and ok4 and ok5:
+        return \"ALIASES LITERALS DESTRUCTURING WORK\"
+    return \"MISMATCH\"
+";
+    let ir = compile_to_ir(source).expect("45n e2e source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45n e2e program must run");
+    match out {
+        Value::String(s) => assert_eq!(&*s, "ALIASES LITERALS DESTRUCTURING WORK"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}

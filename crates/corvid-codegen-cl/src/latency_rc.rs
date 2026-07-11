@@ -131,6 +131,9 @@ fn collect_prompt_pins_in_stmt(
         IrStmt::If { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
         IrStmt::For { iter, .. } => collect_prompt_pins_in_expr(iter, borrowed_reads, out),
         IrStmt::While { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
+        IrStmt::Destructure { value, .. } => {
+            collect_prompt_pins_in_expr(value, borrowed_reads, out)
+        }
         IrStmt::Approve { args, .. } => {
             for arg in args {
                 collect_prompt_pins_in_expr(arg, borrowed_reads, out);
@@ -166,6 +169,14 @@ fn collect_prompt_pins_in_expr(
         }
         IrExprKind::Lambda { body, .. } => {
             collect_prompt_pins_in_expr(body, borrowed_reads, out);
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            for (_, v) in fields {
+                collect_prompt_pins_in_expr(v, borrowed_reads, out);
+            }
+            if let Some(s) = spread {
+                collect_prompt_pins_in_expr(s, borrowed_reads, out);
+            }
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_prompt_pins_in_expr(receiver, borrowed_reads, out);

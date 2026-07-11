@@ -981,6 +981,23 @@ impl<'a> Checker<'a> {
             .get(&def_id)
             .expect("type DefId not indexed");
 
+        // A type alias (45n) is transparent — it has no constructor
+        // of its own. Construct the target type instead.
+        if ty_decl.alias.is_some() {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::StructLiteralInvalid {
+                    type_name: name.to_string(),
+                    message: "a type alias is not a constructor — construct the target type"
+                        .into(),
+                },
+                ty_decl.span,
+            ));
+            for a in args {
+                let _ = self.check_expr(a);
+            }
+            return Type::Unknown;
+        }
+
         if args.len() != ty_decl.fields.len() {
             self.errors.push(TypeError::new(
                 TypeErrorKind::ArityMismatch {

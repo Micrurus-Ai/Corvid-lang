@@ -15,6 +15,23 @@ impl<'a> Parser<'a> {
         self.bump(); // type
 
         let (name, name_span) = self.expect_ident()?;
+
+        // Type alias (slice 45n): `type CustomerId = String`.
+        if matches!(self.peek(), TokKind::Assign) {
+            self.bump(); // =
+            let target = self.parse_type_ref()?;
+            let end = self.prev_span();
+            self.expect_newline()?;
+            return Ok(TypeDecl {
+                name: Ident::new(name, name_span),
+                fields: Vec::new(),
+                variants: Vec::new(),
+                alias: Some(target),
+                visibility,
+                span: start.merge(end),
+            });
+        }
+
         self.expect(TokKind::Colon, "`:` after type name")?;
         self.expect_newline()?;
 
@@ -75,6 +92,7 @@ impl<'a> Parser<'a> {
             name: Ident::new(name, name_span),
             fields,
             variants,
+            alias: None,
             visibility,
             span: start.merge(end),
         })

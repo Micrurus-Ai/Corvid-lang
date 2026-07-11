@@ -292,6 +292,11 @@ impl Codegen {
                 }
                 self.out.dedent();
             }
+            IrStmt::Destructure { .. } => {
+                self.out.writeln(
+                    "raise NotImplementedError(\"destructuring is interpreter-only in 45n\")",
+                );
+            }
             IrStmt::Break { .. } => self.out.writeln("break"),
             IrStmt::Continue { .. } => self.out.writeln("continue"),
             IrStmt::Pass { .. } => self.out.writeln("pass"),
@@ -320,6 +325,11 @@ impl Codegen {
             IrExprKind::Lambda { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"lambdas are interpreter-only in 45j\"))",
+                );
+            }
+            IrExprKind::StructLiteral { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"named struct literals are interpreter-only in 45n\"))",
                 );
             }
             IrExprKind::MapLiteral { .. } => {

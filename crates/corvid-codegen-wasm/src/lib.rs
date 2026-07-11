@@ -313,6 +313,9 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
                 intern_expr_literals(cond, pool);
                 intern_string_literals(body, pool);
             }
+            IrStmt::Destructure { value, .. } => {
+                intern_expr_literals(value, pool);
+            }
             IrStmt::Approve { args, .. } => {
                 for arg in args {
                     intern_expr_literals(arg, pool);
@@ -401,6 +404,11 @@ fn collect_block_imports(
                     "wasm target does not yet lower loops in agent `{agent_name}`"
                 )));
             }
+            IrStmt::Destructure { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "destructuring is interpreter-only in 45n".to_string(),
+                ));
+            }
             IrStmt::Approve { label, args, .. } => {
                 for arg in args {
                     collect_expr_imports(arg, tools, prompts, plan, agent_name)?;
@@ -446,6 +454,15 @@ fn collect_expr_imports(
         }
         IrExprKind::Lambda { body, .. } => {
             collect_expr_imports(body, tools, prompts, plan, agent_name)
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            for (_, v) in fields {
+                collect_expr_imports(v, tools, prompts, plan, agent_name)?;
+            }
+            if let Some(s) = spread {
+                collect_expr_imports(s, tools, prompts, plan, agent_name)?;
+            }
+            Ok(())
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
@@ -684,6 +701,11 @@ fn collect_block_locals(block: &IrBlock, locals: &mut LocalLayout) -> Result<(),
                     "wasm target does not yet lower loop locals",
                 ));
             }
+            IrStmt::Destructure { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "destructuring is interpreter-only in 45n",
+                ));
+            }
             _ => {}
         }
     }
@@ -896,6 +918,7 @@ fn emit_block(
             IrStmt::Yield { .. }
             | IrStmt::For { .. }
             | IrStmt::While { .. }
+            | IrStmt::Destructure { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(
@@ -924,6 +947,11 @@ fn emit_expr(
         IrExprKind::Lambda { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "lambdas are interpreter-only in 45j".to_string(),
+            ));
+        }
+        IrExprKind::StructLiteral { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "named struct literals are interpreter-only in 45n".to_string(),
             ));
         }
         IrExprKind::MapLiteral { .. } => {

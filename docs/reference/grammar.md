@@ -89,7 +89,7 @@ import_item       ::= IDENT ('as' IDENT)?
 
 ```ebnf
 type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
-                    | 'type' IDENT '=' type_alias_body NEWLINE      # PLANNED(45n)
+                    | 'type' IDENT '=' type_alias_body NEWLINE
 
 # A type declaration is a record (field lines) XOR a sum (variant
 # lines) — mixing is a parse error. Unit variants (`| Pending`) are
@@ -101,7 +101,11 @@ type_field        ::= IDENT ':' type_ref NEWLINE
 
 field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
 
-type_alias_body   ::= type_ref                                      # PLANNED(45n)
+# Aliases are TRANSPARENT: `type CustomerId = String` makes
+# `CustomerId` the same type as `String` everywhere (no newtype
+# semantics). Alias cycles are a compile error; an alias is not a
+# constructor.
+type_alias_body   ::= type_ref
 
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
 ```
@@ -267,6 +271,7 @@ stmt              ::= return_stmt
                     | if_stmt
                     | for_stmt
                     | while_stmt
+                    | destructure_stmt
                     | approve_stmt
                     | break_stmt | continue_stmt | pass_stmt
                     | assign_stmt
@@ -346,7 +351,7 @@ primary_expr      ::= literal
                     | '(' expr ')'
                     | list_literal
                     | map_literal
-                    | struct_literal                       # PLANNED(45n)
+                    | struct_literal
                     | match_expr
                     | lambda_expr
                     | retry_expr
@@ -360,9 +365,21 @@ list_literal      ::= '[' (expr (',' expr)*)? ']'
 map_literal       ::= '{' (map_entry (',' map_entry)* ','?)? '}'
 map_entry         ::= expr ':' expr
 
-struct_literal    ::= IDENT '{' field_init (',' field_init)* '}'     # PLANNED(45n)
-field_init        ::= IDENT (':' expr)?                              # PLANNED(45n)
-                    | '..' expr             # spread / update
+# Named-field construction: every declared field must be provided
+# (in any order) unless a `..base` spread fills the rest. The
+# spread must be LAST and must be the same struct type. A field
+# without a value is shorthand for `field: field`. A bare `..`
+# (no expression) is only valid when the whole literal is
+# reinterpreted as a DESTRUCTURING pattern in statement position.
+struct_literal    ::= IDENT '{' field_init (',' field_init)*
+                      (',' ('..' expr | '..'))? '}'
+field_init        ::= IDENT (':' expr)?
+
+# Statement-position destructuring (irrefutable): shorthand fields
+# bind the field name, `field: name` renames, `..` ignores the
+# rest. Refutable shapes (literals, nested patterns) belong in
+# `match`.
+destructure_stmt  ::= struct_literal '=' expr NEWLINE
 
 # `match` is exhaustiveness-checked: sum scrutinees must cover every
 # variant irrefutably (or carry a catch-all), Option needs Some+None,

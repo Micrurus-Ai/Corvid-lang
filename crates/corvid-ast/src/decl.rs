@@ -334,6 +334,13 @@ pub struct TypeDecl {
     /// metadata for diagnostics and 45i pattern destructuring.
     #[serde(default)]
     pub variants: Vec<SumVariant>,
+    /// Type alias (slice 45n): `type CustomerId = String`. An alias
+    /// is TRANSPARENT — the checker expands it to the target type
+    /// everywhere, so `CustomerId` and `String` are the same type
+    /// (no newtype semantics). A declaration is a record XOR a sum
+    /// XOR an alias.
+    #[serde(default)]
+    pub alias: Option<crate::ty::TypeRef>,
     /// Module-level visibility. Defaults to [`Visibility::Private`]
     /// (file-scoped). Marked `public` to be visible to importers
     /// once cross-file `.cor` imports land in `lang-cor-imports-basic`.

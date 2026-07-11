@@ -432,6 +432,10 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             out.push_str(":\n");
             render_block(body, indent + 1, out);
         }
+        Stmt::Destructure { .. } => {
+            push_indent(indent, out);
+            out.push_str("<destructure>\n");
+        }
         Stmt::Break { .. } => {
             push_indent(indent, out);
             out.push_str("break\n");
@@ -497,6 +501,7 @@ fn render_expr(expr: &Expr) -> String {
             // passes; the placeholder keeps the renderer total.
             "<fn>".to_string()
         }
+        Expr::StructLiteral { .. } => "<struct_literal>".to_string(),
         Expr::MapLiteral { entries, .. } => format!(
             "{{{}}}",
             entries

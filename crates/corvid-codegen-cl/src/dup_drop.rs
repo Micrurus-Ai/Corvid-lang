@@ -366,6 +366,9 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
             scan_expr(cond, max_id);
             scan_block(body, max_id);
         }
+        IrStmt::Destructure { value, .. } => {
+            scan_expr(value, max_id);
+        }
         IrStmt::Expr { expr, .. } => scan_expr(expr, max_id),
         IrStmt::Approve { args, .. } => {
             for a in args {
@@ -399,6 +402,14 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
         }
         IrExprKind::Lambda { body, .. } => {
             scan_expr(body, max_id);
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            for (_, v) in fields {
+                scan_expr(v, max_id);
+            }
+            if let Some(s) = spread {
+                scan_expr(s, max_id);
+            }
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
@@ -495,6 +506,10 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
                 })
         }
         IrExprKind::Lambda { body, .. } => expr_reads_local(body, target),
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|(_, v)| expr_reads_local(v, target))
+                || spread.as_ref().is_some_and(|s| expr_reads_local(s, target))
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }

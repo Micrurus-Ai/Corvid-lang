@@ -71,6 +71,9 @@ impl<'a> Checker<'a> {
                 self.walk_grounded_pure_expr(agent, cond);
                 self.walk_grounded_pure_block(agent, body);
             }
+            Stmt::Destructure { value, .. } => {
+                self.walk_grounded_pure_expr(agent, value);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Expr { expr, .. } => self.walk_grounded_pure_expr(agent, expr),
             Stmt::Approve { action, .. } => self.walk_grounded_pure_expr(agent, action),
@@ -125,6 +128,16 @@ impl<'a> Checker<'a> {
             }
             Expr::Lambda { body, .. } => {
                 self.walk_grounded_pure_expr(agent, body);
+            }
+            Expr::StructLiteral { fields, spread, .. } => {
+                for f in fields {
+                    if let Some(v) = &f.value {
+                        self.walk_grounded_pure_expr(agent, v);
+                    }
+                }
+                if let Some(s) = spread {
+                    self.walk_grounded_pure_expr(agent, s);
+                }
             }
             Expr::Index { target, index, .. } => {
                 self.walk_grounded_pure_expr(agent, target);

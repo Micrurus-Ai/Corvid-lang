@@ -1113,6 +1113,36 @@ Next per track order: 45n-type-aliases-and-named-struct-literals.
 
 ---
 
+## 2026-07-11 - 45n closed: aliases, named literals, destructuring — one surface, three forms
+
+The `Type { ... }` surface now works in all three positions:
+expression (named literal with shorthand + `..base` spread),
+statement-left-of-`=` (irrefutable destructuring, the 45i
+deferral), and `type X = T` aliases tie the room together.
+
+Design calls: aliases are TRANSPARENT (CustomerId IS String —
+no newtype; cycles error; not a constructor); spread builds a NEW
+cell whose fields share handles (base untouched, e2e-pinned);
+spread must be last and the same struct type; destructuring
+reuses the ENTIRE 45i pattern pipeline (check_pattern +
+pattern_is_irrefutable + pattern_matches) — the statement parser
+just reinterprets a parsed literal, so there is exactly one
+pattern grammar in the language.
+
+Probe returned "ALIASES LITERALS DESTRUCTURING WORK" first run;
+negative probes: alias cycle NAMED, missing field NAMED, refutable
+destructure rejected at parse with a pointer to `match`.
+
+Ops note: disk filled again mid-slice (incremental cache);
+CARGO_INCREMENTAL=0 for the remainder of the loop.
+
+Validation: 280 types + 216 syntax + 109 vm + 13 e2e + grammar
+gate + book guard; corpus verify exits 1.
+
+Next per track order: 45o-effect-and-model-exports.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

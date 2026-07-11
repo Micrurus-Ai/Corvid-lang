@@ -320,6 +320,9 @@ fn rename_local_in_block(block: &mut Block, resolved: &Resolved, target: LocalId
                 rename_local_in_expr(cond, resolved, target, fresh);
                 rename_local_in_block(body, resolved, target, fresh);
             }
+            Stmt::Destructure { value, .. } => {
+                rename_local_in_expr(value, resolved, target, fresh);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => rename_local_in_expr(action, resolved, target, fresh),
             Stmt::Expr { expr, .. } => rename_local_in_expr(expr, resolved, target, fresh),
@@ -376,6 +379,16 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
             }
         }
         Expr::Lambda { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
+        Expr::StructLiteral { fields, spread, .. } => {
+            for f in fields {
+                if let Some(v) = &mut f.value {
+                    rename_local_in_expr(v, resolved, target, fresh);
+                }
+            }
+            if let Some(s) = spread {
+                rename_local_in_expr(s, resolved, target, fresh);
+            }
+        }
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
         Expr::TryRetry { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
         Expr::Replay {
@@ -452,6 +465,7 @@ fn extract_from_stmt(
         Stmt::If { cond, .. } => extract_expr_to_let(cond, allocator, reserved),
         Stmt::For { iter, .. } => extract_expr_to_let(iter, allocator, reserved),
         Stmt::While { cond, .. } => extract_expr_to_let(cond, allocator, reserved),
+        Stmt::Destructure { value, .. } => extract_expr_to_let(value, allocator, reserved),
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => None,
         Stmt::Expr { expr, .. } => extract_expr_to_let(expr, allocator, reserved),
         Stmt::Approve { action, .. } => extract_expr_to_let(action, allocator, reserved),
@@ -587,6 +601,7 @@ fn direct_local_use(stmt: &Stmt, resolved: &Resolved, local: LocalId) -> bool {
         Stmt::If { cond, .. } => is_direct_local_expr(cond, resolved, local),
         Stmt::For { iter, .. } => is_direct_local_expr(iter, resolved, local),
         Stmt::While { cond, .. } => is_direct_local_expr(cond, resolved, local),
+        Stmt::Destructure { value, .. } => is_direct_local_expr(value, resolved, local),
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
         Stmt::Approve { action, .. } => is_direct_local_expr(action, resolved, local),
         Stmt::Expr { expr, .. } => is_direct_local_expr(expr, resolved, local),
@@ -633,6 +648,11 @@ fn apply_inline_to_stmt(stmt: &mut Stmt, resolved: &Resolved, replacement: Expr)
         Stmt::While { cond, .. } => {
             if matches!(cond, Expr::Ident { .. }) {
                 *cond = replacement;
+            }
+        }
+        Stmt::Destructure { value, .. } => {
+            if matches!(value, Expr::Ident { .. }) {
+                *value = replacement;
             }
         }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
@@ -779,6 +799,15 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
                 })
         }
         Expr::Lambda { body, .. } => expr_mentions_local(body, resolved, local),
+        Expr::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|f| {
+                f.value
+                    .as_ref()
+                    .is_some_and(|v| expr_mentions_local(v, resolved, local))
+            }) || spread
+                .as_ref()
+                .is_some_and(|s| expr_mentions_local(s, resolved, local))
+        }
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
         Expr::TryRetry { body, .. } => expr_mentions_local(body, resolved, local),
         Expr::Replay {
@@ -946,6 +975,7 @@ fn fold_constants_in_stmt(stmt: &mut Stmt) -> bool {
         Stmt::If { cond, .. } => fold_constants_in_expr(cond),
         Stmt::For { iter, .. } => fold_constants_in_expr(iter),
         Stmt::While { cond, .. } => fold_constants_in_expr(cond),
+        Stmt::Destructure { value, .. } => fold_constants_in_expr(value),
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
     }
 }
@@ -997,6 +1027,7 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             false
         }
         Expr::Lambda { .. } => false,
+        Expr::StructLiteral { .. } => false,
         Expr::Match {
             scrutinee, arms, ..
         } => {
@@ -1120,6 +1151,9 @@ fn is_pure_expr(expr: &Expr) -> bool {
         // Conservative: lambdas capture the environment; keep them
         // out of pure-expression substitution.
         Expr::Lambda { .. } => false,
+        // Conservative: named literals allocate cells; keep them out
+        // of pure-expression substitution.
+        Expr::StructLiteral { .. } => false,
         Expr::FieldAccess { target, .. } => is_pure_expr(target),
         Expr::Index { target, index, .. } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Call { .. }

@@ -3973,6 +3973,89 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45n — type aliases are transparent (CustomerId IS
+/// String); alias cycles error; named literals enforce full field
+/// coverage; spread must match the struct type.
+#[test]
+fn aliases_and_named_literals() {
+    let ok = check(
+        "type CustomerId = String
+
+type Decision:
+    refund: Bool
+    amount: Float
+
+agent main(base: Decision) -> String:
+    cid: CustomerId = \"c-42\"
+    amount = 9.5
+    d = Decision { refund: true, amount }
+    d2 = Decision { amount: 1.0, ..d }
+    Decision { refund, amount: got, .. } = d2
+    if refund and got > 0.0:
+        return cid.to_upper()
+    return cid
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+
+    let cycle = check(
+        "type A = B
+type B = A
+
+agent main() -> Int:
+    x: A = 1
+    return 1
+",
+    );
+    assert!(
+        cycle
+            .errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::AliasCycle { .. })),
+        "expected alias cycle error, got {:?}",
+        cycle.errors
+    );
+
+    let missing = check(
+        "type D:
+    a: Int
+    b: Int
+
+agent main() -> Int:
+    d = D { a: 1 }
+    return d.a
+",
+    );
+    assert!(
+        missing.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::StructLiteralInvalid { message, .. } if message.contains("missing")
+        )),
+        "expected missing-field error, got {:?}",
+        missing.errors
+    );
+
+    let wrong_spread = check(
+        "type D:
+    a: Int
+type E:
+    a: Int
+
+agent main(e: E) -> Int:
+    d = D { ..e }
+    return d.a
+",
+    );
+    assert!(
+        wrong_spread.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::TypeMismatch { context, .. } if context.contains("spread")
+        )),
+        "expected spread type mismatch, got {:?}",
+        wrong_spread.errors
+    );
+}
+
 /// Slice 45m — math methods on the builtin table: Int and Float
 /// receivers, Float->Int conversions typed as Int, method chains
 /// compose.

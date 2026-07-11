@@ -198,6 +198,9 @@ fn collect_ident_spans_by_name_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(cond, name, spans);
             collect_ident_spans_by_name_in_block(body, name, spans);
         }
+        Stmt::Destructure { value, .. } => {
+            collect_ident_spans_by_name_in_expr(value, name, spans);
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => collect_ident_spans_by_name_in_expr(action, name, spans),
         Stmt::Expr { expr, .. } => collect_ident_spans_by_name_in_expr(expr, name, spans),
@@ -223,6 +226,16 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
         }
         Expr::Lambda { body, .. } => {
             collect_ident_spans_by_name_in_expr(body, name, spans);
+        }
+        Expr::StructLiteral { fields, spread, .. } => {
+            for f in fields {
+                if let Some(v) = &f.value {
+                    collect_ident_spans_by_name_in_expr(v, name, spans);
+                }
+            }
+            if let Some(s) = spread {
+                collect_ident_spans_by_name_in_expr(s, name, spans);
+            }
         }
         Expr::Index { target, index, .. } => {
             collect_ident_spans_by_name_in_expr(target, name, spans);

@@ -289,6 +289,10 @@ impl CfgBuilder {
                     );
                     cur = join;
                 }
+                IrStmt::Destructure { value, .. } => {
+                    let reads = collect_reads(value, true);
+                    self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                }
                 IrStmt::While { cond, body, .. } => {
                     // Same edge shape as `for`: head -> body,
                     // body -> head (backedge), head -> after. The
@@ -436,6 +440,14 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
         }
         IrExprKind::Lambda { body, .. } => {
             out.extend(collect_reads(body, false));
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            for (_, v) in fields {
+                out.extend(collect_reads(v, false));
+            }
+            if let Some(s) = spread {
+                out.extend(collect_reads(s, false));
+            }
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             out.extend(collect_reads(receiver, false));

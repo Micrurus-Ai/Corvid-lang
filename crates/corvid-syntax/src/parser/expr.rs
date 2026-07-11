@@ -13,7 +13,9 @@
 use super::{describe_token, Parser};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
-use corvid_ast::{Backoff, BinaryOp, Expr, Ident, LambdaParam, Literal, Span, UnaryOp};
+use corvid_ast::{
+    Backoff, BinaryOp, Expr, Ident, LambdaParam, Literal, Span, StructLiteralField, UnaryOp,
+};
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------
@@ -307,6 +309,10 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name) => {
                 self.bump();
                 let name = self.parse_namespaced_ident_from(name)?;
+                // Named struct literal (45n): `Decision { ... }`.
+                if matches!(self.peek(), TokKind::LBrace) {
+                    return self.parse_struct_literal(Ident::new(name, start_span));
+                }
                 Ok(Expr::Ident {
                     name: Ident::new(name, start_span),
                     span: start_span,
@@ -395,6 +401,75 @@ impl<'a> Parser<'a> {
                 span: start_span,
             }),
         }
+    }
+
+    /// `Decision { refund: true, amount, ..base }` — named struct
+    /// literal (slice 45n). A bare `..` (no expression) sets `rest`
+    /// and is only legal when the whole form is reinterpreted as a
+    /// destructuring pattern by the statement parser.
+    fn parse_struct_literal(&mut self, name: Ident) -> Result<Expr, ParseError> {
+        let start = name.span;
+        self.bump(); // {
+        let mut fields: Vec<StructLiteralField> = Vec::new();
+        let mut spread: Option<Box<Expr>> = None;
+        let mut rest = false;
+        loop {
+            if matches!(self.peek(), TokKind::RBrace) {
+                break;
+            }
+            // `..` — either a bare rest marker or `..base` spread.
+            if matches!(self.peek(), TokKind::Dot) {
+                self.bump();
+                self.expect(TokKind::Dot, "`..` in a struct literal")?;
+                if matches!(self.peek(), TokKind::RBrace | TokKind::Comma) {
+                    rest = true;
+                } else {
+                    spread = Some(Box::new(self.parse_expr()?));
+                }
+                // Spread/rest must be LAST.
+                if matches!(self.peek(), TokKind::Comma) {
+                    self.bump();
+                }
+                if !matches!(self.peek(), TokKind::RBrace) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(self.peek()),
+                            expected: "`}` — `..` must be the LAST entry in a struct literal"
+                                .into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                break;
+            }
+            let fstart = self.peek_span();
+            let (fname, fname_span) = self.expect_ident()?;
+            let value = if matches!(self.peek(), TokKind::Colon) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None // shorthand: reads the local of the same name
+            };
+            fields.push(StructLiteralField {
+                name: Ident::new(fname, fname_span),
+                value,
+                span: fstart.merge(self.prev_span()),
+            });
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        let end = self.peek_span();
+        self.expect(TokKind::RBrace, "`}` closing the struct literal")?;
+        Ok(Expr::StructLiteral {
+            name,
+            fields,
+            spread,
+            rest,
+            span: start.merge(end),
+        })
     }
 
     /// `fn (x, y) -> expr` — lambda expression (slice 45j).
