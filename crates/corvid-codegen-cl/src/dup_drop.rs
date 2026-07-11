@@ -362,6 +362,10 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
             scan_expr(iter, max_id);
             scan_block(body, max_id);
         }
+        IrStmt::While { cond, body, .. } => {
+            scan_expr(cond, max_id);
+            scan_block(body, max_id);
+        }
         IrStmt::Expr { expr, .. } => scan_expr(expr, max_id),
         IrStmt::Approve { args, .. } => {
             for a in args {
@@ -640,6 +644,7 @@ fn find_block<'a>(root: &'a IrBlock, parent: &IrPath) -> Option<&'a IrBlock> {
                 IrNavStep::IfElse,
             ) => eb,
             (IrStmt::For { body, .. }, IrNavStep::ForBody) => body,
+            (IrStmt::While { body, .. }, IrNavStep::WhileBody) => body,
             _ => return None,
         };
         i += 2;
@@ -675,6 +680,7 @@ fn navigate_mut<'a>(root: &'a mut IrBlock, parent: &IrPath) -> &'a mut IrBlock {
                 IrNavStep::IfElse,
             ) => eb,
             (IrStmt::For { body, .. }, IrNavStep::ForBody) => body,
+            (IrStmt::While { body, .. }, IrNavStep::WhileBody) => body,
             _ => panic!("IrPath descent doesn't match IR shape"),
         };
         i += 2;

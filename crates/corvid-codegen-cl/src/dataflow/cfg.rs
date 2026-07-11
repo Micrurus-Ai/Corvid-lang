@@ -289,6 +289,26 @@ impl CfgBuilder {
                     );
                     cur = join;
                 }
+                IrStmt::While { cond, body, .. } => {
+                    // Same edge shape as `for`: head -> body,
+                    // body -> head (backedge), head -> after. The
+                    // condition's reads are non-consuming (the head
+                    // re-reads them every iteration).
+                    let cond_reads = collect_reads(cond, false);
+                    self.push_stmt(cur, CfgStmt::Branch { reads: cond_reads }, my_path.clone());
+                    let body_id = self.alloc_block();
+                    let after_loop = self.alloc_block();
+                    self.add_succ(cur, body_id);
+                    self.add_succ(cur, after_loop);
+                    let mut body_parent = my_path.clone();
+                    body_parent.push(IrNavStep::WhileBody);
+                    let after_body = self.lower_block(body, body_id, body_parent);
+                    if let Some(ab) = after_body {
+                        self.add_succ(ab, cur);
+                    }
+                    cur = after_loop;
+                    continue;
+                }
                 IrStmt::For {
                     var_local,
                     var_name: _,

@@ -263,7 +263,6 @@ impl<'a> Checker<'a> {
                     Type::Unknown
                 }
                 BuiltIn::None => Type::Option(Box::new(Type::Unknown)),
-                BuiltIn::Break | BuiltIn::Continue | BuiltIn::Pass => Type::Nothing,
             },
         }
     }

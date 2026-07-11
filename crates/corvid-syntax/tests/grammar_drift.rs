@@ -473,6 +473,18 @@ agent mutate(w: Wallet, xs: List<Int>) -> Float:
     n += 37
     return w.balance
 
+agent while_demo(limit: Int) -> Int:
+    n = 0
+    total = 0
+    while n < limit:
+        n += 1
+        if n % 2 == 0:
+            continue
+        if n > 7:
+            break
+        total += n
+    return total
+
 agent flow(xs: List<Int>) -> Result<Int, String>:
     total: Int = 0
     for x in xs:
@@ -601,6 +613,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("list_literal", "expressions"),
     ("map_literal", "statements"),
     ("field_list", "statements"),
+    ("while_stmt", "statements"),
     ("match_expr", "statements"),
     ("match_arm", "statements"),
     ("pattern", "statements"),

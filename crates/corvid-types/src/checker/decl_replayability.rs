@@ -69,6 +69,11 @@ impl<'a> Checker<'a> {
                 self.walk_deterministic_expr(agent, iter);
                 self.walk_deterministic_block(agent, body);
             }
+            Stmt::While { cond, body, .. } => {
+                self.walk_deterministic_expr(agent, cond);
+                self.walk_deterministic_block(agent, body);
+            }
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Expr { expr, .. } => self.walk_deterministic_expr(agent, expr),
             Stmt::Assign { target, value, .. } => {
                 self.walk_deterministic_expr(agent, target);
@@ -298,6 +303,11 @@ fn collect_replayability_violations_in_stmt(stmt: &Stmt, out: &mut Vec<Replayabi
             collect_replayability_violations_in_expr(iter, out);
             collect_replayability_violations_in_block(body, out);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_replayability_violations_in_expr(cond, out);
+            collect_replayability_violations_in_block(body, out);
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Expr { expr, .. } => {
             collect_replayability_violations_in_expr(expr, out);
         }

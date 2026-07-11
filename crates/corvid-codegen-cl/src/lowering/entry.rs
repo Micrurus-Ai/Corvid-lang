@@ -31,6 +31,7 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
                 || else_block.as_ref().map(block_uses_runtime).unwrap_or(false)
         }
         IrStmt::For { iter, body, .. } => expr_uses_runtime(iter) || block_uses_runtime(body),
+        IrStmt::While { cond, body, .. } => expr_uses_runtime(cond) || block_uses_runtime(body),
         IrStmt::Approve { .. } => true,
         IrStmt::Expr { expr, .. } => expr_uses_runtime(expr),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => false,

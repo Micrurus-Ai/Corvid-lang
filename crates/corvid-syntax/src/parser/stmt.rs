@@ -12,7 +12,7 @@
 use super::Parser;
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
-use corvid_ast::{BinaryOp, Block, Expr, Ident, Span, Stmt};
+use corvid_ast::{BinaryOp, Block, Expr, Ident, Stmt};
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------
@@ -73,21 +73,11 @@ impl<'a> Parser<'a> {
             TokKind::KwYield => self.parse_yield_stmt(),
             TokKind::KwIf => self.parse_if_stmt(),
             TokKind::KwFor => self.parse_for_stmt(),
+            TokKind::KwWhile => self.parse_while_stmt(),
             TokKind::KwApprove => self.parse_approve_stmt(),
-            TokKind::KwBreak => self.parse_simple_kw_stmt(TokKind::KwBreak, |_| {
-                // We don't have a dedicated Break variant yet — represent it as
-                // an expression statement referencing the keyword would be wrong.
-                // Use a placeholder: treat Break/Continue/Pass as expression-less
-                // marker statements via Stmt::Expr with a specific Ident.
-                // For cleanness we'll add variants when the AST needs them.
-                unreachable!("handled specially")
-            }),
-            TokKind::KwContinue => self.parse_simple_kw_stmt(TokKind::KwContinue, |_| {
-                unreachable!("handled specially")
-            }),
-            TokKind::KwPass => self.parse_simple_kw_stmt(TokKind::KwPass, |_| {
-                unreachable!("handled specially")
-            }),
+            TokKind::KwBreak => self.parse_loop_flow_stmt(),
+            TokKind::KwContinue => self.parse_loop_flow_stmt(),
+            TokKind::KwPass => self.parse_loop_flow_stmt(),
             TokKind::Ident(_) => self.parse_assign_or_expr_stmt(),
             _ => self.parse_expr_stmt(),
         }
@@ -178,31 +168,35 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `break`, `continue`, and `pass` are each a single keyword + newline.
-    /// Since the AST doesn't yet have dedicated variants, they are encoded
-    /// as expression statements containing a sentinel `Ident` — the name
-    /// resolver will recognize them. (A future cleanup: add real variants.)
-    fn parse_simple_kw_stmt(
-        &mut self,
-        _expected: TokKind,
-        _: fn(Span) -> Stmt,
-    ) -> Result<Stmt, ParseError> {
+    /// `while cond:` — conditional loop (slice 45k).
+    fn parse_while_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // while
+        let cond = self.parse_expr()?;
+        self.expect(TokKind::Colon, "`:` after `while` condition")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let end = body.span;
+        Ok(Stmt::While {
+            cond,
+            body,
+            span: start.merge(end),
+        })
+    }
+
+    /// `break`, `continue`, and `pass` — single keyword + newline,
+    /// each a real AST variant (promoted from the former
+    /// sentinel-`Ident` encoding in slice 45k).
+    fn parse_loop_flow_stmt(&mut self) -> Result<Stmt, ParseError> {
         let span = self.peek_span();
         let kw = self.peek().clone();
         self.bump();
         self.expect_newline()?;
-        let name = match kw {
-            TokKind::KwBreak => "break",
-            TokKind::KwContinue => "continue",
-            TokKind::KwPass => "pass",
-            _ => unreachable!(),
-        };
-        Ok(Stmt::Expr {
-            expr: Expr::Ident {
-                name: Ident::new(name, span),
-                span,
-            },
-            span,
+        Ok(match kw {
+            TokKind::KwBreak => Stmt::Break { span },
+            TokKind::KwContinue => Stmt::Continue { span },
+            TokKind::KwPass => Stmt::Pass { span },
+            _ => unreachable!("dispatched on break/continue/pass only"),
         })
     }
 

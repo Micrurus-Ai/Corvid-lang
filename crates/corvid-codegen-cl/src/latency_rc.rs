@@ -130,6 +130,7 @@ fn collect_prompt_pins_in_stmt(
         IrStmt::Expr { expr, .. } => collect_prompt_pins_in_expr(expr, borrowed_reads, out),
         IrStmt::If { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
         IrStmt::For { iter, .. } => collect_prompt_pins_in_expr(iter, borrowed_reads, out),
+        IrStmt::While { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
         IrStmt::Approve { args, .. } => {
             for arg in args {
                 collect_prompt_pins_in_expr(arg, borrowed_reads, out);

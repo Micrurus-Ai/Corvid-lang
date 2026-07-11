@@ -216,6 +216,11 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
             scan_expr(iter, current_return_ty)?;
             scan_block(body, current_return_ty)
         }
+        // `while` (45k) lowers natively like `for` — walk cond + body.
+        IrStmt::While { cond, body, .. } => {
+            scan_expr(cond, current_return_ty)?;
+            scan_block(body, current_return_ty)
+        }
         IrStmt::Approve { args, .. } => {
             // `approve` compiles to a no-op in generated native code.
             // Still walk the arg expressions so any tool/prompt call

@@ -322,6 +322,50 @@ impl<'ir> Interpreter<'ir> {
                 }
                 Ok(Flow::Normal)
             }
+            // `while cond:` (slice 45k) — re-evaluate the condition
+            // before every iteration; a non-Bool condition traps
+            // (the checker only lets Bool/Unknown through).
+            IrStmt::While { cond, body, span } => {
+                loop {
+                    let cond_val = match self.eval_expr(cond).await?.into_value() {
+                        Ok(v) => v,
+                        Err(v) => return Ok(Flow::Return(v)),
+                    };
+                    let keep_going = match cond_val {
+                        Value::Bool(b) => b,
+                        Value::Grounded(g) => match g.inner.get() {
+                            Value::Bool(b) => b,
+                            other => {
+                                return Err(InterpError::new(
+                                    InterpErrorKind::TypeMismatch {
+                                        expected: "Bool".into(),
+                                        got: other.type_name(),
+                                    },
+                                    *span,
+                                ));
+                            }
+                        },
+                        other => {
+                            return Err(InterpError::new(
+                                InterpErrorKind::TypeMismatch {
+                                    expected: "Bool".into(),
+                                    got: other.type_name(),
+                                },
+                                *span,
+                            ));
+                        }
+                    };
+                    if !keep_going {
+                        break;
+                    }
+                    match self.eval_block(body).await? {
+                        Flow::Normal | Flow::Continue => continue,
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                    }
+                }
+                Ok(Flow::Normal)
+            }
             IrStmt::Approve { label, args, span } => {
                 let mut json_args = Vec::with_capacity(args.len());
                 for a in args {

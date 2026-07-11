@@ -25,6 +25,8 @@ pub enum IrNavStep {
     /// Descend into the `else_block` of an `IrStmt::If`. Only valid
     /// if the `If` has an else branch.
     IfElse,
+    /// Descend into the `body` of an `IrStmt::While`.
+    WhileBody,
     /// Descend into the `body` of an `IrStmt::For`.
     ForBody,
 }

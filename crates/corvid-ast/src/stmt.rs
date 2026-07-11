@@ -52,6 +52,27 @@ pub enum Stmt {
         span: Span,
     },
 
+    /// Conditional loop: `while cond:` (slice 45k). The condition
+    /// is re-evaluated before every iteration; `break`/`continue`
+    /// apply to the innermost enclosing loop of either kind.
+    While {
+        cond: Expr,
+        body: Block,
+        span: Span,
+    },
+
+    /// `break` — exit the innermost enclosing loop (slice 45k
+    /// promoted this from a sentinel-`Ident` encoding to a real
+    /// variant).
+    Break { span: Span },
+
+    /// `continue` — skip to the next iteration of the innermost
+    /// enclosing loop.
+    Continue { span: Span },
+
+    /// `pass` — explicit no-op statement.
+    Pass { span: Span },
+
     /// The approval gate — the core of Corvid's safety story.
     ///
     /// `approve Action(...)` must precede any `Irreversible` tool call
@@ -90,6 +111,10 @@ impl Stmt {
             | Stmt::Yield { span, .. }
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::While { span, .. }
+            | Stmt::Break { span }
+            | Stmt::Continue { span }
+            | Stmt::Pass { span }
             | Stmt::Approve { span, .. }
             | Stmt::Expr { span, .. }
             | Stmt::Assign { span, .. } => *span,

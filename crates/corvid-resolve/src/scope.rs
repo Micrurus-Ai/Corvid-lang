@@ -84,10 +84,6 @@ pub enum BuiltIn {
     /// invalidating the builder (so set+finish cycles can
     /// continue).
     JsonBuilder,
-    // Structural sentinels (surface as Idents today; real variants later).
-    Break,
-    Continue,
-    Pass,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -169,8 +165,6 @@ impl SymbolTable {
             .insert("resume_token".into(), BuiltIn::StreamResumeToken);
         self.builtins.insert("ask".into(), BuiltIn::Ask);
         self.builtins.insert("choose".into(), BuiltIn::Choose);
-        self.builtins.insert("break".into(), BuiltIn::Break);
-        self.builtins.insert("continue".into(), BuiltIn::Continue);
         // Phase 33S3a — see the `BuiltIn::DbHandle` docstring.
         self.builtins.insert("DbHandle".into(), BuiltIn::DbHandle);
         // Phase 33R5b-a — see the `BuiltIn::JsonValue` /
@@ -178,7 +172,6 @@ impl SymbolTable {
         self.builtins.insert("JsonValue".into(), BuiltIn::JsonValue);
         self.builtins
             .insert("JsonBuilder".into(), BuiltIn::JsonBuilder);
-        self.builtins.insert("pass".into(), BuiltIn::Pass);
     }
 
     /// Insert a top-level declaration.

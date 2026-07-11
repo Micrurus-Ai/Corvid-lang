@@ -1015,6 +1015,38 @@ to real AST variants), 45l Option/Result method shorthands.
 
 ---
 
+## 2026-07-11 - 45k closed: while — and the loop-flow statements become real
+
+`while cond:` ships everywhere at once — interpreter AND native.
+codegen-cl already lowered `for` through Cranelift with a proper
+loop stack, so `while` got the same treatment rather than a
+degradation: a new `lower_while` (header re-evaluates the
+condition; `continue` jumps to the header — a while loop has no
+step block). The native probe with break+continue returned the
+hand-checked sum on the first run; the interpreter probe returned
+"WHILE WORKS".
+
+The second half of the slice paid down the oldest TODO in the
+parser: `break`/`continue`/`pass` were encoded as sentinel `Ident`
+expressions that the resolver recognized as builtins. They are now
+real AST variants and the whole sentinel pathway (scope entries,
+BuiltIn variants, lower.rs special-case, checker arm) is deleted.
+The promotion bought a new compile error for free: `break` outside
+a loop was silently lowered before; now the checker tracks loop
+depth and rejects it with a named diagnostic.
+
+Cost analysis stays @budget-sound: a while body with any static
+cost marks the estimate unbounded (iteration count unknown); a
+zero-cost body stays bounded.
+
+Validation: 277 types + 216 syntax + grammar gate + 2 new e2e pins
++ book guard; corpus verify exits 1 on the two deliberate fixtures.
+
+Next per track order: 45l-option-result-ergonomics (unwrap_or,
+is_some/is_ok family, ok_or, map_err on the 45c table).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

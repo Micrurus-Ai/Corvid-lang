@@ -104,6 +104,8 @@ pub enum TokKind {
     KwIf,
     KwElse,
     KwFor,
+    /// `while` — conditional loop (slice 45k).
+    KwWhile,
     KwIn,
     KwReturn,
     KwYield,
@@ -244,6 +246,7 @@ impl TokKind {
             "if" => TokKind::KwIf,
             "else" => TokKind::KwElse,
             "for" => TokKind::KwFor,
+            "while" => TokKind::KwWhile,
             "in" => TokKind::KwIn,
             "return" => TokKind::KwReturn,
             "yield" => TokKind::KwYield,

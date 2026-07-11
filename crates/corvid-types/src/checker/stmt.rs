@@ -176,7 +176,9 @@ impl<'a> Checker<'a> {
                 }
                 let entry_frontier = self.effect_frontier;
                 let entry_weak_refresh = self.weak_refresh.clone();
+                self.loop_depth += 1;
                 self.check_block(body);
+                self.loop_depth -= 1;
                 let body_frontier = self.effect_frontier;
                 let body_refresh = self.weak_refresh.clone();
                 self.effect_frontier = entry_frontier.merge_max(body_frontier);
@@ -186,6 +188,55 @@ impl<'a> Checker<'a> {
                     &body_refresh,
                 );
             }
+            Stmt::While { cond, body, .. } => {
+                // Same Grounded<Bool> acceptance rule as `if`: the
+                // branch consumes the bool, it does not launder it.
+                let cond_ty = self.check_expr(cond);
+                if !matches!(cond_ty.ungrounded(), Type::Bool | Type::Unknown) {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::TypeMismatch {
+                            expected: "Bool".into(),
+                            got: cond_ty.display_name(),
+                            context: "`while` condition".into(),
+                        },
+                        cond.span(),
+                    ));
+                }
+                let entry_frontier = self.effect_frontier;
+                let entry_weak_refresh = self.weak_refresh.clone();
+                self.loop_depth += 1;
+                self.check_block(body);
+                self.loop_depth -= 1;
+                let body_frontier = self.effect_frontier;
+                let body_refresh = self.weak_refresh.clone();
+                self.effect_frontier = entry_frontier.merge_max(body_frontier);
+                self.weak_refresh = self.merge_weak_refresh(
+                    &entry_weak_refresh,
+                    &entry_weak_refresh,
+                    &body_refresh,
+                );
+            }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::LoopFlowOutsideLoop {
+                            keyword: "break".into(),
+                        },
+                        *span,
+                    ));
+                }
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::LoopFlowOutsideLoop {
+                            keyword: "continue".into(),
+                        },
+                        *span,
+                    ));
+                }
+            }
+            Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => {
                 self.check_approve(action);
                 self.bump_effect(WeakEffect::Approve);

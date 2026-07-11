@@ -102,6 +102,9 @@ pub enum TypeErrorKind {
     /// `yield` is only valid inside agent bodies.
     YieldOutsideAgent,
 
+    /// `break` or `continue` outside any enclosing loop (slice 45k).
+    LoopFlowOutsideLoop { keyword: String },
+
     /// An agent body used `yield` without declaring `Stream<T>`.
     YieldRequiresStreamReturn { declared: String },
 
@@ -448,6 +451,9 @@ impl TypeErrorKind {
                 format!("the module imported as `{alias}` has no declaration named `{name}`")
             }
             Self::YieldOutsideAgent => "`yield` is only allowed inside agent bodies".into(),
+            Self::LoopFlowOutsideLoop { keyword } => {
+                format!("`{keyword}` is only valid inside a `for` or `while` loop")
+            }
             Self::YieldRequiresStreamReturn { declared } => {
                 format!(
                     "`yield` requires the enclosing agent to declare `Stream<T>`, got `{declared}`"
@@ -747,6 +753,9 @@ impl TypeErrorKind {
             Self::UnknownImportMember { .. } => Some(
                 "check the imported file's top-level declarations for the name you meant".into(),
             ),
+            Self::LoopFlowOutsideLoop { keyword } => Some(format!(
+                "move the `{keyword}` inside a loop body, or remove it"
+            )),
             Self::YieldOutsideAgent => Some(
                 "move `yield` into an `agent ... -> Stream<T>` body, or replace it with `return`".into(),
             ),

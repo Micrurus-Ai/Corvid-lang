@@ -51,6 +51,11 @@ fn collect_block_dependencies(block: &Block, out: &mut Vec<String>) {
                 collect_expr_dependencies(iter, out);
                 collect_block_dependencies(body, out);
             }
+            Stmt::While { cond, body, .. } => {
+                collect_expr_dependencies(cond, out);
+                collect_block_dependencies(body, out);
+            }
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => collect_expr_dependencies(action, out),
             Stmt::Return { value: None, .. } => {}
         }

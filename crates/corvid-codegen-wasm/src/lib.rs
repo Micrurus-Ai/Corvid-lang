@@ -309,6 +309,10 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
                 intern_expr_literals(iter, pool);
                 intern_string_literals(body, pool);
             }
+            IrStmt::While { cond, body, .. } => {
+                intern_expr_literals(cond, pool);
+                intern_string_literals(body, pool);
+            }
             IrStmt::Approve { args, .. } => {
                 for arg in args {
                     intern_expr_literals(arg, pool);
@@ -392,7 +396,7 @@ fn collect_block_imports(
                     collect_block_imports(else_block, tools, prompts, plan, agent_name)?;
                 }
             }
-            IrStmt::For { .. } => {
+            IrStmt::For { .. } | IrStmt::While { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(
                     "wasm target does not yet lower loops in agent `{agent_name}`"
                 )));
@@ -675,7 +679,7 @@ fn collect_block_locals(block: &IrBlock, locals: &mut LocalLayout) -> Result<(),
                     collect_block_locals(else_block, locals)?;
                 }
             }
-            IrStmt::For { .. } => {
+            IrStmt::For { .. } | IrStmt::While { .. } => {
                 return Err(WasmCodegenError::unsupported(
                     "wasm target does not yet lower loop locals",
                 ));
@@ -891,6 +895,7 @@ fn emit_block(
             IrStmt::Pass { .. } | IrStmt::Dup { .. } | IrStmt::Drop { .. } => {}
             IrStmt::Yield { .. }
             | IrStmt::For { .. }
+            | IrStmt::While { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(

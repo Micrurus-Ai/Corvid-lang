@@ -281,6 +281,20 @@ fn lower_stmt(
             module,
             runtime,
         ),
+        IrStmt::While { cond, body, span } => lower_while(
+            builder,
+            cond,
+            body,
+            *span,
+            current_return_ty,
+            env,
+            var_idx,
+            scope_stack,
+            loop_stack,
+            func_ids_by_def,
+            module,
+            runtime,
+        ),
         IrStmt::Approve { label, args, span } => {
             // Lower approve args once, keep their side effects, and
             // forward the typed values into the native runtime so the
@@ -616,6 +630,94 @@ fn lower_for(
     Ok(BlockOutcome::Normal)
 }
 
+/// Lower `while cond: body` (slice 45k). Simpler than `for`: the
+/// header re-evaluates the condition before every iteration, and
+/// `continue` jumps back to the header (there is no step block).
+#[allow(clippy::too_many_arguments)]
+fn lower_while(
+    builder: &mut FunctionBuilder,
+    cond: &IrExpr,
+    body: &IrBlock,
+    _span: Span,
+    current_return_ty: &Type,
+    env: &mut HashMap<LocalId, (Variable, clir::Type)>,
+    var_idx: &mut usize,
+    scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
+    loop_stack: &mut Vec<LoopCtx>,
+    func_ids_by_def: &HashMap<DefId, FuncId>,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+) -> Result<BlockOutcome, CodegenError> {
+    let header_b = builder.create_block();
+    let body_b = builder.create_block();
+    let exit_b = builder.create_block();
+    let scope_depth_at_entry = scope_stack.len();
+
+    loop_stack.push(LoopCtx {
+        // `continue` re-checks the condition — the header IS the
+        // step block for a while loop.
+        step_block: header_b,
+        exit_block: exit_b,
+        scope_depth_at_entry,
+        loop_owned_local: None,
+    });
+
+    builder.ins().jump(header_b, &[]);
+
+    builder.switch_to_block(header_b);
+    // Condition lowering may span multiple CLIF blocks (e.g. short-
+    // circuit `and`/`or`), so the brif is emitted from wherever it
+    // ends; the backedge always re-enters `header_b`.
+    let cond_val = lower_expr(
+        builder,
+        cond,
+        current_return_ty,
+        env,
+        scope_stack,
+        func_ids_by_def,
+        module,
+        runtime,
+    )?;
+    builder.ins().brif(cond_val, body_b, &[], exit_b, &[]);
+
+    builder.switch_to_block(body_b);
+    builder.seal_block(body_b);
+    scope_stack.push(Vec::new());
+    let body_outcome = lower_block(
+        builder,
+        body,
+        current_return_ty,
+        env,
+        var_idx,
+        scope_stack,
+        loop_stack,
+        func_ids_by_def,
+        module,
+        runtime,
+    )?;
+    match body_outcome {
+        BlockOutcome::Normal => {
+            let body_scope = scope_stack.pop().unwrap_or_default();
+            if !runtime.dup_drop_enabled {
+                for (_, v) in body_scope.iter().rev() {
+                    let x = builder.use_var(*v);
+                    emit_release(builder, module, runtime, x);
+                }
+            }
+            builder.ins().jump(header_b, &[]);
+        }
+        BlockOutcome::Terminated => {
+            scope_stack.pop();
+        }
+    }
+    builder.seal_block(header_b);
+
+    builder.switch_to_block(exit_b);
+    builder.seal_block(exit_b);
+    loop_stack.pop();
+    Ok(BlockOutcome::Normal)
+}
+
 /// Release refcounted locals deeper than `floor_depth`, then jump to
 /// the given block. Shared by `break` and `continue`.
 fn lower_break_or_continue(
@@ -702,6 +804,9 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
         }
         IrStmt::For { iter, body, .. } => {
             expr_mentions_local(iter, target) || block_mentions_local(body, target)
+        }
+        IrStmt::While { cond, body, .. } => {
+            expr_mentions_local(cond, target) || block_mentions_local(body, target)
         }
         IrStmt::Approve { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
         IrStmt::Break { .. }

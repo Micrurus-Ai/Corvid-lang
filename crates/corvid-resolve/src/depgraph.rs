@@ -260,6 +260,11 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
             collect_expr_deps(iter, resolved, deps);
             collect_block_deps(body, resolved, deps);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_expr_deps(cond, resolved, deps);
+            collect_block_deps(body, resolved, deps);
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => {
             collect_expr_deps(action, resolved, deps);
         }

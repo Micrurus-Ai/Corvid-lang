@@ -266,6 +266,7 @@ stmt              ::= return_stmt
                     | yield_stmt
                     | if_stmt
                     | for_stmt
+                    | while_stmt
                     | approve_stmt
                     | break_stmt | continue_stmt | pass_stmt
                     | assign_stmt
@@ -277,10 +278,16 @@ yield_stmt        ::= 'yield' expr NEWLINE
 
 if_stmt           ::= 'if' expr ':' INDENT block DEDENT
                       ('else' ':' INDENT block DEDENT)?
-                      # 'elif' chaining PLANNED(45q); 'while' loops PLANNED(45k);
+                      # 'elif' chaining PLANNED(45q);
                       # `match` covers multi-way branching today
 
 for_stmt          ::= 'for' IDENT 'in' expr ':' INDENT block DEDENT
+
+# The condition re-evaluates before every iteration and must be
+# Bool. `break`/`continue` outside any loop is a COMPILE error.
+# `@budget` cost analysis treats a non-zero-cost while body as
+# unbounded (no static iteration count).
+while_stmt        ::= 'while' expr ':' INDENT block DEDENT
 
 approve_stmt      ::= 'approve' IDENT '(' arg_list? ')' NEWLINE
 
@@ -403,8 +410,8 @@ Keywords (reserved): `agent`, `tool`, `prompt`, `eval`, `test`,
 `uses`, `assert`, `assert_snapshot`, `model`, `requires`,
 `progressive`, `below`, `rollout`, `ensemble`, `vote`, `adversarial`,
 `propose`, `challenge`, `adjudicate`, `if`, `else`, `for`, `in`,
-`return`, `yield`, `break`, `continue`, `pass`, `match`, `fn`,
-`replay`, `when`, `true`, `false`, `and`, `or`, `not`.
+`return`, `yield`, `break`, `continue`, `pass`, `while`, `match`,
+`fn`, `replay`, `when`, `true`, `false`, `and`, `or`, `not`.
 
 Contextual words (parsed positionally, NOT reserved — they are valid
 identifiers elsewhere): `use` (import lists), `Nothing` (the unit

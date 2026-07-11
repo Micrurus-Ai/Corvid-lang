@@ -3973,6 +3973,61 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45k — `while` requires a Bool condition, and
+/// `break`/`continue` outside any loop are compile errors (they
+/// were silently accepted under the old sentinel-Ident encoding).
+#[test]
+fn while_condition_and_loop_flow_validation() {
+    let bad_cond = check(
+        "agent main() -> Int:
+    n = 0
+    while n + 1:
+        n = n + 1
+    return n
+",
+    );
+    assert!(
+        bad_cond.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::TypeMismatch { context, .. } if context == "`while` condition"
+        )),
+        "expected while-condition mismatch, got {:?}",
+        bad_cond.errors
+    );
+
+    let stray_break = check(
+        "agent main() -> Int:
+    break
+    return 0
+",
+    );
+    assert!(
+        stray_break.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::LoopFlowOutsideLoop { keyword } if keyword == "break"
+        )),
+        "expected break-outside-loop error, got {:?}",
+        stray_break.errors
+    );
+
+    // Inside a loop (either kind), break/continue are fine — and a
+    // Grounded<Bool>-style Unknown condition stays lenient.
+    let ok = check(
+        "agent main(xs: List<Int>) -> Int:
+    n = 0
+    while n < 5:
+        n = n + 1
+        if n == 3:
+            continue
+    for x in xs:
+        if x > 2:
+            break
+    return n
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+}
+
 /// Slice 45j — lambdas typecheck contextually: the builtin-method
 /// table's function-typed parameters supply unannotated param types
 /// and check the body's return type; `map`'s result element type and

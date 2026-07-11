@@ -52,6 +52,9 @@ use super::*;
             IrStmt::For { iter, body, .. } => {
                 find_replay_in_expr(iter).or_else(|| find_replay_in_block(body))
             }
+            IrStmt::While { cond, body, .. } => {
+                find_replay_in_expr(cond).or_else(|| find_replay_in_block(body))
+            }
             IrStmt::Break { .. }
             | IrStmt::Continue { .. }
             | IrStmt::Pass { .. }

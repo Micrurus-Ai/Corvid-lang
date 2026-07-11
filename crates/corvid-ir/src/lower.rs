@@ -813,6 +813,14 @@ impl<'a> Lowerer<'a> {
                     span: *span,
                 }
             }
+            Stmt::While { cond, body, span } => IrStmt::While {
+                cond: self.lower_expr(cond),
+                body: self.lower_block(body),
+                span: *span,
+            },
+            Stmt::Break { span } => IrStmt::Break { span: *span },
+            Stmt::Continue { span } => IrStmt::Continue { span: *span },
+            Stmt::Pass { span } => IrStmt::Pass { span: *span },
             // Place assignment (45b): decompose the target into a root
             // local + a Field/Index path. The checker guarantees the
             // root is a local binding.
@@ -867,23 +875,10 @@ impl<'a> Lowerer<'a> {
                     span: *span,
                 }
             }
-            Stmt::Expr { expr, span } => {
-                // Special-case break/continue/pass (currently encoded as Idents).
-                if let Expr::Ident { name, .. } = expr {
-                    if let Some(Binding::BuiltIn(b)) = self.bindings.get(&name.span) {
-                        match b {
-                            BuiltIn::Break => return IrStmt::Break { span: *span },
-                            BuiltIn::Continue => return IrStmt::Continue { span: *span },
-                            BuiltIn::Pass => return IrStmt::Pass { span: *span },
-                            _ => {}
-                        }
-                    }
-                }
-                IrStmt::Expr {
-                    expr: self.lower_expr(expr),
-                    span: *span,
-                }
-            }
+            Stmt::Expr { expr, span } => IrStmt::Expr {
+                expr: self.lower_expr(expr),
+                span: *span,
+            },
         }
     }
 

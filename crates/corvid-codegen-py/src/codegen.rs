@@ -280,6 +280,18 @@ impl Codegen {
                 self.emit_expr(expr);
                 self.out.newline();
             }
+            IrStmt::While { cond, body, .. } => {
+                self.out.write("while ");
+                self.emit_expr(cond);
+                self.out.writeln(":");
+                self.out.indent();
+                if body.stmts.is_empty() {
+                    self.out.writeln("pass");
+                } else {
+                    self.emit_block(body);
+                }
+                self.out.dedent();
+            }
             IrStmt::Break { .. } => self.out.writeln("break"),
             IrStmt::Continue { .. } => self.out.writeln("continue"),
             IrStmt::Pass { .. } => self.out.writeln("pass"),

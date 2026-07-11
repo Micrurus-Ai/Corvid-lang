@@ -194,6 +194,11 @@ fn collect_ident_spans_by_name_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(iter, name, spans);
             collect_ident_spans_by_name_in_block(body, name, spans);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_ident_spans_by_name_in_expr(cond, name, spans);
+            collect_ident_spans_by_name_in_block(body, name, spans);
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => collect_ident_spans_by_name_in_expr(action, name, spans),
         Stmt::Expr { expr, .. } => collect_ident_spans_by_name_in_expr(expr, name, spans),
         Stmt::Assign { target, value, .. } => {

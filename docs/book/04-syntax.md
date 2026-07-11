@@ -137,20 +137,30 @@ agent count_positives(xs: List<Int>) -> Int:
     return total
 ```
 
-> **Planned — `while` loops land in slice 45k; `match` expressions
-> land in slice 45i; `elif` chaining lands in slice 45q.** Until
-> then, chained conditions nest `if`/`else`, and counted iteration
-> uses `for` over a list.
+`while` re-evaluates its condition before every iteration;
+`break` exits the innermost loop, `continue` skips to its next
+iteration, and both are compile errors outside a loop (compiled
+in CI):
 
-```corvid-planned
-while predicate:
-    # ... (45k)
-
-match value:
-    Some(x) -> x
-    None -> 0
-# (45i)
+```corvid
+agent drain(limit: Int) -> Int:
+    n = 0
+    total = 0
+    while n < limit:
+        n = n + 1
+        if n % 2 == 0:
+            continue
+        if n > 7:
+            break
+        total = total + n
+    return total
 ```
+
+`match` gives multi-way branching over sums, `Option`, `Result`,
+and literals — see [Pattern matching](./13-pattern-matching.md).
+
+> **Planned — `elif` chaining lands in slice 45q.** Until then,
+> chained conditions nest `if`/`else`.
 
 ## Expressions
 

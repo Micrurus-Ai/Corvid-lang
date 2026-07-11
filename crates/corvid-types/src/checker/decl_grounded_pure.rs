@@ -67,6 +67,11 @@ impl<'a> Checker<'a> {
                 self.walk_grounded_pure_expr(agent, iter);
                 self.walk_grounded_pure_block(agent, body);
             }
+            Stmt::While { cond, body, .. } => {
+                self.walk_grounded_pure_expr(agent, cond);
+                self.walk_grounded_pure_block(agent, body);
+            }
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Expr { expr, .. } => self.walk_grounded_pure_expr(agent, expr),
             Stmt::Approve { action, .. } => self.walk_grounded_pure_expr(agent, action),
             Stmt::Assign { target, value, .. } => {

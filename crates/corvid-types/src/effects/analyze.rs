@@ -160,6 +160,13 @@ fn collect_stmt_capabilities(
             collect_expr_capabilities(iter, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
         }
+        corvid_ast::Stmt::While { cond, body, .. } => {
+            collect_expr_capabilities(cond, file, resolved, caps);
+            collect_body_capabilities(body, file, resolved, caps);
+        }
+        corvid_ast::Stmt::Break { .. }
+        | corvid_ast::Stmt::Continue { .. }
+        | corvid_ast::Stmt::Pass { .. } => {}
         corvid_ast::Stmt::Expr { expr, .. } => {
             collect_expr_capabilities(expr, file, resolved, caps);
         }
@@ -247,6 +254,13 @@ fn collect_stmt_effects(
             collect_expr_effects(iter, file, resolved, registry, effects);
             collect_body_effects(body, file, resolved, registry, effects);
         }
+        corvid_ast::Stmt::While { cond, body, .. } => {
+            collect_expr_effects(cond, file, resolved, registry, effects);
+            collect_body_effects(body, file, resolved, registry, effects);
+        }
+        corvid_ast::Stmt::Break { .. }
+        | corvid_ast::Stmt::Continue { .. }
+        | corvid_ast::Stmt::Pass { .. } => {}
         corvid_ast::Stmt::Approve { action, .. } => {
             effects.push("approve".into());
             collect_expr_effects(action, file, resolved, registry, effects);

@@ -425,6 +425,25 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             out.push_str(":\n");
             render_block(body, indent + 1, out);
         }
+        Stmt::While { cond, body, .. } => {
+            push_indent(indent, out);
+            out.push_str("while ");
+            out.push_str(&render_expr(cond));
+            out.push_str(":\n");
+            render_block(body, indent + 1, out);
+        }
+        Stmt::Break { .. } => {
+            push_indent(indent, out);
+            out.push_str("break\n");
+        }
+        Stmt::Continue { .. } => {
+            push_indent(indent, out);
+            out.push_str("continue\n");
+        }
+        Stmt::Pass { .. } => {
+            push_indent(indent, out);
+            out.push_str("pass\n");
+        }
         Stmt::Approve { action, .. } => {
             push_indent(indent, out);
             out.push_str("approve ");

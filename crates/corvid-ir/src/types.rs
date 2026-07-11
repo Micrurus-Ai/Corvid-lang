@@ -492,6 +492,14 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// `while cond: body` (slice 45k). The condition re-evaluates
+    /// before every iteration.
+    While {
+        cond: IrExpr,
+        body: IrBlock,
+        span: Span,
+    },
+
     /// `approve Label(args)` — authorizes matching dangerous tool calls.
     Approve {
         label: String,

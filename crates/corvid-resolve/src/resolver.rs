@@ -789,6 +789,12 @@ impl Resolver {
                 self.bindings.insert(var.span, Binding::Local(id));
                 self.resolve_block(body);
             }
+            Stmt::While { cond, body, .. } => {
+                self.resolve_expr(cond);
+                self.resolve_block(body);
+            }
+            // Loop-flow statements bind and reference nothing.
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => self.resolve_approve_action(action),
             Stmt::Expr { expr, .. } => self.resolve_expr(expr),
             // Place assignment (45b): both the target place and the

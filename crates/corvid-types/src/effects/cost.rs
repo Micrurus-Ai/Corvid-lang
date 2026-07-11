@@ -199,6 +199,57 @@ impl<'a> CostAnalyzer<'a> {
                     bounded: cond_est.bounded && then_est.bounded && else_est.bounded,
                 }
             }
+            // `while` (45k) has no static iteration count by
+            // construction: the body + condition feed the tree once
+            // and the estimate is UNBOUNDED so `@budget` stays sound.
+            // (`for` over a static range stays the bounded-loop tool.)
+            corvid_ast::Stmt::While { cond, body, span } => {
+                let cond_est = self.analyze_expr(cond, agent_name);
+                let body_est = self.analyze_block(body, agent_name);
+                let tree = sequence_tree(
+                    "while",
+                    CostNodeKind::Sequence,
+                    vec![
+                        wrap_if_needed("cond", cond_est.tree, cond.span()),
+                        body_est.tree,
+                    ],
+                    *span,
+                );
+                let mut warnings = cond_est.warnings;
+                warnings.extend(body_est.warnings);
+                let zero = tree_is_zero(&tree);
+                if !zero {
+                    warnings.push(CostWarning {
+                        kind: CostWarningKind::UnboundedLoop {
+                            agent: agent_name.to_string(),
+                            message: format!(
+                                "`while` loop at {}..{} — iteration count unknown at compile time",
+                                span.start, span.end
+                            ),
+                        },
+                        span: *span,
+                    });
+                }
+                CostEstimate {
+                    dimensions: tree.costs.clone(),
+                    tree,
+                    warnings,
+                    // A zero-cost while body cannot spend budget no
+                    // matter how many times it runs.
+                    bounded: zero,
+                }
+            }
+            corvid_ast::Stmt::Break { span }
+            | corvid_ast::Stmt::Continue { span }
+            | corvid_ast::Stmt::Pass { span } => {
+                let tree = sequence_tree("flow", CostNodeKind::Sequence, Vec::new(), *span);
+                CostEstimate {
+                    dimensions: tree.costs.clone(),
+                    tree,
+                    warnings: Vec::new(),
+                    bounded: true,
+                }
+            }
             corvid_ast::Stmt::For {
                 iter, body, span, ..
             } => {

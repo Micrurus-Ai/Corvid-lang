@@ -403,6 +403,10 @@ struct Checker<'a> {
     /// Declared return type of the currently-checked function-like.
     current_return: Option<Type>,
     in_agent_body: bool,
+    /// Nesting depth of `for`/`while` loops around the statement
+    /// being checked — `break`/`continue` require depth > 0
+    /// (slice 45k).
+    loop_depth: usize,
     in_test_body: bool,
     saw_yield: bool,
 
@@ -602,6 +606,7 @@ impl<'a> Checker<'a> {
             local_types: HashMap::new(),
             current_return: None,
             in_agent_body: false,
+            loop_depth: 0,
             in_test_body: false,
             saw_yield: false,
             approvals: Vec::new(),
