@@ -196,6 +196,35 @@ program and hoping nothing leaks. Corvid's replay refuses to leak by
 construction. Differential replay is a separate, opt-in mode that intentionally
 hits a live LLM for record-vs-live comparison; the default is the closed one.
 
+### Deterministic Time And Randomness
+
+```corvid
+import "./std/time" use time_now_utc, time_format_iso
+import "./std/random" use random_int
+
+agent schedule_followup(days: Int) -> String:
+    now = time_now_utc()
+    return time_format_iso(now.epoch_ms + days * 86400000)
+```
+
+Clock reads and random draws are tools, not builtins — so they are
+traced, substituted under replay (a re-run reads the recorded
+instant and draws the recorded value), and rejected inside
+`@deterministic` bodies at compile time. Reproducibility comes
+from the replay machinery the language already has, not from seed
+management conventions.
+
+Why it is unique: ordinary languages treat `now()` and `random()`
+as ambient, untracked authority — the two most common reasons a
+"deterministic" pipeline isn't. Corvid routes both through the
+effect system.
+
+- Shipped: slice 45m. Runnable: `corvid tour --topic deterministic-time`.
+- Tests: `crates/corvid-driver/tests/executing_time_through_driver.rs`,
+  `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_substitutes_recorded_time_and_random`.
+- Spec: [`std.time`](./stdlib/time.md), [`std.random`](./stdlib/random.md).
+- Non-scope: UTC only; no calendar arithmetic; no seeded PRNG surface.
+
 ## 3. Adaptive Routing
 
 ### Typed Model Routing

@@ -1,0 +1,60 @@
+# Standard time surface — wall-clock, monotonic elapsed, and
+# ISO-8601 conversion.
+#
+# Design (slice 45m): the CLOCK READS are TOOLS, not builtins.
+# That single decision buys the whole replay story for free —
+# tool calls are traced (`TraceEvent::ToolCall`/`ToolResult`) and
+# substituted from the recorded trace in replay mode, so a
+# time-dependent agent re-runs deterministically. It also means
+# the checker's declaration-kind classifier rejects clock reads
+# inside `@deterministic` bodies with no extra machinery, exactly
+# like file I/O.
+#
+# The CONVERSIONS (`time_parse_iso` / `time_format_iso`) are pure
+# functions of their inputs. They are still tools (they need the
+# runtime's datetime library), but calling them introduces no
+# nondeterminism and their traced results are stable.
+#
+# Durations are plain `Int` milliseconds — ordinary arithmetic IS
+# the duration API (`deadline = now.epoch_ms + 30 * 1000`), and
+# the always-checked arithmetic rule covers overflow.
+
+import "./effects" use EffectEnvelope, effect_envelope
+
+# A wall-clock instant: epoch milliseconds (UTC) plus the same
+# instant pre-rendered as ISO-8601, so prompts and logs never need
+# a second call to format what they just read.
+public type TimeInstant:
+    epoch_ms: Int
+    iso: String
+    effect_meta: EffectEnvelope
+
+public agent time_instant(epoch_ms: Int, iso: String) -> TimeInstant:
+    return TimeInstant(epoch_ms, iso, effect_envelope("std.time.now", "", "", "", "std.time.now"))
+
+# Clock effect rows. Reads are reversible (they change nothing);
+# they are still effects because their RESULTS are nondeterministic
+# and must be traced for replay.
+effect time_wall:
+    reversible: true
+
+effect time_monotonic:
+    reversible: true
+
+# Wall-clock now, UTC. Nondeterministic; replay substitutes the
+# recorded instant.
+public tool time_now_utc() -> TimeInstant uses time_wall
+
+# Monotonic milliseconds since an unspecified origin (process
+# start). Use two reads for elapsed time — the difference is
+# meaningful, the absolute value is not. Nondeterministic; replay
+# substitutes.
+public tool time_monotonic_ms() -> Int uses time_monotonic
+
+# ISO-8601 (RFC 3339) parse: accepts `2026-07-11T08:30:00Z` and
+# offset forms; returns epoch milliseconds (UTC). Malformed input
+# flows through the Result, never a trap.
+public tool time_parse_iso(text: String) -> Result<Int, String> uses time_wall
+
+# Render epoch milliseconds (UTC) as ISO-8601 with a trailing `Z`.
+public tool time_format_iso(epoch_ms: Int) -> String uses time_wall

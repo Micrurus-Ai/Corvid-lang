@@ -1074,6 +1074,45 @@ Next per track order: 45m-datetime-and-math-builtins.
 
 ---
 
+## 2026-07-11 - 45m closed: time, randomness, and math — determinism as a design decision
+
+The slice's one big call: clock reads and random draws are TOOLS,
+never builtins. Everything else follows for free — tool calls are
+traced and substituted under replay (the new load-bearing test
+records a fixed instant + draw and proves replay returns exactly
+those, not live values), and `@deterministic` bodies already
+reject tool calls, so a "deterministic" agent that secretly reads
+the clock or rolls dice is a compile error. The determinism
+catalog stays deliberately empty.
+
+std/time: now_utc (epoch_ms + pre-rendered ISO), monotonic_ms,
+parse_iso -> Result (malformed input is an Err, never a trap),
+format_iso. Durations are plain Int milliseconds — checked
+arithmetic IS the duration API; no Duration type to learn.
+std/random: random_float [0,1) + random_int inclusive-both-ends
+(Python randint contract), rejection-sampled (no modulo bias).
+
+Math: 12 pure kinds on the 45c table under the always-checked
+rule — abs(i64::MIN)/pow-overflow/negative-exponent/negative-sqrt
+all TRAP; floor/ceil/round return Int and trap on NaN; round is
+half-away-from-zero (deliberately not Python's half-to-even).
+
+Full invention contract shipped: README section, tour topic
+`deterministic-time` (driver-guard-compiled), inventions.md entry,
+stdlib/time.md + random.md specs, replay substitution test.
+
+Mid-slice ops note: the disk filled (0 bytes free) — cleared the
+release profile + 4.3GB of incremental artifacts; the release
+corvid_test_tools staticlib for baseline_rc_counts is environmental
+and rebuilt on demand.
+
+Validation: 279 types + 109 vm + 16 replay-corpus + e2e + tour
+guard + book guard; corpus verify exits 1.
+
+Next per track order: 45n-type-aliases-and-named-struct-literals.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

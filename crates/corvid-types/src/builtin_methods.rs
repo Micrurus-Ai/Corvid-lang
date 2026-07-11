@@ -177,6 +177,47 @@ pub enum BuiltinMethodKind {
     /// `List<T>.all(pred: (T) -> Bool) -> Bool` — short-circuits.
     ListAll,
 
+    // ----- math (slice 45m) ----------------------------------------
+    //
+    // Pure numeric methods under the always-checked rule: Int
+    // methods TRAP instead of wrapping (`abs` on i64::MIN, `pow`
+    // overflow or negative exponent); Float->Int conversions
+    // (`floor`/`ceil`/`round`) trap on NaN or out-of-i64-range,
+    // exactly like `to_int_truncated`. `round` is half-AWAY-FROM-
+    // ZERO (2.5 -> 3, -2.5 -> -3) — deliberately not Python's
+    // half-to-even, which surprises far more readers than it
+    // helps. Float `min`/`max` follow IEEE/Rust: a NaN operand
+    // loses. `sqrt` of a negative traps (a silent NaN would poison
+    // downstream arithmetic invisibly). All are pure — replay
+    // stays deterministic; the effectful numeric source (`random`)
+    // lives in std/random.cor as a TOOL.
+    /// `Int.abs() -> Int` — traps on i64::MIN.
+    IntAbs,
+    /// `Int.min(other: Int) -> Int`.
+    IntMin,
+    /// `Int.max(other: Int) -> Int`.
+    IntMax,
+    /// `Int.pow(exp: Int) -> Int` — checked; traps on overflow or
+    /// a negative exponent (use `to_float().pow(...)` for roots).
+    IntPow,
+    /// `Float.abs() -> Float`.
+    FloatAbs,
+    /// `Float.min(other: Float) -> Float` — NaN operand loses.
+    FloatMin,
+    /// `Float.max(other: Float) -> Float` — NaN operand loses.
+    FloatMax,
+    /// `Float.pow(exp: Float) -> Float`.
+    FloatPow,
+    /// `Float.sqrt() -> Float` — traps on negative input.
+    FloatSqrt,
+    /// `Float.floor() -> Int` — traps on NaN / out-of-range.
+    FloatFloor,
+    /// `Float.ceil() -> Int` — traps on NaN / out-of-range.
+    FloatCeil,
+    /// `Float.round() -> Int` — half away from zero; traps on
+    /// NaN / out-of-range.
+    FloatRound,
+
     // ----- Option / Result ergonomics (slice 45l) -----------------
     //
     // The point-of-use shorthands: defaulting an absent Option,
@@ -316,6 +357,18 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![func(vec![(**elem).clone()], Type::Bool)],
             Type::Bool,
         ),
+        (Type::Int, "abs") => sig(IntAbs, vec![], Type::Int),
+        (Type::Int, "min") => sig(IntMin, vec![Type::Int], Type::Int),
+        (Type::Int, "max") => sig(IntMax, vec![Type::Int], Type::Int),
+        (Type::Int, "pow") => sig(IntPow, vec![Type::Int], Type::Int),
+        (Type::Float, "abs") => sig(FloatAbs, vec![], Type::Float),
+        (Type::Float, "min") => sig(FloatMin, vec![Type::Float], Type::Float),
+        (Type::Float, "max") => sig(FloatMax, vec![Type::Float], Type::Float),
+        (Type::Float, "pow") => sig(FloatPow, vec![Type::Float], Type::Float),
+        (Type::Float, "sqrt") => sig(FloatSqrt, vec![], Type::Float),
+        (Type::Float, "floor") => sig(FloatFloor, vec![], Type::Int),
+        (Type::Float, "ceil") => sig(FloatCeil, vec![], Type::Int),
+        (Type::Float, "round") => sig(FloatRound, vec![], Type::Int),
         (Type::Option(inner), "unwrap_or") => {
             sig(OptionUnwrapOr, vec![(**inner).clone()], (**inner).clone())
         }

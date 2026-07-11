@@ -594,3 +594,57 @@ async fn replay_does_not_block_executing_db_query_dispatch_during_write_quaranti
         "db_query envelope must be a JSON array of DbResult-shaped rows; got {result:?}"
     );
 }
+
+/// Slice 45m — the load-bearing determinism proof for std/time +
+/// std/random: in Substitute-mode replay, `call_tool` returns the
+/// RECORDED instant / draw instead of touching the live clock or
+/// entropy source. The recorded epoch below is fixed; if the live
+/// clock leaked through, the assertion could never match it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_substitutes_recorded_time_and_random() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace.jsonl");
+    let contents = concat!(
+        r#"{"kind":"schema_header","version":2,"writer":"corvid-vm","ts_ms":0,"run_id":"r"}"#,
+        "
+",
+        r#"{"kind":"seed_read","ts_ms":1,"run_id":"r","purpose":"rollout_default_seed","value":12345}"#,
+        "
+",
+        r#"{"kind":"tool_call","ts_ms":3,"run_id":"r","tool":"time_now_utc","args":[]}"#,
+        "
+",
+        r#"{"kind":"tool_result","ts_ms":4,"run_id":"r","tool":"time_now_utc","result":{"epoch_ms":1699999999000,"iso":"2023-11-14T22:13:19.000Z","effect_meta":{"effect_name":"std.time.now","provenance_key":"","approval_label":"","cache_key":"","replay_key":"std.time.now"}}}"#,
+        "
+",
+        r#"{"kind":"tool_call","ts_ms":5,"run_id":"r","tool":"random_float","args":[]}"#,
+        "
+",
+        r#"{"kind":"tool_result","ts_ms":6,"run_id":"r","tool":"random_float","result":0.42}"#,
+        "
+",
+    );
+    std::fs::write(&path, contents).unwrap();
+    let runtime = build_substitute_replay_runtime(&path);
+    assert!(runtime.is_replay_mode());
+
+    let instant = runtime
+        .call_tool("time_now_utc", vec![])
+        .await
+        .expect("replayed time_now_utc must substitute");
+    assert_eq!(
+        instant.get("epoch_ms").and_then(|v| v.as_i64()),
+        Some(1699999999000),
+        "replay must return the RECORDED instant, not the live clock; got {instant}"
+    );
+
+    let draw = runtime
+        .call_tool("random_float", vec![])
+        .await
+        .expect("replayed random_float must substitute");
+    assert_eq!(
+        draw.as_f64(),
+        Some(0.42),
+        "replay must return the RECORDED draw, not fresh entropy; got {draw}"
+    );
+}

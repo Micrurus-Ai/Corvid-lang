@@ -415,6 +415,38 @@ mod tests {
 /// documented on `corvid_types::BuiltinMethodKind`. The checker
 /// guarantees receiver/argument types, so mismatches here indicate
 /// an internal inconsistency and surface as typed runtime errors.
+/// Python-style float rendering: always shows a decimal point
+/// or exponent so string output round-trips visibly typed.
+fn render_float(f: f64) -> String {
+    let rendered = format!("{f}");
+    if rendered.contains('.')
+        || rendered.contains('e')
+        || rendered.contains('E')
+        || rendered.contains("inf")
+        || rendered.contains("NaN")
+    {
+        rendered
+    } else {
+        format!("{rendered}.0")
+    }
+}
+
+/// Checked Float->Int conversion shared by `floor`/`ceil`/`round`
+/// (slice 45m) — the same always-checked rule as
+/// `to_int_truncated`: NaN and out-of-i64-range TRAP.
+fn float_to_int_checked(f: f64, method: &str, span: Span) -> Result<Value, InterpError> {
+    if f.is_nan() || f < (i64::MIN as f64) || f >= (i64::MAX as f64) {
+        return Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: format!("a Float within Int range for `{method}`"),
+                got: format!("`{}`", render_float(f)),
+            },
+            span,
+        ));
+    }
+    Ok(Value::Int(f as i64))
+}
+
 pub(super) fn eval_builtin_method(
     kind: corvid_types::BuiltinMethodKind,
     recv: Value,
@@ -475,22 +507,6 @@ pub(super) fn eval_builtin_method(
             )),
         }
     }
-    /// Python-style float rendering: always shows a decimal point
-    /// or exponent so string output round-trips visibly typed.
-    fn render_float(f: f64) -> String {
-        let rendered = format!("{f}");
-        if rendered.contains('.')
-            || rendered.contains('e')
-            || rendered.contains('E')
-            || rendered.contains("inf")
-            || rendered.contains("NaN")
-        {
-            rendered
-        } else {
-            format!("{rendered}.0")
-        }
-    }
-
     match kind {
         IntToString => Ok(Value::String(std::sync::Arc::from(
             want_int(&recv, span)?.to_string(),
@@ -603,6 +619,73 @@ pub(super) fn eval_builtin_method(
                 _ => unreachable!("gated above"),
             })
         }
+        // Math (45m): checked Int methods, IEEE Float methods,
+        // trapping Float->Int conversions (same rule as
+        // `to_int_truncated`).
+        IntAbs => {
+            let n = want_int(&recv, span)?;
+            n.checked_abs().map(Value::Int).ok_or_else(|| {
+                InterpError::new(
+                    InterpErrorKind::Arithmetic(
+                        "abs() overflows on the minimum Int".into(),
+                    ),
+                    span,
+                )
+            })
+        }
+        IntMin => Ok(Value::Int(want_int(&recv, span)?.min(want_int(&args[0], span)?))),
+        IntMax => Ok(Value::Int(want_int(&recv, span)?.max(want_int(&args[0], span)?))),
+        IntPow => {
+            let base = want_int(&recv, span)?;
+            let exp = want_int(&args[0], span)?;
+            if exp < 0 {
+                return Err(InterpError::new(
+                    InterpErrorKind::Arithmetic(
+                        "pow() with a negative exponent — use to_float().pow(...) for roots"
+                            .into(),
+                    ),
+                    span,
+                ));
+            }
+            u32::try_from(exp)
+                .ok()
+                .and_then(|e| base.checked_pow(e))
+                .map(Value::Int)
+                .ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::Arithmetic(format!(
+                            "pow() overflows: {base}^{exp} does not fit in Int"
+                        )),
+                        span,
+                    )
+                })
+        }
+        FloatAbs => Ok(Value::Float(want_float(&recv, span)?.abs())),
+        FloatMin => Ok(Value::Float(
+            want_float(&recv, span)?.min(want_float(&args[0], span)?),
+        )),
+        FloatMax => Ok(Value::Float(
+            want_float(&recv, span)?.max(want_float(&args[0], span)?),
+        )),
+        FloatPow => Ok(Value::Float(
+            want_float(&recv, span)?.powf(want_float(&args[0], span)?),
+        )),
+        FloatSqrt => {
+            let x = want_float(&recv, span)?;
+            if x < 0.0 {
+                return Err(InterpError::new(
+                    InterpErrorKind::Arithmetic(format!(
+                        "sqrt() of a negative number ({x}) — a silent NaN would poison downstream arithmetic"
+                    )),
+                    span,
+                ));
+            }
+            Ok(Value::Float(x.sqrt()))
+        }
+        FloatFloor => float_to_int_checked(want_float(&recv, span)?.floor(), "floor", span),
+        FloatCeil => float_to_int_checked(want_float(&recv, span)?.ceil(), "ceil", span),
+        FloatRound => float_to_int_checked(want_float(&recv, span)?.round(), "round", span),
+
         // Option / Result ergonomics (45l). `unwrap_or` returns the
         // payload or the default; `ok_or` converts the envelope.
         OptionUnwrapOr => Ok(match recv {

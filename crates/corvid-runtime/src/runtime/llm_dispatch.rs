@@ -57,6 +57,10 @@ impl Runtime {
             self.dispatch_stdlib_io_tool(name, args.clone()).await?
         } else if is_stdlib_http_tool(name) {
             self.dispatch_stdlib_http_tool(name, args.clone()).await?
+        } else if is_stdlib_time_tool(name) {
+            dispatch_stdlib_time_tool(name, &args)?
+        } else if is_stdlib_random_tool(name) {
+            dispatch_stdlib_random_tool(name, &args)?
         } else {
             self.tools.call(name, args.clone()).await?
         };
@@ -1114,6 +1118,165 @@ fn hex_lower(bytes: &[u8]) -> String {
 ///
 /// EffectEnvelope fields: effect_name, provenance_key,
 /// approval_label, cache_key, replay_key.
+/// Slice 45m: exact-match gate for the stdlib time tools. Same
+/// exact-names-only rationale as `is_stdlib_io_tool`.
+fn is_stdlib_time_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "time_now_utc" | "time_monotonic_ms" | "time_parse_iso" | "time_format_iso"
+    )
+}
+
+/// Slice 45m: exact-match gate for the stdlib randomness tools.
+fn is_stdlib_random_tool(name: &str) -> bool {
+    matches!(name, "random_float" | "random_int")
+}
+
+fn stdlib_time_effect_envelope(replay_key: &str) -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": "std.time.now",
+        "provenance_key": "",
+        "approval_label": "",
+        "cache_key": "",
+        "replay_key": replay_key,
+    })
+}
+
+/// Slice 45m — the executing stdlib time tools. The clock reads
+/// (`time_now_utc`, `time_monotonic_ms`) are nondeterministic and
+/// rely on `call_tool`'s tracing + replay substitution (the replay
+/// branch runs BEFORE dispatch, so a replayed program never
+/// touches the real clock). The conversions are pure functions of
+/// their arguments.
+fn dispatch_stdlib_time_tool(
+    name: &str,
+    args: &[serde_json::Value],
+) -> Result<serde_json::Value, RuntimeError> {
+    use chrono::{TimeZone, Utc};
+    match name {
+        "time_now_utc" => {
+            let now = Utc::now();
+            let epoch_ms = now.timestamp_millis();
+            Ok(serde_json::json!({
+                "epoch_ms": epoch_ms,
+                "iso": now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                "effect_meta": stdlib_time_effect_envelope("std.time.now"),
+            }))
+        }
+        "time_monotonic_ms" => {
+            // Monotonic origin = first read in this process. Only
+            // DIFFERENCES between reads are meaningful.
+            use std::sync::OnceLock;
+            use std::time::Instant;
+            static ORIGIN: OnceLock<Instant> = OnceLock::new();
+            let origin = *ORIGIN.get_or_init(Instant::now);
+            Ok(serde_json::json!(origin.elapsed().as_millis() as i64))
+        }
+        "time_parse_iso" => {
+            let text = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
+                RuntimeError::ToolFailed {
+                    tool: "time_parse_iso".to_string(),
+                    message: "expected one String argument (ISO-8601 text)".to_string(),
+                }
+            })?;
+            match chrono::DateTime::parse_from_rfc3339(text.trim()) {
+                Ok(dt) => Ok(serde_json::json!({
+                    "tag": "ok",
+                    "ok": dt.timestamp_millis(),
+                })),
+                Err(e) => Ok(serde_json::json!({
+                    "tag": "err",
+                    "err": format!("not ISO-8601: `{text}` ({e})"),
+                })),
+            }
+        }
+        "time_format_iso" => {
+            let epoch_ms = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
+                RuntimeError::ToolFailed {
+                    tool: "time_format_iso".to_string(),
+                    message: "expected one Int argument (epoch milliseconds)".to_string(),
+                }
+            })?;
+            let dt = Utc.timestamp_millis_opt(epoch_ms).single().ok_or_else(|| {
+                RuntimeError::ToolFailed {
+                    tool: "time_format_iso".to_string(),
+                    message: format!("epoch_ms out of representable range: {epoch_ms}"),
+                }
+            })?;
+            Ok(serde_json::json!(
+                dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            ))
+        }
+        other => Err(RuntimeError::ToolFailed {
+            tool: other.to_string(),
+            message: "unknown stdlib time tool (gate/dispatch mismatch)".to_string(),
+        }),
+    }
+}
+
+/// Slice 45m — the executing stdlib randomness tools. OS-entropy
+/// draws (rand_core/getrandom); traced + replay-substituted like
+/// every tool, so replays reproduce the recorded draws.
+fn dispatch_stdlib_random_tool(
+    name: &str,
+    args: &[serde_json::Value],
+) -> Result<serde_json::Value, RuntimeError> {
+    fn entropy_u64(tool: &str) -> Result<u64, RuntimeError> {
+        use rand_core::{OsRng, RngCore};
+        let mut rng = OsRng;
+        let mut buf = [0u8; 8];
+        rng.try_fill_bytes(&mut buf)
+            .map_err(|e| RuntimeError::ToolFailed {
+                tool: tool.to_string(),
+                message: format!("OS entropy source failed: {e}"),
+            })?;
+        Ok(u64::from_le_bytes(buf))
+    }
+    match name {
+        "random_float" => {
+            // 53 uniform bits -> [0.0, 1.0), the standard f64 recipe.
+            let bits = entropy_u64("random_float")? >> 11;
+            Ok(serde_json::json!(bits as f64 / (1u64 << 53) as f64))
+        }
+        "random_int" => {
+            let min = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
+                RuntimeError::ToolFailed {
+                    tool: "random_int".to_string(),
+                    message: "expected (min: Int, max: Int) — min missing".to_string(),
+                }
+            })?;
+            let max = args.get(1).and_then(|v| v.as_i64()).ok_or_else(|| {
+                RuntimeError::ToolFailed {
+                    tool: "random_int".to_string(),
+                    message: "expected (min: Int, max: Int) — max missing".to_string(),
+                }
+            })?;
+            if min > max {
+                return Err(RuntimeError::ToolFailed {
+                    tool: "random_int".to_string(),
+                    message: format!("min ({min}) must be <= max ({max})"),
+                });
+            }
+            // Rejection sampling over the inclusive span — no
+            // modulo bias.
+            let span = (max as i128 - min as i128 + 1) as u128;
+            let zone = u128::from(u64::MAX) + 1;
+            let limit = zone - (zone % span);
+            let draw = loop {
+                let x = u128::from(entropy_u64("random_int")?);
+                if x < limit {
+                    break x % span;
+                }
+            };
+            Ok(serde_json::json!((min as i128 + draw as i128) as i64))
+        }
+        other => Err(RuntimeError::ToolFailed {
+            tool: other.to_string(),
+            message: "unknown stdlib random tool (gate/dispatch mismatch)".to_string(),
+        }),
+    }
+}
+
 fn stdlib_io_effect_envelope(
     effect: &crate::io::FileSystemEffect,
 ) -> serde_json::Value {

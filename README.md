@@ -675,6 +675,33 @@ Roadmap: [Phase 33R5b](./ROADMAP.md)
 Proof: [end-to-end JSON tests](./crates/corvid-driver/tests/executing_json_through_driver.rs) + [runtime JSON tests](./crates/corvid-runtime/src/json.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: No JSON Path / JSONata / JMESPath query language (nested access via `json_get_object` chains). cdylib codegen for the opaque types is a follow-up slice; the C-ABI exports already exist.
 
+#### Executing Time & Randomness Surface
+
+Corvid's `std/time` and `std/random` modules make the two most common sources of hidden nondeterminism — clock reads and random draws — **visible to the effect system**. `time_now_utc`, `time_monotonic_ms`, `random_float`, and `random_int` are tools flowing through typed effect rows (`time_wall`, `time_monotonic`, `rand_draw`), which means:
+
+1. **Replay substitutes them.** Tool calls are traced; in Substitute-mode replay the recorded instant / draw is returned instead of touching the live clock or entropy source. A time-dependent agent re-runs deterministically with no seed-management convention.
+2. **`@deterministic` rejects them at compile time.** The declaration-kind classifier already rejects tool calls inside `@deterministic` bodies — an agent that secretly reads the clock or rolls dice is a compile error.
+
+The pure math methods (`abs`, `min`, `max`, `pow`, `sqrt`, `floor`, `ceil`, `round`) live on the builtin-method table under the always-checked rule (Int overflow traps; `sqrt` of a negative traps; `floor`/`ceil`/`round` return `Int` and trap on NaN). Durations are plain `Int` milliseconds — checked arithmetic IS the duration API.
+
+```corvid
+import "./std/time" use time_now_utc, time_format_iso
+import "./std/random" use random_int
+
+agent schedule_followup(days: Int) -> String:
+    now = time_now_utc()
+    return time_format_iso(now.epoch_ms + days * 86400000)
+
+agent roll() -> Int:
+    return random_int(1, 6)
+```
+
+Spec: [`std.time` reference](./docs/reference/stdlib/time.md) + [`std.random` reference](./docs/reference/stdlib/random.md)
+Tour: `corvid tour --topic deterministic-time`
+Roadmap: slice 45m in [ROADMAP.md](./ROADMAP.md)
+Proof: [end-to-end time/math/random test](./crates/corvid-driver/tests/executing_time_through_driver.rs) + [replay substitution test](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: UTC only (no timezone database or calendar arithmetic); no seeded PRNG surface — reproducibility comes from replay.
+
 ## Architecture
 
 ```text

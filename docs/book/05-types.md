@@ -99,6 +99,32 @@ Float-to-string rendering always shows a decimal point or exponent
 (`42.0` renders as `"42.0"`, never `"42"`) so string output — which
 feeds LLM prompts and JSON — stays visibly typed.
 
+The math methods live on the same table, under the same
+always-checked rule — `abs` on the minimum Int traps, `pow` traps
+on overflow or a negative exponent, `sqrt` of a negative traps
+(a silent NaN would poison downstream arithmetic), and the
+`Float`→`Int` conversions trap on NaN. `round` is half **away from
+zero** (`2.5` → `3`, `-2.5` → `-3`), deliberately not Python's
+half-to-even:
+
+```corvid
+agent math_tour(x: Float, n: Int) -> Int:
+    magnitude = x.abs().sqrt()             # Float -> Float
+    clamped = n.min(100).max(0)            # Int bounds
+    grown = 2.pow(10)                      # checked: overflow traps
+    lo = 3.7.floor()                       # 3 — Float -> Int
+    hi = 3.2.ceil()                        # 4
+    nearest = (-2.5).round()               # -3 — half away from zero
+    return clamped + grown + lo + hi + nearest + magnitude.floor()
+```
+
+The **effectful** numeric surfaces — wall-clock time and
+randomness — are deliberately NOT methods: they are stdlib tools
+(`std/time`, `std/random`) so every read is traced, substituted
+under replay, and rejected inside `@deterministic` agents. See the
+[`std.time`](../reference/stdlib/time.md) and
+[`std.random`](../reference/stdlib/random.md) references.
+
 Integer overflow, division by zero, and modulo by zero are **checked
 in every build mode** and trap with a typed runtime error. There is
 deliberately no saturating or wrapping mode: silent saturation

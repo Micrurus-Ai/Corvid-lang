@@ -3973,6 +3973,35 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45m — math methods on the builtin table: Int and Float
+/// receivers, Float->Int conversions typed as Int, method chains
+/// compose.
+#[test]
+fn math_method_types() {
+    let ok = check(
+        "agent main(x: Float, n: Int) -> Int:
+    magnitude = x.abs().sqrt()
+    clamped = n.min(100).max(0)
+    grown = 2.pow(10)
+    lo = 3.7.floor()
+    hi = 3.2.ceil()
+    nearest = 2.5.round()
+    total: Int = clamped + grown + lo + hi + nearest + magnitude.floor()
+    return total
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+
+    // sqrt is Float-only; Int receivers get the standard
+    // no-builtin-method diagnostic.
+    let bad = check(
+        "agent main(n: Int) -> Int:
+    return n.sqrt()
+",
+    );
+    assert!(!bad.errors.is_empty(), "Int.sqrt() must not typecheck");
+}
+
 /// Slice 45l — Option/Result method shorthands: `ok_or`'s error
 /// type comes from its argument, `map_err`'s from its lambda's
 /// checked return type, and `unwrap_or` returns the payload type.

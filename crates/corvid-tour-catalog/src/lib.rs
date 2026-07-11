@@ -472,6 +472,26 @@ agent load_summary(date: String) -> String:
 "#,
     },
     TourTopic {
+        name: "deterministic-time",
+        title: "Deterministic Time & Randomness",
+        category: "Executing I/O",
+        pitch: "Corvid's std/time and std/random surfaces make clock reads and random draws TOOLS, not builtins. That single decision buys the whole reproducibility story: tool calls are traced and substituted from the recorded trace under replay, so an agent that read 2026-07-11T08:30:00Z or drew 0.42 reads and draws exactly those values on every re-run — and the checker rejects clock/dice reads inside @deterministic bodies at compile time with zero extra machinery. Durations are plain Int milliseconds (ordinary checked arithmetic IS the duration API). The pure math methods (abs, min, max, pow, sqrt, floor, ceil, round) live on the builtin-method table and never touch the trace.",
+        spec: "docs/reference/stdlib/time.md",
+        roadmap: "Slice 45m datetime-and-math-builtins",
+        test: "crates/corvid-driver/tests/executing_time_through_driver.rs + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_substitutes_recorded_time_and_random",
+        non_scope: "UTC only — no timezone database or calendar arithmetic surface; no seeded PRNG (reproducibility comes from replay, not seed management).",
+        source: r#"import "./std/time" use time_now_utc, time_format_iso
+import "./std/random" use random_int
+
+agent schedule_followup(days: Int) -> String:
+    now = time_now_utc()
+    return time_format_iso(now.epoch_ms + days * 86400000)
+
+agent roll() -> Int:
+    return random_int(1, 6)
+"#,
+    },
+    TourTopic {
         name: "json",
         title: "Executing JSON Surface (Opaque + Typed-Decoder)",
         category: "Executing I/O",

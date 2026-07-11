@@ -1,0 +1,24 @@
+# Standard randomness surface.
+#
+# Design (slice 45m): randomness is a TOOL, never a builtin — the
+# same decision as std/time.cor and for the same reason: tool
+# calls are traced and substituted under replay, so a program that
+# drew 0.42 draws 0.42 again on every re-run. The checker rejects
+# tool calls inside `@deterministic` bodies, so a "deterministic"
+# agent that secretly rolls dice is a compile error, not a
+# production incident.
+#
+# The pure math methods (`abs`, `min`, `pow`, `sqrt`, ...) live on
+# the builtin-method table — see docs/book/05-types.md.
+
+effect rand_draw:
+    reversible: true
+
+# Uniform draw in [0.0, 1.0). Nondeterministic; replay substitutes
+# the recorded value.
+public tool random_float() -> Float uses rand_draw
+
+# Uniform integer in [min, max] — INCLUSIVE on both ends (Python's
+# randint, the least surprising contract for "give me 1..6").
+# min > max is a runtime error.
+public tool random_int(min: Int, max: Int) -> Int uses rand_draw
