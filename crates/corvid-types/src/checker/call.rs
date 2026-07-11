@@ -831,6 +831,21 @@ impl<'a> Checker<'a> {
                     sig.ret = Type::List(ret.clone());
                 }
             }
+            // Option/Result refinement (45l): `ok_or`'s error type
+            // is its argument's; `map_err`'s is the lambda's checked
+            // return type.
+            if sig.kind == BuiltinMethodKind::OptionOkOr {
+                if let Type::Result(ok, _) = &sig.ret {
+                    sig.ret = Type::Result(ok.clone(), Box::new(first_arg_ty.clone()));
+                }
+            }
+            if sig.kind == BuiltinMethodKind::ResultMapErr {
+                if let (Type::Result(ok, _), Type::Function { ret, .. }) =
+                    (&sig.ret, &first_arg_ty)
+                {
+                    sig.ret = Type::Result(ok.clone(), ret.clone());
+                }
+            }
             return sig.ret;
         }
 

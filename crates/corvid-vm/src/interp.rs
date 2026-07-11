@@ -247,7 +247,12 @@ impl<'ir> Interpreter<'ir> {
                     use corvid_types::BuiltinMethodKind as Bmk;
                     if matches!(
                         kind,
-                        Bmk::ListMap | Bmk::ListFilter | Bmk::ListFold | Bmk::ListAny | Bmk::ListAll
+                        Bmk::ListMap
+                            | Bmk::ListFilter
+                            | Bmk::ListFold
+                            | Bmk::ListAny
+                            | Bmk::ListAll
+                            | Bmk::ResultMapErr
                     ) {
                         return self
                             .eval_higher_order_list_method(*kind, recv, arg_vals, expr.span)
@@ -929,6 +934,37 @@ impl<'ir> Interpreter<'ir> {
         span: Span,
     ) -> Result<Value, InterpError> {
         use corvid_types::BuiltinMethodKind as Bmk;
+        // Result.map_err (45l): the one lambda-taking method whose
+        // receiver is not a list. Ok passes through untouched; the
+        // closure runs only on the Err side.
+        if kind == Bmk::ResultMapErr {
+            let f = match args.remove(0) {
+                Value::Closure(c) => c,
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "Function".into(),
+                            got: other.type_name(),
+                        },
+                        span,
+                    ))
+                }
+            };
+            return match recv {
+                Value::ResultOk(v) => Ok(Value::ResultOk(v)),
+                Value::ResultErr(e) => {
+                    let mapped = self.apply_closure(&f, vec![e.get()], span).await?;
+                    Ok(Value::ResultErr(BoxedValue::new(mapped)))
+                }
+                other => Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "Result".into(),
+                        got: other.type_name(),
+                    },
+                    span,
+                )),
+            };
+        }
         let Value::List(list) = &recv else {
             return Err(InterpError::new(
                 InterpErrorKind::TypeMismatch {

@@ -1047,6 +1047,33 @@ is_some/is_ok family, ok_or, map_err on the 45c table).
 
 ---
 
+## 2026-07-11 - 45l closed: Option/Result shorthands — audit B6 fully closed
+
+The point-of-use ergonomics: `unwrap_or`, `is_some`/`is_none`,
+`is_ok`/`is_err`, `ok_or`, `map_err`. The generic bits reuse 45j's
+sequential signature refinement — `ok_or`'s error type is its
+argument's checked type, `map_err`'s is its lambda's checked return
+type — so still zero generics machinery. `map_err` rides the 45j
+async closure path and runs the lambda only on the Err side
+(e2e-pinned with a "never runs" closure on an Ok value).
+
+The envelope audit answered YES: io/http/db executing tools return
+bare envelopes and trap on failure — with Result now fully
+consumable they deserve honest signatures. Filed as 47h (shared
+dispatch mechanics, three surfaces) rather than expanding Phase 45.
+
+Book ch 12's last Planned block flipped; probe returned
+"OPTION RESULT ERGONOMICS WORK" first run.
+
+Validation: 278 types + 12 e2e + 216 syntax + book guard + corpus
+verify exit 1. Baseline RC suite confirmed green after rebuilding
+the release corvid_test_tools staticlib (the earlier failures were
+the missing artifact, not a regression).
+
+Next per track order: 45m-datetime-and-math-builtins.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

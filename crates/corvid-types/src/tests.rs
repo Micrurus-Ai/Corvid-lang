@@ -3973,6 +3973,46 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 45l — Option/Result method shorthands: `ok_or`'s error
+/// type comes from its argument, `map_err`'s from its lambda's
+/// checked return type, and `unwrap_or` returns the payload type.
+#[test]
+fn option_result_shorthand_types() {
+    // ok_or(Int) yields Result<T, Int>; map_err's lambda rewraps
+    // String -> String and feeds starts_with; unwrap_or returns T
+    // so the arithmetic checks.
+    let ok = check(
+        "agent main(xs: List<Int>) -> Bool:
+    n = xs.first().unwrap_or(0) + 1
+    r = xs.first().ok_or(404)
+    coded = match r:
+        Ok(_) -> 0
+        Err(code) -> code + 1
+    tagged = \"x\".parse_int().map_err(fn (e) -> \"bad: \" + e)
+    flag = match tagged:
+        Ok(_) -> false
+        Err(msg) -> msg.starts_with(\"bad:\")
+    return xs.first().is_some() and n + coded > 0 and flag
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+
+    // unwrap_or's default must match the payload type.
+    let bad = check(
+        "agent main(xs: List<Int>) -> Int:
+    return xs.first().unwrap_or(\"zero\")
+",
+    );
+    assert!(
+        bad.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::TypeMismatch { expected, .. } if expected == "Int"
+        )),
+        "expected unwrap_or default mismatch, got {:?}",
+        bad.errors
+    );
+}
+
 /// Slice 45k — `while` requires a Bool condition, and
 /// `break`/`continue` outside any loop are compile errors (they
 /// were silently accepted under the old sentinel-Ident encoding).

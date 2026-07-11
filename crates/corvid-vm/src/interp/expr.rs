@@ -418,7 +418,7 @@ mod tests {
 pub(super) fn eval_builtin_method(
     kind: corvid_types::BuiltinMethodKind,
     recv: Value,
-    args: Vec<Value>,
+    mut args: Vec<Value>,
     span: Span,
 ) -> Result<Value, InterpError> {
     use corvid_types::BuiltinMethodKind::*;
@@ -603,10 +603,56 @@ pub(super) fn eval_builtin_method(
                 _ => unreachable!("gated above"),
             })
         }
+        // Option / Result ergonomics (45l). `unwrap_or` returns the
+        // payload or the default; `ok_or` converts the envelope.
+        OptionUnwrapOr => Ok(match recv {
+            Value::OptionSome(v) => v.get(),
+            Value::OptionNone => args.remove(0),
+            other => {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "Option".into(),
+                        got: other.type_name(),
+                    },
+                    span,
+                ))
+            }
+        }),
+        OptionIsSome => Ok(Value::Bool(matches!(recv, Value::OptionSome(_)))),
+        OptionIsNone => Ok(Value::Bool(matches!(recv, Value::OptionNone))),
+        OptionOkOr => Ok(match recv {
+            Value::OptionSome(v) => Value::ResultOk(crate::value::BoxedValue::new(v.get())),
+            Value::OptionNone => Value::ResultErr(crate::value::BoxedValue::new(args.remove(0))),
+            other => {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "Option".into(),
+                        got: other.type_name(),
+                    },
+                    span,
+                ))
+            }
+        }),
+        ResultUnwrapOr => Ok(match recv {
+            Value::ResultOk(v) => v.get(),
+            Value::ResultErr(_) => args.remove(0),
+            other => {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: "Result".into(),
+                        got: other.type_name(),
+                    },
+                    span,
+                ))
+            }
+        }),
+        ResultIsOk => Ok(Value::Bool(matches!(recv, Value::ResultOk(_)))),
+        ResultIsErr => Ok(Value::Bool(matches!(recv, Value::ResultErr(_)))),
+
         // The lambda-taking methods (45j) are intercepted in the
         // ASYNC evaluator (applying a closure re-enters eval); this
         // arm is a loud backstop, not a code path.
-        ListMap | ListFilter | ListFold | ListAny | ListAll => Err(InterpError::new(
+        ListMap | ListFilter | ListFold | ListAny | ListAll | ResultMapErr => Err(InterpError::new(
             InterpErrorKind::DispatchFailed(
                 "higher-order list methods dispatch through the async evaluator".into(),
             ),

@@ -71,11 +71,20 @@ agent describe(amount: Float) -> String:
         Err(msg) -> "rejected: " + msg
 ```
 
-> **Planned — the `unwrap_or` / `is_ok` / `map_err` method
-> shorthands land in slice 45l:**
+The method shorthands cover the common cases without a full
+`match`: `unwrap_or(default)` on both envelopes, `is_ok`/`is_err`
+and `is_some`/`is_none` for inspection, `ok_or(err)` to convert an
+`Option` into a `Result`, and `map_err(fn (e) -> ...)` to rewrap
+the error side (`Ok` passes through untouched — the lambda runs
+only on `Err`). All compiled in CI:
 
-```corvid-planned
-x = parse_int(s).unwrap_or(0)
+```corvid
+agent summarize(s: String) -> String:
+    n = s.parse_int().unwrap_or(0)
+    tagged = s.parse_int().map_err(fn (e) -> "bad input: " + e)
+    if tagged.is_err():
+        return "fallback used: " + n.to_string()
+    return n.to_string()
 ```
 
 ## Typed error enums

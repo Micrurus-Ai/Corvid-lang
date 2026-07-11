@@ -177,6 +177,34 @@ pub enum BuiltinMethodKind {
     /// `List<T>.all(pred: (T) -> Bool) -> Bool` — short-circuits.
     ListAll,
 
+    // ----- Option / Result ergonomics (slice 45l) -----------------
+    //
+    // The point-of-use shorthands: defaulting an absent Option,
+    // asking which side a Result landed on, and converting between
+    // the two envelopes without a full `match`. `ok_or`'s error
+    // type comes from its argument and `map_err`'s from its
+    // lambda's checked return type — the same sequential signature
+    // refinement `map`/`fold` use. All are pure; `map_err` applies
+    // its closure at most once (only on the Err side).
+    /// `Option<T>.unwrap_or(default: T) -> T`.
+    OptionUnwrapOr,
+    /// `Option<T>.is_some() -> Bool`.
+    OptionIsSome,
+    /// `Option<T>.is_none() -> Bool`.
+    OptionIsNone,
+    /// `Option<T>.ok_or(err: E) -> Result<T, E>` — Some(v) becomes
+    /// Ok(v), None becomes Err(err).
+    OptionOkOr,
+    /// `Result<T, E>.unwrap_or(default: T) -> T`.
+    ResultUnwrapOr,
+    /// `Result<T, E>.is_ok() -> Bool`.
+    ResultIsOk,
+    /// `Result<T, E>.is_err() -> Bool`.
+    ResultIsErr,
+    /// `Result<T, E>.map_err(f: (E) -> F) -> Result<T, F>` — Ok
+    /// passes through untouched; the closure runs only on Err.
+    ResultMapErr,
+
     /// `range(start: Int, end: Int) -> List<Int>` — the free builtin
     /// function (half-open, step 1, empty when start >= end). Lowered
     /// through the BuiltinMethod IR with `start` as the receiver so
@@ -287,6 +315,26 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             ListAll,
             vec![func(vec![(**elem).clone()], Type::Bool)],
             Type::Bool,
+        ),
+        (Type::Option(inner), "unwrap_or") => {
+            sig(OptionUnwrapOr, vec![(**inner).clone()], (**inner).clone())
+        }
+        (Type::Option(_), "is_some") => sig(OptionIsSome, vec![], Type::Bool),
+        (Type::Option(_), "is_none") => sig(OptionIsNone, vec![], Type::Bool),
+        (Type::Option(inner), "ok_or") => sig(
+            OptionOkOr,
+            vec![Type::Unknown],
+            Type::Result(inner.clone(), Box::new(Type::Unknown)),
+        ),
+        (Type::Result(ok, _), "unwrap_or") => {
+            sig(ResultUnwrapOr, vec![(**ok).clone()], (**ok).clone())
+        }
+        (Type::Result(_, _), "is_ok") => sig(ResultIsOk, vec![], Type::Bool),
+        (Type::Result(_, _), "is_err") => sig(ResultIsErr, vec![], Type::Bool),
+        (Type::Result(ok, err), "map_err") => sig(
+            ResultMapErr,
+            vec![func(vec![(**err).clone()], Type::Unknown)],
+            Type::Result(ok.clone(), Box::new(Type::Unknown)),
         ),
         (Type::Map(_, _), "length") => sig(MapLength, vec![], Type::Int),
         (Type::Map(k, v), "get") => sig(MapGet, vec![(**k).clone()], Type::Option(v.clone())),

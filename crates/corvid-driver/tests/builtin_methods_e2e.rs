@@ -405,3 +405,45 @@ agent main() -> Int:
         other => panic!("expected Int, got {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn option_result_ergonomics_end_to_end() {
+    // Slice 45l: unwrap_or / is_some / is_none / ok_or on Option,
+    // unwrap_or / is_ok / is_err / map_err on Result. map_err's
+    // closure must run ONLY on the Err side.
+    let source = "
+agent main() -> String:
+    xs = [10, 20, 30]
+    first = xs.first().unwrap_or(0)
+    missing = xs.slice(0, 0).first().unwrap_or(-1)
+    have = xs.first().is_some()
+    empty = xs.slice(0, 0).first().is_none()
+    converted = xs.first().ok_or(\"empty list\")
+    fallback = xs.slice(0, 0).first().ok_or(\"empty list\")
+    parsed = \"42\".parse_int()
+    bad = \"nope\".parse_int()
+    v = parsed.unwrap_or(0)
+    w = bad.unwrap_or(-7)
+    tagged = bad.map_err(fn (e) -> \"parse failed: \" + e)
+    untouched = parsed.map_err(fn (e) -> \"never runs: \" + e)
+    ok1 = first == 10 and missing == -1 and have and empty
+    ok2 = converted.is_ok() and fallback.is_err()
+    ok3 = v == 42 and w == -7 and parsed.is_ok() and bad.is_err()
+    ok4 = match tagged:
+        Ok(_) -> false
+        Err(msg) -> msg.starts_with(\"parse failed:\")
+    ok5 = untouched.unwrap_or(0) == 42
+    if ok1 and ok2 and ok3 and ok4 and ok5:
+        return \"OPTION RESULT ERGONOMICS WORK\"
+    return \"MISMATCH\"
+";
+    let ir = compile_to_ir(source).expect("45l e2e source must compile");
+    let runtime = Runtime::builder().build();
+    let out = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("45l e2e program must run");
+    match out {
+        Value::String(s) => assert_eq!(&*s, "OPTION RESULT ERGONOMICS WORK"),
+        other => panic!("expected String, got {other:?}"),
+    }
+}
