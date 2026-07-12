@@ -91,6 +91,12 @@ pub enum TraceEvent {
         rendered: Option<String>,
         #[serde(default)]
         args: Vec<serde_json::Value>,
+        /// Sampling parameters the request carried (slice 46a) —
+        /// `{"temperature": .., "top_p": .., "max_tokens": ..}`.
+        /// Absent when every knob used the adapter default; absent
+        /// in pre-46a traces (serde default keeps them readable).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sampling: Option<serde_json::Value>,
     },
     LlmResult {
         ts_ms: u64,

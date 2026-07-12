@@ -34,6 +34,7 @@ pub(super) fn trace_mock_llm_attempt(
         model_version: runtime.model_version(effective_model),
         rendered: Some(rendered.to_string()),
         args: args.to_vec(),
+                sampling: None,
     });
     tracer.emit(TraceEvent::LlmResult {
         ts_ms: crate::tracing::now_ms(),
@@ -180,6 +181,7 @@ pub(super) fn call_llm_once(
         rendered: &combined,
         args,
         output_schema: None,
+        sampling: Default::default(),
     };
     let resp = state.tokio_handle().block_on(async move {
         runtime

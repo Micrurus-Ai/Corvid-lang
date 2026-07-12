@@ -331,6 +331,9 @@ tool read_config(path: String) -> String @owned uses fs_eff
     confidence: 0.9
 
 prompt summarize(text: String) -> String uses llm_eff:
+    with temperature 0.2
+    with top_p 0.95
+    with max_tokens 256
     "Summarize in one sentence: {text}"
 "#,
     ),
@@ -416,6 +419,9 @@ mock summarize(text: String) -> String:
 
 public model exported_model:
     capability: expert
+    temperature: 0.1
+    top_p: 0.9
+    max_tokens: 512
 
 tool refund(amount: Float) -> Nothing uses pay_eff
 

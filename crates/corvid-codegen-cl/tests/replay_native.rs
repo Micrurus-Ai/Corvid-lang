@@ -160,6 +160,7 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             model_version: model_version.clone(),
             rendered: rendered.clone(),
             args: args.clone(),
+        sampling: None,
         },
         TraceEvent::LlmResult {
             prompt,

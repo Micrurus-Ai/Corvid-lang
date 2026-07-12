@@ -67,7 +67,8 @@ pub async fn run_capability_contracts(
                         rendered: "Return JSON matching the provided schema with ok=true."
                             .to_string(),
                         args: vec![],
-                        output_schema: Some(json!({
+                        sampling: Default::default(),
+            output_schema: Some(json!({
                             "type": "object",
                             "properties": {
                                 "ok": { "type": "boolean" }

@@ -176,6 +176,12 @@ Prompt bodies also accept structured clauses (`requires:`, `route:`,
 the prompt chapters and the effect spec; their EBNF lands with a
 future grammar-expansion pass rather than being half-specified here.
 
+The `with` modifier lines include the sampling overrides shipped in
+slice 46a: `with temperature F` (0..=2) and `with top_p F` (0..=1),
+beside the existing `with max_tokens N`. Precedence at dispatch is
+prompt override > model declaration field > provider default; the
+resolved values are recorded in the trace's `llm_call` event.
+
 ## Effect declarations
 
 ```ebnf
@@ -195,6 +201,10 @@ dimension_value   ::= 'true' | 'false'
 model_decl        ::= 'model' IDENT ':' INDENT model_field+ DEDENT
 
 model_field       ::= IDENT ':' dimension_value NEWLINE
+
+# Sampling fields (slice 46a): `temperature:` (0..=2), `top_p:`
+# (0..=1), and `max_tokens:` (positive integer) are range-checked
+# at the declaration and become the model's dispatch defaults.
 ```
 
 ## Agent declarations

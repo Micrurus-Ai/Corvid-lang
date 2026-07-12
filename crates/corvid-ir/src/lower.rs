@@ -208,6 +208,7 @@ impl<'a> Lowerer<'a> {
         let mut fixtures = Vec::new();
         let mut mocks = Vec::new();
         let mut servers = Vec::new();
+        let mut models = Vec::new();
 
         for decl in &file.decls {
             match decl {
@@ -223,12 +224,29 @@ impl<'a> Lowerer<'a> {
                 Decl::Fixture(f) => fixtures.push(self.lower_fixture(f)),
                 Decl::Mock(m) => mocks.push(self.lower_mock(m)),
                 Decl::Effect(_) => {}
-                Decl::Model(_) => {
-                    // Phase 20h slice A: model declarations are a
-                    // static catalog with no runtime lowering yet.
-                    // Slice B adds IR fields on IrPrompt for
-                    // capability requirements; slice C adds the
-                    // route table.
+                Decl::Model(m) => {
+                    // Slice 46a: sampling fields made model decls
+                    // load-bearing at dispatch. Other fields stay
+                    // checker-side (capability routing reads the
+                    // AST catalog directly).
+                    let get = |key: &str| {
+                        m.fields.iter().find_map(|f| {
+                            if f.name.name != key {
+                                return None;
+                            }
+                            match &f.value {
+                                corvid_ast::DimensionValue::Number(n) => Some(*n),
+                                _ => None,
+                            }
+                        })
+                    };
+                    models.push(IrModel {
+                        name: m.name.name.clone(),
+                        temperature: get("temperature"),
+                        top_p: get("top_p"),
+                        max_tokens: get("max_tokens").map(|n| n as u64),
+                        span: m.span,
+                    });
                 }
                 Decl::Server(s) => servers.push(self.lower_server(s)),
                 Decl::Schedule(_) => {
@@ -279,6 +297,7 @@ impl<'a> Lowerer<'a> {
             fixtures,
             mocks,
             servers,
+            models,
         }
     }
 
@@ -626,6 +645,8 @@ impl<'a> Lowerer<'a> {
             produces_grounded,
             cites_strictly_param,
             min_confidence: p.stream.min_confidence,
+            temperature: p.stream.temperature,
+            top_p: p.stream.top_p,
             max_tokens: p.stream.max_tokens,
             backpressure: p.stream.backpressure.clone(),
             escalate_to: p

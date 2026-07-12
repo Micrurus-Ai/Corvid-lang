@@ -1226,6 +1226,30 @@ before any code.
 
 ---
 
+## 2026-07-12 - Phase 46 opened (pre-phase chat) + 46a closed: sampling parameters
+
+Pre-phase chat held: slice order 46a -> 46b -> 46c -> 46d -> 46g ->
+46h -> 46e -> 46f (dependency chain first, design-heavy parallel +
+MCP last). 46f decided CLIENT-ONLY with full moat integration
+("MCP with governance"); 46h repair decided as a prompt-body
+modifier. 46e gets a design doc at slice time.
+
+46a shipped: SamplingParams through all four adapters; model
+declarations became load-bearing at dispatch for the first time
+(IrModel lowering — the Phase 20h catalog previously had zero
+runtime presence); precedence prompt-override > model-field >
+adapter-default resolved in the VM at all three request sites;
+resolved params recorded in the trace's llm_call event so replay
+documents the exact request. Ranges compile-checked at both
+surfaces.
+
+Validation: 283 types + 216 syntax + 109 vm + 323 runtime + 16 e2e
++ book guard + grammar gate; corpus verify exits 1.
+
+Next per agreed order: 46b-system-prompts-and-message-blocks.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

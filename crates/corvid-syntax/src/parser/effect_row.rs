@@ -58,6 +58,34 @@ impl<'a> Parser<'a> {
                         self.expect_positive_int_literal("a positive max token count")?;
                     settings.max_tokens = Some(max_tokens);
                 }
+                // Sampling overrides (slice 46a). Ranges enforced at
+                // parse so the error lands on the literal.
+                "temperature" => {
+                    let (value, value_span) = self.expect_float_literal("a temperature value")?;
+                    if !(0.0..=2.0).contains(&value) {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: format!("temperature {value}"),
+                                expected: "a temperature between 0.0 and 2.0".into(),
+                            },
+                            span: value_span,
+                        });
+                    }
+                    settings.temperature = Some(value);
+                }
+                "top_p" => {
+                    let (value, value_span) = self.expect_float_literal("a top_p value")?;
+                    if !(0.0..=1.0).contains(&value) {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: format!("top_p {value}"),
+                                expected: "a top_p between 0.0 and 1.0".into(),
+                            },
+                            span: value_span,
+                        });
+                    }
+                    settings.top_p = Some(value);
+                }
                 "backpressure" => {
                     settings.backpressure = Some(self.parse_backpressure_policy()?);
                 }
@@ -69,7 +97,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("identifier `{name}`"),
-                            expected: "`min_confidence`, `max_tokens`, `backpressure`, or `escalate_to`".into(),
+                            expected: "`min_confidence`, `max_tokens`, `temperature`, `top_p`, `backpressure`, or `escalate_to`".into(),
                         },
                         span,
                     });

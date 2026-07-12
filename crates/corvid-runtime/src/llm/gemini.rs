@@ -84,6 +84,27 @@ impl LlmAdapter for GeminiAdapter {
                     "responseSchema": schema,
                 });
             }
+            // Sampling (46a): merge into generationConfig without
+            // clobbering the schema keys above.
+            {
+                let cfg = body["generationConfig"]
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                let mut cfg = cfg;
+                if let Some(t) = req.sampling.temperature {
+                    cfg.insert("temperature".into(), json!(t));
+                }
+                if let Some(p) = req.sampling.top_p {
+                    cfg.insert("topP".into(), json!(p));
+                }
+                if let Some(mt) = req.sampling.max_tokens {
+                    cfg.insert("maxOutputTokens".into(), json!(mt));
+                }
+                if !cfg.is_empty() {
+                    body["generationConfig"] = serde_json::Value::Object(cfg);
+                }
+            }
 
             let resp = self
                 .client

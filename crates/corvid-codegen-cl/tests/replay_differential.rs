@@ -363,6 +363,7 @@ fn native_differential_prompt_mismatch_is_replay_divergence() {
             model_version: model_version.clone(),
             rendered: rendered.clone(),
             args: args.clone(),
+        sampling: None,
         },
         other => panic!("expected llm call, got {other:?}"),
     };

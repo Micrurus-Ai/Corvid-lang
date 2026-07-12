@@ -60,6 +60,7 @@ pub fn llm_events(run_id: &str, writer: &str, agent: &str, prompt: &str, result:
             model_version: None,
             rendered: Some("rendered".into()),
             args: vec![],
+            sampling: None,
         },
         TraceEvent::LlmResult {
             ts_ms: 4,

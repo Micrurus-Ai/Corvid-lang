@@ -457,6 +457,8 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
             produces_grounded: false,
             cites_strictly_param: None,
             min_confidence: None,
+            temperature: None,
+            top_p: None,
             max_tokens: None,
             backpressure: Some(BackpressurePolicy::Bounded(1)),
             escalate_to: None,
@@ -513,6 +515,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
         fixtures: vec![],
         mocks: vec![],
         servers: vec![],
+        models: Vec::new(),
     };
     let rt = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))

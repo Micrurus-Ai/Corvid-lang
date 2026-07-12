@@ -69,6 +69,7 @@ mod tests {
             rendered: "Answer ord_42",
             args: &args,
             output_schema: Some(&schema),
+            sampling: Default::default(),
         };
 
         let first = PromptCache::fingerprint(req);

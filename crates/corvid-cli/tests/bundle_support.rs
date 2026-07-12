@@ -578,6 +578,7 @@ fn write_classify_trace(
             model_version: None,
             rendered: None,
             args: vec![serde_json::json!(text)],
+        sampling: None,
         },
         TraceEvent::LlmResult {
             ts_ms: 4,

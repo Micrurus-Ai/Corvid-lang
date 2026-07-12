@@ -3973,6 +3973,41 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 46a — model sampling fields are range-validated at the
+/// declaration.
+#[test]
+fn model_sampling_field_ranges() {
+    let bad = check(
+        "model wild:
+    temperature: 9.5
+
+agent main() -> Int:
+    return 0
+",
+    );
+    assert!(
+        bad.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ModelFieldInvalid { model, field, .. }
+                if model == "wild" && field == "temperature"
+        )),
+        "expected range error, got {:?}",
+        bad.errors
+    );
+
+    let ok = check(
+        "model precise:
+    temperature: 0.1
+    top_p: 0.9
+    max_tokens: 512
+
+agent main() -> Int:
+    return 0
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+}
+
 /// Slice 45r — `fn` pure functions: bodies typecheck like agents,
 /// purity is enforced (tool/prompt/agent calls rejected with the
 /// callee named), fn-to-fn calls compose, and `@deterministic`

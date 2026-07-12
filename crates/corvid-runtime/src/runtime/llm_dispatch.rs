@@ -676,6 +676,7 @@ impl Runtime {
                 model_version: trace_model_version.clone(),
                 rendered: Some(trace_rendered.to_string()),
                 args: req.args.to_vec(),
+                sampling: req.sampling.to_trace_json(),
             });
         }
         let cache_fingerprint = if cacheable && replay.is_none() {

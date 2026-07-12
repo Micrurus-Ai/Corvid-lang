@@ -40,6 +40,7 @@ async fn structured_call_sends_response_format_and_parses_json_content() {
         model: "gpt-4o-mini".into(),
         rendered: "Decide.".into(),
         args: vec![],
+        sampling: Default::default(),
         output_schema: Some(json!({
             "type": "object",
             "properties": {
@@ -91,6 +92,7 @@ async fn unstructured_call_returns_raw_string() {
         model: "gpt-4o-mini".into(),
         rendered: "say hi".into(),
         args: vec![],
+        sampling: Default::default(),
         output_schema: None,
     };
     let resp = adapter.call(&req.as_ref()).await.unwrap();
@@ -112,6 +114,7 @@ async fn http_error_surfaces_as_adapter_failed() {
         model: "gpt-4o-mini".into(),
         rendered: "".into(),
         args: vec![],
+        sampling: Default::default(),
         output_schema: None,
     };
     let err = adapter.call(&req.as_ref()).await.unwrap_err();

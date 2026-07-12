@@ -87,10 +87,11 @@ impl<'ir> Interpreter<'ir> {
                 selected_model.clone(),
                 LlmRequest {
                     prompt: callee_name.to_string(),
-                    model: selected_model,
+                    model: selected_model.clone(),
                     rendered: rendered.clone(),
                     args: json_args.clone(),
                     output_schema: output_schema.clone(),
+                    sampling: self.resolve_sampling(prompt, &selected_model),
                 },
             ));
         }
@@ -195,6 +196,7 @@ impl<'ir> Interpreter<'ir> {
                             rendered: rendered.clone(),
                             args: json_args.clone(),
                             output_schema: output_schema.clone(),
+                            sampling: self.resolve_sampling(prompt, &selected_model),
                         },
                         prompt.cacheable,
                     )

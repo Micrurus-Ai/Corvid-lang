@@ -686,6 +686,7 @@ eval math:
                     model_version: Some("1".into()),
                     rendered: Some("draft body".into()),
                     args: vec![],
+        sampling: None,
                 },
                 TraceEvent::ToolCall {
                     ts_ms: 30,

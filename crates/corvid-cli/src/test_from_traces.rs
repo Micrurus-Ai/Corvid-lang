@@ -351,6 +351,7 @@ mod tests {
                 model_version: None,
                 rendered: None,
                 args: vec![],
+        sampling: None,
             });
             events.push(TraceEvent::LlmResult {
                 ts_ms: shape.ts_ms + 4,

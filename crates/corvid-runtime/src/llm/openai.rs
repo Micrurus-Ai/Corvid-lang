@@ -116,6 +116,15 @@ fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
             {"role": "user", "content": req.rendered}
         ],
     });
+    if let Some(t) = req.sampling.temperature {
+        body["temperature"] = json!(t);
+    }
+    if let Some(p) = req.sampling.top_p {
+        body["top_p"] = json!(p);
+    }
+    if let Some(mt) = req.sampling.max_tokens {
+        body["max_completion_tokens"] = json!(mt);
+    }
 
     if let Some(schema) = &req.output_schema {
         body["response_format"] = json!({
@@ -211,6 +220,7 @@ mod tests {
             model: "gpt-4o-mini".into(),
             rendered: "decide pls".into(),
             args: vec![],
+            sampling: Default::default(),
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {"x": {"type": "boolean"}},
@@ -233,6 +243,7 @@ mod tests {
             model: "gpt-4o-mini".into(),
             rendered: "say hi".into(),
             args: vec![],
+            sampling: Default::default(),
             output_schema: None,
         };
         let body = build_request_body(&req.as_ref());

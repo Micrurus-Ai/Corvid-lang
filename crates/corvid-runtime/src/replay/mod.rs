@@ -1023,6 +1023,7 @@ mod tests {
             model_version: None,
             rendered: Some("Context: {\"timestamp_ms\":10}".into()),
             args: expected_args,
+        sampling: None,
         };
         assert!(ReplaySource::llm_call_matches(
             &event,

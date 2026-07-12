@@ -664,12 +664,37 @@ impl<'a> Checker<'a> {
                 Decl::Mock(m) => self.check_mock(m),
                 Decl::Prompt(p) => self.check_prompt(p),
                 Decl::Server(s) => self.check_server(s),
+                // Model sampling fields (slice 46a): validate
+                // ranges at the declaration so a typo'd
+                // `temperature: 20` fails compile, not dispatch.
+                Decl::Model(m) => {
+                    for f in &m.fields {
+                        let corvid_ast::DimensionValue::Number(n) = &f.value else {
+                            continue;
+                        };
+                        let bad = match f.name.name.as_str() {
+                            "temperature" => !(0.0..=2.0).contains(n),
+                            "top_p" => !(0.0..=1.0).contains(n),
+                            "max_tokens" => *n < 1.0 || n.fract() != 0.0,
+                            _ => false,
+                        };
+                        if bad {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::ModelFieldInvalid {
+                                    model: m.name.name.clone(),
+                                    field: f.name.name.clone(),
+                                    message: format!("value {n} is out of range"),
+                                },
+                                f.span,
+                            ));
+                        }
+                    }
+                }
                 Decl::Tool(_)
                 | Decl::Type(_)
                 | Decl::Store(_)
                 | Decl::Import(_)
                 | Decl::Effect(_)
-                | Decl::Model(_)
                 | Decl::Schedule(_) => {}
                 Decl::Extend(ext) => {
                     // Typecheck agent method bodies the same way free

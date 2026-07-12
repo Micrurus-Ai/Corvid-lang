@@ -13,6 +13,7 @@ async fn call_llm_uses_default_model_when_request_blank() {
             rendered: "say hi".into(),
             args: vec![],
             output_schema: None,
+        sampling: Default::default(),
         })
         .await
         .unwrap();
@@ -59,6 +60,7 @@ async fn call_llm_fails_over_to_compatible_model_and_traces_provider_events() {
             rendered: "say hi".into(),
             args: vec![],
             output_schema: None,
+        sampling: Default::default(),
         })
         .await
         .unwrap();
@@ -124,6 +126,7 @@ async fn call_llm_records_normalized_usage_by_provider() {
             rendered: "say hi".into(),
             args: vec![],
             output_schema: None,
+        sampling: Default::default(),
         })
         .await
         .unwrap();
@@ -182,6 +185,7 @@ async fn observation_summary_aggregates_usage_and_provider_health() {
         rendered: "Summarize.".into(),
         args: vec![],
         output_schema: None,
+        sampling: Default::default(),
     })
     .await
     .unwrap();

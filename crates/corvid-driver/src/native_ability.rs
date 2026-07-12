@@ -450,6 +450,7 @@ mod tests {
             fixtures: vec![],
             mocks: vec![],
             servers: vec![],
+            models: Vec::new(),
         };
 
         assert!(matches!(

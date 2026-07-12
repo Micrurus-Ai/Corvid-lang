@@ -260,6 +260,7 @@ async fn prompt_mismatch_is_a_replay_divergence_not_a_model_swap_diff() {
             model_version: model_version.clone(),
             rendered: rendered.clone(),
             args: args.clone(),
+        sampling: None,
         },
         other => panic!("expected llm call, got {other:?}"),
     };

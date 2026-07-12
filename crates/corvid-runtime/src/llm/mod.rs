@@ -28,6 +28,42 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+/// Sampling parameters (slice 46a): `temperature` / `top_p` /
+/// `max_tokens`, resolved by the CALLER (prompt modifier overrides
+/// beat model-declaration fields; `None` means the adapter's
+/// default). Recorded in the trace so replays document the exact
+/// request that produced the recorded response.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SamplingParams {
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub max_tokens: Option<u64>,
+}
+
+impl SamplingParams {
+    pub fn is_default(&self) -> bool {
+        self.temperature.is_none() && self.top_p.is_none() && self.max_tokens.is_none()
+    }
+
+    /// JSON shape recorded in `TraceEvent::LlmCall`.
+    pub fn to_trace_json(&self) -> Option<serde_json::Value> {
+        if self.is_default() {
+            return None;
+        }
+        let mut m = serde_json::Map::new();
+        if let Some(t) = self.temperature {
+            m.insert("temperature".into(), t.into());
+        }
+        if let Some(p) = self.top_p {
+            m.insert("top_p".into(), p.into());
+        }
+        if let Some(mt) = self.max_tokens {
+            m.insert("max_tokens".into(), mt.into());
+        }
+        Some(serde_json::Value::Object(m))
+    }
+}
+
 /// Request handed to an adapter.
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -48,6 +84,9 @@ pub struct LlmRequest {
     /// `None` means the caller doesn't care about structure — the adapter
     /// returns whatever the model produced.
     pub output_schema: Option<serde_json::Value>,
+    /// Sampling parameters (slice 46a). Defaults leave every knob
+    /// at the adapter's own default.
+    pub sampling: SamplingParams,
 }
 
 /// Borrowed request shape for hot paths that already hold prompt/model/rendered
@@ -60,6 +99,7 @@ pub struct LlmRequestRef<'a> {
     pub rendered: &'a str,
     pub args: &'a [serde_json::Value],
     pub output_schema: Option<&'a serde_json::Value>,
+    pub sampling: SamplingParams,
 }
 
 impl LlmRequest {
@@ -70,6 +110,7 @@ impl LlmRequest {
             rendered: &self.rendered,
             args: &self.args,
             output_schema: self.output_schema.as_ref(),
+            sampling: self.sampling,
         }
     }
 }
@@ -338,6 +379,7 @@ mod tests {
             rendered: "Decide whether to refund.".into(),
             args: vec![],
             output_schema: None,
+            sampling: Default::default(),
         };
         let resp = reg.call(&req.as_ref()).await.unwrap();
         assert_eq!(resp.value, serde_json::json!({"should_refund": true}));
@@ -352,6 +394,7 @@ mod tests {
             rendered: "".into(),
             args: vec![],
             output_schema: None,
+            sampling: Default::default(),
         };
         let err = reg.call(&req.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::NoAdapter(ref m) if m == "claude-opus-4-6"));
@@ -369,6 +412,7 @@ mod tests {
             rendered: "".into(),
             args: vec![],
             output_schema: None,
+            sampling: Default::default(),
         };
         let err = reg.call(&missing.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::AdapterFailed { .. }));
@@ -383,6 +427,7 @@ mod tests {
             rendered: "".into(),
             args: vec![],
             output_schema: None,
+            sampling: Default::default(),
         };
         reg.call(&ok.as_ref()).await.unwrap();
         let health = reg.health();
@@ -411,6 +456,7 @@ mod tests {
             rendered: "".into(),
             args: vec![],
             output_schema: None,
+            sampling: Default::default(),
         };
         let err = reg.call(&req.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::NoModelConfigured));

@@ -93,6 +93,22 @@ impl LlmAdapter for OllamaAdapter {
                     {"role": "user", "content": req.rendered}
                 ],
             });
+            // Sampling (46a): Ollama takes these under `options`.
+            {
+                let mut opts = serde_json::Map::new();
+                if let Some(t) = req.sampling.temperature {
+                    opts.insert("temperature".into(), json!(t));
+                }
+                if let Some(p) = req.sampling.top_p {
+                    opts.insert("top_p".into(), json!(p));
+                }
+                if let Some(mt) = req.sampling.max_tokens {
+                    opts.insert("num_predict".into(), json!(mt));
+                }
+                if !opts.is_empty() {
+                    body["options"] = serde_json::Value::Object(opts);
+                }
+            }
             if let Some(schema) = req.output_schema {
                 // Newer Ollama (≥ 0.5.x) accepts a JSON schema
                 // directly in `format`. Older versions accepted

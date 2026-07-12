@@ -114,6 +114,14 @@ pub enum TypeErrorKind {
     /// `replay`, or `yield`. A `fn` is statically effect-free.
     FnBodyNotPure { name: String, what: String },
 
+    /// A model declaration field with an out-of-range value
+    /// (slice 46a): `temperature: 9.5`.
+    ModelFieldInvalid {
+        model: String,
+        field: String,
+        message: String,
+    },
+
     /// A malformed `@retry(...)` / `@idempotency(...)` annotation
     /// (slice 45q): zero attempts, key naming no parameter, or a
     /// key parameter of non-derivable type.
@@ -481,6 +489,13 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::ModelFieldInvalid {
+                model,
+                field,
+                message,
+            } => {
+                format!("invalid field `{field}` on model `{model}`: {message}")
+            }
             Self::FnBodyNotPure { name, what } => {
                 format!("`fn {name}` must be effect-free, but its body contains {what}")
             }
@@ -799,6 +814,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::ModelFieldInvalid { .. } => Some(
+                "sampling ranges: temperature 0..=2, top_p 0..=1, max_tokens a positive integer".into(),
+            ),
             Self::FnBodyNotPure { .. } => Some(
                 "move the effectful call into an agent, or pass its result into the fn as a parameter".into(),
             ),

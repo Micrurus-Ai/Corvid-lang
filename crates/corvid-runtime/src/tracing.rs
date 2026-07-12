@@ -214,6 +214,7 @@ impl Tracer {
                 model_version,
                 rendered,
                 args,
+                sampling,
             } => TraceEvent::LlmCall {
                 ts_ms,
                 run_id,
@@ -222,6 +223,7 @@ impl Tracer {
                 model_version,
                 rendered: rendered.map(|s| redact_string(&r.redact(serde_json::Value::String(s)))),
                 args: r.redact_args(args),
+                sampling,
             },
             TraceEvent::ApprovalRequest {
                 ts_ms,

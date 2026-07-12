@@ -12,6 +12,27 @@ use corvid_types::Type;
 use super::{PromptCallResult, DEFAULT_COMPLETION_TOKEN_ESTIMATE};
 
 impl<'ir> Interpreter<'ir> {
+    /// Resolve sampling parameters for a prompt call (slice 46a):
+    /// per-prompt `with temperature/top_p/max_tokens` overrides
+    /// beat the selected model declaration's fields; anything left
+    /// `None` falls through to the adapter default.
+    pub(in crate::interp) fn resolve_sampling(
+        &self,
+        prompt: &corvid_ir::IrPrompt,
+        model_name: &str,
+    ) -> corvid_runtime::llm::SamplingParams {
+        let model = self.ir.models.iter().find(|m| m.name == model_name);
+        corvid_runtime::llm::SamplingParams {
+            temperature: prompt
+                .temperature
+                .or_else(|| model.and_then(|m| m.temperature)),
+            top_p: prompt.top_p.or_else(|| model.and_then(|m| m.top_p)),
+            max_tokens: prompt
+                .max_tokens
+                .or_else(|| model.and_then(|m| m.max_tokens)),
+        }
+    }
+
     fn emit_model_selected(
         &self,
         callee_name: &str,
@@ -348,6 +369,7 @@ impl<'ir> Interpreter<'ir> {
             Type::Stream(inner) => inner.as_ref(),
             other => other,
         };
+
         let output_schema = Some(crate::schema::schema_for(result_ty, &self.types_by_id));
         let req = LlmRequest {
             prompt: callee_name.to_string(),
@@ -355,6 +377,7 @@ impl<'ir> Interpreter<'ir> {
             rendered: rendered.to_string(),
             args: json_args,
             output_schema,
+            sampling: self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or("")),
         };
         let actual_model = if req.model.is_empty() {
             self.runtime.default_model().to_string()

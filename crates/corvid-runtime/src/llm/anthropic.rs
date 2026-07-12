@@ -114,11 +114,17 @@ impl LlmAdapter for AnthropicAdapter {
 fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
     let mut body = json!({
         "model": req.model,
-        "max_tokens": DEFAULT_MAX_TOKENS,
+        "max_tokens": req.sampling.max_tokens.unwrap_or(u64::from(DEFAULT_MAX_TOKENS)),
         "messages": [
             {"role": "user", "content": req.rendered}
         ],
     });
+    if let Some(t) = req.sampling.temperature {
+        body["temperature"] = json!(t);
+    }
+    if let Some(p) = req.sampling.top_p {
+        body["top_p"] = json!(p);
+    }
 
     if let Some(schema) = &req.output_schema {
         let tool_name = format!("respond_with_{}", req.prompt);
@@ -219,6 +225,7 @@ mod tests {
             model: "claude-opus-4-6".into(),
             rendered: "decide pls".into(),
             args: vec![],
+            sampling: Default::default(),
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {"x": {"type": "boolean"}},
@@ -234,12 +241,51 @@ mod tests {
     }
 
     #[test]
+    fn body_carries_sampling_params() {
+        // Slice 46a: temperature/top_p pass through; max_tokens
+        // replaces the adapter default.
+        let req = LlmRequest {
+            prompt: "chat".into(),
+            model: "claude-opus-4-6".into(),
+            rendered: "say hi".into(),
+            args: vec![],
+            output_schema: None,
+            sampling: crate::llm::SamplingParams {
+                temperature: Some(0.2),
+                top_p: Some(0.9),
+                max_tokens: Some(512),
+            },
+        };
+        let body = build_request_body(&req.as_ref());
+        assert_eq!(body["temperature"], json!(0.2));
+        assert_eq!(body["top_p"], json!(0.9));
+        assert_eq!(body["max_tokens"], json!(512));
+    }
+
+    #[test]
+    fn body_omits_sampling_when_default() {
+        let req = LlmRequest {
+            prompt: "chat".into(),
+            model: "claude-opus-4-6".into(),
+            rendered: "say hi".into(),
+            args: vec![],
+            output_schema: None,
+            sampling: Default::default(),
+        };
+        let body = build_request_body(&req.as_ref());
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert_eq!(body["max_tokens"], json!(u64::from(DEFAULT_MAX_TOKENS)));
+    }
+
+    #[test]
     fn body_omits_tools_when_no_schema() {
         let req = LlmRequest {
             prompt: "chat".into(),
             model: "claude-opus-4-6".into(),
             rendered: "say hi".into(),
             args: vec![],
+            sampling: Default::default(),
             output_schema: None,
         };
         let body = build_request_body(&req.as_ref());

@@ -76,6 +76,34 @@ prompt ask(question: String) -> String uses llm_call:
     user: "{question}"
 ```
 
+## Sampling parameters
+
+`temperature`, `top_p`, and `max_tokens` live in two places, with a
+clear precedence (compiled in CI):
+
+```corvid
+model precise:
+    capability: expert
+    temperature: 0.1
+    top_p: 0.9
+    max_tokens: 512
+
+prompt classify(text: String) -> String:
+    route:
+        true -> precise
+    with temperature 0.7
+    "Classify {text}"
+```
+
+The model declaration sets the model's defaults; a per-prompt
+`with temperature 0.7` overrides them for that prompt only.
+Anything left unset falls through to the provider's default. The
+resolved values ride the request to all four provider adapters and
+are recorded in the trace's `llm_call` event, so a replayed run
+documents exactly which sampling produced the recorded response.
+Ranges are compile-checked: temperature 0..=2, top_p 0..=1,
+max_tokens a positive integer.
+
 ## Provider routing
 
 Which LLM serves the prompt is decided by the typed model-routing

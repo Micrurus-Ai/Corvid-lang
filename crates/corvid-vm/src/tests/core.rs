@@ -215,6 +215,7 @@ async fn if_non_bool_condition_is_defensive_runtime_error() {
         fixtures: vec![],
         mocks: vec![],
         servers: vec![],
+        models: Vec::new(),
     };
     let rt = empty_runtime();
     let err = run_agent(&ir, "bad", vec![], &rt).await.unwrap_err();

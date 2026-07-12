@@ -581,3 +581,43 @@ agent main() -> String:
         other => panic!("expected String, got {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sampling_parameters_lower_into_ir() {
+    // Slice 46a: model-declaration sampling fields and per-prompt
+    // `with temperature/top_p` overrides both reach the IR; the VM
+    // resolves prompt-override > model-field > adapter default at
+    // dispatch and records the resolved params in the trace.
+    let source = "
+model precise:
+    capability: expert
+    temperature: 0.1
+    top_p: 0.9
+    max_tokens: 512
+
+prompt classify(text: String) -> String:
+    route:
+        true -> precise
+    with temperature 0.7
+    \"Classify {text}\"
+
+agent main() -> String:
+    return \"ok\"
+";
+    let ir = compile_to_ir(source).expect("46a source must compile");
+    let model = ir
+        .models
+        .iter()
+        .find(|m| m.name == "precise")
+        .expect("model lowered");
+    assert_eq!(model.temperature, Some(0.1));
+    assert_eq!(model.top_p, Some(0.9));
+    assert_eq!(model.max_tokens, Some(512));
+    let prompt = ir
+        .prompts
+        .iter()
+        .find(|p| p.name == "classify")
+        .expect("prompt lowered");
+    assert_eq!(prompt.temperature, Some(0.7), "prompt override present");
+    assert_eq!(prompt.top_p, None, "top_p falls through to the model");
+}

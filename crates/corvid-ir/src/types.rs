@@ -26,6 +26,8 @@ pub struct IrFile {
     /// the HTTP-serve layer can register routes and dispatch to the
     /// handler agent.
     pub servers: Vec<IrServer>,
+    /// `model` declarations' runtime-relevant fields (slice 46a).
+    pub models: Vec<IrModel>,
 }
 
 /// A `server` block lowered to IR.
@@ -147,6 +149,19 @@ pub struct IrTool {
 
 /// A prompt declaration (body is a template string).
 #[derive(Debug, Clone)]
+/// A `model` declaration's runtime-relevant fields (slice 46a).
+/// Until 46a, model decls were a static checker-side catalog with
+/// no lowering; sampling made them load-bearing at dispatch: the
+/// VM resolves `prompt override > model field > adapter default`.
+pub struct IrModel {
+    pub name: String,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub max_tokens: Option<u64>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct IrPrompt {
     pub id: DefId,
     pub name: String,
@@ -169,6 +184,10 @@ pub struct IrPrompt {
     /// Stream-only prompt modifiers preserved for the interpreter tier.
     pub min_confidence: Option<f64>,
     pub max_tokens: Option<u64>,
+    /// Per-prompt sampling overrides (slice 46a): beat the model
+    /// declaration's fields; `None` falls through.
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
     pub backpressure: Option<BackpressurePolicy>,
     pub escalate_to: Option<String>,
     /// Runtime calibration flag. When true, prompt calls record

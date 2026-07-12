@@ -59,6 +59,7 @@ fn sample_trace() -> Vec<TraceEvent> {
             model_version: Some("2024-10-22".into()),
             rendered: Some("Classify: ticket-42".into()),
             args: vec![],
+            sampling: Some(json!({"temperature": 0.2, "max_tokens": 512})),
         },
         TraceEvent::PromptCache {
             ts_ms: 6,

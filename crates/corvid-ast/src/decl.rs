@@ -457,6 +457,13 @@ pub struct PromptStreamSettings {
     pub min_confidence: Option<f64>,
     #[serde(default)]
     pub max_tokens: Option<u64>,
+    /// Sampling override (slice 46a): `with temperature 0.2`.
+    /// Beats the model declaration's `temperature:` field.
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    /// Sampling override (slice 46a): `with top_p 0.9`.
+    #[serde(default)]
+    pub top_p: Option<f64>,
     #[serde(default)]
     pub backpressure: Option<BackpressurePolicy>,
     #[serde(default)]
