@@ -1063,8 +1063,34 @@ agent main() -> Bool:
         let root = scaffold_new_in(tmp.path(), "my_bot").unwrap();
         assert!(root.join("corvid.toml").exists());
         assert!(root.join("src/main.cor").exists());
-        assert!(root.join("tools.py").exists());
         assert!(root.join(".gitignore").exists());
+        // Slice 47a: the DEFAULT scaffold is pure Corvid — no
+        // Python glue in the first minute. The starter agent runs
+        // an executing stdlib surface instead.
+        assert!(
+            !root.join("tools.py").exists(),
+            "default scaffold must not ship Python glue"
+        );
+        let main = std::fs::read_to_string(root.join("src/main.cor")).unwrap();
+        assert!(
+            main.contains("time_now_utc"),
+            "starter agent uses an executing stdlib surface"
+        );
+        assert!(
+            main.contains("agent main()"),
+            "starter has a zero-arg entrypoint so `corvid run` works immediately"
+        );
+    }
+
+    /// Slice 47a: `--with-python-tools` is the OPT-IN home for the
+    /// Python tool template.
+    #[test]
+    fn scaffold_python_template_is_opt_in() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = scaffold_new_in(tmp.path(), "my_bot").unwrap();
+        crate::scaffold::write_python_tool_template(&root).unwrap();
+        assert!(root.join("tools.py").exists());
+        assert!(root.join("src/python_tools_example.cor").exists());
     }
 
     /// Slice 33S2b — `corvid new` must scaffold the two
@@ -1188,6 +1214,14 @@ agent main() -> Bool:
         std::fs::write(
             std_src.join("effects.cor"),
             b"public type EffectEnvelope:\n    name: String\n",
+        )
+        .unwrap();
+        // Slice 47a: the scaffold's starter agent imports
+        // `./std/time`, so the synthetic stdlib must ship a
+        // compatible module for the round-trip to typecheck.
+        std::fs::write(
+            std_src.join("time.cor"),
+            b"public type TimeInstant:\n    epoch_ms: Int\n    iso: String\n\npublic effect time_wall:\n    reversible: true\n\npublic tool time_now_utc() -> TimeInstant uses time_wall\n",
         )
         .unwrap();
 

@@ -72,7 +72,10 @@ pub(crate) use connectors::cmd_connectors;
 /// `std::process::ExitCode`.
 pub(crate) fn run(cli: Cli) -> Result<u8> {
     match cli.command {
-        Some(Command::New { name }) => cmd_new(&name),
+        Some(Command::New {
+            name,
+            with_python_tools,
+        }) => cmd_new(&name, with_python_tools),
         Some(Command::Check { file }) => cmd_check(&file),
         Some(Command::Build {
             file,

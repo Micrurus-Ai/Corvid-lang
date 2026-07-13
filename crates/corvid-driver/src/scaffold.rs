@@ -12,6 +12,42 @@ pub fn scaffold_new(name: &str) -> anyhow::Result<PathBuf> {
     scaffold_new_in(&std::env::current_dir()?, name)
 }
 
+/// Scaffold with the opt-in Python tool template (slice 47a:
+/// `corvid new --with-python-tools`). The DEFAULT scaffold is
+/// pure Corvid — the hello-world runs an executing stdlib surface,
+/// not a PyO3 round-trip.
+pub fn scaffold_new_with_python(name: &str) -> anyhow::Result<PathBuf> {
+    let root = scaffold_new(name)?;
+    write_python_tool_template(&root)?;
+    Ok(root)
+}
+
+pub(crate) fn write_python_tool_template(root: &Path) -> anyhow::Result<()> {
+    std::fs::write(
+        root.join("tools.py"),
+        r#"# Implement your Corvid tools here.
+from corvid_runtime import tool
+
+
+@tool("echo")
+async def echo(message: str) -> str:
+    return message
+"#,
+    )?;
+    std::fs::write(
+        root.join("src").join("python_tools_example.cor"),
+        r#"# Example: a tool implemented in Python (tools.py).
+# Run with: corvid run src/python_tools_example.cor
+
+tool echo(message: String) -> String
+
+agent main(name: String) -> String:
+    return echo(name)
+"#,
+    )?;
+    Ok(())
+}
+
 /// Scaffold a new Corvid project named `<name>` under `parent`.
 pub fn scaffold_new_in(parent: &Path, name: &str) -> anyhow::Result<PathBuf> {
     let root = parent.join(name);
@@ -57,30 +93,24 @@ allow = []
 "#
         ),
     )?;
-    std::fs::write(
-        root.join(".gitignore"),
-        "/target\n__pycache__/\n*.pyc\n",
-    )?;
+    std::fs::write(root.join(".gitignore"), "/target\n__pycache__/\n*.pyc\n")?;
     std::fs::write(
         root.join("src").join("main.cor"),
-        r#"# Your first Corvid agent.
+        r#"# Your first Corvid agent — pure Corvid, no glue code.
+#
+# `time_now_utc` is an EXECUTING stdlib tool: the call below is
+# traced, and `corvid replay` substitutes the recorded instant so
+# a re-run reproduces this exact output. That is the language's
+# whole promise, live in your first program.
 
-tool echo(message: String) -> String
+import "./std/time" use time_now_utc
 
 agent greet(name: String) -> String:
-    message = echo(name)
-    return message
-"#,
-    )?;
-    std::fs::write(
-        root.join("tools.py"),
-        r#"# Implement your Corvid tools here.
-from corvid_runtime import tool
+    now = time_now_utc()
+    return "Hello, " + name + "! It is " + now.iso
 
-
-@tool("echo")
-async def echo(message: str) -> str:
-    return message
+agent main() -> String:
+    return greet("Corvid")
 "#,
     )?;
     Ok(root)

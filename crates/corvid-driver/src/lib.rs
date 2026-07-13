@@ -133,7 +133,8 @@ pub use run::{
     RunTarget,
 };
 pub use scaffold::{
-    find_std_source, scaffold_new, scaffold_new_in, vendor_std, vendor_std_from,
+    find_std_source, scaffold_new, scaffold_new_in, scaffold_new_with_python, vendor_std,
+    vendor_std_from,
 };
 pub use eval_runner::{
     default_eval_options, render_eval_report, run_evals_at_path, run_evals_at_path_with_options,

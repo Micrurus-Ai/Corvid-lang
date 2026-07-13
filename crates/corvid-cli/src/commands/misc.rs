@@ -24,8 +24,12 @@ use crate::routing_report::{
     build_report, render_report as render_routing_report, RoutingReportOptions,
 };
 
-pub(crate) fn cmd_new(name: &str) -> Result<u8> {
-    let root = scaffold_new(name).context("failed to scaffold project")?;
+pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
+    let root = if with_python_tools {
+        corvid_driver::scaffold_new_with_python(name).context("failed to scaffold project")?
+    } else {
+        scaffold_new(name).context("failed to scaffold project")?
+    };
     println!("created new Corvid project at `{}`", root.display());
     match vendor_std(&root) {
         Ok(Some(src)) => println!("vendored stdlib from `{}`", src.display()),
@@ -44,12 +48,18 @@ pub(crate) fn cmd_new(name: &str) -> Result<u8> {
     println!("  cd {name}");
     println!("  corvid run src/main.cor   # OR `corvid serve src/main.cor` for the HTTP path");
     println!();
-    println!("Tools that need a Python implementation go in `tools.py`. The");
-    println!("`corvid_runtime` Python package is bundled with the install,");
-    println!("so `from corvid_runtime import tool` works without any pip");
-    println!("install. (Filed as slice 33Q6 closing the prior `pip install");
-    println!("corvid-runtime` directive that was broken because the package");
-    println!("isn't on PyPI.)");
+    if with_python_tools {
+        println!("Python tool template included: implement tools in `tools.py`");
+        println!("(the bundled `corvid_runtime` package makes `from");
+        println!("corvid_runtime import tool` work without any pip install)");
+        println!("and see `src/python_tools_example.cor` for the declaration");
+        println!("side.");
+    } else {
+        println!("The starter agent is pure Corvid — it reads the clock");
+        println!("through an executing, replay-traced stdlib tool. Need a");
+        println!("Python-implemented tool later? Re-scaffold with");
+        println!("`corvid new --with-python-tools` or add a `tools.py`.");
+    }
     Ok(0)
 }
 

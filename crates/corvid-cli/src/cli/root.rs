@@ -74,7 +74,14 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// Scaffold a new Corvid project.
-    New { name: String },
+    New {
+        name: String,
+        /// Also scaffold the opt-in Python tool template
+        /// (`tools.py` + an example .cor) — slice 47a made the
+        /// DEFAULT scaffold pure Corvid.
+        #[arg(long)]
+        with_python_tools: bool,
+    },
     /// Type-check a Corvid source file.
     Check { file: PathBuf },
     /// Compile a Corvid source file. Default target is Python (target/py/);

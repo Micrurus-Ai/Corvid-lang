@@ -1439,6 +1439,33 @@ project rule, a pre-phase chat comes first.
 
 ---
 
+## 2026-07-13 - Phase 47 opened (pre-phase chat) + 47a closed: pure-Corvid scaffold
+
+Pre-phase chat held: order 47a -> 47b -> 47h -> 47f -> 47g -> 47c
+-> 47e -> 47d. Decisions: 47c batteries-on-compiled-tiers is
+post-v1.0 (tier-matrix doc + loud transpile failures ship now);
+47d ships the MINIMAL SCHEDULER RUNNER (governed cron over the
+existing durable queue — documenting the limitation would be the
+shortcut); 47g DERIVES the approve requirement from the trust
+tier (breaking, safer — the warning would be the half-measure).
+
+47a shipped: the first minute is pure Corvid. The starter agent
+reads the clock through the executing, replay-traced std/time
+tool and `corvid run` works with zero arguments and zero config.
+Python glue moved behind --with-python-tools. Live probe:
+scaffold -> run -> "Hello, Corvid! It is <now>".
+
+Live finding for 47b: the installed ~/.corvid/std is stale
+(pre-45m), which broke the starter import until CORVID_HOME
+pointed at the repo — exactly the staleness gap 47b closes.
+
+Validation: 198 driver + workspace check clean; corpus verify
+exits 1.
+
+Next per agreed order: 47b-std-vendoring-hardening.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
