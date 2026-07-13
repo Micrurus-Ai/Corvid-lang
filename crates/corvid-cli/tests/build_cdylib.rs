@@ -57,9 +57,17 @@ agent refund_bot(ticket_id: String, amount: Float) -> Bool:
     return ticket_id == "vip" and amount > 10.0
 "#;
 
+// Slice 33Q8 promoted flat scalar-field structs to supported ABI
+// shapes (they cross as JSON-encoded C strings), so the offender
+// here must be a NESTED struct — still beyond the encoder/decoder
+// depth and still rejected by the checker.
 const NON_SCALAR_SRC: &str = r#"
+type Assignee:
+    name: String
+
 type Ticket:
     id: String
+    assignee: Assignee
 
 pub extern "c"
 agent refund_bot(ticket: Ticket) -> Bool:
@@ -370,18 +378,17 @@ fn cli_build_cdylib_fails_cleanly_on_non_scalar_signature() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // The error help text used to say "Phase 22-B". It was
-    // reworded to "Phase 22 FFI slices" — both the unit tests in
-    // `corvid-types/src/tests.rs` and the production message in
-    // `corvid-types/src/errors/error_kind.rs` track the current
-    // phrasing. Assert the stable substring `Phase 22` so a
-    // future rewording that keeps the phase reference but drops
-    // the "FFI" word doesn't break this test for the wrong
-    // reason.
-    assert!(stderr.contains("Phase 22"), "stderr missing Phase 22 hint: {stderr}");
+    // The diagnostic must name the ABI violation AND surface the
+    // actionable help enumerating the supported boundary set (the
+    // help's old phase-numbered phrasing is gone; assert the
+    // stable behavioral wording).
     assert!(
-        stderr.contains("unsupported ABI type") || stderr.contains("struct") || stderr.contains("Ticket"),
-        "stderr missing offender detail: {stderr}"
+        stderr.contains("unsupported ABI type"),
+        "stderr missing the ABI violation message: {stderr}"
+    );
+    assert!(
+        stderr.contains("extern \"c\" accepts"),
+        "stderr missing the supported-ABI-set help text: {stderr}"
     );
 }
 
