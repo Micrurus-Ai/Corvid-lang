@@ -147,12 +147,18 @@ pub struct IrTool {
     pub span: Span,
 }
 
-/// A prompt declaration (body is a template string).
-#[derive(Debug, Clone)]
+/// One role block of a multi-message prompt (slice 46b).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IrPromptMessage {
+    pub role: String,
+    pub template: String,
+}
+
 /// A `model` declaration's runtime-relevant fields (slice 46a).
 /// Until 46a, model decls were a static checker-side catalog with
 /// no lowering; sampling made them load-bearing at dispatch: the
 /// VM resolves `prompt override > model field > adapter default`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct IrModel {
     pub name: String,
     pub temperature: Option<f64>,
@@ -168,6 +174,9 @@ pub struct IrPrompt {
     pub params: Vec<IrParam>,
     pub return_ty: Type,
     pub template: String,
+    /// Multi-message role blocks (slice 46b). Empty = the classic
+    /// single-template form.
+    pub messages: Vec<IrPromptMessage>,
     pub effect_names: Vec<String>,
     pub effect_cost: f64,
     pub effect_confidence: f64,

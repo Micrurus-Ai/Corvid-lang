@@ -70,6 +70,7 @@ mod tests {
             args: &args,
             output_schema: Some(&schema),
             sampling: Default::default(),
+            messages: &[],
         };
 
         let first = PromptCache::fingerprint(req);

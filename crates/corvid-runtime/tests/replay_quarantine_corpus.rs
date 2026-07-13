@@ -81,6 +81,7 @@ async fn replay_quarantines_llm_registry_direct_calls() {
         args: &[],
         output_schema: None,
             sampling: Default::default(),
+            messages: &[],
     };
     let err = runtime.llms().call(&req).await.expect_err("must refuse");
     match err {
@@ -227,6 +228,7 @@ async fn differential_replay_does_not_quarantine_llm_registry() {
         args: &[],
         output_schema: None,
             sampling: Default::default(),
+            messages: &[],
     };
     let resp = runtime
         .llms()

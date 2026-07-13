@@ -43,6 +43,7 @@ async fn structured_call_sends_tool_definition_and_extracts_input() {
         rendered: "Decide.".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: Some(json!({
             "type": "object",
             "properties": {
@@ -93,6 +94,7 @@ async fn unstructured_call_concatenates_text_blocks() {
         rendered: "say hi".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: None,
     };
     let resp = adapter.call(&req.as_ref()).await.unwrap();
@@ -115,6 +117,7 @@ async fn http_error_surfaces_as_adapter_failed() {
         rendered: "".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: None,
     };
     let err = adapter.call(&req.as_ref()).await.unwrap_err();

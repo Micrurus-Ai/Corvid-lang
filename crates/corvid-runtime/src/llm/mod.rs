@@ -64,6 +64,15 @@ impl SamplingParams {
     }
 }
 
+/// One role-tagged message of a multi-message prompt (slice 46b).
+/// `role` is `"system"`, `"user"`, or `"assistant"` — validated at
+/// parse time; adapters map roles to their native shapes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmMessage {
+    pub role: String,
+    pub content: String,
+}
+
 /// Request handed to an adapter.
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -87,6 +96,13 @@ pub struct LlmRequest {
     /// Sampling parameters (slice 46a). Defaults leave every knob
     /// at the adapter's own default.
     pub sampling: SamplingParams,
+    /// Multi-message form (slice 46b). Empty means the prompt is
+    /// the classic single-template form: adapters send `rendered`
+    /// as one user message. Non-empty means adapters build their
+    /// provider-native message array from these and `rendered` is
+    /// the role-labeled concatenation (canonical for traces, cache
+    /// fingerprints, token estimates, and mock keying).
+    pub messages: Vec<LlmMessage>,
 }
 
 /// Borrowed request shape for hot paths that already hold prompt/model/rendered
@@ -100,6 +116,7 @@ pub struct LlmRequestRef<'a> {
     pub args: &'a [serde_json::Value],
     pub output_schema: Option<&'a serde_json::Value>,
     pub sampling: SamplingParams,
+    pub messages: &'a [LlmMessage],
 }
 
 impl LlmRequest {
@@ -111,6 +128,7 @@ impl LlmRequest {
             args: &self.args,
             output_schema: self.output_schema.as_ref(),
             sampling: self.sampling,
+            messages: &self.messages,
         }
     }
 }
@@ -380,6 +398,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         let resp = reg.call(&req.as_ref()).await.unwrap();
         assert_eq!(resp.value, serde_json::json!({"should_refund": true}));
@@ -395,6 +414,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         let err = reg.call(&req.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::NoAdapter(ref m) if m == "claude-opus-4-6"));
@@ -413,6 +433,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         let err = reg.call(&missing.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::AdapterFailed { .. }));
@@ -428,6 +449,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         reg.call(&ok.as_ref()).await.unwrap();
         let health = reg.health();
@@ -457,6 +479,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         let err = reg.call(&req.as_ref()).await.unwrap_err();
         assert!(matches!(err, RuntimeError::NoModelConfigured));

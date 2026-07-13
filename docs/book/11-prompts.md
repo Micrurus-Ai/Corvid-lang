@@ -65,15 +65,27 @@ slice that landed this surface
 
 ## Multi-message prompts
 
-> **Planned — lands in slice 46b of the Language completeness
-> track.** Today a prompt renders as a single user-role message;
-> there is no system-prompt or role-block surface yet. First-class
-> conversation history follows in slice 46c.
+Role blocks give a prompt a real message structure — `system:`
+sets behavior, `user:` (and `assistant:`, for few-shot pairs)
+carry the conversation. Each block's template interpolates
+`{param}` exactly like the single-template form, and each provider
+receives its native shape (Anthropic: top-level `system` +
+messages array; OpenAI: role-tagged array; Gemini:
+`systemInstruction` + contents). At least one non-`system` message
+is required. First-class conversation history follows in slice
+46c. (Compiled in CI:)
 
-```corvid-planned
+```corvid
+effect llm_call:
+    cost: $0.01
+    reversible: true
+
 prompt ask(question: String) -> String uses llm_call:
     system: "You are a careful, terse assistant."
     user: "{question}"
+
+agent main(q: String) -> String:
+    return ask(q)
 ```
 
 ## Sampling parameters

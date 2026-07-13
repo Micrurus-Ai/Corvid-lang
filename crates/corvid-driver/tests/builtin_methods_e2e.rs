@@ -621,3 +621,37 @@ agent main() -> String:
     assert_eq!(prompt.temperature, Some(0.7), "prompt override present");
     assert_eq!(prompt.top_p, None, "top_p falls through to the model");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn message_blocks_lower_into_ir() {
+    // Slice 46b: system/user role blocks lower into
+    // IrPrompt.messages; the template holds the role-labeled
+    // concatenation (canonical for traces/caching/estimates).
+    let source = "
+public effect llm_call:
+    cost: $0.01
+    reversible: true
+
+prompt ask(question: String) -> String uses llm_call:
+    system: \"You are terse.\"
+    user: \"{question}\"
+
+agent main() -> String:
+    return \"ok\"
+";
+    let ir = compile_to_ir(source).expect("46b source must compile");
+    let prompt = ir
+        .prompts
+        .iter()
+        .find(|p| p.name == "ask")
+        .expect("prompt lowered");
+    assert_eq!(prompt.messages.len(), 2);
+    assert_eq!(prompt.messages[0].role, "system");
+    assert_eq!(prompt.messages[1].role, "user");
+    assert_eq!(prompt.messages[1].template, "{question}");
+    assert_eq!(
+        prompt.template,
+        "[system] You are terse.
+[user] {question}"
+    );
+}

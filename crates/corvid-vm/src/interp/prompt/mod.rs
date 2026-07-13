@@ -322,12 +322,50 @@ impl<'ir> Interpreter<'ir> {
 }
 
 fn render_prompt(prompt: &IrPrompt, args: &[Value]) -> String {
-    let mut out = prompt.template.clone();
+    render_template(&prompt.template, prompt, args)
+}
+
+fn render_template(template: &str, prompt: &IrPrompt, args: &[Value]) -> String {
+    let mut out = template.to_string();
     for (param, value) in prompt.params.iter().zip(args) {
         let needle = format!("{{{}}}", param.name);
         if out.contains(&needle) {
             let replacement = value_to_json(value).to_string();
             out = out.replace(&needle, &replacement);
+        }
+    }
+    out
+}
+
+/// Render the multi-message form (slice 46b): each role block's
+/// template interpolates independently. When the caller's
+/// `rendered` string extends the canonical concatenation (the
+/// escalation path appends continuation text), the suffix becomes
+/// a final `user` message so no content is silently dropped.
+pub(super) fn render_messages(
+    prompt: &IrPrompt,
+    args: &[Value],
+    rendered: &str,
+) -> Vec<corvid_runtime::llm::LlmMessage> {
+    if prompt.messages.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<corvid_runtime::llm::LlmMessage> = prompt
+        .messages
+        .iter()
+        .map(|m| corvid_runtime::llm::LlmMessage {
+            role: m.role.clone(),
+            content: render_template(&m.template, prompt, args),
+        })
+        .collect();
+    let canonical = render_prompt(prompt, args);
+    if let Some(suffix) = rendered.strip_prefix(&canonical) {
+        let suffix = suffix.trim();
+        if !suffix.is_empty() {
+            out.push(corvid_runtime::llm::LlmMessage {
+                role: "user".to_string(),
+                content: suffix.to_string(),
+            });
         }
     }
     out

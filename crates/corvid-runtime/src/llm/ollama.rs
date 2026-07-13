@@ -89,9 +89,16 @@ impl LlmAdapter for OllamaAdapter {
                 // `stream: false` returns the full response in one
                 // JSON object; streaming is not implemented yet.
                 "stream": false,
-                "messages": [
-                    {"role": "user", "content": req.rendered}
-                ],
+                "messages": if req.messages.is_empty() {
+                    json!([{"role": "user", "content": req.rendered}])
+                } else {
+                    serde_json::Value::Array(
+                        req.messages
+                            .iter()
+                            .map(|m| json!({"role": m.role, "content": m.content}))
+                            .collect(),
+                    )
+                },
             });
             // Sampling (46a): Ollama takes these under `options`.
             {

@@ -335,6 +335,11 @@ prompt summarize(text: String) -> String uses llm_eff:
     with top_p 0.95
     with max_tokens 256
     "Summarize in one sentence: {text}"
+
+prompt roled(question: String) -> String uses llm_eff:
+    system: "You are terse."
+    assistant: "Understood."
+    user: "{question}"
 "#,
     ),
     (
@@ -664,6 +669,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("field_init", "statements"),
     ("destructure_stmt", "statements"),
     ("fn_decl", "statements"),
+    ("role_clause", "prompts"),
     ("match_expr", "statements"),
     ("match_arm", "statements"),
     ("pattern", "statements"),

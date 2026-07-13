@@ -479,6 +479,17 @@ pub struct PromptStreamSettings {
 ///
 /// The body is a string template the compiler turns into an LLM call.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One role block of a multi-message prompt (slice 46b):
+/// `system: "You are terse."`. Roles are `system` / `user` /
+/// `assistant`, validated at parse. Templates interpolate
+/// `{param}` exactly like the single-template form.
+pub struct PromptMessage {
+    pub role: String,
+    pub template: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptDecl {
     pub name: Ident,
     pub params: Vec<Param>,
@@ -486,6 +497,12 @@ pub struct PromptDecl {
     #[serde(default)]
     pub return_ownership: Option<OwnershipAnnotation>,
     pub template: String,
+    /// Multi-message role blocks (slice 46b). Empty means the
+    /// single-`template` form; non-empty means `template` holds the
+    /// role-labeled concatenation for display and the blocks carry
+    /// the real structure.
+    #[serde(default)]
+    pub messages: Vec<PromptMessage>,
     /// Dimensional effect row: `uses llm_call, reads_context`.
     #[serde(default)]
     pub effect_row: EffectRow,

@@ -639,6 +639,14 @@ impl<'a> Lowerer<'a> {
             params: self.lower_params(&p.params),
             return_ty: self.type_ref_to_type(&p.return_ty),
             template: p.template.clone(),
+            messages: p
+                .messages
+                .iter()
+                .map(|m| IrPromptMessage {
+                    role: m.role.clone(),
+                    template: m.template.clone(),
+                })
+                .collect(),
             effect_names,
             effect_cost: numeric_profile_dimension(&profile, "cost"),
             effect_confidence: confidence_profile_dimension(&profile),

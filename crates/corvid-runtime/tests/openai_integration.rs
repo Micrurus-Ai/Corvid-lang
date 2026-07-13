@@ -41,6 +41,7 @@ async fn structured_call_sends_response_format_and_parses_json_content() {
         rendered: "Decide.".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: Some(json!({
             "type": "object",
             "properties": {
@@ -93,6 +94,7 @@ async fn unstructured_call_returns_raw_string() {
         rendered: "say hi".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: None,
     };
     let resp = adapter.call(&req.as_ref()).await.unwrap();
@@ -115,6 +117,7 @@ async fn http_error_surfaces_as_adapter_failed() {
         rendered: "".into(),
         args: vec![],
         sampling: Default::default(),
+        messages: Vec::new(),
         output_schema: None,
     };
     let err = adapter.call(&req.as_ref()).await.unwrap_err();

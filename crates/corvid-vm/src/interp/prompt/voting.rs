@@ -92,6 +92,7 @@ impl<'ir> Interpreter<'ir> {
                     args: json_args.clone(),
                     output_schema: output_schema.clone(),
                     sampling: self.resolve_sampling(prompt, &selected_model),
+            messages: super::render_messages(prompt, arg_values, &rendered),
                 },
             ));
         }
@@ -197,6 +198,7 @@ impl<'ir> Interpreter<'ir> {
                             args: json_args.clone(),
                             output_schema: output_schema.clone(),
                             sampling: self.resolve_sampling(prompt, &selected_model),
+            messages: super::render_messages(prompt, arg_values, &rendered),
                         },
                         prompt.cacheable,
                     )

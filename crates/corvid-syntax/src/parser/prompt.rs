@@ -150,23 +150,100 @@ impl<'a> Parser<'a> {
 
         let stream = self.parse_prompt_stream_settings()?;
 
-        // Expect a single string literal as the template.
-        let template = match self.peek().clone() {
-            TokKind::StringLit(s) => {
-                self.bump();
-                s
+        // Multi-message role blocks (slice 46b) — `system:` /
+        // `user:` / `assistant:` lines — or the classic single
+        // template string.
+        let mut messages: Vec<corvid_ast::PromptMessage> = Vec::new();
+        loop {
+            let TokKind::Ident(role) = self.peek() else { break };
+            let role = role.clone();
+            if role != "system" && role != "user" && role != "assistant" {
+                break;
             }
-            other => {
+            if !matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokKind::Colon)
+            ) {
+                break;
+            }
+            let start = self.peek_span();
+            self.bump(); // role
+            self.bump(); // :
+            let template = match self.peek().clone() {
+                TokKind::StringLit(s) => {
+                    self.bump();
+                    s
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(&other),
+                            expected: "a message string after the role".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+            };
+            self.expect_newline()?;
+            messages.push(corvid_ast::PromptMessage {
+                role,
+                template,
+                span: start.merge(self.prev_span()),
+            });
+        }
+
+        let template = if messages.is_empty() {
+            // Classic single-template form.
+            let template = match self.peek().clone() {
+                TokKind::StringLit(s) => {
+                    self.bump();
+                    s
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(&other),
+                            expected: "a prompt template string".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+            };
+            self.expect_newline()?;
+            template
+        } else {
+            // A bare template after role blocks is ambiguous — the
+            // final message needs a role.
+            if matches!(self.peek(), TokKind::StringLit(_)) {
                 return Err(ParseError {
                     kind: ParseErrorKind::UnexpectedToken {
-                        got: describe_token(&other),
-                        expected: "a prompt template string".into(),
+                        got: "a bare template string after role blocks".into(),
+                        expected: "`user:` (or another role) on every message once role blocks are used"
+                            .into(),
                     },
                     span: self.peek_span(),
                 });
             }
+            // Anthropic (and sense) require at least one
+            // non-system message.
+            if !messages.iter().any(|m| m.role != "system") {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "a prompt with only `system:` messages".into(),
+                        expected: "at least one `user:` (or `assistant:`) message".into(),
+                    },
+                    span: self.peek_span(),
+                });
+            }
+            // Role-labeled concatenation: the canonical rendered
+            // form for traces, caching, and token estimates.
+            messages
+                .iter()
+                .map(|m| format!("[{}] {}", m.role, m.template))
+                .collect::<Vec<_>>()
+                .join("
+")
         };
-        self.expect_newline()?;
 
         let end = self.peek_span();
         if matches!(self.peek(), TokKind::Dedent) {
@@ -179,6 +256,7 @@ impl<'a> Parser<'a> {
             return_ty,
             return_ownership,
             template,
+            messages,
             effect_row,
             cites_strictly,
             stream,

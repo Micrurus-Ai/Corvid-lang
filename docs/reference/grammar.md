@@ -158,14 +158,19 @@ effect_name       ::= IDENT
 
 The prompt body is a single template string; parameters interpolate
 with `{param}` inside the string (any typed parameter renders as its
-JSON form). Role-block bodies are planned.
+JSON form) — in the single template and in every role block.
 
 ```ebnf
 prompt_decl       ::= 'prompt' IDENT params '->' type_ref uses_clause? ':' INDENT prompt_body DEDENT
 
-prompt_body       ::= role_clause* template_line
+# A prompt body is EITHER one or more role blocks (46b) OR a single
+# template line — mixing them is a parse error (give the final
+# message a role instead). Role-block prompts need at least one
+# non-`system` message. The single-template form renders as one
+# user-role message.
+prompt_body       ::= role_clause+ | template_line
 
-role_clause       ::= ('system' | 'user' | 'assistant') ':' STRING_LITERAL NEWLINE   # PLANNED(46b)
+role_clause       ::= ('system' | 'user' | 'assistant') ':' STRING_LITERAL NEWLINE
 
 template_line     ::= STRING_LITERAL NEWLINE
 ```

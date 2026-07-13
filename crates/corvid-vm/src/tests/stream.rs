@@ -451,6 +451,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
             params: vec![],
             return_ty: Type::Stream(Box::new(Type::String)),
             template: "Generate".into(),
+            messages: Vec::new(),
             effect_names: vec!["expensive".into()],
             effect_cost: 0.75,
             effect_confidence: 1.0,

@@ -68,6 +68,7 @@ pub async fn run_capability_contracts(
                             .to_string(),
                         args: vec![],
                         sampling: Default::default(),
+            messages: Vec::new(),
             output_schema: Some(json!({
                             "type": "object",
                             "properties": {

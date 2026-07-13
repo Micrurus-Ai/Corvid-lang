@@ -182,6 +182,7 @@ pub(super) fn call_llm_once(
         args,
         output_schema: None,
         sampling: Default::default(),
+            messages: &[],
     };
     let resp = state.tokio_handle().block_on(async move {
         runtime

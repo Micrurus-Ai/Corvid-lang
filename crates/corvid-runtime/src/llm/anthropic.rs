@@ -112,13 +112,41 @@ impl LlmAdapter for AnthropicAdapter {
 }
 
 fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
+    // Multi-message form (46b): system messages become Anthropic's
+    // top-level `system` string (concatenated if several); user and
+    // assistant messages become the messages array.
+    let (system, messages): (Option<String>, Value) = if req.messages.is_empty() {
+        (None, json!([{"role": "user", "content": req.rendered}]))
+    } else {
+        let system: Vec<&str> = req
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        let arr: Vec<Value> = req
+            .messages
+            .iter()
+            .filter(|m| m.role != "system")
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+        (
+            if system.is_empty() {
+                None
+            } else {
+                Some(system.join("\n\n"))
+            },
+            Value::Array(arr),
+        )
+    };
     let mut body = json!({
         "model": req.model,
         "max_tokens": req.sampling.max_tokens.unwrap_or(u64::from(DEFAULT_MAX_TOKENS)),
-        "messages": [
-            {"role": "user", "content": req.rendered}
-        ],
+        "messages": messages,
     });
+    if let Some(system) = system {
+        body["system"] = json!(system);
+    }
     if let Some(t) = req.sampling.temperature {
         body["temperature"] = json!(t);
     }
@@ -226,6 +254,7 @@ mod tests {
             rendered: "decide pls".into(),
             args: vec![],
             sampling: Default::default(),
+            messages: Vec::new(),
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {"x": {"type": "boolean"}},
@@ -238,6 +267,34 @@ mod tests {
         assert_eq!(body["tools"][0]["name"], "respond_with_decide");
         assert_eq!(body["tool_choice"]["name"], "respond_with_decide");
         assert!(body["tools"][0]["input_schema"].is_object());
+    }
+
+    #[test]
+    fn body_builds_message_array_with_system_extraction() {
+        // Slice 46b: system messages become the top-level `system`
+        // string; user/assistant stay in the messages array.
+        let req = LlmRequest {
+            prompt: "ask".into(),
+            model: "claude-opus-4-6".into(),
+            rendered: "[system] Be terse.
+[user] hi".into(),
+            args: vec![],
+            output_schema: None,
+            sampling: Default::default(),
+            messages: vec![
+                crate::llm::LlmMessage {
+                    role: "system".into(),
+                    content: "Be terse.".into(),
+                },
+                crate::llm::LlmMessage {
+                    role: "user".into(),
+                    content: "hi".into(),
+                },
+            ],
+        };
+        let body = build_request_body(&req.as_ref());
+        assert_eq!(body["system"], json!("Be terse."));
+        assert_eq!(body["messages"], json!([{"role": "user", "content": "hi"}]));
     }
 
     #[test]
@@ -255,6 +312,7 @@ mod tests {
                 top_p: Some(0.9),
                 max_tokens: Some(512),
             },
+            messages: Vec::new(),
         };
         let body = build_request_body(&req.as_ref());
         assert_eq!(body["temperature"], json!(0.2));
@@ -271,6 +329,7 @@ mod tests {
             args: vec![],
             output_schema: None,
             sampling: Default::default(),
+            messages: Vec::new(),
         };
         let body = build_request_body(&req.as_ref());
         assert!(body.get("temperature").is_none());
@@ -286,6 +345,7 @@ mod tests {
             rendered: "say hi".into(),
             args: vec![],
             sampling: Default::default(),
+            messages: Vec::new(),
             output_schema: None,
         };
         let body = build_request_body(&req.as_ref());

@@ -1250,6 +1250,30 @@ Next per agreed order: 46b-system-prompts-and-message-blocks.
 
 ---
 
+## 2026-07-12 - 46b closed: system prompts + message blocks (audit B7 first half)
+
+Role blocks ship: system/user/assistant lines in prompt bodies,
+each interpolating {param} independently. Body is role blocks XOR
+single template (parse error otherwise); at least one non-system
+message required.
+
+The load-bearing decision: `rendered` stays the canonical string
+as a role-labeled concat — traces, cache fingerprints, token
+estimates, cites checks, and mock keying all keep working with
+zero new trace schema. Adapters build provider-native shapes from
+the structured messages (anthropic system extraction, openai
+verbatim roles, gemini systemInstruction + model role, ollama
+array). The escalation path's continuation suffix becomes a final
+user message via a canonical-prefix rule.
+
+Validation: 283 types + 216 syntax + 109 vm + 325 runtime + 17 e2e
++ book guard + grammar gate; corpus verify exits 1.
+
+Next per agreed order: 46c-conversation-history-first-class
+(design doc first).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

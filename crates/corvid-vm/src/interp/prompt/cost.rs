@@ -378,6 +378,7 @@ impl<'ir> Interpreter<'ir> {
             args: json_args,
             output_schema,
             sampling: self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or("")),
+            messages: super::render_messages(prompt, arg_values, rendered),
         };
         let actual_model = if req.model.is_empty() {
             self.runtime.default_model().to_string()

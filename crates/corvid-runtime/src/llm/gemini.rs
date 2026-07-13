@@ -70,14 +70,34 @@ impl LlmAdapter for GeminiAdapter {
                 self.api_key
             );
 
-            let mut body = json!({
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": req.rendered}]
-                    }
-                ]
-            });
+            // Multi-message form (46b): system messages become
+            // systemInstruction; user stays `user`, assistant maps
+            // to Gemini's `model` role.
+            let contents: serde_json::Value = if req.messages.is_empty() {
+                json!([{"role": "user", "parts": [{"text": req.rendered}]}])
+            } else {
+                serde_json::Value::Array(
+                    req.messages
+                        .iter()
+                        .filter(|m| m.role != "system")
+                        .map(|m| {
+                            let role = if m.role == "assistant" { "model" } else { "user" };
+                            json!({"role": role, "parts": [{"text": m.content}]})
+                        })
+                        .collect(),
+                )
+            };
+            let mut body = json!({ "contents": contents });
+            let system: Vec<&str> = req
+                .messages
+                .iter()
+                .filter(|m| m.role == "system")
+                .map(|m| m.content.as_str())
+                .collect();
+            if !system.is_empty() {
+                body["systemInstruction"] =
+                    json!({"parts": [{"text": system.join("\n\n")}]});
+            }
             if let Some(schema) = &req.output_schema {
                 body["generationConfig"] = json!({
                     "responseMimeType": "application/json",

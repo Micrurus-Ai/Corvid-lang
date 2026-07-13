@@ -95,6 +95,7 @@ mod tests {
             args: &[],
             output_schema: None,
             sampling: Default::default(),
+            messages: &[],
         }
     }
 
@@ -179,6 +180,7 @@ mod tests {
             args: &[],
             output_schema: None,
             sampling: Default::default(),
+            messages: &[],
         };
         let result = registry.call(&req).await;
         // Either succeeds (mock returns the canned response) or fails

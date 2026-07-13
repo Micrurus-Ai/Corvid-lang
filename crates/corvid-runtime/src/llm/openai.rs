@@ -110,11 +110,20 @@ impl LlmAdapter for OpenAiAdapter {
 }
 
 fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
+    // Multi-message form (46b): OpenAI takes roles verbatim.
+    let messages: Value = if req.messages.is_empty() {
+        json!([{"role": "user", "content": req.rendered}])
+    } else {
+        Value::Array(
+            req.messages
+                .iter()
+                .map(|m| json!({"role": m.role, "content": m.content}))
+                .collect(),
+        )
+    };
     let mut body = json!({
         "model": req.model,
-        "messages": [
-            {"role": "user", "content": req.rendered}
-        ],
+        "messages": messages,
     });
     if let Some(t) = req.sampling.temperature {
         body["temperature"] = json!(t);
@@ -214,6 +223,38 @@ mod tests {
     }
 
     #[test]
+    fn body_builds_message_array_with_roles() {
+        // Slice 46b: OpenAI takes roles verbatim.
+        let req = LlmRequest {
+            prompt: "ask".into(),
+            model: "gpt-4o-mini".into(),
+            rendered: "[system] Be terse.
+[user] hi".into(),
+            args: vec![],
+            output_schema: None,
+            sampling: Default::default(),
+            messages: vec![
+                crate::llm::LlmMessage {
+                    role: "system".into(),
+                    content: "Be terse.".into(),
+                },
+                crate::llm::LlmMessage {
+                    role: "user".into(),
+                    content: "hi".into(),
+                },
+            ],
+        };
+        let body = build_request_body(&req.as_ref());
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role": "system", "content": "Be terse."},
+                {"role": "user", "content": "hi"}
+            ])
+        );
+    }
+
+    #[test]
     fn body_includes_response_format_when_schema_present() {
         let req = LlmRequest {
             prompt: "decide".into(),
@@ -221,6 +262,7 @@ mod tests {
             rendered: "decide pls".into(),
             args: vec![],
             sampling: Default::default(),
+            messages: Vec::new(),
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {"x": {"type": "boolean"}},
@@ -244,6 +286,7 @@ mod tests {
             rendered: "say hi".into(),
             args: vec![],
             sampling: Default::default(),
+            messages: Vec::new(),
             output_schema: None,
         };
         let body = build_request_body(&req.as_ref());
