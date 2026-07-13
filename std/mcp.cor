@@ -1,0 +1,30 @@
+# Standard MCP surface (slice 46f) — consume Model Context
+# Protocol tool servers as GOVERNED Corvid tools.
+#
+# One executing tool, full moat integration: every call is traced
+# (tool_call/tool_result), replay-substituted (a replayed run never
+# contacts a server and never prompts), budget-accounted through
+# the effect row, and APPROVAL-GATED — servers declared in
+# corvid.toml's [mcp.servers.<name>] are untrusted by default, so
+# their calls go through the runtime approver; mark a server
+# `trust = "autonomous"` to loosen it explicitly.
+#
+#   [mcp.servers.files]
+#   command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
+#
+#   [mcp.servers.search]
+#   url = "https://mcp.example.com/rpc"
+#   trust = "autonomous"
+#
+# Failures — unknown server, transport errors, JSON-RPC errors,
+# tool-side isError results, and APPROVAL DENIAL — are all Err
+# values, never traps. Pair with std/json's typed accessors to
+# decode structured tool output.
+
+public effect mcp_egress:
+    reversible: false
+    data: external
+
+# Call `tool` on the configured MCP `server` with a JSON-object
+# argument string. Returns the tool's text content.
+public tool mcp_call(server_name: String, tool_name: String, args_json: String) -> Result<String, String> uses mcp_egress

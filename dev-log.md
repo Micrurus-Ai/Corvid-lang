@@ -1412,6 +1412,33 @@ the pre-phase decision) — the FINAL Phase 46 slice.
 
 ---
 
+## 2026-07-12 - 46f closed: MCP with governance — AND PHASE 46 CLOSED
+
+One governed surface (mcp_call) makes external MCP tools subject
+to the whole moat: untrusted-by-default approval gating (the live
+probe hit the real `approve? [y/N]` prompt), replay quarantine
+for free (standard tool dispatch — replays never contact a server
+and never prompt), budget-visible effect rows, and Err-value
+failures including denial (with the test proving zero transport
+I/O on deny). stdio + HTTP transports; `server`/`tool` are
+keywords, so the params are server_name/tool_name.
+
+PHASE 46 IS CLOSED. Eight slices in one day on top of the
+pre-phase chat: sampling params (46a), role blocks (46b),
+conversation history (46c) — B7 closed; real SSE streaming with
+chunk-boundary replay (46d) — M6 real; governed retrieval (46g) —
+M8 closed; repair + quality assertions (46h); governed
+concurrency (46e) — B8 closed; MCP with governance (46f) — B9
+closed. The audit's three AI-native blockers and both quality
+minors are done. Every slice shipped its invention contract where
+user-visible; the moat composed with every commodity feature
+instead of being bypassed by it.
+
+Next: Phase 47 (batteries parity + scaffold honesty) — per the
+project rule, a pre-phase chat comes first.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

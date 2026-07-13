@@ -360,6 +360,13 @@ fn run_via_interpreter_tier(
         builder = builder.rag_embedder(embedder);
     }
 
+    // Slice 46f: configured MCP servers (untrusted by default —
+    // approval-gated through the StdinApprover installed above).
+    let mcp_servers = load_mcp_servers(path);
+    if !mcp_servers.is_empty() {
+        builder = builder.mcp_servers(mcp_servers);
+    }
+
     if let Ok(model) = std::env::var("CORVID_MODEL") {
         builder = builder.default_model(&model);
     }
@@ -619,6 +626,31 @@ pub fn load_rag_embedder(
         }
         _ => None,
     }
+}
+
+/// Slice 46f: build the MCP server map from `[mcp.servers]` in
+/// corvid.toml. Servers default to UNTRUSTED (approval-gated).
+pub fn load_mcp_servers(
+    source_path: &Path,
+) -> std::collections::HashMap<String, corvid_runtime::mcp::McpServerConfig> {
+    let Some((_, config)) = load_corvid_config_with_path_for(source_path) else {
+        return Default::default();
+    };
+    config
+        .mcp
+        .servers
+        .into_iter()
+        .map(|(name, entry)| {
+            (
+                name,
+                corvid_runtime::mcp::McpServerConfig {
+                    command: entry.command,
+                    url: entry.url,
+                    trusted: entry.trust.as_deref() == Some("autonomous"),
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {

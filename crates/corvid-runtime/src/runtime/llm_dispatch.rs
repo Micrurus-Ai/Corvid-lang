@@ -63,6 +63,8 @@ impl Runtime {
             dispatch_stdlib_random_tool(name, &args)?
         } else if is_stdlib_rag_tool(name) {
             self.dispatch_stdlib_rag_tool(name, &args).await?
+        } else if name == "mcp_call" {
+            self.dispatch_stdlib_mcp_tool(&args).await?
         } else {
             self.tools.call(name, args.clone()).await?
         };
@@ -75,6 +77,67 @@ impl Runtime {
             });
         }
         Ok(result)
+    }
+
+    /// Slice 46f: the executing MCP surface — one governed tool.
+    /// UNTRUSTED servers (the default) route every call through the
+    /// runtime `Approver` before any transport I/O; `trust =
+    /// "autonomous"` in `[mcp.servers.<name>]` loosens a server
+    /// explicitly. Failures are Err VALUES (the honest-envelope
+    /// direction), including approval denial — a denied call is a
+    /// recoverable outcome, not a crash. Replay substitution
+    /// happens in `call_tool` BEFORE this dispatch, so replays
+    /// never contact a server and never prompt.
+    async fn dispatch_stdlib_mcp_tool(
+        &self,
+        args: &[serde_json::Value],
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let (Some(server), Some(tool), Some(args_json)) = (
+            args.first().and_then(|v| v.as_str()),
+            args.get(1).and_then(|v| v.as_str()),
+            args.get(2).and_then(|v| v.as_str()),
+        ) else {
+            return Err(RuntimeError::ToolFailed {
+                tool: "mcp_call".into(),
+                message: "expected (server: String, tool: String, args_json: String)".into(),
+            });
+        };
+        let err = |message: String| {
+            serde_json::json!({ "tag": "err", "err": message })
+        };
+        let Some(config) = self.mcp.server(server) else {
+            return Ok(err(format!(
+                "MCP server `{server}` is not configured — add [mcp.servers.{server}] to corvid.toml"
+            )));
+        };
+        if !config.trusted {
+            let request = crate::ApprovalRequest {
+                label: format!("mcp:{server}:{tool}"),
+                args: vec![serde_json::json!(args_json)],
+            };
+            let decision = self.approver.approve(&request).await?;
+            if decision != crate::ApprovalDecision::Approve {
+                return Ok(err(format!(
+                    "approval denied for MCP call `{tool}` on untrusted server `{server}` (mark it trust = \"autonomous\" in corvid.toml to skip approval)"
+                )));
+            }
+        }
+        let arguments: serde_json::Value = match serde_json::from_str(args_json) {
+            Ok(v) => v,
+            Err(e) => return Ok(err(format!("args_json is not valid JSON: {e}"))),
+        };
+        match self.mcp.call(server, tool, arguments).await {
+            Ok(content) => {
+                let is_error = content["is_error"].as_bool().unwrap_or(false);
+                let text = content["text"].as_str().unwrap_or_default().to_string();
+                if is_error {
+                    Ok(err(text))
+                } else {
+                    Ok(serde_json::json!({ "tag": "ok", "ok": text }))
+                }
+            }
+            Err(e) => Ok(err(e.to_string())),
+        }
     }
 
     /// Slice 46g: dispatch handler for the executing stdlib

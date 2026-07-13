@@ -158,7 +158,7 @@ Not necessarily bad ideas, but not v1.0 scope:
 - Fine-tuning as a language feature
 - Visual/block-based editor
 - RAG framework (vector store, loaders, chunking, reranking) bundled in the compiler distribution — the grounding/citation *contracts* are language; the runtime substrate ships as the separate `corvid-rag` package
-- MCP runtime client/server — belongs in `corvid-runtime` or a package, not the compiler core (effect tagging for MCP calls can arrive with custom effects in v0.4)
+- MCP SERVER (serving Corvid tools over MCP) — post-v1.0. The CLIENT shipped in slice 46f as the governed `mcp_call` surface (`std/mcp.cor` + `[mcp.servers]` in corvid.toml): untrusted-by-default approval gating, trace/replay quarantine, effect-tagged
 - Typed Python library wrappers (`std.python.anthropic`, etc.) — library work, not language
 - `corvid-py` Python-embedding package — distribution/library question, handled outside the language roadmap
 

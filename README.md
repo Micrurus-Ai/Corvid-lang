@@ -693,6 +693,14 @@ Roadmap: [Slice 46g](./ROADMAP.md)
 Proof: [end-to-end RAG tests](./crates/corvid-driver/tests/executing_rag_through_driver.rs)
 Non-scope: No loaders on the tool surface (PDF/HTML loaders exist runtime-side); no reranking; effect-level `Grounded<T>` wrapping waits for cross-module provenance composition (post-v1.0) — provenance travels explicitly in the envelope values.
 
+#### MCP With Governance
+
+Consume any Model Context Protocol tool server through `mcp_call` — with the moat intact: servers are **untrusted by default** (calls go through the runtime approver before any transport I/O; `trust = "autonomous"` loosens explicitly), every call is traced and **replay-substituted** (replays never contact a server), and every failure including approval denial is an `Err` value. stdio + HTTP transports. Try `corvid tour --topic mcp`.
+
+Roadmap: [Slice 46f](./ROADMAP.md)
+Proof: [MCP integration tests](./crates/corvid-runtime/tests/mcp_integration.rs)
+Non-scope: client only (MCP server is post-v1.0); no compile-time tool introspection — pair with `std/json` typed accessors.
+
 #### Governed Concurrency
 
 `parallel:` runs named arms concurrently and joins when all complete — with the governance intact: arm costs **sum** into `@budget`, arm traces flush in **arm order** so `corvid replay` reproduces a concurrent run deterministically (zero trace-schema changes), and failures are arm-ordered, not completion-ordered. Try `corvid tour --topic parallel`.

@@ -205,6 +205,23 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **What it is**: `rag_ingest` / `rag_search` — retrieval with the moat attached: index paths confined by the `[io] root` policy, failures as typed `Err` values, provenance keys on every retrieved chunk, trace/replay substitution (the embedder never fires on replay), and honest lexical degradation when no embedder is configured.
 - **Non-scope**: loaders on the tool surface, reranking, effect-level `Grounded<T>` wrapping (waits for cross-module provenance composition, post-v1.0).
 
+### MCP With Governance
+
+| | |
+|---|---|
+| **Status** | Shipped (slice 46f) |
+| **Run it** | `corvid tour --topic mcp` |
+| **Tests** | `crates/corvid-runtime/tests/mcp_integration.rs` — trusted round-trip, approval denial (no transport I/O), tool-side errors |
+| **Spec** | `docs/reference/stdlib/mcp.md` |
+| **Non-scope** | Client only (server is post-v1.0); no compile-time tool introspection; SSE transport streaming |
+
+One governed surface — `mcp_call` — makes external MCP tools
+subject to the full moat: untrusted-by-default approval gating,
+trace + replay quarantine (replays never contact a server, never
+prompt), budget-visible effect rows, and Err-value failures
+including denial. A bare MCP client is commodity; MCP that cannot
+bypass the governance is the invention.
+
 ### Governed Concurrency (`parallel:`)
 
 | | |

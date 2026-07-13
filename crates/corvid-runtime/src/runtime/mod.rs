@@ -90,6 +90,9 @@ pub struct Runtime {
     /// `rag_ingest` / `rag_search` stdlib tools. `None` means
     /// lexical-only retrieval.
     pub(super) rag_embedder: Option<std::sync::Arc<dyn crate::rag::RagEmbedder>>,
+    /// Slice 46f: configured MCP servers + cached connections for
+    /// the executing `mcp_call` tool.
+    pub(super) mcp: crate::mcp::McpRuntime,
     /// Slice 33S3b: registry of open SQLite connections keyed by
     /// handle id. The `Runtime::db_open_tool` /
     /// `db_query_tool` / `db_execute_tool` dispatch methods (the

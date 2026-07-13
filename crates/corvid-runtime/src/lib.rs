@@ -96,6 +96,7 @@ pub mod python_ffi;
 #[cfg(feature = "python")]
 pub mod python_tools;
 pub mod queue;
+pub mod mcp;
 pub mod rag;
 /// Slice 38K: multi-worker durable-queue runner over `queue`.
 pub mod worker_pool;

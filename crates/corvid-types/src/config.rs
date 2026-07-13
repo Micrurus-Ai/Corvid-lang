@@ -54,6 +54,30 @@ pub struct CorvidConfig {
     /// configured, `rag_search` falls back to LEXICAL search — an
     /// honest degradation, not an error.
     pub rag: RagConfig,
+    /// Slice 46f: MCP server configuration. Servers are UNTRUSTED
+    /// by default — every `mcp_call` against them goes through the
+    /// runtime approver; `trust = "autonomous"` loosens a server
+    /// explicitly.
+    pub mcp: McpConfig,
+}
+
+/// Slice 46f: parsed `[mcp]` table.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct McpConfig {
+    pub servers: std::collections::HashMap<String, McpServerEntry>,
+}
+
+/// One `[mcp.servers.<name>]` entry: stdio (`command`) or HTTP
+/// (`url`) transport, plus the trust tier.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct McpServerEntry {
+    pub command: Vec<String>,
+    pub url: Option<String>,
+    /// `"autonomous"` skips the approver; anything else (or absent)
+    /// keeps the safe default: approval required.
+    pub trust: Option<String>,
 }
 
 /// Slice 46g: parsed `[rag]` table from `corvid.toml`.

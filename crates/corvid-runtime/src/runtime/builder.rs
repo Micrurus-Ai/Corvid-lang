@@ -45,6 +45,7 @@ pub struct RuntimeBuilder {
     /// missing-config diagnostic.
     io_policy: IoToolPolicy,
     rag_embedder: Option<std::sync::Arc<dyn crate::rag::RagEmbedder>>,
+    mcp: crate::mcp::McpRuntime,
     /// Slice 33S2a: policy carrying the configured `[http] allow`
     /// allowlist from `corvid.toml`. Threaded into
     /// `Runtime::http_policy` at build time. Defaults to an
@@ -82,6 +83,7 @@ impl Default for RuntimeBuilder {
             stores: StoreManager::default(),
             io_policy: IoToolPolicy::default(),
             rag_embedder: None,
+            mcp: crate::mcp::McpRuntime::default(),
             http_policy: HttpEgressPolicy::default(),
             http_client_override: None,
         }
@@ -169,6 +171,18 @@ impl RuntimeBuilder {
     /// missing-config diagnostic — the 33S0 security model.
     pub fn io_policy(mut self, policy: IoToolPolicy) -> Self {
         self.io_policy = policy;
+        self
+    }
+
+    /// Slice 46f: install the configured MCP servers for the
+    /// executing `mcp_call` tool. Servers are UNTRUSTED by default
+    /// (calls go through the runtime approver); `trusted: true`
+    /// mirrors `trust = "autonomous"` in corvid.toml.
+    pub fn mcp_servers(
+        mut self,
+        servers: std::collections::HashMap<String, crate::mcp::McpServerConfig>,
+    ) -> Self {
+        self.mcp = crate::mcp::McpRuntime::new(servers);
         self
     }
 
@@ -427,6 +441,7 @@ impl RuntimeBuilder {
             io,
             io_policy: self.io_policy,
             rag_embedder: self.rag_embedder,
+            mcp: self.mcp,
             db_registry,
             secrets: SecretRuntime::new(),
             queue: QueueRuntime::new(),

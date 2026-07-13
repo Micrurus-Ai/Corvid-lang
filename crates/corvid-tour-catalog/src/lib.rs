@@ -494,6 +494,22 @@ agent recall(question: String) -> String:
 "#,
     },
     TourTopic {
+        name: "mcp",
+        title: "MCP With Governance",
+        category: "Executing I/O",
+        pitch: "Corvid consumes Model Context Protocol tool servers through ONE governed surface: mcp_call(server_name, tool_name, args_json). A bare MCP client is commodity — the invention is that every MCP call arrives GOVERNED: servers declared in corvid.toml are UNTRUSTED BY DEFAULT, so their calls go through the runtime approver before any transport I/O (mark trust = \"autonomous\" to loosen explicitly); every call is traced and replay-substituted (a replayed run never contacts a server and never prompts); costs ride the effect row into @budget; and every failure — unknown server, transport error, JSON-RPC error, tool-side isError, APPROVAL DENIAL — is an Err value, never a trap. stdio (spawned process, cached connection) and HTTP transports.",
+        spec: "docs/reference/stdlib/mcp.md",
+        roadmap: "Slice 46f mcp-client",
+        test: "crates/corvid-runtime/tests/mcp_integration.rs",
+        non_scope: "Client only — serving Corvid tools over MCP is post-v1.0. No compile-time tool introspection (per-tool typed imports); pair mcp_call with std/json typed accessors to decode structured output. SSE server transport streaming not in v1.",
+        source: r#"import "./std/mcp" use mcp_call
+
+agent list_notes() -> String:
+    found: Result<String, String> = mcp_call("notes", "list", "{}")
+    return found.unwrap_or("server unavailable or denied")
+"#,
+    },
+    TourTopic {
         name: "parallel",
         title: "Governed Concurrency",
         category: "AI-native ergonomics",
