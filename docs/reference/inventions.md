@@ -205,6 +205,24 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **What it is**: `rag_ingest` / `rag_search` — retrieval with the moat attached: index paths confined by the `[io] root` policy, failures as typed `Err` values, provenance keys on every retrieved chunk, trace/replay substitution (the embedder never fires on replay), and honest lexical degradation when no embedder is configured.
 - **Non-scope**: loaders on the tool surface, reranking, effect-level `Grounded<T>` wrapping (waits for cross-module provenance composition, post-v1.0).
 
+### Governed Concurrency (`parallel:`)
+
+| | |
+|---|---|
+| **Status** | Shipped (slice 46e) |
+| **Run it** | `corvid tour --topic parallel` |
+| **Tests** | `crates/corvid-vm/src/tests/parallel.rs` — arm-ordered trace + identical replay |
+| **Spec** | `docs/meta/46e-parallel-design.md` + effect-spec §10.6 (parallel composition operator) |
+| **Non-scope** | Racing/select, cancellation, streaming arms, arbitrary arm bodies (post-v1.0) |
+
+`parallel:` arms run concurrently while every moat guarantee
+survives: costs SUM into `@budget`, trust maxes, confidence mins;
+arm trace buffers flush in ARM ORDER at the join so a concurrent
+run replays deterministically through the unchanged sequential
+cursor; the error rule is arm-ordered. Concurrency that stays
+governed is the invention — no mainstream runtime replays
+concurrent LLM calls deterministically.
+
 ### Deterministic Time And Randomness
 
 ```corvid

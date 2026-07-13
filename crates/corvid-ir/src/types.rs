@@ -147,6 +147,15 @@ pub struct IrTool {
     pub span: Span,
 }
 
+/// One arm of a `parallel:` block (slice 46e).
+#[derive(Debug, Clone)]
+pub struct IrParallelArm {
+    pub name: String,
+    pub local_id: LocalId,
+    pub call: IrExpr,
+    pub span: Span,
+}
+
 /// One role block of a multi-message prompt (slice 46b).
 #[derive(Debug, Clone, PartialEq)]
 pub struct IrPromptMessage {
@@ -554,6 +563,14 @@ pub enum IrStmt {
         var_name: String,
         iter: IrExpr,
         body: IrBlock,
+        span: Span,
+    },
+
+    /// `parallel:` block (slice 46e): named arms run concurrently;
+    /// arm trace buffers flush in ARM ORDER at the join; the error
+    /// rule is arm-ordered. Interpreter-only in v1.
+    Parallel {
+        arms: Vec<IrParallelArm>,
         span: Span,
     },
 

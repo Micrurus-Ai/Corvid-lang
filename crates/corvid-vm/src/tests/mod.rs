@@ -15,6 +15,7 @@ use std::sync::Arc;
 mod stream;
 mod core;
 mod dispatch;
+mod parallel;
 mod test_runner;
 
 /// Compile source text all the way down to IR. Panics on any frontend

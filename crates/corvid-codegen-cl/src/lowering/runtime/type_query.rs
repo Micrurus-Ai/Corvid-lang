@@ -332,6 +332,11 @@ fn visit_block_types(
             IrStmt::Destructure { value, .. } => {
                 visit_expr_types(value, seen, order, visit);
             }
+            IrStmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    visit_expr_types(&arm.call, seen, order, visit);
+                }
+            }
             IrStmt::For { iter, body, .. } => {
                 visit_expr_types(iter, seen, order, visit);
                 visit_block_types(body, seen, order, visit);

@@ -322,6 +322,68 @@ impl<'ir> Interpreter<'ir> {
                 }
                 Ok(Flow::Normal)
             }
+            // `parallel:` block (slice 46e): every arm's call runs
+            // CONCURRENTLY on its own sub-interpreter (cloned env —
+            // shared cells stay shared per the reference-semantics
+            // model) with a BUFFERED per-arm tracer. At the join:
+            // buffers flush in ARM ORDER (the recorded trace is
+            // indistinguishable from sequential arm-order
+            // execution, so replay works unchanged and replays
+            // arms sequentially), costs charge to the parent
+            // budget in arm order, then the error rule fires
+            // (first failed arm BY INDEX — deterministic), then
+            // arm names bind.
+            IrStmt::Parallel { arms, span } => {
+                let mut buffers = Vec::with_capacity(arms.len());
+                let mut arm_runtimes = Vec::with_capacity(arms.len());
+                for _ in arms {
+                    let (tracer, buffer) = self.runtime.tracer().buffered();
+                    buffers.push(buffer);
+                    arm_runtimes.push(self.runtime.with_arm_tracer(tracer));
+                }
+                let ir = self.ir;
+                let mut futures = Vec::with_capacity(arms.len());
+                for (arm, arm_rt) in arms.iter().zip(arm_runtimes.iter()) {
+                    let env = self.env.clone();
+                    let mocks = self.mock_tools.clone();
+                    let budget = self.cost_budget.map(|b| b - self.cost_used);
+                    futures.push(async move {
+                        let mut sub = Interpreter::new(ir, arm_rt);
+                        sub.env = env;
+                        sub.mock_tools = mocks;
+                        sub.cost_budget = budget;
+                        let outcome = sub.eval_expr(&arm.call).await;
+                        (outcome, sub.cost_used)
+                    });
+                }
+                let results = futures::future::join_all(futures).await;
+
+                // 1. Flush arm trace buffers IN ARM ORDER.
+                for buffer in &buffers {
+                    self.runtime.tracer().flush_buffer(buffer);
+                }
+                // 2. Charge costs in arm order (all arms ran; all
+                //    are paid — the parallel operator's Sum).
+                for (_, cost) in &results {
+                    self.charge_cost(*cost, *span)?;
+                }
+                // 3. Error rule: first failed arm by index.
+                let mut values = Vec::with_capacity(results.len());
+                for (outcome, _) in results {
+                    match outcome {
+                        Ok(flow) => match flow.into_value() {
+                            Ok(v) => values.push(v),
+                            Err(v) => return Ok(Flow::Return(v)),
+                        },
+                        Err(e) => return Err(e),
+                    }
+                }
+                // 4. Bind arm names.
+                for (arm, value) in arms.iter().zip(values) {
+                    self.env.bind(arm.local_id, value);
+                }
+                Ok(Flow::Normal)
+            }
             // Destructuring binding (slice 45n): evaluate once,
             // bind every pattern binding transactionally through
             // the 45i pattern machinery. The checker guarantees

@@ -823,6 +823,18 @@ impl Resolver {
                 self.resolve_expr(value);
                 self.resolve_pattern(pattern);
             }
+            Stmt::Parallel { arms, .. } => {
+                // All calls resolve BEFORE any arm name binds — an
+                // arm cannot reference a sibling's result.
+                for arm in arms {
+                    self.resolve_expr(&arm.call);
+                }
+                for arm in arms {
+                    let id = self.fresh_local();
+                    self.current_scope_mut().insert(&arm.name.name, id);
+                    self.bindings.insert(arm.name.span, Binding::Local(id));
+                }
+            }
             // Loop-flow statements bind and reference nothing.
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => self.resolve_approve_action(action),

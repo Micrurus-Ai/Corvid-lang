@@ -316,6 +316,7 @@ stmt              ::= return_stmt
                     | for_stmt
                     | while_stmt
                     | destructure_stmt
+                    | parallel_stmt
                     | approve_stmt
                     | break_stmt | continue_stmt | pass_stmt
                     | assign_stmt
@@ -426,6 +427,16 @@ field_init        ::= IDENT (':' expr)?
 # rest. Refutable shapes (literals, nested patterns) belong in
 # `match`.
 destructure_stmt  ::= struct_literal '=' expr NEWLINE
+
+# `parallel:` (slice 46e) — two or more named arms run
+# CONCURRENTLY and join when all complete; arm names bind after
+# the block. Each arm's RHS must be a call (wrap richer logic in
+# an agent). Effects compose with the parallel operator (cost Sum,
+# latency Max, trust Max, confidence Min); arm trace buffers flush
+# in ARM ORDER at the join, so replay is deterministic and the
+# error rule is arm-ordered. `parallel` is contextual, not
+# reserved.
+parallel_stmt     ::= 'parallel' ':' INDENT (IDENT '=' expr NEWLINE)+ DEDENT
 
 # `match` is exhaustiveness-checked: sum scrutinees must cover every
 # variant irrefutably (or carry a catch-all), Option needs Some+None,

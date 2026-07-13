@@ -693,6 +693,14 @@ Roadmap: [Slice 46g](./ROADMAP.md)
 Proof: [end-to-end RAG tests](./crates/corvid-driver/tests/executing_rag_through_driver.rs)
 Non-scope: No loaders on the tool surface (PDF/HTML loaders exist runtime-side); no reranking; effect-level `Grounded<T>` wrapping waits for cross-module provenance composition (post-v1.0) — provenance travels explicitly in the envelope values.
 
+#### Governed Concurrency
+
+`parallel:` runs named arms concurrently and joins when all complete — with the governance intact: arm costs **sum** into `@budget`, arm traces flush in **arm order** so `corvid replay` reproduces a concurrent run deterministically (zero trace-schema changes), and failures are arm-ordered, not completion-ordered. Try `corvid tour --topic parallel`.
+
+Roadmap: [Slice 46e](./ROADMAP.md)
+Proof: [parallel tests](./crates/corvid-vm/src/tests/parallel.rs)
+Non-scope: racing/select, cancellation, streaming arms (post-v1.0); each arm is one call — wrap richer logic in an agent.
+
 #### Executing Time & Randomness Surface
 
 Corvid's `std/time` and `std/random` modules make the two most common sources of hidden nondeterminism — clock reads and random draws — **visible to the effect system**. `time_now_utc`, `time_monotonic_ms`, `random_float`, and `random_int` are tools flowing through typed effect rows (`time_wall`, `time_monotonic`, `rand_draw`), which means:

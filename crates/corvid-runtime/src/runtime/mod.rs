@@ -111,6 +111,17 @@ enum RuntimeMode {
 }
 
 impl Runtime {
+    /// Slice 46e: a clone of this runtime writing through a
+    /// buffered per-arm tracer for `parallel:` blocks. Unlike
+    /// [`Runtime::with_tracer`], this does NOT rebuild the
+    /// recorder or re-emit schema headers — arm buffers flush into
+    /// the middle of the parent trace, which already carries them.
+    pub fn with_arm_tracer(&self, tracer: crate::tracing::Tracer) -> Runtime {
+        let mut clone = self.clone();
+        clone.tracer = tracer;
+        clone
+    }
+
     pub fn builder() -> RuntimeBuilder {
         RuntimeBuilder::default()
     }

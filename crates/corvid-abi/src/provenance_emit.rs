@@ -58,6 +58,11 @@ fn collect_block_dependencies(block: &Block, out: &mut Vec<String>) {
             Stmt::Destructure { value, .. } => {
                 collect_expr_dependencies(value, out);
             }
+            Stmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    collect_expr_dependencies(&arm.call, out);
+                }
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => collect_expr_dependencies(action, out),
             Stmt::Return { value: None, .. } => {}

@@ -1381,6 +1381,37 @@ Phase 46 dependency chain + self-contained slices are DONE
 
 ---
 
+## 2026-07-12 - 46e closed: parallel — governed concurrency (audit B8)
+
+Design doc first (docs/meta/46e-parallel-design.md), approved
+under the decision principle, then the implementation. Named arms
+(`weather = fetch_weather(city)`) — easier than Promise.all,
+gather, or goroutines; nothing new to learn beyond `parallel:`.
+
+The invention is that governance SURVIVES the concurrency:
+- Replay: per-arm buffered tracers flush in ARM ORDER at the
+  join, so a concurrent run's trace reads like sequential
+  execution and replays through the unchanged cursor. The
+  load-bearing test records concurrently, asserts arm-ordered
+  events, and replays identically.
+- Budget: arm costs SUM into the parent @budget at the join (the
+  effect-spec parallel operator).
+- Failure: arm-ordered error rule — deterministic regardless of
+  completion order.
+
+Execution: join_all over per-arm sub-interpreters with cloned
+envs (shared cells stay shared) — single-threaded concurrency,
+no Send/'static machinery. V1: each arm is one call; streams
+rejected; `parallel` contextual.
+
+Validation: 284 types + 216 syntax + 114 vm + 325 runtime + tour
+guard + book guard + grammar gate; corpus verify exits 1.
+
+Next: 46f MCP client (client-only with full moat integration, per
+the pre-phase decision) — the FINAL Phase 46 slice.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

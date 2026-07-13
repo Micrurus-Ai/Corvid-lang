@@ -323,6 +323,11 @@ fn rename_local_in_block(block: &mut Block, resolved: &Resolved, target: LocalId
             Stmt::Destructure { value, .. } => {
                 rename_local_in_expr(value, resolved, target, fresh);
             }
+            Stmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    rename_local_in_expr(&mut arm.call, resolved, target, fresh);
+                }
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => rename_local_in_expr(action, resolved, target, fresh),
             Stmt::Expr { expr, .. } => rename_local_in_expr(expr, resolved, target, fresh),
@@ -466,6 +471,7 @@ fn extract_from_stmt(
         Stmt::For { iter, .. } => extract_expr_to_let(iter, allocator, reserved),
         Stmt::While { cond, .. } => extract_expr_to_let(cond, allocator, reserved),
         Stmt::Destructure { value, .. } => extract_expr_to_let(value, allocator, reserved),
+        Stmt::Parallel { .. } => None,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => None,
         Stmt::Expr { expr, .. } => extract_expr_to_let(expr, allocator, reserved),
         Stmt::Approve { action, .. } => extract_expr_to_let(action, allocator, reserved),
@@ -602,6 +608,7 @@ fn direct_local_use(stmt: &Stmt, resolved: &Resolved, local: LocalId) -> bool {
         Stmt::For { iter, .. } => is_direct_local_expr(iter, resolved, local),
         Stmt::While { cond, .. } => is_direct_local_expr(cond, resolved, local),
         Stmt::Destructure { value, .. } => is_direct_local_expr(value, resolved, local),
+        Stmt::Parallel { .. } => false,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
         Stmt::Approve { action, .. } => is_direct_local_expr(action, resolved, local),
         Stmt::Expr { expr, .. } => is_direct_local_expr(expr, resolved, local),
@@ -655,6 +662,7 @@ fn apply_inline_to_stmt(stmt: &mut Stmt, resolved: &Resolved, replacement: Expr)
                 *value = replacement;
             }
         }
+        Stmt::Parallel { .. } => {}
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => {
             if matches!(action, Expr::Ident { .. }) {
@@ -976,6 +984,7 @@ fn fold_constants_in_stmt(stmt: &mut Stmt) -> bool {
         Stmt::For { iter, .. } => fold_constants_in_expr(iter),
         Stmt::While { cond, .. } => fold_constants_in_expr(cond),
         Stmt::Destructure { value, .. } => fold_constants_in_expr(value),
+        Stmt::Parallel { .. } => false,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
     }
 }

@@ -369,6 +369,11 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
         IrStmt::Destructure { value, .. } => {
             scan_expr(value, max_id);
         }
+        IrStmt::Parallel { arms, .. } => {
+            for arm in arms {
+                scan_expr(&arm.call, max_id);
+            }
+        }
         IrStmt::Expr { expr, .. } => scan_expr(expr, max_id),
         IrStmt::Approve { args, .. } => {
             for a in args {

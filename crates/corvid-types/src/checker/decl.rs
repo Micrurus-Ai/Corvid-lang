@@ -253,6 +253,11 @@ fn collect_ident_spans_by_name_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<
         Stmt::Destructure { value, .. } => {
             collect_ident_spans_by_name_in_expr(value, name, spans);
         }
+        Stmt::Parallel { arms, .. } => {
+            for arm in arms {
+                collect_ident_spans_by_name_in_expr(&arm.call, name, spans);
+            }
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => collect_ident_spans_by_name_in_expr(action, name, spans),
         Stmt::Expr { expr, .. } => collect_ident_spans_by_name_in_expr(expr, name, spans),

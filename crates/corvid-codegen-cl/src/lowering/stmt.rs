@@ -285,6 +285,10 @@ fn lower_stmt(
             "destructuring is interpreter-only in 45n",
             *span,
         )),
+        IrStmt::Parallel { span, .. } => Err(CodegenError::not_supported(
+            "parallel blocks are interpreter-only in 46e",
+            *span,
+        )),
         IrStmt::While { cond, body, span } => lower_while(
             builder,
             cond,
@@ -813,6 +817,9 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
             expr_mentions_local(cond, target) || block_mentions_local(body, target)
         }
         IrStmt::Destructure { value, .. } => expr_mentions_local(value, target),
+        IrStmt::Parallel { arms, .. } => {
+            arms.iter().any(|arm| expr_mentions_local(&arm.call, target))
+        }
         IrStmt::Approve { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
         IrStmt::Break { .. }
         | IrStmt::Continue { .. }

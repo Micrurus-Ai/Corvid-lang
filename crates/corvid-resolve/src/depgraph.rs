@@ -278,6 +278,11 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
         Stmt::Destructure { value, .. } => {
             collect_expr_deps(value, resolved, deps);
         }
+        Stmt::Parallel { arms, .. } => {
+            for arm in arms {
+                collect_expr_deps(&arm.call, resolved, deps);
+            }
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => {
             collect_expr_deps(action, resolved, deps);

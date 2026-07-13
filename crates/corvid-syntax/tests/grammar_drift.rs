@@ -533,6 +533,18 @@ agent chained(order_id: String, n: Int) -> Int:
     else:
         return -0
 
+agent side_a(x: Int) -> Int:
+    return x + 1
+
+agent side_b(x: Int) -> Int:
+    return x * 2
+
+agent parallel_demo(x: Int) -> Int:
+    parallel:
+        a = side_a(x)
+        b = side_b(x)
+    return a + b
+
 agent while_demo(limit: Int) -> Int:
     n = 0
     total = 0
@@ -679,6 +691,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("field_init", "statements"),
     ("destructure_stmt", "statements"),
     ("fn_decl", "statements"),
+    ("parallel_stmt", "statements"),
     ("role_clause", "prompts"),
     ("match_expr", "statements"),
     ("match_arm", "statements"),

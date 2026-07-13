@@ -215,6 +215,40 @@ impl<'a> Checker<'a> {
                     &body_refresh,
                 );
             }
+            Stmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    // v1 rule: the RHS must be a call to a
+                    // tool/prompt/agent/fn — the concurrent unit is
+                    // the effectful call; wrap richer logic in an
+                    // agent. Stream-returning calls are rejected
+                    // (join semantics for streams are post-v1).
+                    let is_call = matches!(&arm.call, corvid_ast::Expr::Call { .. });
+                    if !is_call {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::ParallelArmInvalid {
+                                arm: arm.name.name.clone(),
+                                message: "each arm must be `name = call(...)` — wrap richer logic in an agent and call it".into(),
+                            },
+                            arm.span,
+                        ));
+                    }
+                    let ty = self.check_expr(&arm.call);
+                    if matches!(ty.ungrounded(), Type::Stream(_)) {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::ParallelArmInvalid {
+                                arm: arm.name.name.clone(),
+                                message: "stream-returning calls cannot join in a parallel block (v1)".into(),
+                            },
+                            arm.span,
+                        ));
+                    }
+                    if let Some(corvid_resolve::Binding::Local(id)) =
+                        self.bindings.get(&arm.name.span)
+                    {
+                        self.local_types.insert(*id, ty);
+                    }
+                }
+            }
             Stmt::Destructure {
                 pattern,
                 value,

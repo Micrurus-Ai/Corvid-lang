@@ -37,6 +37,13 @@ struct TracerInner {
     run_id: String,
     writer: JsonlTraceWriter,
     redaction: RedactionSet,
+    /// Arm buffer (slice 46e): when set, `emit` queues events here
+    /// instead of writing. `parallel:` blocks give each concurrent
+    /// arm a buffered handle and flush the queues IN ARM ORDER at
+    /// the join, so the recorded trace is indistinguishable from
+    /// sequential arm-order execution — replay needs no schema or
+    /// cursor changes.
+    buffer: Option<std::sync::Arc<std::sync::Mutex<Vec<TraceEvent>>>>,
 }
 
 impl Tracer {
@@ -59,6 +66,7 @@ impl Tracer {
                 run_id,
                 writer: JsonlTraceWriter::open(path),
                 redaction: RedactionSet::empty(),
+                buffer: None,
             }),
         }
     }
@@ -71,6 +79,7 @@ impl Tracer {
                 run_id: "null".into(),
                 writer: JsonlTraceWriter::open(PathBuf::new()),
                 redaction: RedactionSet::empty(),
+                buffer: None,
             }),
         }
     }
@@ -84,6 +93,7 @@ impl Tracer {
                 run_id: inner.run_id,
                 writer: inner.writer,
                 redaction,
+                buffer: inner.buffer,
             },
             Err(arc) => {
                 // The Tracer was already cloned; we can't mutate. Create
@@ -94,6 +104,7 @@ impl Tracer {
                     run_id: arc.run_id.clone(),
                     writer: JsonlTraceWriter::open(PathBuf::new()),
                     redaction,
+                    buffer: None,
                 }
             }
         };
@@ -114,6 +125,35 @@ impl Tracer {
         self.inner.writer.is_enabled()
     }
 
+    /// Slice 46e: a buffered handle for one `parallel:` arm. Events
+    /// emitted through the returned tracer queue in the returned
+    /// buffer; flush them through THIS tracer (in arm order) with
+    /// [`Tracer::flush_buffer`].
+    pub fn buffered(&self) -> (Tracer, std::sync::Arc<std::sync::Mutex<Vec<TraceEvent>>>) {
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let tracer = Tracer {
+            inner: std::sync::Arc::new(TracerInner {
+                run_id: self.inner.run_id.clone(),
+                writer: self.inner.writer.clone(),
+                redaction: self.inner.redaction.clone(),
+                buffer: Some(buffer.clone()),
+            }),
+        };
+        (tracer, buffer)
+    }
+
+    /// Slice 46e: flush one arm's buffered events through the real
+    /// writer (redaction applies here, once).
+    pub fn flush_buffer(&self, buffer: &std::sync::Mutex<Vec<TraceEvent>>) {
+        let events: Vec<TraceEvent> = match buffer.lock() {
+            Ok(mut guard) => guard.drain(..).collect(),
+            Err(_) => return,
+        };
+        for event in events {
+            self.emit(event);
+        }
+    }
+
     pub(crate) fn writer(&self) -> JsonlTraceWriter {
         self.inner.writer.clone()
     }
@@ -127,6 +167,14 @@ impl Tracer {
             None
         };
         if !self.is_enabled() {
+            return;
+        }
+        // Arm buffering (46e): queue raw; redaction applies ONCE at
+        // flush through the parent tracer.
+        if let Some(buffer) = &self.inner.buffer {
+            if let Ok(mut guard) = buffer.lock() {
+                guard.push(event);
+            }
             return;
         }
         let event = self.apply_redaction(event);

@@ -316,6 +316,11 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
             IrStmt::Destructure { value, .. } => {
                 intern_expr_literals(value, pool);
             }
+            IrStmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    intern_expr_literals(&arm.call, pool);
+                }
+            }
             IrStmt::Approve { args, .. } => {
                 for arg in args {
                     intern_expr_literals(arg, pool);
@@ -407,6 +412,11 @@ fn collect_block_imports(
             IrStmt::Destructure { .. } => {
                 return Err(WasmCodegenError::unsupported(
                     "destructuring is interpreter-only in 45n".to_string(),
+                ));
+            }
+            IrStmt::Parallel { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "parallel blocks are interpreter-only in 46e".to_string(),
                 ));
             }
             IrStmt::Approve { label, args, .. } => {
@@ -706,6 +716,11 @@ fn collect_block_locals(block: &IrBlock, locals: &mut LocalLayout) -> Result<(),
                     "destructuring is interpreter-only in 45n",
                 ));
             }
+            IrStmt::Parallel { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "parallel blocks are interpreter-only in 46e",
+                ));
+            }
             _ => {}
         }
     }
@@ -919,6 +934,7 @@ fn emit_block(
             | IrStmt::For { .. }
             | IrStmt::While { .. }
             | IrStmt::Destructure { .. }
+            | IrStmt::Parallel { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(

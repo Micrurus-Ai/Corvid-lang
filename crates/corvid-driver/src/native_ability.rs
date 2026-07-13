@@ -218,6 +218,8 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
         }
         // Destructuring is interpreter-only in 45n.
         IrStmt::Destructure { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        // Parallel blocks are interpreter-only in 46e.
+        IrStmt::Parallel { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `while` (45k) lowers natively like `for` — walk cond + body.
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, current_return_ty)?;

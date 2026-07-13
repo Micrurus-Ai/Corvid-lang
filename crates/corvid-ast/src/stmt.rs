@@ -52,6 +52,17 @@ pub enum Stmt {
         span: Span,
     },
 
+    /// `parallel:` block (slice 46e): two or more named arms whose
+    /// calls run CONCURRENTLY; the block joins when all complete.
+    /// Effects compose with the parallel operator (cost Sum,
+    /// latency Max, trust Max, confidence Min); arm trace buffers
+    /// flush in ARM ORDER at the join so replay is deterministic;
+    /// the error rule is arm-ordered (first failed arm by index).
+    Parallel {
+        arms: Vec<crate::stmt::ParallelArm>,
+        span: Span,
+    },
+
     /// Destructuring binding (slice 45n): `Decision { refund,
     /// amount, .. } = compute()`. The pattern must be IRREFUTABLE —
     /// shorthand field bindings, renamed bindings (`field: name`),
@@ -122,6 +133,7 @@ impl Stmt {
             | Stmt::Yield { span, .. }
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::Parallel { span, .. }
             | Stmt::Destructure { span, .. }
             | Stmt::While { span, .. }
             | Stmt::Break { span }
@@ -132,4 +144,15 @@ impl Stmt {
             | Stmt::Assign { span, .. } => *span,
         }
     }
+}
+
+/// One arm of a `parallel:` block (slice 46e): `name = call(...)`.
+/// The right-hand side must be a CALL (checker-enforced) — the
+/// concurrent unit is the effectful call; wrap richer logic in an
+/// agent and call it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParallelArm {
+    pub name: crate::span::Ident,
+    pub call: crate::expr::Expr,
+    pub span: Span,
 }

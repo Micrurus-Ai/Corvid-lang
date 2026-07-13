@@ -74,6 +74,11 @@ impl<'a> Checker<'a> {
             Stmt::Destructure { value, .. } => {
                 self.walk_grounded_pure_expr(agent, value);
             }
+            Stmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    self.walk_grounded_pure_expr(agent, &arm.call);
+                }
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Expr { expr, .. } => self.walk_grounded_pure_expr(agent, expr),
             Stmt::Approve { action, .. } => self.walk_grounded_pure_expr(agent, action),

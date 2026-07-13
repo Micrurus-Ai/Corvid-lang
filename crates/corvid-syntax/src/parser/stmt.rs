@@ -78,6 +78,22 @@ impl<'a> Parser<'a> {
             TokKind::KwBreak => self.parse_loop_flow_stmt(),
             TokKind::KwContinue => self.parse_loop_flow_stmt(),
             TokKind::KwPass => self.parse_loop_flow_stmt(),
+            // `parallel:` (46e) — contextual keyword: only when the
+            // ident is immediately followed by `:` then a newline
+            // (an annotated assignment has a TYPE after the colon).
+            TokKind::Ident(name)
+                if name == "parallel"
+                    && matches!(
+                        self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                        Some(TokKind::Colon)
+                    )
+                    && matches!(
+                        self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                        Some(TokKind::Newline)
+                    ) =>
+            {
+                self.parse_parallel_stmt()
+            }
             TokKind::Ident(_) => self.parse_assign_or_expr_stmt(),
             _ => self.parse_expr_stmt(),
         }
@@ -107,6 +123,57 @@ impl<'a> Parser<'a> {
         self.expect_newline()?;
         Ok(Stmt::Yield {
             value,
+            span: start.merge(end),
+        })
+    }
+
+    /// `parallel:` block (slice 46e) — contextual keyword; arms are
+    /// `name = call(...)` lines. At least two arms.
+    fn parse_parallel_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // parallel (contextual ident)
+        self.expect(TokKind::Colon, "`:` after `parallel`")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError {
+                kind: ParseErrorKind::ExpectedBlock,
+                span: self.peek_span(),
+            });
+        }
+        self.bump(); // Indent
+        let mut arms = Vec::new();
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+                break;
+            }
+            let arm_start = self.peek_span();
+            let (name, name_span) = self.expect_ident()?;
+            self.expect(TokKind::Assign, "`=` in a parallel arm (`name = call(...)`)")?;
+            let call = self.parse_expr()?;
+            let end = call.span();
+            self.expect_newline()?;
+            arms.push(corvid_ast::ParallelArm {
+                name: Ident::new(name, name_span),
+                call,
+                span: arm_start.merge(end),
+            });
+        }
+        let end = self.peek_span();
+        if matches!(self.peek(), TokKind::Dedent) {
+            self.bump();
+        }
+        if arms.len() < 2 {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("a `parallel:` block with {} arm(s)", arms.len()),
+                    expected: "at least two `name = call(...)` arms (a single call needs no block)".into(),
+                },
+                span: start.merge(end),
+            });
+        }
+        Ok(Stmt::Parallel {
+            arms,
             span: start.merge(end),
         })
     }

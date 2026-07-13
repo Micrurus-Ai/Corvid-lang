@@ -293,6 +293,12 @@ impl CfgBuilder {
                     let reads = collect_reads(value, true);
                     self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
                 }
+                IrStmt::Parallel { arms, .. } => {
+                    for arm in arms {
+                        let reads = collect_reads(&arm.call, true);
+                        self.push_stmt(cur, CfgStmt::Expr { reads }, my_path.clone());
+                    }
+                }
                 IrStmt::While { cond, body, .. } => {
                     // Same edge shape as `for`: head -> body,
                     // body -> head (backedge), head -> after. The

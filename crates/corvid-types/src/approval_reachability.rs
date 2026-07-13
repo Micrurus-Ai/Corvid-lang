@@ -211,6 +211,11 @@ impl<'a> ReachabilityPass<'a> {
             Stmt::Destructure { value, .. } => {
                 self.check_expr(entrypoint, value, approvals, visiting);
             }
+            Stmt::Parallel { arms, .. } => {
+                for arm in arms {
+                    self.check_expr(entrypoint, &arm.call, approvals, visiting);
+                }
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
             Stmt::Approve { action, .. } => {
                 if let Expr::Call { callee, args, .. } = action {

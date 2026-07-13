@@ -494,6 +494,28 @@ agent recall(question: String) -> String:
 "#,
     },
     TourTopic {
+        name: "parallel",
+        title: "Governed Concurrency",
+        category: "AI-native ergonomics",
+        pitch: "parallel: runs two or more named arms CONCURRENTLY and joins when all complete — and every governance guarantee survives the concurrency. Arm costs SUM into the enclosing @budget (parallelism hides latency, not money). Each arm's trace events buffer and flush IN ARM ORDER at the join, so the recorded trace reads like sequential execution and corvid replay reproduces a concurrent run deterministically with the ordinary sequential cursor — zero trace-schema changes. Failures are arm-ordered too: the first failed arm by position, not by completion time. No other language replays concurrent LLM calls deterministically.",
+        spec: "docs/meta/46e-parallel-design.md",
+        roadmap: "Slice 46e parallel-construct",
+        test: "crates/corvid-vm/src/tests/parallel.rs::parallel_trace_is_arm_ordered_and_replays_identically",
+        non_scope: "Racing/select, timeouts, cancellation, streaming arms, and arbitrary statement bodies per arm are post-v1.0 — each arm is one call; wrap richer logic in an agent.",
+        source: r#"agent fetch_weather(city: String) -> String:
+    return "sunny in " + city
+
+agent fetch_news(city: String) -> String:
+    return "quiet in " + city
+
+agent brief(city: String) -> String:
+    parallel:
+        weather = fetch_weather(city)
+        news = fetch_news(city)
+    return weather + " / " + news
+"#,
+    },
+    TourTopic {
         name: "deterministic-time",
         title: "Deterministic Time & Randomness",
         category: "Executing I/O",

@@ -83,6 +83,11 @@ impl<'a> Checker<'a> {
                 self.walk_fn_purity_block(fn_name, body);
             }
             Stmt::Destructure { value, .. } => self.walk_fn_purity_expr(fn_name, value),
+            // A parallel block is inherently effectful (its arms
+            // are tool/prompt/agent calls).
+            Stmt::Parallel { span, .. } => {
+                self.fn_purity_violation(fn_name, "a `parallel:` block", *span);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         }
     }

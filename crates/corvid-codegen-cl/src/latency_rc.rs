@@ -134,6 +134,11 @@ fn collect_prompt_pins_in_stmt(
         IrStmt::Destructure { value, .. } => {
             collect_prompt_pins_in_expr(value, borrowed_reads, out)
         }
+        IrStmt::Parallel { arms, .. } => {
+            for arm in arms {
+                collect_prompt_pins_in_expr(&arm.call, borrowed_reads, out);
+            }
+        }
         IrStmt::Approve { args, .. } => {
             for arg in args {
                 collect_prompt_pins_in_expr(arg, borrowed_reads, out);

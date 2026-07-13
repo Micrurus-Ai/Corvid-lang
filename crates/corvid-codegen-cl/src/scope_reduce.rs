@@ -194,6 +194,9 @@ fn stmt_mentions_local(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::For { iter, .. } => expr_mentions_local(iter, local_id),
         IrStmt::While { cond, .. } => expr_mentions_local(cond, local_id),
         IrStmt::Destructure { value, .. } => expr_mentions_local(value, local_id),
+        IrStmt::Parallel { arms, .. } => arms
+            .iter()
+            .any(|arm| expr_mentions_local(&arm.call, local_id)),
         IrStmt::Approve { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, local_id)),
         IrStmt::Expr { expr, .. } => expr_mentions_local(expr, local_id),
         IrStmt::Dup {
@@ -290,6 +293,8 @@ fn stmt_is_effect_barrier(stmt: &IrStmt) -> bool {
     match stmt {
         IrStmt::Let { value, .. } => !expr_is_effect_free(value),
         IrStmt::Destructure { value, .. } => !expr_is_effect_free(value),
+        // Parallel arms are effectful calls — always a barrier.
+        IrStmt::Parallel { .. } => true,
         // Place assignment mutates shared state — always a barrier.
         IrStmt::Assign { .. } => true,
         IrStmt::Expr { expr, .. } => !expr_is_effect_free(expr),

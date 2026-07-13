@@ -244,6 +244,30 @@ impl<'a> CostAnalyzer<'a> {
                 estimate.tree = wrap_if_needed("destructure", estimate.tree, *span);
                 estimate
             }
+            // Parallel arms (46e): the $ dimension SUMS across arms
+            // (both are paid) — a sequence node composes costs by
+            // sum, so `@budget` stays sound; wall-clock parallelism
+            // is a latency property, not a cost one.
+            corvid_ast::Stmt::Parallel { arms, span } => {
+                let mut children = Vec::new();
+                let mut warnings = Vec::new();
+                let mut bounded = true;
+                for arm in arms {
+                    let e = self.analyze_expr(&arm.call, agent_name);
+                    if !tree_is_zero(&e.tree) {
+                        children.push(e.tree);
+                    }
+                    warnings.extend(e.warnings);
+                    bounded &= e.bounded;
+                }
+                let tree = sequence_tree("parallel", CostNodeKind::Sequence, children, *span);
+                CostEstimate {
+                    dimensions: tree.costs.clone(),
+                    tree,
+                    warnings,
+                    bounded,
+                }
+            }
             corvid_ast::Stmt::Break { span }
             | corvid_ast::Stmt::Continue { span }
             | corvid_ast::Stmt::Pass { span } => {

@@ -443,6 +443,10 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             push_indent(indent, out);
             out.push_str("<destructure>\n");
         }
+        Stmt::Parallel { .. } => {
+            push_indent(indent, out);
+            out.push_str("<parallel>\n");
+        }
         Stmt::Break { .. } => {
             push_indent(indent, out);
             out.push_str("break\n");

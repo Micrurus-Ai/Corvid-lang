@@ -922,6 +922,21 @@ impl<'a> Lowerer<'a> {
                     span: *span,
                 }
             }
+            Stmt::Parallel { arms, span } => IrStmt::Parallel {
+                arms: arms
+                    .iter()
+                    .map(|arm| IrParallelArm {
+                        name: arm.name.name.clone(),
+                        local_id: match self.bindings.get(&arm.name.span) {
+                            Some(Binding::Local(id)) => *id,
+                            _ => LocalId(u32::MAX),
+                        },
+                        call: self.lower_expr(&arm.call),
+                        span: arm.span,
+                    })
+                    .collect(),
+                span: *span,
+            },
             Stmt::Destructure {
                 pattern,
                 value,

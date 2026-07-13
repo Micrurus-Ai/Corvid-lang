@@ -114,6 +114,9 @@ pub enum TypeErrorKind {
     /// `replay`, or `yield`. A `fn` is statically effect-free.
     FnBodyNotPure { name: String, what: String },
 
+    /// A malformed `parallel:` arm (slice 46e).
+    ParallelArmInvalid { arm: String, message: String },
+
     /// A misused conversation-history parameter (slice 46c).
     PromptHistoryInvalid { prompt: String, message: String },
 
@@ -492,6 +495,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::ParallelArmInvalid { arm, message } => {
+                format!("invalid parallel arm `{arm}`: {message}")
+            }
             Self::PromptHistoryInvalid { prompt, message } => {
                 format!("invalid history parameter on prompt `{prompt}`: {message}")
             }
@@ -820,6 +826,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::ParallelArmInvalid { .. } => Some(
+                "a parallel block runs two or more `name = call(...)` arms concurrently and joins when all complete".into(),
+            ),
             Self::PromptHistoryInvalid { .. } => Some(
                 "declare one `history: List<AiMessage>` parameter; its messages splice between the system blocks and the current turn".into(),
             ),

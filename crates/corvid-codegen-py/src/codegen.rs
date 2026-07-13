@@ -292,6 +292,11 @@ impl Codegen {
                 }
                 self.out.dedent();
             }
+            IrStmt::Parallel { .. } => {
+                self.out.writeln(
+                    "raise NotImplementedError(\"parallel blocks are interpreter-only in 46e\")",
+                );
+            }
             IrStmt::Destructure { .. } => {
                 self.out.writeln(
                     "raise NotImplementedError(\"destructuring is interpreter-only in 45n\")",

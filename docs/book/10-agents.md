@@ -67,6 +67,35 @@ enqueue surface (`corvid jobs enqueue`) reads its values from flags
 today — annotation-derived defaults at enqueue time are the queue's
 follow-up (tracked in ROADMAP).
 
+## Parallel arms
+
+`parallel:` runs two or more calls CONCURRENTLY and joins when all
+complete — each arm's name binds after the block (compiled in CI):
+
+```corvid
+agent fetch_weather(city: String) -> String:
+    return "sunny in " + city
+
+agent fetch_news(city: String) -> String:
+    return "quiet in " + city
+
+agent brief(city: String) -> String:
+    parallel:
+        weather = fetch_weather(city)
+        news = fetch_news(city)
+    return weather + " / " + news
+```
+
+The governance is what makes this Corvid's: arm COSTS SUM into the
+enclosing `@budget` (both are paid — parallelism hides latency,
+not money); each arm's trace events buffer and flush IN ARM ORDER
+at the join, so the recorded trace reads like sequential execution
+and `corvid replay` reproduces the run deterministically; failures
+are arm-ordered too (the first failed arm by position, not by
+completion time). Each arm must be a single call — wrap richer
+logic in an agent. Streams, racing, and cancellation are
+post-v1.0.
+
 ## Calling other agents
 
 ```corvid

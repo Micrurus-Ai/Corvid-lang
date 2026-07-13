@@ -134,6 +134,7 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
         | IrStmt::For { .. }
         | IrStmt::While { .. }
         | IrStmt::Destructure { .. }
+        | IrStmt::Parallel { .. }
         | IrStmt::Return { .. }
         | IrStmt::Yield { .. }
         | IrStmt::Break { .. }
@@ -190,6 +191,10 @@ fn stmt_local_mentions(stmt: &IrStmt, local_id: LocalId) -> usize {
         IrStmt::For { iter, .. } => count_local_mentions_expr(iter, local_id),
         IrStmt::While { cond, .. } => count_local_mentions_expr(cond, local_id),
         IrStmt::Destructure { value, .. } => count_local_mentions_expr(value, local_id),
+        IrStmt::Parallel { arms, .. } => arms
+            .iter()
+            .map(|arm| count_local_mentions_expr(&arm.call, local_id))
+            .sum(),
         IrStmt::Approve { args, .. } => args
             .iter()
             .map(|expr| count_local_mentions_expr(expr, local_id))

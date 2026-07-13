@@ -33,6 +33,7 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
         IrStmt::For { iter, body, .. } => expr_uses_runtime(iter) || block_uses_runtime(body),
         IrStmt::While { cond, body, .. } => expr_uses_runtime(cond) || block_uses_runtime(body),
         IrStmt::Destructure { value, .. } => expr_uses_runtime(value),
+        IrStmt::Parallel { .. } => true,
         IrStmt::Approve { .. } => true,
         IrStmt::Expr { expr, .. } => expr_uses_runtime(expr),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => false,
