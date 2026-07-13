@@ -417,12 +417,25 @@ impl IoToolPolicy {
     pub fn new(root_value: Option<&str>, corvid_toml_dir: Option<&Path>) -> Self {
         let root = root_value.map(|raw| {
             let raw_path = Path::new(raw);
-            let absolute = if raw_path.is_absolute() {
+            let anchored = if raw_path.is_absolute() {
                 raw_path.to_path_buf()
             } else {
                 match corvid_toml_dir {
                     Some(anchor) => anchor.join(raw_path),
                     None => raw_path.to_path_buf(),
+                }
+            };
+            // The root MUST end up absolute: `resolve`'s
+            // confinement check is a component-prefix comparison,
+            // and a still-relative root (a relative corvid.toml
+            // anchor from `corvid run src/main.cor`, or a relative
+            // CORVID_IO_ROOT) false-fires it on every path.
+            let absolute = if anchored.is_absolute() {
+                anchored
+            } else {
+                match std::env::current_dir() {
+                    Ok(cwd) => cwd.join(&anchored),
+                    Err(_) => anchored,
                 }
             };
             normalize_path(&absolute)
@@ -627,6 +640,28 @@ mod tests {
             resolved, expected,
             "relative root should resolve against the corvid.toml dir"
         );
+    }
+
+    /// A RELATIVE corvid.toml anchor (what `corvid run
+    /// src/main.cor` produces when invoked from the project dir)
+    /// must still yield an absolute root — otherwise the
+    /// component-prefix confinement check false-fires on every
+    /// path and the whole executing io/db surface is unusable
+    /// from the CLI. Pins the CWD-anchoring fallback.
+    #[test]
+    fn io_tool_policy_relative_anchor_still_produces_absolute_root() {
+        let policy = IoToolPolicy::new(Some("."), Some(Path::new("")));
+        let resolved = policy
+            .resolve("notes.txt")
+            .expect("inside-root path must resolve even with a relative anchor");
+        assert!(
+            resolved.is_absolute(),
+            "resolved path must be absolute; got {}",
+            resolved.display()
+        );
+        let cwd = std::env::current_dir().expect("cwd");
+        let expected = normalize_path(&cwd.join("notes.txt"));
+        assert_eq!(resolved, expected, "path should land under the CWD-anchored root");
     }
 
     /// 33S1a — Absolute `[io] root` is taken as-is; relative
