@@ -15,6 +15,7 @@ corvid-trace-schema = { workspace = true }
 corvid-prompt-format = { workspace = true }
 serde_json = { workspace = true }
 async-recursion = "1"
+futures = "0.3"
 async-trait = "0.1"
 sha2 = "0.10"
 tokio = { workspace = true }

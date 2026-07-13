@@ -198,6 +198,7 @@ impl Tracer {
                 model,
                 model_version,
                 result,
+                chunk_boundaries,
             } => TraceEvent::LlmResult {
                 ts_ms,
                 run_id,
@@ -205,6 +206,7 @@ impl Tracer {
                 model,
                 model_version,
                 result: r.redact(result),
+                chunk_boundaries,
             },
             TraceEvent::LlmCall {
                 ts_ms,

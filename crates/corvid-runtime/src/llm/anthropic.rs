@@ -10,7 +10,8 @@
 //! Auth: `x-api-key` header. Version: pinned to the latest stable
 //! API version we've validated against (`anthropic-version: 2023-06-01`).
 //!
-//! Out of scope (deferred): streaming, prompt caching, vision, batch.
+//! SSE streaming shipped in slice 46d. Out of scope (deferred):
+//! prompt caching, vision, batch.
 
 use crate::errors::RuntimeError;
 use crate::llm::{LlmAdapter, LlmRequestRef, LlmResponse};
@@ -64,6 +65,87 @@ impl LlmAdapter for AnthropicAdapter {
 
     fn handles(&self, model: &str) -> bool {
         model.starts_with("claude-")
+    }
+
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
+        use futures::StreamExt;
+        Box::pin(async move {
+            // Structured output streams poorly (tool_use blocks
+            // arrive as partial JSON); fall back to a single-chunk
+            // whole call.
+            if req.output_schema.is_some() {
+                let resp = self.call(req).await?;
+                let text = match resp.value {
+                    Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                return Ok(Box::pin(futures::stream::once(async move {
+                    Ok(crate::llm::LlmStreamChunk {
+                        delta: text,
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    })
+                })) as crate::llm::LlmChunkStream);
+            }
+            let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+            let mut body = build_request_body(req);
+            body["stream"] = json!(true);
+            let resp = self
+                .client
+                .post(&url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| RuntimeError::AdapterFailed {
+                    adapter: "anthropic".into(),
+                    message: format!("HTTP send failed: {e}"),
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(RuntimeError::AdapterFailed {
+                    adapter: "anthropic".into(),
+                    message: format!("HTTP {status}: {body_text}"),
+                });
+            }
+            let lines = super::sse::response_lines(resp, "anthropic");
+            let chunks = lines.filter_map(|line| async move {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => return Some(Err(e)),
+                };
+                let data = super::sse::sse_data(&line)?;
+                let json: Value = serde_json::from_str(data.trim()).ok()?;
+                match json["type"].as_str() {
+                    Some("content_block_delta") => {
+                        let delta = json["delta"]["text"].as_str()?.to_string();
+                        Some(Ok(crate::llm::LlmStreamChunk { delta, done: false, usage: None, confidence: None }))
+                    }
+                    Some("message_stop") => Some(Ok(crate::llm::LlmStreamChunk {
+                        delta: String::new(),
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    })),
+                    Some("error") => Some(Err(RuntimeError::AdapterFailed {
+                        adapter: "anthropic".into(),
+                        message: json["error"]["message"]
+                            .as_str()
+                            .unwrap_or("provider stream error")
+                            .to_string(),
+                    })),
+                    _ => None,
+                }
+            });
+            Ok(Box::pin(chunks) as crate::llm::LlmChunkStream)
+        })
     }
 
     fn call<'a>(

@@ -34,7 +34,7 @@ pub(super) fn trace_mock_llm_attempt(
         model_version: runtime.model_version(effective_model),
         rendered: Some(rendered.to_string()),
         args: args.to_vec(),
-                sampling: None,
+        sampling: None,
     });
     tracer.emit(TraceEvent::LlmResult {
         ts_ms: crate::tracing::now_ms(),
@@ -47,6 +47,7 @@ pub(super) fn trace_mock_llm_attempt(
         },
         model_version: runtime.model_version(effective_model),
         result,
+        chunk_boundaries: None,
     });
 }
 

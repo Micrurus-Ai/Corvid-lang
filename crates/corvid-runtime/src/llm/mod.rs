@@ -16,6 +16,7 @@ pub mod ollama;
 pub mod openai;
 pub mod openai_compat;
 pub mod quarantine;
+mod sse;
 
 pub use quarantine::QuarantinedLlmAdapter;
 
@@ -166,6 +167,12 @@ pub struct LlmResponse {
     pub usage: TokenUsage,
     pub confidence: Option<f64>,
     pub calibration: Option<CalibrationObservation>,
+    /// Chunk boundaries of a streamed response (slice 46d) — byte
+    /// offsets into the textual value where provider chunks ended.
+    /// `None` for non-streamed calls. Replay substitution carries
+    /// the recorded boundaries back so the VM re-chunks
+    /// identically.
+    pub chunk_boundaries: Option<Vec<u64>>,
 }
 
 impl LlmResponse {
@@ -175,6 +182,7 @@ impl LlmResponse {
             usage,
             confidence: None,
             calibration: None,
+            chunk_boundaries: None,
         }
     }
 
@@ -188,6 +196,7 @@ impl LlmResponse {
             usage,
             confidence: Some(confidence.clamp(0.0, 1.0)),
             calibration: None,
+            chunk_boundaries: None,
         }
     }
 
@@ -201,6 +210,7 @@ impl LlmResponse {
             usage,
             confidence: None,
             calibration: Some(CalibrationObservation { actual_correct }),
+            chunk_boundaries: None,
         }
     }
 }
@@ -257,7 +267,51 @@ pub trait LlmAdapter: Send + Sync {
         &'a self,
         req: &'a LlmRequestRef<'a>,
     ) -> BoxFuture<'a, Result<LlmResponse, RuntimeError>>;
+
+    /// Stream the response incrementally (slice 46d). The default
+    /// implementation performs a whole `call` and yields it as one
+    /// final chunk, so adapters without native streaming (and the
+    /// mock) keep working through the streaming path.
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<LlmChunkStream, RuntimeError>> {
+        Box::pin(async move {
+            let resp = self.call(req).await?;
+            let text = match resp.value {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            };
+            let usage = resp.usage;
+            let confidence = resp.confidence;
+            let stream = futures::stream::once(async move {
+                Ok(LlmStreamChunk {
+                    delta: text,
+                    done: true,
+                    usage: Some(usage),
+                    confidence,
+                })
+            });
+            Ok(Box::pin(stream) as LlmChunkStream)
+        })
+    }
 }
+
+/// One incremental delta of a streamed response (slice 46d).
+/// `usage`/`confidence` ride the FINAL chunk when the provider (or
+/// the whole-call fallback) reports them; mid-stream deltas carry
+/// `None` and consumers fall back to estimates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmStreamChunk {
+    pub delta: String,
+    pub done: bool,
+    pub usage: Option<TokenUsage>,
+    pub confidence: Option<f64>,
+}
+
+/// A stream of deltas from an adapter.
+pub type LlmChunkStream =
+    futures::stream::BoxStream<'static, Result<LlmStreamChunk, RuntimeError>>;
 
 /// Registry of LLM adapters. Cheap to clone.
 #[derive(Clone, Default)]
@@ -300,6 +354,27 @@ impl LlmRegistry {
     /// Dispatch `req` to the first adapter whose `handles` returns true.
     pub async fn call(&self, req: &LlmRequestRef<'_>) -> Result<LlmResponse, RuntimeError> {
         Ok(self.call_with_adapter_name(req).await?.response)
+    }
+
+    /// Stream dispatch (slice 46d): first handling adapter, no
+    /// fallback chain — the caller falls back to the whole-call
+    /// path on setup errors.
+    pub async fn stream(
+        &self,
+        req: &LlmRequestRef<'_>,
+    ) -> Result<LlmChunkStream, RuntimeError> {
+        let model = if req.model.is_empty() {
+            return Err(RuntimeError::NoModelConfigured);
+        } else {
+            req.model
+        };
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|a| a.handles(model))
+            .ok_or_else(|| RuntimeError::NoAdapter(model.to_string()))?
+            .clone();
+        adapter.stream(req).await
     }
 
     pub async fn call_with_adapter_name(

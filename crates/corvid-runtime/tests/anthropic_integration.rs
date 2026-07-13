@@ -125,3 +125,76 @@ async fn http_error_surfaces_as_adapter_failed() {
     assert!(msg.contains("anthropic"));
     assert!(msg.contains("401"));
 }
+
+#[tokio::test]
+async fn streams_sse_deltas_incrementally() {
+    // Slice 46d: real SSE parsing — three content_block_delta
+    // events + message_stop become three deltas and a done marker.
+    use futures::StreamExt;
+    let server = MockServer::start().await;
+    let sse_body = concat!(
+        "event: message_start
+",
+        "data: {\"type\":\"message_start\"}
+",
+        "
+",
+        "event: content_block_delta
+",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}
+",
+        "
+",
+        "event: content_block_delta
+",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo \"}}
+",
+        "
+",
+        "event: content_block_delta
+",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"world\"}}
+",
+        "
+",
+        "event: message_stop
+",
+        "data: {\"type\":\"message_stop\"}
+",
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(sse_body, "text/event-stream"),
+        )
+        .mount(&server)
+        .await;
+
+    let adapter = AnthropicAdapter::new("sk-test").with_base_url(server.uri());
+    let req = LlmRequest {
+        prompt: "chat".into(),
+        model: "claude-haiku-4-5".into(),
+        rendered: "say hi".into(),
+        args: vec![],
+        output_schema: None,
+        sampling: Default::default(),
+        messages: Vec::new(),
+    };
+    let req_ref = req.as_ref();
+    let mut stream = adapter.stream(&req_ref).await.expect("stream setup");
+    let mut deltas = Vec::new();
+    let mut done = false;
+    while let Some(item) = stream.next().await {
+        let chunk = item.expect("chunk ok");
+        if !chunk.delta.is_empty() {
+            deltas.push(chunk.delta.clone());
+        }
+        if chunk.done {
+            done = true;
+            break;
+        }
+    }
+    assert_eq!(deltas, vec!["Hel", "lo ", "world"]);
+    assert!(done, "message_stop must yield a done chunk");
+}

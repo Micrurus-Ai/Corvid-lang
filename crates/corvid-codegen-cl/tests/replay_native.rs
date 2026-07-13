@@ -175,6 +175,7 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             model: model.clone(),
             model_version: model_version.clone(),
             result: result.clone(),
+            chunk_boundaries: None,
         },
         TraceEvent::ApprovalRequest { label, args, .. } => TraceEvent::ApprovalRequest {
             ts_ms: 0,

@@ -453,7 +453,7 @@ Spec: [streaming](./docs/internals/effect-spec/08-streaming.md)
 Tour: `corvid tour --topic streaming-effects`
 Roadmap: [Phase 20f](./ROADMAP.md)
 Proof: [stream tests](./crates/corvid-vm/src/tests/stream.rs)
-Non-scope: The stream algebra applies to agent-produced streams (`yield`) today. **Provider token streaming is not yet wired**: a prompt declared `-> Stream<T>` currently makes one blocking LLM call and yields the complete response as a single chunk — all four provider adapters defer SSE streaming. Live token flow through this algebra lands with slice 46d (Language completeness track); provider-native continuation additionally depends on provider APIs.
+Non-scope: Provider token streaming is REAL as of slice 46d — a plain `-> Stream<String>` prompt streams SSE deltas from all four provider adapters through this algebra (mid-stream token limits, confidence floors, budget termination), and the trace records chunk boundaries so replay re-chunks identically. Structured `Stream<T>` and prompts using multi-model dispatch clauses (route/progressive/rollout/ensemble/adversarial) still make one whole call and yield it as a single chunk; provider-native continuation additionally depends on provider APIs.
 
 #### Progressive Structured Streams
 

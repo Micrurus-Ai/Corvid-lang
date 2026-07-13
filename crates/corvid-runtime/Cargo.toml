@@ -44,7 +44,7 @@ hmac = "0.12"
 subtle = "2.6"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 pdf-extract = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
 dotenvy = "0.15"
 corvid-ast = { workspace = true }
 corvid-ir = { workspace = true }

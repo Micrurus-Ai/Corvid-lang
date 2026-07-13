@@ -8,7 +8,8 @@
 //!
 //! Auth: `Authorization: Bearer <key>`.
 //!
-//! Out of scope (deferred): streaming, function calling, vision, batch,
+//! SSE streaming shipped in slice 46d. Out of scope (deferred):
+//! function calling, vision, batch,
 //! reasoning-effort knobs for o-series.
 
 use crate::errors::RuntimeError;
@@ -60,6 +61,77 @@ impl LlmAdapter for OpenAiAdapter {
             || model == "o1"
             || model == "o3"
             || model == "o4"
+    }
+
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
+        use futures::StreamExt;
+        Box::pin(async move {
+            if req.output_schema.is_some() {
+                let resp = self.call(req).await?;
+                let text = match resp.value {
+                    Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                return Ok(Box::pin(futures::stream::once(async move {
+                    Ok(crate::llm::LlmStreamChunk {
+                        delta: text,
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    })
+                })) as crate::llm::LlmChunkStream);
+            }
+            let url = format!(
+                "{}/v1/chat/completions",
+                self.base_url.trim_end_matches('/')
+            );
+            let mut body = build_request_body(req);
+            body["stream"] = json!(true);
+            let resp = self
+                .client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| RuntimeError::AdapterFailed {
+                    adapter: "openai".into(),
+                    message: format!("HTTP send failed: {e}"),
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(RuntimeError::AdapterFailed {
+                    adapter: "openai".into(),
+                    message: format!("HTTP {status}: {body_text}"),
+                });
+            }
+            let lines = super::sse::response_lines(resp, "openai");
+            let chunks = lines.filter_map(|line| async move {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => return Some(Err(e)),
+                };
+                let data = super::sse::sse_data(&line)?;
+                let data = data.trim();
+                if data == "[DONE]" {
+                    return Some(Ok(crate::llm::LlmStreamChunk {
+                        delta: String::new(),
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    }));
+                }
+                let json: Value = serde_json::from_str(data).ok()?;
+                let delta = json["choices"][0]["delta"]["content"].as_str()?.to_string();
+                Some(Ok(crate::llm::LlmStreamChunk { delta, done: false, usage: None, confidence: None }))
+            });
+            Ok(Box::pin(chunks) as crate::llm::LlmChunkStream)
+        })
     }
 
     fn call<'a>(

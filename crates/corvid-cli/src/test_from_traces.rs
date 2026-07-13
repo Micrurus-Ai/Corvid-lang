@@ -360,6 +360,7 @@ mod tests {
                 model: None,
                 model_version: None,
                 result: json!("ok"),
+            chunk_boundaries: None,
             });
         }
         if let Some(a) = &shape.approval {

@@ -107,6 +107,14 @@ pub enum TraceEvent {
         #[serde(default)]
         model_version: Option<String>,
         result: serde_json::Value,
+        /// Streamed-response chunk boundaries (slice 46d): byte
+        /// offsets into the final text where provider chunks ended.
+        /// Replay re-chunks the recorded text at exactly these
+        /// offsets, so a streamed run replays with identical chunk
+        /// timing structure. Absent for non-streamed calls and in
+        /// pre-46d traces.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chunk_boundaries: Option<Vec<u64>>,
     },
     /// Metadata for a cacheable prompt call. A cache hit is still recorded
     /// as a normal `LlmCall` / `LlmResult` pair so replay consumes the same

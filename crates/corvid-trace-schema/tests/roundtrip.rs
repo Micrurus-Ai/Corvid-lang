@@ -78,6 +78,7 @@ fn sample_trace() -> Vec<TraceEvent> {
             model: Some("claude-opus-4-7".into()),
             model_version: Some("2024-10-22".into()),
             result: json!("refund"),
+            chunk_boundaries: None,
         },
         TraceEvent::ApprovalRequest {
             ts_ms: 8,

@@ -35,7 +35,7 @@ pub(super) fn default_stream_backpressure() -> BackpressurePolicy {
     BackpressurePolicy::Bounded(16)
 }
 
-pub(super) fn estimate_tokens(text: &str) -> u64 {
+pub(crate) fn estimate_tokens(text: &str) -> u64 {
     let chars = text.chars().count() as u64;
     if chars == 0 {
         0

@@ -69,6 +69,7 @@ pub fn llm_events(run_id: &str, writer: &str, agent: &str, prompt: &str, result:
             model: Some("mock-1".into()),
             model_version: None,
             result: result.clone(),
+            chunk_boundaries: None,
         },
         TraceEvent::RunCompleted {
             ts_ms: 5,

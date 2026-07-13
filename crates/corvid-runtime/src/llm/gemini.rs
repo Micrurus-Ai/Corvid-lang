@@ -58,6 +58,95 @@ impl LlmAdapter for GeminiAdapter {
         model.starts_with("gemini-")
     }
 
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
+        use futures::StreamExt;
+        Box::pin(async move {
+            if req.output_schema.is_some() {
+                let resp = self.call(req).await?;
+                let text = match resp.value {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                return Ok(Box::pin(futures::stream::once(async move {
+                    Ok(crate::llm::LlmStreamChunk {
+                        delta: text,
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    })
+                })) as crate::llm::LlmChunkStream);
+            }
+            let url = format!(
+                "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+                self.base_url.trim_end_matches('/'),
+                req.model,
+                self.api_key
+            );
+            let contents: serde_json::Value = if req.messages.is_empty() {
+                json!([{"role": "user", "parts": [{"text": req.rendered}]}])
+            } else {
+                serde_json::Value::Array(
+                    req.messages
+                        .iter()
+                        .filter(|m| m.role != "system")
+                        .map(|m| {
+                            let role = if m.role == "assistant" { "model" } else { "user" };
+                            json!({"role": role, "parts": [{"text": m.content}]})
+                        })
+                        .collect(),
+                )
+            };
+            let mut body = json!({ "contents": contents });
+            let system: Vec<&str> = req
+                .messages
+                .iter()
+                .filter(|m| m.role == "system")
+                .map(|m| m.content.as_str())
+                .collect();
+            if !system.is_empty() {
+                body["systemInstruction"] = json!({"parts": [{"text": system.join("
+
+")}]});
+            }
+            let resp = self
+                .client
+                .post(&url)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| RuntimeError::AdapterFailed {
+                    adapter: "gemini".into(),
+                    message: format!("HTTP send failed: {e}"),
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(RuntimeError::AdapterFailed {
+                    adapter: "gemini".into(),
+                    message: format!("HTTP {status}: {body_text}"),
+                });
+            }
+            let lines = super::sse::response_lines(resp, "gemini");
+            let chunks = lines.filter_map(|line| async move {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => return Some(Err(e)),
+                };
+                let data = super::sse::sse_data(&line)?;
+                let json: serde_json::Value = serde_json::from_str(data.trim()).ok()?;
+                let delta = json["candidates"][0]["content"]["parts"][0]["text"]
+                    .as_str()?
+                    .to_string();
+                Some(Ok(crate::llm::LlmStreamChunk { delta, done: false, usage: None, confidence: None }))
+            });
+            Ok(Box::pin(chunks) as crate::llm::LlmChunkStream)
+        })
+    }
+
     fn call<'a>(
         &'a self,
         req: &'a LlmRequestRef<'a>,

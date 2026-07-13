@@ -73,6 +73,88 @@ impl LlmAdapter for OllamaAdapter {
         model.starts_with(OLLAMA_MODEL_PREFIX)
     }
 
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
+        use futures::StreamExt;
+        Box::pin(async move {
+            if req.output_schema.is_some() {
+                let resp = self.call(req).await?;
+                let text = match resp.value {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                return Ok(Box::pin(futures::stream::once(async move {
+                    Ok(crate::llm::LlmStreamChunk {
+                        delta: text,
+                        done: true,
+                        usage: None,
+                        confidence: None,
+                    })
+                })) as crate::llm::LlmChunkStream);
+            }
+            let model_name = req
+                .model
+                .strip_prefix(OLLAMA_MODEL_PREFIX)
+                .unwrap_or(&req.model);
+            let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
+            // Ollama streams JSONL: one JSON object per line with
+            // message.content deltas and a final done:true object.
+            let body = json!({
+                "model": model_name,
+                "stream": true,
+                "messages": if req.messages.is_empty() {
+                    json!([{"role": "user", "content": req.rendered}])
+                } else {
+                    serde_json::Value::Array(
+                        req.messages
+                            .iter()
+                            .map(|m| json!({"role": m.role, "content": m.content}))
+                            .collect(),
+                    )
+                },
+            });
+            let resp = self
+                .client
+                .post(&url)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| RuntimeError::AdapterFailed {
+                    adapter: "ollama".into(),
+                    message: format!("HTTP send failed: {e}"),
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(RuntimeError::AdapterFailed {
+                    adapter: "ollama".into(),
+                    message: format!("HTTP {status}: {body_text}"),
+                });
+            }
+            let lines = super::sse::response_lines(resp, "ollama");
+            let chunks = lines.filter_map(|line| async move {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => return Some(Err(e)),
+                };
+                let json: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+                let done = json["done"].as_bool().unwrap_or(false);
+                let delta = json["message"]["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                if delta.is_empty() && !done {
+                    return None;
+                }
+                Some(Ok(crate::llm::LlmStreamChunk { delta, done, usage: None, confidence: None }))
+            });
+            Ok(Box::pin(chunks) as crate::llm::LlmChunkStream)
+        })
+    }
+
     fn call<'a>(
         &'a self,
         req: &'a LlmRequestRef<'a>,

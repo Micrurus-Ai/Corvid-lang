@@ -1302,6 +1302,33 @@ Next per agreed order: 46d-real-provider-streaming.
 
 ---
 
+## 2026-07-12 - 46d closed: real provider streaming (audit M6 fake -> real)
+
+SSE in all four adapters over a shared buffered line-splitter;
+structured outputs fall back to whole-call (partial tool_use JSON
+is not a streamable surface). The replay design: LlmResult records
+CHUNK BOUNDARIES (byte offsets); replay substitutes the recorded
+text and re-chunks at exactly those offsets — a streamed run
+replays with identical chunk structure, zero per-chunk trace
+events.
+
+The VM streams plain-path Stream<String> prompts through a feed
+task. The satisfying part: the two pre-46d tests pinning
+mid-stream token-limit and confidence-floor termination now pass
+THROUGH the real streaming path unchanged — provider-reported
+usage on the final chunk is authoritative, estimates cover the
+deltas. Cost rides the final chunk exactly once; setup failures
+fall back to the whole call.
+
+README's stream-algebra caveat rewritten to the shipped truth.
+
+Validation: 284 types + 216 syntax + 110 vm + 325 runtime + SSE
+integration + book guard + grammar gate; corpus verify exits 1.
+
+Next per agreed order: 46g-rag-stdlib-dispatch.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

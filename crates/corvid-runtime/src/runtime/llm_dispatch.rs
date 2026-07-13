@@ -607,6 +607,145 @@ impl Runtime {
         crate::json::object_finish(builder)
     }
 
+    /// Streamed LLM call (slice 46d). Live mode: dispatches to the
+    /// adapter's SSE stream, accumulates the full text, and emits
+    /// the LlmCall/LlmResult trace pair with CHUNK BOUNDARIES (byte
+    /// offsets into the final text) on completion, so replay
+    /// re-chunks identically. Replay mode: substitutes through the
+    /// normal path and re-chunks the recorded text at the recorded
+    /// boundaries. On stream-setup failure the caller should fall
+    /// back to `call_llm`.
+    pub async fn call_llm_stream(
+        &self,
+        mut req: crate::llm::LlmRequest,
+    ) -> Result<crate::llm::LlmChunkStream, RuntimeError> {
+        use crate::llm::LlmStreamChunk;
+        use futures::StreamExt;
+        if req.model.is_empty() {
+            req.model = self.default_model.clone();
+        }
+        if self.replay_source()?.is_some() {
+            // Replay: substitute the whole recorded response, then
+            // re-chunk at the recorded boundaries.
+            let resp = self.call_llm_ref(req.as_ref()).await?;
+            let text = match resp.value {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            };
+            let bounds = resp.chunk_boundaries.unwrap_or_default();
+            let mut chunks: Vec<LlmStreamChunk> = Vec::new();
+            let mut start = 0usize;
+            for b in &bounds {
+                let end = (*b as usize).min(text.len());
+                if end > start {
+                    chunks.push(LlmStreamChunk {
+                        delta: text[start..end].to_string(),
+                        done: false,
+                        usage: None,
+                        confidence: None,
+                    });
+                    start = end;
+                }
+            }
+            if start < text.len() || chunks.is_empty() {
+                chunks.push(LlmStreamChunk {
+                    delta: text[start..].to_string(),
+                    done: true,
+                    usage: None,
+                    confidence: None,
+                });
+            } else if let Some(last) = chunks.last_mut() {
+                last.done = true;
+            }
+            return Ok(Box::pin(futures::stream::iter(chunks.into_iter().map(Ok))));
+        }
+
+        // Live: trace the call, stream, and record boundaries on
+        // completion.
+        let trace_model_version = self.model_version(req.model.as_str());
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::LlmCall {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                prompt: req.prompt.clone(),
+                model: Some(req.model.clone()),
+                model_version: trace_model_version.clone(),
+                rendered: Some(req.rendered.clone()),
+                args: req.args.clone(),
+                sampling: req.sampling.to_trace_json(),
+            });
+        }
+        let inner = self.llms.stream(&req.as_ref()).await?;
+        let tracer = self.tracer.clone();
+        let prompt_name = req.prompt.clone();
+        let model_name = req.model.clone();
+        let accumulate = futures::stream::unfold(
+            (inner, String::new(), Vec::<u64>::new(), false, tracer, prompt_name, model_name, trace_model_version),
+            |(mut inner, mut text, mut bounds, mut finished, tracer, prompt_name, model_name, model_version)| async move {
+                if finished {
+                    return None;
+                }
+                match inner.next().await {
+                    Some(Ok(chunk)) => {
+                        text.push_str(&chunk.delta);
+                        bounds.push(text.len() as u64);
+                        if chunk.done {
+                            finished = true;
+                            if tracer.is_enabled() {
+                                tracer.emit(TraceEvent::LlmResult {
+                                    ts_ms: now_ms(),
+                                    run_id: tracer.run_id().to_string(),
+                                    prompt: prompt_name.clone(),
+                                    model: Some(model_name.clone()),
+                                    model_version: model_version.clone(),
+                                    result: serde_json::Value::String(text.clone()),
+                                    chunk_boundaries: Some(bounds.clone()),
+                                });
+                            }
+                        }
+                        Some((
+                            Ok(chunk),
+                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                        ))
+                    }
+                    Some(Err(e)) => {
+                        finished = true;
+                        Some((
+                            Err(e),
+                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                        ))
+                    }
+                    None => {
+                        // Provider ended without a done marker:
+                        // record what we have.
+                        finished = true;
+                        if tracer.is_enabled() {
+                            tracer.emit(TraceEvent::LlmResult {
+                                ts_ms: now_ms(),
+                                run_id: tracer.run_id().to_string(),
+                                prompt: prompt_name.clone(),
+                                model: Some(model_name.clone()),
+                                model_version: model_version.clone(),
+                                result: serde_json::Value::String(text.clone()),
+                                chunk_boundaries: Some(bounds.clone()),
+                            });
+                        }
+                        Some((
+                            Ok(LlmStreamChunk {
+                                delta: String::new(),
+                                done: true,
+                                usage: None,
+                                confidence: None,
+                            }),
+                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                        ))
+                    }
+                }
+            },
+        );
+        Ok(Box::pin(accumulate))
+    }
+
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
     pub async fn call_llm(&self, mut req: LlmRequest) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
@@ -711,6 +850,7 @@ impl Runtime {
                         },
                         model_version: trace_model_version.clone(),
                         result: cached.value.clone(),
+                        chunk_boundaries: None,
                     });
                 }
                 return Ok(PromptCache::cached_response(cached));
@@ -890,6 +1030,7 @@ impl Runtime {
                 },
                 model_version: result_trace_model_version,
                 result: resp.value.clone(),
+                        chunk_boundaries: None,
             });
         }
         Ok(resp)

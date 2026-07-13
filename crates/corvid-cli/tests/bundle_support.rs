@@ -587,6 +587,7 @@ fn write_classify_trace(
             model: Some("mock-1".to_string()),
             model_version: None,
             result: serde_json::json!(result),
+            chunk_boundaries: None,
         },
         TraceEvent::RunCompleted {
             ts_ms: 5,

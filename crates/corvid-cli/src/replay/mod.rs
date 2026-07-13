@@ -233,6 +233,7 @@ mod tests {
                 model: Some("claude-opus-4-6".into()),
                 model_version: None,
                 result: serde_json::json!("refund"),
+            chunk_boundaries: None,
             });
         }
         events.push(TraceEvent::RunCompleted {

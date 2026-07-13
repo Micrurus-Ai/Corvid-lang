@@ -599,6 +599,7 @@ impl ReplaySource {
         live_req: LlmRequestRef<'_>,
         llms: &LlmRegistry,
     ) -> Result<LlmResponse, RuntimeError> {
+        let mut replayed_chunk_boundaries: Option<Vec<u64>> = None;
         let (result_step, recorded_result) = {
             let mut cursor = self.cursor.lock().unwrap();
             match &self.mode {
@@ -631,11 +632,15 @@ impl ReplaySource {
                             model: expected_model,
                             model_version: expected_model_version,
                             result,
+                            chunk_boundaries,
                             ..
                         } if expected_prompt == prompt
                             && expected_model.as_deref() == recorded_model
                             && expected_model_version.as_deref() == recorded_model_version =>
                         {
+                            // Streamed-response boundaries (46d)
+                            // travel with the substituted value.
+                            replayed_chunk_boundaries = chunk_boundaries;
                             result
                         }
                         other => {
@@ -711,7 +716,11 @@ impl ReplaySource {
         };
 
         match &self.mode {
-            ReplayMode::Substitute => Ok(LlmResponse::new(recorded_result, TokenUsage::default())),
+            ReplayMode::Substitute => {
+                let mut resp = LlmResponse::new(recorded_result, TokenUsage::default());
+                resp.chunk_boundaries = replayed_chunk_boundaries;
+                Ok(resp)
+            }
             ReplayMode::Differential { .. } => {
                 let live = llms.call(&live_req).await?;
                 if live.value != recorded_result {
