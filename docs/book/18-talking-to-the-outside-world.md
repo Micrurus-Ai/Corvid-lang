@@ -62,8 +62,11 @@ tool decode_user_from_json(text: String) -> Result<User, String> uses json_decod
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     # 1. HTTP GET. The URL host must appear in `[http] allow`.
     #    The always-on SSRF block refuses RFC1918 / loopback / link-local
-    #    regardless of allowlist contents.
-    response = http_get(url)
+    #    regardless of allowlist contents. Every executing tool returns
+    #    `Result` — a policy refusal or transport failure is an Err
+    #    VALUE `?` propagates, never a crash. (An error HTTP STATUS
+    #    like 404 is still `Ok` — inspect `response.status`.)
+    response = http_get(url)?
 
     # 2. Typed-decoder JSON. The `decode_<X>_from_json` name pattern
     #    + `Result<X, String>` return type together trigger the
@@ -77,15 +80,17 @@ agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     #    parameter-binds via `rusqlite::params_from_iter` — there is
     #    no SQL interpolation path; the typechecker's `List<DbParam>`
     #    signature forces every value through the typed constructors.
-    handle = db_open(db_path)
-    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])
+    #    A confinement refusal or SQL error is an Err value, so `?`
+    #    keeps the pipeline honest at every step.
+    handle = db_open(db_path)?
+    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?
 
     # 4. SQLite read-back. Parameterised SELECT through the same
     #    path. The DbResult envelope's `rows_affected` is 0 for a
     #    SELECT (the field is meaningful only for INSERT/UPDATE/DELETE);
     #    indexing `rows[0]` succeeds because the row exists.
-    rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])
+    rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])?
     return Ok(rows[0].rows_affected)
 
 agent main() -> Result<Int, String>:
@@ -126,26 +131,31 @@ step without any of the safety boundaries firing.
 The pipeline above is the happy path. Each of the four executing-I/O
 guarantees is testable by deliberately violating it.
 
+Each refusal arrives as an `Err` **value** — the program keeps
+control. `?` propagates it up here, but an agent that wants to retry,
+fall back, or log can `match` on the Result instead. The boundary is
+just as hard; the failure mode is honest.
+
 ### SSRF block (always on)
 
-Change the URL to `http://127.0.0.1:8080/users/1` and re-run. The HTTP
-dispatch refuses with a diagnostic naming the structural SSRF property —
+Change the URL to `http://127.0.0.1:8080/users/1` and re-run. `http_get`
+returns `Err` with a diagnostic naming the structural SSRF property —
 not the allowlist. Even if you add `127.0.0.1` to `[http] allow`, the
 structural block still fires. The block is the security floor; the
 allowlist is the layer on top.
 
 ### `[http] allow` allowlist (fail-closed)
 
-Change the URL to `http://api.attacker.com/users/1` and re-run. The
-HTTP dispatch refuses with a diagnostic naming the missing allowlist
+Change the URL to `http://api.attacker.com/users/1` and re-run.
+`http_get` returns `Err` with a diagnostic naming the missing allowlist
 entry and the `CORVID_HTTP_ALLOW` env override pathway. Empty
 allowlists fail-close on every executing HTTP call — the security
 boundary is visible from day one.
 
 ### `[io] root` confinement (reused by SQLite)
 
-Change the DB path to `"../../etc/users.db"` and re-run. The `db_open`
-dispatch refuses at the `IoToolPolicy::resolve` boundary — the same
+Change the DB path to `"../../etc/users.db"` and re-run. `db_open`
+returns `Err` at the `IoToolPolicy::resolve` boundary — the same
 boundary the file-I/O tools enforce. SQLite paths ARE file paths; no
 separate `[db]` allowlist exists.
 
@@ -218,8 +228,9 @@ The three executing surfaces compose:
 - HTTP's SSRF + allowlist gates the URL.
 - JSON's typed-decoder converts the response into a typed `User` struct.
 - SQLite's parameter-binding writes the row without SQL interpolation.
-- `?` propagation routes errors through the standard `Result<_, String>`
-  envelope.
+- Every executing tool returns `Result` — refusals and I/O failures are
+  Err values, and `?` propagation routes them through the standard
+  `Result<_, String>` envelope.
 - `corvid.toml`'s `[io] root` and `[http] allow` declare the
   process-wide boundaries.
 

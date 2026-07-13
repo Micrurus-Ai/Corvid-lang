@@ -30,6 +30,10 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
     let policy = IoToolPolicy::new(root.to_str(), None);
     let rt = Runtime::builder().io_policy(policy).build();
 
+    // Slice 47h: the io tools return Result envelopes —
+    // `{"tag":"ok","ok":<envelope>}` on success. Unwrap the ok
+    // payload before asserting on envelope fields.
+
     // 1. Write a file via io.write_text.
     let write_result = rt
         .call_tool(
@@ -38,6 +42,8 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
         )
         .await
         .expect("write_text call");
+    assert_eq!(write_result["tag"], "ok", "write must be Ok; got {write_result}");
+    let write_result = &write_result["ok"];
     assert_eq!(
         write_result["bytes"].as_i64().expect("bytes int"),
         16,
@@ -56,6 +62,8 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
         .call_tool("io_read_text", vec![json!("hello.txt")])
         .await
         .expect("read_text call");
+    assert_eq!(read_result["tag"], "ok", "read must be Ok; got {read_result}");
+    let read_result = &read_result["ok"];
     assert_eq!(
         read_result["contents"].as_str().expect("contents str"),
         "hello from 33S1b",
@@ -68,7 +76,8 @@ async fn executing_io_tools_round_trip_through_runtime_dispatch() {
         .call_tool("io_list_dir", vec![json!(".")])
         .await
         .expect("list_dir call");
-    let entries = list_result.as_array().expect("list returns array");
+    assert_eq!(list_result["tag"], "ok", "list must be Ok; got {list_result}");
+    let entries = list_result["ok"].as_array().expect("list returns array");
     let names: Vec<&str> = entries
         .iter()
         .filter_map(|e| e["name"].as_str())
@@ -88,14 +97,17 @@ async fn executing_io_tools_reject_path_traversal_with_clear_diagnostic() {
     let policy = IoToolPolicy::new(tmp.path().to_str(), None);
     let rt = Runtime::builder().io_policy(policy).build();
 
-    let err = rt
+    // Slice 47h: the refusal is an Err-envelope VALUE, not a
+    // failed call — the diagnostic must survive into the payload.
+    let result = rt
         .call_tool(
             "io_read_text",
             vec![json!("../../etc/passwd")],
         )
         .await
-        .expect_err("traversal must be rejected before any FS call");
-    let msg = format!("{err}");
+        .expect("the call completes; the refusal is the Err envelope");
+    assert_eq!(result["tag"], "err", "traversal must be Err; got {result}");
+    let msg = result["err"].as_str().expect("err message").to_string();
     assert!(
         msg.contains("../../etc/passwd"),
         "diagnostic must name the offending caller path; got {msg}"
@@ -114,11 +126,15 @@ async fn executing_io_tools_reject_path_traversal_with_clear_diagnostic() {
 async fn executing_io_tools_fail_closed_without_io_root_configured() {
     let rt = Runtime::builder().build(); // default = IoToolPolicy::unset()
 
-    let err = rt
+    // Slice 47h: fail-closed still holds — the refusal is the
+    // returned Err envelope carrying the missing-config
+    // diagnostic.
+    let result = rt
         .call_tool("io_read_text", vec![json!("any.txt")])
         .await
-        .expect_err("unconfigured policy must fail closed");
-    let msg = format!("{err}");
+        .expect("the call completes; the fail-closed refusal is the Err envelope");
+    assert_eq!(result["tag"], "err", "unconfigured must be Err; got {result}");
+    let msg = result["err"].as_str().expect("err message").to_string();
     assert!(
         msg.contains("[io] root"),
         "diagnostic must name [io] root; got {msg}"
@@ -145,7 +161,8 @@ async fn executing_io_tools_resolve_both_absolute_and_relative_roots() {
         )
         .await
         .expect("absolute root write");
-    let path = write_abs["path_value"].as_str().expect("path_value");
+    assert_eq!(write_abs["tag"], "ok", "abs write must be Ok; got {write_abs}");
+    let path = write_abs["ok"]["path_value"].as_str().expect("path_value");
     assert!(
         path.contains("abs.txt"),
         "absolute-root resolution should land file inside the abs root; got {path}"
@@ -164,7 +181,8 @@ async fn executing_io_tools_resolve_both_absolute_and_relative_roots() {
         )
         .await
         .expect("relative root write");
-    let path = write_rel["path_value"].as_str().expect("path_value");
+    assert_eq!(write_rel["tag"], "ok", "rel write must be Ok; got {write_rel}");
+    let path = write_rel["ok"]["path_value"].as_str().expect("path_value");
     assert!(
         path.contains("data") && path.contains("rel.txt"),
         "relative-root resolution should land file under the project's data/ dir; got {path}"
@@ -217,8 +235,9 @@ async fn executing_io_write_is_quarantined_when_runtime_quarantine_is_active() {
         .call_tool("io_read_text", vec![json!("seed.txt")])
         .await
         .expect("read after seed");
+    assert_eq!(read["tag"], "ok", "read must be Ok; got {read}");
     assert_eq!(
-        read["contents"].as_str().expect("contents"),
+        read["ok"]["contents"].as_str().expect("contents"),
         "seed content"
     );
 }

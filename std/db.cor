@@ -329,6 +329,9 @@ public effect db_egress_read:
 public effect db_egress_write:
     reversible: false
 
-public tool db_open(path: String) -> DbHandle uses db_egress_open
-public tool db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> List<DbResult> uses db_egress_read
-public tool db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> DbResult uses db_egress_write
+# Slice 47h: honest Result envelopes. A missing/corrupt database
+# file, an SQL error, or a parameter-binding failure is an Err
+# VALUE naming the cause — never a trap.
+public tool db_open(path: String) -> Result<DbHandle, String> uses db_egress_open
+public tool db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<DbResult>, String> uses db_egress_read
+public tool db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<DbResult, String> uses db_egress_write

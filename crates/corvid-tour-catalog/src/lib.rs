@@ -455,20 +455,20 @@ agent safe_refund(id: String) -> String:
         name: "file-io",
         title: "Executing File-I/O Surface",
         category: "Executing I/O",
-        pitch: "Corvid's std/io tools execute real filesystem operations through a runtime-enforced [io] root confinement. Paths that escape the root are refused; calls inside @deterministic agents are rejected at typecheck; replay-mode writes never reach the live filesystem. The security boundary is declared in corvid.toml and signable through the cdylib's claim manifest.",
+        pitch: "Corvid's std/io tools execute real filesystem operations through a runtime-enforced [io] root confinement. Paths that escape the root are refused; calls inside @deterministic agents are rejected at typecheck; replay-mode writes never reach the live filesystem. Recoverable failures — a policy refusal, a missing file, an OS error — return honest Err values naming the cause instead of trapping, so agents can branch on them. The security boundary is declared in corvid.toml and signable through the cdylib's claim manifest.",
         spec: "docs/reference/stdlib/io.md",
         roadmap: "Phase 33S1 executing file-I/O surface",
         test: "crates/corvid-runtime/tests/executing_io_tools.rs + crates/corvid-runtime/src/io.rs IoToolPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_io_* fixtures",
         non_scope: "Confines paths to the declared [io] root; does not police what user code does with the read contents.",
-        source: r#"import "./std/io" use io_read_text, io_write_text
+        source: r#"import "./std/io" use io_read_text, io_write_text, FileReadEnvelope, FileWriteEnvelope
 
-agent persist_summary(date: String, body: String) -> String:
-    io_write_text(date + ".txt", body)
-    return date
+agent persist_summary(date: String, body: String) -> Result<String, String>:
+    written: FileWriteEnvelope = io_write_text(date + ".txt", body)?
+    return Ok(date)
 
-agent load_summary(date: String) -> String:
-    file = io_read_text(date + ".txt")
-    return file.contents
+agent load_summary(date: String) -> Result<String, String>:
+    file: FileReadEnvelope = io_read_text(date + ".txt")?
+    return Ok(file.contents)
 "#,
     },
     TourTopic {
@@ -585,39 +585,39 @@ agent typed_decoder_path(text: String) -> Result<Int, String>:
         name: "sqlite",
         title: "Executing SQLite Surface",
         category: "Executing I/O",
-        pitch: "Corvid's std/db tools perform real SQLite operations through three load-bearing structural properties: SQL injection is prevented STRUCTURALLY (the typechecker's List<DbParam> signature + the runtime's rusqlite::params_from_iter binding path together make string interpolation impossible — a literal `\"'; DROP TABLE users; --\"` placed in db_param_text survives as data); path confinement REUSES [io] root from the file-I/O surface (db_open is structurally as narrow as io_write_text); replay quarantine refuses db_execute regardless of SQL contents. The DbHandle returned by db_open is an opaque, refcounted language primitive — user code cannot construct or forge one. Calls from @deterministic agents are rejected at typecheck. The tour uses `:memory:` so it runs offline; production programs configure persistent paths through corvid.toml's [io] root.",
+        pitch: "Corvid's std/db tools perform real SQLite operations through three load-bearing structural properties: SQL injection is prevented STRUCTURALLY (the typechecker's List<DbParam> signature + the runtime's rusqlite::params_from_iter binding path together make string interpolation impossible — a literal `\"'; DROP TABLE users; --\"` placed in db_param_text survives as data); path confinement REUSES [io] root from the file-I/O surface (db_open is structurally as narrow as io_write_text); replay quarantine refuses db_execute regardless of SQL contents. The DbHandle returned by db_open is an opaque, refcounted language primitive — user code cannot construct or forge one. Calls from @deterministic agents are rejected at typecheck. Open/SQL/binding failures return honest Err values naming the cause instead of trapping. The tour uses `:memory:` so it runs offline; production programs configure persistent paths through corvid.toml's [io] root.",
         spec: "docs/reference/stdlib/db.md",
         roadmap: "Phase 33S3 executing SQLite surface",
         test: "crates/corvid-driver/tests/executing_sqlite_through_driver.rs + crates/corvid-runtime/src/db.rs DbHandleRegistry tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_db_* fixtures",
         non_scope: "SQLite only; the Postgres path remains envelope-only (declare a Postgres tool in user code). Path confinement reuses [io] root; no separate [db] allowlist.",
         source: r#"import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent record_user(email: String) -> Int:
-    handle = db_open(":memory:")
-    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
-    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
-    return rows[0].rows_affected
+agent record_user(email: String) -> Result<Int, String>:
+    handle = db_open(":memory:")?
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])?
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])?
+    return Ok(rows[0].rows_affected)
 "#,
     },
     TourTopic {
         name: "http-client",
         title: "Executing HTTP-Client Surface",
         category: "Executing I/O",
-        pitch: "Corvid's std/http tools perform real HTTP requests through a two-layer security boundary: an always-on structural SSRF block that refuses private / loopback / link-local hosts regardless of allowlist, plus a required [http] allow allowlist that fails closed when unconfigured. Calls from @deterministic agents are rejected at typecheck; Substitute-mode replay refuses every executing HTTP call regardless of allowlist contents. The allowlist is declared in corvid.toml (or overridden by CORVID_HTTP_ALLOW) and signable through the cdylib's claim manifest. The same source compiles, type-checks, and runs identically whether the configured network endpoint is real or a loopback test responder — production behavior never branches on a test-only flag.",
+        pitch: "Corvid's std/http tools perform real HTTP requests through a two-layer security boundary: an always-on structural SSRF block that refuses private / loopback / link-local hosts regardless of allowlist, plus a required [http] allow allowlist that fails closed when unconfigured. Calls from @deterministic agents are rejected at typecheck; Substitute-mode replay refuses every executing HTTP call regardless of allowlist contents. Transport failures and policy refusals return honest Err values (error HTTP statuses like 404 are still Ok envelopes — inspect `status`). The allowlist is declared in corvid.toml (or overridden by CORVID_HTTP_ALLOW) and signable through the cdylib's claim manifest. The same source compiles, type-checks, and runs identically whether the configured network endpoint is real or a loopback test responder — production behavior never branches on a test-only flag.",
         spec: "docs/reference/stdlib/http.md",
         roadmap: "Phase 33S2 executing HTTP-client surface",
         test: "crates/corvid-driver/tests/executing_http_through_driver.rs + crates/corvid-runtime/src/http.rs HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_http_* fixtures",
         non_scope: "Enforces SSRF + allowlist + replay quarantine on the URL host; does not police what user code does with the response body, and does not inspect or rewrite request headers.",
-        source: r#"import "./std/http" use http_get, http_post_json, http_ok
+        source: r#"import "./std/http" use http_get, http_post_json, http_ok, HttpResponseEnvelope
 
-agent fetch_status(url: String) -> Int:
-    response = http_get(url)
-    return response.status
+agent fetch_status(url: String) -> Result<Int, String>:
+    response: HttpResponseEnvelope = http_get(url)?
+    return Ok(response.status)
 
-agent ship_event(url: String, body: String) -> Bool:
-    response = http_post_json(url, body)
-    return http_ok(response)
+agent ship_event(url: String, body: String) -> Result<Bool, String>:
+    response: HttpResponseEnvelope = http_post_json(url, body)?
+    return Ok(http_ok(response))
 "#,
     },
 ];

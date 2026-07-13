@@ -1612,11 +1612,13 @@ async fn dispatch_stdlib_db_tool(
                     ))
                 }
             };
-            let handle = runtime
-                .db_open_tool(path)
-                .await
-                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-            Ok(Value::DbHandle(handle))
+            // Slice 47h: open failures are Err VALUES, not traps.
+            match runtime.db_open_tool(path).await {
+                Ok(handle) => Ok(Value::ResultOk(BoxedValue::new(Value::DbHandle(handle)))),
+                Err(e) => Ok(Value::ResultErr(BoxedValue::new(Value::String(
+                    std::sync::Arc::from(e.to_string()),
+                )))),
+            }
         }
         "db_query" | "db_execute" => {
             let handle = match arg_values.first() {
@@ -1644,23 +1646,34 @@ async fn dispatch_stdlib_db_tool(
                 }
             };
             let params = extract_db_params(arg_values.get(2), callee_name, span)?;
-            let result_json = if callee_name == "db_query" {
-                runtime
-                    .db_query_tool(&handle, sql, params)
-                    .await
-                    .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
-            } else {
-                runtime
-                    .db_execute_tool(&handle, sql, params)
-                    .await
-                    .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
+            // Slice 47h: SQL/binding failures are Err VALUES. The
+            // declared return is Result<T, String>; decode the ok
+            // payload against T (the Result wrapper is typed-Value
+            // side, not JSON side).
+            let ok_decode_ty = match result_decode_ty {
+                Type::Result(ok, _) => ok.as_ref(),
+                other => other,
             };
-            json_to_value(result_json, result_decode_ty, types_by_id).map_err(|e| {
-                InterpError::new(
-                    InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
-                    span,
-                )
-            })
+            let result_json = if callee_name == "db_query" {
+                runtime.db_query_tool(&handle, sql, params).await
+            } else {
+                runtime.db_execute_tool(&handle, sql, params).await
+            };
+            match result_json {
+                Ok(json) => {
+                    let ok_value =
+                        json_to_value(json, ok_decode_ty, types_by_id).map_err(|e| {
+                            InterpError::new(
+                                InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                                span,
+                            )
+                        })?;
+                    Ok(Value::ResultOk(BoxedValue::new(ok_value)))
+                }
+                Err(e) => Ok(Value::ResultErr(BoxedValue::new(Value::String(
+                    std::sync::Arc::from(e.to_string()),
+                )))),
+            }
         }
         other => Err(InterpError::new(
             InterpErrorKind::DispatchFailed(format!(

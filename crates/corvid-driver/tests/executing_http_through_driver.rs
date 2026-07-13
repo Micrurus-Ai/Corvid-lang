@@ -23,9 +23,9 @@
 //! (URL parsing, SSRF check, allowlist check, real HTTP send,
 //! response marshalling).
 
-use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime, RunError};
+use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime};
 use corvid_runtime::{HttpClient, HttpEgressPolicy, Runtime};
-use corvid_vm::{InterpError, Value};
+use corvid_vm::Value;
 use std::fs;
 use std::path::Path;
 use wiremock::matchers::{method, path};
@@ -97,9 +97,9 @@ async fn real_corvid_program_performs_get_through_executing_http_dispatch() {
         r#"
 import "./std/http" use http_get
 
-agent main() -> Int:
-    response = http_get("http://api.example.com/status")
-    return response.status
+agent main() -> Result<Int, String>:
+    response = http_get("http://api.example.com/status")?
+    return Ok(response.status)
 "#,
     );
 
@@ -122,9 +122,16 @@ agent main() -> Int:
         .expect("executing GET should round-trip through the dispatch");
 
     match result {
-        Value::Int(200) => {}
+        Value::ResultOk(inner) => match inner.get() {
+            Value::Int(200) => {}
+            other => panic!(
+                "expected `main` to return Ok(200) from wiremock's response; \
+                 got Ok({other:?}). The dispatch may have swallowed the \
+                 response or marshalled it incorrectly."
+            ),
+        },
         other => panic!(
-            "expected `main` to return Int(200) from wiremock's response; \
+            "expected `main` to return Ok(200) from wiremock's response; \
              got {other:?}. The dispatch may have swallowed the response \
              or marshalled it incorrectly."
         ),
@@ -149,9 +156,9 @@ async fn ssrf_block_rejects_loopback_url_even_when_allowlist_contains_it() {
         r#"
 import "./std/http" use http_get
 
-agent main() -> Int:
-    response = http_get("http://127.0.0.1:9999/path")
-    return response.status
+agent main() -> Result<Int, String>:
+    response = http_get("http://127.0.0.1:9999/path")?
+    return Ok(response.status)
 "#,
     );
 
@@ -162,18 +169,22 @@ agent main() -> Int:
     let policy = HttpEgressPolicy::new(Some(&["127.0.0.1".to_string()]));
     let runtime = Runtime::builder().http_policy(policy).build();
 
-    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+    // Slice 47h: the SSRF rejection is an Err VALUE the program
+    // observes (here propagated by `?`), not a trap. The run
+    // itself completes; the full diagnostic must survive into
+    // the Err payload.
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
         .await
-        .expect_err("structural SSRF block must refuse loopback URL");
+        .expect("the run completes; the SSRF rejection is the returned Err value");
 
-    let detail = format_run_error(&err);
+    let detail = expect_result_err_string(result);
     assert!(
         detail.contains("SSRF") || detail.contains("private / loopback / link-local"),
-        "diagnostic must name the SSRF block as the cause; got: {detail}"
+        "the Err value must name the SSRF block as the cause; got: {detail}"
     );
     assert!(
         detail.contains("structural property") || detail.contains("never reachable"),
-        "diagnostic must explain SSRF is structural (not configurable); got: {detail}"
+        "the Err value must explain SSRF is structural (not configurable); got: {detail}"
     );
 }
 
@@ -193,9 +204,9 @@ async fn missing_http_allowlist_fails_closed_with_actionable_diagnostic() {
         r#"
 import "./std/http" use http_get
 
-agent main() -> Int:
-    response = http_get("http://api.example.com/foo")
-    return response.status
+agent main() -> Result<Int, String>:
+    response = http_get("http://api.example.com/foo")?
+    return Ok(response.status)
 "#,
     );
 
@@ -210,11 +221,13 @@ agent main() -> Int:
         .http_policy(HttpEgressPolicy::unset())
         .build();
 
-    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+    // Slice 47h: fail-closed still holds — but the refusal is an
+    // Err VALUE carrying the actionable diagnostic, not a trap.
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
         .await
-        .expect_err("missing allowlist must refuse executing HTTP calls");
+        .expect("the run completes; the fail-closed refusal is the returned Err value");
 
-    let detail = format_run_error(&err);
+    let detail = expect_result_err_string(result);
     assert!(
         detail.contains("[http] allow"),
         "diagnostic must name `[http] allow`; got: {detail}"
@@ -229,18 +242,18 @@ agent main() -> Int:
     );
 }
 
-/// Render a `RunError` (which boxes `InterpError`) down to its
-/// human-readable detail so tests can assert on diagnostic
-/// content. The runtime errors are nested several layers deep
-/// (RunError → InterpError → RuntimeError); we just use Debug
-/// formatting since the test is checking message contents.
-fn format_run_error(err: &RunError) -> String {
-    match err {
-        RunError::Interp(inner) => format_interp_error(inner),
-        other => format!("{other:?}"),
+/// Slice 47h — policy rejections surface as Err VALUES. Unwrap a
+/// `main() -> Result<_, String>` run result down to the Err
+/// message so tests can assert on the diagnostic content.
+fn expect_result_err_string(result: Value) -> String {
+    match result {
+        Value::ResultErr(inner) => match inner.get() {
+            Value::String(s) => s.to_string(),
+            other => panic!("expected Err(String); got Err({other:?})"),
+        },
+        other => panic!(
+            "expected the program to return a ResultErr carrying the policy \
+             diagnostic; got {other:?}"
+        ),
     }
-}
-
-fn format_interp_error(err: &InterpError) -> String {
-    format!("{err:?}")
 }

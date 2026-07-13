@@ -98,7 +98,7 @@ Edit `src/main.cor` to read it:
 import "./std/io" use io_read_text
 
 agent main() -> Result<String, String>:
-    file = io_read_text("note.txt")
+    file = io_read_text("note.txt")?
     return Ok(file.contents)
 ```
 
@@ -118,11 +118,12 @@ What you just got, with zero glue:
 
 - The `[io] root = "."` boundary in `corvid.toml` confined the read
   to your project directory.
-- `io_read_text("../etc/passwd")` would be refused at the runtime
-  boundary with a structured diagnostic naming the offending path AND
-  the configured root.
-- The agent uses `Result<String, String>`; the call's typed envelope
-  flows through Corvid's existing error-handling surface.
+- `io_read_text("../etc/passwd")` would return an `Err` value with a
+  structured diagnostic naming the offending path AND the configured
+  root — a refusal your program observes, not a crash.
+- `io_read_text` returns `Result<FileReadEnvelope, String>`: a missing
+  file or a policy refusal is an Err VALUE the `?` propagates (or you
+  `match` on); malformed argument shapes are still compile-time errors.
 - A `@deterministic` agent calling this would be a typecheck error.
 - A replay run refuses `io_write_text` calls — the filesystem is
   provably untouched.

@@ -3,33 +3,38 @@
 > **Status:** Phase 33S1 (closed 2026-06-08). Three tools execute
 > real filesystem operations; three RuntimeChecked guarantees
 > govern their behavior. Earlier slices shipped the envelope types
-> only; 33S1 promotes the module to executing.
+> only; 33S1 promotes the module to executing. Since the stdlib
+> Result-envelope migration, all three tools return
+> `Result<_, String>` — recoverable failures are Err values.
 
 ## Quick reference
 
 ```corvid
 import "./std/io" use io_read_text, io_write_text, io_list_dir
 
-agent demo() -> String:
-    io_write_text("notes.txt", "hello from corvid")
-    file = io_read_text("notes.txt")
-    return file.contents
+agent demo() -> Result<String, String>:
+    io_write_text("notes.txt", "hello from corvid")?
+    file = io_read_text("notes.txt")?
+    return Ok(file.contents)
 ```
 
 When this agent runs through `corvid run`, both calls flow through
-the configured `[io] root` and return typed envelopes:
-`FileReadEnvelope`, `FileWriteEnvelope`,
-`DirectoryEntryEnvelope`.
+the configured `[io] root` and return `Result`-wrapped typed
+envelopes: `FileReadEnvelope`, `FileWriteEnvelope`,
+`DirectoryEntryEnvelope`. A missing file, a policy refusal, or an
+OS error is an `Err(String)` VALUE naming the cause — `?`
+propagates it, or `match` on it to recover. Malformed argument
+shapes are compile-time errors, not runtime conditions.
 
 ## The three tools
 
-### `io_read_text(path: String) -> FileReadEnvelope uses io_read`
+### `io_read_text(path: String) -> Result<FileReadEnvelope, String> uses io_read`
 
 Reads a UTF-8 file under the configured root. The envelope carries
 `path_value`, `contents`, `bytes`, and an `effect_meta` field for
 trace + replay metadata.
 
-### `io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write`
+### `io_write_text(path: String, content: String) -> Result<FileWriteEnvelope, String> uses io_write`
 
 Writes UTF-8 content to a file under the configured root. The
 envelope carries `path_value`, `bytes`, and `effect_meta`. The
@@ -37,7 +42,7 @@ effect row marks the operation as `reversible: false` — composes
 correctly with `@reversible` constraints elsewhere in the call
 graph.
 
-### `io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list`
+### `io_list_dir(path: String) -> Result<List<DirectoryEntryEnvelope>, String> uses io_list`
 
 Lists immediate children of a directory under the configured root.
 Each entry carries `path_value`, `name`, `is_dir`, and `effect_meta`.
@@ -71,12 +76,12 @@ forms ultimately produce the same `IoToolPolicy` (see
 ### What's rejected
 
 - **Missing `[io] root`**: every executing tool call fails closed
-  with a structured diagnostic naming the missing config + the
-  33S0 security model.
+  with an `Err` value whose diagnostic names the missing config +
+  the 33S0 security model.
 - **Path traversal**: a caller path that resolves OUTSIDE the
   root after `.` / `..` / absolute-prefix normalization is
-  refused. The diagnostic names both the offending caller path
-  AND the configured root.
+  refused with an `Err` value naming both the offending caller
+  path AND the configured root.
 - **Absolute-looking caller paths**: `/etc/passwd` is stripped of
   its leading separator and joined under the root — it can NEVER
   escape via path-join behavior.
@@ -135,15 +140,15 @@ tool calls regardless of effect.
 ```corvid
 import "./std/io" use io_read_text, io_write_text
 
-agent record_summary(date: String, summary: String) -> String:
+agent record_summary(date: String, summary: String) -> Result<String, String>:
     path = date + ".txt"
-    io_write_text(path, summary)
-    return path
+    io_write_text(path, summary)?
+    return Ok(path)
 
-agent load_summary(date: String) -> String:
+agent load_summary(date: String) -> Result<String, String>:
     path = date + ".txt"
-    file = io_read_text(path)
-    return file.contents
+    file = io_read_text(path)?
+    return Ok(file.contents)
 ```
 
 With `corvid.toml`:
@@ -156,7 +161,7 @@ root = "./summaries"
 `record_summary("2026-06-08", "...")` writes
 `./summaries/2026-06-08.txt`; `load_summary("2026-06-08")` reads
 it back. Path traversal is impossible — `record_summary("../etc/passwd", ...)`
-is rejected at the `IoToolPolicy::resolve` boundary.
+returns `Err` from the `IoToolPolicy::resolve` boundary.
 
 ## Related references
 

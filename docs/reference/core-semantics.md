@@ -204,7 +204,7 @@ Cross-module imports preserve effect annotations exactly; an importer cannot use
 - **class**: runtime_checked
 - **phase**: runtime
 
-Every call to an executing file-I/O tool (io.read_text / io.write_text / io.list_dir, from std/io.cor) resolves the caller's path through the project's configured `[io] root` before reaching the filesystem. Paths that traverse out of the root (via `..` segments or absolute-prefix escapes) are refused with a structured diagnostic naming the offending path AND the configured root. When no `[io] root` is configured, every call fails closed — the executing file-I/O surface refuses to operate without an explicit security boundary declared in corvid.toml.
+Every call to an executing file-I/O tool (io.read_text / io.write_text / io.list_dir, from std/io.cor) resolves the caller's path through the project's configured `[io] root` before reaching the filesystem. Paths that traverse out of the root (via `..` segments or absolute-prefix escapes) are refused with a structured diagnostic naming the offending path AND the configured root. When no `[io] root` is configured, every call fails closed — the executing file-I/O surface refuses to operate without an explicit security boundary declared in corvid.toml. At the language surface the refusal is an honest Err value (the io/db tools return Result), so programs observe the diagnostic without the boundary weakening.
 
 **Positive tests:**
 
@@ -252,7 +252,7 @@ A Substitute-mode replay runtime gates every executing file-read call (read_text
 - **class**: runtime_checked
 - **phase**: runtime
 
-Every call to an executing HTTP tool (http_get / http_post_json, from std/http.cor) parses the request URL and refuses any host that lexically resolves to a private RFC1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8 + ::1), link-local (169.254.0.0/16 + fe80::/10), unspecified (0.0.0.0/8 + ::), ULA (fc00::/7), or the `localhost` DNS alias. The block is a STRUCTURAL property of the language: it runs regardless of `[http] allow` contents — even a fully-misconfigured allowlist containing `127.0.0.1` cannot bypass it. This is the security floor underneath the configurable allowlist.
+Every call to an executing HTTP tool (http_get / http_post_json, from std/http.cor) parses the request URL and refuses any host that lexically resolves to a private RFC1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8 + ::1), link-local (169.254.0.0/16 + fe80::/10), unspecified (0.0.0.0/8 + ::), ULA (fc00::/7), or the `localhost` DNS alias. The block is a STRUCTURAL property of the language: it runs regardless of `[http] allow` contents — even a fully-misconfigured allowlist containing `127.0.0.1` cannot bypass it. This is the security floor underneath the configurable allowlist. At the language surface the refusal is an honest Err value (the http tools return Result), so programs observe the diagnostic without the floor weakening.
 
 **Positive tests:**
 
@@ -269,7 +269,7 @@ Every call to an executing HTTP tool (http_get / http_post_json, from std/http.c
 - **class**: runtime_checked
 - **phase**: runtime
 
-Every call to an executing HTTP tool checks the request URL's host against the project's configured `[http] allow = [...]` list (or the `CORVID_HTTP_ALLOW` env override). Case-insensitive exact-host comparison. When no allowlist is configured (missing `[http]` section, empty `allow`, or unset env), every call fails closed with a structured diagnostic naming the requested URL, the missing config, and the env-override pathway. This is the configurable layer on top of the always-on SSRF block.
+Every call to an executing HTTP tool checks the request URL's host against the project's configured `[http] allow = [...]` list (or the `CORVID_HTTP_ALLOW` env override). Case-insensitive exact-host comparison. When no allowlist is configured (missing `[http]` section, empty `allow`, or unset env), every call fails closed with a structured diagnostic naming the requested URL, the missing config, and the env-override pathway. This is the configurable layer on top of the always-on SSRF block. At the language surface the refusal is an honest Err value (the http tools return Result), so programs observe the diagnostic without the gate weakening.
 
 **Positive tests:**
 

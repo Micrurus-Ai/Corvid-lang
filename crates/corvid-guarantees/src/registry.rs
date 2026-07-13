@@ -213,7 +213,10 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              offending path AND the configured root. When no `[io] root` \
              is configured, every call fails closed — the executing \
              file-I/O surface refuses to operate without an explicit \
-             security boundary declared in corvid.toml.",
+             security boundary declared in corvid.toml. At the language \
+             surface the refusal is an honest Err value (the io/db tools \
+             return Result), so programs observe the diagnostic without \
+             the boundary weakening.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/io.rs::io_tool_policy_relative_root_resolves_against_corvid_toml_dir",
@@ -314,7 +317,10 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              language: it runs regardless of `[http] allow` \
              contents — even a fully-misconfigured allowlist \
              containing `127.0.0.1` cannot bypass it. This is the \
-             security floor underneath the configurable allowlist.",
+             security floor underneath the configurable allowlist. \
+             At the language surface the refusal is an honest Err \
+             value (the http tools return Result), so programs \
+             observe the diagnostic without the floor weakening.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_permits_matching_host",
@@ -342,7 +348,10 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              structured diagnostic naming the requested URL, the \
              missing config, and the env-override pathway. This \
              is the configurable layer on top of the always-on \
-             SSRF block.",
+             SSRF block. At the language surface the refusal is an \
+             honest Err value (the http tools return Result), so \
+             programs observe the diagnostic without the gate \
+             weakening.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_permits_matching_host",

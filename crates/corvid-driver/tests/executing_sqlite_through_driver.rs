@@ -35,9 +35,9 @@
 //!      structurally prevents SQL interpolation, and this test
 //!      proves the property end-to-end through the dispatch path.
 
-use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime, RunError};
+use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime};
 use corvid_runtime::{IoToolPolicy, Runtime};
-use corvid_vm::{InterpError, Value};
+use corvid_vm::Value;
 use std::fs;
 use std::path::Path;
 
@@ -83,12 +83,12 @@ async fn real_corvid_program_round_trips_data_through_executing_sqlite_dispatch(
         r#"
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent main() -> Int:
-    handle = db_open(":memory:")
-    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text("alice@example.com")])
-    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text("alice@example.com")])
-    return rows[0].rows_affected
+agent main() -> Result<Int, String>:
+    handle = db_open(":memory:")?
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text("alice@example.com")])?
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text("alice@example.com")])?
+    return Ok(rows[0].rows_affected)
 "#,
     );
 
@@ -114,9 +114,14 @@ agent main() -> Int:
     // surfaced as a different error). The `rows_affected = 0`
     // value is the marker that the SELECT path completed.
     match result {
-        Value::Int(0) => {}
+        Value::ResultOk(inner) => match inner.get() {
+            Value::Int(0) => {}
+            other => panic!(
+                "expected main to return Ok(0) (SELECT envelope's rows_affected is 0); got Ok({other:?})"
+            ),
+        },
         other => panic!(
-            "expected main to return Int(0) (SELECT envelope's rows_affected is 0); got {other:?}"
+            "expected main to return Ok(0) (SELECT envelope's rows_affected is 0); got {other:?}"
         ),
     }
 }
@@ -137,9 +142,9 @@ async fn db_open_with_path_outside_io_root_is_refused_by_policy() {
         r#"
 import "./std/db" use db_open
 
-agent main() -> Int:
-    handle = db_open("../../etc/passwd")
-    return 42
+agent main() -> Result<Int, String>:
+    handle = db_open("../../etc/passwd")?
+    return Ok(42)
 "#,
     );
 
@@ -150,14 +155,17 @@ agent main() -> Int:
     let policy = IoToolPolicy::new(Some("."), Some(project.path()));
     let runtime = Runtime::builder().io_policy(policy).build();
 
-    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+    // Slice 47h: the policy refusal is an Err VALUE the program
+    // observes, not a trap. The run completes; the boundary
+    // diagnostic must survive into the Err payload.
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
         .await
-        .expect_err("db_open against a path escaping [io] root must be refused");
+        .expect("the run completes; the [io] root refusal is the returned Err value");
 
-    let detail = format_run_error(&err);
+    let detail = expect_result_err_string(result);
     assert!(
         detail.contains("[io] root") || detail.contains("io_policy") || detail.contains("escapes"),
-        "diagnostic must name the [io] root policy boundary; got: {detail}"
+        "the Err value must name the [io] root policy boundary; got: {detail}"
     );
 }
 
@@ -194,12 +202,12 @@ async fn db_param_text_with_sql_metacharacters_survives_round_trip_through_real_
         r#"
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent main() -> Int:
-    handle = db_open(":memory:")
-    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text("'; DROP TABLE users; --")])
-    rows = db_query(handle, "SELECT count(*) AS c FROM users", [])
-    return rows[0].rows_affected
+agent main() -> Result<Int, String>:
+    handle = db_open(":memory:")?
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text("'; DROP TABLE users; --")])?
+    rows = db_query(handle, "SELECT count(*) AS c FROM users", [])?
+    return Ok(rows[0].rows_affected)
 "#,
     );
 
@@ -223,25 +231,31 @@ agent main() -> Int:
     // test reaching this point at all proves the structural
     // property holds.
     match result {
-        Value::Int(0) => {}
+        Value::ResultOk(inner) => match inner.get() {
+            Value::Int(0) => {}
+            other => panic!(
+                "expected main to return Ok(0) from the SELECT envelope; got Ok({other:?}) \
+                 (the structural injection-resistance property may be broken)"
+            ),
+        },
         other => panic!(
-            "expected main to return Int(0) from the SELECT envelope; got {other:?} \
+            "expected main to return Ok(0) from the SELECT envelope; got {other:?} \
              (the structural injection-resistance property may be broken)"
         ),
     }
 }
 
-/// Render a `RunError` (which boxes `InterpError`) down to its
-/// human-readable detail so tests can assert on diagnostic
-/// content. Mirrors the helper in
-/// `executing_http_through_driver.rs`.
-fn format_run_error(err: &RunError) -> String {
-    match err {
-        RunError::Interp(inner) => format_interp_error(inner),
-        other => format!("{other:?}"),
+/// Slice 47h — policy rejections surface as Err VALUES. Mirrors
+/// the helper in `executing_http_through_driver.rs`.
+fn expect_result_err_string(result: Value) -> String {
+    match result {
+        Value::ResultErr(inner) => match inner.get() {
+            Value::String(s) => s.to_string(),
+            other => panic!("expected Err(String); got Err({other:?})"),
+        },
+        other => panic!(
+            "expected the program to return a ResultErr carrying the policy \
+             diagnostic; got {other:?}"
+        ),
     }
-}
-
-fn format_interp_error(err: &InterpError) -> String {
-    format!("{err:?}")
 }

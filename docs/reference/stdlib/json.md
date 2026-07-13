@@ -317,13 +317,13 @@ import "./std/db" use db_open, db_execute, db_param_int, db_param_text
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    # Fetch the JSON.
-    response = http_get(url)
+    # Fetch the JSON (Result: transport/policy failures are Err values).
+    response = http_get(url)?
     # Decode into the typed struct (typed-decoder convention).
     user = decode_user_from_json(response.body)?
-    # Persist via parameterised SQL.
-    handle = db_open(db_path)
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])
+    # Persist via parameterised SQL (Result: SQL errors are Err values).
+    handle = db_open(db_path)?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?
     return Ok(user.id)
 ```
 

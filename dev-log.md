@@ -1483,6 +1483,32 @@ Next per agreed order: 47h-stdlib-result-envelopes.
 
 ---
 
+## 2026-07-13 - 47h closed: the executing stdlib is honest about failure
+
+io, http, and db now return `Result` — a refused path, a missing
+file, a transport failure, or an SQL error is an Err value the
+program can `?`-propagate or match on, never a trap. The line is
+principled: recoverable CONDITIONS are values; malformed SHAPES
+stay compile-time errors; an HTTP 404 is still Ok (inspect
+`status`). The policy boundaries did not soften — the e2e tests
+now assert the full SSRF/allowlist/[io]-root diagnostics survive
+INTO the Err payloads.
+
+The live probes earned their keep: running `corvid run
+src/main.cor` with a relative path had a relative [io] root
+anchor false-firing the confinement check on every path — the
+quickstart's own example failed from the CLI. IoToolPolicy now
+anchors still-relative roots against the CWD. (Phase 20l's
+"path-anchored API used in some entry points" shape, live again.)
+
+Validation: runtime 328 + driver 199 + cli suites green;
+workspace check --tests clean; corpus verify exits 1; six live
+probes through the rebuilt CLI.
+
+Next per agreed order: 47f-contract-module-disposition.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

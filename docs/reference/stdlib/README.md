@@ -39,8 +39,11 @@ plus the request/response envelopes the surface returns.
 
 Executing tools:
 
-- `http_get(url) -> HttpResponseEnvelope uses http_egress_get` — executing tool
-- `http_post_json(url, body) -> HttpResponseEnvelope uses http_egress_post` — executing tool
+- `http_get(url) -> Result<HttpResponseEnvelope, String> uses http_egress_get` — executing tool
+- `http_post_json(url, body) -> Result<HttpResponseEnvelope, String> uses http_egress_post` — executing tool
+
+Recoverable failures (policy refusals, transport errors) are Err values;
+an error HTTP status (4xx/5xx) is still Ok — inspect `status`.
 
 Envelope-builder agents (pure; construct a request without executing it):
 
@@ -77,9 +80,12 @@ file-I/O tool surface added in Phase 33S1:
 - `FileReadEnvelope`
 - `FileWriteEnvelope`
 - `DirectoryEntryEnvelope`
-- `io_read_text(path) -> FileReadEnvelope uses io_read` — executing tool
-- `io_write_text(path, content) -> FileWriteEnvelope uses io_write` — executing tool
-- `io_list_dir(path) -> List<DirectoryEntryEnvelope> uses io_list` — executing tool
+- `io_read_text(path) -> Result<FileReadEnvelope, String> uses io_read` — executing tool
+- `io_write_text(path, content) -> Result<FileWriteEnvelope, String> uses io_write` — executing tool
+- `io_list_dir(path) -> Result<List<DirectoryEntryEnvelope>, String> uses io_list` — executing tool
+
+Recoverable failures (missing files, policy refusals, OS errors) are Err
+values naming the cause.
 
 The executing tools enforce three RuntimeChecked guarantees:
 `io_source.fs_path_confinement` (paths stay inside the configured `[io] root`),
@@ -101,9 +107,12 @@ envelope-only — declare your Postgres tool in user code and reach the
 
 Executing tools:
 
-- `db_open(path) -> DbHandle uses db_egress_open` — executing tool
-- `db_query(handle, sql, params) -> List<DbResult> uses db_egress_read` — executing tool
-- `db_execute(handle, sql, params) -> DbResult uses db_egress_write` — executing tool
+- `db_open(path) -> Result<DbHandle, String> uses db_egress_open` — executing tool
+- `db_query(handle, sql, params) -> Result<List<DbResult>, String> uses db_egress_read` — executing tool
+- `db_execute(handle, sql, params) -> Result<DbResult, String> uses db_egress_write` — executing tool
+
+Recoverable failures (open/SQL/binding errors, confinement refusals) are
+Err values naming the cause.
 
 Typed parameter constructors (the typechecker's `List<DbParam>` signature
 forces every value through these — there is no string-interpolation path):

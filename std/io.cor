@@ -74,6 +74,11 @@ public effect io_write:
 public effect io_list:
     reversible: true
 
-public tool io_read_text(path: String) -> FileReadEnvelope uses io_read
-public tool io_write_text(path: String, content: String) -> FileWriteEnvelope uses io_write
-public tool io_list_dir(path: String) -> List<DirectoryEntryEnvelope> uses io_list
+# Slice 47h: honest Result envelopes. A missing file, a policy
+# rejection, or an OS error is an Err VALUE (the message names the
+# cause), never a trap. Malformed argument SHAPES are still hard
+# errors — the checker prevents them, so hitting one is a
+# programmer error, not a runtime condition.
+public tool io_read_text(path: String) -> Result<FileReadEnvelope, String> uses io_read
+public tool io_write_text(path: String, content: String) -> Result<FileWriteEnvelope, String> uses io_write
+public tool io_list_dir(path: String) -> Result<List<DirectoryEntryEnvelope>, String> uses io_list

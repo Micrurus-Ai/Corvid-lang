@@ -86,7 +86,7 @@ async fn quickstart_executing_io_snippet_compiles_and_reads_the_file() {
 import "./std/io" use io_read_text
 
 agent main() -> Result<String, String>:
-    file = io_read_text("note.txt")
+    file = io_read_text("note.txt")?
     return Ok(file.contents)
 "#,
     );
@@ -169,12 +169,12 @@ import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    response = http_get(url)
+    response = http_get(url)?
     user = decode_user_from_json(response.body)?
-    handle = db_open(db_path)
-    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])
-    rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])
+    handle = db_open(db_path)?
+    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?
+    rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])?
     return Ok(rows[0].rows_affected)
 
 agent main() -> Result<Int, String>:

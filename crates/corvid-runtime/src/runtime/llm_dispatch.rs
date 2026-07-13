@@ -331,14 +331,22 @@ impl Runtime {
                         tool: "io_read_text".to_string(),
                         message: "expected one String argument (path)".to_string(),
                     })?;
-                let resolved = self.io_policy.resolve(path_arg)?;
-                let read = self.io.read_text(&resolved).await?;
-                Ok(serde_json::json!({
+                // Slice 47h: policy rejections and I/O failures are
+                // Err VALUES, never traps.
+                let resolved = match self.io_policy.resolve(path_arg) {
+                    Ok(p) => p,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                let read = match self.io.read_text(&resolved).await {
+                    Ok(r) => r,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                Ok(stdlib_result_ok(serde_json::json!({
                     "path_value": read.path.display().to_string(),
                     "contents": read.contents,
                     "bytes": read.bytes as i64,
                     "effect_meta": stdlib_io_effect_envelope(&read.effect),
-                }))
+                })))
             }
             "io_write_text" => {
                 let path_arg = args
@@ -357,13 +365,19 @@ impl Runtime {
                         message: "expected (path: String, content: String) — content missing"
                             .to_string(),
                     })?;
-                let resolved = self.io_policy.resolve(path_arg)?;
-                let write = self.io.write_text(&resolved, content_arg).await?;
-                Ok(serde_json::json!({
+                let resolved = match self.io_policy.resolve(path_arg) {
+                    Ok(p) => p,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                let write = match self.io.write_text(&resolved, content_arg).await {
+                    Ok(w) => w,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                Ok(stdlib_result_ok(serde_json::json!({
                     "path_value": write.path.display().to_string(),
                     "bytes": write.bytes as i64,
                     "effect_meta": stdlib_io_effect_envelope(&write.effect),
-                }))
+                })))
             }
             "io_list_dir" => {
                 let path_arg = args
@@ -373,8 +387,14 @@ impl Runtime {
                         tool: "io_list_dir".to_string(),
                         message: "expected one String argument (path)".to_string(),
                     })?;
-                let resolved = self.io_policy.resolve(path_arg)?;
-                let entries = self.io.list_dir(&resolved).await?;
+                let resolved = match self.io_policy.resolve(path_arg) {
+                    Ok(p) => p,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                let entries = match self.io.list_dir(&resolved).await {
+                    Ok(e) => e,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
                 let json_entries: Vec<serde_json::Value> = entries
                     .into_iter()
                     .map(|entry| {
@@ -386,7 +406,7 @@ impl Runtime {
                         })
                     })
                     .collect();
-                Ok(serde_json::Value::Array(json_entries))
+                Ok(stdlib_result_ok(serde_json::Value::Array(json_entries)))
             }
             other => Err(RuntimeError::UnknownTool(other.to_string())),
         }
@@ -421,17 +441,25 @@ impl Runtime {
                         tool: "http_get".to_string(),
                         message: "expected one String argument (url)".to_string(),
                     })?;
-                self.http_policy.check(url_arg)?;
+                // Slice 47h: policy + transport failures are Err
+                // values; an error STATUS is still Ok (the request
+                // succeeded — inspect `status`).
+                if let Err(e) = self.http_policy.check(url_arg) {
+                    return Ok(stdlib_result_err(e));
+                }
                 let request = HttpRequest::get(url_arg.to_string())
                     .effect_tag("std.http.request");
-                let response = self.http.send(&request).await?;
-                Ok(serde_json::json!({
+                let response = match self.http.send(&request).await {
+                    Ok(r) => r,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                Ok(stdlib_result_ok(serde_json::json!({
                     "status": response.status as i64,
                     "body": response.body,
                     "attempts": 1_i64,
                     "elapsed_ms": 0_i64,
                     "effect_meta": stdlib_http_effect_envelope(),
-                }))
+                })))
             }
             "http_post_json" => {
                 let url_arg = args
@@ -450,17 +478,22 @@ impl Runtime {
                         message: "expected (url: String, body: String) — body missing"
                             .to_string(),
                     })?;
-                self.http_policy.check(url_arg)?;
+                if let Err(e) = self.http_policy.check(url_arg) {
+                    return Ok(stdlib_result_err(e));
+                }
                 let request = HttpRequest::post_json(url_arg.to_string(), body_arg.to_string())
                     .effect_tag("std.http.request");
-                let response = self.http.send(&request).await?;
-                Ok(serde_json::json!({
+                let response = match self.http.send(&request).await {
+                    Ok(r) => r,
+                    Err(e) => return Ok(stdlib_result_err(e)),
+                };
+                Ok(stdlib_result_ok(serde_json::json!({
                     "status": response.status as i64,
                     "body": response.body,
                     "attempts": 1_i64,
                     "elapsed_ms": 0_i64,
                     "effect_meta": stdlib_http_effect_envelope(),
-                }))
+                })))
             }
             other => Err(RuntimeError::UnknownTool(other.to_string())),
         }
@@ -1529,6 +1562,16 @@ fn rag_chunk_envelope_json(chunk: &crate::rag::RagChunk) -> serde_json::Value {
 
 fn rag_err(message: impl Into<String>) -> serde_json::Value {
     serde_json::json!({ "tag": "err", "err": message.into() })
+}
+
+/// Slice 47h: the shared Result-envelope marshalling for stdlib
+/// tools that migrated from trap-on-failure to honest Err values.
+fn stdlib_result_ok(ok: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "tag": "ok", "ok": ok })
+}
+
+fn stdlib_result_err(err: impl std::fmt::Display) -> serde_json::Value {
+    serde_json::json!({ "tag": "err", "err": err.to_string() })
 }
 
 fn stdlib_time_effect_envelope(replay_key: &str) -> serde_json::Value {

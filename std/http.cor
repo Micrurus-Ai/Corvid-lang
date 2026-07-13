@@ -88,5 +88,10 @@ public effect http_egress_get:
 public effect http_egress_post:
     reversible: false
 
-public tool http_get(url: String) -> HttpResponseEnvelope uses http_egress_get
-public tool http_post_json(url: String, body: String) -> HttpResponseEnvelope uses http_egress_post
+# Slice 47h: honest Result envelopes. Policy rejections (SSRF
+# block, allowlist misses) and network failures are Err VALUES
+# whose message names the cause — never traps. Note: an HTTP error
+# STATUS (4xx/5xx) is still an Ok(envelope) — the request
+# succeeded; inspect `status` yourself.
+public tool http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get
+public tool http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post

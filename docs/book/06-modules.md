@@ -61,7 +61,7 @@ braces, per-item aliases with `as`:
 import "./std/io" use io_read_text, io_write_text as write
 
 agent main() -> Result<String, String>:
-    file = io_read_text("note.txt")
+    file = io_read_text("note.txt")?
     return Ok(file.contents)
 ```
 

@@ -4,25 +4,32 @@
 > real HTTP requests; three RuntimeChecked guarantees govern
 > their behavior. Earlier slices shipped the envelope types and
 > envelope-builder agents only; 33S2 promotes the module to
-> executing.
+> executing. Since the stdlib Result-envelope migration, both
+> tools return `Result<HttpResponseEnvelope, String>` —
+> recoverable failures are Err values.
 
 ## Quick reference
 
 ```corvid
 import "./std/http" use http_get, http_post_json
 
-agent fetch_status(url: String) -> Int:
-    response = http_get(url)
-    return response.status
+agent fetch_status(url: String) -> Result<Int, String>:
+    response = http_get(url)?
+    return Ok(response.status)
 
-agent publish_event(url: String, event_json: String) -> Int:
-    response = http_post_json(url, event_json)
-    return response.status
+agent publish_event(url: String, event_json: String) -> Result<Int, String>:
+    response = http_post_json(url, event_json)?
+    return Ok(response.status)
 ```
 
 When this agent runs through `corvid run`, both calls flow through
 the configured `[http] allow` allowlist (after the always-on SSRF
-block) and return the typed `HttpResponseEnvelope`:
+block) and return a `Result`-wrapped `HttpResponseEnvelope`. A
+policy refusal (SSRF block, missing/unlisted allowlist entry) or a
+transport failure (DNS, connect, timeout) is an `Err(String)`
+VALUE naming the cause. **An error HTTP STATUS (4xx/5xx) is still
+`Ok`** — the request succeeded at the transport layer; inspect
+`response.status` (or `http_ok`) to branch on it:
 
 ```corvid
 public type HttpResponseEnvelope:
@@ -35,14 +42,14 @@ public type HttpResponseEnvelope:
 
 ## The two tools
 
-### `http_get(url: String) -> HttpResponseEnvelope uses http_egress_get`
+### `http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get`
 
 Performs an HTTP GET. The `http_egress_get` effect carries
 `io_source: net.egress` and `reversible: true` — composes
 correctly with `@reversible` constraints elsewhere in the call
 graph.
 
-### `http_post_json(url: String, body: String) -> HttpResponseEnvelope uses http_egress_post`
+### `http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post`
 
 Performs an HTTP POST with the supplied UTF-8 body and
 `Content-Type: application/json`. The `http_egress_post` effect
@@ -118,17 +125,21 @@ clear an allowlist).
 
 ### What's rejected
 
+Every rejection below arrives as an `Err` VALUE the program
+observes — the boundary is just as hard, but the caller keeps
+control (retry, fall back, log, or `?`-propagate).
+
 - **Missing `[http] allow`** (no section, empty list, or unset
-  env): every call fails closed with a diagnostic naming the
+  env): every call fails closed with an Err diagnostic naming the
   missing config + the `CORVID_HTTP_ALLOW` env pathway + the
   fail-closed contract from the 33S0 security model.
-- **Host not in allowlist**: a structured diagnostic names the
+- **Host not in allowlist**: the Err diagnostic names the
   requested URL, the parsed host, and the configured allowlist
   so the operator can see exactly which entry is missing.
 - **Private / loopback / link-local URL**: the SSRF block fires
-  before the allowlist is consulted; the diagnostic names "SSRF"
-  and "structural property" so the operator understands the
-  floor.
+  before the allowlist is consulted; the Err diagnostic names
+  "SSRF" and "structural property" so the operator understands
+  the floor.
 
 ## Determinism
 
@@ -180,9 +191,9 @@ to all tool calls regardless of effect.
 ```corvid
 import "./std/http" use http_post_json, http_ok
 
-agent notify_webhook(url: String, event_json: String) -> Bool:
-    response = http_post_json(url, event_json)
-    return http_ok(response)
+agent notify_webhook(url: String, event_json: String) -> Result<Bool, String>:
+    response = http_post_json(url, event_json)?
+    return Ok(http_ok(response))
 ```
 
 With `corvid.toml`:
@@ -194,8 +205,8 @@ allow = ["hooks.example.com", "audit.example.com"]
 
 `notify_webhook("https://hooks.example.com/new-order", "...")`
 succeeds; `notify_webhook("https://hooks.attacker.example/...", "...")`
-is refused at the dispatch boundary with a diagnostic naming the
-unlisted host and the configured allowlist. Even if a future
+returns `Err` from the dispatch boundary with a diagnostic naming
+the unlisted host and the configured allowlist. Even if a future
 configuration mistake adds `127.0.0.1` to the allowlist, calls to
 loopback are still refused by the structural SSRF block.
 

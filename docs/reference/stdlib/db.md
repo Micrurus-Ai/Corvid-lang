@@ -5,34 +5,42 @@
 > guarantees + the existing `io_source.fs_path_confinement`
 > guarantee (reused via `IoToolPolicy`) govern their behavior.
 > Earlier slices shipped envelope types only; 33S3 promotes the
-> SQLite path to executing. The Postgres path remains envelope-
-> only — `std.db`'s Postgres types are still the boundary
-> between your agent and a tool wrapper.
+> SQLite path to executing. Since the stdlib Result-envelope
+> migration, all three tools return `Result<_, String>` —
+> recoverable failures are Err values. The Postgres path remains
+> envelope-only — `std.db`'s Postgres types are still the
+> boundary between your agent and a tool wrapper.
 
 ## Quick reference
 
 ```corvid
 import "./std/db" use db_open, db_query, db_execute, db_param_int, db_param_text
 
-agent record_user(email: String) -> Int:
-    handle = db_open(":memory:")
-    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
-    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
-    return rows[0].rows_affected
+agent record_user(email: String) -> Result<Int, String>:
+    handle = db_open(":memory:")?
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])?
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])?
+    return Ok(rows[0].rows_affected)
 ```
 
 When this agent runs through `corvid run`, the calls flow through
 typed `DbParam` constructors and `rusqlite::params_from_iter` —
 there is no string-interpolation path anywhere on the dispatch.
+Every tool returns `Result`: a missing/corrupt database file, an
+SQL error, a binding failure, or a policy refusal is an
+`Err(String)` VALUE naming the cause — `?` propagates it, or
+`match` to recover. Malformed argument shapes are compile-time
+errors, not runtime conditions.
 
 ## The three tools
 
-### `db_open(path: String) -> DbHandle uses db_egress_open`
+### `db_open(path: String) -> Result<DbHandle, String> uses db_egress_open`
 
-Opens a SQLite connection at `path` and returns an opaque,
-refcounted `DbHandle` the runtime uses to look up the connection
-on subsequent `db_query` / `db_execute` calls. The path is
+Opens a SQLite connection at `path` and returns `Ok` of an
+opaque, refcounted `DbHandle` the runtime uses to look up the
+connection on subsequent `db_query` / `db_execute` calls; a
+missing/corrupt file or a confinement refusal is `Err`. The path is
 resolved through the project's `IoToolPolicy` — see the security
 section below. The documented special case `":memory:"` skips
 path resolution and opens an ephemeral in-memory database.
@@ -43,23 +51,24 @@ configured path is the only side effect, treated as reversible
 because the connection lifecycle is reverted when the runtime
 drops).
 
-### `db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> List<DbResult> uses db_egress_read`
+### `db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<DbResult>, String> uses db_egress_read`
 
 Runs a parameterised SELECT against the connection at `handle`.
 The `params` list flows through the typed `DbParam` constructors
 (below); the runtime binds via `rusqlite::params_from_iter` —
-there is no SQL interpolation path. Returns one `DbResult`
-envelope per row.
+there is no SQL interpolation path. Returns `Ok` of one
+`DbResult` envelope per row; an SQL or binding error is `Err`.
 
 `db_egress_read` is reversible: reads don't modify state.
 
-### `db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> DbResult uses db_egress_write`
+### `db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<DbResult, String> uses db_egress_write`
 
 Runs a parameterised INSERT / UPDATE / DELETE / DDL statement
 against the connection at `handle`. Same parameter-binding path
 as `db_query` — typed `DbParam`s threaded through
-`params_from_iter`. Returns a `DbResult` envelope with
-`rows_affected` populated.
+`params_from_iter`. Returns `Ok` of a `DbResult` envelope with
+`rows_affected` populated; an SQL, binding, or constraint error
+is `Err`.
 
 `db_egress_write` is NOT reversible: writes durably change DB
 state. The replay-quarantine guarantee below leverages this:
@@ -148,7 +157,7 @@ After this call:
   a typed `DbValue::Text`, never parsed as SQL.
 
 The structural argument: the `db_execute` tool's signature is
-`(DbHandle, String, List<DbParam>) -> DbResult`. The
+`(DbHandle, String, List<DbParam>) -> Result<DbResult, String>`. The
 typechecker REJECTS any call that doesn't pass a `List<DbParam>`
 as the third argument. The dispatch path
 (`crates/corvid-vm/src/interp.rs::extract_db_params`) reads
@@ -167,9 +176,9 @@ SQL string.
 This is the deliberate design that makes `db_open` strictly
 narrower than `io_write_text`:
 
-- Paths that traverse out of `[io] root` are refused with a
-  structured diagnostic naming the offending path AND the
-  configured root.
+- Paths that traverse out of `[io] root` are refused with an
+  `Err` value naming the offending path AND the configured
+  root.
 - The documented special case `":memory:"` bypasses resolution
   because there is no filesystem path to confine.
 - A program with no `[io] root` configured fails closed on
@@ -239,18 +248,18 @@ applies to all tool calls regardless of effect.
 ```corvid
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent open_users(path: String) -> DbHandle:
-    handle = db_open(path)
-    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE)", [])
-    return handle
+agent open_users(path: String) -> Result<DbHandle, String>:
+    handle = db_open(path)?
+    db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE)", [])?
+    return Ok(handle)
 
-agent register_user(handle: DbHandle, id: Int, email: String) -> Int:
-    result = db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(id), db_param_text(email)])
-    return result.rows_affected
+agent register_user(handle: DbHandle, id: Int, email: String) -> Result<Int, String>:
+    result = db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(id), db_param_text(email)])?
+    return Ok(result.rows_affected)
 
-agent find_email(handle: DbHandle, id: Int) -> Int:
-    rows = db_query(handle, "SELECT email FROM users WHERE id = ?", [db_param_int(id)])
-    return rows[0].rows_affected
+agent find_email(handle: DbHandle, id: Int) -> Result<Int, String>:
+    rows = db_query(handle, "SELECT email FROM users WHERE id = ?", [db_param_int(id)])?
+    return Ok(rows[0].rows_affected)
 ```
 
 With `corvid.toml`:
@@ -261,8 +270,8 @@ root = "./data"
 ```
 
 `open_users("./users.sqlite")` succeeds and resolves to
-`./data/users.sqlite`. `open_users("../../etc/passwd")` is
-refused at the `IoToolPolicy` boundary. `register_user(handle,
+`./data/users.sqlite`. `open_users("../../etc/passwd")` returns
+`Err` from the `IoToolPolicy` boundary. `register_user(handle,
 1, "alice")` inserts. `register_user(handle, 2, "'; DROP TABLE
 users; --")` ALSO succeeds — the attack string is bound as
 TEXT data, the table survives, and `find_email(handle, 2)`

@@ -564,12 +564,12 @@ The security boundary is **declared in `corvid.toml`** and signable: a signed cd
 ```corvid
 import "./std/io" use io_read_text, io_write_text
 
-agent persist_summary(date: String, body: String) -> String:
-    io_write_text(date + ".txt", body)
-    return date
+agent persist_summary(date: String, body: String) -> Result<String, String>:
+    io_write_text(date + ".txt", body)?
+    return Ok(date)
 ```
 
-Calls outside the configured `[io] root` are refused with a structured diagnostic naming the offending path AND the root. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during replay either substitute from the recorded trace or diverge — the filesystem is provably untouched.
+All three tools return `Result` — a missing file, an OS error, or a policy refusal is an Err VALUE naming the cause, never a crash. Calls outside the configured `[io] root` return Err with a structured diagnostic naming the offending path AND the root. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during replay either substitute from the recorded trace or diverge — the filesystem is provably untouched.
 
 Spec: [`std.io` reference](./docs/reference/stdlib/io.md)
 Tour: `corvid tour --topic file-io`
@@ -586,10 +586,12 @@ The security boundary is **declared in `corvid.toml`** and signable: a signed cd
 ```corvid
 import "./std/http" use http_get, http_post_json, http_ok
 
-agent ship_event(url: String, body: String) -> Bool:
-    response = http_post_json(url, body)
-    return http_ok(response)
+agent ship_event(url: String, body: String) -> Result<Bool, String>:
+    response = http_post_json(url, body)?
+    return Ok(http_ok(response))
 ```
+
+Both tools return `Result` — policy refusals and transport failures are Err VALUES the program observes (an error HTTP status like 404 is still Ok; inspect `status`).
 
 ```toml
 [http]
@@ -619,13 +621,15 @@ The security boundary is **declared in `corvid.toml`** (via `[io] root`) and sig
 ```corvid
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent record_user(email: String) -> Int:
-    handle = db_open(":memory:")
-    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])
-    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])
-    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])
-    return rows[0].rows_affected
+agent record_user(email: String) -> Result<Int, String>:
+    handle = db_open(":memory:")?
+    db_execute(handle, "CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
+    db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(1), db_param_text(email)])?
+    rows = db_query(handle, "SELECT id FROM users WHERE email = ?", [db_param_text(email)])?
+    return Ok(rows[0].rows_affected)
 ```
+
+All three tools return `Result` — open failures, SQL errors, and confinement refusals are Err VALUES naming the cause.
 
 Calls inside a `@deterministic` agent are rejected at typecheck. Calls during Substitute-mode replay refuse `db_execute` with `QuarantineViolation { surface: "db", .. }` — the database is provably untouched. SQLite only; the Postgres path remains envelope-only (declare a Postgres tool in user code and reach `corvid-runtime::PostgresDbRuntime` from a tool wrapper).
 
