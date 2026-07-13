@@ -61,6 +61,8 @@ impl Runtime {
             dispatch_stdlib_time_tool(name, &args)?
         } else if is_stdlib_random_tool(name) {
             dispatch_stdlib_random_tool(name, &args)?
+        } else if is_stdlib_rag_tool(name) {
+            self.dispatch_stdlib_rag_tool(name, &args).await?
         } else {
             self.tools.call(name, args.clone()).await?
         };
@@ -73,6 +75,167 @@ impl Runtime {
             });
         }
         Ok(result)
+    }
+
+    /// Slice 46g: dispatch handler for the executing stdlib
+    /// retrieval tools. Index paths resolve through the SAME
+    /// `[io] root` policy as file I/O (fails closed when
+    /// unconfigured — the retrieval index is a file the program
+    /// writes). Failures return `Result::Err` values (the 47h
+    /// honest-envelope direction), not traps. With no embedder
+    /// configured, search degrades HONESTLY to lexical matching.
+    async fn dispatch_stdlib_rag_tool(
+        &self,
+        name: &str,
+        args: &[serde_json::Value],
+    ) -> Result<serde_json::Value, RuntimeError> {
+        match name {
+            "rag_ingest" => {
+                let (Some(index_path), Some(doc_id), Some(source), Some(text), Some(chunk_chars)) = (
+                    args.first().and_then(|v| v.as_str()),
+                    args.get(1).and_then(|v| v.as_str()),
+                    args.get(2).and_then(|v| v.as_str()),
+                    args.get(3).and_then(|v| v.as_str()),
+                    args.get(4).and_then(|v| v.as_i64()),
+                ) else {
+                    return Err(RuntimeError::ToolFailed {
+                        tool: "rag_ingest".into(),
+                        message: "expected (index_path: String, doc_id: String, source: String, text: String, chunk_chars: Int)".into(),
+                    });
+                };
+                if chunk_chars < 1 {
+                    return Ok(rag_err("chunk_chars must be at least 1"));
+                }
+                let resolved = match self.io_policy.resolve(index_path) {
+                    Ok(p) => p,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                let document = crate::rag::RagDocument {
+                    id: doc_id.to_string(),
+                    source: source.to_string(),
+                    media_type: "text/plain".to_string(),
+                    text: text.to_string(),
+                };
+                let chunks = match crate::rag::chunk_document(
+                    &document,
+                    chunk_chars as usize,
+                    (chunk_chars as usize) / 5,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                let mut index = match crate::rag::RagSqliteIndex::open(&resolved) {
+                    Ok(i) => i,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                if let Err(e) = index.insert_document(&document) {
+                    return Ok(rag_err(e.to_string()));
+                }
+                if let Err(e) = index.insert_chunks(&chunks) {
+                    return Ok(rag_err(e.to_string()));
+                }
+                if let Some(embedder) = &self.rag_embedder {
+                    let texts: Vec<String> =
+                        chunks.iter().map(|c| c.text.clone()).collect();
+                    let vectors = match embedder.embed(&texts).await {
+                        Ok(v) => v,
+                        Err(e) => return Ok(rag_err(e.to_string())),
+                    };
+                    let records: Vec<crate::rag::RagEmbeddingRecord> = chunks
+                        .iter()
+                        .zip(vectors)
+                        .map(|(c, v)| crate::rag::RagEmbeddingRecord {
+                            chunk_id: c.chunk_id.clone(),
+                            values: v.values,
+                        })
+                        .collect();
+                    if let Err(e) = index.insert_embedding_vectors(&records) {
+                        return Ok(rag_err(e.to_string()));
+                    }
+                }
+                Ok(serde_json::json!({ "tag": "ok", "ok": chunks.len() as i64 }))
+            }
+            "rag_search" => {
+                let (Some(index_path), Some(query), Some(limit)) = (
+                    args.first().and_then(|v| v.as_str()),
+                    args.get(1).and_then(|v| v.as_str()),
+                    args.get(2).and_then(|v| v.as_i64()),
+                ) else {
+                    return Err(RuntimeError::ToolFailed {
+                        tool: "rag_search".into(),
+                        message: "expected (index_path: String, query: String, limit: Int)".into(),
+                    });
+                };
+                if limit < 1 {
+                    return Ok(rag_err("limit must be at least 1"));
+                }
+                let resolved = match self.io_policy.resolve(index_path) {
+                    Ok(p) => p,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                let index = match crate::rag::RagSqliteIndex::open(&resolved) {
+                    Ok(i) => i,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                let chunks: Vec<crate::rag::RagChunk> =
+                    if let Some(embedder) = &self.rag_embedder {
+                        let vectors =
+                            match embedder.embed(&[query.to_string()]).await {
+                                Ok(v) => v,
+                                Err(e) => return Ok(rag_err(e.to_string())),
+                            };
+                        let Some(query_vec) = vectors.first() else {
+                            return Ok(rag_err("embedder returned no vector for the query"));
+                        };
+                        match index.search_embeddings(&query_vec.values, limit as usize) {
+                            Ok(hits) => hits.into_iter().map(|h| h.chunk).collect(),
+                            Err(e) => return Ok(rag_err(e.to_string())),
+                        }
+                    } else {
+                        // Lexical fallback: score chunks by how
+                        // many query terms they contain (the raw
+                        // index method is a phrase LIKE — too
+                        // strict for multi-word queries).
+                        let mut scored: std::collections::HashMap<
+                            String,
+                            (usize, crate::rag::RagChunk),
+                        > = std::collections::HashMap::new();
+                        let fetch = ((limit as usize) * 8).clamp(16, 128);
+                        for term in query
+                            .split_whitespace()
+                            .filter(|t| t.chars().count() >= 2)
+                        {
+                            let found = match index.search_text(term, fetch) {
+                                Ok(c) => c,
+                                Err(e) => return Ok(rag_err(e.to_string())),
+                            };
+                            for chunk in found {
+                                scored
+                                    .entry(chunk.chunk_id.clone())
+                                    .and_modify(|(n, _)| *n += 1)
+                                    .or_insert((1, chunk));
+                            }
+                        }
+                        let mut ranked: Vec<(usize, crate::rag::RagChunk)> =
+                            scored.into_values().collect();
+                        ranked.sort_by(|a, b| {
+                            b.0.cmp(&a.0).then(a.1.chunk_id.cmp(&b.1.chunk_id))
+                        });
+                        ranked
+                            .into_iter()
+                            .take(limit as usize)
+                            .map(|(_, c)| c)
+                            .collect()
+                    };
+                let items: Vec<serde_json::Value> =
+                    chunks.iter().map(rag_chunk_envelope_json).collect();
+                Ok(serde_json::json!({ "tag": "ok", "ok": items }))
+            }
+            other => Err(RuntimeError::ToolFailed {
+                tool: other.to_string(),
+                message: "not a stdlib rag tool".into(),
+            }),
+        }
     }
 
     /// Slice 33S1a: dispatch handler for the three executing
@@ -1272,6 +1435,37 @@ fn is_stdlib_time_tool(name: &str) -> bool {
 /// Slice 45m: exact-match gate for the stdlib randomness tools.
 fn is_stdlib_random_tool(name: &str) -> bool {
     matches!(name, "random_float" | "random_int")
+}
+
+/// Slice 46g: exact-match gate for the executing stdlib retrieval
+/// tools (the fifth executing surface after io/http/db-json/time).
+fn is_stdlib_rag_tool(name: &str) -> bool {
+    matches!(name, "rag_ingest" | "rag_search")
+}
+
+/// JSON shape of a retrieved chunk, matching std/rag.cor's
+/// `RagChunkEnvelope` (slice 46g).
+fn rag_chunk_envelope_json(chunk: &crate::rag::RagChunk) -> serde_json::Value {
+    serde_json::json!({
+        "doc_id": chunk.doc_id,
+        "chunk_id": chunk.chunk_id,
+        "source": chunk.source,
+        "text": chunk.text,
+        "start_char": chunk.start_char as i64,
+        "end_char": chunk.end_char as i64,
+        "provenance_key": chunk.provenance_key,
+        "effect_meta": {
+            "effect_name": "std.rag.search",
+            "provenance_key": chunk.provenance_key,
+            "approval_label": "",
+            "cache_key": "",
+            "replay_key": "std.rag.search",
+        },
+    })
+}
+
+fn rag_err(message: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({ "tag": "err", "err": message.into() })
 }
 
 fn stdlib_time_effect_envelope(replay_key: &str) -> serde_json::Value {

@@ -47,3 +47,36 @@ public agent ollama_embedder(model_name: String, endpoint: String) -> EmbedderEn
 
 public agent chunk_is_grounded(chunk: RagChunkEnvelope) -> Bool:
     return chunk.provenance_key != ""
+
+# ---------------------------------------------------------------
+# Executing retrieval surface (slice 46g). The runtime dispatches
+# these by exact name — the fifth executing surface after io /
+# http / db+json / time+random. Index paths resolve through the
+# SAME `[io] root` policy as file I/O (fails closed when
+# unconfigured). Failures are Err values, not traps. With no
+# `[rag]` embedder configured in corvid.toml, `rag_search`
+# degrades HONESTLY to lexical search over the same index.
+
+public effect rag_write:
+    reversible: false
+    data: external
+
+# NOTE: rag_read deliberately does NOT carry `data: grounded` in
+# v1 — the Grounded<T> wrapper at the import boundary depends on
+# the cross-module provenance-composition slice (post-v1.0
+# roadmap). Provenance is carried EXPLICITLY instead: every
+# retrieved chunk's `provenance_key` + `effect_meta` travel in the
+# envelope values.
+public effect rag_read:
+    reversible: true
+
+# Chunk `text` (chunk_chars-sized windows with 20% overlap), store
+# document + chunks in the SQLite index at `index_path`, and embed
+# every chunk when an embedder is configured. Returns the chunk
+# count.
+public tool rag_ingest(index_path: String, doc_id: String, source: String, text: String, chunk_chars: Int) -> Result<Int, String> uses rag_write
+
+# Retrieve the `limit` best chunks for `query` — cosine similarity
+# over embeddings when configured, lexical match otherwise. Every
+# retrieved chunk carries its provenance key.
+public tool rag_search(index_path: String, query: String, limit: Int) -> Result<List<RagChunkEnvelope>, String> uses rag_read

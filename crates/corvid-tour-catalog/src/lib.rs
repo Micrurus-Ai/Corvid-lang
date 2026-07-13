@@ -472,6 +472,28 @@ agent load_summary(date: String) -> String:
 "#,
     },
     TourTopic {
+        name: "governed-retrieval",
+        title: "Governed Retrieval",
+        category: "Executing I/O",
+        pitch: "rag_ingest and rag_search are retrieval with the moat attached: index paths resolve through the same [io] root policy as file I/O (fails closed), every failure is a typed Err value instead of a trap, every retrieved chunk carries its provenance key, and the calls are traced + replay-substituted like every executing tool — the embedder never fires on replay. With no embedder configured, search degrades honestly to term-scored lexical matching over the same index, so programs behave identically with lower recall.",
+        spec: "docs/reference/stdlib/rag.md",
+        roadmap: "Slice 46g rag-stdlib-dispatch",
+        test: "crates/corvid-driver/tests/executing_rag_through_driver.rs",
+        non_scope: "No PDF/HTML loaders on the tool surface (runtime loaders exist for embedders); no reranking; effect-level Grounded<T> wrapping waits for cross-module provenance composition (post-v1.0) — provenance travels explicitly in the envelope values.",
+        source: r#"import "./std/rag" use rag_ingest, rag_search, RagChunkEnvelope
+
+agent remember(note: String) -> Result<Int, String>:
+    return rag_ingest("index.sqlite", "note-1", "notes", note, 200)
+
+agent recall(question: String) -> String:
+    found: Result<List<RagChunkEnvelope>, String> = rag_search("index.sqlite", question, 3)
+    hits: List<RagChunkEnvelope> = found.unwrap_or([])
+    if hits.length() > 0:
+        return hits[0].text
+    return "nothing indexed yet"
+"#,
+    },
+    TourTopic {
         name: "deterministic-time",
         title: "Deterministic Time & Randomness",
         category: "Executing I/O",

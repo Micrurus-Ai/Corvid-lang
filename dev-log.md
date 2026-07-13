@@ -1329,6 +1329,34 @@ Next per agreed order: 46g-rag-stdlib-dispatch.
 
 ---
 
+## 2026-07-12 - 46g closed: governed retrieval (audit M8)
+
+The fifth executing surface, framed as the invention it is:
+retrieval with the moat attached. Index paths confined by the same
+[io] root policy as file I/O (fails closed, e2e-pinned); failures
+as Err values from day one (the 47h direction); provenance keys on
+every retrieved chunk; replay substitution through the ordinary
+tool-event machinery (the embedder never fires on replay); and
+honest degradation — no [rag] embedder config means term-scored
+lexical search over the same index.
+
+One scope decision recorded: rag_read does NOT carry data:grounded
+in v1 — the Grounded<T> wrapper at import boundaries trips the
+known cross-module provenance gap (already post-v1.0). Provenance
+travels explicitly in envelope values; the effect-level wrapper
+joins when that machinery lands.
+
+Probe: "RAG RETRIEVES" through ingest -> chunk(20% overlap) ->
+SQLite -> term-scored search -> provenance-carrying envelope.
+
+Validation: 284 types + 110 vm + 325 runtime + 2 e2e + tour guard
++ book guard + grammar gate; corpus verify exits 1.
+
+Next per agreed order: 46h-structured-output-repair-and-judge-
+assertions.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

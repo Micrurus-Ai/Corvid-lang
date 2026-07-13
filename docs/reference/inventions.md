@@ -196,6 +196,15 @@ program and hoping nothing leaks. Corvid's replay refuses to leak by
 construction. Differential replay is a separate, opt-in mode that intentionally
 hits a live LLM for record-vs-live comparison; the default is the closed one.
 
+### Governed Retrieval
+
+- **Status**: shipped (slice 46g, 2026-07-12)
+- **Run it**: `corvid tour --topic governed-retrieval`
+- **Tests**: `crates/corvid-driver/tests/executing_rag_through_driver.rs`
+- **Spec**: `docs/reference/stdlib/rag.md`
+- **What it is**: `rag_ingest` / `rag_search` — retrieval with the moat attached: index paths confined by the `[io] root` policy, failures as typed `Err` values, provenance keys on every retrieved chunk, trace/replay substitution (the embedder never fires on replay), and honest lexical degradation when no embedder is configured.
+- **Non-scope**: loaders on the tool surface, reranking, effect-level `Grounded<T>` wrapping (waits for cross-module provenance composition, post-v1.0).
+
 ### Deterministic Time And Randomness
 
 ```corvid

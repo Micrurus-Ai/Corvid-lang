@@ -675,6 +675,24 @@ Roadmap: [Phase 33R5b](./ROADMAP.md)
 Proof: [end-to-end JSON tests](./crates/corvid-driver/tests/executing_json_through_driver.rs) + [runtime JSON tests](./crates/corvid-runtime/src/json.rs) + [replay-quarantine corpus](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: No JSON Path / JSONata / JMESPath query language (nested access via `json_get_object` chains). cdylib codegen for the opaque types is a follow-up slice; the C-ABI exports already exist.
 
+#### Governed Retrieval
+
+`std/rag`'s `rag_ingest` / `rag_search` are retrieval **with the moat attached** — the part every RAG framework leaves to convention, Corvid enforces:
+
+1. **Path confinement**: index paths resolve through the same `[io] root` policy as file I/O — fails closed when unconfigured, rejects traversal and absolute escapes.
+2. **Honest failures**: missing index, bad arguments, embedder errors, and policy rejections are `Result::Err` values, never traps.
+3. **Provenance on every chunk**: each retrieved `RagChunkEnvelope` carries its `provenance_key` + `effect_meta` — checkable, threadable values.
+4. **Replay substitution**: the calls are traced like every executing tool; on replay the recorded results return and the embedder never fires.
+5. **Honest degradation**: with no `[rag]` embedder in corvid.toml, search falls back to term-scored lexical matching over the same index — identical program behavior, lower recall.
+
+Embedders (OpenAI / Ollama) configure in `corvid.toml` `[rag]`; ingestion chunks with overlap and embeds in one call.
+
+Spec: [`std.rag` reference](./docs/reference/stdlib/rag.md)
+Tour: `corvid tour --topic governed-retrieval`
+Roadmap: [Slice 46g](./ROADMAP.md)
+Proof: [end-to-end RAG tests](./crates/corvid-driver/tests/executing_rag_through_driver.rs)
+Non-scope: No loaders on the tool surface (PDF/HTML loaders exist runtime-side); no reranking; effect-level `Grounded<T>` wrapping waits for cross-module provenance composition (post-v1.0) — provenance travels explicitly in the envelope values.
+
 #### Executing Time & Randomness Surface
 
 Corvid's `std/time` and `std/random` modules make the two most common sources of hidden nondeterminism — clock reads and random draws — **visible to the effect system**. `time_now_utc`, `time_monotonic_ms`, `random_float`, and `random_int` are tools flowing through typed effect rows (`time_wall`, `time_monotonic`, `rand_draw`), which means:

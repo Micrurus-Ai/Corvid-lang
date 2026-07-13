@@ -44,6 +44,7 @@ pub struct RuntimeBuilder {
     /// makes every executing file-I/O tool fail closed with the
     /// missing-config diagnostic.
     io_policy: IoToolPolicy,
+    rag_embedder: Option<std::sync::Arc<dyn crate::rag::RagEmbedder>>,
     /// Slice 33S2a: policy carrying the configured `[http] allow`
     /// allowlist from `corvid.toml`. Threaded into
     /// `Runtime::http_policy` at build time. Defaults to an
@@ -80,6 +81,7 @@ impl Default for RuntimeBuilder {
             replay_mutation: None,
             stores: StoreManager::default(),
             io_policy: IoToolPolicy::default(),
+            rag_embedder: None,
             http_policy: HttpEgressPolicy::default(),
             http_client_override: None,
         }
@@ -167,6 +169,17 @@ impl RuntimeBuilder {
     /// missing-config diagnostic — the 33S0 security model.
     pub fn io_policy(mut self, policy: IoToolPolicy) -> Self {
         self.io_policy = policy;
+        self
+    }
+
+    /// Slice 46g: install the embedding provider for the executing
+    /// `rag_ingest` / `rag_search` stdlib tools. Without one,
+    /// retrieval degrades honestly to lexical search.
+    pub fn rag_embedder(
+        mut self,
+        embedder: std::sync::Arc<dyn crate::rag::RagEmbedder>,
+    ) -> Self {
+        self.rag_embedder = Some(embedder);
         self
     }
 
@@ -413,6 +426,7 @@ impl RuntimeBuilder {
             http_policy: self.http_policy,
             io,
             io_policy: self.io_policy,
+            rag_embedder: self.rag_embedder,
             db_registry,
             secrets: SecretRuntime::new(),
             queue: QueueRuntime::new(),

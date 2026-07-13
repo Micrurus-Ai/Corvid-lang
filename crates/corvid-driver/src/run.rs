@@ -354,6 +354,12 @@ fn run_via_interpreter_tier(
     // CORVID_IO_ROOT / CORVID_MODEL.
     builder = builder.http_policy(load_http_egress_policy(path));
 
+    // Slice 46g: install the [rag] embedder when configured; the
+    // executing rag tools degrade to lexical search without one.
+    if let Some(embedder) = load_rag_embedder(path) {
+        builder = builder.rag_embedder(embedder);
+    }
+
     if let Ok(model) = std::env::var("CORVID_MODEL") {
         builder = builder.default_model(&model);
     }
@@ -576,6 +582,45 @@ mod tests {
 /// Public so the embed paths (`corvid serve`, custom embedders)
 /// can share this loading logic instead of re-implementing the
 /// precedence.
+/// Slice 46g: build the embedding provider from `[rag]` in
+/// corvid.toml. `embedder = "openai"` needs OPENAI_API_KEY in the
+/// environment; `embedder = "ollama"` takes an optional
+/// `endpoint`. No `[rag]` table (or a missing key) means NO
+/// embedder — retrieval degrades honestly to lexical search.
+pub fn load_rag_embedder(
+    source_path: &Path,
+) -> Option<std::sync::Arc<dyn corvid_runtime::rag::RagEmbedder>> {
+    let (_, config) = load_corvid_config_with_path_for(source_path)?;
+    let provider = config.rag.embedder.as_deref()?;
+    let model = config.rag.model.clone().unwrap_or_default();
+    match provider {
+        "openai" => {
+            let key = std::env::var("OPENAI_API_KEY").ok()?;
+            let model = if model.is_empty() {
+                "text-embedding-3-small".to_string()
+            } else {
+                model
+            };
+            Some(std::sync::Arc::new(
+                corvid_runtime::rag::OpenAiEmbedder::new(key, model),
+            ))
+        }
+        "ollama" => {
+            let model = if model.is_empty() {
+                "nomic-embed-text".to_string()
+            } else {
+                model
+            };
+            let mut embedder = corvid_runtime::rag::OllamaEmbedder::new(model);
+            if let Some(endpoint) = config.rag.endpoint.as_deref() {
+                embedder = embedder.with_endpoint(endpoint);
+            }
+            Some(std::sync::Arc::new(embedder))
+        }
+        _ => None,
+    }
+}
+
 pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {
     // 1. Env override.
     if let Ok(env_root) = std::env::var("CORVID_IO_ROOT") {

@@ -47,6 +47,22 @@ pub struct CorvidConfig {
     /// regardless of allow contents. Parsing only in 33S0;
     /// enforcement lands in 33S2.
     pub http: HttpConfig,
+    /// Slice 46g: retrieval configuration. `embedder` selects the
+    /// embedding provider (`"openai"` or `"ollama"`); `model` names
+    /// the embedding model; `endpoint` overrides the provider URL
+    /// (Ollama's default is localhost). When no embedder is
+    /// configured, `rag_search` falls back to LEXICAL search — an
+    /// honest degradation, not an error.
+    pub rag: RagConfig,
+}
+
+/// Slice 46g: parsed `[rag]` table from `corvid.toml`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct RagConfig {
+    pub embedder: Option<String>,
+    pub model: Option<String>,
+    pub endpoint: Option<String>,
 }
 
 /// Phase 33S0: parsed `[io]` table from `corvid.toml`. Fields
