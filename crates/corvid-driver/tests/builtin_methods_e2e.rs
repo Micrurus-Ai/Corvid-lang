@@ -655,3 +655,41 @@ agent main() -> String:
 [user] {question}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conversation_history_lowers_into_ir() {
+    // Slice 46c: the List<AiMessage> param is recognized as the
+    // history surface; context_window lowers on the model.
+    let source = "
+public effect llm_call:
+    cost: $0.01
+    reversible: true
+
+type AiMessage:
+    role: String
+    content: String
+
+model tiny:
+    context_window: 4096
+
+prompt chat(history: List<AiMessage>, question: String) -> String uses llm_call:
+    system: \"be terse\"
+    user: \"{question}\"
+
+agent main() -> String:
+    return \"ok\"
+";
+    let ir = compile_to_ir(source).expect("46c source must compile");
+    let prompt = ir
+        .prompts
+        .iter()
+        .find(|p| p.name == "chat")
+        .expect("prompt lowered");
+    assert_eq!(prompt.history_param, Some(0));
+    let model = ir
+        .models
+        .iter()
+        .find(|m| m.name == "tiny")
+        .expect("model lowered");
+    assert_eq!(model.context_window, Some(4096));
+}

@@ -3973,6 +3973,68 @@ fn match_option_result_and_guards() {
     );
 }
 
+/// Slice 46c — conversation-history rules: one `List<AiMessage>`
+/// param per prompt, never interpolated as `{param}`.
+#[test]
+fn prompt_history_rules() {
+    let ok = check(
+        "type AiMessage:
+    role: String
+    content: String
+
+prompt chat(history: List<AiMessage>, q: String) -> String:
+    system: \"be terse\"
+    user: \"{q}\"
+
+agent main() -> String:
+    return \"x\"
+",
+    );
+    assert!(ok.errors.is_empty(), "got {:?}", ok.errors);
+
+    let interpolated = check(
+        "type AiMessage:
+    role: String
+    content: String
+
+prompt chat(history: List<AiMessage>, q: String) -> String:
+    user: \"{history} {q}\"
+
+agent main() -> String:
+    return \"x\"
+",
+    );
+    assert!(
+        interpolated.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::PromptHistoryInvalid { .. }
+        )),
+        "expected interpolation error, got {:?}",
+        interpolated.errors
+    );
+
+    let duplicated = check(
+        "type AiMessage:
+    role: String
+    content: String
+
+prompt chat(h1: List<AiMessage>, h2: List<AiMessage>) -> String:
+    user: \"hello\"
+
+agent main() -> String:
+    return \"x\"
+",
+    );
+    assert!(
+        duplicated.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::PromptHistoryInvalid { .. }
+        )),
+        "expected duplicate error, got {:?}",
+        duplicated.errors
+    );
+}
+
 /// Slice 46a — model sampling fields are range-validated at the
 /// declaration.
 #[test]

@@ -18,6 +18,7 @@ use corvid_resolve::Binding;
 
 impl<'a> Checker<'a> {
     pub(super) fn check_prompt(&mut self, p: &PromptDecl) {
+        self.check_prompt_history(p);
         let return_ty = self.type_ref_to_type(&p.return_ty);
         let has_stream_modifiers = p.stream.min_confidence.is_some()
             || p.stream.max_tokens.is_some()
@@ -537,6 +538,72 @@ impl<'a> Checker<'a> {
                 .map(|t| t.export.kind == corvid_resolve::DeclKind::Model)
                 .unwrap_or(false),
             _ => false,
+        }
+    }
+
+    /// Conversation history rules (slice 46c): at most one
+    /// `List<AiMessage>` parameter; it must not be interpolated in
+    /// any template (it splices structurally); a LOCAL AiMessage
+    /// declaration must carry the `role`/`content` String shape.
+    pub(super) fn check_prompt_history(&mut self, p: &corvid_ast::PromptDecl) {
+        let is_history = |param: &corvid_ast::Param| {
+            matches!(&param.ty, corvid_ast::TypeRef::Generic { name, args, .. }
+                if name.name == "List"
+                    && args.len() == 1
+                    && matches!(&args[0], corvid_ast::TypeRef::Named { name, .. } if name.name == "AiMessage"))
+        };
+        let history: Vec<&corvid_ast::Param> =
+            p.params.iter().filter(|param| is_history(param)).collect();
+        if history.len() > 1 {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::PromptHistoryInvalid {
+                    prompt: p.name.name.clone(),
+                    message: "a prompt may declare at most one `List<AiMessage>` history parameter"
+                        .into(),
+                },
+                history[1].span,
+            ));
+        }
+        let Some(history) = history.first() else {
+            return;
+        };
+        // Local AiMessage declarations must carry the canonical
+        // shape (imported std/ai already does).
+        if let Some(def_id) = self.symbols.lookup_def("AiMessage") {
+            if let Some(decl) = self.types_by_id.get(&def_id) {
+                let shape_ok = decl.fields.len() == 2
+                    && decl
+                        .fields
+                        .iter()
+                        .all(|f| f.name.name == "role" || f.name.name == "content");
+                if !shape_ok {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::PromptHistoryInvalid {
+                            prompt: p.name.name.clone(),
+                            message:
+                                "history requires AiMessage { role: String, content: String } — the local `AiMessage` declaration has a different shape"
+                                    .into(),
+                        },
+                        history.span,
+                    ));
+                }
+            }
+        }
+        // History splices structurally; `{history}` in a template is
+        // almost always a bug.
+        let needle = format!("{{{}}}", history.name.name);
+        let mut templates: Vec<&str> = vec![&p.template];
+        templates.extend(p.messages.iter().map(|m| m.template.as_str()));
+        if templates.iter().any(|t| t.contains(&needle)) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::PromptHistoryInvalid {
+                    prompt: p.name.name.clone(),
+                    message: format!(
+                        "`{needle}` interpolates the history as JSON text — history splices structurally into the message array; remove the placeholder"
+                    ),
+                },
+                history.span,
+            ));
         }
     }
 

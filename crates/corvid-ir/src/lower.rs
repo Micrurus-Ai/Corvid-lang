@@ -245,6 +245,7 @@ impl<'a> Lowerer<'a> {
                         temperature: get("temperature"),
                         top_p: get("top_p"),
                         max_tokens: get("max_tokens").map(|n| n as u64),
+                        context_window: get("context_window").map(|n| n as u64),
                         span: m.span,
                     });
                 }
@@ -548,6 +549,13 @@ impl<'a> Lowerer<'a> {
                 .iter()
                 .position(|param| param.name.name == *param_name)
         });
+        // Conversation history (46c): a param typed List<AiMessage>
+        // is the history surface (syntactic recognition by type
+        // name — works for the std/ai import and local decls alike;
+        // the VM validates role/content at runtime). The CHECKER
+        // enforces at-most-one and the no-interpolation rule.
+        let lowered_params = self.lower_params(&p.params);
+        let history_param = p.params.iter().position(param_is_history);
         let effect_names: Vec<String> = p
             .effect_row
             .effects
@@ -636,7 +644,7 @@ impl<'a> Lowerer<'a> {
         IrPrompt {
             id: self.remap_def_id(id),
             name: p.name.name.clone(),
-            params: self.lower_params(&p.params),
+            params: lowered_params,
             return_ty: self.type_ref_to_type(&p.return_ty),
             template: p.template.clone(),
             messages: p
@@ -647,6 +655,7 @@ impl<'a> Lowerer<'a> {
                     template: m.template.clone(),
                 })
                 .collect(),
+            history_param,
             effect_names,
             effect_cost: numeric_profile_dimension(&profile, "cost"),
             effect_confidence: confidence_profile_dimension(&profile),
@@ -1940,4 +1949,16 @@ fn is_wrapping_int_unop(op: UnaryOp, ty: Option<&Type>) -> bool {
 /// through the symbol table can happen when it becomes a hot path.
 fn lookup_tool_effect(_symbols: &SymbolTable, _def_id: DefId) -> Effect {
     Effect::Safe
+}
+
+
+/// The 46c history-recognition rule, applied syntactically: a
+/// parameter typed `List<AiMessage>`. Works across module
+/// boundaries (the std/ai import) without def-id gymnastics; the
+/// checker verifies the local shape and the VM validates values.
+pub fn param_is_history(p: &Param) -> bool {
+    matches!(&p.ty, corvid_ast::TypeRef::Generic { name, args, .. }
+        if name.name == "List"
+            && args.len() == 1
+            && matches!(&args[0], corvid_ast::TypeRef::Named { name, .. } if name.name == "AiMessage"))
 }

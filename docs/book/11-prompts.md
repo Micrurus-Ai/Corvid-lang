@@ -88,6 +88,49 @@ agent main(q: String) -> String:
     return ask(q)
 ```
 
+## Conversation history
+
+A parameter typed `List<AiMessage>` IS the history surface — no new
+syntax. Its messages splice between the declaration's `system:`
+blocks and the current turn, in list order (compiled in CI):
+
+```corvid
+effect llm_call:
+    cost: $0.01
+    reversible: true
+
+type AiMessage:
+    role: String
+    content: String
+
+prompt chat(history: List<AiMessage>, question: String) -> String uses llm_call:
+    system: "You are a careful assistant."
+    user: "{question}"
+
+agent converse() -> String:
+    turns = [
+        AiMessage("user", "What is Corvid?"),
+        AiMessage("assistant", "An AI-native language."),
+    ]
+    return chat(turns, "Who makes it?")
+```
+
+Rules: one history parameter per prompt; `{history}` in a template
+is a compile error (history splices structurally — interpolating it
+as JSON is almost always a bug); roles are validated at dispatch
+(`system` / `user` / `assistant`). The history list rides the trace
+as an ordinary argument, so replay matching is exact.
+
+**Context windows.** Declare `context_window: N` on a model and the
+runtime drops history messages OLDEST-FIRST — whole messages, never
+split, never the system blocks or the current turn — until the
+request fits `N` minus the completion reserve (`max_tokens` or its
+default estimate). Truncation is a pure function of its inputs, so
+a replayed run truncates identically. If the request still doesn't
+fit with all history dropped, the call fails with a typed error
+instead of a silent provider rejection. Full design:
+`docs/meta/46c-conversation-history-design.md`.
+
 ## Sampling parameters
 
 `temperature`, `top_p`, and `max_tokens` live in two places, with a

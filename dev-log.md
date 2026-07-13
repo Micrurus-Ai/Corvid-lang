@@ -1274,6 +1274,34 @@ Next per agreed order: 46c-conversation-history-first-class
 
 ---
 
+## 2026-07-12 - 46c closed: first-class conversation history (audit B7 closed)
+
+Design doc first (docs/meta/46c-conversation-history-design.md),
+then the implementation. The surface decision: history is a TYPED
+PARAMETER — `List<AiMessage>` splices between system blocks and
+the current turn. Zero new syntax; composes with routing,
+ensembles, sampling, and streaming for free.
+
+One history param per prompt; {history} interpolation is a
+compile error; roles validated at dispatch. The 46b canonical
+string extends: history renders into the role-labeled concat, so
+every downstream surface (traces, cache, estimates, mocks) stays
+coherent with zero new trace schema.
+
+Context windows: `context_window: N` on model decls; oldest-first
+whole-message truncation against window − completion reserve;
+deterministic, so replay reproduces it; typed error when nothing
+fits. Segmented VM implementation (system/history/turn).
+
+With 46b + 46c, audit blocker B7 is fully closed.
+
+Validation: 284 types + 216 syntax + 110 vm + 325 runtime + 18 e2e
++ book guard + grammar gate; corpus verify exits 1.
+
+Next per agreed order: 46d-real-provider-streaming.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

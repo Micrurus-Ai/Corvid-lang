@@ -13,7 +13,7 @@ use corvid_ir::IrPrompt;
 use corvid_runtime::{trace_text, TraceEvent};
 use corvid_types::Type;
 
-const DEFAULT_COMPLETION_TOKEN_ESTIMATE: u64 = 256;
+pub(super) const DEFAULT_COMPLETION_TOKEN_ESTIMATE: u64 = 256;
 
 struct PromptCallResult {
     value: Value,
@@ -321,8 +321,190 @@ impl<'ir> Interpreter<'ir> {
     }
 }
 
+/// String extraction for AiMessage fields: strings pass through
+/// verbatim; anything else renders as its JSON text.
+fn value_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.to_string(),
+        other => value_to_json(other).to_string(),
+    }
+}
+
 fn render_prompt(prompt: &IrPrompt, args: &[Value]) -> String {
+    // Conversation history (46c): with a history param, the
+    // canonical rendered form is ALWAYS the role-labeled concat —
+    // history in splice order between the declaration's system
+    // blocks and the current turn. Best-effort here (a String
+    // cannot error); strict role validation happens in
+    // `build_message_segments` before dispatch.
+    if let Some(idx) = prompt.history_param {
+        let mut parts: Vec<String> = Vec::new();
+        let turn: Vec<(String, String)> = if prompt.messages.is_empty() {
+            vec![(
+                "user".to_string(),
+                render_template(&prompt.template, prompt, args),
+            )]
+        } else {
+            prompt
+                .messages
+                .iter()
+                .map(|m| (m.role.clone(), render_template(&m.template, prompt, args)))
+                .collect()
+        };
+        for (role, content) in turn.iter().filter(|(r, _)| r == "system") {
+            parts.push(format!("[{role}] {content}"));
+        }
+        if let Some(Value::List(list)) = args.get(idx) {
+            for i in 0..list.len() {
+                if let Some(Value::Struct(sv)) = list.get(i) {
+                    let role = sv
+                        .get_field("role")
+                        .map(|v| value_text(&v))
+                        .unwrap_or_default();
+                    let content = sv
+                        .get_field("content")
+                        .map(|v| value_text(&v))
+                        .unwrap_or_default();
+                    parts.push(format!("[{role}] {content}"));
+                }
+            }
+        }
+        for (role, content) in turn.iter().filter(|(r, _)| r != "system") {
+            parts.push(format!("[{role}] {content}"));
+        }
+        return parts.join("\n");
+    }
     render_template(&prompt.template, prompt, args)
+}
+
+/// The three segments of a prompt request (slice 46c): declaration
+/// system blocks, spliced history, and the current turn. Kept
+/// separate so context-window truncation can drop history
+/// oldest-first without ever touching the other two.
+pub(crate) struct MessageSegments {
+    pub system: Vec<corvid_runtime::llm::LlmMessage>,
+    pub history: Vec<corvid_runtime::llm::LlmMessage>,
+    pub turn: Vec<corvid_runtime::llm::LlmMessage>,
+}
+
+impl MessageSegments {
+    pub fn is_empty(&self) -> bool {
+        self.system.is_empty() && self.history.is_empty() && self.turn.is_empty()
+    }
+
+    pub fn flatten(&self) -> Vec<corvid_runtime::llm::LlmMessage> {
+        let mut out =
+            Vec::with_capacity(self.system.len() + self.history.len() + self.turn.len());
+        out.extend(self.system.iter().cloned());
+        out.extend(self.history.iter().cloned());
+        out.extend(self.turn.iter().cloned());
+        out
+    }
+
+    pub fn concat(&self) -> String {
+        self.flatten()
+            .iter()
+            .map(|m| format!("[{}] {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Build the segmented message form. Errors with the offending
+/// index when a history entry carries a role outside
+/// system/user/assistant.
+pub(crate) fn build_message_segments(
+    prompt: &IrPrompt,
+    args: &[Value],
+    rendered: &str,
+    span: Span,
+) -> Result<MessageSegments, InterpError> {
+    use corvid_runtime::llm::LlmMessage;
+    let has_roles = !prompt.messages.is_empty();
+    let has_history = prompt.history_param.is_some();
+    if !has_roles && !has_history {
+        return Ok(MessageSegments {
+            system: Vec::new(),
+            history: Vec::new(),
+            turn: Vec::new(),
+        });
+    }
+
+    let mut system = Vec::new();
+    let mut turn = Vec::new();
+    if has_roles {
+        for m in &prompt.messages {
+            let msg = LlmMessage {
+                role: m.role.clone(),
+                content: render_template(&m.template, prompt, args),
+            };
+            if m.role == "system" {
+                system.push(msg);
+            } else {
+                turn.push(msg);
+            }
+        }
+    } else {
+        turn.push(LlmMessage {
+            role: "user".to_string(),
+            content: render_template(&prompt.template, prompt, args),
+        });
+    }
+
+    let mut history = Vec::new();
+    if let Some(idx) = prompt.history_param {
+        if let Some(Value::List(list)) = args.get(idx) {
+            for i in 0..list.len() {
+                let Some(Value::Struct(sv)) = list.get(i) else {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "AiMessage".into(),
+                            got: "a non-struct history entry".into(),
+                        },
+                        span,
+                    ));
+                };
+                let role = sv
+                    .get_field("role")
+                    .map(|v| value_text(&v))
+                    .unwrap_or_default();
+                let content = sv
+                    .get_field("content")
+                    .map(|v| value_text(&v))
+                    .unwrap_or_default();
+                if role != "system" && role != "user" && role != "assistant" {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch {
+                            expected: "history roles system/user/assistant".into(),
+                            got: format!("`{role}` at history index {i}"),
+                        },
+                        span,
+                    ));
+                }
+                history.push(LlmMessage { role, content });
+            }
+        }
+    }
+
+    // The escalation path appends continuation text to `rendered`;
+    // the canonical-prefix rule turns the suffix into a final user
+    // message (46b) — applies to the history form too.
+    let canonical = render_prompt(prompt, args);
+    if let Some(suffix) = rendered.strip_prefix(&canonical) {
+        let suffix = suffix.trim();
+        if !suffix.is_empty() {
+            turn.push(LlmMessage {
+                role: "user".to_string(),
+                content: suffix.to_string(),
+            });
+        }
+    }
+
+    Ok(MessageSegments {
+        system,
+        history,
+        turn,
+    })
 }
 
 fn render_template(template: &str, prompt: &IrPrompt, args: &[Value]) -> String {
@@ -337,36 +519,15 @@ fn render_template(template: &str, prompt: &IrPrompt, args: &[Value]) -> String 
     out
 }
 
-/// Render the multi-message form (slice 46b): each role block's
-/// template interpolates independently. When the caller's
-/// `rendered` string extends the canonical concatenation (the
-/// escalation path appends continuation text), the suffix becomes
-/// a final `user` message so no content is silently dropped.
+/// The 46b-compatible flat form, used by the ensemble/adversarial
+/// paths (no truncation there — the single-shot path in `cost.rs`
+/// owns the context-window policy).
 pub(super) fn render_messages(
     prompt: &IrPrompt,
     args: &[Value],
     rendered: &str,
 ) -> Vec<corvid_runtime::llm::LlmMessage> {
-    if prompt.messages.is_empty() {
-        return Vec::new();
-    }
-    let mut out: Vec<corvid_runtime::llm::LlmMessage> = prompt
-        .messages
-        .iter()
-        .map(|m| corvid_runtime::llm::LlmMessage {
-            role: m.role.clone(),
-            content: render_template(&m.template, prompt, args),
-        })
-        .collect();
-    let canonical = render_prompt(prompt, args);
-    if let Some(suffix) = rendered.strip_prefix(&canonical) {
-        let suffix = suffix.trim();
-        if !suffix.is_empty() {
-            out.push(corvid_runtime::llm::LlmMessage {
-                role: "user".to_string(),
-                content: suffix.to_string(),
-            });
-        }
-    }
-    out
+    build_message_segments(prompt, args, rendered, Span::new(0, 0))
+        .map(|segments| segments.flatten())
+        .unwrap_or_default()
 }

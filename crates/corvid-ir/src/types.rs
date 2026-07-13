@@ -164,6 +164,9 @@ pub struct IrModel {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub max_tokens: Option<u64>,
+    /// Declared context window (slice 46c). Drives deterministic
+    /// oldest-first history truncation at dispatch.
+    pub context_window: Option<u64>,
     pub span: Span,
 }
 
@@ -177,6 +180,10 @@ pub struct IrPrompt {
     /// Multi-message role blocks (slice 46b). Empty = the classic
     /// single-template form.
     pub messages: Vec<IrPromptMessage>,
+    /// Conversation history (slice 46c): index of the parameter
+    /// typed `List<AiMessage>`. Its messages splice after the
+    /// declaration's system blocks and before the current turn.
+    pub history_param: Option<usize>,
     pub effect_names: Vec<String>,
     pub effect_cost: f64,
     pub effect_confidence: f64,

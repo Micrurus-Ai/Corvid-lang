@@ -2172,6 +2172,16 @@ fn dispatch_typed_json_decoder(
 /// Collects bindings without touching the environment so a failed
 /// sibling subpattern can't leave partial state; the caller applies
 /// them on success.
+/// Test hook (46c): segment building without an Interpreter.
+#[cfg(test)]
+pub(crate) fn prompt_segments_for_test(
+    prompt: &corvid_ir::IrPrompt,
+    args: &[Value],
+) -> Result<crate::interp::prompt::MessageSegments, InterpError> {
+    let rendered = String::new();
+    prompt::build_message_segments(prompt, args, &rendered, corvid_ast::Span::new(0, 0))
+}
+
 pub(crate) fn pattern_matches(
     pattern: &IrPattern,
     value: &Value,

@@ -452,6 +452,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
             return_ty: Type::Stream(Box::new(Type::String)),
             template: "Generate".into(),
             messages: Vec::new(),
+            history_param: None,
             effect_names: vec!["expensive".into()],
             effect_cost: 0.75,
             effect_confidence: 1.0,
@@ -637,4 +638,94 @@ fn struct_string_field(value: &Value, field: &str) -> String {
         Value::String(value) => value.to_string(),
         other => panic!("expected string field, got {other:?}"),
     }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn history_segments_splice_and_truncate() {
+    use corvid_ast::Span;
+    use corvid_ir::{IrParam, IrPrompt};
+    use corvid_resolve::{DefId, LocalId};
+    use corvid_types::Type;
+    // Slice 46c: system blocks first, history in list order, then
+    // the current turn; truncation drops history oldest-first.
+    use crate::interp::prompt_segments_for_test as segments_for_test;
+    let prompt = IrPrompt {
+        id: DefId(900),
+        name: "chat".into(),
+        params: vec![
+            IrParam {
+                name: "history".into(),
+                local_id: LocalId(0),
+                ty: Type::List(Box::new(Type::Unknown)),
+                span: Span::new(0, 0),
+            },
+            IrParam {
+                name: "q".into(),
+                local_id: LocalId(1),
+                ty: Type::String,
+                span: Span::new(0, 0),
+            },
+        ],
+        return_ty: Type::String,
+        template: "{q}".into(),
+        messages: vec![
+            corvid_ir::IrPromptMessage {
+                role: "system".into(),
+                template: "be terse".into(),
+            },
+            corvid_ir::IrPromptMessage {
+                role: "user".into(),
+                template: "{q}".into(),
+            },
+        ],
+        history_param: Some(0),
+        effect_names: vec![],
+        effect_cost: 0.0,
+        effect_confidence: 1.0,
+        produces_grounded: false,
+        cites_strictly_param: None,
+        min_confidence: None,
+        max_tokens: None,
+        temperature: None,
+        top_p: None,
+        backpressure: None,
+        escalate_to: None,
+        calibrated: false,
+        cacheable: false,
+        capability_required: None,
+        output_format_required: None,
+        route: vec![],
+        progressive: vec![],
+        rollout: None,
+        ensemble: None,
+        adversarial: None,
+        span: Span::new(0, 0),
+    };
+    let mk = |role: &str, content: &str| {
+        Value::new_struct(
+            DefId(901),
+            "AiMessage".to_string(),
+            vec![
+                ("role".to_string(), Value::String(role.into())),
+                ("content".to_string(), Value::String(content.into())),
+            ],
+        )
+    };
+    let history = Value::List(crate::value::ListValue::new(vec![
+        mk("user", "first turn"),
+        mk("assistant", "first answer"),
+    ]));
+    let args = vec![history, Value::String("now?".into())];
+    let segments = segments_for_test(&prompt, &args).expect("segments build");
+    assert_eq!(segments.system.len(), 1);
+    assert_eq!(segments.history.len(), 2);
+    assert_eq!(segments.turn.len(), 1);
+    let flat = segments.flatten();
+    assert_eq!(
+        flat.iter().map(|m| m.role.as_str()).collect::<Vec<_>>(),
+        vec!["system", "user", "assistant", "user"]
+    );
+    assert_eq!(flat[1].content, "first turn");
+    assert_eq!(flat[3].content, "\"now?\"");
 }

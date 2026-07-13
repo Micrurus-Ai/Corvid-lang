@@ -210,6 +210,8 @@ model_field       ::= IDENT ':' dimension_value NEWLINE
 # Sampling fields (slice 46a): `temperature:` (0..=2), `top_p:`
 # (0..=1), and `max_tokens:` (positive integer) are range-checked
 # at the declaration and become the model's dispatch defaults.
+# `context_window: N` (slice 46c) drives deterministic oldest-first
+# history truncation at dispatch.
 ```
 
 ## Agent declarations

@@ -114,6 +114,9 @@ pub enum TypeErrorKind {
     /// `replay`, or `yield`. A `fn` is statically effect-free.
     FnBodyNotPure { name: String, what: String },
 
+    /// A misused conversation-history parameter (slice 46c).
+    PromptHistoryInvalid { prompt: String, message: String },
+
     /// A model declaration field with an out-of-range value
     /// (slice 46a): `temperature: 9.5`.
     ModelFieldInvalid {
@@ -489,6 +492,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => {
                 format!("`{keyword}` is only valid inside a `for` or `while` loop")
             }
+            Self::PromptHistoryInvalid { prompt, message } => {
+                format!("invalid history parameter on prompt `{prompt}`: {message}")
+            }
             Self::ModelFieldInvalid {
                 model,
                 field,
@@ -814,6 +820,9 @@ impl TypeErrorKind {
             Self::LoopFlowOutsideLoop { keyword } => Some(format!(
                 "move the `{keyword}` inside a loop body, or remove it"
             )),
+            Self::PromptHistoryInvalid { .. } => Some(
+                "declare one `history: List<AiMessage>` parameter; its messages splice between the system blocks and the current turn".into(),
+            ),
             Self::ModelFieldInvalid { .. } => Some(
                 "sampling ranges: temperature 0..=2, top_p 0..=1, max_tokens a positive integer".into(),
             ),

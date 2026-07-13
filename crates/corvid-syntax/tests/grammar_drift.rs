@@ -340,6 +340,14 @@ prompt roled(question: String) -> String uses llm_eff:
     system: "You are terse."
     assistant: "Understood."
     user: "{question}"
+
+type AiMessage:
+    role: String
+    content: String
+
+prompt chat(history: List<AiMessage>, question: String) -> String uses llm_eff:
+    system: "You are a careful assistant."
+    user: "{question}"
 "#,
     ),
     (

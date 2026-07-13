@@ -371,14 +371,54 @@ impl<'ir> Interpreter<'ir> {
         };
 
         let output_schema = Some(crate::schema::schema_for(result_ty, &self.types_by_id));
+        let sampling = self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or(""));
+        // Conversation history + context-window policy (46c): build
+        // the segmented message form, then drop history OLDEST-FIRST
+        // until the request fits the selected model's declared
+        // window (minus the completion reserve). Deterministic —
+        // replay reproduces the same truncation.
+        let mut segments =
+            super::build_message_segments(prompt, arg_values, rendered, span)?;
+        let mut final_rendered = rendered.to_string();
+        if !segments.is_empty() {
+            let window = self
+                .ir
+                .models
+                .iter()
+                .find(|m| Some(m.name.as_str()) == selected_model.as_deref())
+                .and_then(|m| m.context_window);
+            if let Some(window) = window {
+                let reserve = sampling
+                    .max_tokens
+                    .unwrap_or(super::DEFAULT_COMPLETION_TOKEN_ESTIMATE);
+                let budget = window.saturating_sub(reserve);
+                while super::super::effect_compose::estimate_tokens(&segments.concat()) > budget
+                    && !segments.history.is_empty()
+                {
+                    segments.history.remove(0);
+                }
+                if super::super::effect_compose::estimate_tokens(&segments.concat()) > budget {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Runtime(corvid_runtime::errors::RuntimeError::AdapterFailed {
+                            adapter: "context-window".into(),
+                            message: format!(
+                                "prompt `{callee_name}` exceeds model context window ({window} tokens, {reserve} reserved for completion) even with all history dropped"
+                            ),
+                        }),
+                        span,
+                    ));
+                }
+            }
+            final_rendered = segments.concat();
+        }
         let req = LlmRequest {
             prompt: callee_name.to_string(),
             model: selected_model.clone().unwrap_or_default(),
-            rendered: rendered.to_string(),
+            rendered: final_rendered,
             args: json_args,
             output_schema,
-            sampling: self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or("")),
-            messages: super::render_messages(prompt, arg_values, rendered),
+            sampling,
+            messages: segments.flatten(),
         };
         let actual_model = if req.model.is_empty() {
             self.runtime.default_model().to_string()
