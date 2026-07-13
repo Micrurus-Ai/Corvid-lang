@@ -407,6 +407,8 @@ schedule "0 9 * * *" zone "UTC" -> daily_summary()
         "test_surface",
         r#"eval checks:
     assert 1 == 1
+    assert similar "hello world", "hello there world" min 0.5
+    assert judged "a polite reply", "is polite and helpful" min 0.7
     assert_snapshot "golden"
 
 test smoke:

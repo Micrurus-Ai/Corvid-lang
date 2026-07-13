@@ -1357,6 +1357,30 @@ assertions.
 
 ---
 
+## 2026-07-12 - 46h closed: structured-output repair + quality assertions
+
+`with repair N`: schema violations become bounded self-repair —
+the re-ask carries the failed response and the exact validation
+error; every attempt is traced (replay reproduces the sequence);
+wasted cost accumulates onto the final result so @budget sees the
+truth; exhausted repair surfaces the ORIGINAL typed error. The
+flaky-adapter test proves recovery (wrong shape -> feedback ->
+"repaired").
+
+`assert similar` (deterministic Jaccard, zero cost) and `assert
+judged` (LLM judge through the normal traced/cost-accounted path)
+give evals a quality vocabulary; failures print scores and texts.
+The eval report grew a quality bucket.
+
+Validation: 284 types + 216 syntax + 112 vm + book guard + grammar
+gate; corpus verify exits 1.
+
+Phase 46 dependency chain + self-contained slices are DONE
+(46a-d, g, h). Remaining: the design-heavy tail — 46e parallel
+(design doc first) and 46f MCP client.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -582,6 +582,8 @@ fn render_replay_tool_arg(arg: &corvid_ast::ToolArgPattern) -> String {
 
 fn render_eval_assert(assertion: &EvalAssert) -> String {
     match assertion {
+        // Never synthesized by rewrite passes (46h).
+        EvalAssert::Similar { .. } | EvalAssert::Judged { .. } => "<judge assert>".to_string(),
         EvalAssert::Value {
             expr,
             confidence,

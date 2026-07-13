@@ -86,6 +86,11 @@ impl<'a> Parser<'a> {
                     }
                     settings.top_p = Some(value);
                 }
+                "repair" => {
+                    let (attempts, _) =
+                        self.expect_positive_int_literal("a positive repair attempt count")?;
+                    settings.repair = Some(attempts);
+                }
                 "backpressure" => {
                     settings.backpressure = Some(self.parse_backpressure_policy()?);
                 }
@@ -97,7 +102,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("identifier `{name}`"),
-                            expected: "`min_confidence`, `max_tokens`, `temperature`, `top_p`, `backpressure`, or `escalate_to`".into(),
+                            expected: "`min_confidence`, `max_tokens`, `temperature`, `top_p`, `repair`, `backpressure`, or `escalate_to`".into(),
                         },
                         span,
                     });

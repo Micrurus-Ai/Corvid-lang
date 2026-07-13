@@ -161,6 +161,17 @@ impl<'a> Checker<'a> {
 
     fn check_eval_assert(&mut self, assertion: &EvalAssert) {
         match assertion {
+            // Slice 46h: both compared values typecheck; the
+            // comparison itself is over rendered text, so any type
+            // is acceptable (structured values compare via their
+            // JSON rendering).
+            EvalAssert::Similar { expr, expected, .. } => {
+                let _ = self.check_expr(expr);
+                let _ = self.check_expr(expected);
+            }
+            EvalAssert::Judged { expr, .. } => {
+                let _ = self.check_expr(expr);
+            }
             EvalAssert::Value {
                 expr,
                 confidence,

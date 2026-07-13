@@ -157,6 +157,10 @@ fn collect_decl_contracts(decl: &Decl, claims: &mut DeclaredContractClaims) {
                             claims.required_ids.insert("confidence.min_threshold");
                         }
                     }
+                    // Judge/similarity assertions (46h) run
+                    // eval-side; no cdylib guarantee id applies.
+                    corvid_ast::EvalAssert::Similar { .. }
+                    | corvid_ast::EvalAssert::Judged { .. } => {}
                     corvid_ast::EvalAssert::Approved { .. } => {
                         claims.required_ids.insert("approval.dangerous_call_requires_token");
                         claims.required_ids.insert("approval.token_lexical_only");

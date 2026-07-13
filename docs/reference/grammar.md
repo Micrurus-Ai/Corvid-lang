@@ -183,7 +183,11 @@ future grammar-expansion pass rather than being half-specified here.
 
 The `with` modifier lines include the sampling overrides shipped in
 slice 46a: `with temperature F` (0..=2) and `with top_p F` (0..=1),
-beside the existing `with max_tokens N`. Precedence at dispatch is
+beside the existing `with max_tokens N` — plus `with repair N`
+(slice 46h): when a structured response fails typed decode, the
+runtime re-asks with the schema-violation feedback appended, up to
+N extra attempts, each fully traced (replay reproduces the
+sequence) and cost-accounted (failed attempts still cost). Precedence at dispatch is
 prompt override > model declaration field > provider default; the
 resolved values are recorded in the trace's `llm_call` event.
 
@@ -293,7 +297,13 @@ mock_decl         ::= 'mock' IDENT params '->' type_ref uses_clause? ':' INDENT 
 
 eval_body         ::= (assertion | stmt)+
 
+# `assert similar` (deterministic word-set similarity, no LLM
+# cost) and `assert judged` (LLM-judge score through the normal
+# traced + cost-accounted LLM path) shipped in slice 46h; both
+# take a `min` threshold in 0..=1.
 assertion         ::= 'assert' expr NEWLINE
+                    | 'assert' 'similar' expr ',' expr 'min' FLOAT NEWLINE
+                    | 'assert' 'judged' expr ',' STRING_LITERAL 'min' FLOAT NEWLINE
                     | 'assert_snapshot' STRING_LITERAL NEWLINE
 ```
 

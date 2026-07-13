@@ -56,6 +56,10 @@ pub struct EvalTraceReport {
     pub invalid_traces: Vec<String>,
     pub value_assertions_passed: usize,
     pub value_assertions_total: usize,
+    /// Quality assertions (slice 46h): `assert similar` +
+    /// `assert judged`.
+    pub quality_assertions_total: usize,
+    pub quality_assertions_passed: usize,
     pub process_assertions_passed: usize,
     pub process_assertions_total: usize,
     pub approval_assertions_passed: usize,

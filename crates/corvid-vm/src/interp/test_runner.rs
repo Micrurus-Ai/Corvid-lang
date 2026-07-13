@@ -130,10 +130,171 @@ async fn eval_test_assertion<'ir>(
         IrEvalAssert::Snapshot { expr, .. } => {
             eval_snapshot_assertion(interp, expr, assertion_label(assertion), &test.name, assertion_index, options).await
         }
+        IrEvalAssert::Similar {
+            expr,
+            expected,
+            min,
+            ..
+        } => eval_similar_assertion(interp, expr, expected, *min, assertion_label(assertion)).await,
+        IrEvalAssert::Judged {
+            expr,
+            criteria,
+            min,
+            ..
+        } => {
+            eval_judged_assertion(interp, runtime, expr, criteria, *min, assertion_label(assertion))
+                .await
+        }
         IrEvalAssert::Called { .. }
         | IrEvalAssert::Approved { .. }
         | IrEvalAssert::Cost { .. }
         | IrEvalAssert::Ordering { .. } => eval_trace_assertion(assertion, trace_fixture),
+    }
+}
+
+/// Slice 46h: deterministic word-set similarity. Both values render
+/// to text; lowercase alphanumeric word sets compare by Jaccard
+/// index. No LLM cost — the cheap regression gate.
+async fn eval_similar_assertion<'ir>(
+    interp: &mut Interpreter<'ir>,
+    expr: &'ir IrExpr,
+    expected: &'ir IrExpr,
+    min: f64,
+    label: String,
+) -> TestAssertionExecution {
+    let render = |v: &Value| match v {
+        Value::String(s) => s.to_string(),
+        other => crate::conv::value_to_json(other).to_string(),
+    };
+    let actual = match interp.eval_expr(expr).await.map(|f| f.into_value()) {
+        Ok(Ok(v)) | Ok(Err(v)) => render(&v),
+        Err(e) => {
+            return TestAssertionExecution {
+                label,
+                status: TestAssertionStatus::Error,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    let wanted = match interp.eval_expr(expected).await.map(|f| f.into_value()) {
+        Ok(Ok(v)) | Ok(Err(v)) => render(&v),
+        Err(e) => {
+            return TestAssertionExecution {
+                label,
+                status: TestAssertionStatus::Error,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    let score = word_jaccard(&actual, &wanted);
+    if score >= min {
+        TestAssertionExecution {
+            label,
+            status: TestAssertionStatus::Passed,
+            message: None,
+        }
+    } else {
+        TestAssertionExecution {
+            label,
+            status: TestAssertionStatus::Failed,
+            message: Some(format!(
+                "similarity {score:.3} is below min {min} (actual: {actual:?}, expected: {wanted:?})"
+            )),
+        }
+    }
+}
+
+fn word_jaccard(a: &str, b: &str) -> f64 {
+    let words = |s: &str| -> std::collections::HashSet<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_lowercase())
+            .collect()
+    };
+    let (wa, wb) = (words(a), words(b));
+    if wa.is_empty() && wb.is_empty() {
+        return 1.0;
+    }
+    let intersection = wa.intersection(&wb).count() as f64;
+    let union = wa.union(&wb).count() as f64;
+    intersection / union
+}
+
+/// Slice 46h: LLM-judge assertion. The judge call flows through
+/// the NORMAL LLM path — traced, cost-accounted, mockable — so
+/// eval `--max-spend` accounting and replay both see it.
+async fn eval_judged_assertion<'ir>(
+    interp: &mut Interpreter<'ir>,
+    runtime: &'ir Runtime,
+    expr: &'ir IrExpr,
+    criteria: &str,
+    min: f64,
+    label: String,
+) -> TestAssertionExecution {
+    let value = match interp.eval_expr(expr).await.map(|f| f.into_value()) {
+        Ok(Ok(v)) | Ok(Err(v)) => v,
+        Err(e) => {
+            return TestAssertionExecution {
+                label,
+                status: TestAssertionStatus::Error,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    let rendered_value = match &value {
+        Value::String(s) => s.to_string(),
+        other => crate::conv::value_to_json(other).to_string(),
+    };
+    let req = corvid_runtime::llm::LlmRequest {
+        prompt: "__corvid_eval_judge".to_string(),
+        model: String::new(),
+        rendered: format!(
+            "You are an evaluation judge. Score how well the VALUE satisfies the CRITERIA on a scale from 0.0 (not at all) to 1.0 (perfectly).\n\nCRITERIA: {criteria}\n\nVALUE:\n{rendered_value}\n\nRespond with the score."
+        ),
+        args: vec![serde_json::json!(criteria), serde_json::json!(rendered_value)],
+        output_schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": {"score": {"type": "number"}},
+            "required": ["score"],
+        })),
+        sampling: Default::default(),
+        messages: Vec::new(),
+    };
+    let resp = match runtime.call_llm(req).await {
+        Ok(r) => r,
+        Err(e) => {
+            return TestAssertionExecution {
+                label,
+                status: TestAssertionStatus::Error,
+                message: Some(format!("judge call failed: {e}")),
+            }
+        }
+    };
+    let score = resp.value["score"]
+        .as_f64()
+        .or_else(|| resp.value.as_f64());
+    let Some(score) = score else {
+        return TestAssertionExecution {
+            label,
+            status: TestAssertionStatus::Error,
+            message: Some(format!(
+                "judge returned no numeric score: {}",
+                resp.value
+            )),
+        };
+    };
+    if score >= min {
+        TestAssertionExecution {
+            label,
+            status: TestAssertionStatus::Passed,
+            message: None,
+        }
+    } else {
+        TestAssertionExecution {
+            label,
+            status: TestAssertionStatus::Failed,
+            message: Some(format!("judge score {score:.3} is below min {min}")),
+        }
     }
 }
 
@@ -380,6 +541,10 @@ async fn eval_bool_assertion<'ir>(
 fn assertion_label(assertion: &IrEvalAssert) -> String {
     match assertion {
         IrEvalAssert::Value { .. } => "assert <expr>".into(),
+        IrEvalAssert::Similar { min, .. } => format!("assert similar ... min {min}"),
+        IrEvalAssert::Judged { criteria, min, .. } => {
+            format!("assert judged {criteria:?} min {min}")
+        }
         IrEvalAssert::Snapshot { .. } => "assert_snapshot <expr>".into(),
         IrEvalAssert::Called { name, .. } => format!("assert called {name}"),
         IrEvalAssert::Approved { label, .. } => format!("assert approved {label}"),

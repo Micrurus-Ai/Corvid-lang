@@ -464,6 +464,14 @@ pub struct PromptStreamSettings {
     /// Sampling override (slice 46a): `with top_p 0.9`.
     #[serde(default)]
     pub top_p: Option<f64>,
+    /// Structured-output auto-repair (slice 46h): `with repair N`.
+    /// When the response fails typed decode, re-ask with the
+    /// schema-violation feedback appended, up to N extra attempts.
+    /// Each attempt is a fully traced LLM call, so replay
+    /// reproduces the exact repair sequence; failed attempts still
+    /// cost and the accumulated cost lands on the final result.
+    #[serde(default)]
+    pub repair: Option<u64>,
     #[serde(default)]
     pub backpressure: Option<BackpressurePolicy>,
     #[serde(default)]
@@ -954,6 +962,26 @@ pub enum EvalAssert {
     Ordering {
         before: Ident,
         after: Ident,
+        span: Span,
+    },
+    /// `assert similar <expr>, <expr> min <float>` (slice 46h) —
+    /// deterministic word-set similarity between the two rendered
+    /// values must reach `min` (0..=1). No LLM cost.
+    Similar {
+        expr: Expr,
+        expected: Expr,
+        min: f64,
+        span: Span,
+    },
+    /// `assert judged <expr>, "criteria" min <float>` (slice 46h)
+    /// — an LLM judge scores the value against the criteria; the
+    /// score must reach `min` (0..=1). The judge call flows
+    /// through the normal LLM path (traced, cost-accounted, so
+    /// eval `--max-spend` sees it).
+    Judged {
+        expr: Expr,
+        criteria: String,
+        min: f64,
         span: Span,
     },
 }

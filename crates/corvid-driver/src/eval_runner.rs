@@ -189,6 +189,14 @@ fn collect_trace_report(path: &Path, evals: &[TestExecution]) -> EvalTraceReport
                     report.process_assertions_passed += 1;
                 }
             }
+            if assertion.label.starts_with("assert similar")
+                || assertion.label.starts_with("assert judged")
+            {
+                report.quality_assertions_total += 1;
+                if passed {
+                    report.quality_assertions_passed += 1;
+                }
+            }
             if assertion.label.starts_with("assert approved ") {
                 report.approval_assertions_total += 1;
                 if passed {

@@ -204,6 +204,8 @@ pub struct IrPrompt {
     /// declaration's fields; `None` falls through.
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    /// Structured-output auto-repair attempts (slice 46h).
+    pub repair_attempts: Option<u64>,
     pub backpressure: Option<BackpressurePolicy>,
     pub escalate_to: Option<String>,
     /// Runtime calibration flag. When true, prompt calls record
@@ -459,6 +461,18 @@ pub enum IrEvalAssert {
     Cost {
         op: BinaryOp,
         bound: f64,
+        span: Span,
+    },
+    Similar {
+        expr: IrExpr,
+        expected: IrExpr,
+        min: f64,
+        span: Span,
+    },
+    Judged {
+        expr: IrExpr,
+        criteria: String,
+        min: f64,
         span: Span,
     },
     Ordering {

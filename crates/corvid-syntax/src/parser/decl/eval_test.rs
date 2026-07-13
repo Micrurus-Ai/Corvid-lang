@@ -210,6 +210,84 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            TokKind::Ident(keyword) if keyword == "similar" => {
+                self.bump();
+                let expr = self.parse_expr()?;
+                self.expect(TokKind::Comma, "`,` between the compared values")?;
+                let expected = self.parse_expr()?;
+                if !self.peek_ident_is("min") {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(self.peek()),
+                            expected: "`min <float>` after the compared values".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                self.bump(); // min
+                let (min, min_span) = self.expect_float_literal("a similarity threshold 0..=1")?;
+                if !(0.0..=1.0).contains(&min) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("min {min}"),
+                            expected: "a similarity threshold between 0.0 and 1.0".into(),
+                        },
+                        span: min_span,
+                    });
+                }
+                EvalAssert::Similar {
+                    expr,
+                    expected,
+                    min,
+                    span: start.merge(min_span),
+                }
+            }
+            TokKind::Ident(keyword) if keyword == "judged" => {
+                self.bump();
+                let expr = self.parse_expr()?;
+                self.expect(TokKind::Comma, "`,` before the judge criteria")?;
+                let criteria = match self.peek().clone() {
+                    TokKind::StringLit(s) => {
+                        self.bump();
+                        s
+                    }
+                    other => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(&other),
+                                expected: "a criteria string for the judge".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                };
+                if !self.peek_ident_is("min") {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(self.peek()),
+                            expected: "`min <float>` after the criteria".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                self.bump(); // min
+                let (min, min_span) = self.expect_float_literal("a judge threshold 0..=1")?;
+                if !(0.0..=1.0).contains(&min) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("min {min}"),
+                            expected: "a judge threshold between 0.0 and 1.0".into(),
+                        },
+                        span: min_span,
+                    });
+                }
+                EvalAssert::Judged {
+                    expr,
+                    criteria,
+                    min,
+                    span: start.merge(min_span),
+                }
+            }
             TokKind::Ident(keyword) if keyword == "approved" => {
                 self.bump();
                 let (label, span) = self.expect_ident()?;

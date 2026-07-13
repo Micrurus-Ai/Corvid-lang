@@ -159,6 +159,25 @@ documents exactly which sampling produced the recorded response.
 Ranges are compile-checked: temperature 0..=2, top_p 0..=1,
 max_tokens a positive integer.
 
+## Structured-output repair
+
+`with repair N` turns schema violations into bounded self-repair:
+when a typed prompt's response fails decode, the runtime re-asks —
+appending the failed response and the exact validation error — up
+to N extra attempts. Every attempt is a fully traced LLM call, so
+a replayed run reproduces the exact repair sequence; failed
+attempts still cost, and the accumulated cost lands on the final
+result, so `@budget` sees the truth:
+
+```corvid-fragment
+prompt classify(text: String) -> Verdict uses llm_call:
+    with repair 2
+    "Classify {text}"
+```
+
+If every attempt fails, the ORIGINAL typed decode error surfaces —
+repair never converts a hard failure into a silent wrong answer.
+
 ## Provider routing
 
 Which LLM serves the prompt is decided by the typed model-routing

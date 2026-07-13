@@ -479,17 +479,82 @@ impl<'ir> Interpreter<'ir> {
             }
         }
 
-        self.decode_prompt_response(
+        let first = self.decode_prompt_response(
             prompt,
             callee_name,
             arg_values,
             rendered,
             &actual_model,
-            resp.value,
+            resp.value.clone(),
             resp.usage,
             resp.confidence,
             resp.calibration.map(|c| c.actual_correct),
             span,
-        )
+        );
+
+        // Structured-output auto-repair (slice 46h): on a typed
+        // decode failure, re-ask with the schema-violation feedback
+        // appended — bounded by `with repair N`. Every attempt is a
+        // fully traced LLM call (replay reproduces the sequence),
+        // and failed attempts still cost: their estimated cost
+        // accumulates onto the final result.
+        let (mut last_err, mut wasted_cost) = match first {
+            Ok(result) => return Ok(result),
+            Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+                let wasted = self.prompt_call_cost(prompt, &actual_model, rendered, resp.usage);
+                (e, wasted)
+            }
+            Err(e) => return Err(e),
+        };
+        let attempts = prompt.repair_attempts.unwrap_or(0);
+        let mut failed_value = resp.value;
+        for _ in 0..attempts {
+            let InterpErrorKind::Marshal(feedback) = &last_err.kind else {
+                return Err(last_err);
+            };
+            let retry_rendered = format!(
+                "{rendered}\n\nYour previous response was:\n{}\n\nIt failed schema validation: {feedback}\nRespond again, matching the required schema exactly.",
+                failed_value
+            );
+            let retry_req = LlmRequest {
+                prompt: callee_name.to_string(),
+                model: actual_model.clone(),
+                rendered: retry_rendered.clone(),
+                args: arg_values.iter().map(value_to_json).collect(),
+                output_schema: Some(crate::schema::schema_for(result_ty, &self.types_by_id)),
+                sampling: self.resolve_sampling(prompt, &actual_model),
+                messages: Vec::new(),
+            };
+            let retry_resp = self
+                .runtime
+                .call_llm_cacheable(retry_req, false)
+                .await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+            match self.decode_prompt_response(
+                prompt,
+                callee_name,
+                arg_values,
+                &retry_rendered,
+                &actual_model,
+                retry_resp.value.clone(),
+                retry_resp.usage,
+                retry_resp.confidence,
+                retry_resp.calibration.map(|c| c.actual_correct),
+                span,
+            ) {
+                Ok(mut result) => {
+                    result.cost += wasted_cost;
+                    return Ok(result);
+                }
+                Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+                    wasted_cost +=
+                        self.prompt_call_cost(prompt, &actual_model, &retry_rendered, retry_resp.usage);
+                    failed_value = retry_resp.value;
+                    last_err = e;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err)
     }
 }

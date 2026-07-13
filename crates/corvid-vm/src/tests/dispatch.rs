@@ -2143,3 +2143,109 @@ async fn span_is_preserved_in_errors() {
     let err = run_agent(&ir, "bad", vec![], &rt).await.unwrap_err();
     assert_ne!(err.span, Span::new(0, 0));
 }
+
+/// Slice 46h: an adapter whose FIRST response violates the schema
+/// and whose second matches — proving the `with repair N` re-ask.
+struct FlakyStructuredAdapter {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl corvid_runtime::LlmAdapter for FlakyStructuredAdapter {
+    fn name(&self) -> &str {
+        "flaky"
+    }
+    fn handles(&self, _model: &str) -> bool {
+        true
+    }
+    fn call<'a>(
+        &'a self,
+        _req: &'a corvid_runtime::llm::LlmRequestRef<'a>,
+    ) -> futures::future::BoxFuture<'a, Result<corvid_runtime::llm::LlmResponse, corvid_runtime::errors::RuntimeError>>
+    {
+        Box::pin(async move {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let value = if n == 0 {
+                // Wrong shape: `ok` is a string, not a bool.
+                json!({"ok": "yes", "reason": "first"})
+            } else {
+                json!({"ok": true, "reason": "repaired"})
+            };
+            Ok(corvid_runtime::llm::LlmResponse::new(
+                value,
+                corvid_runtime::TokenUsage::default(),
+            ))
+        })
+    }
+}
+
+#[tokio::test]
+async fn repair_reasks_on_schema_violation() {
+    let src = "public effect llm_call:
+    cost: $0.01
+    reversible: true
+
+type Verdict:
+    ok: Bool
+    reason: String
+
+prompt classify(text: String) -> Verdict uses llm_call:
+    with repair 2
+    \"Classify {text}\"
+
+agent main(text: String) -> String:
+    v = classify(text)
+    return v.reason
+";
+    let ir = ir_of(src);
+    let rt = Runtime::builder()
+        .llm(Arc::new(FlakyStructuredAdapter {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }))
+        .default_model("flaky-1")
+        .build();
+    let out = run_agent(&ir, "main", vec![Value::String(Arc::from("x"))], &rt)
+        .await
+        .expect("repair must recover");
+    let Value::String(s) = out else {
+        panic!("expected String, got {out:?}");
+    };
+    assert_eq!(&*s, "repaired");
+}
+
+#[tokio::test]
+async fn repair_exhausts_and_surfaces_the_decode_error() {
+    // Zero repair attempts: the schema violation surfaces as the
+    // original typed Marshal error.
+    let src = "public effect llm_call:
+    cost: $0.01
+    reversible: true
+
+type Verdict:
+    ok: Bool
+    reason: String
+
+prompt classify(text: String) -> Verdict uses llm_call:
+    \"Classify {text}\"
+
+agent main(text: String) -> String:
+    v = classify(text)
+    return v.reason
+";
+    let ir = ir_of(src);
+    let rt = Runtime::builder()
+        .llm(Arc::new(MockAdapter::new("mock-1").reply(
+            "classify",
+            json!({"ok": "yes", "reason": "wrong shape"}),
+        )))
+        .default_model("mock-1")
+        .build();
+    let err = run_agent(&ir, "main", vec![Value::String(Arc::from("x"))], &rt)
+        .await
+        .expect_err("must fail without repair");
+    assert!(
+        err.to_string().contains("classify"),
+        "error should name the prompt: {err}"
+    );
+}

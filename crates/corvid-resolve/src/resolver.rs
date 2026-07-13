@@ -719,6 +719,11 @@ impl Resolver {
             EvalAssert::Value { expr, .. } | EvalAssert::Snapshot { expr, .. } => {
                 self.resolve_expr(expr)
             }
+            EvalAssert::Similar { expr, expected, .. } => {
+                self.resolve_expr(expr);
+                self.resolve_expr(expected);
+            }
+            EvalAssert::Judged { expr, .. } => self.resolve_expr(expr),
             EvalAssert::Called { tool, .. } => self.resolve_ident(tool),
             EvalAssert::Approved { .. } => {}
             EvalAssert::Cost { .. } => {}

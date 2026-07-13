@@ -92,6 +92,24 @@ corvid eval
 corvid eval --swap-model <model>   # diff behavior against the baseline
 ```
 
+## Quality assertions
+
+Two assertion forms for prompt-quality regressions (slice 46h):
+
+```corvid-fragment
+eval description_quality:
+    d = describe()
+    assert similar d, "an AI-native language with typed effects" min 0.7
+    assert judged d, "is accurate and mentions the language name" min 0.8
+```
+
+`assert similar` is a deterministic word-set similarity — zero LLM
+cost, the cheap regression gate. `assert judged` sends the value
+and your criteria to an LLM judge scoring 0..1; the judge call
+flows through the normal traced, cost-accounted LLM path, so eval
+`--max-spend` sees it and failures print the score. Both take a
+`min` threshold in 0..=1, compile-checked at parse.
+
 ## Snapshots
 
 ```corvid

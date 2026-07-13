@@ -173,8 +173,13 @@ fn collect_assert_deps(
 ) {
     match assertion {
         corvid_ast::EvalAssert::Value { expr, .. }
-        | corvid_ast::EvalAssert::Snapshot { expr, .. } => {
+        | corvid_ast::EvalAssert::Snapshot { expr, .. }
+        | corvid_ast::EvalAssert::Judged { expr, .. } => {
             collect_expr_deps(expr, resolved, deps);
+        }
+        corvid_ast::EvalAssert::Similar { expr, expected, .. } => {
+            collect_expr_deps(expr, resolved, deps);
+            collect_expr_deps(expected, resolved, deps);
         }
         corvid_ast::EvalAssert::Called { tool, .. } => {
             if let Some(Binding::Decl(id)) = resolved.bindings.get(&tool.span) {

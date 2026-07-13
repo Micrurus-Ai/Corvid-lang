@@ -419,6 +419,28 @@ impl<'a> Lowerer<'a> {
                 label: label.name.clone(),
                 span: *span,
             },
+            EvalAssert::Similar {
+                expr,
+                expected,
+                min,
+                span,
+            } => IrEvalAssert::Similar {
+                expr: self.lower_expr(expr),
+                expected: self.lower_expr(expected),
+                min: *min,
+                span: *span,
+            },
+            EvalAssert::Judged {
+                expr,
+                criteria,
+                min,
+                span,
+            } => IrEvalAssert::Judged {
+                expr: self.lower_expr(expr),
+                criteria: criteria.clone(),
+                min: *min,
+                span: *span,
+            },
             EvalAssert::Cost { op, bound, span } => IrEvalAssert::Cost {
                 op: *op,
                 bound: *bound,
@@ -664,6 +686,7 @@ impl<'a> Lowerer<'a> {
             min_confidence: p.stream.min_confidence,
             temperature: p.stream.temperature,
             top_p: p.stream.top_p,
+            repair_attempts: p.stream.repair,
             max_tokens: p.stream.max_tokens,
             backpressure: p.stream.backpressure.clone(),
             escalate_to: p

@@ -82,9 +82,11 @@ fn render_trace_summary(report: &CorvidEvalReport, out: &mut String) {
     }
     out.push('\n');
     out.push_str(&format!(
-        "  values: {}/{} passed; process: {}/{} passed; approvals: {}/{} passed\n",
+        "  values: {}/{} passed; quality: {}/{} passed; process: {}/{} passed; approvals: {}/{} passed\n",
         trace.value_assertions_passed,
         trace.value_assertions_total,
+        trace.quality_assertions_passed,
+        trace.quality_assertions_total,
         trace.process_assertions_passed,
         trace.process_assertions_total,
         trace.approval_assertions_passed,
