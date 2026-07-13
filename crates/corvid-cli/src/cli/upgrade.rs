@@ -35,6 +35,16 @@ pub enum UpgradeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Refresh the project's vendored `src/std/` from the current
+    /// install's stdlib (slice 47b). Projects vendored from an
+    /// older install pick up new modules (std/json, std/time,
+    /// std/mcp, ...) without manual copying. Local edits under
+    /// `src/std/` are overwritten for modules that changed
+    /// upstream — the vendored stdlib is not a user-edit surface.
+    RefreshStd {
+        /// Project root (the directory containing `src/`).
+        path: PathBuf,
+    },
     /// Audit source for patterns that will need attention at the
     /// next strict-typecheck or feature-boundary upgrade — slice
     /// 33Q13e (third and last of the remaining AI helpers under

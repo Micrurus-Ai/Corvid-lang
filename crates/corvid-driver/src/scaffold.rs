@@ -160,16 +160,84 @@ pub fn find_std_source() -> Option<PathBuf> {
 /// in this file's `#[cfg(test)] mod tests` block catches the
 /// regression by running the full scaffold + import + check
 /// round-trip.
-pub fn vendor_std(project_root: &Path) -> anyhow::Result<Option<PathBuf>> {
+pub fn vendor_std(project_root: &Path) -> anyhow::Result<VendorOutcome> {
     let dst = project_root.join("src").join("std");
     if dst.exists() {
-        return Ok(None);
+        return Ok(VendorOutcome::AlreadyPresent);
     }
     let Some(src) = find_std_source() else {
-        return Ok(None);
+        // Slice 47b: this used to be a SILENT no-op — the scaffold
+        // printed nothing and the starter project's stdlib import
+        // failed on first run with no hint why. The caller now
+        // prints a loud warning with the remediation.
+        return Ok(VendorOutcome::NoSourceFound);
     };
     vendor_std_from(&src, &dst)?;
-    Ok(Some(src))
+    Ok(VendorOutcome::Vendored(src))
+}
+
+/// What [`vendor_std`] did (slice 47b — the silent no-op became a
+/// distinguishable outcome so callers can warn loudly).
+#[derive(Debug)]
+pub enum VendorOutcome {
+    /// Copied the stdlib from this source directory.
+    Vendored(PathBuf),
+    /// `src/std/` already exists — nothing to do.
+    AlreadyPresent,
+    /// NO stdlib source was found (no `$CORVID_HOME/std`, no
+    /// `<exe>/../std`). The project's stdlib imports will not
+    /// compile until the install is fixed.
+    NoSourceFound,
+}
+
+/// Slice 47b: refresh a project's vendored `src/std/` from the
+/// install's stdlib — the migration path for projects vendored
+/// from an older install (`corvid upgrade refresh-std`). Local
+/// edits to `src/std/` are OVERWRITTEN for modules that changed
+/// upstream (the vendored stdlib is not a user-edit surface; git
+/// history preserves anything lost).
+pub fn refresh_vendored_std(project_root: &Path) -> anyhow::Result<StdRefreshReport> {
+    let Some(src) = find_std_source() else {
+        anyhow::bail!(
+            "no stdlib source found — set CORVID_HOME to your Corvid \
+             install directory (the one containing `std/`) or reinstall"
+        );
+    };
+    let dst = project_root.join("src").join("std");
+    std::fs::create_dir_all(&dst)?;
+    let mut report = StdRefreshReport::default();
+    for entry in std::fs::read_dir(&src)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let from = entry.path();
+        let to = dst.join(&name);
+        let new_bytes = std::fs::read(&from)?;
+        match std::fs::read(&to) {
+            Ok(old_bytes) if old_bytes == new_bytes => report.unchanged.push(name),
+            Ok(_) => {
+                std::fs::write(&to, &new_bytes)?;
+                report.updated.push(name);
+            }
+            Err(_) => {
+                std::fs::write(&to, &new_bytes)?;
+                report.added.push(name);
+            }
+        }
+    }
+    report.source = src;
+    Ok(report)
+}
+
+/// What [`refresh_vendored_std`] changed.
+#[derive(Debug, Default)]
+pub struct StdRefreshReport {
+    pub source: PathBuf,
+    pub added: Vec<String>,
+    pub updated: Vec<String>,
+    pub unchanged: Vec<String>,
 }
 
 /// Recursive directory copy used by [`vendor_std`]. Exposed separately so

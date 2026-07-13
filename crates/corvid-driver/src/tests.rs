@@ -1082,6 +1082,45 @@ agent main() -> Bool:
         );
     }
 
+    /// Slice 47b: refresh reports added / updated / unchanged
+    /// precisely, and actually rewrites stale modules.
+    #[test]
+    fn refresh_vendored_std_reports_and_rewrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A fake INSTALL std with two modules.
+        let install_std = tmp.path().join("install").join("std");
+        std::fs::create_dir_all(&install_std).unwrap();
+        std::fs::write(install_std.join("effects.cor"), b"# v2 effects
+").unwrap();
+        std::fs::write(install_std.join("time.cor"), b"# v1 time
+").unwrap();
+        // A project vendored from an OLDER install: stale effects,
+        // missing time.
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("src").join("std")).unwrap();
+        std::fs::write(
+            proj.join("src").join("std").join("effects.cor"),
+            b"# v1 effects
+",
+        )
+        .unwrap();
+
+        // Drive through CORVID_HOME (the documented source hook).
+        // SAFETY-ish: env vars are process-global; this test sets a
+        // unique value and the assertion reads back through the
+        // same code path immediately.
+        std::env::set_var("CORVID_HOME", tmp.path().join("install"));
+        let report = crate::refresh_vendored_std(&proj).unwrap();
+        std::env::remove_var("CORVID_HOME");
+
+        assert_eq!(report.added, vec!["time.cor".to_string()]);
+        assert_eq!(report.updated, vec!["effects.cor".to_string()]);
+        let refreshed =
+            std::fs::read(proj.join("src").join("std").join("effects.cor")).unwrap();
+        assert_eq!(refreshed, b"# v2 effects
+");
+    }
+
     /// Slice 47a: `--with-python-tools` is the OPT-IN home for the
     /// Python tool template.
     #[test]
@@ -1170,11 +1209,10 @@ agent main() -> Bool:
         )
         .unwrap();
 
-        // No CORVID_HOME, no exe-adjacent std → vendor_std returns None
-        // anyway, but the dst-exists guard is the primary check we care
+        // The dst-exists guard is the primary check we care
         // about: it must never overwrite a user's existing std/.
         let result = vendor_std(&proj).unwrap();
-        assert!(result.is_none());
+        assert!(matches!(result, crate::VendorOutcome::AlreadyPresent));
         assert_eq!(
             std::fs::read(proj.join("src").join("std").join("preexisting.cor")).unwrap(),
             b"keep\n"

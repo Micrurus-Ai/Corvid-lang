@@ -1466,6 +1466,23 @@ Next per agreed order: 47b-std-vendoring-hardening.
 
 ---
 
+## 2026-07-13 - 47b closed: vendoring is loud and refreshable
+
+The silent no-op became a VendorOutcome: `corvid new` now warns
+loudly (with the exact fix) when no stdlib source exists, instead
+of scaffolding a project whose first import mysteriously fails.
+`corvid upgrade refresh-std` closes the staleness gap 47a's probe
+hit live: one command brings a project vendored from an older
+install up to the current module set, with a precise
+added/updated/unchanged report.
+
+Validation: 199 driver + workspace check clean; corpus verify
+exits 1.
+
+Next per agreed order: 47h-stdlib-result-envelopes.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

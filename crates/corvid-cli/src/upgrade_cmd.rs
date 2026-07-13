@@ -241,6 +241,34 @@ fn render_claim_regressions(regressions: &[ClaimRegression]) {
     );
 }
 
+/// Slice 47b: refresh the vendored `src/std/` from the current
+/// install's stdlib and report what changed.
+pub fn run_refresh_std(root: &Path) -> Result<u8> {
+    let report = corvid_driver::refresh_vendored_std(root)?;
+    println!("corvid upgrade refresh-std");
+    println!("source: {}", report.source.display());
+    if report.added.is_empty() && report.updated.is_empty() {
+        println!(
+            "vendored stdlib is up to date ({} modules unchanged)",
+            report.unchanged.len()
+        );
+        return Ok(0);
+    }
+    for name in &report.added {
+        println!("  added   src/std/{name}");
+    }
+    for name in &report.updated {
+        println!("  updated src/std/{name}");
+    }
+    println!(
+        "{} added, {} updated, {} unchanged",
+        report.added.len(),
+        report.updated.len(),
+        report.unchanged.len()
+    );
+    Ok(0)
+}
+
 pub fn run_apply(root: &Path, json: bool) -> Result<u8> {
     let mut findings = Vec::new();
     for path in corvid_sources(root)? {
