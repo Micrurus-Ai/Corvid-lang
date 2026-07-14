@@ -205,6 +205,24 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **What it is**: `rag_ingest` / `rag_search` — retrieval with the moat attached: index paths confined by the `[io] root` policy, failures as typed `Err` values, provenance keys on every retrieved chunk, trace/replay substitution (the embedder never fires on replay), and honest lexical degradation when no embedder is configured.
 - **Non-scope**: loaders on the tool surface, reranking, effect-level `Grounded<T>` wrapping (waits for cross-module provenance composition, post-v1.0).
 
+### Replay-Safe Secret Access
+
+- **Status**: shipped (slice 48a, 2026-07-14)
+- **Run it**: `corvid tour --topic replay-safe-secrets`
+- **Tests**: `crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs` (value-to-program, trace-redaction, missing-is-modeled) + `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment`
+- **Spec**: `docs/reference/stdlib/secrets.md`
+- **What it is**: `secret_read` with the trace problem solved instead of ignored — the program gets the real value, the recorded ToolResult carries a redacted copy (`secrets.trace_never_carries_value`, RuntimeChecked), and replay re-reads the live environment instead of substituting, so rotated credentials diverge honestly.
+- **Non-scope**: the residual forwarding channel (a secret passed into another tool's args is recorded by that tool's events) — the structural `SecretHandle` taint is the tracked post-v1.0 deepening.
+
+### Provenance-Keyed Cache
+
+- **Status**: shipped (slice 48a, 2026-07-14)
+- **Run it**: `corvid tour --topic provenance-cache`
+- **Tests**: `crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs` (roundtrip, invalidation-key eviction, provenance eviction across namespaces, one-entry-per-address overwrite)
+- **Spec**: `docs/reference/stdlib/cache.md`
+- **What it is**: an in-run cache whose eviction composes with provenance — entries carry the provenance key of their source, and one `cache_invalidate_provenance` call drops everything derived from a changed source. Misses are modeled Ok states; all operations record/replay-substitute deterministically.
+- **Non-scope**: in-memory per-run scope (durable caching is a different feature); String values in v1.
+
 ### MCP With Governance
 
 | | |

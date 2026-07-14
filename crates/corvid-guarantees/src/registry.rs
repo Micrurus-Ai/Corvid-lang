@@ -215,6 +215,22 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     // — they're part of the broader replay.deterministic_pure_path
     // proof matrix, not a new io-specific guarantee.
     Guarantee {
+        id: "secrets.trace_never_carries_value",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "The executing `secret_read` tool returns the real secret value to the program, but the recorded ToolResult trace event carries a redacted copy (`<redacted:XY>` marker, `value_redacted: true`) — traces never persist secret values. Substitute-mode replay RE-READS the live environment instead of substituting (there is nothing usable to substitute), so a changed environment diverges honestly. Residual channel stated as explicit non-scope: a secret the program forwards into another tool's arguments is recorded by that tool's own events; the structural taint fix (an opaque SecretHandle value) is the tracked post-v1.0 deepening.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs::secret_read_returns_real_value_to_the_program",
+            "crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs::secret_value_never_lands_in_the_trace",
+        ],
+    },
+    Guarantee {
         id: "io_source.fs_path_confinement",
         kind: GuaranteeKind::EffectRow,
         class: GuaranteeClass::RuntimeChecked,

@@ -1,12 +1,14 @@
-# Standard cache metadata envelopes.
+# Standard cache metadata envelopes + the executing cache surface.
 #
-# Disposition: CONTRACT-ONLY — non-executing today. The runtime
-# ships a real cache (corvid-runtime `cache::CacheRuntime`:
-# put/get plus invalidation by invalidation key or provenance
-# key), but no stdlib tool reaches it yet; reach it through a
-# host tool wrapper with these envelopes as the typed boundary.
-# An executing cache surface (provenance-keyed caching of
-# expensive results) is a tracked roadmap candidate.
+# Disposition: EXECUTING. Four tools drive the runtime's in-memory
+# `cache::CacheRuntime` (shared across the run): `cache_put` /
+# `cache_get` keyed on (namespace, subject), plus invalidation by
+# invalidation key or by provenance key — cache eviction that
+# composes with Corvid's provenance story: invalidate everything
+# derived from a source the moment the source changes. Values are
+# Strings in v1 (JSON-encode richer shapes via std/json). All four
+# tools record and replay-substitute as ordinary tool events, so
+# replayed runs see identical cache behavior.
 
 import "./effects" use EffectEnvelope, effect_envelope
 
@@ -25,6 +27,26 @@ public type CacheEntryEnvelope:
     replay_safe: Bool
     invalidation_key: String
     effect_meta: EffectEnvelope
+
+# Result of a lookup: `hit` is a modeled state (a miss is Ok, not
+# an error), `value` is "" on a miss.
+public type CacheLookupEnvelope:
+    namespace: String
+    subject: String
+    hit: Bool
+    value: String
+    effect_meta: EffectEnvelope
+
+public effect cache_read:
+    reversible: true
+
+public effect cache_write:
+    reversible: true
+
+public tool cache_put(namespace: String, subject: String, value: String, invalidation_key: String, provenance_key: String) -> Result<CacheEntryEnvelope, String> uses cache_write
+public tool cache_get(namespace: String, subject: String) -> Result<CacheLookupEnvelope, String> uses cache_read
+public tool cache_invalidate(invalidation_key: String) -> Result<Int, String> uses cache_write
+public tool cache_invalidate_provenance(provenance_key: String) -> Result<Int, String> uses cache_write
 
 public agent cache_key(namespace: String, subject: String, fingerprint: String, effect_key: String, provenance_key: String) -> CacheKeyEnvelope:
     return CacheKeyEnvelope(namespace, subject, fingerprint, effect_key, provenance_key, effect_envelope("std.cache.key", provenance_key, "", fingerprint, "std.cache.key"))

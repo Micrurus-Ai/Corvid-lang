@@ -51,8 +51,18 @@ impl Runtime {
                 args: args.clone(),
             });
         }
-        let result = if let Some(replay) = self.replay_source()? {
+        let result = if is_stdlib_secret_tool(name) {
+            // Secrets RE-READ on replay instead of substituting: the
+            // trace deliberately never stores the value (the recorded
+            // ToolResult below is redacted), so there is nothing to
+            // substitute — the same read-passthrough rule db_query
+            // follows. A changed environment at replay time diverges
+            // honestly.
+            self.dispatch_stdlib_secret_tool(&args)?
+        } else if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)?
+        } else if is_stdlib_cache_tool(name) {
+            self.dispatch_stdlib_cache_tool(name, &args)?
         } else if is_stdlib_io_tool(name) {
             self.dispatch_stdlib_io_tool(name, args.clone()).await?
         } else if is_stdlib_http_tool(name) {
@@ -69,14 +79,145 @@ impl Runtime {
             self.tools.call(name, args.clone()).await?
         };
         if self.tracer.is_enabled() {
+            // Traces must NEVER persist secret values: the recorded
+            // copy of a secret_read result carries the redacted
+            // marker in place of the value. The caller still receives
+            // the real result.
+            let recorded = if is_stdlib_secret_tool(name) {
+                redact_secret_result_for_trace(&result)
+            } else {
+                result.clone()
+            };
             self.tracer.emit(TraceEvent::ToolResult {
                 ts_ms: now_ms(),
                 run_id: self.tracer.run_id().to_string(),
                 tool: name.to_string(),
-                result: result.clone(),
+                result: recorded,
             });
         }
         Ok(result)
+    }
+
+    /// Slice 48a — executing secrets surface. Recoverable failures
+    /// are Err VALUES; a missing secret is Ok with `present: false`.
+    fn dispatch_stdlib_secret_tool(
+        &self,
+        args: &[serde_json::Value],
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let name_arg = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
+            RuntimeError::ToolFailed {
+                tool: "secret_read".to_string(),
+                message: "expected one String argument (secret name)".to_string(),
+            }
+        })?;
+        match self.secrets.read_env(name_arg) {
+            Ok(read) => Ok(stdlib_result_ok(serde_json::json!({
+                "name": read.name,
+                "present": read.present,
+                "value": read.value.clone().unwrap_or_default(),
+                "value_redacted": false,
+                "effect_meta": stdlib_secrets_effect_envelope(),
+            }))),
+            Err(err) => Ok(stdlib_result_err(err)),
+        }
+    }
+
+    /// Slice 48a — executing cache surface over the shared in-memory
+    /// `CacheRuntime`. (namespace, subject) is the address; a miss is
+    /// Ok with `hit: false`.
+    fn dispatch_stdlib_cache_tool(
+        &self,
+        name: &str,
+        args: &[serde_json::Value],
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let str_arg = |index: usize, what: &str| -> Result<String, RuntimeError> {
+            args.get(index)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| RuntimeError::ToolFailed {
+                    tool: name.to_string(),
+                    message: format!("expected String argument {} ({what})", index + 1),
+                })
+        };
+        let mut cache = self.cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match name {
+            "cache_put" => {
+                let namespace = str_arg(0, "namespace")?;
+                let subject = str_arg(1, "subject")?;
+                let value = str_arg(2, "value")?;
+                let invalidation_key = str_arg(3, "invalidation_key")?;
+                let provenance_key = str_arg(4, "provenance_key")?;
+                let key = match crate::cache::build_cache_key(crate::cache::CacheKeyInput {
+                    namespace: namespace.clone(),
+                    subject: subject.clone(),
+                    model: None,
+                    effect_key: None,
+                    provenance_key: (!provenance_key.is_empty()).then_some(provenance_key.clone()),
+                    version: None,
+                    args: serde_json::Value::Null,
+                }) {
+                    Ok(key) => key,
+                    Err(err) => return Ok(stdlib_result_err(err)),
+                };
+                // One entry per (namespace, subject): evict first so
+                // writer-side key metadata changes never accumulate
+                // ambiguous duplicates.
+                cache.evict_namespace_subject(&namespace, &subject);
+                let entry = cache.put(
+                    key,
+                    serde_json::Value::String(value),
+                    true,
+                    (!invalidation_key.is_empty()).then_some(invalidation_key.clone()),
+                );
+                Ok(stdlib_result_ok(serde_json::json!({
+                    "namespace": entry.metadata.key.namespace,
+                    "subject": entry.metadata.key.subject,
+                    "fingerprint": entry.metadata.key.fingerprint,
+                    "replay_safe": entry.metadata.replay_safe,
+                    "invalidation_key": entry.metadata.invalidation_key.clone().unwrap_or_default(),
+                    "effect_meta": stdlib_cache_effect_envelope(
+                        "std.cache.entry",
+                        &provenance_key,
+                        &entry.metadata.key.fingerprint,
+                    ),
+                })))
+            }
+            "cache_get" => {
+                let namespace = str_arg(0, "namespace")?;
+                let subject = str_arg(1, "subject")?;
+                let (hit, value, fingerprint) =
+                    match cache.get_by_namespace_subject(&namespace, &subject) {
+                        Some(entry) => (
+                            true,
+                            entry.value.as_str().unwrap_or_default().to_string(),
+                            entry.metadata.key.fingerprint.clone(),
+                        ),
+                        None => (false, String::new(), String::new()),
+                    };
+                Ok(stdlib_result_ok(serde_json::json!({
+                    "namespace": namespace,
+                    "subject": subject,
+                    "hit": hit,
+                    "value": value,
+                    "effect_meta": stdlib_cache_effect_envelope("std.cache.get", "", &fingerprint),
+                })))
+            }
+            "cache_invalidate" => {
+                let invalidation_key = str_arg(0, "invalidation_key")?;
+                let evicted = cache.invalidate_invalidation_key(&invalidation_key);
+                Ok(stdlib_result_ok(serde_json::json!(evicted as i64)))
+            }
+            "cache_invalidate_provenance" => {
+                let provenance_key = str_arg(0, "provenance_key")?;
+                let evicted = cache.invalidate_provenance_key(&provenance_key);
+                Ok(stdlib_result_ok(serde_json::json!(evicted as i64)))
+            }
+            other => Err(RuntimeError::ToolFailed {
+                tool: other.to_string(),
+                message: "stdlib cache dispatch reached an unknown name — gate-keeper drift"
+                    .to_string(),
+            }),
+        }
     }
 
     /// Slice 46f: the executing MCP surface — one governed tool.
@@ -1717,6 +1858,61 @@ fn dispatch_stdlib_random_tool(
             message: "unknown stdlib random tool (gate/dispatch mismatch)".to_string(),
         }),
     }
+}
+
+/// Exact-name gate for the executing secrets surface.
+fn is_stdlib_secret_tool(name: &str) -> bool {
+    name == "secret_read"
+}
+
+/// Exact-name gate for the executing cache surface.
+fn is_stdlib_cache_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "cache_put" | "cache_get" | "cache_invalidate" | "cache_invalidate_provenance"
+    )
+}
+
+/// Produce the trace-safe copy of a secret_read result: the `value`
+/// field of an Ok envelope is replaced by the same `<redacted:..>`
+/// marker the audit metadata uses, and `value_redacted` flips to
+/// true. Err results carry no value and pass through unchanged.
+fn redact_secret_result_for_trace(result: &serde_json::Value) -> serde_json::Value {
+    let mut recorded = result.clone();
+    if let Some(ok) = recorded.get_mut("ok") {
+        if let Some(fields) = ok.as_object_mut() {
+            let redacted_marker = fields
+                .get("value")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .map(crate::secrets::redact_secret_value);
+            if let Some(marker) = redacted_marker {
+                fields.insert("value".to_string(), serde_json::json!(marker));
+            }
+            fields.insert("value_redacted".to_string(), serde_json::json!(true));
+        }
+    }
+    recorded
+}
+
+fn stdlib_secrets_effect_envelope() -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": "std.secrets.read",
+        "provenance_key": "",
+        "approval_label": "secrets.read",
+        "cache_key": "",
+        "replay_key": "std.secrets.read",
+    })
+}
+
+fn stdlib_cache_effect_envelope(tag: &str, provenance_key: &str, cache_key: &str) -> serde_json::Value {
+    serde_json::json!({
+        "effect_name": tag,
+        "provenance_key": provenance_key,
+        "approval_label": "",
+        "cache_key": cache_key,
+        "replay_key": tag,
+    })
 }
 
 fn stdlib_io_effect_envelope(

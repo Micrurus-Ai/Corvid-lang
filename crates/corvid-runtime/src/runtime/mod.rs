@@ -104,6 +104,10 @@ pub struct Runtime {
     /// the same write-quarantine flag.
     pub(super) db_registry: crate::db::DbHandleRegistry,
     secrets: SecretRuntime,
+    /// In-memory cache shared across Runtime clones (worker pools,
+    /// per-job tracer swaps). The stdlib cache tools lock it per
+    /// operation.
+    cache: std::sync::Arc<std::sync::Mutex<crate::cache::CacheRuntime>>,
     queue: QueueRuntime,
 }
 

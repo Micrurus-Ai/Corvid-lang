@@ -472,6 +472,44 @@ agent load_summary(date: String) -> Result<String, String>:
 "#,
     },
     TourTopic {
+        name: "replay-safe-secrets",
+        title: "Replay-Safe Secret Access",
+        category: "Executing I/O",
+        pitch: "secret_read is secret access with the trace problem actually solved: the program receives the real value, but the recorded ToolResult carries a redacted copy (traces NEVER persist secret values — a RuntimeChecked guarantee), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is Ok with present: false — absence is a modeled state, not a crash. The residual channel is stated, not hidden: forwarding a secret into another tool's arguments records it there; the structural SecretHandle taint is the tracked deepening.",
+        spec: "docs/reference/stdlib/secrets.md",
+        roadmap: "Slice 48a executing-secrets-and-cache",
+        test: "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment",
+        non_scope: "Env-backed reads only; the opaque SecretHandle taint (a value that never serializes, accepted by consuming surfaces) is post-v1.0.",
+        source: r#"import "./std/secrets" use secret_read, SecretReadEnvelope
+
+agent api_key() -> Result<String, String>:
+    key: SecretReadEnvelope = secret_read("ANTHROPIC_API_KEY")?
+    if not key.present:
+        return Err("set ANTHROPIC_API_KEY")
+    return Ok(key.value)
+"#,
+    },
+    TourTopic {
+        name: "provenance-cache",
+        title: "Provenance-Keyed Cache",
+        category: "Executing I/O",
+        pitch: "cache_put / cache_get / cache_invalidate / cache_invalidate_provenance — an in-run cache whose eviction composes with Corvid's provenance story: every entry can carry the provenance key of the source it was derived from, and one cache_invalidate_provenance call drops everything computed from a source the moment that source changes, across namespaces. Addressed by (namespace, subject), one entry per address, misses are Ok values with hit: false. All four tools record and replay-substitute as ordinary tool events, so replayed runs observe identical cache behavior.",
+        spec: "docs/reference/stdlib/cache.md",
+        roadmap: "Slice 48a executing-secrets-and-cache",
+        test: "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs",
+        non_scope: "In-memory, per-run scope; durable cross-process caching is a different feature. String values in v1 (JSON-encode richer shapes via std/json).",
+        source: r#"import "./std/cache" use cache_put, cache_get, CacheLookupEnvelope
+
+agent cached_summary(doc_id: String, body: String) -> Result<String, String>:
+    found: CacheLookupEnvelope = cache_get("summaries", doc_id)?
+    if found.hit:
+        return Ok(found.value)
+    summary = body.substring(0, 80)
+    cache_put("summaries", doc_id, summary, "", "doc:" + doc_id)?
+    return Ok(summary)
+"#,
+    },
+    TourTopic {
         name: "governed-retrieval",
         title: "Governed Retrieval",
         category: "Executing I/O",

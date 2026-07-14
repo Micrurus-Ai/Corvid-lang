@@ -444,6 +444,9 @@ impl RuntimeBuilder {
             mcp: self.mcp,
             db_registry,
             secrets: SecretRuntime::new(),
+            cache: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::cache::CacheRuntime::new(),
+            )),
             queue: QueueRuntime::new(),
         }
     }

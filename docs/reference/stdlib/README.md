@@ -36,7 +36,8 @@ things, states which in its file header, and appears in this table:
 | `std/auth` | Contract-only | `auth::SessionAuthRuntime` + `corvid auth ...` |
 | `std/jobs` | Contract-only | `queue::DurableQueueRuntime` + `corvid jobs ...`; scheduler runner rides the roadmap |
 | `std/observe` | Contract (event shape) | describes the `std.observe.summary` host-event payload + `corvid observe ...` |
-| `std/secrets` | Contract-only (designed) | `secrets::SecretRuntime`; executing reads need the replay-safe redaction design first |
+| `std/secrets` | **Executing** | `secret_read` — real value to the program, redacted trace, re-read on replay |
+| `std/cache` | **Executing** | `cache_put` / `cache_get` / `cache_invalidate` / `cache_invalidate_provenance` |
 
 `std/queue.cor` (the pre-durable in-process job vocabulary) was removed:
 `std/jobs.cor` supersedes it and no program imported it.
@@ -223,15 +224,16 @@ JSON → SQLite pipeline (no Python glue), and the v1.0 post-scope.
 
 ## `std.secrets`
 
-`std/secrets.cor` defines `SecretReadEnvelope` plus constructors for present and
-missing reads. The runtime exposes environment-backed secret reads that return
-the value to the caller but only emit redacted trace metadata:
+Executing tool:
 
-- secret name
-- whether the secret was present
-- whether the value was redacted
+- `secret_read(name) -> Result<SecretReadEnvelope, String> uses secrets_read` — executing tool
 
-Trace events never include the secret value.
+The program receives the real value; the recorded ToolResult carries a
+redacted copy (`<redacted:XY>` + `value_redacted: true`); Substitute-mode
+replay re-reads the live environment instead of substituting. Trace events
+never include the secret value (`secrets.trace_never_carries_value`,
+RuntimeChecked). A missing secret is Ok with `present: false`. See the
+[reference](./secrets.md) for the residual-channel non-scope.
 
 ## `std.observe`
 
@@ -246,12 +248,20 @@ degraded-provider counts.
 
 ## `std.cache`
 
-`std/cache.cor` defines typed cache-key and cache-entry envelopes for prompt,
-model, and tool-result caching. The runtime exposes deterministic cache-key
-construction over namespace, subject, model, arguments, effect key, provenance
-key, and version metadata. Cache-key creation emits `std.cache.key` trace events
-so cache decisions are replay-auditable without storing cached payloads in the
-metadata event.
+Executing tools:
+
+- `cache_put(namespace, subject, value, invalidation_key, provenance_key) -> Result<CacheEntryEnvelope, String> uses cache_write` — executing tool
+- `cache_get(namespace, subject) -> Result<CacheLookupEnvelope, String> uses cache_read` — executing tool
+- `cache_invalidate(invalidation_key) -> Result<Int, String> uses cache_write` — executing tool
+- `cache_invalidate_provenance(provenance_key) -> Result<Int, String> uses cache_write` — executing tool
+
+An in-memory cache shared across the run, addressed by (namespace,
+subject), with eviction by invalidation key or by provenance key — one
+call drops everything derived from a changed source. A miss is Ok with
+`hit: false`. All four tools record/replay-substitute as ordinary tool
+events. The runtime additionally exposes deterministic cache-key
+construction (`std.cache.key` events) for host-side caching. See the
+[reference](./cache.md).
 
 ## `std.jobs`
 

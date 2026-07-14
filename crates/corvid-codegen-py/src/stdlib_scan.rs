@@ -45,6 +45,13 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "json_object_set_string",
     "json_object_set_bool",
     "json_object_finish",
+    // std/secrets
+    "secret_read",
+    // std/cache
+    "cache_put",
+    "cache_get",
+    "cache_invalidate",
+    "cache_invalidate_provenance",
     // std/mcp
     "mcp_call",
     // std/rag

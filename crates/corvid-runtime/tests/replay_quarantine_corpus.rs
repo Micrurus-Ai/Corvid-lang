@@ -348,6 +348,42 @@ async fn replay_blocks_executing_io_read_tool_dispatch_without_recorded_event() 
     }
 }
 
+/// Slice 48a — `secret_read` RE-READS the environment during
+/// Substitute-mode replay instead of substituting from the trace:
+/// the recorded ToolResult is deliberately redacted, so there is
+/// nothing to substitute — the db_query read-passthrough rule. A
+/// changed environment at replay time is observed (honest
+/// divergence), and the call does NOT fail with ReplayDivergence
+/// despite the trace carrying no usable secret event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_rereads_secret_from_live_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = write_minimal_trace(dir.path());
+    std::env::set_var("CORVID_48A_REPLAY_SECRET", "value-at-replay-time");
+
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(
+            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
+        ))
+        .replay_from(&trace_path)
+        .build();
+    assert!(runtime.is_replay_mode());
+
+    let result = runtime
+        .call_tool(
+            "secret_read",
+            vec![serde_json::json!("CORVID_48A_REPLAY_SECRET")],
+        )
+        .await
+        .expect("secret_read must re-execute on replay, not diverge");
+    assert_eq!(result["tag"], "ok", "re-read must succeed; got {result}");
+    assert_eq!(
+        result["ok"]["value"], "value-at-replay-time",
+        "the replayed run must observe the LIVE environment; got {result}"
+    );
+}
+
 /// Slice 33S2b — the executing `http_post_json` tool dispatch
 /// (33S2a's interception inside `Runtime::call_tool` for any
 /// `http_*` name) is gated by the replay substitution path

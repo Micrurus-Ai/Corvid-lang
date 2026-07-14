@@ -325,6 +325,34 @@ Roadmap: [Phase 21 and Phase 22](./ROADMAP.md)
 Proof: [bundle verification tests](./crates/corvid-cli/tests/bundle_verify.rs)
 Non-scope: Receipts are evidence of observed behavior, not full formal verification of every possible run.
 
+#### Replay-Safe Secret Access
+
+`secret_read` solves the secrets-in-traces problem instead of ignoring it: the program receives the real value, the recorded trace event carries a redacted copy (`<redacted:XY>` + `value_redacted: true` — a RuntimeChecked guarantee, `secrets.trace_never_carries_value`), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is `Ok` with `present: false`.
+
+```corvid
+import "./std/secrets" use secret_read
+
+agent api_key() -> Result<String, String>:
+    key = secret_read("ANTHROPIC_API_KEY")?
+    if not key.present:
+        return Err("set ANTHROPIC_API_KEY")
+    return Ok(key.value)
+```
+
+Spec: [`std.secrets` reference](./docs/reference/stdlib/secrets.md)
+Tour: `corvid tour --topic replay-safe-secrets`
+Proof: [secrets + cache e2e tests](./crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs)
+Non-scope: forwarding a secret into another tool's arguments records it in that tool's events — the structural `SecretHandle` taint is the tracked post-v1.0 deepening.
+
+#### Provenance-Keyed Cache
+
+`cache_put` / `cache_get` / `cache_invalidate` / `cache_invalidate_provenance` — an in-run cache whose eviction composes with provenance: entries carry the provenance key of the source they were derived from, and one call drops everything computed from a changed source, across namespaces. Misses are modeled `Ok` states (`hit: false`); all four tools record and replay-substitute as ordinary tool events, so replayed runs see identical cache behavior.
+
+Spec: [`std.cache` reference](./docs/reference/stdlib/cache.md)
+Tour: `corvid tour --topic provenance-cache`
+Proof: [secrets + cache e2e tests](./crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs)
+Non-scope: in-memory, per-run scope; String values in v1.
+
 #### Governed Cron
 
 Language-level `schedule "<cron>" zone "<tz>" -> agent(args)` declarations execute under the scheduler runner: `corvid schedule run --source app.cor` registers each declaration as a durable schedule manifest and fires due jobs through the durable-jobs worker pool. Scheduled agents inherit the whole durable story — per-job tracing (JSONL traces for `@replayable` agents), retries with backoff, dead-letters, idempotent fires, DST-aware timezone handling, and missed-fire recovery policies — because scheduling rides the same queue everything else does, instead of a side mechanism with weaker guarantees.

@@ -65,6 +65,36 @@ impl CacheRuntime {
         self.entries.get(&entry_id(key))
     }
 
+    /// Lookup by (namespace, subject) alone — the identity the
+    /// stdlib tool surface exposes. Exact-key `get` requires
+    /// reconstructing the full fingerprint (model, args, provenance
+    /// key, ...), which a reader often can't; the tool surface
+    /// treats (namespace, subject) as the address and the rest of
+    /// the key as writer-side metadata. The tool surface keeps at
+    /// most one entry per address (see [`Self::evict_namespace_subject`]),
+    /// so the find is unambiguous there.
+    pub fn get_by_namespace_subject(
+        &self,
+        namespace: &str,
+        subject: &str,
+    ) -> Option<&CacheEntry> {
+        self.entries.values().find(|entry| {
+            entry.metadata.key.namespace == namespace && entry.metadata.key.subject == subject
+        })
+    }
+
+    /// Remove every entry at (namespace, subject), returning the
+    /// count. The stdlib tool surface calls this before each put so
+    /// an address holds at most one entry — two puts with different
+    /// writer-side key metadata (e.g. provenance keys) must not
+    /// accumulate ambiguous duplicates.
+    pub fn evict_namespace_subject(&mut self, namespace: &str, subject: &str) -> usize {
+        self.retain(|entry| {
+            !(entry.metadata.key.namespace == namespace
+                && entry.metadata.key.subject == subject)
+        })
+    }
+
     pub fn invalidate_invalidation_key(&mut self, invalidation_key: &str) -> usize {
         self.retain(|entry| entry.metadata.invalidation_key.as_deref() != Some(invalidation_key))
     }

@@ -1638,6 +1638,26 @@ Starting 48a.
 
 ---
 
+## 2026-07-14 - 48a closed: replay-safe secrets + provenance cache
+
+Two inventions shipped with full contracts. secret_read solves the
+secrets-in-traces problem instead of ignoring it: real value to the
+program, redacted copy in the trace (new RuntimeChecked guarantee),
+and replay re-reads the live environment — a rotated credential
+diverges honestly instead of replaying a value the trace never
+stored. The residual forwarding channel is stated in every doc
+rather than hidden; SecretHandle taint is the filed deepening. The
+cache's invalidation composes with provenance: one call drops
+everything derived from a changed source, across namespaces.
+
+Validation: runtime/driver/guarantees/codegen-py/cli suites green;
+workspace check clean; corpus verify exits 1; live probe ran the
+whole story in one program.
+
+Next per the Phase 48 queue: 48b-connector-grounded-returns-disposition.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

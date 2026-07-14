@@ -24,6 +24,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `effect_row.body_completeness` | effect_row | static | typecheck |
 | `effect_row.caller_propagation` | effect_row | out_of_scope | typecheck |
 | `effect_row.import_boundary` | effect_row | static | resolve |
+| `secrets.trace_never_carries_value` | effect_row | runtime_checked | runtime |
 | `io_source.fs_path_confinement` | effect_row | runtime_checked | runtime |
 | `io_source.fs_write_quarantine_on_replay` | effect_row | runtime_checked | runtime |
 | `io_source.fs_read_quarantine_on_replay` | effect_row | runtime_checked | runtime |
@@ -215,6 +216,21 @@ Cross-module imports preserve effect annotations exactly; an importer cannot use
 **Adversarial tests:**
 
 - `crates/corvid-types/src/tests.rs::python_import_without_effects_is_rejected`
+
+#### `secrets.trace_never_carries_value`
+- **class**: runtime_checked
+- **phase**: runtime
+
+The executing `secret_read` tool returns the real secret value to the program, but the recorded ToolResult trace event carries a redacted copy (`<redacted:XY>` marker, `value_redacted: true`) — traces never persist secret values. Substitute-mode replay RE-READS the live environment instead of substituting (there is nothing usable to substitute), so a changed environment diverges honestly. Residual channel stated as explicit non-scope: a secret the program forwards into another tool's arguments is recorded by that tool's own events; the structural taint fix (an opaque SecretHandle value) is the tracked post-v1.0 deepening.
+
+**Positive tests:**
+
+- `crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs::secret_read_returns_real_value_to_the_program`
+- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment`
+
+**Adversarial tests:**
+
+- `crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs::secret_value_never_lands_in_the_trace`
 
 #### `io_source.fs_path_confinement`
 - **class**: runtime_checked

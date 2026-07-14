@@ -59,6 +59,24 @@ impl SecretRuntime {
     }
 }
 
+/// Guarantee anchor — the executing `secret_read` tool returns the
+/// real value to the program while the recorded ToolResult carries a
+/// redacted copy, and Substitute-mode replay re-reads the live
+/// environment instead of substituting. Traces never persist secret
+/// values. Enforcement sites: the trace-recording redaction in
+/// `runtime/llm_dispatch.rs::redact_secret_result_for_trace` and the
+/// replay bypass in `Runtime::call_tool`'s secrets branch.
+pub const GUARANTEE_ID_SECRETS_TRACE_NEVER_CARRIES_VALUE: &str =
+    "secrets.trace_never_carries_value";
+
+/// Public redaction used by both the audit metadata and the trace
+/// recorder: the value is replaced by `<redacted:XY>` where XY is
+/// the final two characters (enough to correlate, never enough to
+/// recover).
+pub fn redact_secret_value(value: &str) -> String {
+    redact_secret(value)
+}
+
 fn redact_secret(value: &str) -> String {
     if value.is_empty() {
         return "<redacted>".to_string();
