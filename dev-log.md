@@ -1621,6 +1621,23 @@ governed cron. Phase 48 requires a pre-phase chat.
 
 ---
 
+## 2026-07-14 - Phase 48 pre-phase chat: finish everything, then launch
+
+CTO decision: complete all remaining phase work BEFORE the launch
+phase. Phase 48 (pre-launch close-out) queue recorded in the
+ROADMAP: 48a executing secrets + cache (the promoted 47i, design
+decided — redacted recording + re-read-on-replay for secrets, the
+db_query read-passthrough precedent; SecretHandle taint is the
+post-v1.0 deepening), 48b connector-grounded-returns disposition,
+48c the remaining LLM-shaped AI helpers, 48d imported-struct-4
+disposition. The launch phase (33J website/playground/runtime
+split + externally-gated beta and reviewer items) starts when the
+queue is empty.
+
+Starting 48a.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
