@@ -119,11 +119,10 @@ jobs:
           name="corvid-${{ matrix.target }}"
           stage="dist/$name"
           mkdir -p "$stage/bin" "$stage/lib"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp "target/${{ matrix.target }}/release/corvid.exe" "$stage/bin/"
-          else
-            cp "target/${{ matrix.target }}/release/corvid" "$stage/bin/"
-          fi
+          case "${{ matrix.target }}" in
+            *windows*) cp "target/${{ matrix.target }}/release/corvid.exe" "$stage/bin/" ;;
+            *)         cp "target/${{ matrix.target }}/release/corvid" "$stage/bin/" ;;
+          esac
           # Stage the runtime staticlib alongside the bin under
           # `$stage/lib/` so post-install discovery via
           # `staticlib_discovery::SiblingLibDir` (which checks
@@ -133,11 +132,10 @@ jobs:
           # `35V2-P33-release-archive-staticlib`. Without this the
           # `cargo install`-shape friction the first 33M trial
           # reviewer hit ships in every release.
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp "target/${{ matrix.target }}/release/corvid_runtime.lib" "$stage/lib/"
-          else
-            cp "target/${{ matrix.target }}/release/libcorvid_runtime.a" "$stage/lib/"
-          fi
+          case "${{ matrix.target }}" in
+            *windows-msvc*) cp "target/${{ matrix.target }}/release/corvid_runtime.lib" "$stage/lib/" ;;
+            *)              cp "target/${{ matrix.target }}/release/libcorvid_runtime.a" "$stage/lib/" ;;
+          esac
           [ -d std ]            && cp -R std            "$stage/std"            || true
           # Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): ship the
           # `corvid_runtime` Python package alongside the binary so the
