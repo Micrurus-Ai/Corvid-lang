@@ -1575,6 +1575,30 @@ Next per agreed order: 47e-hardening-tests.
 
 ---
 
+## 2026-07-14 - 47e closed: the hardening pass found a real ABI hole
+
+The filed python-smoke failure was not an environment quirk — it
+was heap corruption from a genuine C-ABI design gap: tool-callback
+result buffers must come from the cdylib's own Rust allocator, and
+no portable way to allocate one existed (host malloc only matches
+on linux-gnu). The fix is a new `corvid_alloc_result` export +
+`Client.make_result` in the python bindings + header declarations
+for the whole tool bridge (previously exported but undeclared).
+The integration test passes on Windows now. Alongside: e2e pins
+for checked int overflow / @wrapping / division-by-zero /
+float-to-int range traps, and first-ever coverage for recursive
+and mutually-recursive struct types — all green on the first run,
+which is what the pins are for: keeping it that way.
+
+Validation: runtime/bind/c-header/codegen-cl/driver/cli suites
+green (host_bindings_integration included); workspace check clean;
+corpus verify exits 1.
+
+Phase 47 remaining: 47d-schedule-execution (the scheduler runner),
+then the phase close-out.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -129,11 +129,13 @@ DESCRIPTOR_HASH_HEX = "{hash}"
 # `corvid-runtime` `CorvidToolFn` C ABI:
 #   - `args_json` / `args_len` carry the call args as a UTF-8 JSON
 #     array, borrowed for the call duration.
-#   - The callback returns a freshly-allocated null-terminated JSON
-#     C string the runtime reclaims via the global `free()` after
-#     dispatching (a `libc.malloc`-allocated buffer is the
-#     simplest match on linux-gnu), or `None`/`0` to signal
-#     failure.
+#   - The callback returns a null-terminated JSON C string the
+#     runtime reclaims with ITS OWN allocator, or `None`/`0` to
+#     signal failure. Allocate the buffer with
+#     `Client.make_result(content)` (which routes through the
+#     cdylib's exported `corvid_alloc_result`) — a host-side
+#     `malloc` happens to work on linux-gnu but corrupts the heap
+#     on Windows, where Rust's allocator is not the CRT heap.
 #   - `user_data` is the opaque pointer the host supplied at
 #     registration (currently always `None`).
 CorvidToolFn = ctypes.CFUNCTYPE(
@@ -419,6 +421,31 @@ class Client:
         fn.argtypes = [ctypes.c_char_p, CorvidToolFn, ctypes.c_void_p]
         fn.restype = None
         fn(name.encode("utf-8"), callback, None)
+
+    def make_result(self, content: bytes) -> int:
+        """Allocate a tool-callback result buffer the cdylib can
+        reclaim, portably, and copy `content` into it.
+
+        The `CorvidToolFn` contract requires the returned pointer
+        to come from the cdylib's own allocator (it is reclaimed
+        with Rust's `CString::from_raw`). This helper routes the
+        allocation through the exported `corvid_alloc_result`, so
+        it is correct on every platform — a host-side `malloc`
+        happens to match on linux-gnu but corrupts the heap on
+        Windows. `content` must be NUL-free (JSON always is);
+        raises `ValueError` otherwise. Returns the pointer as an
+        int, ready to be returned from a `CorvidToolFn` callback.
+        """
+        if b"\x00" in content:
+            raise ValueError("tool result content must be NUL-free")
+        alloc = self._library.corvid_alloc_result
+        alloc.argtypes = [ctypes.c_size_t]
+        alloc.restype = ctypes.c_void_p
+        p = alloc(len(content))
+        if not p:
+            raise MemoryError("corvid_alloc_result returned null")
+        ctypes.memmove(p, content, len(content))
+        return p
 
     def _probe_json_agent(
         self,

@@ -169,6 +169,11 @@ fn exported_symbols(ir: &IrFile, has_attestation: bool) -> Vec<String> {
             // codegen-emitted tool calls dispatch to.
             "corvid_register_tool",
             "corvid_clear_tools",
+            // Portable tool-result allocation: callbacks must return
+            // buffers from THIS library's allocator (reclaimed via
+            // CString::from_raw); host malloc only matches on
+            // linux-gnu.
+            "corvid_alloc_result",
         ]
         .into_iter()
         .map(str::to_string),

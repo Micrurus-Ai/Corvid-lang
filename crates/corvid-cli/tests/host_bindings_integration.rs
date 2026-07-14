@@ -213,7 +213,6 @@ fn write_python_smoke(package_dir: &Path) -> PathBuf {
         r#"from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import sys
 
 from classify import ApprovalDecision, ApprovalRequest, Client, CorvidToolFn, TrustTier
@@ -224,23 +223,14 @@ class AcceptApprover:
         return ApprovalDecision.ACCEPT
 
 
-# Resolve the system C allocator. On linux-gnu, Rust's default
-# global allocator IS libc malloc/free, so a buffer the callback
-# below `libc.malloc`'s is reclaimed cleanly by the cdylib's
-# `CString::from_raw` → `Box::dealloc` → libc `free`. On Windows
-# Rust uses HeapAlloc/HeapFree, NOT the CRT — a `msvcrt.malloc`'d
-# buffer would crash inside Rust's dealloc. This demo's CI target
-# is linux-gnu where the match is correct; the Windows path is
-# wired up so the test at least loads on developer hosts and the
-# failure surfaces as a tool-dispatch error rather than a
-# `FileNotFoundError: libc.so.6` import-time crash.
-if sys.platform == "win32":
-    _LIBC = ctypes.CDLL("msvcrt")
-else:
-    _LIBC_PATH = ctypes.util.find_library("c") or "libc.so.6"
-    _LIBC = ctypes.CDLL(_LIBC_PATH)
-_LIBC.malloc.restype = ctypes.c_void_p
-_LIBC.malloc.argtypes = [ctypes.c_size_t]
+# The client is created in main() before tools are registered; the
+# callback captures it via this module global. Result buffers MUST
+# come from the cdylib's own allocator (`Client.make_result` routes
+# through the exported `corvid_alloc_result`) — a host-side malloc
+# happens to match Rust's allocator on linux-gnu but corrupts the
+# heap on Windows, which used to crash this smoke with empty
+# stdout/stderr.
+_CLIENT: Client | None = None
 
 
 def _echo_first_string_arg(args_json, args_len, _user_data):
@@ -249,21 +239,16 @@ def _echo_first_string_arg(args_json, args_len, _user_data):
     Matches the Rust `echo_string` / `grounded_echo` tools'
     semantics (return the input unchanged). `args_json` arrives
     as `b'["catalog-proof"]'` — we copy the content between the
-    outer brackets (`b'"catalog-proof"'`) into a fresh
-    libc-malloc'd buffer and return the pointer; the cdylib's
-    runtime takes ownership via `CString::from_raw`.
+    outer brackets (`b'"catalog-proof"'`) into a buffer allocated
+    by the cdylib itself; its runtime takes ownership via
+    `CString::from_raw`.
     """
     buf = ctypes.string_at(args_json, args_len)
     if len(buf) < 2 or buf[0:1] != b"[" or buf[-1:] != b"]":
         return None
-    inner = buf[1:-1]
-    n = len(inner)
-    p = _LIBC.malloc(n + 1)
-    if not p:
+    if _CLIENT is None:
         return None
-    ctypes.memmove(p, inner, n)
-    ctypes.cast(p, ctypes.POINTER(ctypes.c_ubyte))[n] = 0
-    return p
+    return _CLIENT.make_result(buf[1:-1])
 
 
 # CFUNCTYPE wrappers must outlive every cdylib agent invocation
@@ -274,8 +259,10 @@ _ECHO_TOOL = CorvidToolFn(_echo_first_string_arg)
 
 
 def main() -> int:
+    global _CLIENT
     library_path = sys.argv[1]
     client = Client(library_path)
+    _CLIENT = client
 
     # Register the echo callback for both tools the demo agents
     # invoke. The same implementation services both — they are

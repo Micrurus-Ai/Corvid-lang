@@ -182,7 +182,19 @@ pub fn render_header(opts: &HeaderOptions, agents: &[HeaderAgent]) -> String {
     out.push_str("    const char* name,\n");
     out.push_str("    const char* payload_json,\n");
     out.push_str("    size_t payload_len);\n");
-    out.push_str("void corvid_free_string(const char* value);\n\n");
+    out.push_str("void corvid_free_string(const char* value);\n");
+    out.push_str("// Host tool bridge: register a callback per `tool` the agents\n");
+    out.push_str("// invoke. The callback returns a NUL-terminated JSON C string\n");
+    out.push_str("// the library reclaims with ITS OWN allocator - allocate it via\n");
+    out.push_str("// corvid_alloc_result (a host malloc only matches on linux-gnu\n");
+    out.push_str("// and corrupts the heap on Windows), filling ALL content_len\n");
+    out.push_str("// bytes with NUL-free content. Return NULL to signal failure.\n");
+    out.push_str(
+        "typedef char* (*CorvidToolFn)(const char* args_json, size_t args_len, void* user_data);\n",
+    );
+    out.push_str("void corvid_register_tool(const char* name, CorvidToolFn fn, void* user_data);\n");
+    out.push_str("void corvid_clear_tools(void);\n");
+    out.push_str("char* corvid_alloc_result(size_t content_len);\n\n");
 
     for agent in agents {
         out.push_str(&format!("// {}\n", agent.signature_comment));

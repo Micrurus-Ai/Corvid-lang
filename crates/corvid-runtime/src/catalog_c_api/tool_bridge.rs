@@ -44,6 +44,35 @@ fn registry() -> &'static Mutex<HashMap<String, ToolRegistration>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Allocate a tool-result buffer the bridge can reclaim, portably.
+///
+/// The [`CorvidToolFn`] contract requires the returned result pointer
+/// to have been allocated by THIS library's Rust allocator (the
+/// bridge reclaims it with `CString::from_raw`). On linux-gnu Rust's
+/// default allocator IS libc malloc, so a host `malloc` happens to
+/// satisfy the contract — but on Windows Rust allocates from the
+/// process heap via HeapAlloc while a host CRT `malloc` may not, and
+/// the mismatch corrupts the heap (observed as a silent hard crash
+/// of the host process). This export removes the portability trap:
+/// it returns a `content_len + 1`-byte buffer (space-filled,
+/// NUL-terminated) allocated exactly the way `CString::from_raw`
+/// expects.
+///
+/// Contract for hosts: overwrite ALL `content_len` bytes with
+/// NUL-free content (JSON results are NUL-free) before returning the
+/// pointer from the callback — a shorter write leaves an interior
+/// NUL and the reclaim's length bookkeeping becomes undefined
+/// behavior. To abandon an allocated buffer without returning it,
+/// pass it to `corvid_free_result`.
+#[no_mangle]
+pub extern "C" fn corvid_alloc_result(content_len: usize) -> *mut c_char {
+    let filled = vec![b' '; content_len];
+    match CString::new(filled) {
+        Ok(s) => s.into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
 /// Register (or, with `fn_ptr == None`, unregister) a tool by name.
 ///
 /// # Safety
@@ -291,7 +320,60 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    // A callback that allocates its result through the exported
+    // portable allocator — the contract every non-Rust host must
+    // follow (host malloc only matches Rust's allocator on
+    // linux-gnu).
+    unsafe extern "C" fn alloc_result_tool(
+        _args_json: *const c_char,
+        _args_len: usize,
+        _user_data: *mut c_void,
+    ) -> *mut c_char {
+        let content = br#""portable""#;
+        let ptr = corvid_alloc_result(content.len());
+        if ptr.is_null() {
+            return ptr;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(content.as_ptr(), ptr as *mut u8, content.len());
+        }
+        ptr
+    }
+
+    #[test]
+    fn alloc_result_buffer_round_trips_through_dispatch() {
+        let _guard = test_guard();
+        let name = CString::new("portable_alloc_tool").unwrap();
+        unsafe {
+            corvid_register_tool(name.as_ptr(), Some(alloc_result_tool), ptr::null_mut());
+        }
+        let result = dispatch_registered_tool("portable_alloc_tool", "[]")
+            .expect("dispatch reclaims the corvid_alloc_result buffer");
+        assert_eq!(result, r#""portable""#);
+        unsafe {
+            corvid_register_tool(name.as_ptr(), None, ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn alloc_result_zero_len_yields_reclaimable_empty_buffer() {
+        let ptr = corvid_alloc_result(0);
+        assert!(!ptr.is_null());
+        // Reclaim exactly the way the bridge does.
+        let s = unsafe { CString::from_raw(ptr) };
+        assert_eq!(s.as_bytes(), b"");
+    }
+
     static ECHO_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    /// The tool registry is a process-wide global; tests that
+    /// register/clear/dispatch against it must not interleave.
+    /// Every test below takes this guard first — the pre-existing
+    /// intermittent failures in this module were exactly this race.
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     // A registered tool that echoes its JSON args back inside a result
     // object, and counts invocations so the test can prove dispatch.
@@ -310,6 +392,7 @@ mod tests {
 
     #[test]
     fn register_invoke_and_clear_roundtrip() {
+        let _guard = test_guard();
         corvid_clear_tools();
         ECHO_CALLS.store(0, Ordering::SeqCst);
 
@@ -357,6 +440,7 @@ mod tests {
 
     #[test]
     fn dispatch_registered_tool_reclaims_and_parses_result() {
+        let _guard = test_guard();
         corvid_clear_tools();
         let name = CString::new("share").unwrap();
         unsafe { corvid_register_tool(name.as_ptr(), Some(receipt_tool), ptr::null_mut()) };
@@ -373,6 +457,7 @@ mod tests {
 
     #[test]
     fn inventoried_tool_registers_and_dispatches() {
+        let _guard = test_guard();
         // The init-path helper registers a `#[tool]`'s JSON dispatcher
         // (CorvidToolJsonFn) the same way a host's `corvid_register_tool`
         // would, and `corvid_invoke_tool` then dispatches to it.
