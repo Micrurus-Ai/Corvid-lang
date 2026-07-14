@@ -92,6 +92,9 @@ pub enum Command {
     /// installed one from its pinned source.
     #[command(subcommand)]
     Skill(SkillCommand),
+    /// MCP maintenance: regenerate a server's typed module.
+    #[command(subcommand)]
+    Mcp(McpCommand),
     /// Compile a Corvid source file. Default target is Python (target/py/);
     /// `--target=native` emits target/bin/, and `--target=wasm`
     /// emits target/wasm/ with `.wasm`, JS loader, and TypeScript types.
@@ -850,6 +853,25 @@ pub enum AddCommand {
         #[arg(long)]
         publisher_key: Option<PathBuf>,
     },
+    /// Add an MCP server: writes the `[mcp.servers.<name>]` entry,
+    /// connects, discovers the server's tools, and generates a TYPED
+    /// module (`src/mcp/<name>.cor`) — one typed wrapper per tool.
+    /// Untrusted servers stay approval-gated.
+    Mcp {
+        /// Server name (becomes the config key and module name).
+        name: String,
+        /// Stdio transport: the command to spawn (repeat for args,
+        /// e.g. `--cmd npx --cmd my-mcp-server`).
+        #[arg(long = "cmd")]
+        cmd: Vec<String>,
+        /// HTTP transport: the server URL.
+        #[arg(long)]
+        url: Option<String>,
+        /// Mark the server trusted (`trust = "autonomous"`): calls
+        /// skip the approver. Default is approval-gated.
+        #[arg(long)]
+        trusted: bool,
+    },
     /// Add a Corvid package dependency and write/update Corvid.lock.
     /// No Corvid-hosted package registry runs yet; pass --registry or
     /// set CORVID_PACKAGE_REGISTRY to a local/self-hosted index.
@@ -885,5 +907,16 @@ pub enum SkillCommand {
         /// Accept the new label non-interactively.
         #[arg(long)]
         yes: bool,
+    },
+}
+
+/// `corvid mcp <verb>` — maintenance for configured MCP servers.
+#[derive(clap::Subcommand, Debug)]
+pub enum McpCommand {
+    /// Re-discover a configured server's tools and regenerate its
+    /// typed module (`src/mcp/<name>.cor`).
+    Regen {
+        /// The server name as configured in `[mcp.servers.<name>]`.
+        name: String,
     },
 }

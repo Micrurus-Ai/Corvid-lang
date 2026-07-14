@@ -83,8 +83,19 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 yes,
                 publisher_key,
             } => crate::commands::add::cmd_add_skill(&source, yes, publisher_key.as_deref()),
+            crate::cli::root::AddCommand::Mcp {
+                name,
+                cmd,
+                url,
+                trusted,
+            } => crate::commands::add::cmd_add_mcp(&name, &cmd, url.as_deref(), trusted),
             crate::cli::root::AddCommand::Package { spec, registry } => {
                 cmd_add_package(&spec, registry.as_deref())
+            }
+        },
+        Some(Command::Mcp(kind)) => match kind {
+            crate::cli::root::McpCommand::Regen { name } => {
+                crate::commands::add::cmd_mcp_regen(&name)
             }
         },
         Some(Command::Skill(kind)) => match kind {

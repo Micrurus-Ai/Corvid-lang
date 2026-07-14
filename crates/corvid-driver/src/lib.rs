@@ -12,6 +12,7 @@ pub mod effect_diff;
 pub mod meta_verify;
 mod dimension_artifact;
 mod dimension_registry;
+pub mod mcp_codegen;
 pub mod modules;
 pub mod skills;
 pub mod proof_replay;
@@ -131,8 +132,8 @@ pub use law::{
 };
 pub use proof_replay::{replay_dimension_proof, ProofReplayResult, ProofReplayStatus};
 pub use run::{
-    build_or_get_cached_native, run_native, run_with_target, CachedNativeBinary, RunError,
-    RunTarget,
+    build_or_get_cached_native, load_mcp_servers, run_native, run_with_target,
+    CachedNativeBinary, RunError, RunTarget,
 };
 pub use scaffold::{
     find_std_source, refresh_vendored_std, scaffold_new, scaffold_new_in,

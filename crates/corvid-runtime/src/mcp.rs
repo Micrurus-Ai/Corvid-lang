@@ -136,6 +136,52 @@ impl McpRuntime {
         Ok(extract_content(result))
     }
 
+    /// Perform `tools/list` against a configured server — the
+    /// discovery half of `corvid add mcp` / `corvid mcp regen`.
+    /// Returns the raw tool entries (`name`, `description`,
+    /// `inputSchema`).
+    pub async fn list_tools(
+        &self,
+        server: &str,
+    ) -> Result<Vec<serde_json::Value>, RuntimeError> {
+        let config = self
+            .servers
+            .get(server)
+            .ok_or_else(|| Self::err(server, "server is not configured in [mcp.servers]"))?
+            .clone();
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/list",
+            "params": {},
+        });
+        let response = if let Some(url) = &config.url {
+            self.call_http(server, url, request).await?
+        } else if !config.command.is_empty() {
+            let this = self.clone();
+            let server_owned = server.to_string();
+            tokio::task::spawn_blocking(move || this.call_stdio(&server_owned, &request))
+                .await
+                .map_err(|e| Self::err(server, format!("stdio task failed: {e}")))??
+        } else {
+            return Err(Self::err(
+                server,
+                "server config needs either `command` (stdio) or `url` (http)",
+            ));
+        };
+        if let Some(error) = response.get("error") {
+            return Err(Self::err(server, format!("JSON-RPC error: {error}")));
+        }
+        let tools = response
+            .get("result")
+            .and_then(|r| r.get("tools"))
+            .and_then(|t| t.as_array())
+            .cloned()
+            .ok_or_else(|| Self::err(server, "tools/list response carried no tools array"))?;
+        Ok(tools)
+    }
+
     async fn call_http(
         &self,
         server: &str,

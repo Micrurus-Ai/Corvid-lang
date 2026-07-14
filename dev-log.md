@@ -1765,6 +1765,21 @@ Next per the Phase 49 queue: 49c-mcp-add-and-typed-codegen.
 
 ---
 
+## 2026-07-14 - 49c closed: typed MCP
+
+`corvid add mcp` turns an opaque MCP server into a typed Corvid
+module in one command: discovery first, then one typed agent per
+tool generated from the server's own schemas (json-builder args, so
+escaping is never string concat), config written untrusted-by-
+default. The live probe's generated wrappers called a real stdio
+server through the interpreter and came back
+Ok("CORVID SHIPS TYPED MCP = 42"). `corvid mcp regen` keeps the
+module honest when the server changes.
+
+Next per the Phase 49 queue: 49d-connector-scaffolds.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

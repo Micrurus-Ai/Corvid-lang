@@ -164,3 +164,125 @@ pub(crate) fn cmd_skill_update(name: &str, yes: bool) -> Result<u8> {
         }
     }
 }
+
+/// `corvid add mcp <name>` — write the config entry, discover the
+/// server's tools, generate the typed module.
+pub(crate) fn cmd_add_mcp(
+    name: &str,
+    cmd: &[String],
+    url: Option<&str>,
+    trusted: bool,
+) -> Result<u8> {
+    if cmd.is_empty() && url.is_none() {
+        eprintln!("an MCP server needs a transport: `--cmd <command>...` (stdio) or `--url <url>` (http)");
+        return Ok(1);
+    }
+    if !cmd.is_empty() && url.is_some() {
+        eprintln!("pass either `--cmd` or `--url`, not both");
+        return Ok(1);
+    }
+    let root = project_root();
+    let toml_path = root.join("corvid.toml");
+    let mut config_text = std::fs::read_to_string(&toml_path).unwrap_or_default();
+    let section_header = format!("[mcp.servers.{name}]");
+    if config_text.contains(&section_header) {
+        eprintln!(
+            "`{section_header}` already exists in `{}` — use `corvid mcp regen {name}` to \
+             refresh its typed module",
+            toml_path.display()
+        );
+        return Ok(1);
+    }
+
+    // Generate FIRST (discovery can fail; the config write should
+    // only land for a server we actually reached).
+    let servers = std::collections::HashMap::from([(
+        name.to_string(),
+        corvid_runtime::mcp::McpServerConfig {
+            command: cmd.to_vec(),
+            url: url.map(str::to_string),
+            trusted,
+        },
+    )]);
+    let tool_count = generate_mcp_module_file(&root, name, servers)?;
+
+    if !config_text.is_empty() && !config_text.ends_with('\n') {
+        config_text.push('\n');
+    }
+    config_text.push('\n');
+    config_text.push_str(&section_header);
+    config_text.push('\n');
+    if !cmd.is_empty() {
+        let rendered = cmd
+            .iter()
+            .map(|part| format!("\"{part}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        config_text.push_str(&format!("command = [{rendered}]\n"));
+    }
+    if let Some(url) = url {
+        config_text.push_str(&format!("url = \"{url}\"\n"));
+    }
+    if trusted {
+        config_text.push_str("trust = \"autonomous\"\n");
+    } else {
+        config_text.push_str("# untrusted by default: every mcp_call is approval-gated\n");
+    }
+    std::fs::write(&toml_path, config_text)?;
+
+    println!(
+        "added MCP server `{name}` ({} tool(s) discovered) — typed module at \
+         `src/mcp/{name}.cor`, config in `{}`.{}",
+        tool_count,
+        toml_path.display(),
+        if trusted {
+            ""
+        } else {
+            " Untrusted: calls require approval; add `trust = \"autonomous\"` after review."
+        }
+    );
+    Ok(0)
+}
+
+/// `corvid mcp regen <name>` — refresh the typed module from the
+/// configured server.
+pub(crate) fn cmd_mcp_regen(name: &str) -> Result<u8> {
+    let root = project_root();
+    let main_anchor = root.join("src").join("main.cor");
+    let servers = corvid_driver::load_mcp_servers(&main_anchor);
+    if !servers.contains_key(name) {
+        eprintln!(
+            "no `[mcp.servers.{name}]` in corvid.toml — add it first with `corvid add mcp {name}`"
+        );
+        return Ok(1);
+    }
+    let tool_count = generate_mcp_module_file(&root, name, servers)?;
+    println!("regenerated `src/mcp/{name}.cor` ({tool_count} tool(s)).");
+    Ok(0)
+}
+
+/// Discover tools + write the generated module. Returns the tool
+/// count.
+fn generate_mcp_module_file(
+    root: &Path,
+    name: &str,
+    servers: std::collections::HashMap<String, corvid_runtime::mcp::McpServerConfig>,
+) -> Result<usize> {
+    let mcp = corvid_runtime::mcp::McpRuntime::new(servers);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?;
+    let listings = runtime
+        .block_on(mcp.list_tools(name))
+        .map_err(|e| anyhow::anyhow!("tool discovery failed: {e}"))?;
+    let tools: Vec<corvid_driver::mcp_codegen::McpToolDescriptor> = listings
+        .iter()
+        .filter_map(corvid_driver::mcp_codegen::McpToolDescriptor::from_listing)
+        .collect();
+    let module = corvid_driver::mcp_codegen::generate_mcp_module(name, &tools);
+    let mcp_dir = root.join("src").join("mcp");
+    std::fs::create_dir_all(&mcp_dir)?;
+    std::fs::write(mcp_dir.join(format!("{name}.cor")), module)?;
+    Ok(tools.len())
+}
