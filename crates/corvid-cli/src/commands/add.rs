@@ -286,3 +286,41 @@ fn generate_mcp_module_file(
     std::fs::write(mcp_dir.join(format!("{name}.cor")), module)?;
     Ok(tools.len())
 }
+
+/// `corvid add connector <provider>` — manifest-derived scaffold for
+/// a shipped connector.
+pub(crate) fn cmd_add_connector(provider: &str) -> Result<u8> {
+    let manifests = crate::connectors_cmd::support::shipped_manifests()?;
+    let Some((_, manifest)) = manifests.iter().find(|(name, _)| *name == provider) else {
+        let names: Vec<&str> = manifests.iter().map(|(name, _)| *name).collect();
+        eprintln!(
+            "unknown connector `{provider}` — shipped connectors: {}",
+            names.join(", ")
+        );
+        return Ok(1);
+    };
+    let root = project_root();
+    let dir = root.join("src").join("connectors");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{provider}.cor"));
+    if path.exists() {
+        eprintln!(
+            "`{}` already exists — delete it first if you want a fresh scaffold",
+            path.display()
+        );
+        return Ok(1);
+    }
+    let module =
+        crate::commands::connector_scaffold::generate_connector_module(provider, manifest);
+    std::fs::write(&path, module)?;
+    println!(
+        "scaffolded `{}` from the `{provider}` manifest: {} scope effect(s), {} operation tool(s).",
+        path.display(),
+        manifest.scope.len(),
+        manifest.replay.len()
+    );
+    println!(
+        "mock mode works now (`corvid connectors run {provider} <op> --mode=mock`); real mode          needs `corvid connectors oauth {provider}` + CORVID_PROVIDER_LIVE=1."
+    );
+    Ok(0)
+}

@@ -5,6 +5,7 @@
 //! as a thin entry-point shell.
 
 pub mod add;
+pub mod connector_scaffold;
 pub mod eval;
 pub mod jobs;
 pub mod misc;

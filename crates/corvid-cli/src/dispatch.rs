@@ -89,6 +89,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 url,
                 trusted,
             } => crate::commands::add::cmd_add_mcp(&name, &cmd, url.as_deref(), trusted),
+            crate::cli::root::AddCommand::Connector { provider } => {
+                crate::commands::add::cmd_add_connector(&provider)
+            }
             crate::cli::root::AddCommand::Package { spec, registry } => {
                 cmd_add_package(&spec, registry.as_deref())
             }

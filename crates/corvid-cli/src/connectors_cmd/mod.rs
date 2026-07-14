@@ -33,7 +33,7 @@ pub mod check;
 pub mod list;
 pub mod oauth;
 pub mod run;
-mod support;
+pub(crate) mod support;
 pub mod verify_webhook;
 
 #[allow(unused_imports)]

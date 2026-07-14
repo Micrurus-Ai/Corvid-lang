@@ -1780,6 +1780,19 @@ Next per the Phase 49 queue: 49d-connector-scaffolds.
 
 ---
 
+## 2026-07-14 - 49d closed: connectors scaffold from their manifests
+
+`corvid add connector gmail` turns the shipped manifest into the
+typed boundary in one command: scope effects with honest dimensions,
+operation tools with `dangerous` on the quarantined writes, setup
+checklist in the header. No hand-curated tables — the manifest is
+the single source of truth, so a manifest change flows into the
+next scaffold.
+
+Next per the Phase 49 queue: 49e-capability-surface-contract.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

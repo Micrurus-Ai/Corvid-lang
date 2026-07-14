@@ -872,6 +872,14 @@ pub enum AddCommand {
         #[arg(long)]
         trusted: bool,
     },
+    /// Add a connector scaffold for a shipped provider: generates
+    /// `src/connectors/<provider>.cor` from the connector's manifest
+    /// (scopes become effects; approval-required operations are
+    /// `dangerous`), with the setup checklist in the header.
+    Connector {
+        /// Provider name (see `corvid connectors list`).
+        provider: String,
+    },
     /// Add a Corvid package dependency and write/update Corvid.lock.
     /// No Corvid-hosted package registry runs yet; pass --registry or
     /// set CORVID_PACKAGE_REGISTRY to a local/self-hosted index.
