@@ -1675,6 +1675,21 @@ Next per the Phase 48 queue: 48c-ai-helper-sweep.
 
 ---
 
+## 2026-07-14 - 48c closed: the five remaining AI helpers dispositioned
+
+Four re-filed post-v1.0 with per-helper rationale (agentic
+authoring accelerators over deterministic surfaces that shipped
+complete — no guarantee gaps, and live-LLM authoring loops can't
+be honestly validated in offline CI); one (`beta
+synthesize-feedback`) moved to the launch phase where the beta
+feedback it consumes will exist. Both phase checkboxes closed via
+their own "follow-ups filed" branch, which is what the phases
+defined completion to mean.
+
+Next per the Phase 48 queue: 48d-imported-struct-4-disposition.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
