@@ -1710,6 +1710,24 @@ first).
 
 ---
 
+## 2026-07-14 - Phase 49 pre-phase chat: the capability surface
+
+CTO direction: before launch, make adding skills / MCP / connectors
+simpler than any other language, inventively. Design decided at the
+chat (delegated): skills are EFFECT-AUDITED VENDORED PACKAGES — a
+capability label (composed effect ceiling, reach, required config)
+rendered as a consent audit at add-time and re-verified by the
+compiler on every build, so even edited skills cannot silently
+outgrow their label; DSSE-signed (registry-free) with hash-pinned
+local/git sources; `corvid add mcp` generates typed modules from
+discovered MCP tool schemas; `corvid add connector` scaffolds the
+shipped connectors. One verb, three capability kinds, everything
+visible source inside the moat. Slices 49a-49e recorded.
+
+Starting 49a.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
