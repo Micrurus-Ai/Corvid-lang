@@ -17,8 +17,20 @@ install/*.ps1       text eol=lf
 # platform-independent, the way they were always meant to be.
 examples/**/bindings_rust/** text eol=lf
 examples/**/bindings_python/** text eol=lf
-examples/**/artifacts/**     text eol=lf
-examples/**/keys/**          text eol=lf
+# Artifacts and keys mix text (json descriptors, envelopes) with
+# BINARIES (.so/.a/.dll/.lib native libraries). Lock the text kinds
+# to LF for byte-stable hashing; explicitly mark the binary kinds
+# -text — a blanket `text` attribute here once CRLF-stripped the
+# committed .so/.a blobs and corrupted them.
+examples/**/artifacts/**/*.json text eol=lf
+examples/**/artifacts/**/*.h    text eol=lf
+examples/**/keys/**/*.json      text eol=lf
+examples/**/keys/**/*.hex       text eol=lf
+examples/**/*.so  -text
+examples/**/*.a   -text
+examples/**/*.dll -text
+examples/**/*.lib -text
+examples/**/*.dylib -text
 examples/**/verify.sh        text eol=lf
 examples/**/corvid-bundle.toml text eol=lf
 examples/_bundle_demo_common.sh text eol=lf
