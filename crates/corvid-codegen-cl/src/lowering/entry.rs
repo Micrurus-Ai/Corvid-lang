@@ -531,3 +531,37 @@ fn emit_entry_result_print(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::check_entry_boundary_type;
+    use corvid_ast::Span;
+    use corvid_resolve::DefId;
+    use corvid_types::types::ImportedStructType;
+    use corvid_types::Type;
+
+    /// The native entry boundary REFUSES `ImportedStruct` loudly with
+    /// the file-local-alias workaround in the message — never a
+    /// silent degradation. The cross-file native layout work is the
+    /// tracked post-v1.0 follow-up; until it lands, this diagnostic
+    /// is the contract.
+    #[test]
+    fn imported_struct_entry_boundary_refuses_loudly_with_workaround() {
+        let ty = Type::ImportedStruct(ImportedStructType {
+            def_id: DefId(7),
+            name: "Ticket".to_string(),
+            module_path: "./types".to_string(),
+        });
+        let err = check_entry_boundary_type(&ty, Span::new(0, 0), "parameter")
+            .expect_err("ImportedStruct at the entry boundary must refuse");
+        let message = format!("{err:?}");
+        assert!(
+            message.contains("ImportedStruct"),
+            "diagnostic must name the unsupported shape; got {message}"
+        );
+        assert!(
+            message.contains("file-local struct alias"),
+            "diagnostic must state the workaround; got {message}"
+        );
+    }
+}

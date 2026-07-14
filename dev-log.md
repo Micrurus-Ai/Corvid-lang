@@ -1690,6 +1690,26 @@ Next per the Phase 48 queue: 48d-imported-struct-4-disposition.
 
 ---
 
+## 2026-07-14 - 48d closed: Phase 48 queue empty — the launch phase is next
+
+The last conditional codegen item was confirmed unreached (scalar
+extern entrypoints, no prompts in the reference apps) and closed as
+explicitly post-v1.0, with the loud entry-boundary refusal — which
+names the file-local-alias workaround — now test-pinned so the tier
+matrix's "refuses loudly" promise has teeth for this shape too.
+
+Phase 48 (pre-launch close-out) is complete: 48a replay-safe
+secrets + provenance cache, 48b connector-grounding disposition,
+48c AI-helper dispositions, 48d this. Per the 2026-07-14 CTO
+decision, the LAUNCH PHASE starts next: the Phase 33 33J track
+(runtime core/host split, WASM playground, website, benchmark
+page, blog) plus the externally-gated beta and reviewer items.
+The launch phase is large enough to deserve its own pre-phase
+chat on internal ordering (33J7b split first vs. website shell
+first).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
