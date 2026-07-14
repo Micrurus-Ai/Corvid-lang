@@ -62,6 +62,44 @@ agent bad(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
+    fn stdlib_tool_call_refuses_python_transpile_loudly() {
+        // The Python transpile tier has no stdlib dispatch. A program
+        // calling a stdlib executing tool must refuse at transpile
+        // time with a diagnostic naming the call and pointing at the
+        // interpreter tier — never emit an unregistered
+        // `tool_call(\"time_now_utc\", ...)` stub that fails at
+        // runtime far from the cause.
+        let src = "tool time_now_utc() -> Int
+
+agent main() -> Int:
+    return time_now_utc()
+";
+        let r = compile(src);
+        assert!(
+            r.python_source.is_none(),
+            "stdlib-calling program must not transpile"
+        );
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.message.contains("time_now_utc"))
+            .expect("diagnostic names the stdlib tool");
+        assert!(
+            diag.message.contains("cannot be transpiled"),
+            "message states the refusal; got: {}",
+            diag.message
+        );
+        assert!(
+            diag.hint
+                .as_deref()
+                .unwrap_or("")
+                .contains("corvid run"),
+            "hint routes to the interpreter tier; got: {:?}",
+            diag.hint
+        );
+    }
+
+    #[test]
     fn missing_approve_surfaces_as_diagnostic() {
         let r = compile(BAD_EFFECT_SRC);
         assert!(r.python_source.is_none());

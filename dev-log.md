@@ -1554,6 +1554,27 @@ Next per agreed order: 47c-codegen-parity-decision-and-loud-degradation.
 
 ---
 
+## 2026-07-14 - 47c closed: the tiers are honest
+
+The Python transpile tier now refuses stdlib-calling programs at
+transpile time — per-call diagnostics with the exact span and a
+hint routing to `corvid run` — instead of emitting unregistered
+tool_call stubs that failed at runtime far from the cause (the
+Phase 20l object-shaped-degradation recurrence, closed for good
+with an anti-drift test that parses std/*.cor and fails CI if the
+scan's tool list drifts). Chapter 16 opens with the canonical
+execution-tier matrix; runtime/python's README states its
+transpile-tier-only scope. Batteries on compiled tiers stay
+post-v1.0 by decision — the tier-picker auto-fallback is the
+designed mitigation, and it is unchanged.
+
+Validation: driver 200 + cli + codegen-py 19 green; workspace
+check clean; corpus verify exits 1; probed both directions.
+
+Next per agreed order: 47e-hardening-tests.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

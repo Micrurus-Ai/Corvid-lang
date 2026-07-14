@@ -5,8 +5,10 @@
 
 pub mod codegen;
 pub mod emitter;
+pub mod stdlib_scan;
 
 pub use codegen::emit;
+pub use stdlib_scan::{find_stdlib_executing_tool_calls, StdlibToolCall, STDLIB_EXECUTING_TOOLS};
 
 #[cfg(test)]
 mod tests {

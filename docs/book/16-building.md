@@ -1,9 +1,33 @@
 # Building and targets
 
-## The four targets
+## Execution tiers — what runs where
+
+This table is the canonical statement of which language surface runs
+on which tier. The interpreter (`corvid run`) is the reference tier:
+everything runs there. Compiled tiers cover a growing subset and
+refuse LOUDLY — at build/transpile time with a structured diagnostic,
+never with silently degraded output — when a program uses a surface
+they don't carry yet.
+
+| surface | interpreter (`corvid run`) | native / cdylib / wasm | Python transpile (`--target=python`, legacy) |
+|---|---|---|---|
+| pure language core (types, control flow, arithmetic) | ✅ | ✅ | ✅ |
+| prompts / `call_llm` (traced, budgeted) | ✅ | ✅ (runtime built in) | ✅ (via `corvid-runtime` pip package) |
+| user tools | ✅ (auto-dispatch) | ✅ with `--with-tools-lib` staticlib | ✅ (`@tool` registrations) |
+| stdlib executing tools (io/http/db/json/time/random/rag/mcp) | ✅ full dispatch + policies + replay | ❌ refuses at build time (structured interpreter-only diagnostic) | ❌ refuses at transpile time (names the call + the tier that runs it) |
+| `match`, lambdas, maps, sum types, place assignment, `parallel` | ✅ | ❌ routes to interpreter via the tier-picker | partial |
+| `replay` / `ask` / `choose` / streams | ✅ | ❌ routes to interpreter | ❌ refuses |
+
+Batteries on compiled tiers are explicitly **post-v1.0**: the
+tier-picker's auto-fallback (running `corvid run` picks the
+interpreter automatically whenever a program uses an
+interpreter-only surface, and says so) is the designed mitigation,
+not a stopgap. A compiled tier never silently drops a stdlib call.
+
+## The four production targets
 
 ```sh
-corvid build src/main.cor                       # default: native
+corvid build src/main.cor                       # default today: python transpile (legacy)
 corvid build src/main.cor --target=native
 corvid build src/main.cor --target=wasm
 corvid build src/main.cor --target=server

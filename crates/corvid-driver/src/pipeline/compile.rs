@@ -95,6 +95,13 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
 
     // 5. Lower + 6. Codegen. Only when everything before is clean.
     let ir = lower(&file, &resolved, &checked);
+    if let Some(diags) = stdlib_transpile_refusal(&ir) {
+        return CompileResult {
+            python_source: None,
+            diagnostics: diags,
+            warnings,
+        };
+    }
     let py = emit(&ir);
 
     CompileResult {
@@ -102,6 +109,34 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
         diagnostics: Vec::new(),
         warnings,
     }
+}
+
+/// The Python transpile tier has no dispatch for the stdlib's
+/// executing tools — a transpiled `tool_call("io_read_text", ...)`
+/// would reach an empty registry and fail at runtime far from the
+/// cause (and opaque stdlib types would degrade to `object` hints).
+/// Refuse LOUDLY at transpile time instead, naming each call and the
+/// tier that runs it.
+fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
+    let hits = corvid_codegen_py::find_stdlib_executing_tool_calls(ir);
+    if hits.is_empty() {
+        return None;
+    }
+    Some(
+        hits.into_iter()
+            .map(|hit| Diagnostic {
+                span: hit.span,
+                message: format!(
+                    "stdlib tool `{}` cannot be transpiled to Python — the transpile tier has no stdlib dispatch, so the generated code would fail at runtime far from this call",
+                    hit.tool
+                ),
+                hint: Some(
+                    "run the program through the interpreter tier instead (`corvid run`), which dispatches every stdlib executing tool with tracing, policies, and replay. See the execution-tier matrix in docs/book/16-building.md."
+                        .to_string(),
+                ),
+            })
+            .collect(),
+    )
 }
 
 /// Compile a source string that came from `source_path`. Unlike
@@ -162,6 +197,13 @@ pub fn compile_with_config_at_path(
     }
 
     let ir = lower_driver_file(&file, &resolved, &typechecked.result);
+    if let Some(diags) = stdlib_transpile_refusal(&ir) {
+        return CompileResult {
+            python_source: None,
+            diagnostics: diags,
+            warnings,
+        };
+    }
     let py = emit(&ir);
 
     CompileResult {
