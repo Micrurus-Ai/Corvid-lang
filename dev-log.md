@@ -1599,6 +1599,28 @@ then the phase close-out.
 
 ---
 
+## 2026-07-14 - 47d closed: schedules fire — Phase 47 complete
+
+`corvid schedule run` is governed cron: `schedule` declarations
+become durable schedule manifests, a tick loop enqueues due fires
+through the same recovery primitive the ops CLI uses (idempotent,
+DST-aware, missed-fire policies), and the worker pool executes the
+target agents with the full durable story — tracing, retries,
+dead-letters, replay. The survey caught a latent bridge bug before
+it ever fired: the executor expected a bare args array while
+schedule fires wrap payloads in an envelope; cron-fired jobs would
+all have failed PayloadShape. Unwrapped and unit-pinned. W0280 now
+tells the truth (schedules fire under the runner, not under plain
+`corvid run`). First live probe: 4/4 fires succeeded in a 4-second
+bounded run.
+
+That closes every Phase 47 slice: 47a scaffold, 47b vendoring,
+47h Result envelopes, 47f dispositions, 47g trust-derived approve,
+47c honest tiers, 47e hardening (+ the portable allocator), 47d
+governed cron. Phase 48 requires a pre-phase chat.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

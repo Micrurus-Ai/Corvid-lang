@@ -57,7 +57,8 @@ pub trait JobRuntimeExecutor: Send + Sync {
 /// Resolution rules:
 /// - `job.task` not declared in the IR → [`JobOutcome::Skip`]. Per-task
 ///   pools can coexist on one queue without misclaiming each others' jobs.
-/// - Payload is not a JSON array → [`JobOutcome::Failure`] with kind
+/// - Payload is not a JSON array (after unwrapping the schedule-fire
+///   envelope for cron-fired jobs) → [`JobOutcome::Failure`] with kind
 ///   `PayloadShape`. Retry/backoff follows the queue's normal policy.
 /// - Payload arity does not match the agent's params → [`JobOutcome::Failure`]
 ///   with kind `PayloadArity`.
@@ -106,11 +107,26 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
             return Ok(JobOutcome::Skip);
         };
 
-        let serde_json::Value::Array(payload_items) = &job.payload else {
+        // A job fired by a queue schedule arrives wrapped in the
+        // schedule-fire envelope `{ "schedule_id", "scheduled_fire_ms",
+        // "payload": [...] }` (see `enqueue_schedule_fire`); unwrap it
+        // so scheduled agents receive the same positional-args array a
+        // directly-enqueued job carries. The envelope metadata stays in
+        // the queue row for audit.
+        let effective_payload = match &job.payload {
+            serde_json::Value::Object(fields)
+                if fields.contains_key("schedule_id") && fields.contains_key("payload") =>
+            {
+                &fields["payload"]
+            }
+            other => other,
+        };
+        let serde_json::Value::Array(payload_items) = effective_payload else {
             return Ok(JobOutcome::Failure {
                 failure_kind: "PayloadShape".to_string(),
                 failure_fingerprint:
-                    "expected a JSON array of agent arguments; got a different JSON shape"
+                    "expected a JSON array of agent arguments (or a schedule-fire envelope \
+                     wrapping one); got a different JSON shape"
                         .to_string(),
                 base_delay_ms: 1_000,
             });
@@ -291,6 +307,38 @@ mod tests {
             approval_reason: None,
             created_ms: 0,
             updated_ms: 0,
+        }
+    }
+
+    /// A schedule-fired job arrives wrapped in the schedule-fire
+    /// envelope; the executor must unwrap it and execute the agent
+    /// with the inner positional args.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn default_executor_unwraps_schedule_fire_envelope() {
+        let ir = Arc::new(compile(
+            r#"
+agent heartbeat(label: String) -> String:
+    return label
+"#,
+        ));
+        let runtime = empty_runtime();
+        let executor = DefaultJobRuntimeExecutor::new(ir);
+        let job = fake_job(
+            "heartbeat",
+            serde_json::json!({
+                "schedule_id": "sched_heartbeat_0",
+                "scheduled_fire_ms": 1234,
+                "payload": ["tick"],
+            }),
+        );
+
+        let outcome = tokio::task::spawn_blocking(move || executor.execute(&runtime, &job))
+            .await
+            .expect("blocking task completed")
+            .expect("executor surface ok");
+        match outcome {
+            JobOutcome::Success { .. } => {}
+            other => panic!("schedule-fire envelope must unwrap to Success; got {other:?}"),
         }
     }
 

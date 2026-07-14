@@ -20,6 +20,8 @@ budgets, replay) instead of two.
 A durable job runner with:
 
 - Multi-worker async pool (`corvid jobs run --source <path>.cor --workers=N`).
+- Governed-cron scheduler runner (`corvid schedule run --source <path>.cor`)
+  that fires `schedule` declarations through the same pool.
 - Lease-based exclusivity (no two workers run the same job).
 - Idempotency keys (no double-side-effect under concurrent retry).
 - Retry / backoff / dead-letter queue (configured per enqueue, not as
@@ -99,14 +101,33 @@ schedule "0 8 * * *" zone "America/New_York" -> daily_brief("user_123") uses ema
 
 ## Running the runner
 
+Two runners share the same durable queue and executor:
+
 ```sh
+# Governed cron: registers every `schedule` declaration in the source
+# as a durable schedule, then fires due jobs through the worker pool.
+corvid schedule run --source app.cor --workers=4
+
+# Plain worker pool over already-enqueued jobs (no cron ticking).
 corvid jobs run --source app.cor --queue=default --workers=4
 ```
 
-The runner polls the queue, leases jobs, compiles the supplied source
-to resolve agent bodies, executes them with the configured concurrency,
-and handles retries and DLQ. `--source` is required: a production
-`corvid jobs run` without compiled source would mark jobs `succeeded`
+`corvid schedule run` is how `schedule` declarations execute: each
+declaration becomes an upserted schedule manifest (stable id, so
+re-running after an edit updates cron/args in place while the fire
+cursor carries over), a tick loop enqueues due fires idempotently
+(missed-fire policies apply — the default fires once on recovery
+after downtime), and the worker pool executes the target agent
+through the interpreter. Scheduled agents inherit the full durable
+story: tracing (per-job JSONL traces for `@replayable` agents),
+retries with backoff, dead-letters, and replay. Schedule arguments
+must be literals — the manifest is a durable artifact evaluated at
+fire time, so computation belongs in the target agent.
+
+Both runners poll the queue, lease jobs, compile the supplied source
+to resolve agent bodies, execute them with the configured concurrency,
+and handle retries and DLQ. `--source` is required: a production
+runner without compiled source would mark jobs `succeeded`
 without doing any work — a silent durable-state lie. For test-mode job
 lifecycle without executing agent bodies, use `corvid jobs run-one`.
 

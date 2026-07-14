@@ -7,6 +7,7 @@
 pub mod eval;
 pub mod jobs;
 pub mod misc;
+pub mod schedule;
 pub mod test;
 
 #[allow(unused_imports)]

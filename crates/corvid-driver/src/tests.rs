@@ -1350,14 +1350,17 @@ agent main() -> Bool:
         );
         std::fs::write(&main_cor, &with_import).unwrap();
 
-        let result = super::compile_with_config_at_path(&with_import, &main_cor, None);
+        // Compile-only pipeline: the scaffold's starter agent calls a
+        // stdlib executing tool, which the Python TRANSPILE pipeline
+        // rightly refuses — this test is about import resolution +
+        // typechecking, which the IR pipeline exercises identically.
+        let result = super::compile_to_ir_with_config_at_path(&with_import, &main_cor, None);
         assert!(
-            result.diagnostics.is_empty(),
+            result.is_ok(),
             "Gap #1 — import './std/effects' from `src/main.cor` failed \
              to resolve / typecheck after vendor_std landed the module at \
-             `src/std/effects.cor`. Diagnostics ({} total):\n{:#?}",
-            result.diagnostics.len(),
-            result.diagnostics,
+             `src/std/effects.cor`. Diagnostics:\n{:#?}",
+            result.err(),
         );
     }
 

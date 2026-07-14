@@ -325,6 +325,14 @@ Roadmap: [Phase 21 and Phase 22](./ROADMAP.md)
 Proof: [bundle verification tests](./crates/corvid-cli/tests/bundle_verify.rs)
 Non-scope: Receipts are evidence of observed behavior, not full formal verification of every possible run.
 
+#### Governed Cron
+
+Language-level `schedule "<cron>" zone "<tz>" -> agent(args)` declarations execute under the scheduler runner: `corvid schedule run --source app.cor` registers each declaration as a durable schedule manifest and fires due jobs through the durable-jobs worker pool. Scheduled agents inherit the whole durable story — per-job tracing (JSONL traces for `@replayable` agents), retries with backoff, dead-letters, idempotent fires, DST-aware timezone handling, and missed-fire recovery policies — because scheduling rides the same queue everything else does, instead of a side mechanism with weaker guarantees.
+
+Guide: [Jobs and schedules](./docs/guides/jobs.md)
+Proof: [scheduler runner e2e tests](./crates/corvid-cli/tests/schedule_run.rs)
+Non-scope: schedule arguments are literals (the manifest is a durable artifact); computation belongs in the target agent.
+
 #### Replay Quarantine For Durable Jobs
 
 `@replayable` durable jobs record a typed JSONL trace on their first run. `corvid jobs replay --source <path>.cor --job <id>` reproduces the run from the trace, and during replay every side-effect surface refuses to escape: LLM adapter calls, outbound HTTP, application store writes, and filesystem writes. Recorded calls substitute from the trace; unrecorded ones fail closed with a typed `QuarantineViolation` naming the surface.

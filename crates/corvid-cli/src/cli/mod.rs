@@ -34,6 +34,7 @@ pub mod receipt;
 pub mod release;
 pub mod review_queue;
 pub mod root;
+pub mod schedule;
 pub mod trace;
 pub mod upgrade;
 

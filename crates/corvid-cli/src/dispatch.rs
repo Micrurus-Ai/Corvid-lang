@@ -535,6 +535,25 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 dry_run,
             } => cmd_migrate_down(&dir, &down_dir, &state, &database, dry_run),
         },
+        Some(Command::Schedule { command }) => match command {
+            crate::cli::schedule::ScheduleCommand::Run {
+                source,
+                state,
+                workers,
+                lease_ttl_ms,
+                poll_ms,
+                max_runtime_ms,
+                max_missed_per_schedule,
+            } => crate::commands::schedule::cmd_schedule_run(
+                &source,
+                &state,
+                workers,
+                lease_ttl_ms,
+                poll_ms,
+                max_runtime_ms,
+                max_missed_per_schedule,
+            ),
+        },
         Some(Command::Jobs { command }) => match command {
             JobsCommand::Enqueue {
                 state,

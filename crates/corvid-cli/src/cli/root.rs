@@ -757,6 +757,12 @@ pub enum Command {
         #[command(subcommand)]
         command: JobsCommand,
     },
+    /// Governed cron: fire `schedule` declarations through the
+    /// durable-jobs queue (tracing, retries, dead-letters, replay).
+    Schedule {
+        #[command(subcommand)]
+        command: crate::cli::schedule::ScheduleCommand,
+    },
     /// Inspect published orchestration-overhead benchmark archives.
     Bench {
         #[command(subcommand)]

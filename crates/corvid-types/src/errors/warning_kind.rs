@@ -16,15 +16,14 @@ pub enum TypeWarningKind {
     },
     /// `effects: unsafe` on a Python import is explicit but should be reviewed.
     UnsafePythonImport { module: String, message: String },
-    /// A `schedule` declaration is parsed and typechecked but the
-    /// scheduler runner that actually fires the cron isn't part of
-    /// the v1.0 runtime — the declaration is silently dropped at IR
-    /// lowering today. Without this warning, a reviewer writing
-    /// `schedule "0 9 * * *" zone "America/New_York" -> ...` would
-    /// expect the cron to fire and have no signal that it won't
-    /// (surfaced in self-trial round 4 against `/tmp/job_coordinator`).
-    /// Filed alongside the eventual scheduler-runner slice as the
-    /// load-bearing user-visible diagnostic that pins the gap.
+    /// A `schedule` declaration fires only under the governed-cron
+    /// scheduler runner (`corvid schedule run`), never during a plain
+    /// `corvid run` — which executes `main` once. Without this note,
+    /// a reviewer writing `schedule "0 9 * * *" zone
+    /// "America/New_York" -> ...` and testing via `corvid run` would
+    /// expect the cron to fire and have no signal about which command
+    /// starts it (the original gap surfaced in self-trial round 4
+    /// against a job-coordinator project, before the runner shipped).
     ScheduleNotExecutable { agent: String, cron: String },
     /// An unannotated binding whose initializer cannot determine
     /// its full type (slice 45q): `x = []` (element type Unknown)
@@ -70,10 +69,9 @@ impl TypeWarningKind {
             }
             Self::ScheduleNotExecutable { agent, cron } => {
                 format!(
-                    "W0280: `schedule \"{cron}\" -> {agent}(...)` parses + typechecks but the \
-                     v1.0 scheduler runner does not yet fire scheduled jobs — the cron will \
-                     NOT execute. The declaration is preserved in the IR for the post-v1.0 \
-                     runner slice that will wire it up"
+                    "W0280: `schedule \"{cron}\" -> {agent}(...)` fires only under the \
+                     scheduler runner (`corvid schedule run --source <this file>`) — a plain \
+                     `corvid run` executes `main` once and does not start the cron"
                 )
             }
         }
@@ -97,7 +95,7 @@ impl TypeWarningKind {
                 Some(format!("write `{hint}` with the real inner type"))
             }
             Self::ScheduleNotExecutable { .. } => Some(
-                "until the scheduler runner ships, drive scheduled work from an external cron / k8s CronJob that POSTs to a Corvid HTTP route (the `server` block), OR call the agent directly via `corvid run` from your own scheduler".into(),
+                "start the governed-cron runner with `corvid schedule run --source <file>` — scheduled agents inherit tracing, retries, dead-letters, and replay from the durable-jobs queue".into(),
             ),
         }
     }
