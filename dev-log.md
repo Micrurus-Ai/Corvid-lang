@@ -1793,6 +1793,22 @@ Next per the Phase 49 queue: 49e-capability-surface-contract.
 
 ---
 
+## 2026-07-14 - 49e closed: Phase 49 complete — the capability surface shipped
+
+Five slices in one day: effect-audited skills (the nutrition label,
+enforced at add AND on every check), registry-free signing with
+hash-pinned sources and consent-gated updates, typed MCP onboarding
+from server schemas, manifest-derived connector scaffolds, and the
+public contract (guide + FEATURES + README + inventions rows). One
+verb — `corvid add` — three capability kinds, everything visible
+source inside the moat.
+
+The launch phase is next, per the standing Phase 48 decision. It
+still deserves its own pre-phase chat on internal ordering (33J7b
+runtime split first vs website shell first).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

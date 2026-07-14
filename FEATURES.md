@@ -133,6 +133,18 @@ What makes a language a movement.
 
 ---
 
+## The capability surface — shipped 2026-07-14 (Phase 49, pre-launch)
+
+One verb — `corvid add` — three capability kinds, everything visible source inside the moat:
+
+1. **Effect-audited skills** — the capability nutrition label. A skill's `skill.toml` declares its ceiling (capability groups, max trust, max cost, data classes, reach, required env); the audit is COMPUTED from the source and enforced twice: dishonest labels refuse to install, and every `corvid check`/`corvid run` re-verifies each vendored skill, so a post-install edit past the label fails naming the exceeded dimension. DSSE-signed (registry-free), hash-pinned local/git/github sources, `corvid skill update` with fresh consent on change.
+2. **Typed MCP in one command** — `corvid add mcp` discovers a server's tools and generates one typed agent per tool from its own JSON schemas (json-builder args; untrusted servers stay approval-gated); `corvid mcp regen` keeps the module honest.
+3. **Manifest-derived connector scaffolds** — `corvid add connector <provider>` renders the shipped manifest into the typed boundary: scope effects with honest dimensions, `dangerous` on quarantined writes, setup checklist in the header.
+
+Guide: [`docs/guides/capabilities.md`](./docs/guides/capabilities.md).
+
+---
+
 ## v1.0 — Launch
 
 Stable API, documented, production-ready.

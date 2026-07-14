@@ -51,6 +51,7 @@ const GUARDED_CHAPTERS: &[&str] = &[
     "docs/book/18-talking-to-the-outside-world.md",
     "docs/guides/auth.md",
     "docs/guides/backend.md",
+    "docs/guides/capabilities.md",
     "docs/guides/connectors.md",
     "docs/guides/debugging.md",
     "docs/guides/ffi-c-rust.md",

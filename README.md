@@ -325,6 +325,35 @@ Roadmap: [Phase 21 and Phase 22](./ROADMAP.md)
 Proof: [bundle verification tests](./crates/corvid-cli/tests/bundle_verify.rs)
 Non-scope: Receipts are evidence of observed behavior, not full formal verification of every possible run.
 
+#### Effect-Audited Skills
+
+The only agent skill system where you read a skill's permissions like a nutrition label — and the compiler holds it to them. A skill's `skill.toml` declares its capability ceiling; `corvid add skill` COMPUTES the audit from the source (a dishonest label refuses to install), renders it for consent, and vendors visible, git-diffable code. Every `corvid check`/`corvid run` re-verifies: edit a vendored skill past its label and the next check fails naming the exceeded dimension. DSSE-signed without a registry (one verification proves publisher identity AND content integrity), hash-pinned sources (`local`, `git:`, `github:`), and `corvid skill update` with fresh consent on change.
+
+```sh
+corvid add skill github:acme/skills/summarize-repo@v1.2 --publisher-key acme.hex
+```
+
+```text
+capability label (verified against the source):
+  uses:       http, llm
+  max trust:  supervisor_required
+  max cost:   $0.2500 per call
+  reach:      hosts api.github.com (enforced at runtime by [http] allow)
+  signed — publisher key `bc7cbcb5636375fa` verified; content hashes match.
+```
+
+Guide: [Extending your agent](./docs/guides/capabilities.md)
+Proof: [skill audit + signing + pin tests](./crates/corvid-driver/src/skills/)
+Non-scope: hosted registry (post-v1.0); reach hosts/paths are enforced at runtime by `[http] allow` / `[io] root`, declared on the label.
+
+#### Typed MCP In One Command
+
+`corvid add mcp <name> --cmd ...|--url ...` discovers the server's tools and generates a typed module — one typed agent per tool from the server's own JSON schemas, arguments built with the std/json builder so escaping is never string concatenation. Untrusted servers stay approval-gated through the generated wrappers; `corvid mcp regen` refreshes the module when the server changes. `corvid add connector <provider>` does the same for the shipped connectors, rendering each manifest into scope effects + operation tools with `dangerous` on quarantined writes.
+
+Guide: [Extending your agent](./docs/guides/capabilities.md)
+Proof: [MCP codegen tests](./crates/corvid-driver/src/mcp_codegen.rs) + [connector scaffold tests](./crates/corvid-cli/src/commands/connector_scaffold.rs)
+Non-scope: nested schema shapes fall back to one `args_json` parameter, stated in the generated comment.
+
 #### Replay-Safe Secret Access
 
 `secret_read` solves the secrets-in-traces problem instead of ignoring it: the program receives the real value, the recorded trace event carries a redacted copy (`<redacted:XY>` + `value_redacted: true` — a RuntimeChecked guarantee, `secrets.trace_never_carries_value`), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is `Ok` with `present: false`.

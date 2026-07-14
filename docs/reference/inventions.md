@@ -205,6 +205,24 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **What it is**: `rag_ingest` / `rag_search` — retrieval with the moat attached: index paths confined by the `[io] root` policy, failures as typed `Err` values, provenance keys on every retrieved chunk, trace/replay substitution (the embedder never fires on replay), and honest lexical degradation when no embedder is configured.
 - **Non-scope**: loaders on the tool surface, reranking, effect-level `Grounded<T>` wrapping (waits for cross-module provenance composition, post-v1.0).
 
+### Effect-Audited Skills
+
+- **Status**: shipped (slices 49a/49b, 2026-07-14)
+- **Run it**: `corvid add skill <dir|git:|github:> [--publisher-key k.hex]`, `corvid skill sign|update`
+- **Tests**: `crates/corvid-driver/src/skills/` (mod: audit/verify/vendor + edited-skill catch + dishonest-label refusal; signing: sign/verify/tamper; source: github/git parsing + real file:// clone; pin: update cycle)
+- **Spec**: `docs/guides/capabilities.md`
+- **What it is**: the capability nutrition label — a skill's declared ceiling (capability groups, trust, cost, data) verified against a source-computed audit at add time AND on every check/run, so even edited skills cannot silently outgrow what the user consented to. DSSE-signed registry-free; hash-pinned sources; consent-gated updates.
+- **Non-scope**: hosted registry (post-v1.0); reach (hosts/paths) is declared on the label, enforced at runtime by the existing policies.
+
+### Typed MCP Add
+
+- **Status**: shipped (slice 49c, 2026-07-14)
+- **Run it**: `corvid add mcp <name> --cmd ...|--url ...`, `corvid mcp regen <name>`
+- **Tests**: `crates/corvid-driver/src/mcp_codegen.rs` (typed/fallback/empty generation, generated-module-compiles, sanitization) + `McpRuntime::list_tools` over both transports
+- **Spec**: `docs/guides/capabilities.md`
+- **What it is**: discovery-first MCP onboarding — the server's schemas become one typed agent per tool (json-builder args), config lands untrusted-by-default, and the approval gate rides through the generated wrappers unchanged.
+- **Non-scope**: schemas beyond the primitive v1 mapping fall back to `args_json: String`, stated in the generated comment.
+
 ### Replay-Safe Secret Access
 
 - **Status**: shipped (slice 48a, 2026-07-14)
