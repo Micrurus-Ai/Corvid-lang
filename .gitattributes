@@ -16,6 +16,9 @@ install/*.ps1       text eol=lf
 # match. Forcing LF here makes the recorded hashes
 # platform-independent, the way they were always meant to be.
 examples/**/bindings_rust/** text eol=lf
+examples/**/bindings_python/** text eol=lf
+examples/**/artifacts/**     text eol=lf
+examples/**/keys/**          text eol=lf
 examples/**/verify.sh        text eol=lf
 examples/**/corvid-bundle.toml text eol=lf
 examples/_bundle_demo_common.sh text eol=lf

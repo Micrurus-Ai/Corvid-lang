@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use corvid_driver::{
-    compile_with_config_at_path, diff_snapshots, load_corvid_config_for, render_all_pretty,
+    diff_snapshots, load_corvid_config_for, render_all_pretty,
     render_all_pretty_warnings,
     render_effect_diff, scaffold_new, snapshot_revision, vendor_std,
 };
