@@ -1460,6 +1460,59 @@ agent load(id: String) -> Grounded<String>:
 }
 
 #[test]
+fn grounded_connector_tool_return_is_wrapped_and_flows() {
+    // The connector-grounding pattern that works TODAY, no new
+    // syntax: a connector-backed tool declared with a
+    // `data: grounded` effect has its return auto-wrapped to
+    // `Grounded<T>` at call sites, and the provenance flows to a
+    // Grounded return without annotation.
+    let src = "\
+effect gmail_read:
+    data: grounded
+
+tool gmail_recent(query: String) -> String uses gmail_read
+
+agent latest_thread(query: String) -> Grounded<String>:
+    thread = gmail_recent(query)
+    return thread
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn grounded_connector_return_strip_is_the_tracked_legacy_coercion() {
+    // Pins the SHIPPED strip semantics for grounded connector
+    // returns: passing a Grounded<T> where T is expected is the
+    // deliberate legacy coercion (`Grounded<T>` is assignable to
+    // `T`), NOT a typecheck error — but the drop is never silent
+    // at the IR level: lowering emits the explicit
+    // provenance-discard node the corpus fixture
+    // `legacy_grounded_coercion.cor` verifies across all four
+    // tiers. A strict no-implicit-strip mode is the post-v1.0
+    // connector-syntax track.
+    let src = "\
+effect gmail_read:
+    data: grounded
+
+tool gmail_recent(query: String) -> String uses gmail_read
+
+agent summarize(text: String) -> String:
+    return text
+
+agent digest(query: String) -> String:
+    thread = gmail_recent(query)
+    return summarize(thread)
+";
+    let c = check(src);
+    assert!(
+        c.errors.is_empty(),
+        "the legacy coercion must typecheck (the IR discard node is the accountability); got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
 fn mutation_grounded_provenance_flows_through_prompts() {
     // Grounded input into a prompt should ground the prompt result.
     let c = check(MUTATION_PROVENANCE_BASE);

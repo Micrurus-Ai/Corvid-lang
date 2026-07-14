@@ -71,6 +71,38 @@ calls into `corvid_connector_runtime::gmail`; the typechecker
 enforces the effect row + the approve boundary at the Corvid
 layer.
 
+## Grounding connector reads today
+
+The `Grounded<T>` wrap does not need the post-v1.0 `connector`
+syntax: declare the connector-backed tool with an effect whose
+`data` dimension is `grounded`, and every call site's return is
+auto-wrapped today —
+
+```corvid
+effect gmail_read:
+    data: grounded
+
+tool gmail_recent(query: String) -> String uses gmail_read
+
+agent latest_thread(query: String) -> Grounded<String>:
+    thread = gmail_recent(query)
+    return thread
+```
+
+`thread` is `Grounded<String>`; the provenance flows to the declared
+`Grounded` return with no annotation, and a `Grounded` return
+without a grounded source is a typecheck error. Passing a grounded
+value where a plain `T` is expected is the deliberate legacy
+coercion — it typechecks, and lowering emits an explicit
+provenance-discard node (verified across all four tiers by the
+`legacy_grounded_coercion` corpus fixture), so the drop is tracked
+rather than silent. A strict no-implicit-strip mode and
+connector-side default grounding ride the post-v1.0
+`connector ... grounded` syntax; today the shipped examples carry
+provider record ids explicitly (`provenance_id` fields, the
+files-connector pattern), and this opt-in effect pattern layers the
+typed wrap on top.
+
 ## CLI
 
 ```sh

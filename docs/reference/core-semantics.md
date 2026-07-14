@@ -424,10 +424,12 @@ Constructing a `Grounded<T>` value requires citing a source; unsourced `Grounded
 **Positive tests:**
 
 - `crates/corvid-types/src/tests.rs::mutation_direct_grounded_return_with_retrieval_chain_is_ok`
+- `crates/corvid-types/src/tests.rs::grounded_connector_tool_return_is_wrapped_and_flows`
 
 **Adversarial tests:**
 
 - `crates/corvid-types/src/tests.rs::mutation_grounded_return_without_retrieval_errors`
+- `crates/corvid-types/src/tests.rs::grounded_connector_return_strip_is_the_tracked_legacy_coercion`
 
 #### `grounded.propagation_across_calls`
 - **class**: out_of_scope

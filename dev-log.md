@@ -1658,6 +1658,23 @@ Next per the Phase 48 queue: 48b-connector-grounded-returns-disposition.
 
 ---
 
+## 2026-07-14 - 48b closed: connector grounding dispositioned honestly
+
+The survey found the wrap mechanism already exists: any
+connector-backed tool declared with a `data: grounded` effect gets
+`Grounded<T>` returns today, same-module, zero new syntax — now
+checker-pinned and documented in the connectors guide. The
+launch-readiness item's "strips provenance fails typecheck" clause
+turned out to contradict shipped, deliberate semantics (the legacy
+coercion with a four-tier-verified IR discard node), so the item is
+re-scoped to the truth instead of half-shipping a contradiction.
+The universal connector-side default stays with the post-v1.0
+syntax track where the audit chain already placed it.
+
+Next per the Phase 48 queue: 48c-ai-helper-sweep.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

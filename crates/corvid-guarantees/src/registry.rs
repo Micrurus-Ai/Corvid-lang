@@ -637,9 +637,11 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-types/src/tests.rs::mutation_direct_grounded_return_with_retrieval_chain_is_ok",
+            "crates/corvid-types/src/tests.rs::grounded_connector_tool_return_is_wrapped_and_flows",
         ],
         adversarial_test_refs: &[
             "crates/corvid-types/src/tests.rs::mutation_grounded_return_without_retrieval_errors",
+            "crates/corvid-types/src/tests.rs::grounded_connector_return_strip_is_the_tracked_legacy_coercion",
         ],
     },
     Guarantee {
