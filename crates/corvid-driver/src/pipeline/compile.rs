@@ -142,21 +142,60 @@ fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
 /// Compile a source string that came from `source_path`. Unlike
 /// [`compile_with_config`], this path can resolve sibling `.cor`
 /// imports because the driver still has a filesystem anchor.
+/// Type-check pipeline (`corvid check`): lex → parse → resolve →
+/// typecheck → lower, WITHOUT the Python-transpile-tier stdlib
+/// refusal and without emission. A program that calls stdlib
+/// executing tools is perfectly valid Corvid (the interpreter tier
+/// runs it); only the transpile pipeline may refuse it.
+pub fn analyze_with_config_at_path(
+    source: &str,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+) -> CompileResult {
+    compile_front_at_path(source, source_path, config).0
+}
+
+/// Transpile pipeline (`corvid build --target=python`): the shared
+/// front half plus the stdlib-transpile refusal and Python emission.
 pub fn compile_with_config_at_path(
     source: &str,
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
+    let (mut result, ir) = compile_front_at_path(source, source_path, config);
+    let Some(ir) = ir else {
+        return result;
+    };
+    if let Some(diags) = stdlib_transpile_refusal(&ir) {
+        result.diagnostics = diags;
+        result.python_source = None;
+        return result;
+    }
+    result.python_source = Some(emit(&ir));
+    result
+}
+
+/// Shared front half for the two pipelines above. Returns the
+/// lowered IR alongside the (emission-free) result; `None` IR means
+/// diagnostics stopped the pipeline before lowering.
+fn compile_front_at_path(
+    source: &str,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+) -> (CompileResult, Option<corvid_ir::IrFile>) {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let tokens = match lex(source) {
         Ok(t) => t,
         Err(errs) => {
             diagnostics.extend(errs.into_iter().map(Diagnostic::from));
-            return CompileResult {
-                python_source: None,
-                diagnostics,
-                warnings: Vec::new(),
-            };
+            return (
+                CompileResult {
+                    python_source: None,
+                    diagnostics,
+                    warnings: Vec::new(),
+                },
+                None,
+            );
         }
     };
     let (file, parse_errs) = parse_file(&tokens);
@@ -189,26 +228,23 @@ pub fn compile_with_config_at_path(
         .collect();
 
     if !diagnostics.is_empty() {
-        return CompileResult {
-            python_source: None,
-            diagnostics,
-            warnings,
-        };
+        return (
+            CompileResult {
+                python_source: None,
+                diagnostics,
+                warnings,
+            },
+            None,
+        );
     }
 
     let ir = lower_driver_file(&file, &resolved, &typechecked.result);
-    if let Some(diags) = stdlib_transpile_refusal(&ir) {
-        return CompileResult {
+    (
+        CompileResult {
             python_source: None,
-            diagnostics: diags,
+            diagnostics: Vec::new(),
             warnings,
-        };
-    }
-    let py = emit(&ir);
-
-    CompileResult {
-        python_source: Some(py),
-        diagnostics: Vec::new(),
-        warnings,
-    }
+        },
+        Some(ir),
+    )
 }

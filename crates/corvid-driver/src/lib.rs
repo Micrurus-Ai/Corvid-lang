@@ -106,7 +106,8 @@ mod trace_fresh;
 pub use config_loader::{load_corvid_config_for, load_corvid_config_with_path_for};
 pub use pipeline::{
     compile, compile_to_abi_with_config, compile_to_ir, compile_to_ir_with_config,
-    compile_to_ir_with_config_at_path, compile_with_config, compile_with_config_at_path,
+    analyze_with_config_at_path, compile_to_ir_with_config_at_path, compile_with_config,
+    compile_with_config_at_path,
     CompileResult,
 };
 pub(crate) use pipeline::{lower_driver_file, typecheck_driver_file};

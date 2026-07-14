@@ -77,7 +77,7 @@ pub(crate) fn cmd_check(file: &Path) -> Result<u8> {
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("cannot read `{}`", file.display()))?;
     let config = load_corvid_config_for(file);
-    let result = compile_with_config_at_path(&source, file, config.as_ref());
+    let result = corvid_driver::analyze_with_config_at_path(&source, file, config.as_ref());
     // Self-trial round 4 Gap A — surface warnings BEFORE the
     // success/error branch so a reviewer sees them even when the
     // source compiles cleanly. Pre-fix these were silently dropped

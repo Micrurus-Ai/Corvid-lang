@@ -29,7 +29,10 @@ mod compile;
 mod ir;
 
 pub use abi::compile_to_abi_with_config;
-pub use compile::{compile, compile_with_config, compile_with_config_at_path, CompileResult};
+pub use compile::{
+    analyze_with_config_at_path, compile, compile_with_config, compile_with_config_at_path,
+    CompileResult,
+};
 pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config_at_path};
 
 pub(crate) struct DriverTypecheck {

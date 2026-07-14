@@ -62,6 +62,29 @@ agent bad(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
+    fn analyze_pipeline_accepts_stdlib_tool_calls() {
+        // `corvid check` is a TYPE-CHECK command: a program calling
+        // stdlib executing tools is valid Corvid (the interpreter
+        // tier runs it), so the analyze pipeline must accept what
+        // the transpile pipeline refuses. Pins the regression where
+        // check rode the transpile pipeline and rejected every
+        // stdlib-calling program.
+        let src = "\
+tool time_now_utc() -> Int
+
+agent main() -> Int:
+    return time_now_utc()
+";
+        let r = super::analyze_with_config_at_path(src, std::path::Path::new("main.cor"), None);
+        assert!(
+            r.diagnostics.is_empty(),
+            "analyze must accept stdlib tool calls; got {:?}",
+            r.diagnostics
+        );
+        assert!(r.python_source.is_none(), "analyze never emits");
+    }
+
+    #[test]
     fn stdlib_tool_call_refuses_python_transpile_loudly() {
         // The Python transpile tier has no stdlib dispatch. A program
         // calling a stdlib executing tool must refuse at transpile
