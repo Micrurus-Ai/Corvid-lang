@@ -131,19 +131,6 @@ fn std_cache_compiles_as_corvid_source() {
 }
 
 #[test]
-fn std_queue_compiles_as_corvid_source() {
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("repo root");
-    let source_path = repo.join("std").join("queue.cor");
-    let source = fs::read_to_string(&source_path).expect("std/queue.cor");
-
-    compile_to_ir_with_config_at_path(&source, &source_path, None)
-        .expect("std.queue should compile as a standalone Corvid module");
-}
-
-#[test]
 fn std_jobs_compiles_as_corvid_source() {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -404,24 +391,6 @@ agent main() -> String:
 }
 
 #[test]
-fn std_queue_adversarial_job_without_replay_key_is_rejected() {
-    assert_std_adversarial_program_rejected(
-        "queue",
-        true,
-        r#"
-import "./std/queue" use pending_job
-
-agent main() -> String:
-    job = pending_job("job-1", "summarize", 3, 0.50, "std.ai")
-    return job.id
-"#,
-    );
-    let source = std_source("queue");
-    assert!(source.contains("replay_key: String"));
-    assert!(source.contains("effect_envelope(\"std.queue.job\""));
-}
-
-#[test]
 fn std_jobs_adversarial_unredacted_job_payload_surface_is_rejected() {
     assert_std_adversarial_program_rejected(
         "jobs",
@@ -655,23 +624,6 @@ agent main() -> Bool:
     k = cache_key("answers", "weather", "fp-1", "std.http.request", "prov-1")
     entry = cache_entry(k, true, "weather:fp-1")
     return cache_hit(entry)
-"#,
-    );
-}
-
-#[test]
-fn std_queue_imported_helpers_typecheck() {
-    assert_imported_helpers_typecheck(
-        "queue",
-        true,
-        r#"
-import "./std/queue" use QueueJobEnvelope, queued_job, pending_job, canceled_job
-
-agent main() -> Bool:
-    pending = pending_job("job-1", "summarize", 3, 0.50, "std.ai", "std.queue.job")
-    queued = queued_job("job-2", "extract", "running", 5, 1.00, "std.ai", "std.queue.job")
-    cancel = canceled_job(queued)
-    return pending.status == "pending" and queued.status == "running" and cancel.status == "canceled"
 "#,
     );
 }

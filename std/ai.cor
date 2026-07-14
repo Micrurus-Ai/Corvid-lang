@@ -1,4 +1,11 @@
 # Standard AI application primitives.
+#
+# Disposition: PURE PATTERN MODULE — deliberately non-executing.
+# Message, prompt-render, and model-config envelopes for AI
+# applications. The EXECUTING surface for model calls is the
+# language itself (`prompt` declarations and `call_llm` with its
+# with-modifiers), which is traced, budgeted, and replayed by the
+# runtime; these types are the vocabulary programs use around it.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

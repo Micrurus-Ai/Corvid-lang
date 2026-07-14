@@ -1,4 +1,14 @@
 # Standard durable job envelopes.
+#
+# Disposition: CONTRACT-ONLY — non-executing today. The runtime
+# ships the real durable queue (corvid-runtime
+# `queue::DurableQueueRuntime`: SQLite-backed enqueue / lease /
+# complete, retries, dead-letters, checkpoints, cron schedules,
+# job-level approval waits), operated through `corvid jobs ...`.
+# Programs reach it through a host tool wrapper with these
+# envelopes as the typed boundary. The scheduler-runner roadmap
+# slice drives this queue for scheduled agents; an in-language
+# enqueue surface is a candidate after it lands.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

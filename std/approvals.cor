@@ -1,4 +1,18 @@
 # Standard durable approval queue envelopes.
+#
+# Disposition: CONTRACT-ONLY — non-executing BY DESIGN, and it
+# must stay that way. The runtime ships a real durable approval
+# queue (corvid-runtime `approval_queue::ApprovalQueueRuntime`,
+# operated through `corvid approvals ...` and `corvid serve`'s
+# browser approver), but approval DECISIONS are made OUTSIDE the
+# program: a program that could list and decide its own queue
+# could approve itself — exactly what the approve/trust moat
+# exists to prevent. The in-language approval flow is the
+# `approve` statement. These envelopes are the typed boundary for
+# host tools that REPORT queue state to an agent (dashboards,
+# notifications): bring your own host tool; the envelopes carry
+# the redaction and effect metadata so the moat features apply
+# across the bridge.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

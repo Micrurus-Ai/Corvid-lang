@@ -5,6 +5,42 @@ The modules are intentionally small and effect-explicit so they can be imported,
 audited, packaged, and eventually shipped through the same content-addressed
 package path as user code.
 
+## Module dispositions
+
+No stdlib module is silently envelope-only. Every module is one of three
+things, states which in its file header, and appears in this table:
+
+- **Executing** — declares `tool`s the runtime dispatches for real
+  (traced, replay-substituted, policy-governed).
+- **Contract-only** — typed envelopes forming the boundary to a runtime
+  or host capability you reach through a host `tool` wrapper (the
+  `std/db.cor` Postgres precedent). Each header names the real runtime
+  counterpart and why the module is not executing.
+- **Pure vocabulary / patterns** — the types ARE the feature; there is
+  nothing to wire.
+
+| module | disposition | executing surface / runtime counterpart |
+|---|---|---|
+| `std/io` | **Executing** | `io_read_text` / `io_write_text` / `io_list_dir` over `[io] root` confinement |
+| `std/http` | **Executing** | `http_get` / `http_post_json` over SSRF block + `[http] allow` |
+| `std/db` | **Executing** (SQLite) | `db_open` / `db_query` / `db_execute`; Postgres path is contract-only |
+| `std/json` | **Executing** | `json_parse` family + typed-decoder convention |
+| `std/mcp` | **Executing** | `mcp_call` over governed `[mcp]` servers |
+| `std/rag` | **Executing** | `rag_ingest` / `rag_search` over `[io] root` + optional `[rag]` embedder |
+| `std/time` | **Executing** | clock tools (traced + replay-substituted) |
+| `std/random` | **Executing** | randomness tools (traced + replay-substituted) |
+| `std/agent` | Pure patterns | workflow envelope vocabulary; `assert judged` is the executing judge |
+| `std/ai` | Pure patterns | message/prompt vocabulary; `prompt` + `call_llm` are the executing surface |
+| `std/effects` | Pure vocabulary | the shared effect-metadata types every module imports |
+| `std/approvals` | Contract-only (by design) | `ApprovalQueueRuntime` + `corvid approvals ...`; decisions stay OUTSIDE the program |
+| `std/auth` | Contract-only | `auth::SessionAuthRuntime` + `corvid auth ...` |
+| `std/jobs` | Contract-only | `queue::DurableQueueRuntime` + `corvid jobs ...`; scheduler runner rides the roadmap |
+| `std/observe` | Contract (event shape) | describes the `std.observe.summary` host-event payload + `corvid observe ...` |
+| `std/secrets` | Contract-only (designed) | `secrets::SecretRuntime`; executing reads need the replay-safe redaction design first |
+
+`std/queue.cor` (the pre-durable in-process job vocabulary) was removed:
+`std/jobs.cor` supersedes it and no program imported it.
+
 ## `std.ai`
 
 `std/ai.cor` contains reusable AI application data envelopes and pure helpers:
@@ -216,14 +252,6 @@ construction over namespace, subject, model, arguments, effect key, provenance
 key, and version metadata. Cache-key creation emits `std.cache.key` trace events
 so cache decisions are replay-auditable without storing cached payloads in the
 metadata event.
-
-## `std.queue`
-
-`std/queue.cor` defines typed background-job envelopes with task, status, retry,
-budget, effect-summary, and replay-key metadata. The runtime exposes an
-in-process queue foundation for enqueue and cancel operations. Each operation
-emits `std.queue.*` trace events so long-running AI work can be audited and later
-backed by a durable store without changing the job contract.
 
 ## `std.jobs`
 

@@ -1509,6 +1509,31 @@ Next per agreed order: 47f-contract-module-disposition.
 
 ---
 
+## 2026-07-14 - 47f closed: every std module states what it is
+
+The nine envelope-only modules (plus ai.cor, which the audit
+caught as envelope-only too) each carry an explicit disposition
+header now, and the stdlib README opens with the full 16-module
+table. The interesting decisions: approvals is contract-only BY
+DESIGN (a program that could decide its own approval queue could
+approve itself — the gap is the feature); secrets is contract-only
+for a designed reason (executing reads would persist secret values
+into traces); queue.cor is deleted (superseded by jobs.cor, zero
+consumers). The two modules whose runtimes deserve real executing
+surfaces — secrets (replay-safe secret access) and cache
+(provenance-keyed caching) — are filed as 47i with the design
+tensions recorded, rather than wired as a rushed corner of an
+audit slice.
+
+Validation: driver suite green after removing queue's guard tests;
+workspace check clean; corpus verify exits 1.
+
+Next per agreed order: 47g-trust-dangerous-coupling-decision
+(decision already recorded in the phase header: derive approve
+from trust tier).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

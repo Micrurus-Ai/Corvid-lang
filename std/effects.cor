@@ -1,4 +1,10 @@
 # Standard effect metadata envelopes.
+#
+# Disposition: PURE VOCABULARY MODULE — deliberately
+# non-executing, permanently. Every other stdlib module imports
+# these types; they are the shared language for the effect
+# metadata that envelopes carry across tool boundaries. There is
+# nothing to wire: the types ARE the feature.
 
 public type EffectTag:
     name: String

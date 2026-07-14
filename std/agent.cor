@@ -1,4 +1,13 @@
 # Standard agent workflow envelopes.
+#
+# Disposition: PURE PATTERN MODULE — deliberately non-executing.
+# These types name the recurring shapes of agent workflows
+# (classify / extract / rank / judge / plan / tool-use / critique /
+# route / review) so programs, prompts, and hosts share one typed
+# vocabulary. There is no runtime surface to wire: the types ARE
+# the feature. The executing judge surface is the `assert judged`
+# quality assertion; `Judgement` here is the pure pattern type a
+# judge scores into.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

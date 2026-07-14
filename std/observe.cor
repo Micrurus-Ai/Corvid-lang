@@ -1,4 +1,13 @@
 # Standard observability envelopes.
+#
+# Disposition: CONTRACT MODULE with a specific role — these types
+# describe the payload shape of the runtime's
+# `std.observe.summary` host event (emitted by the replay
+# reporter) and the summaries the `corvid observe ...` commands
+# print. There is no executing tool here because observation
+# flows FROM the runtime TO the program, not the other way;
+# a host tool that surfaces runtime metrics to an agent uses
+# these envelopes as its typed boundary.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

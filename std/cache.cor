@@ -1,4 +1,12 @@
 # Standard cache metadata envelopes.
+#
+# Disposition: CONTRACT-ONLY — non-executing today. The runtime
+# ships a real cache (corvid-runtime `cache::CacheRuntime`:
+# put/get plus invalidation by invalidation key or provenance
+# key), but no stdlib tool reaches it yet; reach it through a
+# host tool wrapper with these envelopes as the typed boundary.
+# An executing cache surface (provenance-keyed caching of
+# expensive results) is a tracked roadmap candidate.
 
 import "./effects" use EffectEnvelope, effect_envelope
 

@@ -1,4 +1,15 @@
 # Standard auth, identity, tenant, and trace-context envelopes.
+#
+# Disposition: CONTRACT-ONLY — non-executing today. The executing
+# counterparts live in the runtime (corvid-runtime
+# `auth::SessionAuthRuntime`: sessions, Argon2id-hashed API keys,
+# OAuth state, JWT verification, CSRF), operated through
+# `corvid auth migrate` / `corvid auth keys ...`. Application
+# code reaches them through a host `tool` wrapper — declare the
+# tool signature in your program and pass these envelopes across
+# the boundary; they carry the redaction markers and effect
+# metadata the moat needs. An in-language executing auth surface
+# is a tracked roadmap candidate, not a hidden gap.
 
 import "./effects" use EffectEnvelope, effect_envelope
 
