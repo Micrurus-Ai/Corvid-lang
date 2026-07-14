@@ -1809,6 +1809,16 @@ runtime split first vs website shell first).
 
 ---
 
+## 2026-07-14 - 49z closed: verify no longer eats the disk
+
+The differential verifier deletes each fixture's native binary right
+after its run and sweeps day-old verify dirs once per process. A
+full corpus verify now leaves 194K of traces instead of the
+hundreds of MB of binaries that accumulated to 11 GB and filled the
+disk mid-session. Phase 49 is now FULLY complete (49a-49e + 49z).
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

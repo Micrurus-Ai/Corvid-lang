@@ -279,6 +279,11 @@ fn native_report(frontend: &Frontend) -> Result<TierReport> {
         .env("CORVID_TRACE_PATH", &trace_path)
         .output()
         .with_context(|| format!("failed to run native binary `{}`", binary.display()))?;
+    // The built binary is the heavy artifact (tens of MB per
+    // fixture); it has served its purpose once the run finished.
+    // The trace stays behind for post-run debugging. Best-effort:
+    // a failure to delete must not fail the verification.
+    let _ = std::fs::remove_file(&binary);
     let events = load_trace_events(&trace_path).with_context(|| {
         format!(
             "native run for `{}` did not produce a readable trace at `{}`",
@@ -540,7 +545,35 @@ fn ensure_native_runtime_staticlib() -> Result<()> {
         .map_err(|err| anyhow!(err))
 }
 
+/// Best-effort, once per process: sweep verify dirs older than a
+/// day. The dirs are kept after each run so traces can be inspected,
+/// but nothing ever deleted them — on one dev machine they
+/// accumulated 11 GB and filled the disk. A 24h TTL keeps recent
+/// runs debuggable and the growth bounded; in-flight parallel runs
+/// are always newer than the cutoff.
+fn sweep_stale_verify_dirs() {
+    static SWEEP: std::sync::Once = std::sync::Once::new();
+    SWEEP.call_once(|| {
+        let root = std::env::temp_dir().join("corvid-verify");
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return;
+        };
+        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 3600);
+        for entry in entries.flatten() {
+            let stale = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .map(|modified| modified < cutoff)
+                .unwrap_or(false);
+            if stale {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    });
+}
+
 fn persistent_verify_dir(prefix: &str) -> Result<PathBuf> {
+    sweep_stale_verify_dirs();
     // Process id + wall-clock nanoseconds alone collide under parallel
     // test threads on Windows, where SystemTime::now() has ~100ns
     // resolution. Include the OS thread id and a process-wide atomic
