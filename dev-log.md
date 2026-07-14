@@ -1534,6 +1534,26 @@ from trust tier).
 
 ---
 
+## 2026-07-14 - 47g closed: high trust derives the approve requirement
+
+Declaring `trust: supervisor_required` or `human_required` on a
+tool's effect row now means what it says: call sites need
+`approve`, whether or not the author remembered the `dangerous`
+marker. The derived diagnostic names the effect and tier that
+created the obligation and offers both honest fixes. The breaking
+change cost exactly two test migrations repo-wide — every real
+program already followed the discipline — which is the best
+possible evidence the derivation matches how the language is
+actually used.
+
+Validation: types 289 + guarantees 28 + driver/cli/runtime/vm/
+syntax suites green; workspace check clean; corpus verify exits 1
+on the two deliberate fixtures; live-probed both directions.
+
+Next per agreed order: 47c-codegen-parity-decision-and-loud-degradation.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

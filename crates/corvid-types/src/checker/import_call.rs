@@ -451,39 +451,62 @@ impl<'a> Checker<'a> {
                     return Type::Unknown;
                 };
                 self.check_args_against_imported_params(name, &tool.params, args, module);
-                if matches!(tool.effect, Effect::Dangerous) {
+                // Mirror of `check_tool_call` in `call.rs`: the
+                // approve requirement comes from `dangerous` OR is
+                // derived from a high trust tier in the tool's
+                // effect row. The registry only resolves effects
+                // visible to this checking context; an imported
+                // effect it cannot see simply derives nothing (the
+                // same resolution boundary the grounded analysis
+                // has).
+                let derived_trust = crate::effects::effect_row_trust_requires_approval(
+                    &tool.effect_row,
+                    self.registry,
+                );
+                if matches!(tool.effect, Effect::Dangerous) || derived_trust.is_some() {
                     let authorized = self
                         .approvals
                         .iter()
                         .any(|a| snake_case(&a.label) == name && a.arity == args.len());
                     if !authorized {
-                        // Mirror of `check_tool_call` in `call.rs`:
-                        // discriminate `approval.token_lexical_only`
+                        // Discriminate `approval.token_lexical_only`
                         // (an approve exists in the agent body but
                         // is out of lexical scope at this call site)
-                        // from `approval.dangerous_call_requires_token`
-                        // (no approve anywhere in the agent). The
+                        // from the no-approve-anywhere rows. The
                         // distinction matters identically for
-                        // imported dangerous tools — the user's
-                        // mitigation differs by sub-property.
+                        // imported tools — the user's mitigation
+                        // differs by sub-property.
                         let approve_exists_out_of_scope = self
                             .approvals_seen_in_agent
                             .iter()
                             .any(|a| snake_case(&a.label) == name && a.arity == args.len());
+                        let is_dangerous = matches!(tool.effect, Effect::Dangerous);
                         let guarantee_id = if approve_exists_out_of_scope {
                             "approval.token_lexical_only"
-                        } else {
+                        } else if is_dangerous {
                             "approval.dangerous_call_requires_token"
+                        } else {
+                            "approval.trust_tier_requires_token"
                         };
-                        self.errors.push(TypeError::with_guarantee(
+                        let kind = if is_dangerous {
                             TypeErrorKind::UnapprovedDangerousCall {
                                 tool: name.to_string(),
                                 expected_approve_label: pascal_case(name),
                                 arity: args.len(),
-                            },
-                            span,
-                            guarantee_id,
-                        ));
+                            }
+                        } else {
+                            let (deriving_effect, trust_tier) =
+                                derived_trust.clone().expect("derived_trust is Some here");
+                            TypeErrorKind::UnapprovedHighTrustCall {
+                                tool: name.to_string(),
+                                expected_approve_label: pascal_case(name),
+                                arity: args.len(),
+                                deriving_effect,
+                                trust_tier,
+                            }
+                        };
+                        self.errors
+                            .push(TypeError::with_guarantee(kind, span, guarantee_id));
                     }
                 }
                 self.bump_effect(WeakEffect::ToolCall);

@@ -17,6 +17,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | id | kind | class | phase |
 |----|------|-------|-------|
 | `approval.dangerous_call_requires_token` | approval | static | typecheck |
+| `approval.trust_tier_requires_token` | approval | static | typecheck |
 | `approval.token_lexical_only` | approval | static | typecheck |
 | `approval.dangerous_marker_preserved` | approval | out_of_scope | typecheck |
 | `approval.reachable_entrypoints_require_contract` | approval | static | typecheck |
@@ -122,6 +123,21 @@ A call site invoking a `@dangerous` tool must have an `approve` token lexically 
 
 - `crates/corvid-types/src/tests.rs::dangerous_tool_without_approve_is_compile_error`
 - `crates/corvid-types/src/tests.rs::tagged_unapproved_dangerous_call_carries_approval_guarantee_id`
+
+#### `approval.trust_tier_requires_token`
+- **class**: static
+- **phase**: typecheck
+
+A call site invoking a tool whose composed effect row carries `trust: supervisor_required` or `trust: human_required` must have an `approve` token lexically in scope, exactly like a `dangerous` tool — the requirement is DERIVED from the trust tier so a declaration that forgets the `dangerous` marker still gets compile-time protection. The diagnostic names the deriving effect and tier. `autonomous` and the confidence-gated `autonomous_if_confident(...)` (which typechecks as autonomous and escalates at runtime) derive nothing.
+
+**Positive tests:**
+
+- `crates/corvid-types/src/tests.rs::high_trust_tool_with_matching_approve_is_ok`
+
+**Adversarial tests:**
+
+- `crates/corvid-types/src/tests.rs::high_trust_tool_without_approve_is_compile_error`
+- `crates/corvid-types/src/tests.rs::high_trust_error_names_deriving_effect_and_tier`
 
 #### `approval.token_lexical_only`
 - **class**: static

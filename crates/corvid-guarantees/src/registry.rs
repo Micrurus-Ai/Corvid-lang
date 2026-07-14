@@ -40,6 +40,22 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "approval.trust_tier_requires_token",
+        kind: GuaranteeKind::Approval,
+        class: GuaranteeClass::Static,
+        phase: Phase::TypeCheck,
+        description:
+            "A call site invoking a tool whose composed effect row carries `trust: supervisor_required` or `trust: human_required` must have an `approve` token lexically in scope, exactly like a `dangerous` tool — the requirement is DERIVED from the trust tier so a declaration that forgets the `dangerous` marker still gets compile-time protection. The diagnostic names the deriving effect and tier. `autonomous` and the confidence-gated `autonomous_if_confident(...)` (which typechecks as autonomous and escalates at runtime) derive nothing.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-types/src/tests.rs::high_trust_tool_with_matching_approve_is_ok",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-types/src/tests.rs::high_trust_tool_without_approve_is_compile_error",
+            "crates/corvid-types/src/tests.rs::high_trust_error_names_deriving_effect_and_tier",
+        ],
+    },
+    Guarantee {
         id: "approval.token_lexical_only",
         kind: GuaranteeKind::Approval,
         class: GuaranteeClass::Static,

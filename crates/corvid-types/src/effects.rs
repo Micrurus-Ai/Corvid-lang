@@ -632,6 +632,7 @@ mod analyze;
 mod compose;
 mod cost;
 mod grounded;
+mod trust;
 
 pub use analyze::{analyze_effects, AgentEffectSummary};
 pub use compose::{canonical_dimension_name, compose_dimension_public};
@@ -646,6 +647,7 @@ pub use cost::{
 pub use grounded::{
     check_grounded_returns, effect_row_is_grounded, ProvenanceResult, ProvenanceViolation,
 };
+pub use trust::effect_row_trust_requires_approval;
 
 #[cfg(test)]
 mod tests {

@@ -2,13 +2,24 @@
 
 ## What approve is
 
-`approve` is a compile-time token. When a tool is declared with the
-`dangerous` marker, the compiler refuses to emit a binary unless every
-reachable call site is preceded by an `approve` of the matching shape.
-The effect row's `trust:` dimension records the trust tier the call
-carries (it feeds `@trust(...)` constraints and runtime approval
-routing); the compile-time approve gate is the `dangerous` marker on
-the tool declaration.
+`approve` is a compile-time token. The compiler refuses to emit a
+binary unless every reachable call site of a protected tool is
+preceded by an `approve` of the matching shape. A tool is protected
+in either of two ways:
+
+1. **Declared**: the `dangerous` marker on the tool declaration.
+2. **Derived**: the tool's effect row composes `trust:
+   supervisor_required` or `trust: human_required`. High-trust
+   semantics imply the approve requirement — an author who declares
+   supervisor-required trust but forgets the `dangerous` marker still
+   gets compile-time protection, and the diagnostic names the effect
+   and tier that created the obligation.
+
+`autonomous` (and the confidence-gated
+`autonomous_if_confident(...)`, which typechecks as autonomous and
+escalates at runtime) derives no requirement. The `trust:` dimension
+additionally feeds `@trust(...)` constraints and runtime approval
+routing.
 
 ## The shape
 
@@ -35,6 +46,18 @@ If you remove the `approve` line, the compiler fails:
     │ Help: add `approve Refund(arg1, arg2)` on the line before this call
 
 1 error(s) found.
+```
+
+The derived form fails the same way, naming the declaration that
+created the obligation:
+
+```text
+error: tool `submit_payment` composes `trust: human_required` (from
+effect `payment_write`) and was called without a prior `approve` —
+high-trust tools require approval exactly like `dangerous` ones
+    │ Help: add `approve SubmitPayment(arg1)` on the line before this
+    │ call, or lower `trust:` on effect `payment_write` if
+    │ `human_required` overstates the tool's real authority requirement
 ```
 
 ## Lexical scope

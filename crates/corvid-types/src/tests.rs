@@ -383,6 +383,139 @@ agent bad(id: String, amount: Float) -> Receipt:
 }
 
 #[test]
+fn high_trust_tool_without_approve_is_compile_error() {
+    // The approve requirement is DERIVED from the trust tier: a tool
+    // whose effect row composes `trust: supervisor_required` (or
+    // `human_required`) requires approve at call sites even without
+    // the `dangerous` marker — the forgotten-marker footgun gets
+    // compile-time protection.
+    let src = "\
+effect audit_log:
+    trust: supervisor_required
+
+tool log_refund(id: String) -> Nothing uses audit_log
+
+agent bad(id: String) -> Nothing:
+    return log_refund(id)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::UnapprovedHighTrustCall { .. })),
+        "expected UnapprovedHighTrustCall; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn high_trust_tool_with_matching_approve_is_ok() {
+    let src = "\
+effect audit_log:
+    trust: human_required
+
+tool log_refund(id: String) -> Nothing uses audit_log
+
+agent ok(id: String) -> Nothing:
+    approve LogRefund(id)
+    return log_refund(id)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn high_trust_error_names_deriving_effect_and_tier() {
+    // The diagnostic must be traceable to the declaration that
+    // created the obligation: it names the deriving effect AND the
+    // trust tier, and carries the derived guarantee id.
+    let src = "\
+effect payment_write:
+    trust: human_required
+
+tool submit_payment(id: String) -> Nothing uses payment_write
+
+agent bad(id: String) -> Nothing:
+    return submit_payment(id)
+";
+    let c = check(src);
+    let err = c
+        .errors
+        .iter()
+        .find(|e| matches!(e.kind, TypeErrorKind::UnapprovedHighTrustCall { .. }))
+        .expect("expected UnapprovedHighTrustCall");
+    match &err.kind {
+        TypeErrorKind::UnapprovedHighTrustCall {
+            tool,
+            deriving_effect,
+            trust_tier,
+            expected_approve_label,
+            ..
+        } => {
+            assert_eq!(tool, "submit_payment");
+            assert_eq!(deriving_effect, "payment_write");
+            assert_eq!(trust_tier, "human_required");
+            assert_eq!(expected_approve_label, "SubmitPayment");
+        }
+        other => panic!("wrong kind: {other:?}"),
+    }
+    assert_eq!(
+        err.guarantee_id.as_deref(),
+        Some("approval.trust_tier_requires_token"),
+        "the derived requirement must carry its own guarantee id"
+    );
+}
+
+#[test]
+fn autonomous_trust_tool_needs_no_approve() {
+    // `autonomous` (and by extension the confidence-gated form,
+    // which typechecks as autonomous) derives no approve
+    // requirement.
+    let src = "\
+effect telemetry:
+    trust: autonomous
+
+tool emit_metric(name: String) -> Nothing uses telemetry
+
+agent ok(name: String) -> Nothing:
+    return emit_metric(name)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn dangerous_high_trust_tool_reports_the_dangerous_diagnostic() {
+    // A tool that is BOTH `dangerous` and high-trust keeps the
+    // established dangerous diagnostic (one obligation, one error —
+    // the approve act is the same).
+    let src = "\
+effect payment_write:
+    trust: human_required
+
+tool submit_payment(id: String) -> Nothing dangerous uses payment_write
+
+agent bad(id: String) -> Nothing:
+    return submit_payment(id)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::UnapprovedDangerousCall { .. })),
+        "expected the dangerous diagnostic; got: {:?}",
+        c.errors
+    );
+    assert!(
+        !c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::UnapprovedHighTrustCall { .. })),
+        "must not double-report; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
 fn dangerous_tool_with_matching_approve_is_ok() {
     let src = "\
 tool issue_refund(id: String, amount: Float) -> Receipt dangerous
@@ -1083,6 +1216,7 @@ effect audit_log:
 tool log_refund(id: String) -> Nothing uses audit_log
 
 agent record(id: String) -> Nothing:
+    approve LogRefund(id)
     return log_refund(id)
 ";
     let c = check(src);
@@ -1155,6 +1289,7 @@ tool log_refund(id: String) -> Nothing uses audit_log
 @trust(human_required)
 agent ok(id: String, amount: Float) -> Receipt:
     approve IssueRefund(id, amount)
+    approve LogRefund(id)
     log_refund(id)
     return issue_refund(id, amount)
 ";

@@ -161,6 +161,25 @@ pub enum TypeErrorKind {
         arity: usize,
     },
 
+    /// A tool whose composed effect row carries `trust:
+    /// supervisor_required` or `trust: human_required` was called
+    /// without a matching prior `approve` — the approve requirement
+    /// is DERIVED from the trust tier, same machinery as
+    /// `dangerous`. The variant names the deriving effect and tier
+    /// so the author can see which declaration created the
+    /// obligation.
+    UnapprovedHighTrustCall {
+        tool: String,
+        /// The `approve` label the user should have written (PascalCase).
+        expected_approve_label: String,
+        arity: usize,
+        /// The effect in the tool's row whose trust tier derives the
+        /// requirement.
+        deriving_effect: String,
+        /// The trust tier (`supervisor_required` or `human_required`).
+        trust_tier: String,
+    },
+
     /// An externally reachable route, schedule, or exported agent can reach a
     /// dangerous tool without a matching approval contract in lexical scope.
     ApprovalReachabilityViolation {
@@ -535,6 +554,16 @@ impl TypeErrorKind {
             Self::UnapprovedDangerousCall { tool, .. } => {
                 format!("dangerous tool `{tool}` called without a prior `approve`")
             }
+            Self::UnapprovedHighTrustCall {
+                tool,
+                deriving_effect,
+                trust_tier,
+                ..
+            } => {
+                format!(
+                    "tool `{tool}` composes `trust: {trust_tier}` (from effect `{deriving_effect}`) and was called without a prior `approve` — high-trust tools require approval exactly like `dangerous` ones"
+                )
+            }
             Self::ApprovalReachabilityViolation {
                 entrypoint, tool, ..
             } => {
@@ -870,6 +899,21 @@ impl TypeErrorKind {
                     .join(", ");
                 Some(format!(
                     "add `approve {expected_approve_label}({args})` on the line before this call"
+                ))
+            }
+            Self::UnapprovedHighTrustCall {
+                expected_approve_label,
+                arity,
+                deriving_effect,
+                trust_tier,
+                ..
+            } => {
+                let args = (0..*arity)
+                    .map(|i| format!("arg{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Some(format!(
+                    "add `approve {expected_approve_label}({args})` on the line before this call, or lower `trust:` on effect `{deriving_effect}` if `{trust_tier}` overstates the tool's real authority requirement"
                 ))
             }
             Self::ApprovalReachabilityViolation {

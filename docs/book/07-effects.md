@@ -17,7 +17,7 @@ Every effect carries values along these six dimensions:
 | `cost` | `Money` | `$0.005`, `$50.00` |
 | `latency` | `Latency` | `fast`, `medium`, `slow` |
 | `confidence` | `Float` (0..1) | `0.9`, `0.95` |
-| `trust` | `Trust` | `model_only`, `supervisor_required`, `verified_chain` |
+| `trust` | `Trust` | `autonomous`, `supervisor_required`, `human_required`, `autonomous_if_confident(0.95)` |
 | `reversible` | `Bool` | `true`, `false` |
 | `data` | `Data` | `grounded`, `synthetic`, `external_action` |
 
@@ -85,10 +85,14 @@ Each dimension drives a real compiler behavior:
   the compiler proves the worst-case cost is within budget (over-budget
   is a compile error, E0250).
 - `trust` — records the trust tier a call carries; it feeds `@trust(...)`
-  dimensional constraints and runtime approval routing. The compile-time
-  approve gate is the `dangerous` marker on the tool declaration — see
-  **[Approve](/docs/approve)**. (Whether high trust tiers should also
-  imply the approve requirement is an open design decision, ROADMAP 47g.)
+  dimensional constraints and runtime approval routing. It ALSO drives
+  the compile-time approve gate: a tool whose effect row carries
+  `trust: supervisor_required` or `trust: human_required` requires an
+  `approve` at every call site, exactly like a `dangerous` tool — the
+  requirement is derived from the tier, so forgetting the `dangerous`
+  marker never silently removes protection. `autonomous` (and
+  `autonomous_if_confident(...)`, which typechecks as autonomous and
+  escalates at runtime) derives nothing. See **[Approve](/docs/approve)**.
 - `reversible: false` — the call is treated as committed at the moment of
   invocation; replay does not re-execute it by default.
 - `data: grounded` — the return value must be wrapped in `Grounded<T>`.

@@ -167,8 +167,18 @@ impl<'a> Checker<'a> {
 
         self.check_args_against_params(tool_name, &tool.params, args);
 
-        // Effect check: dangerous tool must have a prior matching approve.
-        if matches!(tool.effect, Effect::Dangerous) {
+        // Effect check: a `dangerous` tool must have a prior matching
+        // approve — and so must a tool whose composed effect row
+        // carries `trust: supervisor_required` or `trust:
+        // human_required`. The approve requirement is DERIVED from
+        // the trust tier so an author who declares high-trust
+        // semantics but forgets the `dangerous` marker still gets
+        // compile-time protection.
+        let derived_trust = crate::effects::effect_row_trust_requires_approval(
+            &tool.effect_row,
+            self.registry,
+        );
+        if matches!(tool.effect, Effect::Dangerous) || derived_trust.is_some() {
             let authorized = self
                 .approvals
                 .iter()
@@ -179,7 +189,8 @@ impl<'a> Checker<'a> {
                 //     right label+arity exists somewhere in this
                 //     agent's body but is out of lexical scope at this
                 //     call site (e.g. inside a sibling `if` branch).
-                //   - `approval.dangerous_call_requires_token`: no
+                //   - `approval.dangerous_call_requires_token` /
+                //     `approval.trust_tier_requires_token`: no
                 //     matching approve exists anywhere in this agent.
                 // The two distinct guarantee_ids let users know whether
                 // their fix is "move the approve to the right scope"
@@ -190,20 +201,36 @@ impl<'a> Checker<'a> {
                     .approvals_seen_in_agent
                     .iter()
                     .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                let is_dangerous = matches!(tool.effect, Effect::Dangerous);
                 let guarantee_id = if approve_exists_out_of_scope {
                     "approval.token_lexical_only"
-                } else {
+                } else if is_dangerous {
                     "approval.dangerous_call_requires_token"
+                } else {
+                    "approval.trust_tier_requires_token"
                 };
-                self.errors.push(TypeError::with_guarantee(
+                // `dangerous` keeps its established diagnostic; the
+                // derived requirement gets its own error naming the
+                // deriving effect + tier so the obligation is
+                // traceable to the declaration that created it.
+                let kind = if is_dangerous {
                     TypeErrorKind::UnapprovedDangerousCall {
                         tool: tool_name.to_string(),
                         expected_approve_label: pascal_case(tool_name),
                         arity: args.len(),
-                    },
-                    span,
-                    guarantee_id,
-                ));
+                    }
+                } else {
+                    let (deriving_effect, trust_tier) =
+                        derived_trust.clone().expect("derived_trust is Some here");
+                    TypeErrorKind::UnapprovedHighTrustCall {
+                        tool: tool_name.to_string(),
+                        expected_approve_label: pascal_case(tool_name),
+                        arity: args.len(),
+                        deriving_effect,
+                        trust_tier,
+                    }
+                };
+                self.errors.push(TypeError::with_guarantee(kind, span, guarantee_id));
             }
         }
 
