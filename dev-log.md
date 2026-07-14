@@ -1809,6 +1809,24 @@ runtime split first vs website shell first).
 
 ---
 
+## 2026-07-14 - Phase 50 pre-phase chat: developer-magnet features
+
+CTO direction across the day's strategy chats: the market story
+leads with universal pains (unreproducible failures, surprise
+bills, glue weeks) — the refund-agent framing was a demo, not the
+market — and launch waits until the feature set makes every
+developer want to try Corvid. Phase 50 recorded: structured-output
+self-heal, behavioral diff (reviewable agent changes), model-
+upgrade diff, token streaming, declarative model routing,
+token/context budgets, latency budgets, cost attribution, and the
+injection-taint invention (last, so it can't hold the rest
+hostage). Launch (demo doctrine + five moments + playground) is
+Phase 51.
+
+Starting 50a.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
