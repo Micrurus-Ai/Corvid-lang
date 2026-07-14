@@ -188,7 +188,15 @@ fn ffi_bridge_init_probe_shutdown() {
     // the same objects, so the explicit lib arg is redundant.
 
     if compiler.is_like_msvc() {
-        cmd.arg("/std:c11")
+        // /MD: the staticlib's Rust + cc objects are built against
+        // the DYNAMIC CRT (their CRT references are `__imp_`-
+        // decorated ucrt imports, e.g. `__imp_getenv` /
+        // `__imp__timespec64_get`); compiling the smoke C file with
+        // the default /MT would pull the static libucrt whose
+        // symbols are undecorated and leave those imports
+        // unresolved.
+        cmd.arg("/MD")
+            .arg("/std:c11")
             .arg(format!(
                 "/Fo{}{}",
                 tmp.path().display(),
@@ -205,6 +213,9 @@ fn ffi_bridge_init_probe_shutdown() {
             .arg("userenv.lib")
             .arg("ws2_32.lib")
             .arg("dbghelp.lib")
+            // whoami (a corvid-runtime transitive dep) imports
+            // GetUserNameExW from secur32.
+            .arg("secur32.lib")
             .arg("legacy_stdio_definitions.lib");
     } else {
         cmd.arg("-std=c11")
