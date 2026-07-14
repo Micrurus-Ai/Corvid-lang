@@ -1728,6 +1728,29 @@ Starting 49a.
 
 ---
 
+## 2026-07-14 - 49a closed: effect-audited skills are real
+
+The nutrition label works end-to-end: `corvid add skill` computes
+the capability label FROM THE SOURCE (token-scan over-approximation
+for capabilities, parsed effect declarations for trust/cost/data),
+refuses dishonest labels, renders the label for consent, vendors
+visible source — and check/run re-verify every vendored skill, so
+the live probe's post-install edit (adding an http_get to a
+cache-only skill) failed the very next check naming the exceeded
+capability. Skills run inside the moat because they are just
+Corvid code. Breaking: `corvid add <spec>` became `corvid add
+package <spec>` under the unified capability verb.
+
+En route, fixed a 47c regression: `corvid check` rode the transpile
+pipeline and refused valid stdlib-calling programs; check now runs
+a dedicated analyze pipeline (commit dec6db4a). Also found and
+filed 49z: `corvid verify` leaked 11 GB of native build artifacts
+into %TEMP%.
+
+Next per the Phase 49 queue: 49b-signed-skills-and-sources.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers

@@ -84,6 +84,10 @@ pub enum Command {
     },
     /// Type-check a Corvid source file.
     Check { file: PathBuf },
+    /// Add a capability to this project: a skill (an effect-audited
+    /// vendored package), an MCP server, or a connector.
+    #[command(subcommand)]
+    Add(AddCommand),
     /// Compile a Corvid source file. Default target is Python (target/py/);
     /// `--target=native` emits target/bin/, and `--target=wasm`
     /// emits target/wasm/ with `.wasm`, JS loader, and TypeScript types.
@@ -322,16 +326,6 @@ pub enum Command {
         /// Dimension spec in `name@version` form (e.g. `fairness@1.2`).
         spec: String,
         /// Effect registry index URL, local `index.toml` path, or registry directory.
-        #[arg(long)]
-        registry: Option<String>,
-    },
-    /// Add a Corvid package dependency and write/update Corvid.lock.
-    /// No Corvid-hosted package registry runs yet; pass --registry or set
-    /// CORVID_PACKAGE_REGISTRY to a local/self-hosted index.
-    Add {
-        /// Package spec in `@scope/name@version` form.
-        spec: String,
-        /// Local or self-hosted registry index URL, directory, or `index.toml` path.
         #[arg(long)]
         registry: Option<String>,
     },
@@ -826,5 +820,34 @@ pub enum Command {
     Ops {
         #[command(subcommand)]
         command: OpsCommand,
+    },
+}
+
+/// `corvid add <kind>` — the capability surface (Phase 49). One verb
+/// for extending a project; each kind lands as visible source +
+/// declarative config.
+#[derive(clap::Subcommand, Debug)]
+pub enum AddCommand {
+    /// Add a skill: an effect-audited package vendored into
+    /// `src/skills/<name>/`. The skill's capability label (what it
+    /// uses, at what trust/cost, touching which data) is computed
+    /// from its SOURCE, shown for consent, and re-verified on every
+    /// check/run.
+    Skill {
+        /// Path to the skill directory (contains `skill.toml`).
+        source: PathBuf,
+        /// Accept the capability label non-interactively.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Add a Corvid package dependency and write/update Corvid.lock.
+    /// No Corvid-hosted package registry runs yet; pass --registry or
+    /// set CORVID_PACKAGE_REGISTRY to a local/self-hosted index.
+    Package {
+        /// Package spec in `@scope/name@version` form.
+        spec: String,
+        /// Local or self-hosted registry index URL, directory, or `index.toml` path.
+        #[arg(long)]
+        registry: Option<String>,
     },
 }

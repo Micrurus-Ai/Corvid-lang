@@ -77,6 +77,14 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             with_python_tools,
         }) => cmd_new(&name, with_python_tools),
         Some(Command::Check { file }) => cmd_check(&file),
+        Some(Command::Add(kind)) => match kind {
+            crate::cli::root::AddCommand::Skill { source, yes } => {
+                crate::commands::add::cmd_add_skill(&source, yes)
+            }
+            crate::cli::root::AddCommand::Package { spec, registry } => {
+                cmd_add_package(&spec, registry.as_deref())
+            }
+        },
         Some(Command::Build {
             file,
             target,
@@ -168,7 +176,6 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::AddDimension { spec, registry }) => {
             cmd_add_dimension(&spec, registry.as_deref())
         }
-        Some(Command::Add { spec, registry }) => cmd_add_package(&spec, registry.as_deref()),
         Some(Command::Remove { name }) => cmd_remove_package(&name),
         Some(Command::Update { spec, registry }) => cmd_update_package(&spec, registry.as_deref()),
         Some(Command::RoutingReport {

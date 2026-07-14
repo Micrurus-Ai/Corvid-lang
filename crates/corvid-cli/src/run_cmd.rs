@@ -21,6 +21,9 @@ pub(crate) fn cmd_run(
     tools_lib: Option<&Path>,
     args: &[String],
 ) -> Result<u8> {
+    if let Some(code) = crate::commands::misc::fail_on_skill_label_violations(file) {
+        return Ok(code);
+    }
     let configured_target;
     let target = if target == "auto" {
         configured_target = load_corvid_config_for(file)

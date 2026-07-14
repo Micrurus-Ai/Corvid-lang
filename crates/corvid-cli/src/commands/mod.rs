@@ -4,6 +4,7 @@
 //! observe/eval/test/misc dispatch arms here, leaving main.rs
 //! as a thin entry-point shell.
 
+pub mod add;
 pub mod eval;
 pub mod jobs;
 pub mod misc;

@@ -13,6 +13,7 @@ pub mod meta_verify;
 mod dimension_artifact;
 mod dimension_registry;
 pub mod modules;
+pub mod skills;
 pub mod proof_replay;
 mod import_integrity;
 mod package_conflicts;

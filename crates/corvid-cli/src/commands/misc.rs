@@ -76,6 +76,9 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
 pub(crate) fn cmd_check(file: &Path) -> Result<u8> {
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("cannot read `{}`", file.display()))?;
+    if let Some(code) = fail_on_skill_label_violations(file) {
+        return Ok(code);
+    }
     let config = load_corvid_config_for(file);
     let result = corvid_driver::analyze_with_config_at_path(&source, file, config.as_ref());
     // Self-trial round 4 Gap A — surface warnings BEFORE the
@@ -183,4 +186,30 @@ pub(crate) fn cmd_routing_report(
         print!("{}", render_routing_report(&report));
     }
     Ok(if report.healthy { 0 } else { 1 })
+}
+
+/// Re-verify every vendored skill's capability label before
+/// check/run — the second half of the label's enforcement contract:
+/// a skill edited past what the user consented to fails loudly here,
+/// naming the exceeded dimension. Returns Some(exit_code) when
+/// violations block the command.
+pub(crate) fn fail_on_skill_label_violations(source_file: &std::path::Path) -> Option<u8> {
+    let root = corvid_driver::load_corvid_config_with_path_for(source_file)
+        .map(|(toml_path, _)| toml_path.parent().map(|p| p.to_path_buf()))
+        .flatten()?;
+    let violations = corvid_driver::skills::verify_project_skills(&root);
+    if violations.is_empty() {
+        return None;
+    }
+    eprintln!(
+        "skill capability label violation(s) — a vendored skill does more than the label \
+         you consented to:"
+    );
+    for violation in &violations {
+        eprintln!("  {violation}");
+    }
+    eprintln!(
+        "fix the skill source, or update its skill.toml label and re-review what it may do."
+    );
+    Some(1)
 }
