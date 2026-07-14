@@ -9,6 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # macOS runners started shipping Python 3.14, which is newer than
+  # PyO3 0.22's maximum supported version; the stable-ABI forward
+  # compatibility flag builds against the stable ABI instead of
+  # failing the build. Jobs that need an exact interpreter still pin
+  # python-version explicitly.
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
 jobs:
   workspace-tests:

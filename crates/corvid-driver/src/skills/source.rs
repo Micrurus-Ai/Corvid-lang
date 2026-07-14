@@ -5,7 +5,7 @@
 //! the content hash go into the skill's pin so `corvid skill update`
 //! can re-fetch reproducibly.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// A parsed skill source.
 #[derive(Debug, Clone, PartialEq, Eq)]
