@@ -1827,6 +1827,19 @@ Starting 50a.
 
 ---
 
+## 2026-07-14 - 50a closed: repair now composes with budgets
+
+The self-heal itself turned out to be 46h's `with repair N` —
+already traced, replayed, and cost-accumulated at runtime. The gap
+was static: the budget checker counted a repairing prompt once, so
+@budget could verify a bound the runtime may exceed. Worst-case
+cost/tokens/latency now multiply by (1 + N), pinned both
+directions.
+
+Next per the Phase 50 queue: 50b-behavioral-diff.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

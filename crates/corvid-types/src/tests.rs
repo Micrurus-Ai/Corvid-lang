@@ -1328,6 +1328,52 @@ agent bad(id: String, amount: Float) -> Receipt:
 }
 
 #[test]
+fn repair_attempts_multiply_worst_case_cost_for_budgets() {
+    // `with repair 2` can re-ask twice: a $0.30 prompt's worst case
+    // is $0.90, so a $0.50 budget must reject it. Without this the
+    // static budget verifies a bound the runtime can exceed.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+type Verdict:
+    label: String
+
+prompt classify(text: String) -> Verdict uses llm_call:
+    with repair 2
+    \"Classify {text}\"
+
+@budget($0.50)
+agent judge(text: String) -> Verdict:
+    return classify(text)
+";
+    let c = check(src);
+    assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
+}
+
+#[test]
+fn repair_free_prompt_within_budget_passes() {
+    // The same prompt WITHOUT repair fits the same budget — pins
+    // that the multiplier comes from the repair clause alone.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+type Verdict:
+    label: String
+
+prompt classify(text: String) -> Verdict uses llm_call:
+    \"Classify {text}\"
+
+@budget($0.50)
+agent judge(text: String) -> Verdict:
+    return classify(text)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\

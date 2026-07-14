@@ -839,10 +839,23 @@ fn effect_node_for_prompt(
         .map(|effect| effect.name.name.as_str())
         .collect();
     let profile = registry.compose(&effect_names);
+    let mut costs = numeric_dimensions_from_profile(&profile);
+    // Structured-output auto-repair (`with repair N`) may re-ask
+    // the model up to N extra times, and every attempt spends real
+    // cost/tokens/latency — the interpreter accumulates the failed
+    // attempts' cost onto the result. The WORST-CASE analysis must
+    // match, or `@budget` verifies a bound the runtime can exceed:
+    // a $0.30 prompt with `repair 2` is a $0.90 worst case.
+    if let Some(repair) = prompt.stream.repair {
+        let multiplier = 1.0 + repair as f64;
+        for value in costs.values_mut() {
+            *value *= multiplier;
+        }
+    }
     CostTreeNode {
         name: prompt.name.name.clone(),
         kind: CostNodeKind::Prompt,
-        costs: numeric_dimensions_from_profile(&profile),
+        costs,
         children: Vec::new(),
     }
 }

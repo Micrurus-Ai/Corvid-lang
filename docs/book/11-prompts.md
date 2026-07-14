@@ -178,6 +178,11 @@ prompt classify(text: String) -> Verdict uses llm_call:
 If every attempt fails, the ORIGINAL typed decode error surfaces —
 repair never converts a hard failure into a silent wrong answer.
 
+Repair composes with `@budget`: the static worst-case cost of a
+`with repair N` prompt is `(1 + N) x` its per-call cost — the checker
+counts every re-ask the runtime might make, so a budget that verifies
+can never be exceeded by repair attempts.
+
 ## Provider routing
 
 Which LLM serves the prompt is decided by the typed model-routing
