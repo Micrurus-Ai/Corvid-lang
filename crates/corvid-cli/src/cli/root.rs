@@ -88,6 +88,10 @@ pub enum Command {
     /// vendored package), an MCP server, or a connector.
     #[command(subcommand)]
     Add(AddCommand),
+    /// Skill maintenance: sign a skill you publish, or update an
+    /// installed one from its pinned source.
+    #[command(subcommand)]
+    Skill(SkillCommand),
     /// Compile a Corvid source file. Default target is Python (target/py/);
     /// `--target=native` emits target/bin/, and `--target=wasm`
     /// emits target/wasm/ with `.wasm`, JS loader, and TypeScript types.
@@ -834,11 +838,17 @@ pub enum AddCommand {
     /// from its SOURCE, shown for consent, and re-verified on every
     /// check/run.
     Skill {
-        /// Path to the skill directory (contains `skill.toml`).
-        source: PathBuf,
+        /// Skill source: a local directory containing `skill.toml`,
+        /// `github:org/repo[/subdir][@ref]`, or
+        /// `git:<url>[#ref][//subdir]`.
+        source: String,
         /// Accept the capability label non-interactively.
         #[arg(long)]
         yes: bool,
+        /// Publisher's ed25519 verifying key (hex or raw 32 bytes)
+        /// to verify the skill's `skill.sig` signature.
+        #[arg(long)]
+        publisher_key: Option<PathBuf>,
     },
     /// Add a Corvid package dependency and write/update Corvid.lock.
     /// No Corvid-hosted package registry runs yet; pass --registry or
@@ -849,5 +859,31 @@ pub enum AddCommand {
         /// Local or self-hosted registry index URL, directory, or `index.toml` path.
         #[arg(long)]
         registry: Option<String>,
+    },
+}
+
+/// `corvid skill <verb>` — publisher + maintenance verbs for skills.
+#[derive(clap::Subcommand, Debug)]
+pub enum SkillCommand {
+    /// Sign a skill directory: write `skill.sig` (a DSSE envelope
+    /// over the skill's content manifest) so consumers can verify
+    /// publisher identity + content integrity at add time.
+    Sign {
+        /// The skill directory (contains `skill.toml`).
+        dir: PathBuf,
+        /// ed25519 signing key file (64 hex chars or 32 raw bytes).
+        /// Falls back to the CORVID_SIGNING_KEY env var.
+        #[arg(long)]
+        key: Option<PathBuf>,
+    },
+    /// Re-fetch an installed skill from its pinned source; on
+    /// change, show the new capability label and re-consent before
+    /// replacing the vendored copy.
+    Update {
+        /// The installed skill's name (its `src/skills/<name>/`).
+        name: String,
+        /// Accept the new label non-interactively.
+        #[arg(long)]
+        yes: bool,
     },
 }

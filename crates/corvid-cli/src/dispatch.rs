@@ -78,11 +78,21 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         }) => cmd_new(&name, with_python_tools),
         Some(Command::Check { file }) => cmd_check(&file),
         Some(Command::Add(kind)) => match kind {
-            crate::cli::root::AddCommand::Skill { source, yes } => {
-                crate::commands::add::cmd_add_skill(&source, yes)
-            }
+            crate::cli::root::AddCommand::Skill {
+                source,
+                yes,
+                publisher_key,
+            } => crate::commands::add::cmd_add_skill(&source, yes, publisher_key.as_deref()),
             crate::cli::root::AddCommand::Package { spec, registry } => {
                 cmd_add_package(&spec, registry.as_deref())
+            }
+        },
+        Some(Command::Skill(kind)) => match kind {
+            crate::cli::root::SkillCommand::Sign { dir, key } => {
+                crate::commands::add::cmd_skill_sign(&dir, key.as_deref())
+            }
+            crate::cli::root::SkillCommand::Update { name, yes } => {
+                crate::commands::add::cmd_skill_update(&name, yes)
             }
         },
         Some(Command::Build {

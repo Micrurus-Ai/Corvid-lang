@@ -25,6 +25,10 @@
 //! skill's parsed `effect` declarations, which is where the checker
 //! reads them too.
 
+pub mod pin;
+pub mod signing;
+pub mod source;
+
 use corvid_syntax::{lex, parse_file, TokKind};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -440,14 +444,28 @@ pub struct SkillAddPlan {
     pub manifest: SkillManifest,
     pub rendered_label: String,
     pub destination: PathBuf,
+    /// Signature verification outcome rendered on the label.
+    pub signature: signing::SignatureStatus,
+    /// Content hash recorded in the pin at vendor time.
+    pub content_hash: String,
+    /// The source string recorded in the pin.
+    pub source_string: String,
 }
 
 /// Validate a skill source dir against its own label and prepare the
 /// vendor plan. Refuses (Err) on label violations — a skill whose
-/// label is dishonest must not be installable.
-pub fn plan_add_skill(project_root: &Path, source_dir: &Path) -> anyhow::Result<SkillAddPlan> {
-    let manifest = load_manifest(source_dir)?;
-    let audit = compute_skill_audit(source_dir)?;
+/// label is dishonest must not be installable — and on signature
+/// tampering when a publisher key is supplied.
+pub fn plan_add_skill_from(
+    project_root: &Path,
+    source: &source::SkillSource,
+    publisher_key: Option<&Path>,
+) -> anyhow::Result<(SkillAddPlan, source::ResolvedSource)> {
+    let resolved = source::resolve(source)?;
+    let source_dir = resolved.skill_dir.clone();
+    let manifest = load_manifest(&source_dir)?;
+    let signature = signing::verify_skill_signature(&source_dir, publisher_key)?;
+    let audit = compute_skill_audit(&source_dir)?;
     let violations = verify_label(&manifest, &audit);
     if !violations.is_empty() {
         anyhow::bail!(
@@ -461,25 +479,57 @@ pub fn plan_add_skill(project_root: &Path, source_dir: &Path) -> anyhow::Result<
         .join(&manifest.skill.name);
     if destination.exists() {
         anyhow::bail!(
-            "`{}` already exists — updating an installed skill is `corvid skill update` \
-             (hash-pinned; rides slice 49b)",
+            "`{}` already exists — updating an installed skill is `corvid skill update <name>`",
             destination.display()
         );
     }
-    let rendered_label = render_label(&manifest, &audit, false);
-    Ok(SkillAddPlan {
+    let content = signing::content_manifest(&source_dir)?;
+    let content_hash = signing::content_hash(&content)?;
+    let rendered_label = render_label(
+        &manifest,
+        &audit,
+        matches!(signature, signing::SignatureStatus::Verified { .. }),
+    );
+    let plan = SkillAddPlan {
         manifest,
         rendered_label,
         destination,
-    })
+        signature,
+        content_hash,
+        source_string: source::source_string(source),
+    };
+    Ok((plan, resolved))
 }
 
-/// Execute a validated plan: copy the skill source into the project.
+/// Back-compat shim for local-path adds (unit tests + simple flows).
+pub fn plan_add_skill(project_root: &Path, source_dir: &Path) -> anyhow::Result<SkillAddPlan> {
+    let (plan, _resolved) = plan_add_skill_from(
+        project_root,
+        &source::SkillSource::Local(source_dir.to_path_buf()),
+        None,
+    )?;
+    Ok(plan)
+}
+
+/// Execute a validated plan: copy the skill source into the project
+/// and write the pin (source + consented content hash + signer).
 pub fn vendor_skill(plan: &SkillAddPlan, source_dir: &Path) -> anyhow::Result<()> {
-    copy_dir(source_dir, &plan.destination)
+    copy_dir(source_dir, &plan.destination)?;
+    let signed_key_id = match &plan.signature {
+        signing::SignatureStatus::Verified { key_id } => key_id.clone(),
+        _ => String::new(),
+    };
+    pin::write_pin(
+        &plan.destination,
+        &pin::SkillPin {
+            source: plan.source_string.clone(),
+            content_hash: plan.content_hash.clone(),
+            signed_key_id,
+        },
+    )
 }
 
-fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
+pub(super) fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;

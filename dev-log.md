@@ -1751,6 +1751,20 @@ Next per the Phase 49 queue: 49b-signed-skills-and-sources.
 
 ---
 
+## 2026-07-14 - 49b closed: the registry-free trust chain
+
+Skills can now be signed (DSSE over a content manifest, so identity
+and integrity verify together — tampered content refuses at add),
+fetched from git/github with shallow clones, and pinned per-skill
+(`skill.lock` records source + consented hash + signer). `corvid
+skill update` closes the loop: hash-diff against the pinned source,
+fresh label + fresh consent on change, refuse name swaps. All
+live-probed including the tamper refusal and the full update cycle.
+
+Next per the Phase 49 queue: 49c-mcp-add-and-typed-codegen.
+
+---
+
 ## 2026-06-10 - 33S4 closed: end-to-end I/O pipeline with no host glue + CI coverage (the adoption-payoff slice)
 
 The umbrella's adoption payoff lands. A new book chapter walks readers
