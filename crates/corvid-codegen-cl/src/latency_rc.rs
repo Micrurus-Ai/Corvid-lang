@@ -229,6 +229,7 @@ fn collect_prompt_pins_in_expr(
         | IrExprKind::Ask { prompt: target, .. }
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
+        | IrExprKind::TrustBoundary { inner: target }
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..

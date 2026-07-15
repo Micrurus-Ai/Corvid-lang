@@ -414,7 +414,7 @@ fn type_label(t: &Type) -> String {
                 format!("Weak<{}, {{{}}}>", type_label(inner), effect_names.join(", "))
             }
         }
-        Type::Grounded(inner) => format!("Grounded<{}>", type_label(inner)),
+        Type::Tainted(inner) | Type::Grounded(inner) => format!("Grounded<{}>", type_label(inner)),
         Type::Partial(inner) => format!("Partial<{}>", type_label(inner)),
         Type::ResumeToken(inner) => format!("ResumeToken<{}>", type_label(inner)),
         Type::TraceId => "TraceId".into(),

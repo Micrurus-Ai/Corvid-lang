@@ -1998,6 +1998,31 @@ standing decision.
 
 ---
 
+## 2026-07-15 - 50i closed: prompt injection is a compile error — PHASE 50 COMPLETE
+
+The phase's crown jewel. `data: untrusted` produces `Tainted<T>`;
+taint spreads through operators and through prompts (an LLM that
+read attacker text yields attacker-influenced output); a tainted
+value cannot reach an approval-requiring call. `trusted(expr)` is
+the one greppable boundary. It is the Grounded machinery inverted —
+provenance tracked backwards, guarding where untrusted data must
+not flow. Live-probed end to end, guarantee-registered, documented
+in the approve chapter, README, inventions, and a tour topic.
+
+Phase 50 (developer-magnet features) is COMPLETE: repair×budget,
+behavioral diff, model-upgrade diff, streaming, model routing,
+context/latency budgets, cost attribution, value refinements,
+timeouts+breakers, judged guards, and injection taint. The recurring
+lesson held throughout — most magnets already existed and needed
+soundness at the seams + visibility; the three genuinely-new ones
+(refinements, judged guards, taint) each compose with the moat
+rather than bolting onto it.
+
+The launch phase (Phase 51: demo doctrine, five moments, playground/
+website/benchmark track) is next and owed its own pre-phase chat.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

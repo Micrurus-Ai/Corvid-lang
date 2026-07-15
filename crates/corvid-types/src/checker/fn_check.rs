@@ -196,7 +196,9 @@ impl<'a> Checker<'a> {
             }
             Expr::Lambda { body, .. } => self.walk_fn_purity_expr(fn_name, body),
             Expr::TryPropagate { inner, .. } => self.walk_fn_purity_expr(fn_name, inner),
-            Expr::TryRetry { body, .. } => self.walk_fn_purity_expr(fn_name, body),
+            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+                self.walk_fn_purity_expr(fn_name, body)
+            }
             Expr::Literal { .. } | Expr::Ident { .. } => {}
         }
     }

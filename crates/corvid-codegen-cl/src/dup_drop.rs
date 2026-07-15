@@ -464,7 +464,9 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => scan_expr(inner, max_id),
-        IrExprKind::TryRetry { body, .. } => scan_expr(body, max_id),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            scan_expr(body, max_id)
+        }
         IrExprKind::Replay {
             trace,
             arms,
@@ -546,7 +548,9 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_reads_local(inner, target),
-        IrExprKind::TryRetry { body, .. } => expr_reads_local(body, target),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            expr_reads_local(body, target)
+        }
         IrExprKind::Replay {
             trace,
             arms,

@@ -58,6 +58,14 @@ pub enum Type {
     /// Compiler-known `Weak<T>` / `Weak<T, {effects}>`.
     Weak(Box<Type>, WeakEffectRow),
 
+    /// Compiler-known `Tainted<T>` (slice 50i) — a value derived from
+    /// UNTRUSTED content (a `data: untrusted` effect source, or the
+    /// output of a prompt that consumed one). Never assignable to
+    /// `T`: taint must not launder silently. Refused as an argument
+    /// to approval-requiring calls; unwrapped only by the explicit
+    /// `trusted(expr)` boundary. Compile-time only — at runtime a
+    /// `Tainted<String>` IS a `String`.
+    Tainted(Box<Type>),
     /// Compiler-known `Grounded<T>` — a value whose provenance chain
     /// includes at least one `data: grounded` source. The compiler
     /// verifies this statically by tracing data flow from retrieval
@@ -187,6 +195,7 @@ impl Type {
                 }
             }
             Type::Grounded(inner) => format!("Grounded<{}>", inner.display_name()),
+            Type::Tainted(inner) => format!("Tainted<{}>", inner.display_name()),
             Type::Partial(inner) => format!("Partial<{}>", inner.display_name()),
             Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
             Type::TraceId => "TraceId".into(),
@@ -216,6 +225,15 @@ impl Type {
         }
     }
 
+    /// Slice 50i — strip `Tainted<>` wrapper(s) for operator
+    /// contagion, mirroring [`Self::ungrounded`].
+    pub fn untainted(&self) -> &Type {
+        match self {
+            Type::Tainted(inner) => inner.untainted(),
+            other => other,
+        }
+    }
+
     /// Is this type compatible with `other` in a value-assignment position?
     ///
     /// v0.1 is intentionally lenient: structurally identical types match,
@@ -238,6 +256,10 @@ impl Type {
                 inner_a.is_assignable_to(inner_b) && effects_a == effects_b
             }
             (Type::Grounded(a), Type::Grounded(b)) => a.is_assignable_to(b),
+            (Type::Tainted(a), Type::Tainted(b)) => a.is_assignable_to(b),
+            // Deliberately NO `Tainted<T>` → `T` coercion (contrast
+            // Grounded's legacy rule below): taint never launders
+            // silently — `trusted(expr)` is the only exit.
             (Type::Partial(a), Type::Partial(b)) => a.is_assignable_to(b),
             (Type::ResumeToken(a), Type::ResumeToken(b)) => a.is_assignable_to(b),
             (Type::RouteParams(a), Type::RouteParams(b)) => a == b,

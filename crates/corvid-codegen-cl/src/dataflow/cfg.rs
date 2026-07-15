@@ -550,7 +550,9 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => walk_expr(inner, true, out),
-        IrExprKind::TryRetry { body, .. } => walk_expr(body, consumed, out),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            walk_expr(body, consumed, out)
+        }
         IrExprKind::Replay {
             trace,
             arms,

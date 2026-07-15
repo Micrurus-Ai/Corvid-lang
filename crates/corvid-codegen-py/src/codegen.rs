@@ -437,6 +437,8 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"`?` codegen is not implemented for Python yet\"))",
                 );
             }
+            // trusted(expr) is compile-time only: transpile the inner.
+            IrExprKind::TrustBoundary { inner } => self.emit_expr(inner),
             IrExprKind::TryRetry { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"`try ... retry` codegen is not implemented for Python yet\"))",
@@ -603,6 +605,7 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // out of 20l-B scope.
         T::Result(_, _) | T::Weak(_, _) => "object".into(),
         T::Grounded(inner) => python_type_hint_of(inner, types),
+        T::Tainted(inner) => python_type_hint_of(inner, types),
         T::TraceId => "str".into(),
         // Phase 33S3a — `DbHandle` is interpreter-tier only; the
         // Python backend has no representation for the opaque

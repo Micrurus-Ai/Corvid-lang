@@ -123,6 +123,7 @@ fn schema_for_inner(
             "additionalProperties": false,
         }),
         Type::Grounded(inner) => schema_for_inner(inner, types_by_id, visiting),
+        Type::Tainted(inner) => schema_for_inner(inner, types_by_id, visiting),
         Type::Partial(inner) => partial_schema(inner, types_by_id, visiting),
         Type::ResumeToken(inner) => resume_token_schema(inner, types_by_id, visiting),
         Type::Struct(def_id) => {

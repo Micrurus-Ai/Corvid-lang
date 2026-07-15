@@ -627,6 +627,21 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     },
     // ----- Grounded<T> --------------------------------------------
     Guarantee {
+        id: "taint.untrusted_cannot_reach_dangerous",
+        kind: GuaranteeKind::EffectRow,
+        class: GuaranteeClass::Static,
+        phase: Phase::TypeCheck,
+        description:
+            "Untrusted content — a value from a `data: untrusted` effect source (retrieved              documents, user messages, untrusted MCP output) or the output of a prompt that              consumed one — is typed `Tainted<T>` and cannot parameterize an              approval-requiring call (a `dangerous` tool, or one whose trust tier is              `supervisor_required`/`human_required`). Taint is never assignable to `T` and is              unwrapped only by the explicit, greppable `trusted(expr)` boundary. This makes              prompt injection (OWASP LLM #1) a compile error: attacker-influenced data cannot              reach a consequential action without a human-reviewed sanitization point.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-types/src/tests.rs::trusted_boundary_unwraps_taint_to_reach_dangerous",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-types/src/tests.rs::tainted_prompt_output_cannot_reach_dangerous_tool",
+        ],
+    },
+    Guarantee {
         id: "grounded.provenance_required",
         kind: GuaranteeKind::Grounded,
         class: GuaranteeClass::Static,

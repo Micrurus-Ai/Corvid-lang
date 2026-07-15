@@ -896,6 +896,11 @@ pub enum IrExprKind {
         /// Per-attempt wall-clock bound (slice 50k).
         timeout_ms: Option<u64>,
     },
+    /// `trusted(expr)` (slice 50i) — compile-time taint unwrap;
+    /// runtime identity.
+    TrustBoundary {
+        inner: Box<IrExpr>,
+    },
 
     /// `replay <trace>: when <pat> -> <body> else <body>` — the
     /// language-level replay primitive. Runtime semantics

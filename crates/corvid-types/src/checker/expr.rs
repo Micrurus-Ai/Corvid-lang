@@ -194,6 +194,16 @@ impl<'a> Checker<'a> {
                 Type::List(Box::new(elem_ty))
             }
             Expr::TryPropagate { inner, span } => self.check_try_propagate(inner, *span),
+            Expr::TrustBoundary { inner, .. } => {
+                let inner_ty = self.check_expr(inner);
+                match inner_ty {
+                    Type::Tainted(unwrapped) => *unwrapped,
+                    // trusted() on an untainted value is harmless —
+                    // the identity — so refactors that remove a
+                    // taint source upstream don't break call sites.
+                    other => other,
+                }
+            }
             Expr::TryRetry {
                 body,
                 timeout_ms,

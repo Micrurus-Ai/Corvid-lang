@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
         };
 
         match name {
-            "List" | "Stream" | "Option" | "Grounded" | "Partial" | "ResumeToken" => {
+            "List" | "Stream" | "Option" | "Grounded" | "Tainted" | "Partial" | "ResumeToken" => {
                 if args.len() != 1 {
                     if matches!(context, TypeContext::Root) {
                         self.errors.push(TypeError::new(
@@ -320,6 +320,7 @@ impl<'a> Checker<'a> {
                     "Stream" => Type::Stream(inner),
                     "Option" => Type::Option(inner),
                     "Grounded" => Type::Grounded(inner),
+                    "Tainted" => Type::Tainted(inner),
                     "Partial" => Type::Partial(inner),
                     "ResumeToken" => Type::ResumeToken(inner),
                     _ => unreachable!(),

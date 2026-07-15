@@ -283,6 +283,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
         | IrExprKind::Ask { prompt: target, .. }
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
+        | IrExprKind::TrustBoundary { inner: target }
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..
@@ -370,6 +371,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         | IrExprKind::Ask { prompt: target, .. }
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
+        | IrExprKind::TrustBoundary { inner: target }
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..

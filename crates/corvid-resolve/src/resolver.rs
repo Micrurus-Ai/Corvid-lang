@@ -1034,6 +1034,7 @@ impl Resolver {
             }
             Expr::TryPropagate { inner, .. } => self.resolve_expr(inner),
             Expr::TryRetry { body, .. } => self.resolve_expr(body),
+            Expr::TrustBoundary { inner, .. } => self.resolve_expr(inner),
             Expr::Replay {
                 trace,
                 arms,

@@ -67,6 +67,8 @@ pub fn emit_type_description(
                 inner: Box::new(emit_type_description(inner, resolved, names)),
             },
         },
+        // Taint is compile-time only — the ABI sees the inner type.
+        Type::Tainted(inner) => emit_type_description(inner, resolved, names),
         Type::Grounded(inner) => TypeDescription::Grounded {
             grounded: AbiGroundedType {
                 inner: Box::new(emit_type_description(inner, resolved, names)),

@@ -98,7 +98,9 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_uses_runtime(inner),
         IrExprKind::OptionNone => false,
-        IrExprKind::TryRetry { body, .. } => expr_uses_runtime(body),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            expr_uses_runtime(body)
+        }
         IrExprKind::Replay {
             trace,
             arms,
@@ -434,6 +436,8 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             Span::new(0, 0),
         )),
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),
+        // Taint is compile-time only: the entry boundary sees the inner.
+        Type::Tainted(inner) => check_entry_boundary_type(inner, span, role),
         Type::Struct(_) => Ok(()),
         Type::ImportedStruct(_) => Err(CodegenError::not_supported(
             format!(

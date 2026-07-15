@@ -210,7 +210,9 @@ fn scan_expr(expr: &IrExpr, hits: &mut Vec<StdlibToolCall>) {
         | IrExprKind::ResultOk { inner }
         | IrExprKind::ResultErr { inner }
         | IrExprKind::TryPropagate { inner } => scan_expr(inner, hits),
-        IrExprKind::TryRetry { body, .. } => scan_expr(body, hits),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            scan_expr(body, hits)
+        }
         IrExprKind::StreamSplitBy { stream, .. }
         | IrExprKind::StreamOrderedBy { stream, .. }
         | IrExprKind::StreamResumeToken { stream } => scan_expr(stream, hits),

@@ -472,6 +472,37 @@ agent load_summary(date: String) -> Result<String, String>:
 "#,
     },
     TourTopic {
+        name: "injection-taint",
+        title: "Prompt Injection Is a Compile Error",
+        category: "Trusted Agents",
+        pitch: "OWASP's #1 LLM risk, answered by the type system. An effect declared `data: untrusted` marks its results (retrieved documents, user messages, untrusted MCP output) as `Tainted<T>`. Taint is contagious — concatenation preserves it, and a prompt that reads tainted content produces tainted output (the LLM read attacker-controlled text). `Tainted<T>` is never assignable to `T`, and passing it to an approval-requiring call (a `dangerous` tool, or one at supervisor/human trust) is a COMPILE ERROR. The only way through is the explicit, greppable `trusted(expr)` boundary — one reviewable place a human asserts the value was constrained. It is `Grounded<T>`'s provenance machinery inverted: instead of tracking where trusted data came from, it tracks where untrusted data must not go.",
+        spec: "docs/meta/50i-injection-taint-design.md",
+        roadmap: "Slice 50i injection-taint-v1",
+        test: "crates/corvid-types/src/tests.rs (tainted_prompt_output_cannot_reach_dangerous_tool, trusted_boundary_unwraps_taint_to_reach_dangerous, direct_untrusted_source_cannot_reach_dangerous_tool, untrusted_concatenation_stays_tainted)",
+        non_scope: "Compile-time flow property only; content-based injection DETECTION (is this text a jailbreak?) is the complementary `with judged` runtime guard. v1 taints whole values, not struct fields; implicit sanitizer typing (recognizing a guard cleared the taint without `trusted(...)`) is v2.",
+        source: r#"effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+
+effect send_money:
+    trust: human_required
+    reversible: false
+
+tool pay(recipient: String, amount: Float) -> String dangerous uses send_money
+
+prompt extract_recipient(page: String) -> String:
+    "Who should be paid, per this page? {page}"
+
+agent assistant(url: String) -> Result<String, String>:
+    page = fetch_page(url)
+    recipient = extract_recipient(page)
+    safe = trusted(recipient)
+    approve Pay(safe, 100.0)
+    return Ok(pay(safe, 100.0))
+"#,
+    },
+    TourTopic {
         name: "replay-safe-secrets",
         title: "Replay-Safe Secret Access",
         category: "Executing I/O",

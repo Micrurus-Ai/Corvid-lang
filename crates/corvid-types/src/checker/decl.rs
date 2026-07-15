@@ -325,7 +325,9 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
                 collect_ident_spans_by_name_in_expr(item, name, spans);
             }
         }
-        Expr::TryRetry { body, .. } => collect_ident_spans_by_name_in_expr(body, name, spans),
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            collect_ident_spans_by_name_in_expr(body, name, spans)
+        }
         Expr::Replay {
             trace,
             arms,

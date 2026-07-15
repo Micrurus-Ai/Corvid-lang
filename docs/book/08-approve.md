@@ -89,6 +89,52 @@ elsewhere but not in scope here). The two diagnostics fire with
 different `guarantee_id`s so you can tell at a glance which mistake
 you made.
 
+## Injection defense: untrusted content can't reach dangerous calls
+
+Approve gates *whether* a consequential action runs. Taint gates
+*what data* can parameterize one. An effect declared `data:
+untrusted` marks its results as attacker-influenceable — retrieved
+documents, inbound user messages, untrusted MCP output:
+
+```corvid
+effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+```
+
+A value from such a source has type `Tainted<String>`, and taint is
+CONTAGIOUS: concatenating it keeps the taint, and — the rule that
+models prompt injection — a prompt that reads tainted content
+produces tainted output (the LLM read attacker-controlled text, so
+its answer is attacker-influenced). `Tainted<T>` is never assignable
+to `T`, and passing it to an approval-requiring call (a `dangerous`
+tool, or one whose trust tier is `supervisor_required` /
+`human_required`) is a **compile error**:
+
+```corvid-error
+agent assistant(url: String) -> String:
+    page = fetch_page(url)
+    recipient = extract_recipient(page)   # Tainted<String>
+    return pay(recipient, 100.0)          # error: untrusted content
+                                          # cannot parameterize pay
+```
+
+The only way through is the explicit `trusted(expr)` boundary — one
+greppable, reviewable place where a human asserts the value has been
+constrained (a `with judged` guard scored it, a refinement forced
+its shape, an allowlist checked it):
+
+```corvid-fragment
+    recipient = trusted(validate(extract_recipient(page)))
+    approve Pay(recipient, 100.0)
+    return pay(recipient, 100.0)
+```
+
+So prompt injection — OWASP's #1 LLM risk — is caught by the
+compiler, not left to runtime hope. Taint is compile-time only:
+at runtime a `Tainted<String>` is just a `String`.
+
 ## At runtime
 
 `approve` is compile-time only. There is no runtime `approve` machinery

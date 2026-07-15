@@ -282,6 +282,14 @@ pub enum TypeErrorKind {
     /// unknown composition rules, unknown value-types, malformed
     /// defaults, and collisions with built-in dimension names.
     InvalidCustomDimension { dimension: String, message: String },
+    /// Slice 50i — UNTRUSTED content (a `data: untrusted` source or
+    /// a prompt output derived from one) reached an
+    /// approval-requiring call's arguments. The injection sink rule.
+    TaintedDangerousArgument {
+        tool: String,
+        argument_index: usize,
+        arg_type: String,
+    },
     /// Slice 50j — a field refinement whose form does not fit the
     /// field's type (or whose bounds are inverted).
     RefinementInvalid {
@@ -645,6 +653,15 @@ impl TypeErrorKind {
                     "agent `{agent}` is marked `@grounded_pure` but {phrase}"
                 )
             }
+            Self::TaintedDangerousArgument {
+                tool,
+                argument_index,
+                arg_type,
+            } => {
+                format!(
+                    "argument {argument_index} to `{tool}` is `{arg_type}` — untrusted content cannot parameterize an approval-requiring call"
+                )
+            }
             Self::RefinementInvalid {
                 type_name,
                 field,
@@ -997,6 +1014,10 @@ impl TypeErrorKind {
                 ),
                 _ => format!("see docs/meta/grounded-propagation-design.md §D6 for the moat contract"),
             }),
+            Self::TaintedDangerousArgument { .. } => Some(
+                "this value derives from untrusted content (a `data: untrusted` source, or a prompt that read one) — the prompt-injection sink rule refuses it here. Either constrain the value and assert the boundary explicitly with `trusted(expr)` (greppable, reviewable), or restructure so the dangerous call's arguments never touch untrusted content"
+                    .into(),
+            ),
             Self::RefinementInvalid { .. } => Some(
                 "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"
                     .into(),

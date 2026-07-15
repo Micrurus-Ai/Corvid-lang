@@ -175,7 +175,9 @@ impl<'a> Checker<'a> {
                     self.walk_grounded_pure_expr(agent, item);
                 }
             }
-            Expr::TryRetry { body, .. } => self.walk_grounded_pure_expr(agent, body),
+            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+                self.walk_grounded_pure_expr(agent, body)
+            }
             Expr::Replay {
                 trace,
                 arms,

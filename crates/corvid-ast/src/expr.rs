@@ -106,6 +106,11 @@ pub enum Expr {
         span: Span,
     },
 
+    /// Trust boundary (slice 50i): `trusted(expr)` unwraps
+    /// `Tainted<T>` to `T` — the single, greppable place a human
+    /// asserts an untrusted-derived value has been constrained.
+    TrustBoundary { inner: Box<Expr>, span: Span },
+
     /// Resilience wrapper (slice 50k widened the grammar):
     /// `try expr [timeout <ms>] [on error retry N times backoff linear 100]`
     /// — at least one of the two clauses must be present. `timeout`
@@ -151,6 +156,7 @@ impl Expr {
             | Expr::StructLiteral { span, .. }
             | Expr::MapLiteral { span, .. }
             | Expr::TryPropagate { span, .. }
+            | Expr::TrustBoundary { span, .. }
             | Expr::TryRetry { span, .. }
             | Expr::Replay { span, .. } => *span,
         }

@@ -1533,6 +1533,124 @@ agent judge(q: String) -> String:
 }
 
 #[test]
+fn tainted_prompt_output_cannot_reach_dangerous_tool() {
+    // The load-bearing injection test: content from a `data:
+    // untrusted` source flows through a prompt (whose output is
+    // therefore tainted) into a dangerous tool's argument. The sink
+    // rule refuses it at compile time.
+    let src = "effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+
+effect send_money:
+    trust: human_required
+    reversible: false
+
+tool pay(recipient: String, amount: Float) -> String dangerous uses send_money
+
+prompt extract_recipient(page: String) -> String:
+    \"Who is paid per {page}\"
+
+agent assistant(url: String) -> String:
+    page = fetch_page(url)
+    recipient = extract_recipient(page)
+    return pay(recipient, 100.0)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::TaintedDangerousArgument { .. })),
+        "tainted prompt output must be refused at the dangerous sink; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn trusted_boundary_unwraps_taint_to_reach_dangerous() {
+    // `trusted(...)` is the explicit, greppable boundary: after it,
+    // the value is plain `String` and the dangerous call is
+    // accepted. This pins that the boundary — and only the boundary
+    // — clears taint.
+    let src = "effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+
+effect send_money:
+    trust: human_required
+    reversible: false
+
+tool pay(recipient: String, amount: Float) -> String dangerous uses send_money
+
+agent assistant(url: String) -> String:
+    page = fetch_page(url)
+    safe = trusted(page)
+    return pay(safe, 100.0)
+";
+    let c = check(src);
+    assert!(
+        !c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::TaintedDangerousArgument { .. })),
+        "trusted() must clear taint; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn direct_untrusted_source_cannot_reach_dangerous_tool() {
+    // Even without a prompt in between: a `data: untrusted` tool's
+    // return reaching a dangerous argument is refused.
+    let src = "effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+
+tool run_shell(cmd: String) -> String dangerous
+
+agent assistant(url: String) -> String:
+    cmd = fetch_page(url)
+    return run_shell(cmd)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::TaintedDangerousArgument { .. })),
+        "direct untrusted source must be refused at the dangerous sink; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn untrusted_concatenation_stays_tainted() {
+    // Contagion through `+`: prefixing untrusted content does not
+    // launder it.
+    let src = "effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+
+tool run_shell(cmd: String) -> String dangerous
+
+agent assistant(url: String) -> String:
+    doc = fetch_page(url)
+    cmd = \"run: \" + doc
+    return run_shell(cmd)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::TaintedDangerousArgument { .. })),
+        "concatenation must preserve taint; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\

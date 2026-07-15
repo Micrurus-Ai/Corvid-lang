@@ -257,6 +257,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         | IrExprKind::Ask { prompt: target, .. }
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
+        | IrExprKind::TrustBoundary { inner: target }
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..
@@ -366,6 +367,7 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
         | IrExprKind::Ask { .. }
         | IrExprKind::Choose { .. }
         | IrExprKind::TryPropagate { .. }
+        | IrExprKind::TrustBoundary { .. }
         | IrExprKind::TryRetry { .. }
         // Replay dispatches over a recorded trace (reads a file)
         // and executes arbitrary arm bodies; treat the whole node

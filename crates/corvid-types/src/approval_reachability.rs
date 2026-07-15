@@ -297,7 +297,7 @@ impl<'a> ReachabilityPass<'a> {
                     self.check_expr(entrypoint, item, approvals, visiting);
                 }
             }
-            Expr::TryRetry { body, .. } => {
+            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
                 self.check_expr(entrypoint, body, approvals, visiting);
             }
             Expr::Replay {

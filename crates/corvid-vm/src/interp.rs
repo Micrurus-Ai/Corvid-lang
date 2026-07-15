@@ -861,6 +861,9 @@ impl<'ir> Interpreter<'ir> {
                 }
             }
 
+            // trusted(expr) is a compile-time assertion; at runtime
+            // it is the identity.
+            IrExprKind::TrustBoundary { inner } => self.eval_expr(inner).await,
             IrExprKind::TryRetry {
                 body,
                 attempts,

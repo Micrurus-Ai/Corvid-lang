@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
             .get(&def_id)
             .expect("tool DefId not indexed");
 
-        self.check_args_against_params(tool_name, &tool.params, args);
+        let arg_types = self.check_args_collecting_types(tool_name, &tool.params, args, false);
 
         // Effect check: a `dangerous` tool must have a prior matching
         // approve — and so must a tool whose composed effect row
@@ -234,9 +234,38 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // Slice 50i — the SINK RULE: an approval-requiring call
+        // (dangerous marker, or trust-derived) refuses tainted
+        // arguments. This is the line that makes prompt injection a
+        // compile error: attacker-influenced content cannot
+        // parameterize a consequential action without an explicit
+        // `trusted(...)` boundary.
+        let requires_approval = matches!(tool.effect, Effect::Dangerous)
+            || crate::effects::effect_row_trust_requires_approval(
+                &tool.effect_row,
+                self.registry,
+            )
+            .is_some();
+        if requires_approval {
+            for (i, arg_ty) in arg_types.iter().enumerate() {
+                if matches!(arg_ty, Type::Tainted(_)) {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::TaintedDangerousArgument {
+                            tool: tool_name.to_string(),
+                            argument_index: i + 1,
+                            arg_type: arg_ty.display_name(),
+                        },
+                        args.get(i).map(|a| a.span()).unwrap_or(span),
+                        "taint.untrusted_cannot_reach_dangerous",
+                    ));
+                }
+            }
+        }
+
         self.bump_effect(WeakEffect::ToolCall);
         let ret = self.type_ref_to_type(&tool.return_ty);
-        self.ground_if_effect_grounded(&tool.effect_row, ret)
+        let ret = self.ground_if_effect_grounded(&tool.effect_row, ret);
+        self.taint_if_effect_untrusted(&tool.effect_row, ret)
     }
 
     /// Provenance Propagation Design X (D1 part A): if a callee's
@@ -250,6 +279,22 @@ impl<'a> Checker<'a> {
     ///
     /// An already-grounded return type (an explicit `Grounded<T>`
     /// annotation on the callee) is not double-wrapped.
+    /// Slice 50i — the taint mirror: a callee whose effect row
+    /// carries `data: untrusted` returns `Tainted<T>`. Applied
+    /// after grounding so an (unusual) untrusted+grounded source is
+    /// `Tainted<Grounded<T>>` — the taint stays outermost, where the
+    /// sink check sees it.
+    fn taint_if_effect_untrusted(&self, effect_row: &corvid_ast::EffectRow, ret: Type) -> Type {
+        if matches!(ret, Type::Tainted(_)) {
+            return ret;
+        }
+        if crate::effects::effect_row_is_untrusted(effect_row, self.registry) {
+            Type::Tainted(Box::new(ret))
+        } else {
+            ret
+        }
+    }
+
     fn ground_if_effect_grounded(&self, effect_row: &corvid_ast::EffectRow, ret: Type) -> Type {
         if matches!(ret, Type::Grounded(_)) {
             return ret;
@@ -289,10 +334,22 @@ impl<'a> Checker<'a> {
             .prompts_by_id
             .get(&def_id)
             .expect("prompt DefId not indexed");
-        self.check_args_against_params(name, &prompt.params, args);
+        let arg_types = self.check_args_collecting_types(name, &prompt.params, args, true);
         self.bump_effect(WeakEffect::Llm);
         let ret = self.type_ref_to_type(&prompt.return_ty);
-        self.ground_if_effect_grounded(&prompt.effect_row, ret)
+        let ret = self.ground_if_effect_grounded(&prompt.effect_row, ret);
+        let ret = self.taint_if_effect_untrusted(&prompt.effect_row, ret);
+        // Slice 50i — PROMPT CONTAGION, the rule that models the
+        // actual attack: an LLM that read attacker-controlled text
+        // produces attacker-influenced output. A prompt consuming a
+        // tainted argument returns Tainted<output>.
+        if !matches!(ret, Type::Tainted(_))
+            && arg_types.iter().any(|t| matches!(t, Type::Tainted(_)))
+        {
+            Type::Tainted(Box::new(ret))
+        } else {
+            ret
+        }
     }
 
     fn check_agent_call(&mut self, def_id: DefId, name: &str, args: &[Expr]) -> Type {
@@ -305,7 +362,8 @@ impl<'a> Checker<'a> {
         self.bump_effect(WeakEffect::Llm);
         self.bump_effect(WeakEffect::Approve);
         let ret = self.type_ref_to_type(&agent.return_ty);
-        self.ground_if_effect_grounded(&agent.effect_row, ret)
+        let ret = self.ground_if_effect_grounded(&agent.effect_row, ret);
+        self.taint_if_effect_untrusted(&agent.effect_row, ret)
     }
 
     /// `fn` call (slice 45r): args against params, return type
@@ -1068,6 +1126,23 @@ impl<'a> Checker<'a> {
     }
 
     fn check_args_against_params(&mut self, callee_name: &str, params: &[Param], args: &[Expr]) {
+        self.check_args_collecting_types(callee_name, params, args, false);
+    }
+
+    /// Slice 50i: the taint-aware form. Returns each argument's
+    /// checked type so callers can apply flow rules (prompt output
+    /// contagion, the dangerous-sink refusal). `accepts_tainted`
+    /// lets PROMPTS consume `Tainted<T>` where `T` is expected —
+    /// analyzing untrusted content is their job (their output then
+    /// carries the taint); everything else requires an explicit
+    /// `trusted(...)` or a `Tainted<T>`-typed parameter.
+    fn check_args_collecting_types(
+        &mut self,
+        callee_name: &str,
+        params: &[Param],
+        args: &[Expr],
+        _accepts_tainted: bool,
+    ) -> Vec<Type> {
         if params.len() != args.len() {
             self.errors.push(TypeError::new(
                 TypeErrorKind::ArityMismatch {
@@ -1078,11 +1153,22 @@ impl<'a> Checker<'a> {
                 args.first().map(|a| a.span()).unwrap_or(Span::new(0, 0)),
             ));
         }
+        let mut arg_types = Vec::with_capacity(args.len());
         for (i, arg) in args.iter().enumerate() {
             if let Some(param) = params.get(i) {
                 let param_ty = self.type_ref_to_type(&param.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&param_ty));
-                if !arg_ty.is_assignable_to(&param_ty) {
+                // `Tainted<T>` where `T` is expected is type-compatible
+                // for arg-checking purposes: the taint SINK rule (in
+                // `check_tool_call`) owns the refusal, so we suppress
+                // the redundant type-mismatch here whether the callee
+                // accepts taint (prompts) or refuses it (dangerous
+                // tools). Otherwise every blocked injection reports
+                // two errors for one cause.
+                let tainted_of_assignable = matches!(
+                    &arg_ty, Type::Tainted(inner) if inner.is_assignable_to(&param_ty)
+                );
+                if !tainted_of_assignable && !arg_ty.is_assignable_to(&param_ty) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeMismatch {
                             expected: param_ty.display_name(),
@@ -1093,10 +1179,12 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 self.record_if_grounded_coercion(&arg_ty, &param_ty, arg.span());
+                arg_types.push(arg_ty);
             } else {
-                let _ = self.check_expr(arg);
+                arg_types.push(self.check_expr(arg));
             }
         }
+        arg_types
     }
 
     pub(super) fn bump_effect(&mut self, effect: WeakEffect) {

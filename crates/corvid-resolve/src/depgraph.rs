@@ -370,7 +370,7 @@ fn collect_expr_deps(expr: &Expr, resolved: &Resolved, deps: &mut HashSet<DefId>
         Expr::TryPropagate { inner, .. } => {
             collect_expr_deps(inner, resolved, deps);
         }
-        Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
             collect_expr_deps(body, resolved, deps);
         }
         Expr::Replay {

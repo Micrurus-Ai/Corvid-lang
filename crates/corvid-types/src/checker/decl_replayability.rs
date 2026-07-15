@@ -160,7 +160,9 @@ impl<'a> Checker<'a> {
                     self.walk_deterministic_expr(agent, item);
                 }
             }
-            Expr::TryRetry { body, .. } => self.walk_deterministic_expr(agent, body),
+            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+                self.walk_deterministic_expr(agent, body)
+            }
             Expr::Replay {
                 trace,
                 arms,
@@ -416,7 +418,7 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
                 collect_replayability_violations_in_expr(item, out);
             }
         }
-        Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
             collect_replayability_violations_in_expr(body, out);
         }
         Expr::Replay {

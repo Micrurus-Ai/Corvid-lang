@@ -381,7 +381,9 @@ fn expr_consumes_target(
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_references(inner, target),
         IrExprKind::OptionNone => false,
-        IrExprKind::TryRetry { body, .. } => expr_references(body, target),
+        IrExprKind::TrustBoundary { inner: body } | IrExprKind::TryRetry { body, .. } => {
+            expr_references(body, target)
+        }
         IrExprKind::Replay {
             trace,
             arms,
@@ -462,7 +464,9 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
                 || arms.iter().any(|arm| expr_references(&arm.body, target))
                 || expr_references(else_body, target)
         }
-        IrExprKind::TryRetry { body, .. } => expr_references(body, target),
+        IrExprKind::TrustBoundary { inner: body } | IrExprKind::TryRetry { body, .. } => {
+            expr_references(body, target)
+        }
     }
 }
 

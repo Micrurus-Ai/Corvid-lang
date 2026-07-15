@@ -321,3 +321,21 @@ fn format_type_ref(ty: &corvid_ast::TypeRef) -> String {
         }
     }
 }
+
+/// Slice 50i — does this effect row mark its results as UNTRUSTED
+/// content (`data: untrusted`)? The taint mirror of
+/// [`effect_row_is_grounded`].
+pub fn effect_row_is_untrusted(
+    effect_row: &corvid_ast::EffectRow,
+    registry: &EffectRegistry,
+) -> bool {
+    effect_row.effects.iter().any(|eff| {
+        registry
+            .get(&eff.name.name)
+            .map(|profile| {
+                profile.dimensions.get("data")
+                    == Some(&DimensionValue::Name("untrusted".into()))
+            })
+            .unwrap_or(false)
+    })
+}

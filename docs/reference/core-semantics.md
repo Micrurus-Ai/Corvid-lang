@@ -36,6 +36,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `io_source.http_quarantine_on_replay` | effect_row | runtime_checked | runtime |
 | `json.parse_safety_no_panic` | effect_row | runtime_checked | runtime |
 | `json.field_type_safety_at_access_boundary` | effect_row | runtime_checked | runtime |
+| `taint.untrusted_cannot_reach_dangerous` | effect_row | static | typecheck |
 | `grounded.provenance_required` | grounded | static | typecheck |
 | `grounded.propagation_across_calls` | grounded | out_of_scope | typecheck |
 | `grounded.no_laundering` | grounded | static | typecheck |
@@ -412,6 +413,20 @@ Each typed accessor on the executing JSON surface (`json_get_int` / `json_get_fl
 - `crates/corvid-runtime/src/json.rs::typed_accessor_mismatch_returns_recoverable_error`
 - `crates/corvid-runtime/src/json.rs::missing_field_returns_recoverable_error_naming_the_field`
 - `crates/corvid-driver/tests/executing_json_through_driver.rs::typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program`
+
+#### `taint.untrusted_cannot_reach_dangerous`
+- **class**: static
+- **phase**: typecheck
+
+Untrusted content — a value from a `data: untrusted` effect source (retrieved              documents, user messages, untrusted MCP output) or the output of a prompt that              consumed one — is typed `Tainted<T>` and cannot parameterize an              approval-requiring call (a `dangerous` tool, or one whose trust tier is              `supervisor_required`/`human_required`). Taint is never assignable to `T` and is              unwrapped only by the explicit, greppable `trusted(expr)` boundary. This makes              prompt injection (OWASP LLM #1) a compile error: attacker-influenced data cannot              reach a consequential action without a human-reviewed sanitization point.
+
+**Positive tests:**
+
+- `crates/corvid-types/src/tests.rs::trusted_boundary_unwraps_taint_to_reach_dangerous`
+
+**Adversarial tests:**
+
+- `crates/corvid-types/src/tests.rs::tainted_prompt_output_cannot_reach_dangerous_tool`
 
 ### Grounded provenance
 

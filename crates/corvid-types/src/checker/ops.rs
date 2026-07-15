@@ -60,8 +60,12 @@ impl<'a> Checker<'a> {
         // additive: it never changes an existing acceptance, only adds
         // new ones.
         let contagious = matches!(lt, Type::Grounded(_)) || matches!(rt, Type::Grounded(_));
-        let lt = lt.ungrounded().clone();
-        let rt = rt.ungrounded().clone();
+        // Slice 50i — taint contagion: an operator with a tainted
+        // operand yields a tainted result. `"prefix " + untrusted`
+        // does not launder the untrusted content.
+        let tainted = matches!(lt, Type::Tainted(_)) || matches!(rt, Type::Tainted(_));
+        let lt = lt.ungrounded().untainted().clone();
+        let rt = rt.ungrounded().untainted().clone();
 
         let result = match op {
             // `+` is overloaded: numeric addition OR string concatenation.
@@ -123,8 +127,13 @@ impl<'a> Checker<'a> {
         // Re-wrap unless the operator itself failed (`Type::Unknown` is
         // the error/recovery sentinel — `Grounded<Unknown>` would add
         // no information and could mask the error downstream).
-        if contagious && !matches!(result, Type::Unknown) {
+        let result = if contagious && !matches!(result, Type::Unknown) {
             Type::Grounded(Box::new(result))
+        } else {
+            result
+        };
+        if tainted && !matches!(result, Type::Unknown) {
+            Type::Tainted(Box::new(result))
         } else {
             result
         }
@@ -138,7 +147,8 @@ impl<'a> Checker<'a> {
         // operand was grounded. Dormant until slice 2b (see
         // `check_binop` for the full rationale).
         let contagious = matches!(t, Type::Grounded(_));
-        let t = t.ungrounded().clone();
+        let tainted = matches!(t, Type::Tainted(_));
+        let t = t.ungrounded().untainted().clone();
 
         let result = match op {
             UnaryOp::Neg | UnaryOp::Pos => match t {
@@ -176,8 +186,13 @@ impl<'a> Checker<'a> {
             },
         };
 
-        if contagious && !matches!(result, Type::Unknown) {
+        let result = if contagious && !matches!(result, Type::Unknown) {
             Type::Grounded(Box::new(result))
+        } else {
+            result
+        };
+        if tainted && !matches!(result, Type::Unknown) {
+            Type::Tainted(Box::new(result))
         } else {
             result
         }

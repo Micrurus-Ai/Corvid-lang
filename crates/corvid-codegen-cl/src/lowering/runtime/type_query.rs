@@ -56,6 +56,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         }
         Type::Option(inner) => format!("Option_{}", mangle_type_name(inner)),
         Type::Grounded(inner) => format!("Grounded_{}", mangle_type_name(inner)),
+        Type::Tainted(inner) => mangle_type_name(inner),
         Type::Partial(inner) => format!("Partial_{}", mangle_type_name(inner)),
         Type::ResumeToken(inner) => format!("ResumeToken_{}", mangle_type_name(inner)),
         Type::Weak(inner, effects) => {
@@ -441,7 +442,7 @@ fn visit_expr_types(
             visit_expr_types(inner, seen, order, visit);
         }
         IrExprKind::OptionNone => {}
-        IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
             visit_expr_types(body, seen, order, visit);
         }
         IrExprKind::Replay {
@@ -500,6 +501,7 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
         | Type::ResumeToken(_) => true,
         Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type(inner),
         Type::Grounded(inner) => is_refcounted_type(inner),
+        Type::Tainted(inner) => is_refcounted_type(inner),
         _ => false,
     }
 }
@@ -512,6 +514,7 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         Type::Option(_) => is_native_option_type(ty),
         Type::Result(ok, err) => is_native_value_type(ok) && is_native_value_type(err),
         Type::Grounded(inner) => is_native_value_type(inner),
+        Type::Tainted(inner) => is_native_value_type(inner),
         // TraceId is a string-backed opaque handle at runtime;
         // treat it as a value type for native emission purposes.
         Type::TraceId => true,

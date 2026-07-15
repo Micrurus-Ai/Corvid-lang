@@ -645,7 +645,8 @@ pub use cost::{
     numeric_constraint_value, render_cost_tree,
 };
 pub use grounded::{
-    check_grounded_returns, effect_row_is_grounded, ProvenanceResult, ProvenanceViolation,
+    check_grounded_returns, effect_row_is_grounded, effect_row_is_untrusted, ProvenanceResult,
+    ProvenanceViolation,
 };
 pub use trust::effect_row_trust_requires_approval;
 

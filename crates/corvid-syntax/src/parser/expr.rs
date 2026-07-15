@@ -308,6 +308,20 @@ impl<'a> Parser<'a> {
                 })
             }
             TokKind::KwTry => self.parse_try_retry_expr(),
+            // Trust boundary (slice 50i): `trusted(expr)`. Contextual
+            // — only when the identifier `trusted` is immediately
+            // called; a plain `trusted` identifier stays a binding.
+            TokKind::Ident(w) if w == "trusted" && matches!(self.peek_ahead(1), TokKind::LParen) => {
+                let start = self.peek_span();
+                self.bump(); // trusted
+                self.bump(); // (
+                let inner = self.parse_expr()?;
+                self.expect(TokKind::RParen, "`)` after trusted(...)")?;
+                Ok(Expr::TrustBoundary {
+                    inner: Box::new(inner),
+                    span: start.merge(self.prev_span()),
+                })
+            }
             TokKind::KwReplay => self.parse_replay_expr(),
             TokKind::KwMatch => self.parse_match_expr(),
             TokKind::KwFn => self.parse_lambda_expr(),

@@ -116,6 +116,7 @@ fn is_native_value_type(ty: &Type) -> bool {
         Type::Option(_) => is_native_option_type(ty),
         Type::Result(ok, err) => is_native_value_type(ok) && is_native_value_type(err),
         Type::Grounded(inner) => is_native_value_type(inner),
+        Type::Tainted(inner) => is_native_value_type(inner),
         // TraceId requires replay-runtime support on the native
         // tier (Phase 21 slice 21-inv-E-4 + E-runtime). Until then,
         // a program using replay routes to the interpreter tier.
@@ -394,6 +395,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 _ => Err(NotNativeReason::TaggedUnionRetryNotNative),
             }
         }
+        IrExprKind::TrustBoundary { inner } => scan_expr(inner, current_return_ty),
         IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, current_return_ty)?;
             if &body.ty == &expr.ty

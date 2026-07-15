@@ -870,6 +870,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
+        | IrExprKind::TrustBoundary { inner }
         | IrExprKind::TryRetry { body: inner, .. }
         | IrExprKind::UnOp { operand: inner, .. }
         | IrExprKind::WrappingUnOp { operand: inner, .. } => expr_mentions_local(inner, target),

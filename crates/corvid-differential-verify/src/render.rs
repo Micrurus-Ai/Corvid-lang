@@ -522,6 +522,7 @@ fn render_expr(expr: &Expr) -> String {
                 .join(", ")
         ),
         Expr::TryPropagate { inner, .. } => format!("{}?", render_expr(inner)),
+        Expr::TrustBoundary { inner, .. } => format!("trusted({})", render_expr(inner)),
         Expr::TryRetry {
             body,
             attempts,

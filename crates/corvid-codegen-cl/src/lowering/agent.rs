@@ -329,6 +329,7 @@ fn extern_c_abi_type(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> 
         // shaped on the wire.
         Type::Struct(_) => Ok(I64),
         Type::Grounded(inner) => extern_c_abi_type(inner, span),
+        Type::Tainted(inner) => extern_c_abi_type(inner, span),
         Type::Nothing => Err(CodegenError::cranelift(
             "`Nothing` is only valid as an extern-c return type",
             span,
@@ -390,6 +391,8 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
         Type::Float => Ok(F64),
         Type::String => Ok(I64),
         Type::Struct(_) => Ok(I64),
+        // Compile-time-only wrapper: native width is the inner's.
+        Type::Tainted(inner) => cl_type_for(inner, span),
         // Imported structs are refcounted heap handles exactly like
         // file-local structs (width I64). Their field layout now lives in
         // the merged `ir.types` table under the same cross-module-remapped

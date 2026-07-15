@@ -354,6 +354,30 @@ Guide: [Extending your agent](./docs/guides/capabilities.md)
 Proof: [MCP codegen tests](./crates/corvid-driver/src/mcp_codegen.rs) + [connector scaffold tests](./crates/corvid-cli/src/commands/connector_scaffold.rs)
 Non-scope: nested schema shapes fall back to one `args_json` parameter, stated in the generated comment.
 
+#### Prompt Injection Is a Compile Error
+
+OWASP's #1 LLM risk, caught by the type system instead of runtime hope. An effect declared `data: untrusted` marks its results — retrieved documents, user messages, untrusted MCP output — as `Tainted<T>`. Taint is contagious: concatenation preserves it, and a prompt that reads tainted content produces tainted output (the LLM read attacker-controlled text). `Tainted<T>` is never assignable to `T`, and passing it to an approval-requiring call (a `dangerous` tool, or one at supervisor/human trust) is a **compile error**.
+
+```corvid
+effect web_content:
+    data: untrusted
+
+tool fetch_page(url: String) -> String uses web_content
+tool pay(recipient: String, amount: Float) -> String dangerous uses send_money
+
+agent assistant(url: String) -> String:
+    page = fetch_page(url)
+    recipient = extract_recipient(page)   # Tainted<String>
+    return pay(recipient, 100.0)          # error: untrusted content
+                                          # cannot parameterize pay
+```
+
+The only way through is the explicit, greppable `trusted(expr)` boundary — one reviewable place a human asserts the value was constrained. It is `Grounded<T>`'s provenance machinery inverted: instead of tracking where trusted data came from, it tracks where untrusted data must not go.
+
+Spec: [injection-taint design](./docs/meta/50i-injection-taint-design.md)
+Tour: `corvid tour --topic injection-taint`
+Guarantee: `taint.untrusted_cannot_reach_dangerous` (Static)
+
 #### Replay-Safe Secret Access
 
 `secret_read` solves the secrets-in-traces problem instead of ignoring it: the program receives the real value, the recorded trace event carries a redacted copy (`<redacted:XY>` + `value_redacted: true` — a RuntimeChecked guarantee, `secrets.trace_never_carries_value`), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is `Ok` with `present: false`.

@@ -576,6 +576,7 @@ impl<'a> CostAnalyzer<'a> {
                 }
             }
             corvid_ast::Expr::TryPropagate { inner, .. } => self.analyze_expr(inner, agent_name),
+            corvid_ast::Expr::TrustBoundary { inner, .. } => self.analyze_expr(inner, agent_name),
             corvid_ast::Expr::TryRetry { body, span, .. } => {
                 let estimate = self.analyze_expr(body, agent_name);
                 let tree = wrap_if_needed("retry", estimate.tree, *span);

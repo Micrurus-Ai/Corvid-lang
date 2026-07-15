@@ -395,7 +395,9 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
             }
         }
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
-        Expr::TryRetry { body, .. } => rename_local_in_expr(body, resolved, target, fresh),
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            rename_local_in_expr(body, resolved, target, fresh)
+        }
         Expr::Replay {
             trace,
             arms,
@@ -817,7 +819,9 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
                 .is_some_and(|s| expr_mentions_local(s, resolved, local))
         }
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
-        Expr::TryRetry { body, .. } => expr_mentions_local(body, resolved, local),
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            expr_mentions_local(body, resolved, local)
+        }
         Expr::Replay {
             trace,
             arms,
@@ -1064,7 +1068,9 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             false
         }
         Expr::TryPropagate { inner, .. } => fold_constants_in_expr(inner),
-        Expr::TryRetry { body, .. } => fold_constants_in_expr(body),
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            fold_constants_in_expr(body)
+        }
         Expr::Replay {
             trace,
             arms,
@@ -1167,6 +1173,7 @@ fn is_pure_expr(expr: &Expr) -> bool {
         Expr::Index { target, index, .. } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Call { .. }
         | Expr::TryPropagate { .. }
+        | Expr::TrustBoundary { .. }
         | Expr::TryRetry { .. }
         | Expr::Replay { .. } => false,
     }

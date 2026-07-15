@@ -1179,6 +1179,9 @@ impl<'a> Lowerer<'a> {
             Expr::TryPropagate { inner, .. } => IrExprKind::TryPropagate {
                 inner: Box::new(self.lower_expr(inner)),
             },
+            Expr::TrustBoundary { inner, .. } => IrExprKind::TrustBoundary {
+                inner: Box::new(self.lower_expr(inner)),
+            },
             Expr::TryRetry {
                 body,
                 attempts,

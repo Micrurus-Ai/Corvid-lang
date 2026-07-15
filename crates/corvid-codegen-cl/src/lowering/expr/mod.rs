@@ -1148,6 +1148,16 @@ pub(super) fn lower_expr(
                 runtime,
             ),
         },
+        IrExprKind::TrustBoundary { inner } => lower_expr(
+            builder,
+            inner,
+            current_return_ty,
+            env,
+            scope_stack,
+            func_ids_by_def,
+            module,
+            runtime,
+        ),
         IrExprKind::TryRetry {
             body,
             attempts,

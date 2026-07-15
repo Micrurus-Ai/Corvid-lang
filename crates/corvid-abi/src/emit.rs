@@ -763,7 +763,9 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
                 collect_called_agents_from_expr(item, stack);
             }
         }
-        IrExprKind::TryRetry { body, .. } => collect_called_agents_from_expr(body, stack),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            collect_called_agents_from_expr(body, stack)
+        }
         IrExprKind::Replay {
             trace,
             arms,
@@ -916,7 +918,9 @@ fn walk_ir_expr_for_prompt(
                 walk_ir_expr_for_prompt(item, prompt_map, found);
             }
         }
-        IrExprKind::TryRetry { body, .. } => walk_ir_expr_for_prompt(body, prompt_map, found),
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+            walk_ir_expr_for_prompt(body, prompt_map, found)
+        }
         IrExprKind::Replay {
             trace,
             arms,

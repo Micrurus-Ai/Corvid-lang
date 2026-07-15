@@ -223,6 +223,15 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **What it is**: discovery-first MCP onboarding — the server's schemas become one typed agent per tool (json-builder args), config lands untrusted-by-default, and the approval gate rides through the generated wrappers unchanged.
 - **Non-scope**: schemas beyond the primitive v1 mapping fall back to `args_json: String`, stated in the generated comment.
 
+### Prompt Injection Is a Compile Error
+
+- **Status**: shipped (slice 50i, 2026-07-15)
+- **Run it**: `corvid tour --topic injection-taint`
+- **Tests**: `crates/corvid-types/src/tests.rs` (tainted-output-to-dangerous refusal, trusted() boundary, direct-source refusal, concatenation contagion) + the `taint.untrusted_cannot_reach_dangerous` guarantee row
+- **Spec**: `docs/meta/50i-injection-taint-design.md`
+- **What it is**: an effect's `data: untrusted` marks its results `Tainted<T>`; taint is contagious (concatenation, and prompt-output — an LLM that read untrusted text produces tainted output) and never assignable to `T`; passing it to an approval-requiring call is a compile error. `trusted(expr)` is the sole, greppable unwrap boundary. `Grounded<T>`'s provenance machinery inverted — tracking where untrusted data must NOT go. OWASP LLM #1, answered structurally.
+- **Non-scope**: compile-time flow property (content-based jailbreak detection is the complementary `with judged` guard); whole-value granularity in v1; implicit sanitizer typing is v2.
+
 ### Replay-Safe Secret Access
 
 - **Status**: shipped (slice 48a, 2026-07-14)

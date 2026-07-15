@@ -124,7 +124,9 @@ fn collect_expr_dependencies(expr: &Expr, out: &mut Vec<String>) {
             }
         }
         Expr::TryPropagate { inner, .. } => collect_expr_dependencies(inner, out),
-        Expr::TryRetry { body, .. } => collect_expr_dependencies(body, out),
+        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            collect_expr_dependencies(body, out)
+        }
         Expr::Replay {
             trace,
             arms,

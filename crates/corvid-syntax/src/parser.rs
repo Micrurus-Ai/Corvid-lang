@@ -115,6 +115,14 @@ impl<'a> Parser<'a> {
     }
 
     /// Peek at the next token without consuming.
+    /// Lookahead by `n` tokens without consuming (0 == peek()).
+    fn peek_ahead(&self, n: usize) -> &TokKind {
+        self.tokens
+            .get(self.pos + n)
+            .map(|t| &t.kind)
+            .unwrap_or(&TokKind::Eof)
+    }
+
     fn peek(&self) -> &TokKind {
         self.tokens
             .get(self.pos)

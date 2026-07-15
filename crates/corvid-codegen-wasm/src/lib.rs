@@ -548,7 +548,7 @@ fn collect_expr_imports(
         | IrExprKind::TryPropagate { inner: target } => {
             collect_expr_imports(target, tools, prompts, plan, agent_name)
         }
-        IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
             collect_expr_imports(body, tools, prompts, plan, agent_name)
         }
         IrExprKind::List { items } => {
@@ -1105,6 +1105,7 @@ fn emit_expr(
         | IrExprKind::Ask { .. }
         | IrExprKind::Choose { .. }
         | IrExprKind::TryPropagate { .. }
+        | IrExprKind::TrustBoundary { .. }
         | IrExprKind::TryRetry { .. }
         | IrExprKind::Replay { .. } => {
             return Err(WasmCodegenError::unsupported(format!(
