@@ -23,6 +23,34 @@ agent chunks(text: String) -> Stream<String>:
 }
 
 #[tokio::test]
+async fn returning_a_stream_from_a_stream_agent_forwards_its_chunks() {
+    // `agent main() -> Stream<String>: return tell(...)` — the most
+    // natural streaming program — silently produced an EMPTY stream
+    // before 50d: the spawned stream-agent body discarded the
+    // returned value. The return-stream's chunks must forward.
+    let src = "agent inner(text: String) -> Stream<String>:
+    yield text
+    yield text + \"!\"
+
+agent outer(text: String) -> Stream<String>:
+    return inner(text)
+";
+    let ir = ir_of(src);
+    let rt = empty_runtime();
+    let stream = run_agent(&ir, "outer", vec![Value::String(Arc::from("hi"))], &rt)
+        .await
+        .expect("run");
+    let items = collect_stream(stream).await.expect("collect");
+    assert_eq!(
+        items,
+        vec![
+            Value::String(Arc::from("hi")),
+            Value::String(Arc::from("hi!")),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn stream_grounded_elements_update_aggregate_provenance_as_consumed() {
     let src = "\
 effect retrieval:

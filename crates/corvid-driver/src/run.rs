@@ -367,20 +367,7 @@ fn run_via_interpreter_tier(
         builder = builder.mcp_servers(mcp_servers);
     }
 
-    if let Ok(model) = std::env::var("CORVID_MODEL") {
-        builder = builder.default_model(&model);
-    }
-    if std::env::var("CORVID_TEST_MOCK_LLM").ok().as_deref() == Some("1") {
-        builder = builder.llm(std::sync::Arc::new(EnvVarMockAdapter::from_env()));
-    }
-    builder = builder.env_mock_tools_from_env();
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        builder = builder.llm(std::sync::Arc::new(AnthropicAdapter::new(key)));
-    }
-    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        builder = builder.llm(std::sync::Arc::new(OpenAiAdapter::new(key)));
-    }
-    builder = builder.llm(std::sync::Arc::new(OllamaAdapter::new()));
+    builder = apply_env_llm_wiring(builder);
     let rt = builder.build();
 
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
@@ -393,9 +380,43 @@ fn run_via_interpreter_tier(
             return Ok(1);
         }
     };
-    let result = tokio_rt.block_on(run_ir_with_runtime(ir, None, parsed_args, &rt));
+    // Stream draining must happen INSIDE the same async context as
+    // the run: the chunk producer is a task spawned during the run,
+    // and it must be driven while stdout drains — a Stream-returning
+    // agent streams each chunk to stdout the moment it arrives
+    // (printing the stream HANDLE's debug form was the pre-50d
+    // behavior).
+    let result = tokio_rt.block_on(async {
+        match run_ir_with_runtime(ir, None, parsed_args, &rt).await {
+            Ok(corvid_vm::Value::Stream(stream)) => {
+                use std::io::Write as _;
+                loop {
+                    match stream.next().await {
+                        Some(Ok(chunk)) => {
+                            match &chunk {
+                                corvid_vm::Value::String(s) => print!("{s}"),
+                                other => print!("{other}"),
+                            }
+                            let _ = std::io::stdout().flush();
+                        }
+                        Some(Err(err)) => {
+                            eprintln!();
+                            return Ok(corvid_vm::Value::String(
+                                format!("stream error: {err:?}").into(),
+                            ));
+                        }
+                        None => break,
+                    }
+                }
+                println!();
+                Ok(corvid_vm::Value::Nothing)
+            }
+            other => other,
+        }
+    });
 
     match result {
+        Ok(corvid_vm::Value::Nothing) => Ok(0),
         Ok(value) => {
             println!("{value}");
             Ok(0)
@@ -1055,4 +1076,29 @@ mod http_policy_loader_tests {
             "corvid.toml fallback should win when env is garbage; got {allow:?}"
         );
     }
+}
+
+/// The env-driven LLM wiring every Corvid entry point shares:
+/// `CORVID_MODEL` default, the test mock adapter, provider adapters
+/// from API-key env vars, and the local Ollama fallback. `corvid
+/// run` always had this; `corvid serve` shipped WITHOUT it, so
+/// served apps could not call models at all — every entry point
+/// must wire models identically.
+pub fn apply_env_llm_wiring(
+    mut builder: corvid_runtime::RuntimeBuilder,
+) -> corvid_runtime::RuntimeBuilder {
+    if let Ok(model) = std::env::var("CORVID_MODEL") {
+        builder = builder.default_model(&model);
+    }
+    if std::env::var("CORVID_TEST_MOCK_LLM").ok().as_deref() == Some("1") {
+        builder = builder.llm(std::sync::Arc::new(EnvVarMockAdapter::from_env()));
+    }
+    builder = builder.env_mock_tools_from_env();
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        builder = builder.llm(std::sync::Arc::new(AnthropicAdapter::new(key)));
+    }
+    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        builder = builder.llm(std::sync::Arc::new(OpenAiAdapter::new(key)));
+    }
+    builder.llm(std::sync::Arc::new(OllamaAdapter::new()))
 }

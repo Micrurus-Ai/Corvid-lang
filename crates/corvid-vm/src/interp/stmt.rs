@@ -50,6 +50,40 @@ impl<'ir> Interpreter<'ir> {
             let outcome = sub.eval_block(&agent.body).await;
             let maybe_sender = sub.stream_sender.take();
             match outcome {
+                // `return <stream>` from a Stream-returning agent
+                // FORWARDS the returned stream's chunks — discarding
+                // the return value (the pre-50d behavior) silently
+                // produced an EMPTY stream for the most natural
+                // program shape: `agent main() -> Stream<String>:
+                // return tell(...)`.
+                Ok(Flow::Return(Value::Stream(inner))) => {
+                    if let Some(sender) = maybe_sender {
+                        loop {
+                            match inner.next_chunk().await {
+                                Some(Ok(chunk)) => {
+                                    if !sender.send_chunk(Ok(chunk)).await {
+                                        break;
+                                    }
+                                }
+                                Some(Err(err)) => {
+                                    let _ = sender.send_chunk(Err(err)).await;
+                                    break;
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+                }
+                // A non-stream return becomes the stream's single
+                // final chunk (the checker constrains what can get
+                // here; Nothing stays an empty close).
+                Ok(Flow::Return(value)) if !matches!(value, Value::Nothing) => {
+                    if let Some(sender) = maybe_sender {
+                        let _ = sender
+                            .send_chunk(Ok(StreamChunk::new(value)))
+                            .await;
+                    }
+                }
                 Ok(Flow::Normal) | Ok(Flow::Return(_)) => {}
                 Ok(Flow::Break) | Ok(Flow::Continue) => {
                     if let Some(sender) = maybe_sender {

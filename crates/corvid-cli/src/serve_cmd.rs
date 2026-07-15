@@ -208,10 +208,12 @@ pub(crate) fn cmd_serve(
         host_tools.extend(register_cdylib_tool_handlers(&ir, cdylib_path)?);
     }
 
-    let runtime = Runtime::builder()
-        .approver(Arc::new(QueueApprover::new(approval_queue.clone())))
-        .tool_registry(host_tools.clone())
-        .build();
+    let runtime = corvid_driver::apply_env_llm_wiring(
+        Runtime::builder()
+            .approver(Arc::new(QueueApprover::new(approval_queue.clone())))
+            .tool_registry(host_tools.clone()),
+    )
+    .build();
     let state = Arc::new(ServeState {
         ir,
         runtime,
@@ -411,6 +413,39 @@ fn capture_pending_invocation_if_queued(
 /// 500 otherwise.
 fn finish(outcome: Result<Value, RunError>) -> Response {
     match outcome {
+        // A Stream-returning handler responds as Server-Sent Events:
+        // each chunk flushes to the client the moment it arrives
+        // (`data: <json>` per chunk, `event: done` terminator) — the
+        // modern AI-app transport, straight from the language's
+        // Stream type with zero glue.
+        Ok(Value::Stream(stream)) => {
+            let sse = async_stream::stream! {
+                loop {
+                    match stream.next().await {
+                        Some(Ok(chunk)) => {
+                            let payload = value_to_json(&chunk);
+                            yield Ok::<_, std::convert::Infallible>(
+                                axum::response::sse::Event::default()
+                                    .data(payload.to_string()),
+                            );
+                        }
+                        Some(Err(err)) => {
+                            yield Ok(axum::response::sse::Event::default()
+                                .event("error")
+                                .data(format!("{err:?}")));
+                            break;
+                        }
+                        None => {
+                            yield Ok(axum::response::sse::Event::default()
+                                .event("done")
+                                .data(""));
+                            break;
+                        }
+                    }
+                }
+            };
+            axum::response::Sse::new(sse).into_response()
+        }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
         Err(RunError::Interp(e)) => {
             if let Some(approval_id) = approval_queued_id(&e.kind) {

@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+content-type: text/event-stream
+cache-control: no-cache
+transfer-encoding: chunked
+date: Wed, 15 Jul 2026 07:07:35 GMT
+
+event: error
+data: InterpError { kind: Runtime(NoModelConfigured), span: Span { start: 169, end: 202 } }
+

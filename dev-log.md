@@ -1872,6 +1872,24 @@ Next per the Phase 50 queue: 50d-token-streaming.
 
 ---
 
+## 2026-07-15 - 50d closed: streaming reaches the user
+
+The streaming core (46d) was already deep — native adapter streams,
+backpressure pumps, replay re-chunking at recorded boundaries. The
+last mile was broken three ways: returning a stream from a stream
+agent silently produced an EMPTY stream (the spawned body discarded
+its return value — found by pointer-identity debugging when the
+pump and the drain turned out to hold different channels); corvid
+run printed the stream handle instead of draining it; and corvid
+serve had no SSE. All fixed and probed: run streams to stdout,
+serve speaks text/event-stream. En route found serve wired no LLM
+adapters AT ALL — served apps could never call models; run and
+serve now share one env wiring helper.
+
+Next per the Phase 50 queue: 50e-declarative-model-routing.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
