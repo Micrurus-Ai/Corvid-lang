@@ -1840,6 +1840,22 @@ Next per the Phase 50 queue: 50b-behavioral-diff.
 
 ---
 
+## 2026-07-15 - Framework-gap review: three slices added to Phase 50
+
+Asked "what do frameworks check that we don't," the honest gaps
+were: value-level validation (the Pydantic gap — shape checked,
+values not), per-call timeouts + circuit breakers, and semantic
+output guards (moderation/PII/groundedness — we check structure and
+provenance, not meaning). All three compose with existing machinery
+(refinements feed the repair loop and count against budgets; the
+judge guard reuses assert judged as a traced, budgeted prompt).
+Recorded as 50j/50k/50l; OTel export filed for the launch phase.
+Multimodal stays the acknowledged post-v1.0 strategic gap.
+
+Continuing with 50b-behavioral-diff.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
