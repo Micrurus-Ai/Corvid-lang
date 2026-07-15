@@ -282,6 +282,13 @@ pub enum TypeErrorKind {
     /// unknown composition rules, unknown value-types, malformed
     /// defaults, and collisions with built-in dimension names.
     InvalidCustomDimension { dimension: String, message: String },
+    /// Slice 50j — a field refinement whose form does not fit the
+    /// field's type (or whose bounds are inverted).
+    RefinementInvalid {
+        type_name: String,
+        field: String,
+        message: String,
+    },
 
     /// A `route:` arm inside a prompt points at a name that is not a
     /// `model` declaration. The runtime can only dispatch to models,
@@ -638,6 +645,13 @@ impl TypeErrorKind {
                     "agent `{agent}` is marked `@grounded_pure` but {phrase}"
                 )
             }
+            Self::RefinementInvalid {
+                type_name,
+                field,
+                message,
+            } => {
+                format!("field `{field}` on `{type_name}`: {message}")
+            }
             Self::InvalidCustomDimension { dimension, message } => {
                 format!("invalid custom dimension `{dimension}` in corvid.toml: {message}")
             }
@@ -983,6 +997,10 @@ impl TypeErrorKind {
                 ),
                 _ => format!("see docs/meta/grounded-propagation-design.md §D6 for the moat contract"),
             }),
+            Self::RefinementInvalid { .. } => Some(
+                "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"
+                    .into(),
+            ),
             Self::InvalidCustomDimension { .. } => Some(
                 "see docs/internals/effect-spec/01-dimensional-syntax.md §4 for the supported \
                  composition rules, value types, and default-value shapes"

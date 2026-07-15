@@ -3310,3 +3310,31 @@ schedule "0 8 * * *" zone "America/New_York" -> daily_brief(every_user()) uses s
         assert_eq!(schedule.args.len(), 1);
         assert_eq!(schedule.effect_row.effects[0].name.name, "send_email");
     }
+
+#[test]
+fn parses_field_refinements() {
+    let src = "\
+type Person:
+    age: Int where between(0, 150)
+    name: String where len_between(1, 80)
+    plain: Int
+";
+    let file = parse_file_src(src);
+    let t = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        t.fields[0].refinement,
+        Some(corvid_ast::Refinement::Between { min: 0, max: 150 })
+    );
+    assert_eq!(
+        t.fields[1].refinement,
+        Some(corvid_ast::Refinement::LenBetween { min: 1, max: 80 })
+    );
+    assert_eq!(t.fields[2].refinement, None);
+}

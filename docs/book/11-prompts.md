@@ -211,6 +211,9 @@ prompt classify(text: String) -> Verdict uses llm_call:
 
 If every attempt fails, the ORIGINAL typed decode error surfaces —
 repair never converts a hard failure into a silent wrong answer.
+Repair also heals FIELD REFINEMENTS (`age: Int where between(0,
+150)` — see the types chapter): a structurally valid but
+out-of-range value re-asks with the exact violation.
 
 Repair composes with `@budget`: the static worst-case cost of a
 `with repair N` prompt is `(1 + N) x` its per-call cost — the checker

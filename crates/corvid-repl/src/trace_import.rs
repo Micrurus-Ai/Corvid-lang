@@ -291,6 +291,7 @@ fn infer_typeref(
                 Field {
                     name: Ident::new(key.clone(), *sp),
                     ty: field_ty,
+                    refinement: None,
                     span: *sp,
                 }
             }).collect();

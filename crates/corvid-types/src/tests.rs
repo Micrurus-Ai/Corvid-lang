@@ -1484,6 +1484,35 @@ agent quick_answer(q: String) -> String:
 }
 
 #[test]
+fn refinement_form_must_fit_field_type() {
+    // `between` on a String field is a decl error, never a decode
+    // surprise.
+    let src = "\
+type Person:
+    name: String where between(0, 150)
+";
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::RefinementInvalid { .. })),
+        "got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn well_formed_refinements_typecheck() {
+    let src = "\
+type Person:
+    age: Int where between(0, 150)
+    name: String where len_between(1, 80)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\

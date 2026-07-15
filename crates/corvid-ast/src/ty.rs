@@ -167,5 +167,32 @@ pub enum OwnershipMode {
 pub struct Field {
     pub name: Ident,
     pub ty: TypeRef,
+    /// Value refinement (slice 50j): `where between(0, 150)` on Int
+    /// fields, `where len_between(1, 80)` on String fields. Checked
+    /// at prompt-output decode, where a violation's message feeds
+    /// the structured-output repair loop.
+    #[serde(default)]
+    pub refinement: Option<Refinement>,
     pub span: Span,
+}
+
+/// A field value refinement (slice 50j). Deliberately small in v1:
+/// integer ranges and string-length ranges cover the bulk of the
+/// "structurally valid, semantically nonsense" decode failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Refinement {
+    /// `where between(min, max)` — inclusive Int range.
+    Between { min: i64, max: i64 },
+    /// `where len_between(min, max)` — inclusive String char-count range.
+    LenBetween { min: u64, max: u64 },
+}
+
+impl Refinement {
+    /// Render for diagnostics and repair feedback.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Between { min, max } => format!("between({min}, {max})"),
+            Self::LenBetween { min, max } => format!("len_between({min}, {max})"),
+        }
+    }
 }

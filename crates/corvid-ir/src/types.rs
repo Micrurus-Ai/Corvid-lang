@@ -118,6 +118,9 @@ pub struct IrEnumVariant {
 pub struct IrField {
     pub name: String,
     pub ty: Type,
+    /// Value refinement (slice 50j) — enforced at typed decode; the
+    /// violation message feeds the structured-output repair loop.
+    pub refinement: Option<corvid_ast::Refinement>,
     pub span: Span,
 }
 

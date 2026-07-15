@@ -303,11 +303,13 @@ mod tests {
                 IrField {
                     name: "should_refund".into(),
                     ty: Type::Bool,
+                    refinement: None,
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "reason".into(),
                     ty: Type::String,
+                    refinement: None,
                     span: Span::new(0, 0),
                 },
             ],
@@ -343,6 +345,7 @@ mod tests {
             fields: vec![IrField {
                 name: "id".into(),
                 ty: Type::String,
+                refinement: None,
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -354,6 +357,7 @@ mod tests {
             fields: vec![IrField {
                 name: "order".into(),
                 ty: Type::Struct(inner_id),
+                refinement: None,
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -378,11 +382,13 @@ mod tests {
                 IrField {
                     name: "title".into(),
                     ty: Type::String,
+                    refinement: None,
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "ready".into(),
                     ty: Type::Bool,
+                    refinement: None,
                     span: Span::new(0, 0),
                 },
             ],

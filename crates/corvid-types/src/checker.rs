@@ -526,6 +526,59 @@ impl EffectFrontier {
 }
 
 impl<'a> Checker<'a> {
+    /// Slice 50j — refinement forms are type-directed: `between`
+    /// refines Int fields, `len_between` refines String fields, and
+    /// bounds must be ordered. A mismatched form is a decl error
+    /// here, never a decode surprise later.
+    fn check_field_refinements(&mut self, t: &corvid_ast::TypeDecl) {
+        for field in &t.fields {
+            let Some(refinement) = &field.refinement else {
+                continue;
+            };
+            let field_type_name = match &field.ty {
+                corvid_ast::TypeRef::Named { name, .. } => name.name.as_str(),
+                _ => "",
+            };
+            let message = match refinement {
+                corvid_ast::Refinement::Between { .. } if field_type_name != "Int" => {
+                    Some(format!(
+                        "refinement `{}` requires an Int field, but the field is `{}`",
+                        refinement.describe(),
+                        field_type_name
+                    ))
+                }
+                corvid_ast::Refinement::Between { min, max } if min > max => Some(format!(
+                    "refinement `{}` has min > max",
+                    refinement.describe()
+                )),
+                corvid_ast::Refinement::LenBetween { .. }
+                    if field_type_name != "String" =>
+                {
+                    Some(format!(
+                        "refinement `{}` requires a String field, but the field is `{}`",
+                        refinement.describe(),
+                        field_type_name
+                    ))
+                }
+                corvid_ast::Refinement::LenBetween { min, max } if min > max => Some(format!(
+                    "refinement `{}` has min > max",
+                    refinement.describe()
+                )),
+                _ => None,
+            };
+            if let Some(message) = message {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::RefinementInvalid {
+                        type_name: t.name.name.clone(),
+                        field: field.name.name.clone(),
+                        message,
+                    },
+                    field.span,
+                ));
+            }
+        }
+    }
+
     fn new(
         file: &'a File,
         resolved: &'a Resolved,
@@ -690,8 +743,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                Decl::Type(t) => self.check_field_refinements(t),
                 Decl::Tool(_)
-                | Decl::Type(_)
                 | Decl::Store(_)
                 | Decl::Import(_)
                 | Decl::Effect(_)

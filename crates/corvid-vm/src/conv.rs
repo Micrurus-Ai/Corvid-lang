@@ -306,6 +306,7 @@ pub fn json_to_value(
                         field: field.name.clone(),
                     })?;
                 let v = json_to_value(raw, &field.ty, types_by_id)?;
+                check_field_refinement(&ir_type.name, field, &v)?;
                 fields.insert(field.name.clone(), v);
             }
             Ok(Value::Struct(StructValue::new(
@@ -601,11 +602,54 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Slice 50j — enforce a field's declared value refinement after
+/// its structural decode. Violations render actionably (field,
+/// value, refinement) because this exact string is what `with
+/// repair N` feeds back to the model.
+fn check_field_refinement(
+    struct_name: &str,
+    field: &corvid_ir::IrField,
+    value: &Value,
+) -> Result<(), ConvError> {
+    let Some(refinement) = &field.refinement else {
+        return Ok(());
+    };
+    let violated = match (refinement, value) {
+        (corvid_ast::Refinement::Between { min, max }, Value::Int(n)) => n < min || n > max,
+        (corvid_ast::Refinement::LenBetween { min, max }, Value::String(s)) => {
+            let len = s.chars().count() as u64;
+            len < *min || len > *max
+        }
+        // Form/type mismatches are rejected at typecheck; anything
+        // else reaching here decodes without a value check.
+        _ => false,
+    };
+    if violated {
+        return Err(ConvError::RefinementViolated {
+            struct_name: struct_name.to_string(),
+            field: field.name.clone(),
+            refinement: refinement.describe(),
+            got: value_to_json(value).to_string(),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum ConvError {
     TypeMismatch { expected: String, got: String },
     MissingField { struct_name: String, field: String },
     UnknownStructType(DefId),
+    /// Slice 50j — a structurally valid field value violated its
+    /// declared refinement. The message names the field, the value,
+    /// and the refinement so the structured-output repair loop can
+    /// feed the model an actionable correction.
+    RefinementViolated {
+        struct_name: String,
+        field: String,
+        refinement: String,
+        got: String,
+    },
 }
 
 impl std::fmt::Display for ConvError {
@@ -617,6 +661,17 @@ impl std::fmt::Display for ConvError {
             Self::MissingField { struct_name, field } => {
                 write!(f, "field `{field}` missing on `{struct_name}`")
             }
+            Self::RefinementViolated {
+                struct_name,
+                field,
+                refinement,
+                got,
+            } => {
+                write!(
+                    f,
+                    "field `{field}` on `{struct_name}`: value {got} violates the declared refinement `{refinement}`"
+                )
+            }
             Self::UnknownStructType(id) => {
                 write!(f, "no IR type registered for DefId({})", id.0)
             }
@@ -625,6 +680,46 @@ impl std::fmt::Display for ConvError {
 }
 
 #[cfg(test)]
+
+    #[test]
+    fn refinement_violation_rejects_decode_with_actionable_message() {
+        use corvid_ir::{IrField, IrType};
+        let ir_type = IrType {
+            id: corvid_resolve::DefId(1),
+            name: "Person".into(),
+            fields: vec![
+                IrField {
+                    name: "age".into(),
+                    ty: Type::Int,
+                    refinement: Some(corvid_ast::Refinement::Between { min: 0, max: 150 }),
+                    span: corvid_ast::Span::new(0, 0),
+                },
+            ],
+            variants: Vec::new(),
+            span: corvid_ast::Span::new(0, 0),
+        };
+        let mut types_by_id = std::collections::HashMap::new();
+        types_by_id.insert(ir_type.id, &ir_type);
+
+        let ok = json_to_value(
+            serde_json::json!({"age": 42}),
+            &Type::Struct(ir_type.id),
+            &types_by_id,
+        );
+        assert!(ok.is_ok(), "in-range value must decode: {ok:?}");
+
+        let err = json_to_value(
+            serde_json::json!({"age": 200}),
+            &Type::Struct(ir_type.id),
+            &types_by_id,
+        )
+        .expect_err("out-of-range value must refuse decode");
+        let message = err.to_string();
+        assert!(
+            message.contains("age") && message.contains("between(0, 150)") && message.contains("200"),
+            "the violation must name field, refinement, and value (it feeds the repair loop): {message}"
+        );
+    }
 mod tests {
     use super::*;
     use serde_json::json;
@@ -674,6 +769,7 @@ mod tests {
             fields: vec![corvid_ir::IrField {
                 name: "should_refund".into(),
                 ty: Type::Bool,
+                refinement: None,
                 span: corvid_ast::Span::new(0, 0),
             }],
             span: corvid_ast::Span::new(0, 0),
@@ -703,6 +799,7 @@ mod tests {
             fields: vec![corvid_ir::IrField {
                 name: "needed".into(),
                 ty: Type::Int,
+                refinement: None,
                 span: corvid_ast::Span::new(0, 0),
             }],
             span: corvid_ast::Span::new(0, 0),

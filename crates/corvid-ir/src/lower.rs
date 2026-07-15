@@ -481,6 +481,7 @@ impl<'a> Lowerer<'a> {
             .map(|f| IrField {
                 name: f.name.name.clone(),
                 ty: self.type_ref_to_type(&f.ty),
+                refinement: f.refinement,
                 span: f.span,
             })
             .collect();
@@ -495,6 +496,7 @@ impl<'a> Lowerer<'a> {
                     .map(|f| IrField {
                         name: f.name.name.clone(),
                         ty: self.type_ref_to_type(&f.ty),
+                        refinement: f.refinement,
                         span: f.span,
                     })
                     .collect(),

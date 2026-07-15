@@ -116,6 +116,7 @@ impl<'a> Parser<'a> {
                 fields.push(Field {
                     name: Ident::new(fname, fname_span),
                     ty,
+                    refinement: None,
                     span: fstart.merge(fend),
                 });
                 if !matches!(self.peek(), TokKind::Comma) {
@@ -139,12 +140,80 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident()?;
         self.expect(TokKind::Colon, "`:` between field name and type")?;
         let ty = self.parse_type_ref()?;
-        let end = ty.span();
+        let refinement = self.parse_field_refinement()?;
+        let end = self.prev_span();
         self.expect_newline()?;
         Ok(Field {
             name: Ident::new(name, name_span),
             ty,
+            refinement,
             span: start.merge(end),
         })
+    }
+
+    /// Optional field refinement (slice 50j): contextual `where`
+    /// followed by `between(min, max)` or `len_between(min, max)`.
+    /// `where` stays an ordinary identifier everywhere else.
+    fn parse_field_refinement(
+        &mut self,
+    ) -> Result<Option<corvid_ast::Refinement>, ParseError> {
+        if !matches!(self.peek(), TokKind::Ident(w) if w == "where") {
+            return Ok(None);
+        }
+        self.bump(); // where
+        let (form, form_span) = self.expect_ident()?;
+        self.expect(TokKind::LParen, "`(` after the refinement form")?;
+        let min = self.expect_refinement_int()?;
+        self.expect(TokKind::Comma, "`,` between refinement bounds")?;
+        let max = self.expect_refinement_int()?;
+        self.expect(TokKind::RParen, "`)` after refinement bounds")?;
+        match form.as_str() {
+            "between" => Ok(Some(corvid_ast::Refinement::Between { min, max })),
+            "len_between" => {
+                if min < 0 || max < 0 {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "a negative length bound".into(),
+                            expected: "non-negative bounds for `len_between`".into(),
+                        },
+                        span: form_span,
+                    });
+                }
+                Ok(Some(corvid_ast::Refinement::LenBetween {
+                    min: min as u64,
+                    max: max as u64,
+                }))
+            }
+            other => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("refinement form `{other}`"),
+                    expected: "`between(min, max)` or `len_between(min, max)`".into(),
+                },
+                span: form_span,
+            }),
+        }
+    }
+
+    /// An integer bound, with optional leading `-`.
+    fn expect_refinement_int(&mut self) -> Result<i64, ParseError> {
+        let negative = if matches!(self.peek(), TokKind::Minus) {
+            self.bump();
+            true
+        } else {
+            false
+        };
+        match self.peek().clone() {
+            TokKind::Int(n) => {
+                self.bump();
+                Ok(if negative { -n } else { n })
+            }
+            other => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("{other:?}"),
+                    expected: "an integer refinement bound".into(),
+                },
+                span: self.peek_span(),
+            }),
+        }
     }
 }

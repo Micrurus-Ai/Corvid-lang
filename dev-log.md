@@ -1953,6 +1953,21 @@ outputs + ch05 types.
 
 ---
 
+## 2026-07-15 - 50j closed: outputs that heal until valid
+
+Field refinements shipped end-to-end: parser (contextual `where`,
+no new tokens), checker (mismatched forms are decl errors), IR
+threading, and decode enforcement whose violation message is
+deliberately the repair loop's feedback — so `with repair N` now
+heals semantic violations, not just schema ones, under the same
+budget accounting. Live probe: an LLM answering age 969 for a
+`between(0, 150)` field refuses decode with the exact actionable
+message.
+
+Next per the Phase 50 queue: 50k-call-timeouts-and-breakers.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

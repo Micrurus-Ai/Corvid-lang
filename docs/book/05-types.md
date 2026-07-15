@@ -364,6 +364,35 @@ locals (`amount: final_amount` renames; `..` ignores the rest).
 Destructuring must be irrefutable: literal or nested patterns
 belong in `match`.
 
+## Field refinements
+
+Record fields can declare VALUE constraints, not just shapes:
+
+```corvid
+type Person:
+    age: Int where between(0, 150)
+    name: String where len_between(1, 80)
+```
+
+`between(min, max)` refines `Int` fields; `len_between(min, max)`
+refines `String` fields (character count); bounds are inclusive. A
+refinement whose form doesn't fit the field's type is a compile
+error.
+
+Refinements are enforced where structured data enters the program —
+typed prompt-output decode and the typed-decoder convention. A
+structurally valid but out-of-range value refuses to decode with a
+message naming the field, the value, and the refinement:
+
+```text
+field `age` on `Person`: value 969 violates the declared refinement `between(0, 150)`
+```
+
+That exact message is what `with repair N` (see the prompts chapter)
+feeds back to the model, so refined prompt outputs heal until they
+are structurally AND semantically valid — with every repair attempt
+still counted against `@budget`.
+
 ## Sum types (enums)
 
 Sum types declare "one of N shapes" — unit variants are bare
