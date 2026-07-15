@@ -10,6 +10,7 @@ mod emit;
 mod introspection_catalog;
 mod provenance_emit;
 pub mod app_contract;
+pub mod openapi;
 mod schema;
 mod signing;
 mod tool_contract;

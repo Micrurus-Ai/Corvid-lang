@@ -16,7 +16,7 @@
 //! command never reorders the registry — declaration order in
 //! `corvid-guarantees` is the stable serialization order.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use corvid_guarantees::{
@@ -313,10 +313,12 @@ mod tests {
     }
 }
 
-/// Slice 51a — emit the Application Contract for `file` (default
-/// `src/main.cor`) to `out` (default `target/contracts/app.corvid.json`,
-/// or `-` for stdout).
-pub fn run_app_contract(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
+/// Compile a source file to its Application Contract, or print the
+/// diagnostics and return `Ok(None)` on failure. Shared by the `app`
+/// and `openapi` contract commands.
+fn build_contract(
+    file: Option<&Path>,
+) -> Result<Option<corvid_abi::app_contract::ApplicationContract>> {
     let source_path = match file {
         Some(f) => f.to_path_buf(),
         None => crate::project_source::resolve_project_source(None)
@@ -325,51 +327,76 @@ pub fn run_app_contract(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     let source = std::fs::read_to_string(&source_path)
         .with_context(|| format!("cannot read `{}`", source_path.display()))?;
     let config = corvid_driver::load_corvid_config_for(&source_path);
-    // A stable timestamp channel: env override for reproducible
-    // builds, else a fixed marker (the contract's identity is its
-    // shape, not its emit time).
-    let generated_at = std::env::var("CORVID_BUILD_DATE")
-        .unwrap_or_else(|_| "unknown".to_string());
+    let generated_at =
+        std::env::var("CORVID_BUILD_DATE").unwrap_or_else(|_| "unknown".to_string());
 
-    let contract = match corvid_driver::compile_to_application_contract_with_config(
+    match corvid_driver::compile_to_application_contract_with_config(
         &source,
         &source_path.display().to_string(),
         &generated_at,
         config.as_ref(),
     ) {
-        Ok(contract) => contract,
+        Ok(contract) => Ok(Some(contract)),
         Err(diags) => {
             eprint!(
                 "{}",
                 corvid_driver::render_all_pretty(&diags, &source_path, &source)
             );
-            return Ok(1);
+            Ok(None)
         }
-    };
+    }
+}
 
+/// Write a JSON artifact to `out` (or a default path), or stdout for
+/// `-`. Returns the resolved path when written to disk.
+fn write_artifact(json: &str, out: Option<&str>, default_path: &str) -> Result<Option<PathBuf>> {
+    if out == Some("-") {
+        println!("{json}");
+        return Ok(None);
+    }
+    let path = PathBuf::from(out.unwrap_or(default_path));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, json)?;
+    Ok(Some(path))
+}
+
+/// Slice 51a — emit the Application Contract for `file` (default
+/// `src/main.cor`) to `out` (default `target/contracts/app.corvid.json`,
+/// or `-` for stdout).
+pub fn run_app_contract(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
     let json = serde_json::to_string_pretty(&contract)?;
-    match out {
-        Some("-") => {
-            println!("{json}");
-        }
-        _ => {
-            let path = match out {
-                Some(p) => std::path::PathBuf::from(p),
-                None => std::path::PathBuf::from("target/contracts/app.corvid.json"),
-            };
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, json)?;
-            println!(
-                "wrote application contract: {} ({} route(s), {} agent(s), {} prompt(s), {} type(s))",
-                path.display(),
-                contract.routes.len(),
-                contract.agents.len(),
-                contract.prompts.len(),
-                contract.types.len(),
-            );
-        }
+    if let Some(path) = write_artifact(&json, out, "target/contracts/app.corvid.json")? {
+        println!(
+            "wrote application contract: {} ({} route(s), {} agent(s), {} prompt(s), {} type(s))",
+            path.display(),
+            contract.routes.len(),
+            contract.agents.len(),
+            contract.prompts.len(),
+            contract.types.len(),
+        );
+    }
+    Ok(0)
+}
+
+/// Slice 51b — emit a standard OpenAPI 3.1 document for `file`.
+pub fn run_openapi(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let openapi = corvid_abi::openapi::emit_openapi(&contract);
+    let json = serde_json::to_string_pretty(&openapi)?;
+    if let Some(path) = write_artifact(&json, out, "target/contracts/openapi.json")? {
+        println!(
+            "wrote OpenAPI 3.1: {} ({} path(s), {} schema(s))",
+            path.display(),
+            contract.routes.len(),
+            contract.types.len(),
+        );
     }
     Ok(0)
 }

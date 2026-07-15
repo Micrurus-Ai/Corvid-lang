@@ -18,6 +18,19 @@ pub enum ContractCommand {
         #[arg(long, value_name = "FILE")]
         out: Option<String>,
     },
+    /// Emit a standard OpenAPI 3.1 document for a Corvid source file —
+    /// routes, request/response schemas (with field-refinement
+    /// constraints), and the session security scheme. Any OpenAPI
+    /// tool (client generators, Swagger UI) consumes it. Writes
+    /// `target/contracts/openapi.json` unless `--out -` (stdout).
+    Openapi {
+        /// Source file. Defaults to `src/main.cor` in a project.
+        file: Option<std::path::PathBuf>,
+        /// Output path, or `-` for stdout. Defaults to
+        /// `target/contracts/openapi.json`.
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+    },
     /// Print the canonical guarantee table.
     ///
     /// Default output is human-readable: one row per guarantee with

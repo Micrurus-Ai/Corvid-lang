@@ -850,6 +850,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             ContractCommand::App { file, out } => {
                 contract_cmd::run_app_contract(file.as_deref(), out.as_deref())
             }
+            ContractCommand::Openapi { file, out } => {
+                contract_cmd::run_openapi(file.as_deref(), out.as_deref())
+            }
             ContractCommand::RegenDoc { output } => contract_cmd::run_regen_doc(&output),
         },
         Some(Command::Connectors { command }) => cmd_connectors(command),

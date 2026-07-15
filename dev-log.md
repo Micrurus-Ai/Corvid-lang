@@ -2058,6 +2058,20 @@ Next per the Phase 51 queue: 51b-openapi-projection.
 
 ---
 
+## 2026-07-15 - 51b closed: standard OpenAPI 3.1 falls out of the model
+
+A pure transform of the application contract into a clean OpenAPI
+3.1 document — routes to paths, types to component schemas with the
+refinement constraints carried through, generic wrappers unwrapped
+to their JSON shape, session security scheme. Any existing OpenAPI
+tool consumes it without knowing Corvid exists. The AI-native
+capabilities OpenAPI can't express ride the companion corvid-ai.json
+(51c, next).
+
+Next per the Phase 51 queue: 51c-corvid-ai-metadata.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
