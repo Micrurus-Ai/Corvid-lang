@@ -1904,6 +1904,22 @@ Next per the Phase 50 queue: 50f-token-context-budgets.
 
 ---
 
+## 2026-07-15 - 50f+50g closed: both were already shipped; both were invisible
+
+Context budgets shipped in 46c (deterministic oldest-first
+truncation + typed refusal) and were even documented. Latency
+budgets fell out of the generic dimensional-constraint machinery —
+`@latency(fast)` statically rejects slow-composed paths with a
+precise diagnostic — but nothing tested or documented the form.
+Pinned both directions and added it to ch07's dimension list. The
+phase's lesson keeps repeating: the power exists; the visibility
+doesn't. Phase 51's launch content is where that gets fixed
+wholesale.
+
+Next per the Phase 50 queue: 50h-cost-attribution.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

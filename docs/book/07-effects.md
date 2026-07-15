@@ -93,6 +93,10 @@ Each dimension drives a real compiler behavior:
   marker never silently removes protection. `autonomous` (and
   `autonomous_if_confident(...)`, which typechecks as autonomous and
   escalates at runtime) derives nothing. See **[Approve](/docs/approve)**.
+- `latency` — composes by MAX (the slowest call on any path wins); an
+  agent annotated `@latency(fast)` fails to compile when any reachable
+  call carries `latency: medium` or `latency: slow` — a static latency
+  SLA, checked the same way `@budget` checks money.
 - `reversible: false` — the call is treated as committed at the moment of
   invocation; replay does not re-execute it by default.
 - `data: grounded` — the return value must be wrapped in `Grounded<T>`.

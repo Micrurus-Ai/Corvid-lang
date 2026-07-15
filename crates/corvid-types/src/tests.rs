@@ -1451,6 +1451,39 @@ agent judge(q: String) -> String:
 }
 
 #[test]
+fn latency_constraint_rejects_slow_composed_path() {
+    // `@latency(fast)` is a static latency SLA: any reachable call
+    // whose composed latency class exceeds the constraint fails at
+    // compile time, naming the dimension.
+    let src = "effect slow_search:
+    latency: slow
+
+tool web_search(q: String) -> String uses slow_search
+
+@latency(fast)
+agent quick_answer(q: String) -> String:
+    return web_search(q)
+";
+    let c = check(src);
+    assert!(has_effect_violation(&c, "latency"), "got: {:?}", c.errors);
+}
+
+#[test]
+fn latency_constraint_accepts_fast_path() {
+    let src = "effect quick_lookup:
+    latency: fast
+
+tool cache_lookup(q: String) -> String uses quick_lookup
+
+@latency(fast)
+agent quick_answer(q: String) -> String:
+    return cache_lookup(q)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\
