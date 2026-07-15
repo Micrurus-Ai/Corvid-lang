@@ -1890,6 +1890,20 @@ Next per the Phase 50 queue: 50e-declarative-model-routing.
 
 ---
 
+## 2026-07-15 - 50e closed: the routing surface was there; its budget hole wasn't
+
+Phase 20h shipped routing beyond the slice design (progressive
+chains, guarded routes, ensembles with calibration weighting,
+adversarial pipelines, A/B rollout) — but ensembles charged N
+members at runtime while the budget checker counted one call, and
+the book never mentioned any of it. Both fixed: dispatch-call
+multipliers in the worst-case analysis (pinned three ways) and a
+Model Routing section in ch11.
+
+Next per the Phase 50 queue: 50f-token-context-budgets.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

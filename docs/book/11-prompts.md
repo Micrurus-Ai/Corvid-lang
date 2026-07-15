@@ -159,6 +159,40 @@ documents exactly which sampling produced the recorded response.
 Ranges are compile-checked: temperature 0..=2, top_p 0..=1,
 max_tokens a positive integer.
 
+## Model routing
+
+Routing is declarative — the policy reads in one line, and every
+form composes with `@budget` (the checker multiplies worst-case cost
+by the number of model calls a clause can make):
+
+```corvid
+model cheap:
+    capability: basic
+
+model expert:
+    capability: expert
+
+prompt classify(q: String) -> String:
+    progressive:
+        cheap below 0.95
+        expert
+    "Classify {q}"
+```
+
+`progressive:` tries stages in order — here `cheap` first, escalating
+to `expert` whenever the observed confidence lands below `0.95`. The
+final stage is the terminal fallback. Worst case both stages run, so
+a `@budget` covering this call must cover both.
+
+The other routing forms share the shape: `route:` picks a model by
+guard expression, `ensemble [a, b, c] vote majority` fires members
+concurrently and votes (optionally weighting by calibration accuracy,
+with a disagreement-escalation fallback), `rollout` sends a
+percentage of calls to a variant for A/B comparison, and
+`adversarial` runs propose / challenge / adjudicate across three
+models. Ensembles cost every member; adversarial costs three calls —
+the budget checker counts all of them.
+
 ## Structured-output repair
 
 `with repair N` turns schema violations into bounded self-repair:

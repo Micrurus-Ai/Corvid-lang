@@ -1374,6 +1374,83 @@ agent judge(text: String) -> Verdict:
 }
 
 #[test]
+fn ensemble_members_multiply_worst_case_cost_for_budgets() {
+    // An ensemble fires EVERY member concurrently and the runtime
+    // sums their costs — a 3-member ensemble of a $0.30 prompt is a
+    // $0.90 worst case, so a $0.50 budget must reject it.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+model a:
+    capability: basic
+
+model b:
+    capability: basic
+
+model c:
+    capability: expert
+
+prompt answer(q: String) -> String uses llm_call:
+    ensemble [a, b, c] vote majority
+    \"Answer {q}\"
+
+@budget($0.50)
+agent judge(q: String) -> String:
+    return answer(q)
+";
+    let c = check(src);
+    assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
+}
+
+#[test]
+fn progressive_stages_multiply_worst_case_cost_for_budgets() {
+    // Worst case every progressive stage runs: two $0.30 stages is
+    // $0.60 against a $0.50 budget.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+model cheap:
+    capability: basic
+
+model expensive:
+    capability: expert
+
+prompt classify(q: String) -> String uses llm_call:
+    progressive:
+        cheap below 0.95
+        expensive
+    \"Classify {q}\"
+
+@budget($0.50)
+agent judge(q: String) -> String:
+    return classify(q)
+";
+    let c = check(src);
+    assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
+}
+
+#[test]
+fn single_dispatch_prompt_within_budget_passes() {
+    // The twin without multi-dispatch fits the same budget — pins
+    // that the multiplier comes from the dispatch clauses alone.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+prompt classify(q: String) -> String uses llm_call:
+    \"Classify {q}\"
+
+@budget($0.50)
+agent judge(q: String) -> String:
+    return classify(q)
+";
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\

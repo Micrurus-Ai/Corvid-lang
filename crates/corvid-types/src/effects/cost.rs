@@ -852,6 +852,28 @@ fn effect_node_for_prompt(
             *value *= multiplier;
         }
     }
+    // Multi-dispatch clauses spend per MODEL CALL, and the runtime
+    // sums those costs onto the result — the worst-case analysis
+    // must match or `@budget` verifies a bound the runtime exceeds:
+    //   - ensemble: every member fires concurrently (+1 when a
+    //     disagreement-escalation member is configured);
+    //   - progressive: worst case every stage runs;
+    //   - adversarial: propose + challenge + adjudicate = 3 calls.
+    // `route` and `rollout` pick ONE model per call: 1x.
+    let dispatch_calls: f64 = if let Some(ensemble) = &prompt.ensemble {
+        (ensemble.models.len() + usize::from(ensemble.disagreement_escalation.is_some())) as f64
+    } else if let Some(progressive) = &prompt.progressive {
+        progressive.stages.len() as f64
+    } else if prompt.adversarial.is_some() {
+        3.0
+    } else {
+        1.0
+    };
+    if dispatch_calls > 1.0 {
+        for value in costs.values_mut() {
+            *value *= dispatch_calls;
+        }
+    }
     CostTreeNode {
         name: prompt.name.name.clone(),
         kind: CostNodeKind::Prompt,
