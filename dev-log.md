@@ -1933,6 +1933,26 @@ it and 50i-injection-taint last).
 
 ---
 
+## 2026-07-15 - 50j design decided (survey done; implementation next)
+
+Syntax avoids new lexer tokens (`..` doesn't exist): refinements are
+contextual `where` + a named form with parens —
+`age: Int where between(0, 150)` and
+`name: String where len_between(1, 80)`. AST: `Field` gains
+`refinement: Option<Refinement>` (Range{min,max} for Int/Float,
+Len{min,max} for String) — mechanical updates across the ~8 crates
+that construct Field literals. Checker validates form-vs-type.
+Enforcement at prompt-output decode in conv.rs `json_to_value`
+struct path: violation renders "field `age`: 200 outside
+between(0, 150)" as the decode error — which the EXISTING `with
+repair N` loop then feeds back to the model, so outputs heal until
+structurally AND semantically valid, still budget-counted (the 50a
+multiplier already covers the attempts). Tests: parser, checker
+mismatch, decode reject, repair-heals e2e. Docs: ch11 structured
+outputs + ch05 types.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
