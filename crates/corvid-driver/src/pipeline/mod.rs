@@ -28,7 +28,7 @@ mod abi;
 mod compile;
 mod ir;
 
-pub use abi::compile_to_abi_with_config;
+pub use abi::{compile_to_abi_with_config, compile_to_application_contract_with_config};
 pub use compile::{
     analyze_with_config_at_path, compile, compile_with_config, compile_with_config_at_path,
     CompileResult,

@@ -2042,6 +2042,22 @@ Starting 51a — the application-contract core (the dependency root).
 
 ---
 
+## 2026-07-15 - 51a closed: the application contract emits
+
+The dependency root of Phase 51. `corvid contract app` produces
+app.corvid.json describing the public surface — routes, public
+agents/prompts, exchanged types with refinement constraints, and
+each callable's AI-native capabilities (streaming/grounded/tainted/
+approvals/confidence/cost/latency) derived from the return type and
+composed effect row. Built as a sibling of emit_abi, reusing the
+type-description machinery. Everything downstream (OpenAPI projection,
+corvid-ai metadata, TS client, dev console, SDKs) consumes this one
+model.
+
+Next per the Phase 51 queue: 51b-openapi-projection.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

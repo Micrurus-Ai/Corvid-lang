@@ -72,3 +72,54 @@ pub fn compile_to_abi_with_config(
         },
     ))
 }
+
+/// Slice 51a — compile a source file to its Application Contract
+/// (`app.corvid.json`). Shares the abi pipeline's front half
+/// (lex → parse → resolve → typecheck → registry) and emits the
+/// public HTTP + agent surface a frontend consumes. Returns the
+/// contract on success, or the accumulated diagnostics.
+pub fn compile_to_application_contract_with_config(
+    source: &str,
+    source_path_for_contract: &str,
+    generated_at: &str,
+    config: Option<&CorvidConfig>,
+) -> Result<corvid_abi::app_contract::ApplicationContract, Vec<Diagnostic>> {
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let tokens = match lex(source) {
+        Ok(t) => t,
+        Err(errs) => {
+            diagnostics.extend(errs.into_iter().map(Diagnostic::from));
+            return Err(diagnostics);
+        }
+    };
+    let (file, parse_errs) = parse_file(&tokens);
+    diagnostics.extend(parse_errs.into_iter().map(Diagnostic::from));
+    let resolved = resolve(&file);
+    diagnostics.extend(resolved.errors.iter().cloned().map(Diagnostic::from));
+    let checked = typecheck_with_config(&file, &resolved, config);
+    diagnostics.extend(checked.errors.iter().cloned().map(Diagnostic::from));
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    let effect_decls = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            corvid_ast::Decl::Effect(effect) => Some(effect.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let effect_registry =
+        corvid_types::EffectRegistry::from_decls_with_config(&effect_decls, config);
+    Ok(corvid_abi::app_contract::emit_application_contract(
+        &file,
+        &resolved,
+        &checked,
+        &effect_registry,
+        &corvid_abi::app_contract::ContractOptions {
+            source_path: source_path_for_contract,
+            compiler_version: env!("CARGO_PKG_VERSION"),
+            generated_at,
+        },
+    ))
+}

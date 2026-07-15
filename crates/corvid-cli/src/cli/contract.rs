@@ -3,6 +3,21 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum ContractCommand {
+    /// Emit the Application Contract for a Corvid source file — the
+    /// machine-readable description of its public HTTP + agent
+    /// surface (routes, public agents/prompts, exchanged types with
+    /// field refinements, and each callable's AI-native capabilities:
+    /// streaming, grounding, approvals, confidence, cost, latency).
+    /// Frontends and SDK generators consume this. Writes
+    /// `target/contracts/app.corvid.json` unless `--out -` (stdout).
+    App {
+        /// Source file. Defaults to `src/main.cor` in a project.
+        file: Option<std::path::PathBuf>,
+        /// Output path, or `-` for stdout. Defaults to
+        /// `target/contracts/app.corvid.json`.
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+    },
     /// Print the canonical guarantee table.
     ///
     /// Default output is human-readable: one row per guarantee with

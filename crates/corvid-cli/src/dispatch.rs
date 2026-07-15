@@ -847,6 +847,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             ContractCommand::List { json, class, kind } => {
                 contract_cmd::run_list(json, class.as_deref(), kind.as_deref())
             }
+            ContractCommand::App { file, out } => {
+                contract_cmd::run_app_contract(file.as_deref(), out.as_deref())
+            }
             ContractCommand::RegenDoc { output } => contract_cmd::run_regen_doc(&output),
         },
         Some(Command::Connectors { command }) => cmd_connectors(command),

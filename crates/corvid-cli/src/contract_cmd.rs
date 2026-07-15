@@ -312,3 +312,64 @@ mod tests {
         assert!(json.contains("Outside Corvid's trust boundary"));
     }
 }
+
+/// Slice 51a — emit the Application Contract for `file` (default
+/// `src/main.cor`) to `out` (default `target/contracts/app.corvid.json`,
+/// or `-` for stdout).
+pub fn run_app_contract(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
+    let source_path = match file {
+        Some(f) => f.to_path_buf(),
+        None => crate::project_source::resolve_project_source(None)
+            .context("no source file given and no src/main.cor found")?,
+    };
+    let source = std::fs::read_to_string(&source_path)
+        .with_context(|| format!("cannot read `{}`", source_path.display()))?;
+    let config = corvid_driver::load_corvid_config_for(&source_path);
+    // A stable timestamp channel: env override for reproducible
+    // builds, else a fixed marker (the contract's identity is its
+    // shape, not its emit time).
+    let generated_at = std::env::var("CORVID_BUILD_DATE")
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let contract = match corvid_driver::compile_to_application_contract_with_config(
+        &source,
+        &source_path.display().to_string(),
+        &generated_at,
+        config.as_ref(),
+    ) {
+        Ok(contract) => contract,
+        Err(diags) => {
+            eprint!(
+                "{}",
+                corvid_driver::render_all_pretty(&diags, &source_path, &source)
+            );
+            return Ok(1);
+        }
+    };
+
+    let json = serde_json::to_string_pretty(&contract)?;
+    match out {
+        Some("-") => {
+            println!("{json}");
+        }
+        _ => {
+            let path = match out {
+                Some(p) => std::path::PathBuf::from(p),
+                None => std::path::PathBuf::from("target/contracts/app.corvid.json"),
+            };
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, json)?;
+            println!(
+                "wrote application contract: {} ({} route(s), {} agent(s), {} prompt(s), {} type(s))",
+                path.display(),
+                contract.routes.len(),
+                contract.agents.len(),
+                contract.prompts.len(),
+                contract.types.len(),
+            );
+        }
+    }
+    Ok(0)
+}
