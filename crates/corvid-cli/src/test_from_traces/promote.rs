@@ -83,6 +83,13 @@ async fn dispatch_replay(
         serde_json::to_value(format!("{v:?}")).unwrap_or(serde_json::Value::Null)
     });
 
+    // Behavioral drift is the harness's SIGNAL, not a failure of
+    // the harness — surface it as the typed divergence error so the
+    // verdict classifies Diverged.
+    if let Some(divergence) = outcome.divergence {
+        return Err(corvid_runtime::RuntimeError::ReplayDivergence(divergence));
+    }
+
     Ok(TraceHarnessRun {
         final_output,
         ok: outcome.ran_cleanly(),

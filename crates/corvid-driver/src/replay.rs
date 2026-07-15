@@ -80,6 +80,11 @@ pub struct ReplayOutcome {
     pub result_value: Option<Value>,
     /// Human-readable error if the run did not complete cleanly.
     pub result_error: Option<String>,
+    /// Structured replay divergence when the failure WAS a
+    /// divergence — behavioral drift the caller should classify as
+    /// Diverged, not as a harness error. Stringifying it into
+    /// `result_error` alone erased that distinction.
+    pub divergence: Option<corvid_runtime::ReplayDivergence>,
     /// Differential-replay report, when `mode == Differential`.
     pub differential_report: Option<ReplayDifferentialReport>,
     /// Mutation-replay report, when `mode == Mutation`.
@@ -224,16 +229,25 @@ pub async fn run_replay_from_source_with_builder_async(
 
     let run_result = run_ir_with_runtime(&ir, Some(&agent_name), args, &runtime).await;
 
-    let (result_value, result_error) = match run_result {
-        Ok(value) => (Some(value), None),
-        Err(RunError::Interp(err)) => (None, Some(err.to_string())),
-        Err(other) => (None, Some(other.to_string())),
+    let (result_value, result_error, divergence) = match run_result {
+        Ok(value) => (Some(value), None, None),
+        Err(RunError::Interp(err)) => {
+            let divergence = match &err.kind {
+                corvid_vm::InterpErrorKind::Runtime(
+                    corvid_runtime::RuntimeError::ReplayDivergence(d),
+                ) => Some(d.clone()),
+                _ => None,
+            };
+            (None, Some(err.to_string()), divergence)
+        }
+        Err(other) => (None, Some(other.to_string()), None),
     };
 
     Ok(ReplayOutcome {
         agent_name,
         result_value,
         result_error,
+        divergence,
         differential_report: runtime.replay_differential_report(),
         mutation_report: runtime.replay_mutation_report(),
     })

@@ -217,7 +217,11 @@ where
         Ok(run) => {
             let report = run.differential_report.unwrap_or_default();
             let divergences = differential_divergences(&report);
-            let verdict = if report.is_empty() {
+            let verdict = if run.error.is_some() {
+                // An errored run produced no comparable report —
+                // Passed here would be a false positive.
+                Verdict::Error
+            } else if report.is_empty() {
                 Verdict::Passed
             } else {
                 Verdict::Diverged
@@ -336,7 +340,15 @@ where
         Ok(run) => HarnessTraceResult::Outcome(TraceOutcome {
             path: trace_path.to_path_buf(),
             run_id: meta.run_id.clone(),
-            verdict: Verdict::Passed,
+            // A run that carried an error (e.g. the cross-tier
+            // replay refusal) verified NOTHING — reporting it as
+            // Passed made the harness lie "1 passed" while
+            // printing the error underneath. Errored, honestly.
+            verdict: if run.error.is_some() {
+                Verdict::Error
+            } else {
+                Verdict::Passed
+            },
             divergences: Vec::new(),
             flake_rank: None,
             promoted: false,
@@ -605,5 +617,89 @@ impl Promoter {
             _ => PromoteDecision::Reject,
         };
         Ok(decision)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_trace(dir: &Path) -> PathBuf {
+        let path = dir.join("trace.jsonl");
+        let contents = concat!(
+            r#"{"kind":"schema_header","version":2,"writer":"corvid-vm","ts_ms":0,"run_id":"r"}"#,
+            "\n",
+            r#"{"kind":"seed_read","ts_ms":1,"run_id":"r","purpose":"rollout_default_seed","value":1}"#,
+            "\n",
+            r#"{"kind":"run_started","ts_ms":2,"run_id":"r","agent":"main","args":[]}"#,
+            "\n",
+            r#"{"kind":"run_completed","ts_ms":3,"run_id":"r","ok":true,"result":"ok"}"#,
+            "\n",
+        );
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn run_ok(error: Option<String>) -> TraceHarnessRun {
+        TraceHarnessRun {
+            final_output: None,
+            ok: error.is_none(),
+            error,
+            emitted_trace_path: PathBuf::new(),
+            differential_report: None,
+        }
+    }
+
+    /// Pins the verdict taxonomy the regression harness lives on:
+    /// a run that carried an error verified NOTHING (Errored — the
+    /// pre-fix harness counted it as Passed while printing the
+    /// error underneath), a typed replay divergence is the drift
+    /// SIGNAL (Diverged, not a harness error), and a clean run
+    /// passes.
+    #[tokio::test]
+    async fn verdicts_classify_error_divergence_and_pass_honestly() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = minimal_trace(dir.path());
+
+        let errored = run_test_from_traces(
+            vec![trace.clone()],
+            TestFromTracesOptions::default(),
+            |_req| async { Ok(run_ok(Some("cross-tier replay is not supported".into()))) },
+        )
+        .await;
+        assert_eq!(errored.summary.errored, 1, "errored run must not count as passed");
+        assert_eq!(errored.summary.passed, 0);
+
+        let diverged = run_test_from_traces(
+            vec![trace.clone()],
+            TestFromTracesOptions::default(),
+            |_req| async {
+                Err(RuntimeError::ReplayDivergence(
+                    crate::ReplayDivergence {
+                        step: 6,
+                        expected: corvid_trace_schema::TraceEvent::RunCompleted {
+                            ts_ms: 3,
+                            run_id: "r".into(),
+                            ok: true,
+                            result: Some(serde_json::json!("ok")),
+                            error: None,
+                        },
+                        got_kind: "run_completed",
+                        got_description: "result changed".into(),
+                    },
+                ))
+            },
+        )
+        .await;
+        assert_eq!(diverged.summary.diverged, 1, "drift is Diverged, not Error");
+        assert_eq!(diverged.summary.errored, 0);
+
+        let passed = run_test_from_traces(
+            vec![trace],
+            TestFromTracesOptions::default(),
+            |_req| async { Ok(run_ok(None)) },
+        )
+        .await;
+        assert_eq!(passed.summary.passed, 1);
     }
 }

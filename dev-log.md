@@ -1856,6 +1856,22 @@ Continuing with 50b-behavioral-diff.
 
 ---
 
+## 2026-07-15 - 50b+50c closed: the behavioral-diff verdicts are honest now
+
+Both magnet features already had surfaces (Phase 21's `corvid test
+--from-traces`, 20h's `corvid eval --swap-model`) — the probe found
+the verdicts lying: errored replays counted as PASSED, and real
+drift classified as harness ERROR because the CLI adapter erased
+the typed divergence. Fixed at the boundary (ReplayOutcome carries
+the structured divergence), pinned the taxonomy, live-probed the
+full record → edit → diverged → revert → passed loop. Built a
+duplicate `corvid behavior diff` first and deleted it on
+discovering the existing surface — one canonical command.
+
+Next per the Phase 50 queue: 50d-token-streaming.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
