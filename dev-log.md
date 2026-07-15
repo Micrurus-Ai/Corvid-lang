@@ -2018,8 +2018,27 @@ soundness at the seams + visibility; the three genuinely-new ones
 (refinements, judged guards, taint) each compose with the moat
 rather than bolting onto it.
 
-The launch phase (Phase 51: demo doctrine, five moments, playground/
-website/benchmark track) is next and owed its own pre-phase chat.
+The launch phase becomes Phase 52 (see below).
+
+---
+
+## 2026-07-15 - Phase 51 pre-phase chat: the full-stack application surface
+
+CTO direction: ship the ENTIRE application-contract + identity
+program before launch — full scope, no narrowing, no shortcuts.
+Corvid becomes the backend compiler that describes its public
+interface precisely enough that any frontend consumes it safely,
+without becoming a frontend language. Two shared-schema contracts
+(OpenAPI 3.1 + corvid-ai.json), typed SDKs, the universal `corvid
+dev` console, and the full identity surface (all providers + OIDC,
+every OAuth safe-default mandatory, explicit account linking,
+per-user connector auth). Foundation is largely built (the auth
+runtime stack + emit_abi precedent); the gap is the source surface,
+the contract emitter, and the TS/console competency. 18 slices
+recorded (51a-51r), foundation-first. The launch phase is now
+Phase 52.
+
+Starting 51a — the application-contract core (the dependency root).
 
 ---
 
