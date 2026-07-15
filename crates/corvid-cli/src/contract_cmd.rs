@@ -400,3 +400,21 @@ pub fn run_openapi(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     }
     Ok(0)
 }
+
+/// Slice 51c — emit the AI-native metadata (`corvid-ai.json`).
+pub fn run_corvid_ai(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let meta = corvid_abi::corvid_ai::emit_corvid_ai(&contract);
+    let json = serde_json::to_string_pretty(&meta)?;
+    if let Some(path) = write_artifact(&json, out, "target/contracts/corvid-ai.json")? {
+        println!(
+            "wrote AI metadata: {} ({} agent(s), {} prompt(s))",
+            path.display(),
+            meta.agents.len(),
+            meta.prompts.len(),
+        );
+    }
+    Ok(0)
+}

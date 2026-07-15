@@ -2072,6 +2072,19 @@ Next per the Phase 51 queue: 51c-corvid-ai-metadata.
 
 ---
 
+## 2026-07-15 - 51c closed: the AI-native metadata artifact
+
+corvid-ai.json is where Corvid goes past OpenAPI: per agent/prompt,
+the typed streaming event protocol (started/chunk/tool_*/approval_
+required/completed/failed derived from capabilities), grounding
+shape, confidence routing, cost/latency, taint flag. Event tags
+match the runtime's SSE event field so the TS client (51l) gets a
+fully-typed event union. Two artifacts, one shared model.
+
+Next per the Phase 51 queue: 51d-ui-hints.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

@@ -10,6 +10,7 @@ mod emit;
 mod introspection_catalog;
 mod provenance_emit;
 pub mod app_contract;
+pub mod corvid_ai;
 pub mod openapi;
 mod schema;
 mod signing;

@@ -31,6 +31,18 @@ pub enum ContractCommand {
         #[arg(long, value_name = "FILE")]
         out: Option<String>,
     },
+    /// Emit the AI-native metadata (`corvid-ai.json`): the typed
+    /// streaming event protocol, grounding, confidence routing,
+    /// approvals, and cost/latency of every public agent and prompt —
+    /// the behavior OpenAPI cannot express. Writes
+    /// `target/contracts/corvid-ai.json` unless `--out -` (stdout).
+    Ai {
+        /// Source file. Defaults to `src/main.cor` in a project.
+        file: Option<std::path::PathBuf>,
+        /// Output path, or `-` for stdout.
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+    },
     /// Print the canonical guarantee table.
     ///
     /// Default output is human-readable: one row per guarantee with
