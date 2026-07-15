@@ -3396,3 +3396,48 @@ prompt summarize(text: String) -> String:
     assert_eq!(guard.criteria, "contains no PII");
     assert_eq!(guard.min, 0.9);
 }
+
+#[test]
+fn parses_field_ui_hints_multiline_and_inline() {
+    let src = "public type RefundRequest:
+    @ui(label: \"Payment ID\", placeholder: \"pay_123\")
+    payment_id: String
+    @ui(
+        label: \"Reason\",
+        multiline: true
+    )
+    explanation: String where len_between(20, 500)
+    plain: Int
+";
+    let file = parse_file_src(src);
+    let t = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    // Inline hints.
+    let payment = &t.fields[0];
+    assert_eq!(payment.ui.len(), 2);
+    assert_eq!(payment.ui[0].key.name, "label");
+    assert_eq!(
+        payment.ui[0].value,
+        corvid_ast::UiHintValue::Str("Payment ID".into())
+    );
+    // Multi-line hints, including a boolean, AND the refinement still
+    // parses on the same field (constraints + hints coexist).
+    let explanation = &t.fields[1];
+    assert_eq!(explanation.ui.len(), 2);
+    assert_eq!(
+        explanation.ui[1].value,
+        corvid_ast::UiHintValue::Bool(true)
+    );
+    assert_eq!(
+        explanation.refinement,
+        Some(corvid_ast::Refinement::LenBetween { min: 20, max: 500 })
+    );
+    // A field with no hints has an empty vec.
+    assert!(t.fields[2].ui.is_empty());
+}

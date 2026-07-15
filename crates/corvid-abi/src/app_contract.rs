@@ -75,6 +75,11 @@ pub struct ContractField {
     pub min_length: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u64>,
+    /// Optional `@ui(...)` presentation hints (slice 51d). A SEPARATE
+    /// channel from the constraints above: a frontend may ignore
+    /// these display suggestions but never the semantic constraints.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ui: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +239,15 @@ fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
 }
 
 fn contract_field(f: &corvid_ast::Field) -> ContractField {
+    let mut ui = std::collections::BTreeMap::new();
+    for hint in &f.ui {
+        let value = match &hint.value {
+            corvid_ast::UiHintValue::Str(s) => serde_json::Value::String(s.clone()),
+            corvid_ast::UiHintValue::Bool(b) => serde_json::Value::Bool(*b),
+            corvid_ast::UiHintValue::Int(n) => serde_json::Value::from(*n),
+        };
+        ui.insert(hint.key.name.clone(), value);
+    }
     let mut field = ContractField {
         name: f.name.name.clone(),
         type_name: type_ref_name(&f.ty),
@@ -241,6 +255,7 @@ fn contract_field(f: &corvid_ast::Field) -> ContractField {
         maximum: None,
         min_length: None,
         max_length: None,
+        ui,
     };
     match f.refinement {
         Some(Refinement::Between { min, max }) => {

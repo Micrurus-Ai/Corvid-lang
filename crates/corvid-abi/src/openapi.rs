@@ -256,6 +256,7 @@ mod tests {
                         maximum: None,
                         min_length: None,
                         max_length: None,
+                        ui: Default::default(),
                     },
                     ContractField {
                         name: "explanation".into(),
@@ -264,6 +265,7 @@ mod tests {
                         maximum: None,
                         min_length: Some(20),
                         max_length: Some(500),
+                        ui: Default::default(),
                     },
                 ],
                 variants: vec![],

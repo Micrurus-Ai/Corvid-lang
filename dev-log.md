@@ -2085,6 +2085,18 @@ Next per the Phase 51 queue: 51d-ui-hints.
 
 ---
 
+## 2026-07-15 - 51d closed: @ui hints, kept out of the constraint channel
+
+`@ui(label:, placeholder:, currency:, multiline:)` on struct fields
+carries optional display hints in their own contract channel,
+distinct from the refinement constraints — the design's load-bearing
+distinction (frontends may ignore hints, never constraints). AST +
+parser + contract, live-probed with a field carrying both.
+
+Next per the Phase 51 queue: 51e-typed-errors-contract.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

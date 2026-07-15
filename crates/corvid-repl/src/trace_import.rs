@@ -293,6 +293,7 @@ fn infer_typeref(
                     name: Ident::new(key.clone(), *sp),
                     ty: field_ty,
                     refinement: None,
+                    ui: Vec::new(),
                     span: *sp,
                 }
             }).collect();

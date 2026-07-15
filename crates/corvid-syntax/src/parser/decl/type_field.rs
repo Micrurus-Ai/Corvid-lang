@@ -117,6 +117,7 @@ impl<'a> Parser<'a> {
                     name: Ident::new(fname, fname_span),
                     ty,
                     refinement: None,
+                    ui: Vec::new(),
                     span: fstart.merge(fend),
                 });
                 if !matches!(self.peek(), TokKind::Comma) {
@@ -137,6 +138,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_field(&mut self) -> Result<Field, ParseError> {
         let start = self.peek_span();
+        let ui = self.parse_field_ui_hints()?;
         let (name, name_span) = self.expect_ident()?;
         self.expect(TokKind::Colon, "`:` between field name and type")?;
         let ty = self.parse_type_ref()?;
@@ -147,8 +149,71 @@ impl<'a> Parser<'a> {
             name: Ident::new(name, name_span),
             ty,
             refinement,
+            ui,
             span: start.merge(end),
         })
+    }
+
+    /// Optional `@ui(key: value, ...)` presentation hints preceding a
+    /// field (slice 51d). Multi-line is fine — the lexer suppresses
+    /// newlines inside the parens.
+    fn parse_field_ui_hints(&mut self) -> Result<Vec<corvid_ast::UiHint>, ParseError> {
+        if !matches!(self.peek(), TokKind::At) {
+            return Ok(Vec::new());
+        }
+        // Only `@ui(` is a field hint; leave other `@` for callers.
+        if !matches!(self.peek_ahead(1), TokKind::Ident(w) if w == "ui") {
+            return Ok(Vec::new());
+        }
+        self.bump(); // @
+        self.bump(); // ui
+        self.expect(TokKind::LParen, "`(` after `@ui`")?;
+        let mut hints = Vec::new();
+        while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
+            let start = self.peek_span();
+            let (key, key_span) = self.expect_ident()?;
+            self.expect(TokKind::Colon, "`:` after a `@ui` hint key")?;
+            let value = match self.peek().clone() {
+                TokKind::StringLit(s) => {
+                    self.bump();
+                    corvid_ast::UiHintValue::Str(s)
+                }
+                TokKind::KwTrue => {
+                    self.bump();
+                    corvid_ast::UiHintValue::Bool(true)
+                }
+                TokKind::KwFalse => {
+                    self.bump();
+                    corvid_ast::UiHintValue::Bool(false)
+                }
+                TokKind::Int(n) => {
+                    self.bump();
+                    corvid_ast::UiHintValue::Int(n)
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("{other:?}"),
+                            expected: "a string, boolean, or integer `@ui` hint value".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+            };
+            hints.push(corvid_ast::UiHint {
+                key: corvid_ast::Ident::new(key, key_span),
+                value,
+                span: start.merge(self.prev_span()),
+            });
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RParen, "`)` after `@ui` hints")?;
+        self.skip_newlines();
+        Ok(hints)
     }
 
     /// Optional field refinement (slice 50j): contextual `where`

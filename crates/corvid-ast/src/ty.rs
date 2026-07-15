@@ -162,11 +162,33 @@ pub enum OwnershipMode {
     Static,
 }
 
+/// One `@ui(key: value)` presentation hint (slice 51d).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiHint {
+    pub key: Ident,
+    pub value: UiHintValue,
+    pub span: Span,
+}
+
+/// The value of a `@ui` hint: a string, boolean, or integer literal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiHintValue {
+    Str(String),
+    Bool(bool),
+    Int(i64),
+}
+
 /// A field in a struct-like type declaration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Field {
     pub name: Ident,
     pub ty: TypeRef,
+    /// Optional `@ui(...)` presentation hints (slice 51d). Purely
+    /// advisory — a frontend MAY ignore them; it must never ignore
+    /// the field's semantic constraints (type, refinement). Kept in
+    /// a separate channel from constraints in the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ui: Vec<UiHint>,
     /// Value refinement (slice 50j): `where between(0, 150)` on Int
     /// fields, `where len_between(1, 80)` on String fields. Checked
     /// at prompt-output decode, where a violation's message feeds
