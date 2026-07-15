@@ -38,6 +38,26 @@ impl<'a> Parser<'a> {
 
     /// Float-or-int literal with its span (slice 46a) — used by
     /// the sampling modifiers so range errors land on the literal.
+    pub(super) fn expect_string_literal(
+        &mut self,
+        expected: &str,
+    ) -> Result<(String, Span), ParseError> {
+        let span = self.peek_span();
+        match self.peek().clone() {
+            TokKind::StringLit(value) => {
+                self.bump();
+                Ok((value, span))
+            }
+            other => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: describe_token(&other),
+                    expected: expected.into(),
+                },
+                span,
+            }),
+        }
+    }
+
     pub(super) fn expect_float_literal(
         &mut self,
         expected: &str,

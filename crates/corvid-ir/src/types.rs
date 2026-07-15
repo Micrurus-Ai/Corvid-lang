@@ -220,6 +220,8 @@ pub struct IrPrompt {
     pub top_p: Option<f64>,
     /// Structured-output auto-repair attempts (slice 46h).
     pub repair_attempts: Option<u64>,
+    /// Judged output guard (slice 50l): (criteria, min score).
+    pub judged_guard: Option<(String, f64)>,
     pub backpressure: Option<BackpressurePolicy>,
     pub escalate_to: Option<String>,
     /// Runtime calibration flag. When true, prompt calls record

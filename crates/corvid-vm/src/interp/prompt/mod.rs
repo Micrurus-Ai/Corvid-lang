@@ -531,3 +531,40 @@ pub(super) fn render_messages(
         .map(|segments| segments.flatten())
         .unwrap_or_default()
 }
+
+/// The LLM judge shared by `assert judged` (evals) and the runtime
+/// `with judged` output guard (slice 50l): score how well a value
+/// satisfies the criteria, 0.0..=1.0. The judge call flows through
+/// the normal LLM path — traced, cost-accounted, replay-substituted.
+pub(crate) async fn judge_score(
+    runtime: &corvid_runtime::Runtime,
+    criteria: &str,
+    rendered_value: &str,
+) -> Result<f64, String> {
+    let req = corvid_runtime::llm::LlmRequest {
+        prompt: "__corvid_eval_judge".to_string(),
+        model: String::new(),
+        rendered: format!(
+            "You are an evaluation judge. Score how well the VALUE satisfies the CRITERIA on a scale from 0.0 (not at all) to 1.0 (perfectly).\n\nCRITERIA: {criteria}\n\nVALUE:\n{rendered_value}\n\nRespond with the score."
+        ),
+        args: vec![
+            serde_json::json!(criteria),
+            serde_json::json!(rendered_value),
+        ],
+        output_schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": {"score": {"type": "number"}},
+            "required": ["score"],
+        })),
+        sampling: Default::default(),
+        messages: Vec::new(),
+    };
+    let resp = runtime
+        .call_llm(req)
+        .await
+        .map_err(|e| format!("judge call failed: {e}"))?;
+    resp.value["score"]
+        .as_f64()
+        .or_else(|| resp.value.as_f64())
+        .ok_or_else(|| format!("judge returned no numeric score: {}", resp.value))
+}

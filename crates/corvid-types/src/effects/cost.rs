@@ -874,6 +874,14 @@ fn effect_node_for_prompt(
             *value *= dispatch_calls;
         }
     }
+    // A judged output guard (slice 50l) runs an LLM judge after
+    // every attempt — one extra model call per attempt, worst-case
+    // approximated at the prompt's own per-call cost.
+    if prompt.stream.judged.is_some() {
+        for value in costs.values_mut() {
+            *value *= 2.0;
+        }
+    }
     CostTreeNode {
         name: prompt.name.name.clone(),
         kind: CostNodeKind::Prompt,

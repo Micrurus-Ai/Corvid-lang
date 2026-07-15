@@ -91,6 +91,34 @@ impl<'a> Parser<'a> {
                         self.expect_positive_int_literal("a positive repair attempt count")?;
                     settings.repair = Some(attempts);
                 }
+                "judged" => {
+                    let (criteria, _) = self.expect_string_literal("the judge criteria")?;
+                    match self.peek() {
+                        TokKind::Ident(w) if w == "min" => {
+                            self.bump();
+                        }
+                        other => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: describe_token(other),
+                                    expected: "`min <score>` after the judge criteria".into(),
+                                },
+                                span: self.peek_span(),
+                            });
+                        }
+                    }
+                    let (min, min_span) = self.expect_float_literal("a minimum judge score")?;
+                    if !(0.0..=1.0).contains(&min) {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: format!("min {min}"),
+                                expected: "a judge score between 0.0 and 1.0".into(),
+                            },
+                            span: min_span,
+                        });
+                    }
+                    settings.judged = Some(corvid_ast::JudgedGuard { criteria, min });
+                }
                 "backpressure" => {
                     settings.backpressure = Some(self.parse_backpressure_policy()?);
                 }
@@ -102,7 +130,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("identifier `{name}`"),
-                            expected: "`min_confidence`, `max_tokens`, `temperature`, `top_p`, `repair`, `backpressure`, or `escalate_to`".into(),
+                            expected: "`min_confidence`, `max_tokens`, `temperature`, `top_p`, `repair`, `judged`, `backpressure`, or `escalate_to`".into(),
                         },
                         span,
                     });

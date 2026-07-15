@@ -245,43 +245,17 @@ async fn eval_judged_assertion<'ir>(
         Value::String(s) => s.to_string(),
         other => crate::conv::value_to_json(other).to_string(),
     };
-    let req = corvid_runtime::llm::LlmRequest {
-        prompt: "__corvid_eval_judge".to_string(),
-        model: String::new(),
-        rendered: format!(
-            "You are an evaluation judge. Score how well the VALUE satisfies the CRITERIA on a scale from 0.0 (not at all) to 1.0 (perfectly).\n\nCRITERIA: {criteria}\n\nVALUE:\n{rendered_value}\n\nRespond with the score."
-        ),
-        args: vec![serde_json::json!(criteria), serde_json::json!(rendered_value)],
-        output_schema: Some(serde_json::json!({
-            "type": "object",
-            "properties": {"score": {"type": "number"}},
-            "required": ["score"],
-        })),
-        sampling: Default::default(),
-        messages: Vec::new(),
-    };
-    let resp = match runtime.call_llm(req).await {
-        Ok(r) => r,
+    let score = match crate::interp::prompt::judge_score(runtime, criteria, &rendered_value)
+        .await
+    {
+        Ok(score) => score,
         Err(e) => {
             return TestAssertionExecution {
                 label,
                 status: TestAssertionStatus::Error,
-                message: Some(format!("judge call failed: {e}")),
+                message: Some(e),
             }
         }
-    };
-    let score = resp.value["score"]
-        .as_f64()
-        .or_else(|| resp.value.as_f64());
-    let Some(score) = score else {
-        return TestAssertionExecution {
-            label,
-            status: TestAssertionStatus::Error,
-            message: Some(format!(
-                "judge returned no numeric score: {}",
-                resp.value
-            )),
-        };
     };
     if score >= min {
         TestAssertionExecution {

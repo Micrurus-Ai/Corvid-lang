@@ -3375,3 +3375,24 @@ agent a() -> String:
     let (_, errors) = parse_file(&tokens);
     assert!(!errors.is_empty(), "bare try must not parse");
 }
+
+#[test]
+fn parses_judged_guard_with_clause() {
+    let src = "\
+prompt summarize(text: String) -> String:
+    with judged \"contains no PII\" min 0.9
+    \"Summarize {text}\"
+";
+    let file = parse_file_src(src);
+    let p = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Prompt(p) => Some(p),
+            _ => None,
+        })
+        .unwrap();
+    let guard = p.stream.judged.as_ref().expect("judged guard parsed");
+    assert_eq!(guard.criteria, "contains no PII");
+    assert_eq!(guard.min, 0.9);
+}

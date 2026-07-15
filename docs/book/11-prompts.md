@@ -193,6 +193,28 @@ percentage of calls to a variant for A/B comparison, and
 models. Ensembles cost every member; adversarial costs three calls —
 the budget checker counts all of them.
 
+## Judged output guards
+
+`with judged` puts an LLM judge between every output and your
+program:
+
+```corvid-fragment
+prompt summarize(text: String) -> String uses llm_call:
+    with judged "contains no personally identifying information" min 0.9
+    "Summarize {text}"
+```
+
+Every decoded output is scored against the criteria (0.0–1.0); a
+score below `min` fails the call with an error naming the score,
+threshold, and criteria — never a silent pass, and judge transport
+failures error too. The judge call is an ordinary LLM call: traced,
+cost-accounted (the budget checker counts one extra call per
+attempt), and replay-substituted. Guards compose with `with repair
+N` — a below-threshold output re-asks with the judge's verdict, so
+guarded outputs heal until they pass. It is the same judge that
+powers `assert judged` in evals: one scoring contract from tests to
+production.
+
 ## Structured-output repair
 
 `with repair N` turns schema violations into bounded self-repair:

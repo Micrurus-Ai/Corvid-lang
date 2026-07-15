@@ -200,6 +200,47 @@ impl<'ir> Interpreter<'ir> {
         }
     }
 
+    /// Judged output guard (slice 50l): when the prompt declares
+    /// `with judged "criteria" min S`, an LLM judge scores every
+    /// decoded output; a below-threshold score fails the attempt as
+    /// a MARSHAL error — the same class `with repair N` retries on,
+    /// so guarded outputs heal until they pass the judge. Never a
+    /// silent pass: judge transport failures error too.
+    async fn apply_judged_guard(
+        &self,
+        prompt: &'ir IrPrompt,
+        callee_name: &str,
+        result: PromptCallResult,
+        span: Span,
+    ) -> Result<PromptCallResult, InterpError> {
+        let Some((criteria, min)) = &prompt.judged_guard else {
+            return Ok(result);
+        };
+        let rendered_value = match &result.value {
+            Value::String(s) => s.to_string(),
+            other => value_to_json(other).to_string(),
+        };
+        let score = super::judge_score(self.runtime, criteria, &rendered_value)
+            .await
+            .map_err(|e| {
+                InterpError::new(
+                    InterpErrorKind::Other(format!(
+                        "judged guard on `{callee_name}` could not run: {e}"
+                    )),
+                    span,
+                )
+            })?;
+        if score < *min {
+            return Err(InterpError::new(
+                InterpErrorKind::Marshal(format!(
+                    "prompt `{callee_name}`: judged guard failed — score {score:.2} is below min {min} for criteria {criteria:?}"
+                )),
+                span,
+            ));
+        }
+        Ok(result)
+    }
+
     pub(super) fn decode_prompt_response(
         &self,
         prompt: &'ir IrPrompt,
@@ -479,7 +520,7 @@ impl<'ir> Interpreter<'ir> {
             }
         }
 
-        let first = self.decode_prompt_response(
+        let first = match self.decode_prompt_response(
             prompt,
             callee_name,
             arg_values,
@@ -490,7 +531,12 @@ impl<'ir> Interpreter<'ir> {
             resp.confidence,
             resp.calibration.map(|c| c.actual_correct),
             span,
-        );
+        ) {
+            Ok(result) => self
+                .apply_judged_guard(prompt, callee_name, result, span)
+                .await,
+            Err(e) => Err(e),
+        };
 
         // Structured-output auto-repair (slice 46h): on a typed
         // decode failure, re-ask with the schema-violation feedback
@@ -530,7 +576,7 @@ impl<'ir> Interpreter<'ir> {
                 .call_llm_cacheable(retry_req, false)
                 .await
                 .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-            match self.decode_prompt_response(
+            match match self.decode_prompt_response(
                 prompt,
                 callee_name,
                 arg_values,
@@ -542,6 +588,11 @@ impl<'ir> Interpreter<'ir> {
                 retry_resp.calibration.map(|c| c.actual_correct),
                 span,
             ) {
+                Ok(result) => self
+                    .apply_judged_guard(prompt, callee_name, result, span)
+                    .await,
+                Err(e) => Err(e),
+            } {
                 Ok(mut result) => {
                     result.cost += wasted_cost;
                     return Ok(result);

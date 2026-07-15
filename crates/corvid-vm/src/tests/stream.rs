@@ -474,6 +474,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
         types: vec![],
         tools: vec![],
         prompts: vec![IrPrompt {
+            judged_guard: None,
             id: prompt_id,
             name: "generate".into(),
             params: vec![],
@@ -680,6 +681,7 @@ fn history_segments_splice_and_truncate() {
     // the current turn; truncation drops history oldest-first.
     use crate::interp::prompt_segments_for_test as segments_for_test;
     let prompt = IrPrompt {
+        judged_guard: None,
         id: DefId(900),
         name: "chat".into(),
         params: vec![
@@ -850,4 +852,60 @@ agent main() -> Int:
         2,
         "the breaker must stop dispatch after 2 consecutive failures"
     );
+}
+
+#[tokio::test]
+async fn judged_guard_rejects_below_threshold_output() {
+    let src = "\
+prompt summarize(text: String) -> String:
+    with judged \"contains no PII\" min 0.9
+    \"Summarize {text}\"
+
+agent main() -> String:
+    return summarize(\"secret data\")
+";
+    let ir = ir_of(src);
+    let rt = Runtime::builder()
+        .llm(Arc::new(
+            MockAdapter::new("mock-1")
+                .reply("summarize", json!("Bob lives at 12 Elm St."))
+                .reply("__corvid_eval_judge", json!({"score": 0.2})),
+        ))
+        .default_model("mock-1")
+        .build();
+    let err = run_agent(&ir, "main", vec![], &rt)
+        .await
+        .expect_err("a 0.2 score must fail a 0.9 guard");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("judged guard failed")
+            && message.contains("0.9")
+            && message.contains("contains no PII"),
+        "the failure must name score, threshold, and criteria: {message}"
+    );
+}
+
+#[tokio::test]
+async fn judged_guard_passes_above_threshold_output() {
+    let src = "\
+prompt summarize(text: String) -> String:
+    with judged \"contains no PII\" min 0.9
+    \"Summarize {text}\"
+
+agent main() -> String:
+    return summarize(\"public data\")
+";
+    let ir = ir_of(src);
+    let rt = Runtime::builder()
+        .llm(Arc::new(
+            MockAdapter::new("mock-1")
+                .reply("summarize", json!("A clean, anonymous summary."))
+                .reply("__corvid_eval_judge", json!({"score": 0.97})),
+        ))
+        .default_model("mock-1")
+        .build();
+    let value = run_agent(&ir, "main", vec![], &rt)
+        .await
+        .expect("a 0.97 score must pass a 0.9 guard");
+    assert_eq!(value, Value::String(Arc::from("A clean, anonymous summary.")));
 }

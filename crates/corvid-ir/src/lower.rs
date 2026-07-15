@@ -690,6 +690,11 @@ impl<'a> Lowerer<'a> {
             temperature: p.stream.temperature,
             top_p: p.stream.top_p,
             repair_attempts: p.stream.repair,
+            judged_guard: p
+                .stream
+                .judged
+                .as_ref()
+                .map(|g| (g.criteria.clone(), g.min)),
             max_tokens: p.stream.max_tokens,
             backpressure: p.stream.backpressure.clone(),
             escalate_to: p

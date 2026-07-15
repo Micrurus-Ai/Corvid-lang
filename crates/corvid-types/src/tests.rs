@@ -1513,6 +1513,26 @@ type Person:
 }
 
 #[test]
+fn judged_guard_doubles_worst_case_cost_for_budgets() {
+    // The judge is one extra LLM call per attempt: a $0.30 guarded
+    // prompt is a $0.60 worst case against a $0.50 budget.
+    let src = "\
+effect llm_call:
+    cost: $0.30
+
+prompt classify(q: String) -> String uses llm_call:
+    with judged \"is accurate\" min 0.8
+    \"Classify {q}\"
+
+@budget($0.50)
+agent judge(q: String) -> String:
+    return classify(q)
+";
+    let c = check(src);
+    assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_reversible_constraint_rejects_irreversible_tool() {
     // Bare @reversible must reject an irreversible call chain.
     let src = "\

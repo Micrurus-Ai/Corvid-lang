@@ -458,12 +458,25 @@ pub struct ToolDecl {
     pub span: Span,
 }
 
+/// A judged output guard (slice 50l) on a prompt declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JudgedGuard {
+    pub criteria: String,
+    pub min: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PromptStreamSettings {
     #[serde(default)]
     pub min_confidence: Option<f64>,
     #[serde(default)]
     pub max_tokens: Option<u64>,
+    /// Judged output guard (slice 50l): `with judged "criteria" min
+    /// 0.9` — an LLM judge scores every output against the criteria;
+    /// below-threshold outputs fail the call (and feed `with repair`
+    /// when present, so outputs heal until they pass the judge).
+    #[serde(default)]
+    pub judged: Option<JudgedGuard>,
     /// Sampling override (slice 46a): `with temperature 0.2`.
     /// Beats the model declaration's `temperature:` field.
     #[serde(default)]

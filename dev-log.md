@@ -1982,6 +1982,22 @@ Next per the Phase 50 queue: 50l-judged-output-guard.
 
 ---
 
+## 2026-07-15 - 50l closed: the judge guards production now
+
+`with judged "contains no PII" min 0.9` — the eval harness's judge,
+factored into one shared helper, now scores every output of a
+guarded prompt at runtime. Below-threshold outputs fail as
+Marshal-class errors, which means `with repair` heals them; the
+budget checker counts the extra judge call per attempt. Semantic
+output guards (moderation, PII, groundedness wording) with the moat
+attached — no framework middleware.
+
+Next per the Phase 50 queue: 50i-injection-taint-v1, the phase's
+final slice and its invention. Design doc at slice time per the
+standing decision.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
