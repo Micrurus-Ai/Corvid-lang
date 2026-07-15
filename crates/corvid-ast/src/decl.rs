@@ -440,6 +440,13 @@ pub struct ToolDecl {
     pub return_ty: TypeRef,
     #[serde(default)]
     pub return_ownership: Option<OwnershipAnnotation>,
+    /// Circuit breaker (slice 50k): `breaker N` — after N
+    /// CONSECUTIVE failures of this tool within a run, further
+    /// calls short-circuit to an error naming the breaker until a
+    /// success resets the count. Run-scoped by design: wall-clock
+    /// cooldowns would break replay determinism.
+    #[serde(default)]
+    pub breaker: Option<u64>,
     pub effect: Effect,
     /// Dimensional effect row: `uses transfer_money, audit_log`.
     #[serde(default)]

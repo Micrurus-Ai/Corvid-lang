@@ -524,6 +524,37 @@ impl<'a> Parser<'a> {
         let start = self.peek_span();
         self.bump(); // try
         let body = self.parse_expr()?;
+
+        // Optional per-attempt timeout (slice 50k): contextual
+        // `timeout <ms>` — `timeout` stays an ordinary identifier
+        // everywhere else.
+        let timeout_ms = if matches!(self.peek(), TokKind::Ident(w) if w == "timeout") {
+            self.bump();
+            Some(self.parse_u64_literal("timeout bound in ms")?)
+        } else {
+            None
+        };
+
+        // The retry clause is optional when a timeout is present:
+        // `try slow_call() timeout 2000` stands alone.
+        if !matches!(self.peek(), TokKind::KwOn) {
+            let Some(timeout_ms) = timeout_ms else {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "a bare `try` with neither clause".into(),
+                        expected: "`timeout <ms>`, `on error retry ...`, or both".into(),
+                    },
+                    span: self.peek_span(),
+                });
+            };
+            return Ok(Expr::TryRetry {
+                body: Box::new(body),
+                attempts: 0,
+                backoff: Backoff::Linear(0),
+                timeout_ms: Some(timeout_ms),
+                span: start.merge(self.prev_span()),
+            });
+        }
         self.expect(TokKind::KwOn, "`on` after `try` body")?;
         self.expect(TokKind::KwError, "`error` after `on` in retry expression")?;
         self.expect(TokKind::KwRetry, "`retry` in retry expression")?;
@@ -557,6 +588,7 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
             attempts,
             backoff,
+            timeout_ms,
             span: start.merge(self.prev_span()),
         })
     }

@@ -759,3 +759,95 @@ fn history_segments_splice_and_truncate() {
     assert_eq!(flat[1].content, "first turn");
     assert_eq!(flat[3].content, "\"now?\"");
 }
+
+#[tokio::test]
+async fn timeout_bounds_a_slow_tool_call() {
+    // `try slow() timeout 50` fails fast instead of hanging; the
+    // error names the bound.
+    let src = "\
+tool slow() -> String
+
+agent main() -> String:
+    return try slow() timeout 50
+";
+    let ir = ir_of(src);
+    let rt = Runtime::builder()
+        .tool("slow", |_| async move {
+            tokio::time::sleep(std::time::Duration::from_millis(5_000)).await;
+            Ok(json!("too late"))
+        })
+        .build();
+    let err = run_agent(&ir, "main", vec![], &rt)
+        .await
+        .expect_err("the slow tool must time out");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("timed out after 50ms"),
+        "the error must name the bound: {message}"
+    );
+}
+
+#[tokio::test]
+async fn timeout_with_retry_recovers_when_an_attempt_is_fast() {
+    // First attempt sleeps past the bound; the retry's attempt
+    // returns immediately — timeout + retry compose.
+    let src = "\
+tool flaky() -> String
+
+agent main() -> String:
+    return try flaky() timeout 100 on error retry 2 times backoff linear 1
+";
+    let ir = ir_of(src);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let calls_in = std::sync::Arc::clone(&calls);
+    let rt = Runtime::builder()
+        .tool("flaky", move |_| {
+            let n = calls_in.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                if n == 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(5_000)).await;
+                }
+                Ok(json!("recovered"))
+            }
+        })
+        .build();
+    let value = run_agent(&ir, "main", vec![], &rt)
+        .await
+        .expect("the second attempt must succeed");
+    assert_eq!(value, Value::String(Arc::from("recovered")));
+}
+
+#[tokio::test]
+async fn circuit_breaker_opens_after_consecutive_failures() {
+    // `breaker 2`: two consecutive failures open the breaker; the
+    // third call refuses BEFORE dispatch, naming the breaker.
+    let src = "tool wobbly() -> Result<String, String> breaker 2
+
+agent main() -> Int:
+    for i in [1, 2, 3]:
+        result = wobbly()
+    return 0
+";
+    let ir = ir_of(src);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let calls_in = std::sync::Arc::clone(&calls);
+    let rt = Runtime::builder()
+        .tool("wobbly", move |_| {
+            calls_in.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { Ok(json!({"tag": "err", "err": "provider down"})) }
+        })
+        .build();
+    let err = run_agent(&ir, "main", vec![], &rt)
+        .await
+        .expect_err("the breaker must refuse once open");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("circuit breaker open for `wobbly`"),
+        "the refusal must name the breaker: {message}"
+    );
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the breaker must stop dispatch after 2 consecutive failures"
+    );
+}

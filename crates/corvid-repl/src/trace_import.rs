@@ -128,6 +128,7 @@ pub fn build_import(mocks: &TraceMocks) -> TraceImportResult {
         }
 
         decls.push(Decl::Tool(ToolDecl {
+            breaker: None,
             name: Ident::new(name.clone(), sp),
             params,
             return_ty,

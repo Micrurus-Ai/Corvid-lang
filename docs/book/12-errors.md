@@ -54,6 +54,38 @@ agent robust(id: String) -> Result<String, String>:
     return value
 ```
 
+## Timeouts
+
+Any call can hang; `timeout` bounds it (interpreter tier):
+
+```corvid-fragment
+data = try slow_fetch(id) timeout 2000
+value = try fetch_remote(id) timeout 500 on error retry 3 times backoff linear 100
+```
+
+`timeout <ms>` bounds EACH attempt, and expiry counts as a retryable
+error — so timeout and retry compose: the second form gives every
+attempt half a second and retries up to three times. A timeout
+clause also lifts the Result/Option restriction: any expression can
+carry one, since any call can hang. Expiry without a retry clause
+propagates as a runtime error naming the bound
+(`timed out after 500ms`).
+
+## Circuit breakers
+
+A tool can declare a breaker threshold:
+
+```corvid-fragment
+tool flaky_api(q: String) -> Result<String, String> breaker 5 uses net_call
+```
+
+After 5 CONSECUTIVE failures (runtime errors or `Err` results), the
+breaker opens: further calls refuse immediately with an error naming
+the breaker, instead of hammering a downed dependency. A success
+resets the count. Breakers are run-scoped by design — a wall-clock
+cooldown would make replays nondeterministic, and the trace already
+records each refusal as an ordinary event.
+
 ## Branching on errors
 
 `match` destructures a Result — branching on WHICH error occurred

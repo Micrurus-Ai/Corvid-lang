@@ -1152,7 +1152,16 @@ pub(super) fn lower_expr(
             body,
             attempts,
             backoff,
-        } => match &body.ty {
+            timeout_ms,
+        } => {
+            if timeout_ms.is_some() {
+                return Err(CodegenError::not_supported(
+                    "`try ... timeout <ms>` is interpreter-only today — the native tier's                      synchronous call lowering has no cancellation point; run through                      `corvid run --target=interpreter` (the default for effectful programs)"
+                        .to_string(),
+                    expr.span,
+                ));
+            }
+            match &body.ty {
             Type::Result(_, _) => lower_try_retry_result(
                 builder,
                 expr,
@@ -1183,7 +1192,8 @@ pub(super) fn lower_expr(
                 "`try ... on error retry ...` in native code currently supports only native `Result<T, E>` and `Option<T>` bodies",
                 expr.span,
             )),
-        },
+        }
+        }
         IrExprKind::Replay { .. } => Err(CodegenError::not_supported(
             "`replay` expressions require runtime pattern-dispatch over a recorded trace; native tier lowering lands in a follow-up to 21-inv-E-runtime. Use the interpreter tier (`corvid run --tier interp`) until then.",
             expr.span,

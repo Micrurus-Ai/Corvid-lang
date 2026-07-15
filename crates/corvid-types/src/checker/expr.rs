@@ -194,7 +194,12 @@ impl<'a> Checker<'a> {
                 Type::List(Box::new(elem_ty))
             }
             Expr::TryPropagate { inner, span } => self.check_try_propagate(inner, *span),
-            Expr::TryRetry { body, span, .. } => self.check_try_retry(body, *span),
+            Expr::TryRetry {
+                body,
+                timeout_ms,
+                span,
+                ..
+            } => self.check_try_retry(body, timeout_ms.is_some(), *span),
             Expr::Replay {
                 trace,
                 arms,

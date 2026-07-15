@@ -127,6 +127,8 @@ pub struct IrField {
 /// A tool declaration (no body — externally implemented).
 #[derive(Debug, Clone)]
 pub struct IrTool {
+    /// Circuit breaker threshold (slice 50k).
+    pub breaker: Option<u64>,
     pub id: DefId,
     pub name: String,
     pub params: Vec<IrParam>,
@@ -889,6 +891,8 @@ pub enum IrExprKind {
         body: Box<IrExpr>,
         attempts: u64,
         backoff: Backoff,
+        /// Per-attempt wall-clock bound (slice 50k).
+        timeout_ms: Option<u64>,
     },
 
     /// `replay <trace>: when <pat> -> <body> else <body>` — the

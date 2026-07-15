@@ -542,6 +542,7 @@ impl<'a> Lowerer<'a> {
             &self.effect_registry,
         );
         IrTool {
+            breaker: t.breaker,
             id: self.remap_def_id(id),
             name: t.name.name.clone(),
             params: self.lower_params(&t.params),
@@ -1177,11 +1178,13 @@ impl<'a> Lowerer<'a> {
                 body,
                 attempts,
                 backoff,
+                timeout_ms,
                 ..
             } => IrExprKind::TryRetry {
                 body: Box::new(self.lower_expr(body)),
                 attempts: *attempts,
                 backoff: *backoff,
+                timeout_ms: *timeout_ms,
             },
             Expr::Replay {
                 trace,

@@ -210,10 +210,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn check_try_retry(&mut self, body: &Expr, span: Span) -> Type {
+    pub(super) fn check_try_retry(&mut self, body: &Expr, has_timeout: bool, span: Span) -> Type {
         let body_ty = self.check_expr(body);
         match body_ty {
             Type::Result(_, _) | Type::Option(_) | Type::Stream(_) | Type::Unknown => body_ty,
+            // A `timeout` clause legitimizes ANY body type (slice
+            // 50k): any call can hang, and expiry surfaces as a
+            // runtime error (retryable when a retry clause is also
+            // present). The Result/Option requirement only ever
+            // existed for value-level retry semantics.
+            other if has_timeout => other,
             other => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::InvalidRetryTarget {

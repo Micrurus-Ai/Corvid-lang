@@ -48,6 +48,7 @@ mod tests {
     fn can_build_refund_bot_ast() {
         // tool get_order(id: String) -> Order
         let get_order = ToolDecl {
+            breaker: None,
             name: id("get_order"),
             params: vec![Param {
                 name: id("id"),
@@ -65,6 +66,7 @@ mod tests {
 
         // tool issue_refund(id: String, amount: Float) -> Receipt dangerous
         let issue_refund = ToolDecl {
+            breaker: None,
             name: id("issue_refund"),
             params: vec![
                 Param {

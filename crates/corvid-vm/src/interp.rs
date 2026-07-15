@@ -91,6 +91,11 @@ struct Interpreter<'ir> {
     agents_by_id: HashMap<DefId, &'ir IrAgent>,
     fixtures_by_id: HashMap<DefId, &'ir IrFixture>,
     mock_tools: HashMap<DefId, &'ir IrMock>,
+    /// Circuit-breaker state (slice 50k): per-tool CONSECUTIVE
+    /// failure counts, shared across sub-interpreters within a run.
+    /// Run-scoped by design — wall-clock cooldowns would break
+    /// replay determinism.
+    breaker_state: Arc<std::sync::Mutex<HashMap<String, u64>>>,
     runtime: &'ir Runtime,
     local_names: HashMap<LocalId, String>,
     stepper: Option<StepController>,
@@ -120,6 +125,7 @@ impl<'ir> Interpreter<'ir> {
             agents_by_id,
             fixtures_by_id,
             mock_tools: HashMap::new(),
+            breaker_state: Arc::new(std::sync::Mutex::new(HashMap::new())),
             runtime,
             local_names: HashMap::new(),
             stepper: None,
@@ -859,15 +865,39 @@ impl<'ir> Interpreter<'ir> {
                 body,
                 attempts,
                 backoff: _,
+                timeout_ms,
             } => {
                 let total = (*attempts).max(1);
+                let timeout_ms = *timeout_ms;
                 let mut last_runtime_error: Option<InterpError> = None;
                 let mut last_result_err: Option<Value> = None;
                 let mut last_stream_start_err: Option<InterpError> = None;
                 let mut last_stream_start_chunk: Option<StreamChunk> = None;
                 let mut saw_option_retry = false;
                 for _ in 0..total {
-                    match self.eval_expr(body).await {
+                    // Per-attempt wall-clock bound (slice 50k):
+                    // expiry counts as a retryable error, so
+                    // `timeout` + `retry` compose naturally.
+                    let attempt = match timeout_ms {
+                        Some(ms) => {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_millis(ms),
+                                self.eval_expr(body),
+                            )
+                            .await
+                            {
+                                Ok(outcome) => outcome,
+                                Err(_elapsed) => Err(InterpError::new(
+                                    InterpErrorKind::Other(format!(
+                                        "timed out after {ms}ms"
+                                    )),
+                                    body.span,
+                                )),
+                            }
+                        }
+                        None => self.eval_expr(body).await,
+                    };
+                    match attempt {
                         Ok(ExprFlow::Value(Value::Stream(stream))) => {
                             match stream.next_chunk().await {
                                 Some(Ok(chunk)) if stream_start_is_retryable(&chunk.value) => {
@@ -1140,6 +1170,26 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
 
+                // Circuit breaker (slice 50k): after N consecutive
+                // failures this tool refuses fast with an error
+                // naming the breaker, until a success resets it.
+                if let Some(threshold) = tool.breaker {
+                    let open = self
+                        .breaker_state
+                        .lock()
+                        .expect("breaker state poisoned")
+                        .get(callee_name)
+                        .is_some_and(|count| *count >= threshold);
+                    if open {
+                        return Err(InterpError::new(
+                            InterpErrorKind::Other(format!(
+                                "circuit breaker open for `{callee_name}`: {threshold}                                  consecutive failures — refusing further calls this run                                  (a success resets the breaker)"
+                            )),
+                            span,
+                        ));
+                    }
+                }
+
                 let json_args: Vec<serde_json::Value> =
                     arg_values.iter().map(value_to_json).collect();
 
@@ -1326,11 +1376,30 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )?
                 } else {
-                    let result = self
+                    let outcome = self
                         .runtime
                         .call_tool(callee_name, json_args)
                         .await
-                        .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+                        .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span));
+                    // Circuit-breaker accounting (slice 50k): a
+                    // runtime error or an Err-envelope result counts
+                    // as one consecutive failure; anything else
+                    // resets the tool's count.
+                    if tool.breaker.is_some() {
+                        let failed = match &outcome {
+                            Err(_) => true,
+                            Ok(json) => json.get("tag").and_then(|t| t.as_str()) == Some("err"),
+                        };
+                        let mut state =
+                            self.breaker_state.lock().expect("breaker state poisoned");
+                        let count = state.entry(callee_name.to_string()).or_insert(0);
+                        if failed {
+                            *count += 1;
+                        } else {
+                            *count = 0;
+                        }
+                    }
+                    let result = outcome?;
                     json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
@@ -1405,6 +1474,7 @@ impl<'ir> Interpreter<'ir> {
 
                 let mut sub = Interpreter::new(self.ir, self.runtime);
                 sub.mock_tools = self.mock_tools.clone();
+                sub.breaker_state = Arc::clone(&self.breaker_state);
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {

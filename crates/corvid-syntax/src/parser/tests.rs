@@ -3338,3 +3338,40 @@ type Person:
     );
     assert_eq!(t.fields[2].refinement, None);
 }
+
+#[test]
+fn parses_timeout_only_and_combined_try_forms() {
+    // Timeout-only: `try slow() timeout 2000`.
+    let src = "\
+agent a() -> String:
+    x = try slow() timeout 2000
+    return x
+";
+    let file = parse_file_src(src);
+    let has_timeout_only = format!("{file:?}").contains("timeout_ms: Some(2000)")
+        && format!("{file:?}").contains("attempts: 0");
+    assert!(has_timeout_only, "timeout-only form must parse");
+
+    // Combined: timeout bounds each retry attempt.
+    let src2 = "\
+agent a() -> String:
+    x = try slow() timeout 500 on error retry 3 times backoff linear 100
+    return x
+";
+    let file2 = parse_file_src(src2);
+    let combined = format!("{file2:?}");
+    assert!(
+        combined.contains("timeout_ms: Some(500)") && combined.contains("attempts: 3"),
+        "combined form must carry both clauses: {combined}"
+    );
+
+    // Bare `try` with neither clause is a parse error.
+    let src3 = "\
+agent a() -> String:
+    x = try slow()
+    return x
+";
+    let tokens = lex(src3).expect("lex");
+    let (_, errors) = parse_file(&tokens);
+    assert!(!errors.is_empty(), "bare try must not parse");
+}

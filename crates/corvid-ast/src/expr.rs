@@ -106,11 +106,18 @@ pub enum Expr {
         span: Span,
     },
 
-    /// Retry wrapper: `try expr on error retry N times backoff linear 100`.
+    /// Resilience wrapper (slice 50k widened the grammar):
+    /// `try expr [timeout <ms>] [on error retry N times backoff linear 100]`
+    /// — at least one of the two clauses must be present. `timeout`
+    /// bounds EACH attempt; expiry counts as a retryable error.
     TryRetry {
         body: Box<Expr>,
+        /// 0 = no retry clause (timeout-only form).
         attempts: u64,
         backoff: Backoff,
+        /// Per-attempt wall-clock bound in milliseconds.
+        #[serde(default)]
+        timeout_ms: Option<u64>,
         span: Span,
     },
 

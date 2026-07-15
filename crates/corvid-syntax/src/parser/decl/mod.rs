@@ -141,6 +141,15 @@ impl<'a> Parser<'a> {
         let return_ty = self.parse_type_ref()?;
         let return_ownership = self.parse_optional_ownership_annotation()?;
 
+        // Circuit breaker (slice 50k): contextual `breaker N` —
+        // `breaker` stays an ordinary identifier everywhere else.
+        let breaker = if matches!(self.peek(), TokKind::Ident(w) if w == "breaker") {
+            self.bump();
+            Some(self.parse_u64_literal("breaker failure threshold")?)
+        } else {
+            None
+        };
+
         let effect = if matches!(self.peek(), TokKind::KwDangerous) {
             self.bump();
             Effect::Dangerous
@@ -157,6 +166,7 @@ impl<'a> Parser<'a> {
             params,
             return_ty,
             return_ownership,
+            breaker,
             effect,
             effect_row,
             visibility,

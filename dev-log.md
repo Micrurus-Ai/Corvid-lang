@@ -1968,6 +1968,20 @@ Next per the Phase 50 queue: 50k-call-timeouts-and-breakers.
 
 ---
 
+## 2026-07-15 - 50k closed: timeouts and breakers
+
+`try expr timeout 500 on error retry 3 times backoff linear 100`
+reads as one line and composes: the bound applies per attempt,
+expiry is retryable, and any expression can carry a timeout (any
+call can hang). Breakers ride tool declarations (`breaker N`),
+open after N consecutive failures, refuse before dispatch with a
+named error, and stay run-scoped so replay stays deterministic.
+Native tier refuses timeout loudly pending a cancellation story.
+
+Next per the Phase 50 queue: 50l-judged-output-guard.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

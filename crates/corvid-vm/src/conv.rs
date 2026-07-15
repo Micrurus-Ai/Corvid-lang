@@ -680,6 +680,9 @@ impl std::fmt::Display for ConvError {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
 
     #[test]
     fn refinement_violation_rejects_decode_with_actionable_message() {
@@ -720,9 +723,7 @@ impl std::fmt::Display for ConvError {
             "the violation must name field, refinement, and value (it feeds the repair loop): {message}"
         );
     }
-mod tests {
-    use super::*;
-    use serde_json::json;
+
 
     #[test]
     fn primitives_roundtrip() {
