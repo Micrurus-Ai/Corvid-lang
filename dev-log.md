@@ -1920,6 +1920,19 @@ Next per the Phase 50 queue: 50h-cost-attribution.
 
 ---
 
+## 2026-07-15 - 50h closed: observe already answers the FinOps question
+
+`corvid observe list` (per-run costs) + `corvid observe
+cost-optimise` (top-N cost centres with grounded typed suggestions)
+cover the attribution pain; the tenant axis waits for the
+multi-tenancy story. Disposition-only close.
+
+Next per the Phase 50 queue: 50j-value-refinements (the first slice
+in the phase that is genuinely NEW machinery, with 50k/50l behind
+it and 50i-injection-taint last).
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
