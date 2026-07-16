@@ -254,6 +254,12 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                     schedule.cron, schedule.zone, schedule.target.name
                 ),
             )),
+            Decl::Identity(identity) => items.add(symbol_item(
+                &identity.name.name,
+                CompletionItemKind::CLASS,
+                "identity",
+                format!("identity {}", identity.name.name),
+            )),
             Decl::Import(_) | Decl::Extend(_) => {}
         }
     }

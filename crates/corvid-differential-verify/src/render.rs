@@ -238,6 +238,54 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 out.push_str(&render_effect_row_names(&schedule.effect_row.effects));
             }
         }
+        Decl::Identity(identity) => render_identity(identity, indent, out),
+    }
+}
+
+fn render_identity(identity: &corvid_ast::IdentityDecl, indent: usize, out: &mut String) {
+    use corvid_ast::ProviderKind;
+    push_indent(indent, out);
+    out.push_str("identity ");
+    out.push_str(&identity.name.name);
+    out.push_str(":\n");
+    for provider in &identity.providers {
+        push_indent(indent + 1, out);
+        match &provider.kind {
+            ProviderKind::Oidc { discovery_url, alias } => {
+                out.push_str("provider oidc ");
+                out.push_str(&render_string_literal(discovery_url));
+                out.push_str(" as ");
+                out.push_str(&alias.name);
+            }
+            other => {
+                out.push_str("provider ");
+                out.push_str(&other.wire_name());
+            }
+        }
+        out.push('\n');
+    }
+    if let Some(session) = &identity.session {
+        push_indent(indent + 1, out);
+        out.push_str("session:\n");
+        if let Some(secs) = session.lifetime_secs {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("lifetime: {secs}s\n"));
+        }
+        push_indent(indent + 2, out);
+        out.push_str(&format!("same_site: {}\n", session.cookie.same_site.wire_name()));
+        push_indent(indent + 2, out);
+        out.push_str(&format!("secure: {}\n", session.cookie.secure));
+        push_indent(indent + 2, out);
+        out.push_str(&format!("http_only: {}\n", session.cookie.http_only));
+        push_indent(indent + 2, out);
+        out.push_str(&format!(
+            "rotate_on_privilege_change: {}\n",
+            session.rotate_on_privilege_change
+        ));
+        if session.cookie.insecure_opt_out {
+            push_indent(indent + 2, out);
+            out.push_str("insecure_opt_out: true\n");
+        }
     }
 }
 

@@ -13,7 +13,8 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, Block, Expr, HttpMethod, HttpRouteDecl, ServerDecl, Span, Stmt,
+    AgentAttribute, AgentDecl, Block, Expr, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind,
+    SameSite, ServerDecl, Span, Stmt,
 };
 use corvid_resolve::Binding;
 use std::collections::HashSet;
@@ -171,6 +172,101 @@ impl<'a> Checker<'a> {
                 ));
             }
             self.check_http_route(server, route);
+        }
+    }
+
+    /// Validate an `identity Name:` block (slice 51g). The safe
+    /// defaults are mandatory: at least one provider, well-formed OIDC
+    /// discovery URLs, and secure/http_only cookies with a non-`none`
+    /// SameSite plus session rotation. Disabling any of those is only
+    /// allowed with an explicit `insecure_opt_out: true`, and even then
+    /// a warning records the deliberately weakened posture.
+    pub(super) fn check_identity(&mut self, decl: &IdentityDecl) {
+        let name = decl.name.name.clone();
+        let invalid = |message: String, span: Span| {
+            TypeError::new(
+                TypeErrorKind::IdentityConfigInvalid {
+                    identity: name.clone(),
+                    message,
+                },
+                span,
+            )
+        };
+
+        if decl.providers.is_empty() {
+            self.errors.push(invalid(
+                "an identity block must declare at least one `provider`".into(),
+                decl.span,
+            ));
+        }
+
+        let mut seen = HashSet::new();
+        for provider in &decl.providers {
+            let wire = provider.kind.wire_name();
+            if !seen.insert(wire.clone()) {
+                self.errors.push(invalid(
+                    format!("duplicate provider `{wire}`"),
+                    provider.span,
+                ));
+            }
+            if let ProviderKind::Oidc { discovery_url, .. } = &provider.kind {
+                if !discovery_url.starts_with("https://") {
+                    self.errors.push(invalid(
+                        format!(
+                            "the OIDC discovery URL must be an absolute `https://` URL, got `{discovery_url}`"
+                        ),
+                        provider.span,
+                    ));
+                }
+            }
+        }
+
+        if let Some(session) = &decl.session {
+            let cookie = &session.cookie;
+            let mut unsafe_reasons = Vec::new();
+            if !cookie.secure {
+                unsafe_reasons.push("`secure` is off");
+            }
+            if !cookie.http_only {
+                unsafe_reasons.push("`http_only` is off");
+            }
+            if matches!(cookie.same_site, SameSite::None) {
+                unsafe_reasons.push("`same_site: none`");
+            }
+            if !session.rotate_on_privilege_change {
+                unsafe_reasons.push("`rotate_on_privilege_change` is off");
+            }
+
+            if !unsafe_reasons.is_empty() {
+                if cookie.insecure_opt_out {
+                    // Allowed, but never silent: record the weakened
+                    // posture so it shows up in review and audit.
+                    self.warnings.push(TypeWarning::new(
+                        TypeWarningKind::IdentityInsecureSession {
+                            identity: name.clone(),
+                            reasons: unsafe_reasons.join(", "),
+                        },
+                        session.span,
+                    ));
+                } else {
+                    self.errors.push(invalid(
+                        format!(
+                            "unsafe session configuration ({}) requires an explicit `insecure_opt_out: true`",
+                            unsafe_reasons.join(", ")
+                        ),
+                        session.span,
+                    ));
+                }
+            }
+
+            // `same_site: none` is only meaningful when the cookie is
+            // also `secure`; browsers reject the combination otherwise.
+            if matches!(cookie.same_site, SameSite::None) && !cookie.secure {
+                self.errors.push(invalid(
+                    "`same_site: none` requires `secure` cookies (browsers reject SameSite=None without Secure)".into(),
+                    session.span,
+                ));
+            }
         }
     }
 

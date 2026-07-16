@@ -635,6 +635,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Decl::Server(_) => {}
+                Decl::Identity(_) => {}
                 Decl::Extend(ext) => {
                     // Index method decls by their allocated DefIds
                     // (from the resolver's
@@ -744,6 +745,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Decl::Type(t) => self.check_field_refinements(t),
+                Decl::Identity(i) => self.check_identity(i),
                 Decl::Tool(_)
                 | Decl::Store(_)
                 | Decl::Import(_)

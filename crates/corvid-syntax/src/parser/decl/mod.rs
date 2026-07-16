@@ -23,6 +23,7 @@ use corvid_ast::{
 mod effect_dimension;
 mod eval_test;
 mod extend;
+mod identity;
 mod import;
 mod model;
 mod server_route;
@@ -76,6 +77,7 @@ impl<'a> Parser<'a> {
             TokKind::KwTool => self.parse_tool_decl(visibility).map(Decl::Tool),
             TokKind::KwPrompt => self.parse_prompt_decl(visibility).map(Decl::Prompt),
             TokKind::KwServer => self.parse_server_decl().map(Decl::Server),
+            TokKind::KwIdentity => self.parse_identity_decl().map(Decl::Identity),
             TokKind::KwSchedule => self.parse_schedule_decl().map(Decl::Schedule),
             TokKind::KwEval => self.parse_eval_decl().map(Decl::Eval),
             TokKind::KwTest => self.parse_test_decl().map(Decl::Test),

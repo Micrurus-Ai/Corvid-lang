@@ -40,6 +40,46 @@ pub struct ApplicationContract {
     pub agents: Vec<ContractCallable>,
     /// Public prompts exposed to callers.
     pub prompts: Vec<ContractCallable>,
+    /// Declared identity surfaces (slice 51g) — the providers a client
+    /// can sign in with and the login-session configuration. Empty
+    /// when the program declares no `identity` block.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identities: Vec<ContractIdentity>,
+}
+
+/// An `identity Name:` surface (slice 51g). The SDK and dev console
+/// render sign-in buttons from `providers`; `session` documents the
+/// login-session posture (all safe-defaults unless a loud opt-out
+/// weakened them). This is the login identity — deliberately separate
+/// from connector workspace tokens (slice 51j).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractIdentity {
+    pub name: String,
+    pub providers: Vec<ContractProvider>,
+    pub session: ContractSession,
+}
+
+/// One configured identity provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractProvider {
+    /// `google`/`github`/`microsoft`/`apple`/`discord`/`slack`/`oidc`.
+    pub kind: String,
+    /// The wire name used in the auth route path (the alias for OIDC).
+    pub name: String,
+    /// The OIDC discovery URL, for `kind == "oidc"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_url: Option<String>,
+}
+
+/// The login-session posture surfaced to clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractSession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifetime_secs: Option<u64>,
+    pub cookie_secure: bool,
+    pub cookie_http_only: bool,
+    pub same_site: String,
+    pub rotate_on_privilege_change: bool,
 }
 
 /// The current contract format version. Bumped only on a breaking
@@ -284,6 +324,15 @@ pub fn emit_application_contract(
         })
         .collect();
 
+    let identities = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Identity(i) => Some(contract_identity(i)),
+            _ => None,
+        })
+        .collect();
+
     ApplicationContract {
         contract_version: CONTRACT_VERSION,
         compiler_version: opts.compiler_version.to_string(),
@@ -293,6 +342,39 @@ pub fn emit_application_contract(
         routes,
         agents,
         prompts,
+        identities,
+    }
+}
+
+fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
+    use corvid_ast::ProviderKind;
+    let providers = decl
+        .providers
+        .iter()
+        .map(|p| match &p.kind {
+            ProviderKind::Oidc { discovery_url, alias } => ContractProvider {
+                kind: "oidc".into(),
+                name: alias.name.clone(),
+                discovery_url: Some(discovery_url.clone()),
+            },
+            other => ContractProvider {
+                kind: other.wire_name(),
+                name: other.wire_name(),
+                discovery_url: None,
+            },
+        })
+        .collect();
+    let session = decl.session.clone().unwrap_or_default();
+    ContractIdentity {
+        name: decl.name.name.clone(),
+        providers,
+        session: ContractSession {
+            lifetime_secs: session.lifetime_secs,
+            cookie_secure: session.cookie.secure,
+            cookie_http_only: session.cookie.http_only,
+            same_site: session.cookie.same_site.wire_name().to_string(),
+            rotate_on_privilege_change: session.rotate_on_privilege_change,
+        },
     }
 }
 
@@ -754,6 +836,79 @@ tool stream_answer(m: String) -> Stream<String>
         assert_eq!(pg.item_type, "String");
         assert!(pg.cursor_param.is_none());
         assert!(agent.capabilities.streaming);
+    }
+
+    #[test]
+    fn identity_surface_lists_providers_and_session_posture() {
+        let contract = contract_for(
+            "identity app_users:
+    provider google
+    provider github
+    provider oidc \"https://issuer.example.com/.well-known/openid-configuration\" as corp
+    session:
+        lifetime: 24h
+        same_site: strict
+",
+        );
+        assert_eq!(contract.identities.len(), 1);
+        let id = &contract.identities[0];
+        assert_eq!(id.name, "app_users");
+        assert_eq!(id.providers.len(), 3);
+        assert_eq!(id.providers[0].kind, "google");
+        let oidc = id.providers.iter().find(|p| p.kind == "oidc").unwrap();
+        assert_eq!(oidc.name, "corp");
+        assert!(oidc.discovery_url.as_deref().unwrap().starts_with("https://"));
+        // Safe defaults hold, and lifetime parsed from `24h`.
+        assert_eq!(id.session.lifetime_secs, Some(24 * 3600));
+        assert_eq!(id.session.same_site, "strict");
+        assert!(id.session.cookie_secure);
+        assert!(id.session.cookie_http_only);
+        assert!(id.session.rotate_on_privilege_change);
+    }
+
+    #[test]
+    fn identity_unsafe_cookie_without_opt_out_is_rejected() {
+        let src = "identity app_users:
+    provider google
+    session:
+        secure: false
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(
+            checked.errors.iter().any(|e| matches!(
+                e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { .. }
+            )),
+            "expected an IdentityConfigInvalid error, got {:?}",
+            checked.errors
+        );
+    }
+
+    #[test]
+    fn identity_unsafe_cookie_with_opt_out_warns_but_compiles() {
+        let src = "identity app_users:
+    provider google
+    session:
+        secure: false
+        insecure_opt_out: true
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(checked.errors.is_empty(), "unexpected errors: {:?}", checked.errors);
+        assert!(
+            checked.warnings.iter().any(|w| matches!(
+                w.kind,
+                corvid_types::TypeWarningKind::IdentityInsecureSession { .. }
+            )),
+            "expected an insecure-session warning"
+        );
     }
 
     #[test]

@@ -32,6 +32,8 @@ pub enum TokKind {
     KwZone,
     KwType,
     KwSession,
+    /// `identity <name>:` — the authenticated-user surface (slice 51g).
+    KwIdentity,
     KwMemory,
     KwImport,
     KwAs,
@@ -210,6 +212,7 @@ impl TokKind {
             "zone" => TokKind::KwZone,
             "type" => TokKind::KwType,
             "session" => TokKind::KwSession,
+            "identity" => TokKind::KwIdentity,
             "memory" => TokKind::KwMemory,
             "import" => TokKind::KwImport,
             "as" => TokKind::KwAs,

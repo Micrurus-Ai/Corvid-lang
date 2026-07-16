@@ -1293,6 +1293,12 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
                     names.insert(effect.name.name.clone());
                 }
             }
+            Decl::Identity(identity) => {
+                names.insert(identity.name.name.clone());
+                for provider in &identity.providers {
+                    names.insert(provider.kind.wire_name());
+                }
+            }
         }
     }
     names

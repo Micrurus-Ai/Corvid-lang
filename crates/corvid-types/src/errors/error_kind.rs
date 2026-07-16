@@ -128,6 +128,12 @@ pub enum TypeErrorKind {
         message: String,
     },
 
+    /// An `identity Name:` block with an invalid configuration
+    /// (slice 51g): no providers, a duplicate provider, an unsafe
+    /// cookie option without the explicit opt-out, or a malformed
+    /// OIDC discovery URL.
+    IdentityConfigInvalid { identity: String, message: String },
+
     /// A malformed `@retry(...)` / `@idempotency(...)` annotation
     /// (slice 45q): zero attempts, key naming no parameter, or a
     /// key parameter of non-derivable type.
@@ -547,6 +553,9 @@ impl TypeErrorKind {
             }
             Self::AnnotationInvalid { annotation, message } => {
                 format!("invalid `@{annotation}(...)`: {message}")
+            }
+            Self::IdentityConfigInvalid { identity, message } => {
+                format!("invalid `identity {identity}`: {message}")
             }
             Self::UnknownGenericHead { name, suggestion } => match suggestion {
                 Some(s) => format!("`{name}` is not a generic type — did you mean `{s}`?"),
@@ -1100,6 +1109,9 @@ impl TypeErrorKind {
             Self::ExternOwnershipMismatch { inferred, .. } => Some(format!(
                 "either change the annotation to `{inferred}` or change the implementation so the inferred ownership matches the declared contract"
             )),
+            Self::IdentityConfigInvalid { .. } => Some(
+                "declare at least one `provider`; keep cookies `secure`+`http_only` and `same_site: strict|lax`. An unsafe cookie choice requires an explicit `insecure_opt_out: true`.".into(),
+            ),
         }
     }
 }

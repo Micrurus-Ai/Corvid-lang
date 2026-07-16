@@ -181,6 +181,7 @@ mod tests {
             routes: vec![],
             agents,
             prompts: vec![],
+            identities: vec![],
         }
     }
 

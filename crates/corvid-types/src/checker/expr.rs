@@ -356,7 +356,8 @@ impl<'a> Checker<'a> {
             | DeclKind::Mock
             | DeclKind::Effect
             | DeclKind::Model
-            | DeclKind::Server => Type::Unknown,
+            | DeclKind::Server
+            | DeclKind::Identity => Type::Unknown,
         }
     }
 

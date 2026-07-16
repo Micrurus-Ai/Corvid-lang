@@ -302,6 +302,14 @@ fn top_level_definitions(file: &File, resolved: &Resolved) -> Vec<Definition> {
                 server.name.span,
                 SymbolKind::CLASS,
             ),
+            Decl::Identity(identity) => push_definition(
+                &mut out,
+                resolved,
+                &identity.name.name,
+                DeclKind::Identity,
+                identity.name.span,
+                SymbolKind::CLASS,
+            ),
             // Schedule decls reference an existing target by name; the
             // navigation surface defines that target via its own
             // Decl::Agent / Decl::Tool entry, so the schedule itself

@@ -135,7 +135,8 @@ agent hello(name: String) -> String:
     #[test]
     fn builtin_types_resolve() {
         // `String` is a built-in; the resolver should not report it undefined.
-        let src = "tool identity(x: String) -> String";
+        // (`echo`, not `identity` — `identity` is a keyword since slice 51g.)
+        let src = "tool echo(x: String) -> String";
         let r = resolve_src(src);
         assert!(r.errors.is_empty(), "errors: {:?}", r.errors);
     }

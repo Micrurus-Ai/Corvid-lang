@@ -244,6 +244,7 @@ impl Resolver {
                 Decl::Effect(e) => (e.name.name.clone(), DeclKind::Effect, e.span),
                 Decl::Model(m) => (m.name.name.clone(), DeclKind::Model, m.span),
                 Decl::Server(s) => (s.name.name.clone(), DeclKind::Server, s.span),
+                Decl::Identity(i) => (i.name.name.clone(), DeclKind::Identity, i.span),
                 Decl::Schedule(_) => {
                     continue;
                 }
@@ -413,6 +414,14 @@ impl Resolver {
                     // clauses that reference model names.
                 }
                 Decl::Server(s) => self.resolve_server_decl(s),
+                Decl::Identity(_) => {
+                    // An identity block carries only provider tags and
+                    // session literals — nothing that references a name
+                    // in scope, so resolution is the name registration
+                    // already done in `collect_decls`. The checker
+                    // (slice 51g) validates the providers and session
+                    // config; slice 51h wires the auth routes.
+                }
                 Decl::Schedule(schedule) => {
                     for arg in &schedule.args {
                         self.resolve_expr(arg);
@@ -1264,6 +1273,7 @@ fn decl_kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Effect => "effect",
         DeclKind::Model => "model",
         DeclKind::Server => "server",
+        DeclKind::Identity => "identity",
     }
 }
 

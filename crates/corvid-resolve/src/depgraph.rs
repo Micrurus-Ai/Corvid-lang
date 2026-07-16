@@ -84,6 +84,7 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Test(d) => Some(&d.name.name),
         Decl::Fixture(d) => Some(&d.name.name),
         Decl::Server(d) => Some(&d.name.name),
+        Decl::Identity(d) => Some(&d.name.name),
         Decl::Mock(_) | Decl::Extend(_) | Decl::Effect(_) | Decl::Model(_) | Decl::Schedule(_) => {
             None
         }
@@ -162,7 +163,9 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
                 collect_expr_deps(arg, resolved, deps);
             }
         }
-        Decl::Import(_) | Decl::Extend(_) | Decl::Effect(_) | Decl::Model(_) => {}
+        // An identity block references no other declaration — its
+        // provider tags and session literals are self-contained.
+        Decl::Import(_) | Decl::Extend(_) | Decl::Effect(_) | Decl::Model(_) | Decl::Identity(_) => {}
     }
 }
 

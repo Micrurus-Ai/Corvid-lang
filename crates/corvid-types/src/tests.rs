@@ -4095,9 +4095,10 @@ agent bounded(q: String) -> String:
 
 #[test]
 fn deterministic_agent_with_pure_body_compiles_clean() {
+    // `echo`, not `identity` — `identity` is a keyword since slice 51g.
     let src = "\
 @deterministic
-agent identity(q: String) -> String:
+agent echo(q: String) -> String:
     return q
 ";
     let c = check(src);

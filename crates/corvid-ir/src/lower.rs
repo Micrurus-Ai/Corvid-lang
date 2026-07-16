@@ -250,6 +250,14 @@ impl<'a> Lowerer<'a> {
                     });
                 }
                 Decl::Server(s) => servers.push(self.lower_server(s)),
+                Decl::Identity(_) => {
+                    // Slice 51g: an identity block is a static auth
+                    // configuration surface (providers + session). It
+                    // is read from the AST by the application contract
+                    // and the auth-runtime wiring, not lowered into
+                    // executable IR — the OAuth routes it implies land
+                    // in slice 51h.
+                }
                 Decl::Schedule(_) => {
                     // Phase 38D2: schedules are static audit/runtime
                     // manifests. They do not lower into executable IR

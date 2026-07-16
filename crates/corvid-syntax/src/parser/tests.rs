@@ -3512,3 +3512,42 @@ agent up(f: Upload<Image>) -> String:
     assert!(file.decls.iter().any(|d| matches!(d, Decl::Tool(_))));
     assert!(file.decls.iter().any(|d| matches!(d, Decl::Agent(_))));
 }
+
+#[test]
+fn parses_identity_block_with_providers_and_session() {
+    let src = "identity app_users:
+    provider google
+    provider github
+    provider oidc \"https://issuer.example.com\" as corp
+    session:
+        lifetime: 24h
+        same_site: strict
+        rotate_on_privilege_change: true
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(id.name.name, "app_users");
+    assert_eq!(id.providers.len(), 3);
+    assert!(matches!(id.providers[0].kind, corvid_ast::ProviderKind::Google));
+    match &id.providers[2].kind {
+        corvid_ast::ProviderKind::Oidc { discovery_url, alias } => {
+            assert_eq!(discovery_url, "https://issuer.example.com");
+            assert_eq!(alias.name, "corp");
+        }
+        other => panic!("expected oidc, got {other:?}"),
+    }
+    let session = id.session.as_ref().unwrap();
+    assert_eq!(session.lifetime_secs, Some(24 * 3600));
+    assert!(matches!(session.cookie.same_site, corvid_ast::SameSite::Strict));
+    assert!(session.rotate_on_privilege_change);
+    // Safe defaults hold without being spelled out.
+    assert!(session.cookie.secure);
+    assert!(session.cookie.http_only);
+}

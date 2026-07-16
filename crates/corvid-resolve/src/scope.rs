@@ -119,6 +119,8 @@ pub enum DeclKind {
     Model,
     /// `server Name:` backend route surface.
     Server,
+    /// `identity Name:` authenticated-user surface (slice 51g).
+    Identity,
 }
 
 /// An entry in the file-level symbol table.

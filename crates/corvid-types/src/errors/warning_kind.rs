@@ -35,6 +35,10 @@ pub enum TypeWarningKind {
         construct: String,
         hint: String,
     },
+    /// An `identity` block explicitly weakened a session safe-default
+    /// via `insecure_opt_out: true` (slice 51g). Allowed, but never
+    /// silent: the weakened posture surfaces in review and audit.
+    IdentityInsecureSession { identity: String, reasons: String },
 }
 
 impl TypeWarningKind {
@@ -74,6 +78,11 @@ impl TypeWarningKind {
                      `corvid run` executes `main` once and does not start the cron"
                 )
             }
+            Self::IdentityInsecureSession { identity, reasons } => {
+                format!(
+                    "W0300: `identity {identity}` weakens a session safe-default ({reasons}) via `insecure_opt_out: true` — allowed, but ship this only for local development"
+                )
+            }
         }
     }
 
@@ -96,6 +105,9 @@ impl TypeWarningKind {
             }
             Self::ScheduleNotExecutable { .. } => Some(
                 "start the governed-cron runner with `corvid schedule run --source <file>` — scheduled agents inherit tracing, retries, dead-letters, and replay from the durable-jobs queue".into(),
+            ),
+            Self::IdentityInsecureSession { .. } => Some(
+                "remove `insecure_opt_out` (and the weakened options) before production — restore `secure`, `http_only`, a non-`none` SameSite, and session rotation".into(),
             ),
         }
     }

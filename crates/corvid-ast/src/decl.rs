@@ -44,6 +44,8 @@ pub enum Decl {
     Server(ServerDecl),
     /// `schedule "cron" zone "Area/City" -> job(args)` durable cron trigger.
     Schedule(ScheduleDecl),
+    /// `identity Name:` authenticated-user surface (slice 51g).
+    Identity(IdentityDecl),
 }
 
 impl Decl {
@@ -65,6 +67,157 @@ impl Decl {
             Decl::Model(d) => d.span,
             Decl::Server(d) => d.span,
             Decl::Schedule(d) => d.span,
+            Decl::Identity(d) => d.span,
+        }
+    }
+}
+
+/// The authenticated-user surface (slice 51g):
+///
+/// ```text
+/// identity app_users:
+///     provider google
+///     provider github
+///     provider oidc "https://issuer.example.com" as corp_sso
+///     session:
+///         lifetime: 24h
+///         same_site: strict
+///         rotate_on_privilege_change: true
+/// ```
+///
+/// The declaration names the identity providers a program accepts and
+/// configures the login session. Every OAuth safe-default is the
+/// default and mandatory: Authorization Code + PKCE, signed/expiring
+/// state, OIDC nonce, JWKS verification, secure http-only cookies,
+/// rotation on privilege change. Making a cookie insecure or
+/// `same_site: none` requires a loud explicit opt-out; the checker
+/// rejects it otherwise. The login session (identity) is deliberately
+/// separate from connector workspace tokens (slice 51j).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentityDecl {
+    pub name: Ident,
+    pub providers: Vec<IdentityProvider>,
+    #[serde(default)]
+    pub session: Option<SessionConfig>,
+    pub span: Span,
+}
+
+/// One configured identity provider.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentityProvider {
+    pub kind: ProviderKind,
+    pub span: Span,
+}
+
+/// The provider kind. The named set is fixed (and complete — no
+/// narrowing); `Oidc` covers every other standards-compliant issuer
+/// via its discovery URL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProviderKind {
+    Google,
+    Github,
+    Microsoft,
+    Apple,
+    Discord,
+    Slack,
+    /// `provider oidc "<discovery-url>" as <alias>` — a generic OIDC
+    /// issuer identified by its discovery document and a local alias.
+    Oidc { discovery_url: String, alias: Ident },
+}
+
+impl ProviderKind {
+    /// The stable wire name a route path and the runtime use.
+    pub fn wire_name(&self) -> String {
+        match self {
+            ProviderKind::Google => "google".into(),
+            ProviderKind::Github => "github".into(),
+            ProviderKind::Microsoft => "microsoft".into(),
+            ProviderKind::Apple => "apple".into(),
+            ProviderKind::Discord => "discord".into(),
+            ProviderKind::Slack => "slack".into(),
+            ProviderKind::Oidc { alias, .. } => alias.name.clone(),
+        }
+    }
+
+    /// The named provider for a bare `provider <name>`, or `None` when
+    /// the name is not a known built-in (the parser then expects the
+    /// `oidc "url" as alias` form).
+    pub fn from_builtin_name(name: &str) -> Option<ProviderKind> {
+        Some(match name {
+            "google" => ProviderKind::Google,
+            "github" => ProviderKind::Github,
+            "microsoft" => ProviderKind::Microsoft,
+            "apple" => ProviderKind::Apple,
+            "discord" => ProviderKind::Discord,
+            "slack" => ProviderKind::Slack,
+            _ => return None,
+        })
+    }
+}
+
+/// Login-session configuration for an identity block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// Session lifetime in seconds. `None` = the runtime default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifetime_secs: Option<u64>,
+    pub cookie: CookieConfig,
+    /// Rotate the session on any privilege change. Defaults to `true`
+    /// and turning it off requires the loud opt-out.
+    pub rotate_on_privilege_change: bool,
+    pub span: Span,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            lifetime_secs: None,
+            cookie: CookieConfig::default(),
+            rotate_on_privilege_change: true,
+            span: Span::new(0, 0),
+        }
+    }
+}
+
+/// Session-cookie flags. The safe defaults (`secure`, `http_only`,
+/// `same_site: lax`) hold unless a loud opt-out flips them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CookieConfig {
+    pub secure: bool,
+    pub http_only: bool,
+    pub same_site: SameSite,
+    /// The user set an UNSAFE cookie option and acknowledged it with
+    /// the explicit `insecure_opt_out: true` key. Without this, the
+    /// checker rejects any unsafe cookie choice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub insecure_opt_out: bool,
+}
+
+impl Default for CookieConfig {
+    fn default() -> Self {
+        Self {
+            secure: true,
+            http_only: true,
+            same_site: SameSite::Lax,
+            insecure_opt_out: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SameSite {
+    Strict,
+    Lax,
+    None,
+}
+
+impl SameSite {
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            SameSite::Strict => "strict",
+            SameSite::Lax => "lax",
+            SameSite::None => "none",
         }
     }
 }

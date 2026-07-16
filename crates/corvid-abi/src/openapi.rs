@@ -409,6 +409,7 @@ mod tests {
                 capabilities: Capabilities::default(),
             }],
             prompts: vec![],
+            identities: vec![],
         }
     }
 

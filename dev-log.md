@@ -2208,6 +2208,66 @@ security safe-defaults block, all mandatory.
 
 ---
 
+## 2026-07-16 - 51g closed: the identity declaration, safe by construction
+
+Identity is now part of the moat, so the invention budget applies:
+the goal is not "an OAuth config block" but "a declaration where the
+insecure configuration is the one you have to fight the compiler for."
+
+```
+identity app_users:
+    provider google
+    provider github
+    provider oidc "https://issuer.example.com/.well-known/openid-configuration" as corp_sso
+    session:
+        lifetime: 24h
+        same_site: strict
+        rotate_on_privilege_change: true
+```
+
+The named provider set is the full six (google, github, microsoft,
+apple, discord, slack) with no narrowing; `provider oidc "<url>" as
+<alias>` covers every other standards-compliant issuer. The `session`
+sub-block configures lifetime (`s`/`m`/`h`/`d`), SameSite, and the
+cookie flags.
+
+The load-bearing decision: EVERY safe default is the default AND
+mandatory. `secure` + `http_only` cookies, a non-`none` SameSite, and
+session rotation on privilege change all hold unless you spell them
+off — and spelling any of them off is a hard `IdentityConfigInvalid`
+error unless the block also carries `insecure_opt_out: true`. With the
+opt-out it compiles, but never silently: it emits `W0300` naming
+exactly which default you weakened. There is no way to end up with an
+insecure session by omission or typo; you can only get there
+deliberately and loudly. OIDC discovery URLs must be `https://`.
+
+The login identity is deliberately separate from connector workspace
+tokens (that separation lands fully in 51j); this slice establishes
+the identity surface and its safe posture.
+
+Scope discipline: 51g is the declaration + validation + contract
+surface. It parses (`KwIdentity` — a new reserved word, so a couple
+of test fixtures that used `identity` as an agent/tool name were
+renamed to `echo`), resolves (`DeclKind::Identity`), checks, and flows
+into the application contract for the SDK / dev console / `corvid
+serve` to consume. The `Decl` enum gained a variant, which cascaded
+through the usual exhaustive matches (IR lowering, both LSP passes,
+the differential-verify renderer + name collector, driver metadata,
+two checker DeclKind matches). The auto-exposed `/auth/{provider}/*`
+routes, the typed `Actor`, and the PKCE/state/nonce/JWKS flows are
+slice 51h — the runtime already implements the OAuth storage
+safe-defaults (PKCE, hashed single-use state, nonce, expiry) in
+`corvid-runtime/src/auth`, so 51h is wiring, not new crypto.
+
+Live-probed the contract surface plus both enforcement paths. Tests:
+parser (providers + OIDC + session + implicit safe flags), contract
+emitter (provider list + session posture), checker (reject unsafe
+without opt-out, warn with it).
+
+Next per the Phase 51 queue: 51h-auth-routes-and-actors.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
