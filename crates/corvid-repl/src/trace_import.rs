@@ -294,6 +294,7 @@ fn infer_typeref(
                     ty: field_ty,
                     refinement: None,
                     ui: Vec::new(),
+                    upload: None,
                     span: *sp,
                 }
             }).collect();

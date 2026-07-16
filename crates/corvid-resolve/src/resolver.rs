@@ -740,6 +740,14 @@ impl Resolver {
             TypeRef::Qualified { alias, .. } => self.resolve_ident(alias),
             TypeRef::Generic { name, args, .. } => {
                 self.resolve_ident(name);
+                // `Upload<Format>` (slice 51f): the argument is a
+                // free-form format tag (`Pdf`, `Image`, `Xml`, ...),
+                // not a type reference — skip resolving it so any tag
+                // is accepted (the contract maps well-known tags to
+                // MIME and falls back to octet-stream otherwise).
+                if name.name == "Upload" {
+                    return;
+                }
                 for arg in args {
                     self.resolve_type_ref(arg);
                 }

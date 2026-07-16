@@ -3473,3 +3473,42 @@ fn parses_variant_status_and_ui_attributes() {
     assert!(t.variants[2].status.is_none());
     assert!(t.variants[2].ui.is_empty());
 }
+
+#[test]
+fn parses_upload_field_attributes() {
+    let src = "public type DocSubmission:
+    @upload(max_mb: 10, retention_days: 7, mime: \"application/pdf\")
+    file: Upload<Pdf>
+    note: String
+";
+    let file = parse_file_src(src);
+    let t = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    let file_field = t.fields.iter().find(|f| f.name.name == "file").unwrap();
+    let spec = file_field.upload.as_ref().expect("upload spec parsed");
+    assert_eq!(spec.max_bytes, Some(10 * 1024 * 1024));
+    assert_eq!(spec.retention_days, Some(7));
+    assert_eq!(spec.mime, vec!["application/pdf".to_string()]);
+    // A field without `@upload` has none.
+    let note = t.fields.iter().find(|f| f.name.name == "note").unwrap();
+    assert!(note.upload.is_none());
+}
+
+#[test]
+fn parses_page_and_upload_generic_types() {
+    // Both new generic heads parse as arity-1 generics.
+    let src = "tool fetch(cursor: String) -> Page<Item>
+
+agent up(f: Upload<Image>) -> String:
+    return \"ok\"
+";
+    let file = parse_file_src(src);
+    assert!(file.decls.iter().any(|d| matches!(d, Decl::Tool(_))));
+    assert!(file.decls.iter().any(|d| matches!(d, Decl::Agent(_))));
+}

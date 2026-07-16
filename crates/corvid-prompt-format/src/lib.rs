@@ -182,6 +182,17 @@ fn schema_for_inner(
         // shouldn't appear as a prompt return type; emit a
         // permissive schema and let the typechecker enforce.
         Type::JsonBuilder => json!({}),
+        // Slice 51f — `Upload<Format>` and `Page<Item>` are
+        // HTTP-boundary types, not prompt return types: an upload is
+        // received bytes and a page is assembled by the server, so
+        // neither is something a model produces. Emit permissive
+        // schemas (an upload as a string handle, a page as an array of
+        // its element schema); the typechecker is the real backstop.
+        Type::Upload(_) => json!({ "type": "string" }),
+        Type::Page(inner) => json!({
+            "type": "array",
+            "items": schema_for_inner(inner, types_by_id, visiting),
+        }),
         Type::Unknown => json!({}),
     }
 }
@@ -305,14 +316,12 @@ mod tests {
                     name: "should_refund".into(),
                     ty: Type::Bool,
                     refinement: None,
-                    ui: Vec::new(),
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "reason".into(),
                     ty: Type::String,
                     refinement: None,
-                    ui: Vec::new(),
                     span: Span::new(0, 0),
                 },
             ],
@@ -349,7 +358,6 @@ mod tests {
                 name: "id".into(),
                 ty: Type::String,
                 refinement: None,
-                ui: Vec::new(),
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -362,7 +370,6 @@ mod tests {
                 name: "order".into(),
                 ty: Type::Struct(inner_id),
                 refinement: None,
-                ui: Vec::new(),
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -388,14 +395,12 @@ mod tests {
                     name: "title".into(),
                     ty: Type::String,
                     refinement: None,
-                    ui: Vec::new(),
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "ready".into(),
                     ty: Type::Bool,
                     refinement: None,
-                    ui: Vec::new(),
                     span: Span::new(0, 0),
                 },
             ],

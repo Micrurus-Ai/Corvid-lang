@@ -79,6 +79,25 @@ pub enum Type {
     /// Compiler-known `ResumeToken<T>` for resuming interrupted streams.
     ResumeToken(Box<Type>),
 
+    /// Compiler-known `Upload<Format>` (slice 51f) — a file upload
+    /// crossing the HTTP boundary, where `Format` is a tag type
+    /// (`Pdf`, `Image`, `Csv`, ...) that supplies default accepted
+    /// MIME. An HTTP-boundary type: the application contract and its
+    /// OpenAPI projection describe it (accepted MIME / max size /
+    /// retention from an `@upload(...)` field attribute), and
+    /// `corvid serve` receives it as multipart. Native codegen
+    /// backends refuse to lower it, the same interpreter/serve-tier
+    /// stance `DbHandle` takes.
+    Upload(Box<Type>),
+
+    /// Compiler-known `Page<Item>` (slice 51f) — one cursor-paginated
+    /// page of `Item`s. Structurally `{ items: List<Item>,
+    /// next_cursor: Option<String>, has_more: Bool }`; a route or
+    /// agent returning `Page<Item>` advertises cursor pagination in
+    /// the contract and accepts a `cursor` query parameter. Another
+    /// HTTP-boundary type — codegen backends refuse to lower it.
+    Page(Box<Type>),
+
     /// Compiler-known `TraceId` — an opaque handle to a recorded
     /// JSONL trace, used as the subject of a `replay <expr>:`
     /// expression. String literals coerce to `TraceId` inside a
@@ -198,6 +217,8 @@ impl Type {
             Type::Tainted(inner) => format!("Tainted<{}>", inner.display_name()),
             Type::Partial(inner) => format!("Partial<{}>", inner.display_name()),
             Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
+            Type::Upload(inner) => format!("Upload<{}>", inner.display_name()),
+            Type::Page(inner) => format!("Page<{}>", inner.display_name()),
             Type::TraceId => "TraceId".into(),
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),

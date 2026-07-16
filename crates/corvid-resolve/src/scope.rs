@@ -84,6 +84,14 @@ pub enum BuiltIn {
     /// invalidating the builder (so set+finish cycles can
     /// continue).
     JsonBuilder,
+    /// Slice 51f — `Upload<Format>`, an HTTP-boundary file-upload
+    /// type. The `Format` argument is a free-form tag (`Pdf`, `Image`,
+    /// ...), not a type to resolve; the resolver skips resolving it and
+    /// the application contract maps well-known tags to default MIME.
+    Upload,
+    /// Slice 51f — `Page<Item>`, the cursor-pagination envelope. Its
+    /// `Item` argument is an ordinary type and resolves normally.
+    Page,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -174,6 +182,9 @@ impl SymbolTable {
         self.builtins.insert("JsonValue".into(), BuiltIn::JsonValue);
         self.builtins
             .insert("JsonBuilder".into(), BuiltIn::JsonBuilder);
+        // Slice 51f — HTTP-boundary upload / pagination heads.
+        self.builtins.insert("Upload".into(), BuiltIn::Upload);
+        self.builtins.insert("Page".into(), BuiltIn::Page);
     }
 
     /// Insert a top-level declaration.

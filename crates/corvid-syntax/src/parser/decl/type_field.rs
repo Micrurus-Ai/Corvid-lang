@@ -228,6 +228,7 @@ impl<'a> Parser<'a> {
                     ty,
                     refinement: None,
                     ui: Vec::new(),
+                    upload: None,
                     span: fstart.merge(fend),
                 });
                 if !matches!(self.peek(), TokKind::Comma) {
@@ -250,7 +251,21 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_field(&mut self) -> Result<Field, ParseError> {
         let start = self.peek_span();
-        let ui = self.parse_field_ui_hints()?;
+        // Leading field attributes (`@ui(...)` display hints, slice
+        // 51d; `@upload(...)` constraints, slice 51f) in any order.
+        let mut ui = Vec::new();
+        let mut upload = None;
+        loop {
+            match self.peek_ahead(1) {
+                TokKind::Ident(w) if w == "ui" && matches!(self.peek(), TokKind::At) => {
+                    ui.extend(self.parse_field_ui_hints()?);
+                }
+                TokKind::Ident(w) if w == "upload" && matches!(self.peek(), TokKind::At) => {
+                    upload = Some(self.parse_field_upload()?);
+                }
+                _ => break,
+            }
+        }
         let (name, name_span) = self.expect_ident()?;
         self.expect(TokKind::Colon, "`:` between field name and type")?;
         let ty = self.parse_type_ref()?;
@@ -262,8 +277,81 @@ impl<'a> Parser<'a> {
             ty,
             refinement,
             ui,
+            upload,
             span: start.merge(end),
         })
+    }
+
+    /// `@upload(max_mb: N, retention_days: N, mime: "a/b, c/d")` — the
+    /// semantic constraints on an `Upload<Format>` field (slice 51f).
+    /// Keys are optional and order-free; `mime` accepts a
+    /// comma-separated list.
+    fn parse_field_upload(&mut self) -> Result<corvid_ast::UploadSpec, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // @
+        self.bump(); // upload
+        self.expect(TokKind::LParen, "`(` after `@upload`")?;
+        let mut spec = corvid_ast::UploadSpec {
+            max_bytes: None,
+            retention_days: None,
+            mime: Vec::new(),
+            span: start,
+        };
+        while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
+            let (key, key_span) = self.expect_ident()?;
+            self.expect(TokKind::Colon, "`:` after an `@upload` key")?;
+            match key.as_str() {
+                "max_mb" => {
+                    let (mb, _) = self.expect_positive_int_literal("a megabyte size")?;
+                    spec.max_bytes = Some(mb.saturating_mul(1024 * 1024));
+                }
+                "max_bytes" => {
+                    let (bytes, _) = self.expect_positive_int_literal("a byte size")?;
+                    spec.max_bytes = Some(bytes);
+                }
+                "retention_days" => {
+                    let (days, _) = self.expect_positive_int_literal("a retention in days")?;
+                    spec.retention_days = Some(days);
+                }
+                "mime" => match self.peek().clone() {
+                    TokKind::StringLit(s) => {
+                        self.bump();
+                        spec.mime.extend(
+                            s.split(',')
+                                .map(|m| m.trim().to_string())
+                                .filter(|m| !m.is_empty()),
+                        );
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: "a non-string `mime` value".into(),
+                                expected: "a MIME string literal for `mime`".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                },
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`@upload` key `{key}`"),
+                            expected: "`max_mb`, `max_bytes`, `retention_days`, or `mime`".into(),
+                        },
+                        span: key_span,
+                    });
+                }
+            }
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RParen, "`)` after `@upload`")?;
+        self.skip_newlines();
+        spec.span = start.merge(self.prev_span());
+        Ok(spec)
     }
 
     /// Optional `@ui(key: value, ...)` presentation hints preceding a

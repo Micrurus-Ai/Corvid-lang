@@ -2146,6 +2146,68 @@ Next per the Phase 51 queue: 51f-uploads-and-pagination.
 
 ---
 
+## 2026-07-16 - 51f closed: uploads and pagination are typed HTTP-boundary surfaces
+
+The application contract was missing two shapes every real frontend
+needs: file uploads and paginated lists. 51f makes both first-class
+types that flow into the contract, OpenAPI, and corvid-ai.json.
+
+Two new compiler-known generic heads:
+
+```
+public type DocSubmission:
+    @upload(max_mb: 10, retention_days: 7)
+    file: Upload<Pdf>
+    @upload(mime: "image/png, image/jpeg")
+    thumbnail: Upload<Image>
+
+agent browse(cursor: String) -> Page<Item>:
+    return page_items(cursor)
+```
+
+`Upload<Format>` is a file upload; the `Format` tag (`Pdf`, `Image`,
+`Csv`, `Json`, `Text`, `Audio`, `Video`, or any other) supplies the
+default accepted MIME. The resolver treats the tag as free-form — it
+is NOT resolved as a type — so `Upload<Xml>` works and unknown tags
+fall back to `application/octet-stream`. `@upload(...)` carries the
+semantic constraints (max size, retention, explicit MIME override),
+parsed in the same field-attribute loop as `@ui`.
+
+`Page<Item>` is the cursor-pagination envelope
+(`{items, next_cursor, has_more}`). A route or agent returning it
+advertises cursor pagination and accepts a `cursor` query parameter;
+`Stream<Item>` advertises stream pagination, so a generic paginated
+hook (51n) drives "load more" and consume-to-end from one signal.
+
+Both are real `Type` variants. Like `DbHandle`, the native codegen
+backends refuse to lower them — they are HTTP-boundary types served
+by `corvid serve`, and the contract is what describes them. That is
+the whole point of Phase 51: define the boundary precisely enough
+that existing tooling consumes it. The OpenAPI projection makes it
+concrete — an upload field is a `format: binary` string with
+`contentMediaType` and `maxLength`; a body containing an upload
+becomes `multipart/form-data`; a `Page<Item>` response is the
+envelope object plus the optional `cursor` parameter.
+
+The Type-enum change cascaded through the usual dozen exhaustive
+matches (checker, both codegen backends, VM, prompt-format, ABI
+descriptor); each backend arm is a refuse-to-lower or a display
+name, mirroring the `DbHandle` template. A pre-existing broken test
+build in prompt-format (stale `IrField { ui: … }` literals left from
+the 51d `ui` removal, never recompiled since) surfaced and was
+cleaned up in passing.
+
+Live-probed the `DocSubmission` + `Page<Item>` surface across all
+three artifacts. Tests: parser (`@upload` keys + both generic heads),
+contract emitter (upload MIME/size/retention, MIME override, cursor +
+stream pagination), OpenAPI (binary + multipart, page envelope +
+cursor param).
+
+Next per the Phase 51 queue: 51g-identity-surface — needs the
+security safe-defaults block, all mandatory.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

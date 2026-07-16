@@ -12,7 +12,9 @@
 //! It is a projection of the same [`crate::app_contract`] model
 //! OpenAPI reads, so the two artifacts reference identical schemas.
 
-use crate::app_contract::{ApplicationContract, Capabilities, ContractCallable, ContractParam};
+use crate::app_contract::{
+    ApplicationContract, Capabilities, ContractCallable, ContractParam, Pagination,
+};
 use serde::{Deserialize, Serialize};
 
 /// The AI-native metadata document.
@@ -47,6 +49,11 @@ pub struct AiCallable {
     /// the program's own sanitization boundary.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub tainted_input: bool,
+    /// Pagination surface (slice 51f) — `Page<Item>` (cursor) or
+    /// `Stream<Item>` (stream). A generic paginated hook drives
+    /// "load more" / consume-to-end from this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<Pagination>,
 }
 
 /// One event a streamed/invoked callable can emit. Serialized as a
@@ -125,6 +132,7 @@ fn ai_callable(c: &ContractCallable, is_agent: bool) -> AiCallable {
         max_cost_usd: caps.max_cost_usd,
         latency_class: caps.latency_class.clone(),
         tainted_input: caps.tainted_input,
+        pagination: caps.pagination.clone(),
     }
 }
 

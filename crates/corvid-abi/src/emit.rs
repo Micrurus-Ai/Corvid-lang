@@ -291,6 +291,12 @@ pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, resolved: &Resolved) -> Type
             "ResumeToken" if args.len() == 1 => {
                 Type::ResumeToken(Box::new(resolve_typeref_to_type(&args[0], resolved)))
             }
+            "Upload" if args.len() == 1 => {
+                Type::Upload(Box::new(resolve_typeref_to_type(&args[0], resolved)))
+            }
+            "Page" if args.len() == 1 => {
+                Type::Page(Box::new(resolve_typeref_to_type(&args[0], resolved)))
+            }
             "Result" if args.len() == 2 => Type::Result(
                 Box::new(resolve_typeref_to_type(&args[0], resolved)),
                 Box::new(resolve_typeref_to_type(&args[1], resolved)),

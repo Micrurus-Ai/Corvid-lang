@@ -96,6 +96,26 @@ pub struct ContractField {
     /// these display suggestions but never the semantic constraints.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ui: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Upload constraints (slice 51f) when this field is typed
+    /// `Upload<Format>`: accepted MIME (format default merged with an
+    /// explicit `@upload(mime:)`), max size, and retention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<ContractUpload>,
+}
+
+/// The upload surface of an `Upload<Format>` field (slice 51f). A
+/// frontend renders a file picker constrained to `accepted_mime` and
+/// `max_bytes`; the server rejects anything outside them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractUpload {
+    /// The format tag (`Pdf`, `Image`, ...) from `Upload<Format>`.
+    pub format: String,
+    /// Accepted MIME types the boundary allows.
+    pub accepted_mime: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +133,10 @@ pub struct ContractRoute {
     /// dangerous surface). Empty = no approval-requiring effect.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<String>,
+    /// Pagination surface (slice 51f) when the response is
+    /// `Page<Item>` / `Stream<Item>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<Pagination>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +180,32 @@ pub struct Capabilities {
     /// `slow`), when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_class: Option<String>,
+    /// Pagination surface (slice 51f) when the output is `Page<Item>`
+    /// (cursor) or `Stream<Item>` (stream). A generic paginated hook
+    /// reads this to drive "load more" / consume-to-end uniformly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<Pagination>,
+}
+
+/// How a callable's output is paginated (slice 51f).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pagination {
+    pub style: PaginationStyle,
+    /// The element type inside the page/stream.
+    pub item_type: String,
+    /// The query parameter that carries the opaque cursor
+    /// (`cursor` for cursor pagination; absent for streams).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_param: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaginationStyle {
+    /// `Page<Item>` — opaque forward cursor, one page per request.
+    Cursor,
+    /// `Stream<Item>` — an SSE/element stream consumed to completion.
+    Stream,
 }
 
 /// Options threaded from the caller (compiler version, timestamp).
@@ -286,6 +336,7 @@ fn contract_field(f: &corvid_ast::Field) -> ContractField {
         min_length: None,
         max_length: None,
         ui: ui_hints_map(&f.ui),
+        upload: contract_upload(&f.ty, f.upload.as_ref()),
     };
     match f.refinement {
         Some(Refinement::Between { min, max }) => {
@@ -299,6 +350,76 @@ fn contract_field(f: &corvid_ast::Field) -> ContractField {
         None => {}
     }
     field
+}
+
+/// The upload surface of a field, when its type is `Upload<Format>`.
+/// The format tag supplies default accepted MIME, which an explicit
+/// `@upload(mime:)` overrides; size/retention come from `@upload`.
+fn contract_upload(
+    ty: &TypeRef,
+    spec: Option<&corvid_ast::UploadSpec>,
+) -> Option<ContractUpload> {
+    let format = upload_format_tag(ty)?;
+    let accepted_mime = match spec {
+        Some(s) if !s.mime.is_empty() => s.mime.clone(),
+        _ => default_mime_for_format(&format),
+    };
+    Some(ContractUpload {
+        format,
+        accepted_mime,
+        max_bytes: spec.and_then(|s| s.max_bytes),
+        retention_days: spec.and_then(|s| s.retention_days),
+    })
+}
+
+/// The `Format` in `Upload<Format>`, or `None` if the type is not an
+/// upload.
+fn upload_format_tag(ty: &TypeRef) -> Option<String> {
+    match ty {
+        TypeRef::Generic { name, args, .. } if name.name == "Upload" && args.len() == 1 => {
+            Some(type_ref_name(&args[0]))
+        }
+        _ => None,
+    }
+}
+
+/// Default accepted MIME types for a well-known upload format tag. An
+/// unknown tag falls back to `application/octet-stream` so the surface
+/// stays usable without special-casing every format.
+fn default_mime_for_format(format: &str) -> Vec<String> {
+    let mimes: &[&str] = match format {
+        "Pdf" => &["application/pdf"],
+        "Image" => &["image/png", "image/jpeg", "image/gif", "image/webp"],
+        "Csv" => &["text/csv"],
+        "Json" => &["application/json"],
+        "Text" => &["text/plain"],
+        "Audio" => &["audio/mpeg", "audio/wav", "audio/ogg"],
+        "Video" => &["video/mp4", "video/webm"],
+        _ => &["application/octet-stream"],
+    };
+    mimes.iter().map(|m| m.to_string()).collect()
+}
+
+/// Pagination surface for a callable/route output type: `Page<Item>`
+/// is cursor pagination; `Stream<Item>` is stream pagination.
+fn pagination_for(ty: &TypeRef) -> Option<Pagination> {
+    match ty {
+        TypeRef::Generic { name, args, .. } if name.name == "Page" && args.len() == 1 => {
+            Some(Pagination {
+                style: PaginationStyle::Cursor,
+                item_type: type_ref_name(&args[0]),
+                cursor_param: Some("cursor".to_string()),
+            })
+        }
+        TypeRef::Generic { name, args, .. } if name.name == "Stream" && args.len() == 1 => {
+            Some(Pagination {
+                style: PaginationStyle::Stream,
+                item_type: type_ref_name(&args[0]),
+                cursor_param: None,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
@@ -325,6 +446,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .iter()
             .map(|e| e.name.name.clone())
             .collect(),
+        pagination: pagination_for(&r.response.ty),
     }
 }
 
@@ -397,6 +519,7 @@ fn contract_callable(
             confidence_min,
             max_cost_usd,
             latency_class,
+            pagination: pagination_for(return_ty),
         },
     }
 }
@@ -550,6 +673,87 @@ public agent submit(x: String) -> RefundError:
         let denied = &e.variants[1];
         assert_eq!(denied.fields.len(), 1);
         assert_eq!(denied.fields[0].name, "reason");
+    }
+
+    #[test]
+    fn upload_field_surfaces_mime_size_and_retention() {
+        let contract = contract_for(
+            "public type DocSubmission:
+    @upload(max_mb: 10, retention_days: 7)
+    file: Upload<Pdf>
+    note: String
+
+public agent ingest(doc: DocSubmission) -> String:
+    return doc.note
+",
+        );
+        let ty = contract.types.iter().find(|t| t.name == "DocSubmission").unwrap();
+        let file = ty.fields.iter().find(|f| f.name == "file").unwrap();
+        let upload = file.upload.as_ref().expect("upload surface present");
+        assert_eq!(upload.format, "Pdf");
+        assert_eq!(upload.accepted_mime, vec!["application/pdf".to_string()]);
+        assert_eq!(upload.max_bytes, Some(10 * 1024 * 1024));
+        assert_eq!(upload.retention_days, Some(7));
+        // A non-upload field carries no upload surface.
+        let note = ty.fields.iter().find(|f| f.name == "note").unwrap();
+        assert!(note.upload.is_none());
+    }
+
+    #[test]
+    fn explicit_upload_mime_overrides_format_default() {
+        let contract = contract_for(
+            "public type Avatar:
+    @upload(mime: \"image/png, image/jpeg\")
+    picture: Upload<Image>
+
+public agent set_avatar(a: Avatar) -> String:
+    return \"ok\"
+",
+        );
+        let ty = contract.types.iter().find(|t| t.name == "Avatar").unwrap();
+        let pic = ty.fields.iter().find(|f| f.name == "picture").unwrap();
+        let upload = pic.upload.as_ref().unwrap();
+        assert_eq!(
+            upload.accepted_mime,
+            vec!["image/png".to_string(), "image/jpeg".to_string()]
+        );
+        assert!(upload.max_bytes.is_none());
+    }
+
+    #[test]
+    fn page_return_advertises_cursor_pagination() {
+        let contract = contract_for(
+            "public type Item:
+    id: String
+
+tool fetch_page(cursor: String) -> Page<Item>
+
+public agent list_items(cursor: String) -> Page<Item>:
+    return fetch_page(cursor)
+",
+        );
+        let agent = contract.agents.iter().find(|a| a.name == "list_items").unwrap();
+        let pg = agent.capabilities.pagination.as_ref().expect("pagination present");
+        assert_eq!(pg.style, PaginationStyle::Cursor);
+        assert_eq!(pg.item_type, "Item");
+        assert_eq!(pg.cursor_param.as_deref(), Some("cursor"));
+    }
+
+    #[test]
+    fn stream_return_advertises_stream_pagination() {
+        let contract = contract_for(
+            "public agent chat(message: String) -> Stream<String>:
+    return stream_answer(message)
+
+tool stream_answer(m: String) -> Stream<String>
+",
+        );
+        let agent = contract.agents.iter().find(|a| a.name == "chat").unwrap();
+        let pg = agent.capabilities.pagination.as_ref().expect("pagination present");
+        assert_eq!(pg.style, PaginationStyle::Stream);
+        assert_eq!(pg.item_type, "String");
+        assert!(pg.cursor_param.is_none());
+        assert!(agent.capabilities.streaming);
     }
 
     #[test]

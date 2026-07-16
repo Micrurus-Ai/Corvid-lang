@@ -597,6 +597,12 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         | T::Partial(_)
         | T::ResumeToken(_)
         | T::RouteParams(_)
+        // Slice 51f — `Upload<Format>` / `Page<Item>` are HTTP-boundary
+        // types the native/Python backends don't lower; `object` keeps
+        // the generated Python valid, matching the interpreter/serve-tier
+        // stance the application contract already documents.
+        | T::Upload(_)
+        | T::Page(_)
         | T::Unknown => "object".into(),
         // `Result<T, E>` and `Weak<T, ...>` stay `object` until the
         // Python backend picks a concrete representation (wrapper

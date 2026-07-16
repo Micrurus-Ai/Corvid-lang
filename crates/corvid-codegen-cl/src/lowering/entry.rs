@@ -476,6 +476,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::Upload(_) | Type::Page(_) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - uploads and pagination are HTTP-boundary types served by `corvid serve`, not the native command-line boundary; the application contract describes the surface. Use the interpreter/serve tier.",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Function { .. } | Type::Unknown => Err(CodegenError::cranelift(
             format!("entry agent {role} has un-printable type `{}`", ty.display_name()),
             span,

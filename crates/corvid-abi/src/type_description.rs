@@ -128,6 +128,20 @@ pub fn emit_type_description(
         Type::JsonBuilder => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
         },
+        // Slice 51f — `Upload<Format>` and `Page<Item>` are
+        // HTTP-boundary types described by the application contract
+        // and its OpenAPI projection, not by the native cdylib ABI
+        // descriptor (the cdylib backend refuses to lower them, the
+        // same interpreter/serve-tier stance as `DbHandle`). An
+        // upload marshals as its bytes; a page as its element type.
+        Type::Upload(_) => TypeDescription::Scalar {
+            scalar: ScalarTypeName::String,
+        },
+        Type::Page(inner) => TypeDescription::List {
+            list: AbiListType {
+                element: Box::new(emit_type_description(inner, resolved, names)),
+            },
+        },
     }
 }
 

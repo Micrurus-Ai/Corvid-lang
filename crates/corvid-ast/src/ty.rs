@@ -195,6 +195,30 @@ pub struct Field {
     /// the structured-output repair loop.
     #[serde(default)]
     pub refinement: Option<Refinement>,
+    /// `@upload(...)` constraints (slice 51f) on a field typed
+    /// `Upload<Format>`: accepted MIME, max size, and retention. A
+    /// SEMANTIC constraint — the boundary rejects an upload that
+    /// violates it — not a display hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<UploadSpec>,
+    pub span: Span,
+}
+
+/// `@upload(max_mb: N, retention_days: N, mime: "a/b, c/d")` on an
+/// `Upload<Format>` field (slice 51f). Any subset may be present; the
+/// inner format tag supplies default accepted MIME when `mime` is
+/// omitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UploadSpec {
+    /// Maximum accepted size in bytes (from `max_mb`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+    /// Retention window before the stored upload is purged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_days: Option<u64>,
+    /// Explicit accepted MIME types; overrides the format-tag default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mime: Vec<String>,
     pub span: Span,
 }
 

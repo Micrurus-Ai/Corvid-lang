@@ -256,7 +256,12 @@ impl<'a> Checker<'a> {
                 // `json_parse`, and a `JsonBuilder` can only come
                 // from `json_object_new`.
                 | BuiltIn::JsonValue
-                | BuiltIn::JsonBuilder => {
+                | BuiltIn::JsonBuilder
+                // Slice 51f — `Upload` / `Page` are HTTP-boundary type
+                // names; naming one in value position is a TypeAsValue
+                // error like the other type constructors.
+                | BuiltIn::Upload
+                | BuiltIn::Page => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -690,6 +695,8 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
                 "Grounded" => Type::Grounded(Box::new(inner)),
                 "Partial" => Type::Partial(Box::new(inner)),
                 "ResumeToken" => Type::ResumeToken(Box::new(inner)),
+                "Upload" => Type::Upload(Box::new(inner)),
+                "Page" => Type::Page(Box::new(inner)),
                 _ => Type::Unknown,
             }
         }

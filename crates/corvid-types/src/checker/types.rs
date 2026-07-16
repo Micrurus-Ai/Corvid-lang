@@ -300,7 +300,8 @@ impl<'a> Checker<'a> {
         };
 
         match name {
-            "List" | "Stream" | "Option" | "Grounded" | "Tainted" | "Partial" | "ResumeToken" => {
+            "List" | "Stream" | "Option" | "Grounded" | "Tainted" | "Partial" | "ResumeToken"
+            | "Upload" | "Page" => {
                 if args.len() != 1 {
                     if matches!(context, TypeContext::Root) {
                         self.errors.push(TypeError::new(
@@ -323,6 +324,8 @@ impl<'a> Checker<'a> {
                     "Tainted" => Type::Tainted(inner),
                     "Partial" => Type::Partial(inner),
                     "ResumeToken" => Type::ResumeToken(inner),
+                    "Upload" => Type::Upload(inner),
+                    "Page" => Type::Page(inner),
                     _ => unreachable!(),
                 }
             }
@@ -371,7 +374,7 @@ impl<'a> Checker<'a> {
                 // everything). Only in root context — imported
                 // modules are validated by their own check.
                 if matches!(context, TypeContext::Root) {
-                    const HEADS: [&str; 9] = [
+                    const HEADS: [&str; 11] = [
                         "List",
                         "Map",
                         "Option",
@@ -381,6 +384,8 @@ impl<'a> Checker<'a> {
                         "Grounded",
                         "Partial",
                         "ResumeToken",
+                        "Upload",
+                        "Page",
                     ];
                     let suggestion = HEADS
                         .iter()

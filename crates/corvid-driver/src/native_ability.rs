@@ -131,6 +131,10 @@ fn is_native_value_type(ty: &Type) -> bool {
         // JsonBuilder. Interpreter-tier only until the cdylib
         // bridging slice ships.
         Type::JsonValue | Type::JsonBuilder => false,
+        // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
+        // by `corvid serve`; the tier-picker routes any program
+        // mentioning them to the interpreter tier, mirroring `DbHandle`.
+        Type::Upload(_) | Type::Page(_) => false,
         Type::Nothing
         | Type::Function { .. }
         | Type::Stream(_)

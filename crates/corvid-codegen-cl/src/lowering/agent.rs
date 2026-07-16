@@ -454,6 +454,14 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`JsonBuilder` - the JSON builder surface (`json_object_new` / `json_object_set_*` / `json_object_finish` from std/json.cor) is interpreter-only in 33R5b; cdylib bridging lands in a follow-up slice. Use the interpreter tier (`corvid run --tier interp`) until then.",
             span,
         )),
+        Type::Upload(_) => Err(CodegenError::not_supported(
+            "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
+            span,
+        )),
+        Type::Page(_) => Err(CodegenError::not_supported(
+            "`Page<Item>` - cursor pagination is an HTTP-boundary type served by `corvid serve`, not the native backend; the application contract describes the surface. Use the interpreter/serve tier until native pagination lowering lands.",
+            span,
+        )),
         Type::Unknown => Err(CodegenError::cranelift(
             "encountered `Unknown` type at codegen — typecheck should have caught this",
             span,

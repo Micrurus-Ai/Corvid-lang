@@ -47,17 +47,36 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
                 "schema": schema_for_type_name(query),
             }));
         }
+        // A cursor-paginated route takes an optional forward `cursor`.
+        if let Some(pagination) = &route.pagination {
+            if let Some(cursor) = &pagination.cursor_param {
+                parameters.push(json!({
+                    "name": cursor,
+                    "in": "query",
+                    "required": false,
+                    "schema": { "type": "string" },
+                    "description": "Opaque forward cursor from a prior page's next_cursor."
+                }));
+            }
+        }
         if !parameters.is_empty() {
             operation.insert("parameters".into(), Value::Array(parameters));
         }
 
         if let Some(body) = &route.body_type {
+            // A body carrying an upload field is multipart/form-data;
+            // otherwise it is JSON.
+            let media_type = if body_type_has_upload(body, contract) {
+                "multipart/form-data"
+            } else {
+                "application/json"
+            };
             operation.insert(
                 "requestBody".into(),
                 json!({
                     "required": true,
                     "content": {
-                        "application/json": { "schema": schema_for_type_name(body) }
+                        media_type: { "schema": schema_for_type_name(body) }
                     }
                 }),
             );
@@ -150,6 +169,26 @@ fn schema_for_type(ty: &ContractType) -> Value {
 }
 
 fn schema_for_field(field: &ContractField) -> Value {
+    // An `Upload<Format>` field is a binary string constrained to the
+    // accepted MIME and max size — what a multipart form part carries.
+    if let Some(upload) = &field.upload {
+        let mut map = Map::new();
+        map.insert("type".into(), json!("string"));
+        map.insert("format".into(), json!("binary"));
+        if let Some(first) = upload.accepted_mime.first() {
+            map.insert("contentMediaType".into(), json!(first));
+        }
+        if upload.accepted_mime.len() > 1 {
+            map.insert("x-corvid-accepted-mime".into(), json!(upload.accepted_mime));
+        }
+        if let Some(max) = upload.max_bytes {
+            map.insert("maxLength".into(), json!(max));
+        }
+        if let Some(days) = upload.retention_days {
+            map.insert("x-corvid-retention-days".into(), json!(days));
+        }
+        return Value::Object(map);
+    }
     let mut schema = match scalar_schema(&field.type_name) {
         Some(s) => s,
         None => return schema_for_type_name(&field.type_name),
@@ -206,6 +245,20 @@ fn schema_for_type_name(name: &str) -> Value {
             // the element type (the streaming nature is documented in
             // corvid-ai.json).
             "Stream" | "Tainted" => schema_for_type_name(inner),
+            // Upload<Format> is a binary string at the JSON boundary;
+            // the accepted-MIME / size constraints attach where the
+            // field is projected (schema_for_field).
+            "Upload" => json!({ "type": "string", "format": "binary" }),
+            // Page<Item> is the cursor-pagination envelope.
+            "Page" => json!({
+                "type": "object",
+                "properties": {
+                    "items": { "type": "array", "items": schema_for_type_name(inner) },
+                    "next_cursor": { "type": "string", "nullable": true },
+                    "has_more": { "type": "boolean" }
+                },
+                "required": ["items", "has_more"]
+            }),
             "Option" => {
                 let mut s = schema_for_type_name(inner);
                 if let Value::Object(map) = &mut s {
@@ -229,6 +282,20 @@ fn schema_for_type_name(name: &str) -> Value {
     }
     // A bare named type references its component schema.
     json!({ "$ref": format!("#/components/schemas/{name}") })
+}
+
+/// Whether a route body type (or the type it directly references)
+/// contains an `Upload<Format>` field — which makes the request
+/// `multipart/form-data`. A bare `Upload<...>` body also counts.
+fn body_type_has_upload(body: &str, contract: &ApplicationContract) -> bool {
+    if body.starts_with("Upload<") {
+        return true;
+    }
+    contract
+        .types
+        .iter()
+        .find(|t| t.name == body)
+        .is_some_and(|t| t.fields.iter().any(|f| f.upload.is_some()))
 }
 
 /// OpenAPI error responses for a route whose response is
@@ -310,6 +377,7 @@ mod tests {
                         min_length: None,
                         max_length: None,
                         ui: Default::default(),
+                        upload: None,
                     },
                     ContractField {
                         name: "explanation".into(),
@@ -319,6 +387,7 @@ mod tests {
                         min_length: Some(20),
                         max_length: Some(500),
                         ui: Default::default(),
+                        upload: None,
                     },
                 ],
                 variants: vec![],
@@ -331,6 +400,7 @@ mod tests {
                 body_type: Some("RefundRequest".into()),
                 response_type: "Answer".into(),
                 requires: vec!["issue_refund".into()],
+                pagination: None,
             }],
             agents: vec![ContractCallable {
                 name: "chat".into(),
@@ -399,6 +469,101 @@ mod tests {
         // Variants sharing a status collapse to one response listing both.
         let desc = responses["410"]["description"].as_str().unwrap();
         assert!(desc.contains("RefundWindowExpired") && desc.contains("AlreadyGone"), "{desc}");
+    }
+
+    #[test]
+    fn upload_field_projects_binary_and_multipart_body() {
+        use crate::app_contract::ContractUpload;
+        let mut c = sample();
+        c.types.push(ContractType {
+            name: "DocSubmission".into(),
+            fields: vec![ContractField {
+                name: "file".into(),
+                type_name: "Upload<Pdf>".into(),
+                minimum: None,
+                maximum: None,
+                min_length: None,
+                max_length: None,
+                ui: Default::default(),
+                upload: Some(ContractUpload {
+                    format: "Pdf".into(),
+                    accepted_mime: vec!["application/pdf".into()],
+                    max_bytes: Some(10 * 1024 * 1024),
+                    retention_days: Some(7),
+                }),
+            }],
+            variants: vec![],
+        });
+        c.routes.push(ContractRoute {
+            method: "POST".into(),
+            path: "/docs".into(),
+            path_params: vec![],
+            query_type: None,
+            body_type: Some("DocSubmission".into()),
+            response_type: "Answer".into(),
+            requires: vec![],
+            pagination: None,
+        });
+        let openapi = emit_openapi(&c);
+        // Body carrying an upload is multipart/form-data.
+        let body = &openapi["paths"]["/docs"]["post"]["requestBody"]["content"];
+        assert!(body.get("multipart/form-data").is_some(), "{body:?}");
+        // The upload field is a size-constrained binary string.
+        let file = &openapi["components"]["schemas"]["DocSubmission"]["properties"]["file"];
+        assert_eq!(file["type"], "string");
+        assert_eq!(file["format"], "binary");
+        assert_eq!(file["contentMediaType"], "application/pdf");
+        assert_eq!(file["maxLength"], 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn page_route_projects_envelope_and_cursor_param() {
+        use crate::app_contract::{Pagination, PaginationStyle};
+        let mut c = sample();
+        c.types.push(ContractType {
+            name: "Item".into(),
+            fields: vec![ContractField {
+                name: "id".into(),
+                type_name: "String".into(),
+                minimum: None,
+                maximum: None,
+                min_length: None,
+                max_length: None,
+                ui: Default::default(),
+                upload: None,
+            }],
+            variants: vec![],
+        });
+        c.routes.push(ContractRoute {
+            method: "GET".into(),
+            path: "/items".into(),
+            path_params: vec![],
+            query_type: None,
+            body_type: None,
+            response_type: "Page<Item>".into(),
+            requires: vec![],
+            pagination: Some(Pagination {
+                style: PaginationStyle::Cursor,
+                item_type: "Item".into(),
+                cursor_param: Some("cursor".into()),
+            }),
+        });
+        let openapi = emit_openapi(&c);
+        let op = &openapi["paths"]["/items"]["get"];
+        // Optional cursor query parameter.
+        let params = op["parameters"].as_array().unwrap();
+        let cursor = params.iter().find(|p| p["name"] == "cursor").unwrap();
+        assert_eq!(cursor["in"], "query");
+        assert_eq!(cursor["required"], false);
+        // Response is the page envelope: items array + next_cursor.
+        let schema = &op["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["items"]["type"], "array");
+        assert_eq!(
+            schema["properties"]["items"]["items"]["$ref"],
+            "#/components/schemas/Item"
+        );
+        assert_eq!(schema["properties"]["next_cursor"]["nullable"], true);
     }
 
     #[test]
