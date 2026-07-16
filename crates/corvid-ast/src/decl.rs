@@ -365,6 +365,13 @@ pub struct SumVariant {
     /// Payload fields: `(name, type)` pairs; empty for unit
     /// variants like `| Pending`.
     pub fields: Vec<Field>,
+    /// Optional `@status(code)` — the HTTP status a route maps this
+    /// error variant to (slice 51e).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u64>,
+    /// Optional `@ui(...)` presentation defaults for this variant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ui: Vec<crate::ty::UiHint>,
     pub span: Span,
 }
 

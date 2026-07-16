@@ -53,9 +53,25 @@ pub struct ContractType {
     /// Record fields (empty for a sum type).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<ContractField>,
-    /// Sum-type variant names (empty for a record).
+    /// Sum-type variants (empty for a record) — name, payload fields,
+    /// and per-variant presentation defaults, so a frontend handles
+    /// error/state enums EXHAUSTIVELY.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variants: Vec<String>,
+    pub variants: Vec<ContractVariant>,
+}
+
+/// One sum-type variant in the contract (slice 51e).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractVariant {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ContractField>,
+    /// `@status(code)` — the HTTP status this variant maps to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u64>,
+    /// `@ui(...)` presentation defaults (e.g. a user-facing message).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ui: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,20 +250,34 @@ fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
         fields: t.fields.iter().map(contract_field).collect(),
-        variants: t.variants.iter().map(|v| v.name.name.clone()).collect(),
+        variants: t.variants.iter().map(contract_variant).collect(),
     }
 }
 
-fn contract_field(f: &corvid_ast::Field) -> ContractField {
-    let mut ui = std::collections::BTreeMap::new();
-    for hint in &f.ui {
+fn contract_variant(v: &corvid_ast::SumVariant) -> ContractVariant {
+    ContractVariant {
+        name: v.name.name.clone(),
+        fields: v.fields.iter().map(contract_field).collect(),
+        status: v.status,
+        ui: ui_hints_map(&v.ui),
+    }
+}
+
+/// Project a slice of `@ui` hints into a name → JSON-value map.
+fn ui_hints_map(hints: &[corvid_ast::UiHint]) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let mut map = std::collections::BTreeMap::new();
+    for hint in hints {
         let value = match &hint.value {
             corvid_ast::UiHintValue::Str(s) => serde_json::Value::String(s.clone()),
             corvid_ast::UiHintValue::Bool(b) => serde_json::Value::Bool(*b),
             corvid_ast::UiHintValue::Int(n) => serde_json::Value::from(*n),
         };
-        ui.insert(hint.key.name.clone(), value);
+        map.insert(hint.key.name.clone(), value);
     }
+    map
+}
+
+fn contract_field(f: &corvid_ast::Field) -> ContractField {
     let mut field = ContractField {
         name: f.name.name.clone(),
         type_name: type_ref_name(&f.ty),
@@ -255,7 +285,7 @@ fn contract_field(f: &corvid_ast::Field) -> ContractField {
         maximum: None,
         min_length: None,
         max_length: None,
-        ui,
+        ui: ui_hints_map(&f.ui),
     };
     match f.refinement {
         Some(Refinement::Between { min, max }) => {
@@ -496,6 +526,30 @@ public agent plain(text: String) -> String:
         assert_eq!(classify.capabilities.confidence_min, Some(0.85));
         let plain = contract.agents.iter().find(|a| a.name == "plain").unwrap();
         assert_eq!(plain.capabilities.confidence_min, None);
+    }
+
+    #[test]
+    fn error_enum_variants_carry_status_ui_and_payload() {
+        let contract = contract_for(
+            "public type RefundError:
+    @status(404)
+    @ui(message: \"Not found.\")
+    | PaymentNotFound
+    | ApprovalDenied(reason: String)
+
+public agent submit(x: String) -> RefundError:
+    return PaymentNotFound
+",
+        );
+        let e = contract.types.iter().find(|t| t.name == "RefundError").unwrap();
+        assert_eq!(e.variants.len(), 2);
+        let not_found = &e.variants[0];
+        assert_eq!(not_found.name, "PaymentNotFound");
+        assert_eq!(not_found.status, Some(404));
+        assert_eq!(not_found.ui.get("message").unwrap(), "Not found.");
+        let denied = &e.variants[1];
+        assert_eq!(denied.fields.len(), 1);
+        assert_eq!(denied.fields[0].name, "reason");
     }
 
     #[test]

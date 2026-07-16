@@ -51,8 +51,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             // Sum-type variant line (slice 45h): `| Name` or
-            // `| Name(field: Type, ...)`.
-            if matches!(self.peek(), TokKind::Pipe) {
+            // `| Name(field: Type, ...)`, optionally preceded by
+            // `@status(code)` / `@ui(...)` variant attributes (51e).
+            if matches!(self.peek(), TokKind::Pipe) || self.variant_attrs_precede_pipe() {
                 match self.parse_sum_variant() {
                     Ok(v) => variants.push(v),
                     Err(e) => {
@@ -100,9 +101,118 @@ impl<'a> Parser<'a> {
 
     /// `'|' IDENT ('(' field_list ')')? NEWLINE` — one sum-type
     /// variant (slice 45h).
+    /// Lookahead: `@ident(...)` groups (newline-separated) followed
+    /// by a `|`? Distinguishes a variant carrying `@status`/`@ui`
+    /// from a field carrying `@ui` (whose group is followed by an
+    /// identifier). Slice 51e.
+    fn variant_attrs_precede_pipe(&self) -> bool {
+        if !matches!(self.peek(), TokKind::At) {
+            return false;
+        }
+        let mut i = 0usize;
+        loop {
+            match self.peek_ahead(i) {
+                TokKind::Newline => i += 1,
+                TokKind::At => {
+                    i += 1;
+                    if !matches!(self.peek_ahead(i), TokKind::Ident(_)) {
+                        return false;
+                    }
+                    i += 1;
+                    if matches!(self.peek_ahead(i), TokKind::LParen) {
+                        i += 1;
+                        let mut depth = 1i32;
+                        while depth > 0 {
+                            match self.peek_ahead(i) {
+                                TokKind::LParen => depth += 1,
+                                TokKind::RParen => depth -= 1,
+                                TokKind::Eof => return false,
+                                _ => {}
+                            }
+                            i += 1;
+                        }
+                    }
+                }
+                TokKind::Pipe => return true,
+                _ => return false,
+            }
+        }
+    }
+
     fn parse_sum_variant(&mut self) -> Result<corvid_ast::SumVariant, ParseError> {
         let start = self.peek_span();
-        self.bump(); // |
+        let mut status = None;
+        let mut ui = Vec::new();
+        while matches!(self.peek(), TokKind::At) {
+            self.bump(); // @
+            let (attr, attr_span) = self.expect_ident()?;
+            match attr.as_str() {
+                "status" => {
+                    self.expect(TokKind::LParen, "`(` after `@status`")?;
+                    let (code, _) = self.expect_positive_int_literal("an HTTP status code")?;
+                    self.expect(TokKind::RParen, "`)` after `@status`")?;
+                    status = Some(code);
+                }
+                "ui" => {
+                    self.expect(TokKind::LParen, "`(` after `@ui`")?;
+                    while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
+                        let hstart = self.peek_span();
+                        let (key, key_span) = self.expect_ident()?;
+                        self.expect(TokKind::Colon, "`:` after a `@ui` hint key")?;
+                        let value = match self.peek().clone() {
+                            TokKind::StringLit(s) => {
+                                self.bump();
+                                corvid_ast::UiHintValue::Str(s)
+                            }
+                            TokKind::KwTrue => {
+                                self.bump();
+                                corvid_ast::UiHintValue::Bool(true)
+                            }
+                            TokKind::KwFalse => {
+                                self.bump();
+                                corvid_ast::UiHintValue::Bool(false)
+                            }
+                            TokKind::Int(n) => {
+                                self.bump();
+                                corvid_ast::UiHintValue::Int(n)
+                            }
+                            other => {
+                                return Err(ParseError {
+                                    kind: ParseErrorKind::UnexpectedToken {
+                                        got: format!("{other:?}"),
+                                        expected: "a string, boolean, or integer `@ui` value"
+                                            .into(),
+                                    },
+                                    span: self.peek_span(),
+                                });
+                            }
+                        };
+                        ui.push(corvid_ast::UiHint {
+                            key: Ident::new(key, key_span),
+                            value,
+                            span: hstart.merge(self.prev_span()),
+                        });
+                        if matches!(self.peek(), TokKind::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(TokKind::RParen, "`)` after `@ui`")?;
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("variant attribute `@{attr}`"),
+                            expected: "`@status(code)` or `@ui(...)` on a variant".into(),
+                        },
+                        span: attr_span,
+                    });
+                }
+            }
+            self.skip_newlines();
+        }
+        self.expect(TokKind::Pipe, "`|` before a sum-type variant")?;
         let (name, name_span) = self.expect_ident()?;
         let mut fields = Vec::new();
         if matches!(self.peek(), TokKind::LParen) {
@@ -132,6 +242,8 @@ impl<'a> Parser<'a> {
         Ok(corvid_ast::SumVariant {
             name: Ident::new(name, name_span),
             fields,
+            status,
+            ui,
             span: start.merge(end),
         })
     }

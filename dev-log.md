@@ -2097,6 +2097,55 @@ Next per the Phase 51 queue: 51e-typed-errors-contract.
 
 ---
 
+## 2026-07-16 - 51e closed: typed errors that reach the frontend exhaustively
+
+An error is only as useful as the frontend's ability to handle every
+case it can produce. Corvid's sum types already gave exhaustive
+matching in the language; 51e carries that exhaustiveness across the
+contract boundary.
+
+A sum-type variant now takes optional attributes before its `|`:
+
+```
+public type RefundError:
+    @status(404)
+    @ui(message: "We could not find this payment.")
+    | PaymentNotFound
+    @status(410)
+    | RefundWindowExpired(expired_at: String)
+    | ProviderUnavailable(retry_after: Int)
+```
+
+The parse ambiguity — a leading `@ui(...)` group belongs to a
+*variant* here but to a *field* in a struct body — is resolved by a
+one-token-past-the-group lookahead (`variant_attrs_precede_pipe`): a
+variant-attribute group is followed by `|`; a field's `@ui` group is
+followed by the field identifier.
+
+`ContractType.variants` graduated from `Vec<String>` to
+`Vec<ContractVariant>` — each carries the tag to match, its payload
+fields, the HTTP status, and the `@ui` presentation map. A frontend
+generator now has everything for an exhaustive typed switch with a
+default presentation per branch.
+
+The OpenAPI projection makes the status codes real to standard
+tooling: a `Result<T, E>` route whose `E` is a status-bearing error
+enum emits one response per `@status` (variants sharing a code
+collapse into a single response listing both), each referencing the
+error schema. An off-the-shelf client generator produces typed error
+branches instead of one opaque non-200.
+
+Contract-only, like the rest of 51 so far — variant attributes are
+read from the AST at emit time and never threaded through IR or
+runtime, so replay determinism is untouched. Parser test (status +
+ui + payload, plus a plain-payload variant), emitter test (all three
+surfaced), OpenAPI test (per-status responses + shared-code
+grouping). Live-probed the `RefundError` above.
+
+Next per the Phase 51 queue: 51f-uploads-and-pagination.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

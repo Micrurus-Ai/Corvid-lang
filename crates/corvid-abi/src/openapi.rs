@@ -63,17 +63,24 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             );
         }
 
-        operation.insert(
-            "responses".into(),
+        let mut responses = Map::new();
+        responses.insert(
+            "200".into(),
             json!({
-                "200": {
-                    "description": "Success",
-                    "content": {
-                        "application/json": { "schema": schema_for_type_name(&route.response_type) }
-                    }
+                "description": "Success",
+                "content": {
+                    "application/json": { "schema": schema_for_type_name(&route.response_type) }
                 }
             }),
         );
+        // A `Result<T, E>` route whose `E` is an error enum carrying
+        // `@status(code)` variants projects one response per status the
+        // enum can produce, so a standard client generates typed error
+        // branches instead of a single opaque failure (slice 51e).
+        for (status, schema) in error_status_responses(&route.response_type, contract) {
+            responses.entry(status).or_insert(schema);
+        }
+        operation.insert("responses".into(), Value::Object(responses));
 
         // A route requiring an approval-bearing effect advertises
         // security so tools prompt for auth.
@@ -116,9 +123,11 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
 
 fn schema_for_type(ty: &ContractType) -> Value {
     if !ty.variants.is_empty() {
-        // A sum type projects to an enum of its variant names (v1;
-        // payload-carrying variants get oneOf in a later slice).
-        return json!({ "type": "string", "enum": ty.variants });
+        // A sum type projects to an enum of its variant names; a
+        // frontend reads the richer per-variant status/ui/payload from
+        // the application contract (51e).
+        let names: Vec<&str> = ty.variants.iter().map(|v| v.name.as_str()).collect();
+        return json!({ "type": "string", "enum": names });
     }
     let mut properties = Map::new();
     let mut required = Vec::new();
@@ -222,6 +231,50 @@ fn schema_for_type_name(name: &str) -> Value {
     json!({ "$ref": format!("#/components/schemas/{name}") })
 }
 
+/// OpenAPI error responses for a route whose response is
+/// `Result<T, E>` with `E` an error enum. Each `@status(code)` variant
+/// yields one `(status, response)` pair; variants sharing a code are
+/// grouped, and the response schema references the error enum so the
+/// client can narrow on the variant tag. Returns nothing when the
+/// response is not a `Result` or `E` has no status-bearing variant.
+fn error_status_responses(
+    response_type: &str,
+    contract: &ApplicationContract,
+) -> Vec<(String, Value)> {
+    let Some(("Result", inner)) = split_generic(response_type) else {
+        return Vec::new();
+    };
+    let Some((_ok, err)) = inner.split_once(',') else {
+        return Vec::new();
+    };
+    let err = err.trim();
+    let Some(err_ty) = contract.types.iter().find(|t| t.name == err) else {
+        return Vec::new();
+    };
+
+    let mut by_status: std::collections::BTreeMap<u64, Vec<&str>> = std::collections::BTreeMap::new();
+    for v in &err_ty.variants {
+        if let Some(code) = v.status {
+            by_status.entry(code).or_default().push(v.name.as_str());
+        }
+    }
+    by_status
+        .into_iter()
+        .map(|(code, variants)| {
+            let description = format!("Error: {}", variants.join(", "));
+            (
+                code.to_string(),
+                json!({
+                    "description": description,
+                    "content": {
+                        "application/json": { "schema": schema_for_type_name(err) }
+                    }
+                }),
+            )
+        })
+        .collect()
+}
+
 /// Split `Head<Inner>` into `("Head", "Inner")`; `None` if not
 /// generic. `Inner` may itself contain commas (e.g. `Result<A, B>`).
 fn split_generic(name: &str) -> Option<(&str, &str)> {
@@ -305,6 +358,47 @@ mod tests {
             &openapi["components"]["schemas"]["RefundRequest"]["properties"]["explanation"];
         assert_eq!(explanation["minLength"], 20);
         assert_eq!(explanation["maxLength"], 500);
+    }
+
+    #[test]
+    fn result_route_projects_per_status_error_responses() {
+        use crate::app_contract::ContractVariant;
+        let mut c = sample();
+        c.types.push(ContractType {
+            name: "RefundError".into(),
+            fields: vec![],
+            variants: vec![
+                ContractVariant {
+                    name: "PaymentNotFound".into(),
+                    fields: vec![],
+                    status: Some(404),
+                    ui: Default::default(),
+                },
+                ContractVariant {
+                    name: "RefundWindowExpired".into(),
+                    fields: vec![],
+                    status: Some(410),
+                    ui: Default::default(),
+                },
+                ContractVariant {
+                    name: "AlreadyGone".into(),
+                    fields: vec![],
+                    status: Some(410),
+                    ui: Default::default(),
+                },
+            ],
+        });
+        c.routes[0].response_type = "Result<Answer, RefundError>".into();
+        let openapi = emit_openapi(&c);
+        let responses = &openapi["paths"]["/refund"]["post"]["responses"];
+        assert!(responses.get("200").is_some());
+        assert_eq!(
+            responses["404"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RefundError"
+        );
+        // Variants sharing a status collapse to one response listing both.
+        let desc = responses["410"]["description"].as_str().unwrap();
+        assert!(desc.contains("RefundWindowExpired") && desc.contains("AlreadyGone"), "{desc}");
     }
 
     #[test]

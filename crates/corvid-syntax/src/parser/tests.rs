@@ -3441,3 +3441,35 @@ fn parses_field_ui_hints_multiline_and_inline() {
     // A field with no hints has an empty vec.
     assert!(t.fields[2].ui.is_empty());
 }
+
+#[test]
+fn parses_variant_status_and_ui_attributes() {
+    let src = "public type RefundError:
+    @status(404)
+    @ui(message: \"We could not find this payment.\")
+    | PaymentNotFound
+    @status(410)
+    | RefundWindowExpired(expired_at: String)
+    | ApprovalDenied(reason: String)
+";
+    let file = parse_file_src(src);
+    let t = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(t.variants.len(), 3);
+    assert_eq!(t.variants[0].name.name, "PaymentNotFound");
+    assert_eq!(t.variants[0].status, Some(404));
+    assert_eq!(t.variants[0].ui.len(), 1);
+    assert_eq!(t.variants[0].ui[0].key.name, "message");
+    assert_eq!(t.variants[1].status, Some(410));
+    assert_eq!(t.variants[1].fields.len(), 1);
+    // A plain variant with a payload and no attributes still parses.
+    assert_eq!(t.variants[2].name.name, "ApprovalDenied");
+    assert!(t.variants[2].status.is_none());
+    assert!(t.variants[2].ui.is_empty());
+}
