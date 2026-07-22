@@ -1403,30 +1403,33 @@ server test_serve_q10_api:
 /// 52b Contract Closure gate. The Phase 52 invariant — *the running
 /// backend proves it implements its own contract, or it refuses to
 /// start* — made mechanical. An app that declares a route the runtime
-/// cannot yet execute (here a `Stream<T>` response, which needs the
-/// Server-Sent-Events endpoint that arrives in slice 52c) MUST NOT
-/// start: `corvid serve` exits non-zero with an `E5204 Contract not
-/// executable` message naming the offending route, never a silent
-/// runtime `501`.
+/// cannot yet execute (here an `Upload<Format>` body, whose multipart
+/// runtime arrives in slice 52c-2) MUST NOT start: `corvid serve`
+/// exits non-zero with an `E5204 Contract not executable` message
+/// naming the offending route, never a silent runtime `501`.
 ///
-/// The source COMPILES fine (the type checker accepts `Stream<T>` route
-/// returns); closure is a serve-time runtime-path assertion, distinct
-/// from type checking. Uses `.output()` because the process is expected
-/// to exit promptly rather than bind a listener.
+/// (Streaming was the original probe here; slice 52c-1 shipped the SSE
+/// runtime and flipped the `streaming` capability, so a `Stream<T>`
+/// route now starts. Upload is the remaining unimplemented boundary
+/// type, so the closure-refusal property is asserted against it.)
+///
+/// The source COMPILES fine (the type checker accepts `Upload<Format>`
+/// route bodies); closure is a serve-time runtime-path assertion,
+/// distinct from type checking. Uses `.output()` because the process is
+/// expected to exit promptly rather than bind a listener.
 #[test]
 fn serve_refuses_to_start_when_a_route_is_not_contract_closed() {
     let dir = tempfile::tempdir().unwrap();
     let src_path = dir.path().join("main.cor");
-    let source = r#"type OrderEvent:
-    id: String
-    status: String
+    let source = r#"type ImportReceipt:
+    accepted: Bool
 
-agent order_stream() -> Stream<OrderEvent>:
-    yield OrderEvent("o1", "open")
+agent take_import(body: Upload<Csv>) -> ImportReceipt:
+    return ImportReceipt(true)
 
-server streaming_api:
-    route GET "/orders/stream" -> json Stream<OrderEvent>:
-        return order_stream()
+server import_api:
+    route POST "/import" body Upload<Csv> -> json ImportReceipt:
+        return take_import(body)
 "#;
     std::fs::write(&src_path, source).unwrap();
 
@@ -1450,7 +1453,7 @@ server streaming_api:
         "serve refusal must carry the `E5204` code: stderr=\n{stderr}"
     );
     assert!(
-        stderr.contains("/orders/stream") && stderr.contains("streaming"),
+        stderr.contains("/import") && stderr.contains("upload"),
         "E5204 must name the offending route and the missing capability: stderr=\n{stderr}"
     );
     // Adversarial: it must NOT have printed the ready banner — the
@@ -1460,4 +1463,67 @@ server streaming_api:
         !stdout.contains("listening on"),
         "serve must refuse BEFORE binding a listener: stdout=\n{stdout}"
     );
+}
+
+/// 52c-1 streaming gate. A `Stream<T>` route response executes as
+/// Server-Sent Events end-to-end: `corvid serve` consumes the
+/// interpreter's stream channel and flushes each yielded value as a
+/// `data: <json>` event, terminated by `event: done`. Proves the
+/// `streaming` RuntimeCapability is wired (the route STARTS under
+/// Contract Closure) AND that the transport carries the typed events.
+#[test]
+fn serve_streams_a_stream_route_as_server_sent_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Tick:
+    n: Int
+    label: String
+
+agent ticker() -> Stream<Tick>:
+    yield Tick(1, "first")
+    yield Tick(2, "second")
+    yield Tick(3, "third")
+
+server ticker_api:
+    route GET "/ticks" -> json Stream<Tick>:
+        return ticker()
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8204;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "streaming app did not become ready on :{port} — if it refused to \
+         start, the `streaming` RuntimeCapability regressed to false"
+    );
+
+    let (status, body) = http_get(port, "/ticks").expect("GET /ticks failed");
+    assert_eq!(status, 200, "SSE response status (body={body})");
+    // Each yielded Tick is a `data:` event carrying its JSON; the stream
+    // terminates with `event: done`.
+    for needle in [
+        "data: {",
+        "\"n\":1",
+        "\"label\":\"first\"",
+        "\"n\":2",
+        "\"n\":3",
+        "event: done",
+    ] {
+        assert!(
+            body.contains(needle),
+            "SSE body must contain `{needle}`: body=\n{body}"
+        );
+    }
 }

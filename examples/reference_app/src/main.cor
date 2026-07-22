@@ -33,6 +33,16 @@ type OrderReceipt:
     id: String
     accepted: Bool
 
+type OrderEvent:
+    id: String
+    status: String
+
+# A streaming source: each yield becomes one Server-Sent Event.
+agent order_activity() -> Stream<OrderEvent>:
+    yield OrderEvent("order-1", "placed")
+    yield OrderEvent("order-1", "picked")
+    yield OrderEvent("order-1", "shipped")
+
 server orders_api:
     # Path parameter → `path.id`.
     route GET "/orders/{id}" -> json OrderView:
@@ -46,6 +56,12 @@ server orders_api:
     # Typed request body → `body.item`, `body.quantity`.
     route POST "/orders" body NewOrder -> json OrderReceipt:
         return OrderReceipt("order-new", true)
+
+    # Streaming response → Server-Sent Events (slice 52c-1). The
+    # `Stream<OrderEvent>` return makes `corvid serve` flush each
+    # yielded event as `data: <json>`, then `event: done`.
+    route GET "/orders/activity" -> json Stream<OrderEvent>:
+        return order_activity()
 
 agent main() -> String:
     return "orders_api reference application"

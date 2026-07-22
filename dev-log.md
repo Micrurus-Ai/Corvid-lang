@@ -2851,6 +2851,68 @@ Next per the Phase 52 queue: 52c-boundary-type-runtime (the capability
 
 ---
 
+## 2026-07-22 - 52c-1 closed: `Stream<T>` routes stream as Server-Sent Events (52c split)
+
+52c turned out lopsided, so I split it (pre-phase chat, 2026-07-22).
+Streaming — the first of the three boundary types — was already fully
+built: the SSE `finish` arm in serve was written speculatively in the
+Phase 51 era but never reachable (routes `501`'d before 52a, then 52b's
+Contract Closure refused any `Stream<T>` route). 52c-1 verified it
+end-to-end and unblocked it; the heavier, genuinely-new `Upload<Format>`
+and `Page<Item>` surfaces become 52c-2.
+
+A `Stream<T>` route now serves as Server-Sent Events: `corvid serve`
+consumes the interpreter's `StreamValue` channel and flushes each
+yielded value as a `data: <json>` event, closing with `event: done`.
+Probed live against a three-`yield` ticker and against the reference
+app's new `GET /orders/activity` route — all yielded events arrive as
+SSE, and the app starts cleanly under Contract Closure now that the
+`streaming` `RuntimeCapability` is flipped on. This is closure working
+as designed: the capability stayed dark until its runtime path was
+proven, and the backend refused to advertise it until then.
+
+The pre-phase chat also locked the 52c-2 surface (the two boundary
+types with no runtime yet): `Upload<Format>` bodies read via METHODS
+(`body.text()` / `body.bytes()` / `body.filename()` / `body.content_type()`
+/ `body.size()`) with multipart parsing + accepted-MIME + max-size
+enforcement at the boundary; `Page<Item>` responses CONSTRUCTED via
+`Page(items, next_cursor)` (mirroring `Ok`/`Some`, `has_more` derived)
+with the incoming cursor read from the route's `query` struct and a
+`{items, next_cursor, has_more}` envelope out.
+
+Docs kept honest: the contract-closure tour, README, and inventions.md
+examples used a `Stream<T>` route as the "refuses to start" illustration
+— now that streaming works, a streaming route STARTS, so those examples
+switched to an `Upload<Csv>` route (still refused until 52c-2). Added a
+Streaming Route Responses (SSE) Proof Matrix row + a live
+`serve_streams_a_stream_route_as_server_sent_events` serve_smoke test;
+the 52b closure-refusal test switched from a Stream route to an Upload
+route (the remaining unimplemented boundary type).
+
+And another honest catch: switching that closure test to an `Upload`
+route revealed that 52b's Contract Closure had a LATENT GAP — the IR
+lowerer's `type_ref_to_type` (a separate copy from the checker's)
+handled `Stream`/`List`/`Option`/… but NOT `Upload`/`Page`, so an
+`Upload<Csv>` body lowered to `Type::Unknown` and closure silently
+passed it. 52b's adversarial serve test used a `Stream` route (which IS
+lowered), so it never exercised the Upload/Page path; the unit tests
+constructed `Type::Upload` directly, bypassing lowering. Fixed by
+lowering `Upload`/`Page` to their real types (also required groundwork
+for 52c-2), and added two end-to-end `compile_to_ir` → closure tests
+(`compiled_upload_route_is_detected_as_a_closure_gap` +
+`…page…`) that pin the source→IR→closure path the hand-built unit
+tests couldn't. Live-verified: the Upload app now refuses with E5204,
+exit 1.
+
+Gate: workspace check; serve_smoke (incl. new SSE test + reference-app
+5-app smoke) green; tour sources compile; corpus verify exits 1 on the
+two deliberate fixtures. Per [[serve_smoke gate]] the serve_smoke suite
+is in the gate for every serve-touching slice now.
+
+Next per the Phase 52 queue: 52c-2-upload-page-runtime.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

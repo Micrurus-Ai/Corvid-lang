@@ -6958,3 +6958,58 @@ What this is NOT:
 
 Reference: guarantee `contract.runtime_closure` (RuntimeChecked) in
 core-semantics.md; `corvid tour --topic contract-closure`.
+
+## A `Stream<T>` route streams as Server-Sent Events (2026-07-22)
+
+A route whose response type is `Stream<T>` now serves the stream as
+Server-Sent Events end-to-end. Given
+
+```
+type Tick:
+    n: Int
+    label: String
+
+agent ticker() -> Stream<Tick>:
+    yield Tick(1, "first")
+    yield Tick(2, "second")
+    yield Tick(3, "third")
+
+server ticker_api:
+    route GET "/ticks" -> json Stream<Tick>:
+        return ticker()
+```
+
+`curl -N localhost:PORT/ticks` returns:
+
+```
+data: {"label":"first","n":1}
+
+data: {"label":"second","n":2}
+
+data: {"label":"third","n":3}
+
+event: done
+data:
+```
+
+Each yielded value flushes as one `data: <json>` event; the stream
+closes with `event: done`. `corvid serve` consumes the interpreter's
+stream channel (the same `StreamValue` the language's streaming
+machinery already produces) and pipes it through axum's SSE response —
+the modern AI-app transport falls straight out of the `Stream` type
+with zero glue.
+
+The interesting history: the SSE `finish` arm was written speculatively
+in the Phase 51 era, but it was never reachable — routes returned `501`
+before slice 52a, and slice 52b's Contract Closure then refused any
+`Stream<T>` route at startup. Slice 52c-1 verified the SSE path
+end-to-end and flipped the `streaming` `RuntimeCapability` on, so a
+streaming route now passes closure and serves. This is the closure
+design working exactly as intended: the capability was dark until its
+runtime path was proven, and the backend refused to advertise it until
+then.
+
+What this is NOT: not provider-native session continuation (resuming a
+model stream across a dropped connection is adapter work); not
+backpressure tuning across the HTTP boundary. The typed event transport
+from a `Stream<T>` route is what ships.

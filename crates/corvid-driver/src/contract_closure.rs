@@ -84,7 +84,11 @@ impl RuntimeCapabilities {
     pub fn interpreter_tier() -> Self {
         Self {
             route_execution: true,
-            streaming: false,
+            // SSE streaming for `Stream<T>` responses executes end-to-end
+            // (slice 52c): serve consumes the interpreter's stream channel
+            // and flushes each chunk as a `data:` event with an `event:
+            // done` terminator.
+            streaming: true,
             uploads: false,
             pagination: false,
             auth_enforcement: false,
@@ -107,7 +111,7 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
                 gaps.push(ClosureGap {
                     element: element.clone(),
                     missing_capability: "streaming responses (Server-Sent Events)".to_string(),
-                    provided_by: "52c",
+                    provided_by: "52c-1",
                 });
             }
             if !caps.pagination && matches!(route.response_ty, Type::Page(_)) {
@@ -115,7 +119,7 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
                     element: element.clone(),
                     missing_capability: "cursor-paginated responses (Page<Item> envelope)"
                         .to_string(),
-                    provided_by: "52c",
+                    provided_by: "52c-2",
                 });
             }
 
@@ -130,7 +134,7 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
                     element: element.clone(),
                     missing_capability: "file uploads (multipart Upload<Format> parsing)"
                         .to_string(),
-                    provided_by: "52c",
+                    provided_by: "52c-2",
                 });
             }
 
@@ -277,17 +281,35 @@ mod tests {
         assert!(gaps.is_empty(), "plain route should have no gaps: {gaps:?}");
     }
 
-    /// Adversarial: a `Stream<T>` response route refuses to start —
-    /// the contract advertises an SSE endpoint the interpreter tier
-    /// cannot yet serve.
+    /// The streaming detection path: with the `streaming` capability
+    /// OFF, a `Stream<T>` response route is a gap (E5204). Slice 52c-1
+    /// shipped the SSE runtime and turned the capability on in
+    /// `interpreter_tier()`, so this asserts the detection code against
+    /// an explicit streaming-off snapshot — the code path that guarded
+    /// stream routes before 52c-1 and still guards native tiers that
+    /// lack SSE.
     #[test]
-    fn stream_response_route_is_a_closure_gap() {
+    fn stream_response_route_is_a_gap_when_streaming_is_off() {
         let r = route(Type::Stream(Box::new(Type::String)), None, "h");
         let ir = ir_with(r, vec![handler_agent("h", false)]);
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        let caps = RuntimeCapabilities {
+            streaming: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1);
         assert!(gaps[0].missing_capability.contains("streaming"));
         assert!(gaps[0].message().contains("E5204"));
+    }
+
+    /// Positive: with `interpreter_tier()` (streaming ON as of 52c-1), a
+    /// `Stream<T>` response route is NOT a gap — it starts and serves.
+    #[test]
+    fn stream_response_route_starts_under_interpreter_tier() {
+        let r = route(Type::Stream(Box::new(Type::String)), None, "h");
+        let ir = ir_with(r, vec![handler_agent("h", false)]);
+        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        assert!(gaps.is_empty(), "streaming route should serve: {gaps:?}");
     }
 
     /// Adversarial: an `Upload<Format>` body route refuses to start —
@@ -337,5 +359,50 @@ mod tests {
             ..RuntimeCapabilities::interpreter_tier()
         };
         assert!(check_contract_closure(&ir, caps).is_empty());
+    }
+
+    /// End-to-end guard: an `Upload<Format>` body route, compiled through
+    /// the REAL pipeline (source → resolve → check → lower), must produce
+    /// an upload closure gap. This pins the `type_ref_to_type` lowering of
+    /// `Upload`/`Page` — without it the IR's `body_ty` is `Type::Unknown`
+    /// and closure silently passes a route the runtime can't serve (the
+    /// gap the hand-built unit tests above could not catch because they
+    /// construct `Type::Upload` directly, bypassing lowering).
+    #[test]
+    fn compiled_upload_route_is_detected_as_a_closure_gap() {
+        let source = r#"type R:
+    ok: Bool
+
+agent take(body: Upload<Csv>) -> R:
+    return R(true)
+
+server a:
+    route POST "/i" body Upload<Csv> -> json R:
+        return take(body)
+"#;
+        let ir = crate::compile_to_ir(source).expect("source compiles");
+        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        assert_eq!(gaps.len(), 1, "expected one upload gap: {gaps:?}");
+        assert!(gaps[0].missing_capability.contains("upload"));
+    }
+
+    /// End-to-end companion: a `Page<Item>` response route compiled
+    /// through the real pipeline produces a pagination gap.
+    #[test]
+    fn compiled_page_route_is_detected_as_a_closure_gap() {
+        let source = r#"type Item:
+    id: String
+
+agent list_items() -> Page<Item>:
+    return list_items()
+
+server a:
+    route GET "/items" -> json Page<Item>:
+        return list_items()
+"#;
+        let ir = crate::compile_to_ir(source).expect("source compiles");
+        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        assert_eq!(gaps.len(), 1, "expected one pagination gap: {gaps:?}");
+        assert!(gaps[0].missing_capability.contains("paginated"));
     }
 }

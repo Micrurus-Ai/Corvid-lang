@@ -2074,6 +2074,15 @@ impl<'a> Lowerer<'a> {
                     Box::new(self.type_ref_to_type(&args[0])),
                     Box::new(self.type_ref_to_type(&args[1])),
                 ),
+                // HTTP-boundary types (slice 51f / 52c). Lowered so the IR
+                // carries the real type — Contract Closure (52b) reads the
+                // route's `body_ty`/`response_ty` to decide whether the
+                // interpreter tier can serve it, and the 52c boundary-type
+                // runtime needs the format/item type.
+                "Upload" if args.len() == 1 => {
+                    Type::Upload(Box::new(self.type_ref_to_type(&args[0])))
+                }
+                "Page" if args.len() == 1 => Type::Page(Box::new(self.type_ref_to_type(&args[0]))),
                 _ => Type::Unknown,
             },
             TypeRef::Weak { inner, effects, .. } => Type::Weak(

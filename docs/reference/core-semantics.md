@@ -729,7 +729,7 @@ Before `corvid serve` / `corvid dev` bind a listener, they walk the public HTTP 
 
 **Adversarial tests:**
 
-- `crates/corvid-driver/src/contract_closure.rs::stream_response_route_is_a_closure_gap`
+- `crates/corvid-driver/src/contract_closure.rs::stream_response_route_is_a_gap_when_streaming_is_off`
 - `crates/corvid-driver/src/contract_closure.rs::upload_body_route_is_a_closure_gap`
 - `crates/corvid-driver/src/contract_closure.rs::page_response_route_is_a_closure_gap`
 - `crates/corvid-driver/src/contract_closure.rs::policy_route_without_auth_enforcement_is_a_closure_gap`
