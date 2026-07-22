@@ -47,6 +47,24 @@ A 3,000-line file that does one thing cleanly is fine. A 400-line grab bag is no
 
 The hardest rule. No shortcuts anywhere. If a shipped surface conflicts with the spec, fix the surface rather than softening the spec (see `memory/project_phase_20_closed.md` for the canonical example).
 
+## Single source of truth — check before you re-implement
+
+**Before writing any logic that mirrors behavior that already exists, search for the canonical implementation and reuse it. Do not hand-copy a mapping, projection, validation, or resolution into a second place.**
+
+This is mandatory because two divergent copies of the "same" logic is a bug that ships silently — the copies drift, and one layer enforces something a different layer never promised. It has bitten this repo more than once:
+
+- `corvid serve` hand-copied the contract's `default_mime_for_format` upload map instead of calling it; the copy omitted `Audio`/`Video` and used the wrong unknown-format default, so the runtime accepted media types the Application Contract told the frontend picker to reject.
+- The IR lowerer carried its own `type_ref_to_type` separate from the checker's; the lowerer's copy didn't handle `Upload`/`Page`, so Contract Closure silently passed routes it should have refused.
+
+**The pre-implementation check (do this every time, not just for "big" features):**
+
+1. **Before implementing a mapping / table / format rule / validation / type-or-shape derivation**, grep for an existing one (by the concept name, a sample key, a representative value). Cross-layer pairs are the high-risk zone: contract ↔ runtime, checker ↔ lowerer, checker ↔ codegen, OpenAPI ↔ serve.
+2. **If a canonical version exists, call it.** Make it `pub` (or lift it to a shared crate) rather than copy it. A one-line `pub` beats a second copy that drifts.
+3. **If you genuinely must duplicate** (e.g. a dependency-cycle blocks reuse), say why in a code comment AND add a test that asserts the two stay in sync — the copies fail loudly the moment they diverge, never silently.
+4. **When the shared thing changes**, the single call site updates every consumer for free — that is the whole point.
+
+The forcing question before you type a `match` on strings or a lookup table: *"Does this already exist somewhere the contract, checker, or another tier already relies on?"* If unsure, grep first.
+
 ## Invention shipping contract
 
 Every new invention ships with public proof at the same time as the code. A feature counts as an invention when it is a Corvid-specific language/runtime capability that we would name in the README, site, launch material, or HN discussion.
