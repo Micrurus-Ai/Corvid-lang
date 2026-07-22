@@ -829,6 +829,45 @@ Roadmap: slice 45m in [ROADMAP.md](./ROADMAP.md)
 Proof: [end-to-end time/math/random test](./crates/corvid-driver/tests/executing_time_through_driver.rs) + [replay substitution test](./crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: UTC only (no timezone database or calendar arithmetic); no seeded PRNG surface — reproducibility comes from replay.
 
+### The Application Surface
+
+#### Define Once, Get Everything
+
+A Corvid backend describes its whole public interface as a machine-readable Application Contract. From that one artifact the compiler emits a standard OpenAPI 3.1 document, an AI-native `corvid-ai.json` (streaming events, grounding, approvals, confidence, cost, latency — the behavior OpenAPI cannot express), a universal `corvid dev` console, and typed client SDKs in TypeScript / Swift / Kotlin / Python, plus React hooks and a runnable frontend scaffold — all reading the SAME contract, so no two platforms disagree about a type.
+
+Typed error enums carry `@status`/`@ui` per variant (exhaustive frontend handling); uploads and cursor pagination are first-class HTTP-boundary types. `identity` declares sign-in providers where every OAuth safe-default is mandatory — an insecure session is a compile error absent a loud opt-out, account-linking never silently merges by email, and a per-user connector token is a distinct credential from the login session.
+
+```corvid
+public type Answer:
+    text: String
+    score: Int where between(0, 100)
+
+identity app_users:
+    provider google
+    provider github
+
+public agent classify(question: String) -> Answer:
+    return Answer(question, 90)
+
+public agent chat(message: String) -> Stream<String>:
+    return echo_stream(message)
+```
+
+```bash
+corvid contract app | openapi | ai        # the contract + its projections
+corvid generate sdk --language ts|swift|kotlin|python
+corvid generate frontend --framework react
+corvid dev                                # a universal, contract-driven console
+```
+
+A running `corvid serve` also advertises its own surface at `/.well-known/corvid` and `/openapi.json`.
+
+Spec: [Application Surface](./docs/reference/inventions.md#the-application-surface)
+Tour: `corvid tour --topic application-surface`
+Roadmap: [Phase 51 application surface](./ROADMAP.md)
+Proof: [contract + OpenAPI + SDK generators](./crates/corvid-abi/src/app_contract.rs) + [core-semantics `contract.matches_compiled_surface`](./docs/reference/core-semantics.md)
+Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the surface precisely enough that existing frontends consume it safely; it does not become a frontend language or design your app's UI.
+
 ## Architecture
 
 ```text

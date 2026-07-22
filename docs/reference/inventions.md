@@ -480,6 +480,66 @@ deterministic adversarial corpus.
 Why it is unique: the language uses adversarial testing against its own safety
 claims instead of treating them as prose.
 
+## 6. The Application Surface
+
+### Define Once, Get Everything {#the-application-surface}
+
+A Corvid backend describes its whole public interface as a machine-readable
+**Application Contract**. From that one artifact the compiler emits a standard
+OpenAPI 3.1 document, an AI-native `corvid-ai.json`, a universal console, and
+typed client SDKs — no hand-written glue.
+
+```corvid
+public type Answer:
+    text: String
+    score: Int where between(0, 100)
+
+public agent classify(question: String) -> Answer:
+    return Answer(question, 90)
+
+public agent chat(message: String) -> Stream<String>:
+    return echo_stream(message)
+```
+
+```bash
+corvid contract app        # the machine-readable Application Contract
+corvid contract openapi    # standard OpenAPI 3.1 (any client generator consumes it)
+corvid contract ai         # the AI-native event/grounding/cost metadata
+corvid contract ts-client  # a typed TypeScript client
+corvid generate sdk --language swift|kotlin|python
+corvid generate frontend --framework react   # a runnable starter project
+corvid dev                 # a universal, contract-driven console
+```
+
+Why it is unique: OpenAPI describes ordinary HTTP; it cannot express streaming
+event protocols, approvals, grounding, confidence routing, or per-cost budgets.
+Corvid's contract does, and every generated client, the console, and the SDKs in
+four languages read the SAME contract — so no two platforms can disagree about a
+type's shape.
+
+### Typed Errors That Reach The Frontend
+
+An error enum's variants carry an `@status(code)` and `@ui(...)` presentation
+defaults; a `Result<T, E>` route projects one OpenAPI response per status, and
+the TypeScript generator emits a discriminated union so a frontend handles every
+case exhaustively — the compiler-enforced exhaustiveness of a Corvid `match`
+extended across the HTTP boundary.
+
+### Identity, Safe By Construction
+
+`identity` declares the sign-in providers and session posture. Every OAuth
+safe-default (Authorization Code + PKCE, JWKS verification, secure http-only
+cookies, session rotation, CSRF, refresh rotation, encrypted tokens, redacted
+logs) is the default AND mandatory: making a session insecure is a **compile
+error** unless a loud `insecure_opt_out: true` is present. Account linking runs
+an explicit-confirmation flow with no silent email-match merge, and a per-user
+connector token is a distinct credential the runtime refuses to accept as a
+login session. A local mock IdP plus source-bypass mutators + JWT byte-fuzz
+prove the safe-defaults cannot be bypassed.
+
+Why it is unique: identity is usually a library you can misconfigure. In Corvid
+the insecure configuration is the one you have to fight the compiler for.
+
 ## Proof Matrix
 
 | Invention | Status | Runnable command | Test coverage | Spec | Explicit non-scope |
@@ -508,3 +568,12 @@ claims instead of treating them as prose.
 | Executing HTTP-Client Surface | Shipped (33S2) | `corvid tour --topic http-client` | `crates/corvid-driver/tests/executing_http_through_driver.rs` + `crates/corvid-runtime/src/http.rs::tests` + `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_*` | [`stdlib/http.md`](./stdlib/http.md) | Enforces always-on SSRF block + required `[http] allow` allowlist + replay quarantine; does not police response-body content or rewrite request headers. |
 | Executing SQLite Surface | Shipped (33S3) | `corvid tour --topic sqlite` | `crates/corvid-driver/tests/executing_sqlite_through_driver.rs` + `crates/corvid-runtime/src/db.rs::tests` + `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_db_*` | [`stdlib/db.md`](./stdlib/db.md) | Structural parameter-binding-only (no SQL interpolation path exists; typechecker's `List<DbParam>` + `params_from_iter` together prevent injection) + `[io] root` path confinement reuse + write quarantine on replay + opaque/refcounted `DbHandle` primitive type (user code cannot forge a handle). SQLite only; Postgres path remains envelope-only. |
 | Executing JSON Surface | Shipped (33R5b) | `corvid tour --topic json` | `crates/corvid-driver/tests/executing_json_through_driver.rs` + `crates/corvid-runtime/src/json.rs::tests` + `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_json_*` | [`stdlib/json.md`](./stdlib/json.md) | Ships BOTH the opaque-handle shape (for dynamic JSON) AND the typed-decoder convention (for typed APIs; declare a struct + `decode_X_from_json` tool, runtime decodes generically via serde + `json_to_value`). Two RuntimeChecked guarantees: parse-safety (malformed input returns `Result::Err`, never panics) + field-type-safety (typed-accessor mismatches return `Result::Err`, never coerce). The C-ABI `corvid_json_*` exports exist in `ffi_bridge::json_exports`; cdylib bridging is interpreter-only for v1.0 (follow-up slice). |
+| Application Contract → OpenAPI + AI metadata | Shipped (51a-51c) | `corvid tour --topic application-surface` | `crates/corvid-abi/src/app_contract.rs` + `openapi.rs` + `corvid_ai.rs` tests | [`inventions.md`](#the-application-surface) | Describes the public surface (routes, agents, types, capabilities); does not execute it. The AI-native metadata is Corvid-specific and rides alongside a clean standard OpenAPI document. |
+| Typed Errors Across The Boundary | Shipped (51e) | `corvid contract openapi` on a `Result<T, E>` route | `crates/corvid-abi/src/app_contract.rs` (`error_enum_variants_*`) + `openapi.rs` (`result_route_projects_per_status_*`) | [`inventions.md`](#typed-errors-that-reach-the-frontend) | `@status`/`@ui` per variant + per-status OpenAPI responses + a TS discriminated union; the frontend's exhaustiveness is the client's, enabled by the contract. |
+| Uploads + Cursor Pagination | Shipped (51f) | `corvid contract openapi` | `crates/corvid-abi/src/app_contract.rs` + `openapi.rs` (upload + page tests) | [`inventions.md`](#the-application-surface) | HTTP-boundary types (`Upload<Format>`, `Page<Item>`); native codegen refuses to lower them (serve/interpreter tier). |
+| Identity, Safe By Construction | Shipped (51g-51i) | `corvid check` on an `identity` block | `crates/corvid-abi/src/app_contract.rs` (identity + auth-route + linking tests) + `corvid-types` `check_identity` | [`inventions.md`](#identity-safe-by-construction) | Insecure session config is a compile error absent a loud opt-out; account-linking never silently merges by email. Route mounting in `corvid serve` is a serve-integration follow-up; the storage-layer OAuth crypto ships in `corvid-runtime/src/auth`. |
+| Connector Token ≠ Login Session | Shipped (51j) | `corvid contract list --kind connector` | `crates/corvid-connector-runtime/src/auth.rs` (`login_session_credential_*`, `per_user_*`) | [`core-semantics.md`](./core-semantics.md) (`connector.per_user_token_separate_from_session`) | Runtime refuses a login-session credential at the connector boundary; per-user connectors require the end-user actor. |
+| Auth Safe-Defaults Are Unbypassable | Shipped (51k) | run `crates/corvid-runtime/src/jwt_verify/mock_idp.rs` tests | `mock_idp.rs` (`every_mutated_token_is_refused`, `byte_fuzz_never_panics_and_never_forges`) | [`core-semantics.md`](./core-semantics.md) (`auth.jwt_tamper_and_fuzz_resistant`) | A mock IdP whose only verifiable token is the correct one; six source-bypass mutators + a 2000-input byte-fuzz. |
+| Typed SDKs In Four Languages | Shipped (51l, 51o) | `corvid generate sdk --language ts\|swift\|kotlin\|python` | `crates/corvid-abi/src/ts_client.rs` + `sdk_gen.rs` tests | [`inventions.md`](#the-application-surface) | One contract → typed models everywhere; the TS target is a full client (shipped `@corvid/client`), the others are typed models + a transport scaffold. |
+| Universal Dev Console | Shipped (51m) | `corvid dev` | `crates/corvid-abi/src/dev_console.rs` tests | [`inventions.md`](#the-application-surface) | One self-contained, contract-driven console for every app; execution targets a running `corvid serve`. |
+| React Hooks + Frontend Scaffold | Shipped (51n, 51p, 51q) | `corvid generate frontend --framework react` | `sdk/typescript/react` (tsc-checked) + `crates/corvid-abi/src/frontend_gen.rs` tests | [`inventions.md`](#the-application-surface) | Generic hooks specialized by the generated types + prototype components + a runnable starter; scaffolds you own, not product UI. |

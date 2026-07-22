@@ -48,7 +48,8 @@ use axum::routing::{any, on, MethodFilter};
 use axum::{Json, Router};
 use corvid_ast::HttpMethod;
 use corvid_driver::{
-    compile_to_ir_with_config_at_path, load_corvid_config_for, render_all_pretty,
+    compile_to_application_contract_with_config, compile_to_ir_with_config_at_path,
+    load_corvid_config_for, render_all_pretty,
     run_ir_with_runtime, InterpErrorKind, RunError, Runtime, RuntimeError, ToolRegistry, Value,
 };
 use corvid_ir::{IrCallKind, IrExprKind, IrFile, IrLiteral, IrRoute, IrStmt, IrType};
@@ -121,6 +122,12 @@ struct ServeState {
     /// failing with "no handler registered for tool `<name>`" — the
     /// regression anonymous-2026-06-04 round-2 P1.1 documented.
     host_tools: ToolRegistry,
+    /// The Application Contract JSON, served at `/.well-known/corvid`
+    /// so clients + tooling discover the surface from the live backend
+    /// (slice 51r). `{}` when the contract could not be built.
+    contract_json: String,
+    /// The OpenAPI 3.1 JSON, served at `/openapi.json` (slice 51r).
+    openapi_json: String,
 }
 
 /// How a route's handler is invoked per request.
@@ -214,12 +221,34 @@ pub(crate) fn cmd_serve(
             .tool_registry(host_tools.clone()),
     )
     .build();
+    // Build the Application Contract + OpenAPI so the live backend
+    // exposes its own machine-readable surface (slice 51r). Best-effort:
+    // the source already compiled to IR, so this should succeed; if not,
+    // fall back to `{}` and keep serving the routes.
+    let generated_at =
+        std::env::var("CORVID_BUILD_DATE").unwrap_or_else(|_| "unknown".to_string());
+    let (contract_json, openapi_json) = match compile_to_application_contract_with_config(
+        &source,
+        &file.display().to_string(),
+        &generated_at,
+        config.as_ref(),
+    ) {
+        Ok(contract) => (
+            serde_json::to_string(&contract).unwrap_or_else(|_| "{}".to_string()),
+            serde_json::to_string(&corvid_abi::openapi::emit_openapi(&contract))
+                .unwrap_or_else(|_| "{}".to_string()),
+        ),
+        Err(_) => ("{}".to_string(), "{}".to_string()),
+    };
+
     let state = Arc::new(ServeState {
         ir,
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
         host_tools,
+        contract_json,
+        openapi_json,
     });
 
     let mut app: Router<Arc<ServeState>> = Router::new()
@@ -248,7 +277,12 @@ pub(crate) fn cmd_serve(
         .route(
             "/__approvals/:id/deny",
             on(MethodFilter::POST, deny_approval),
-        );
+        )
+        // The live backend advertises its own machine-readable surface
+        // (slice 51r): the Application Contract at the well-known path
+        // and a standard OpenAPI 3.1 document.
+        .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
     for plan in plans.iter() {
         let filter = method_filter(plan.method);
@@ -878,6 +912,24 @@ fn bad_request(error: &str, detail: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(serde_json::json!({ "error": error, "detail": detail })),
+    )
+        .into_response()
+}
+
+/// Serve the Application Contract JSON (slice 51r).
+async fn serve_contract(State(state): State<Arc<ServeState>>) -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        state.contract_json.clone(),
+    )
+        .into_response()
+}
+
+/// Serve the OpenAPI 3.1 JSON (slice 51r).
+async fn serve_openapi(State(state): State<Arc<ServeState>>) -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        state.openapi_json.clone(),
     )
         .into_response()
 }

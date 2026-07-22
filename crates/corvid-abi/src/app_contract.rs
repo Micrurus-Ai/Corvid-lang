@@ -47,6 +47,17 @@ pub struct ApplicationContract {
     pub identities: Vec<ContractIdentity>,
 }
 
+/// Public Corvid guarantee id the contract emitter enforces (slice
+/// 51r): `contract.matches_compiled_surface`. The emitted contract
+/// describes exactly the checked public surface — private declarations
+/// never appear, and every capability derives from the checked
+/// signature + composed effect row. Declared as a literal so the
+/// `corvid-guarantees` inverse-coverage sentinel finds the enforcement
+/// site (`emit_application_contract` filtering on
+/// `is_callable_from_outside_file`) wired to the registry row.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_CONTRACT_FIDELITY: &str = "contract.matches_compiled_surface";
+
 /// An `identity Name:` surface (slice 51g). The SDK and dev console
 /// render sign-in buttons from `providers`; `session` documents the
 /// login-session posture (all safe-defaults unless a loud opt-out

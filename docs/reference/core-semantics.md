@@ -68,6 +68,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `auth.api_key_at_rest_hashed` | auth | runtime_checked | runtime |
 | `auth.api_key_scope_subset_check` | auth | runtime_checked | runtime |
 | `auth.jwt_kid_rotation` | auth | runtime_checked | runtime |
+| `contract.matches_compiled_surface` | abi_descriptor | static | abi_emit |
 | `auth.jwt_tamper_and_fuzz_resistant` | auth | runtime_checked | runtime |
 | `auth.oauth_pkce_required` | auth | runtime_checked | runtime |
 | `auth.csrf_double_submit` | auth | runtime_checked | runtime |
@@ -631,6 +632,21 @@ Two byte-identical Corvid sources compiled with the same toolchain version produ
 **Adversarial tests:**
 
 - `crates/corvid-abi-verify/src/lib.rs::verifier_rejects_source_descriptor_mismatch`
+
+#### `contract.matches_compiled_surface`
+- **class**: static
+- **phase**: abi_emit
+
+The emitted Application Contract (slice 51) describes exactly the surface the compiler checked: only PUBLIC agents/prompts/types appear, each callable's declared inputs + return type + AI-native capabilities (streaming, grounding, approvals, confidence, cost, latency, pagination) come from its checked signature and composed effect row, field refinements and `@ui`/`@status`/`@upload` attributes carry through from the checked AST, and a private declaration is never exposed. The OpenAPI 3.1 + `corvid-ai.json` projections and every generated SDK read this same contract, so no consumer can observe a surface the compiler did not verify.
+
+**Positive tests:**
+
+- `crates/corvid-abi/src/app_contract.rs::public_agent_capabilities_reflect_return_type_and_effects`
+- `crates/corvid-abi/src/app_contract.rs::route_requires_policy_surfaces_and_binds_typed_actor`
+
+**Adversarial tests:**
+
+- `crates/corvid-abi/src/app_contract.rs::private_agents_are_not_in_the_contract`
 
 ### ABI attestation
 

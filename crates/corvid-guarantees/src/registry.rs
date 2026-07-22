@@ -1342,6 +1342,33 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "contract.matches_compiled_surface",
+        kind: GuaranteeKind::AbiDescriptor,
+        class: GuaranteeClass::Static,
+        phase: Phase::AbiEmit,
+        description:
+            "The emitted Application Contract (slice 51) describes \
+             exactly the surface the compiler checked: only PUBLIC \
+             agents/prompts/types appear, each callable's declared \
+             inputs + return type + AI-native capabilities (streaming, \
+             grounding, approvals, confidence, cost, latency, \
+             pagination) come from its checked signature and composed \
+             effect row, field refinements and `@ui`/`@status`/`@upload` \
+             attributes carry through from the checked AST, and a \
+             private declaration is never exposed. The OpenAPI 3.1 + \
+             `corvid-ai.json` projections and every generated SDK read \
+             this same contract, so no consumer can observe a surface \
+             the compiler did not verify.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-abi/src/app_contract.rs::public_agent_capabilities_reflect_return_type_and_effects",
+            "crates/corvid-abi/src/app_contract.rs::route_requires_policy_surfaces_and_binds_typed_actor",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-abi/src/app_contract.rs::private_agents_are_not_in_the_contract",
+        ],
+    },
+    Guarantee {
         id: "auth.jwt_tamper_and_fuzz_resistant",
         kind: GuaranteeKind::Auth,
         class: GuaranteeClass::RuntimeChecked,

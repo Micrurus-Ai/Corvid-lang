@@ -689,6 +689,41 @@ agent ship_event(url: String, body: String) -> Result<Bool, String>:
     return Ok(http_ok(response))
 "#,
     },
+    TourTopic {
+        name: "application-surface",
+        title: "Define Once, Get Everything",
+        category: "The application surface",
+        pitch: "A Corvid backend describes its whole public interface as a machine-readable Application Contract — every public agent/prompt with its typed inputs and AI-native capabilities (streaming events, grounding, approvals, confidence, cost, latency), every exchanged type with its field refinements, typed error enums with @status codes, uploads, cursor pagination, and the identity providers with their guaranteed OAuth safe-defaults. From that ONE contract the compiler emits a standard OpenAPI 3.1 document, an AI-native `corvid-ai.json`, a universal `corvid dev` console, and typed client SDKs in TypeScript / Swift / Kotlin / Python (plus React hooks + a runnable frontend scaffold). Define the backend once; the frontend gets types, methods, streaming, auth, errors, and pagination for free, and no two platforms can disagree about a type's shape.",
+        spec: "docs/reference/inventions.md#the-application-surface",
+        roadmap: "Phase 51 application surface (51a-51r)",
+        test: "crates/corvid-abi/src/app_contract.rs + ts_client.rs + sdk_gen.rs + frontend_gen.rs + dev_console.rs generator tests",
+        non_scope: "Describes the AI-backend↔frontend boundary precisely enough that existing frontends consume it safely; it does not make Corvid a frontend language or design your app's UI.",
+        source: r#"public type Answer:
+    text: String
+    score: Int where between(0, 100)
+
+public type RefundError:
+    @status(404)
+    @ui(message: "We could not find this payment.")
+    | PaymentNotFound
+    | RefundWindowExpired(expired_at: String)
+
+identity app_users:
+    provider google
+    provider github
+    session:
+        lifetime: 24h
+        same_site: strict
+
+public agent classify(question: String) -> Answer:
+    return Answer(question, 90)
+
+public agent chat(message: String) -> Stream<String>:
+    return echo_stream(message)
+
+tool echo_stream(m: String) -> Stream<String>
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

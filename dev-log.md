@@ -2686,6 +2686,49 @@ Next per the Phase 51 queue: 51r-contract-sweep (the invention contract
 
 ---
 
+## 2026-07-16 - 51r closed: Phase 51 is done, and the surface advertises itself
+
+The last slice is the one the project's rules demand of every
+invention: make it discoverable, runnable, and test-backed. Seventeen
+slices built the application surface; 51r ships its public proof.
+
+A `corvid tour --topic application-surface` demo — "Define Once, Get
+Everything" — whose source compiles through the real driver (the
+all_tour_sources_compile test is the gate, so this can't rot). A new
+"The Application Surface" section in inventions.md walking the
+contract → OpenAPI / console / SDK pipeline, typed errors, and
+identity-safe-by-construction, plus ten Proof Matrix rows across the
+whole phase — each with a runnable command, a test reference, and an
+honest non-scope. A README catalog entry with the same shape. And a new
+guarantee row, contract.matches_compiled_surface (Static, AbiEmit
+phase): the emitted contract describes exactly the checked PUBLIC
+surface — private declarations never leak, capabilities derive from the
+checked signature and composed effect row — with the id anchored at the
+enforcement site so the inverse-coverage sentinel links it, and
+core-semantics.md regenerated.
+
+The nicest part: the live backend now advertises its own surface.
+`corvid serve` builds the Application Contract + OpenAPI alongside the
+IR and serves them at `/.well-known/corvid` and `/openapi.json`. Point
+any OpenAPI tool at a running Corvid app and it discovers the routes;
+point a Corvid-aware client at /.well-known/corvid and it discovers the
+streaming events, approvals, grounding, and identity providers OpenAPI
+can't express. Probed both live — the contract carries the agents,
+identities, and routes; the OpenAPI carries every path including the
+auto-exposed /auth/* routes.
+
+**Phase 51 — the full-stack application surface — is complete.** One
+Corvid backend now yields a typed contract, OpenAPI, AI metadata, a
+universal console, typed clients in four languages, React hooks,
+prototype components, and a runnable frontend, all from one source of
+truth, and the running server hands out its own contract. Corvid owns
+the AI-backend↔frontend boundary without becoming a frontend language.
+
+Phase 52 is the LAUNCH phase and is owed a pre-phase chat before any
+code — the autonomous loop stops at this phase boundary.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
