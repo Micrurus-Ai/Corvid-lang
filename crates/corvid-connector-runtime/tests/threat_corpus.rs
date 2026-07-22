@@ -69,6 +69,7 @@ fn fake_manifest_with_scopes(
         name: name.to_string(),
         provider: provider.to_string(),
         mode: vec![],
+        authorize: Default::default(),
         scope,
         rate_limit: vec![],
         redaction: vec![],

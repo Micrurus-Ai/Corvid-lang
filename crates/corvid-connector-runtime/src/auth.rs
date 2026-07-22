@@ -1,4 +1,30 @@
+use crate::manifest::ConnectorAuthorize;
 use std::collections::BTreeSet;
+
+/// Public Corvid guarantee id this module enforces (slice 51j):
+/// `connector.per_user_token_separate_from_session`. Declared as a
+/// literal so the `corvid-guarantees` inverse-coverage sentinel finds
+/// the enforcement site (`ConnectorAuthState::authorize` refusing a
+/// `CredentialKind::LoginSession` credential) wired to the registry
+/// row. `allow(dead_code)` is the load-bearing attribute.
+#[allow(dead_code)]
+pub const GUARANTEE_ID_CONNECTOR_TOKEN_SEPARATION: &str =
+    "connector.per_user_token_separate_from_session";
+
+/// What kind of credential a token is (slice 51j). A connector call is
+/// authorized ONLY by a `ConnectorAccess` credential; a `LoginSession`
+/// credential (the identity token from the `identity` block) is refused
+/// at the connector boundary. This makes "the login session is not a
+/// workspace access token" a runtime-enforced guarantee, not a
+/// convention — the two are different credentials that never
+/// interchange, even though a per-user connector token is bound to the
+/// same end-user actor as their login session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CredentialKind {
+    #[default]
+    ConnectorAccess,
+    LoginSession,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorAuthState {
@@ -7,6 +33,11 @@ pub struct ConnectorAuthState {
     pub token_id: String,
     pub scopes: BTreeSet<String>,
     pub expires_at_ms: u64,
+    /// The ownership mode the token was issued under (slice 51j).
+    pub authorize: ConnectorAuthorize,
+    /// The credential kind — always `ConnectorAccess` for a token that
+    /// may authorize a connector call.
+    pub credential_kind: CredentialKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +49,13 @@ pub enum ConnectorAuthError {
     RevokedRefreshToken,
     TenantMismatch,
     MissingScope(String),
+    /// The presented credential is not a connector access token
+    /// (slice 51j) — e.g. a login-session identity token. The login
+    /// session and connector workspace tokens never interchange.
+    NotAConnectorCredential,
+    /// A `per_user` connector was authorized without an end-user
+    /// actor (slice 51j).
+    PerUserRequiresEndUser,
 }
 
 impl std::fmt::Display for ConnectorAuthError {
@@ -30,6 +68,14 @@ impl std::fmt::Display for ConnectorAuthError {
             Self::RevokedRefreshToken => write!(f, "connector refresh token is revoked"),
             Self::TenantMismatch => write!(f, "connector refresh token tenant mismatch"),
             Self::MissingScope(scope) => write!(f, "connector token missing scope `{scope}`"),
+            Self::NotAConnectorCredential => write!(
+                f,
+                "credential is not a connector access token (a login-session identity token cannot authorize a connector)"
+            ),
+            Self::PerUserRequiresEndUser => write!(
+                f,
+                "a per_user connector requires an end-user actor to authorize"
+            ),
         }
     }
 }
@@ -50,15 +96,42 @@ impl ConnectorAuthState {
             token_id: token_id.into(),
             scopes: scopes.into_iter().map(Into::into).collect(),
             expires_at_ms,
+            authorize: ConnectorAuthorize::Workspace,
+            credential_kind: CredentialKind::ConnectorAccess,
         }
     }
 
+    /// Mark this token as issued under a per-user authorization
+    /// (slice 51j) — its `actor_id` is the consenting end user.
+    pub fn per_user(mut self) -> Self {
+        self.authorize = ConnectorAuthorize::PerUser;
+        self
+    }
+
+    /// Stamp a credential kind (slice 51j). Only `ConnectorAccess`
+    /// credentials pass `authorize`.
+    pub fn with_credential_kind(mut self, kind: CredentialKind) -> Self {
+        self.credential_kind = kind;
+        self
+    }
+
     pub fn authorize(&self, required_scope: &str, now_ms: u64) -> Result<(), ConnectorAuthError> {
+        // A login-session identity token is not a connector credential
+        // (slice 51j) — the two never interchange.
+        if self.credential_kind != CredentialKind::ConnectorAccess {
+            return Err(ConnectorAuthError::NotAConnectorCredential);
+        }
         if self.tenant_id.trim().is_empty() {
             return Err(ConnectorAuthError::MissingTenant);
         }
         if self.actor_id.trim().is_empty() {
-            return Err(ConnectorAuthError::MissingActor);
+            // A per-user connector has no meaning without the end user;
+            // a workspace connector still needs its service actor.
+            return Err(if self.authorize == ConnectorAuthorize::PerUser {
+                ConnectorAuthError::PerUserRequiresEndUser
+            } else {
+                ConnectorAuthError::MissingActor
+            });
         }
         if self.token_id.trim().is_empty() {
             return Err(ConnectorAuthError::MissingToken);
@@ -80,6 +153,8 @@ pub struct ConnectorRefreshTokenState {
     pub refresh_token_id: String,
     pub scopes: BTreeSet<String>,
     pub revoked: bool,
+    /// The ownership mode minted access tokens inherit (slice 51j).
+    pub authorize: ConnectorAuthorize,
 }
 
 impl ConnectorRefreshTokenState {
@@ -95,7 +170,15 @@ impl ConnectorRefreshTokenState {
             refresh_token_id: refresh_token_id.into(),
             scopes: scopes.into_iter().map(Into::into).collect(),
             revoked: false,
+            authorize: ConnectorAuthorize::Workspace,
         }
+    }
+
+    /// Mark this refresh token (and the access tokens it mints) as
+    /// per-user (slice 51j).
+    pub fn per_user(mut self) -> Self {
+        self.authorize = ConnectorAuthorize::PerUser;
+        self
     }
 
     pub fn refresh(
@@ -116,6 +199,8 @@ impl ConnectorRefreshTokenState {
             token_id: new_token_id.into(),
             scopes: self.scopes.clone(),
             expires_at_ms,
+            authorize: self.authorize,
+            credential_kind: CredentialKind::ConnectorAccess,
         })
     }
 }
@@ -137,6 +222,35 @@ mod tests {
         assert_eq!(access.actor_id, "actor-1");
         assert!(access.scopes.contains("ms365.mail_search"));
         access.authorize("ms365.calendar_events", 1).unwrap();
+    }
+
+    #[test]
+    fn login_session_credential_cannot_authorize_a_connector() {
+        // Slice 51j — a login-session identity token presented at the
+        // connector boundary is refused; the login session and the
+        // connector workspace token never interchange.
+        let state = ConnectorAuthState::new("tenant-1", "user-1", "tok-1", ["gmail.read"], 1000)
+            .with_credential_kind(CredentialKind::LoginSession);
+        assert_eq!(
+            state.authorize("gmail.read", 1),
+            Err(ConnectorAuthError::NotAConnectorCredential)
+        );
+    }
+
+    #[test]
+    fn per_user_connector_requires_an_end_user_actor() {
+        // Slice 51j — a per_user connector token without an end-user
+        // actor is refused with the per-user-specific error.
+        let state = ConnectorAuthState::new("tenant-1", "", "tok-1", ["gmail.read"], 1000).per_user();
+        assert_eq!(
+            state.authorize("gmail.read", 1),
+            Err(ConnectorAuthError::PerUserRequiresEndUser)
+        );
+        // With the end user present it authorizes normally.
+        let ok = ConnectorAuthState::new("tenant-1", "user-1", "tok-1", ["gmail.read"], 1000)
+            .per_user();
+        assert!(ok.authorize("gmail.read", 1).is_ok());
+        assert_eq!(ok.authorize, ConnectorAuthorize::PerUser);
     }
 
     #[test]

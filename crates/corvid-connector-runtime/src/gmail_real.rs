@@ -264,6 +264,7 @@ mod tests {
             name: "gmail".to_string(),
             provider: "google".to_string(),
             mode: vec![],
+            authorize: Default::default(),
             scope: vec![],
             rate_limit: vec![],
             redaction: vec![],

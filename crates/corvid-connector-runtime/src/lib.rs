@@ -18,7 +18,9 @@ pub mod test_kit;
 pub mod trace;
 pub mod webhook_verify;
 
-pub use auth::{ConnectorAuthError, ConnectorAuthState, ConnectorRefreshTokenState};
+pub use auth::{
+    ConnectorAuthError, ConnectorAuthState, ConnectorRefreshTokenState, CredentialKind,
+};
 pub use contract_drift::{
     detect_contract_drift, narrate_drift_report, ContractDriftReport, DriftNarration, TypeChange,
 };
@@ -42,7 +44,7 @@ pub use gmail::{
     GmailSendRequest, GmailWriteReceipt, GMAIL_CONNECTOR_MANIFEST,
 };
 pub use manifest::{
-    parse_connector_manifest, validate_connector_manifest, ConnectorManifest,
+    parse_connector_manifest, validate_connector_manifest, ConnectorAuthorize, ConnectorManifest,
     ConnectorManifestError, ConnectorMode, ConnectorReplayPolicy, ConnectorScope,
     ConnectorScopeApproval, ConnectorValidationReport, RateLimitDeclaration, RedactionRule,
     ReplayDeclaration,

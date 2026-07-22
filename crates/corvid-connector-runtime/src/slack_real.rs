@@ -248,6 +248,7 @@ mod tests {
             name: "slack".to_string(),
             provider: "slack".to_string(),
             mode: vec![],
+            authorize: Default::default(),
             scope: vec![],
             rate_limit: vec![],
             redaction: vec![],

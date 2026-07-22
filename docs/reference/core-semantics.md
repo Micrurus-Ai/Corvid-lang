@@ -77,6 +77,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `approval.explain_sources_grounded` | auth | runtime_checked | runtime |
 | `approval.confused_deputy_typecheck` | auth | out_of_scope | typecheck |
 | `connector.scope_minimum_enforced` | connector | runtime_checked | runtime |
+| `connector.per_user_token_separate_from_session` | connector | runtime_checked | runtime |
 | `connector.write_requires_approval` | connector | out_of_scope | typecheck |
 | `connector.rate_limit_respects_provider` | connector | runtime_checked | runtime |
 | `connector.contract_drift_detected` | connector | runtime_checked | runtime |
@@ -1009,6 +1010,20 @@ A connector cannot use a scope its manifest does not declare and an actor cannot
 - `crates/corvid-connector-runtime/tests/threat_corpus.rs::t1_github_rejects_unauthorised_scope`
 - `crates/corvid-connector-runtime/tests/threat_corpus.rs::t1_gmail_rejects_unauthorised_scope`
 - `crates/corvid-connector-runtime/tests/threat_corpus.rs::t1_slack_rejects_unauthorised_scope`
+
+#### `connector.per_user_token_separate_from_session`
+- **class**: runtime_checked
+- **phase**: runtime
+
+A connector call is authorized only by a `ConnectorAccess` credential; a `LoginSession` identity token (from the `identity` block) is refused at the connector boundary with `ConnectorAuthError::NotAConnectorCredential`. The login session and the connector workspace/per-user access token are distinct credentials that never interchange, so a stolen or replayed login cookie cannot act as a connector token. A `per_user` connector additionally requires the end-user actor to authorize (`PerUserRequiresEndUser`), keeping each user's connector grant scoped to that user.
+
+**Positive tests:**
+
+- `crates/corvid-connector-runtime/src/auth.rs::per_user_connector_requires_an_end_user_actor`
+
+**Adversarial tests:**
+
+- `crates/corvid-connector-runtime/src/auth.rs::login_session_credential_cannot_authorize_a_connector`
 
 #### `connector.write_requires_approval`
 - **class**: out_of_scope

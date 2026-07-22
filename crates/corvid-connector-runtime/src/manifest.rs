@@ -10,6 +10,12 @@ pub struct ConnectorManifest {
     pub provider: String,
     #[serde(default)]
     pub mode: Vec<ConnectorMode>,
+    /// How the connector's access token is owned (slice 51j).
+    /// Defaults to `workspace`; `per_user` means each authenticated
+    /// user authorizes their own connector access, and that token is
+    /// a distinct credential from the login session (identity token).
+    #[serde(default)]
+    pub authorize: ConnectorAuthorize,
     #[serde(default)]
     pub scope: Vec<ConnectorScope>,
     #[serde(default)]
@@ -18,6 +24,19 @@ pub struct ConnectorManifest {
     pub redaction: Vec<RedactionRule>,
     #[serde(default)]
     pub replay: Vec<ReplayDeclaration>,
+}
+
+/// Connector access-token ownership (slice 51j).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorAuthorize {
+    /// One shared token for the whole workspace/tenant.
+    #[default]
+    Workspace,
+    /// Each authenticated user authorizes their own connector access;
+    /// approval-gated scopes prompt that user, and the resulting token
+    /// is kept SEPARATE from the login session.
+    PerUser,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -94,6 +113,9 @@ pub enum ConnectorManifestError {
     InvalidRateLimit(String),
     MissingSensitiveRedaction(String),
     MissingReplayPolicy(String),
+    /// A `per_user` connector declares no scopes (slice 51j) — there is
+    /// nothing for a user to authorize.
+    PerUserWithoutScopes,
 }
 
 impl std::fmt::Display for ConnectorManifestError {
@@ -123,6 +145,12 @@ impl std::fmt::Display for ConnectorManifestError {
             }
             Self::MissingReplayPolicy(scope) => {
                 write!(f, "scope `{scope}` requires replay policy")
+            }
+            Self::PerUserWithoutScopes => {
+                write!(
+                    f,
+                    "a `per_user` connector must declare at least one scope for a user to authorize"
+                )
             }
         }
     }
@@ -155,6 +183,14 @@ pub fn validate_connector_manifest(manifest: &ConnectorManifest) -> ConnectorVal
         if !manifest.mode.contains(&required) {
             diagnostics.push(ConnectorManifestError::MissingMode(required));
         }
+    }
+
+    // Per-user authorization (slice 51j): each user authorizes their
+    // own connector access, so there must be at least one scope for
+    // them to consent to — a per-user connector with no scopes is a
+    // contradiction.
+    if manifest.authorize == ConnectorAuthorize::PerUser && manifest.scope.is_empty() {
+        diagnostics.push(ConnectorManifestError::PerUserWithoutScopes);
     }
 
     let mut scope_ids = BTreeSet::new();
@@ -288,6 +324,31 @@ policy = "quarantine_write"
         let manifest = parse_connector_manifest(VALID).unwrap();
         let report = validate_connector_manifest(&manifest);
         assert!(report.valid, "{report:?}");
+        // Default authorization is workspace-owned (slice 51j).
+        assert_eq!(manifest.authorize, ConnectorAuthorize::Workspace);
+    }
+
+    #[test]
+    fn parses_and_validates_per_user_authorize() {
+        // Slice 51j — a per_user connector with scopes is valid.
+        let src = VALID.replace(
+            "mode = [\"mock\", \"replay\", \"real\"]",
+            "mode = [\"mock\", \"replay\", \"real\"]\nauthorize = \"per_user\"",
+        );
+        let manifest = parse_connector_manifest(&src).unwrap();
+        assert_eq!(manifest.authorize, ConnectorAuthorize::PerUser);
+        assert!(validate_connector_manifest(&manifest).valid);
+
+        // A per_user connector with no scopes is rejected.
+        let mut empty = manifest.clone();
+        empty.scope.clear();
+        empty.redaction.clear();
+        empty.replay.clear();
+        let report = validate_connector_manifest(&empty);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| matches!(d, ConnectorManifestError::PerUserWithoutScopes)));
     }
 
     #[test]

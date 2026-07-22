@@ -363,6 +363,7 @@ mod tests {
             name: "tasks".to_string(),
             provider: "linear_github".to_string(),
             mode: vec![],
+            authorize: Default::default(),
             scope: vec![],
             rate_limit: vec![],
             redaction: vec![],

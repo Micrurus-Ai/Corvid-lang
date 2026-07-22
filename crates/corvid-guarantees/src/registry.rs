@@ -1576,6 +1576,31 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "connector.per_user_token_separate_from_session",
+        kind: GuaranteeKind::Connector,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A connector call is authorized only by a `ConnectorAccess` \
+             credential; a `LoginSession` identity token (from the \
+             `identity` block) is refused at the connector boundary \
+             with `ConnectorAuthError::NotAConnectorCredential`. The \
+             login session and the connector workspace/per-user access \
+             token are distinct credentials that never interchange, so \
+             a stolen or replayed login cookie cannot act as a \
+             connector token. A `per_user` connector additionally \
+             requires the end-user actor to authorize \
+             (`PerUserRequiresEndUser`), keeping each user's connector \
+             grant scoped to that user.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-connector-runtime/src/auth.rs::per_user_connector_requires_an_end_user_actor",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-connector-runtime/src/auth.rs::login_session_credential_cannot_authorize_a_connector",
+        ],
+    },
+    Guarantee {
         id: "connector.write_requires_approval",
         kind: GuaranteeKind::Connector,
         class: GuaranteeClass::OutOfScope,

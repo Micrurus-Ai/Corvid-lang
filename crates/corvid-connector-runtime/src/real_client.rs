@@ -282,6 +282,7 @@ mod tests {
             name: "fake".to_string(),
             provider: "test".to_string(),
             mode: vec![],
+            authorize: Default::default(),
             scope: vec![],
             rate_limit: vec![],
             redaction: vec![],

@@ -2378,6 +2378,50 @@ Next per the Phase 51 queue: 51j-connector-user-auth.
 
 ---
 
+## 2026-07-16 - 51j closed: per-user connectors, and a credential that isn't a login
+
+The identity block (51g-51i) authenticates the human. Connectors
+(Phase 41) reach into Gmail, Slack, GitHub. The dangerous shortcut is
+to conflate the two credentials — to let the login session double as
+the connector token, so a stolen login cookie can read your mail. 51j
+makes that impossible by construction.
+
+Two pieces:
+
+1. The connector manifest gains `authorize: workspace | per_user`.
+   Workspace is the default (one shared token per tenant); `per_user`
+   means each authenticated user authorizes their own connector
+   access, and approval-gated scopes prompt that specific user. A
+   `per_user` connector with no scopes is a contradiction the manifest
+   validator rejects — there's nothing to consent to.
+
+2. The separation is now a RUNTIME-ENFORCED guarantee, not a
+   convention. A `ConnectorAuthState` carries a `CredentialKind`, and
+   `authorize()` refuses anything that isn't `ConnectorAccess`. Present
+   a `LoginSession` identity token at the connector boundary and you
+   get `NotAConnectorCredential` before any scope check. The login
+   session and the connector workspace/per-user token are different
+   credentials that never interchange — even when a per-user connector
+   token is bound to the very same end-user actor as their login. A
+   per-user connector also refuses to authorize without that end-user
+   actor (`PerUserRequiresEndUser`).
+
+This is the concrete meaning of the actor from 51h carrying no
+provider tokens: the type system already kept `ConnectorAuthState` and
+the identity `SessionRecord` in different crates, and now the runtime
+actively rejects a cross-use even if someone hand-builds it.
+
+Registered as `connector.per_user_token_separate_from_session`
+(RuntimeChecked), with the guarantee id wired as a literal at the
+enforcement site so the inverse-coverage sentinel links the row to the
+code; core-semantics.md regenerated. Tests: manifest (per_user parse +
+validate + no-scopes reject) and auth (login-session refusal as the
+adversarial case, per-user end-user requirement as the positive case).
+
+Next per the Phase 51 queue: 51k-mock-idp-and-fuzz.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
