@@ -1,0 +1,47 @@
+# Corvid TypeScript SDK
+
+A Corvid backend describes its public surface as a machine-readable
+[Application Contract](../../docs/reference/inventions.md). The TypeScript
+SDK turns that contract into a typed browser client with **no hand-written
+glue**.
+
+## Two pieces
+
+- **`@corvid/client`** (`client/`) — the generic transport, shipped once
+  and reused by every app. It owns the cross-cutting behavior:
+  - session-cookie auth (`credentials: "include"`) and the
+    `/auth/{provider}/login|logout|session` helpers,
+  - the typed agent **event protocol** over SSE
+    (`started`/`chunk`/`tool_started`/`tool_completed`/`approval_required`/`completed`/`failed`),
+  - typed errors (`CorvidError`, carrying the `@status` code and the
+    parsed error-enum body),
+  - cursor **pagination** (`Page<Item>`, `paginate(...)`).
+- **Generated `types.ts` + `api.ts`** — produced per app by
+  `corvid contract ts-client`. `types.ts` is one `interface` per record
+  and a discriminated union per sum/error type (with a `…Meta` map for
+  `@status`/`@ui`); `api.ts` is a thin, typed `Api` class whose methods
+  delegate to `@corvid/client`. Nothing cross-cutting is regenerated —
+  upgrades to streaming, approvals, grounding, or pagination happen in
+  the one shipped package.
+
+## Usage
+
+```bash
+corvid contract ts-client src/main.cor --out sdk/generated
+```
+
+```ts
+import { CorvidClient } from "@corvid/client";
+import { Api } from "./sdk/generated/api";
+
+const api = new Api(new CorvidClient({ baseUrl: "https://api.example.com" }));
+
+const answer = await api.classify("hello");            // typed result
+for await (const event of api.chat("hi")) {            // typed SSE events
+  if (event.kind === "chunk") render(event.value);
+}
+api.loginWith_google();                                // auth helper
+```
+
+Define the backend once in Corvid; the frontend gets types, methods,
+streaming, auth, errors, and pagination for free.

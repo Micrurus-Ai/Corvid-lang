@@ -401,6 +401,30 @@ pub fn run_openapi(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     Ok(0)
 }
 
+/// Slice 51l — generate the TypeScript client (`types.ts` + `api.ts`)
+/// into `out_dir`. The generated code delegates to `@corvid/client`.
+pub fn run_ts_client(file: Option<&Path>, out_dir: &Path) -> Result<u8> {
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let files = corvid_abi::ts_client::emit_ts_client(&contract);
+    std::fs::create_dir_all(out_dir)
+        .with_context(|| format!("creating output directory `{}`", out_dir.display()))?;
+    for gf in &files {
+        let path = out_dir.join(&gf.filename);
+        std::fs::write(&path, &gf.contents)
+            .with_context(|| format!("writing `{}`", path.display()))?;
+        println!("wrote {} ({} bytes)", path.display(), gf.contents.len());
+    }
+    println!(
+        "generated TypeScript client for {} agent(s), {} prompt(s), {} type(s) — import the shipped `@corvid/client` package for the transport",
+        contract.agents.len(),
+        contract.prompts.len(),
+        contract.types.len(),
+    );
+    Ok(0)
+}
+
 /// Slice 51c — emit the AI-native metadata (`corvid-ai.json`).
 pub fn run_corvid_ai(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     let Some(contract) = build_contract(file)? else {

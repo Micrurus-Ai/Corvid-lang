@@ -856,6 +856,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             ContractCommand::Ai { file, out } => {
                 contract_cmd::run_corvid_ai(file.as_deref(), out.as_deref())
             }
+            ContractCommand::TsClient { file, out } => {
+                contract_cmd::run_ts_client(file.as_deref(), &out)
+            }
             ContractCommand::RegenDoc { output } => contract_cmd::run_regen_doc(&output),
         },
         Some(Command::Connectors { command }) => cmd_connectors(command),

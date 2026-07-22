@@ -12,6 +12,7 @@ mod provenance_emit;
 pub mod app_contract;
 pub mod corvid_ai;
 pub mod openapi;
+pub mod ts_client;
 mod schema;
 mod signing;
 mod tool_contract;

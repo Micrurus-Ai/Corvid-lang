@@ -67,6 +67,19 @@ pub enum ContractCommand {
         #[arg(long, value_name = "KIND")]
         kind: Option<String>,
     },
+    /// Generate the TypeScript client (`types.ts` + `api.ts`) for a
+    /// Corvid source file from its Application Contract. The generated
+    /// code is a thin, typed veneer over the shipped `@corvid/client`
+    /// package — HTTP/SSE transport, session auth, typed errors, and
+    /// pagination are reused, not regenerated. Writes into `--out`
+    /// (default `sdk/generated`).
+    TsClient {
+        /// Source file. Defaults to `src/main.cor` in a project.
+        file: Option<std::path::PathBuf>,
+        /// Output directory for `types.ts` + `api.ts`.
+        #[arg(long, value_name = "DIR", default_value = "sdk/generated")]
+        out: PathBuf,
+    },
     /// Regenerate `docs/reference/core-semantics.md` from the canonical
     /// guarantee registry. Writes the rendered markdown to the given
     /// `OUTPUT` path (typically `docs/reference/core-semantics.md`); CI fails on

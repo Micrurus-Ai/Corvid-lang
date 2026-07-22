@@ -2466,6 +2466,50 @@ Next per the Phase 51 queue: 51l-ts-client.
 
 ---
 
+## 2026-07-16 - 51l closed: define the backend once, get a typed frontend client
+
+Phase 51 spent eleven slices making the Application Contract describe a
+Corvid backend precisely. 51l cashes that in: the contract generates a
+TypeScript client with zero hand-written glue, and it type-checks.
+
+Two pieces, and the split is the whole point:
+
+`@corvid/client` (sdk/typescript/client/) is the generic transport,
+shipped once and REUSED by every app. It owns everything cross-cutting
+— session-cookie auth, the typed agent event union over SSE
+(started/chunk/tool_started/tool_completed/approval_required/
+completed/failed), `CorvidError` carrying the @status code and the
+parsed error-enum body, and cursor pagination. It type-checks clean
+under tsc strict + NodeNext.
+
+The generated `types.ts` + `api.ts` (from `corvid contract ts-client`)
+are a thin, typed veneer. `types.ts` is one interface per record and a
+discriminated union per sum/error type, with a `…Meta` map carrying the
+@status/@ui presentation defaults. `api.ts` is an `Api` class whose
+every method is a one-liner delegating to the shipped client —
+`invoke` for a normal agent, `stream` for a streaming one,
+`loginWith_google()` etc. from the identity block. The generated code
+IMPORTS the transport; it never reimplements it. Upgrade streaming or
+approvals or grounding once, in the package, and every generated client
+gets it.
+
+The proof is end-to-end. I generated a client for an app mixing
+records, an error enum, `Page<Item>`, `Stream<String>`, and an identity
+block, then wrote realistic usage against it — awaiting a typed result,
+iterating a stream with `event.kind === "chunk"` narrowing to a typed
+value, narrowing an error union exhaustively, calling a login helper —
+and ran `tsc` over the generated files plus the usage plus the package.
+Zero type errors. The contract really does hand a frontend a typed,
+streaming, authenticated client for free.
+
+Rust tests cover the generator (record→interface, error-enum→union +
+meta map, agent→typed method distinguishing invoke vs stream,
+identity→login helpers). This begins Phase 51's frontend/SDK track.
+
+Next per the Phase 51 queue: 51m-dev-console.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
