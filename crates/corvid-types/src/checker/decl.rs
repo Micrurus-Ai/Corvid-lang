@@ -286,6 +286,24 @@ impl<'a> Checker<'a> {
             self.bind_route_local_by_name(&route.body, "body", ty);
         }
 
+        // Auth policy (slice 51h): a `requires` clause needs an
+        // `identity` block to give it meaning, and binds a typed
+        // `actor` in the route body.
+        if let Some(policy) = &route.policy {
+            if policy.requires_auth() {
+                if !self.has_identity {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::RoutePolicyWithoutIdentity {
+                            server: server.name.name.clone(),
+                            path: route.path.clone(),
+                        },
+                        policy.span,
+                    ));
+                }
+                self.bind_route_local_by_name(&route.body, "actor", actor_type());
+            }
+        }
+
         let declared_ret = self.type_ref_to_type(&route.response.ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
@@ -309,6 +327,23 @@ impl<'a> Checker<'a> {
             }
         }
     }
+}
+
+/// The synthetic struct type bound as `actor` in an authenticated
+/// route body (slice 51h). Modeled with the same `RouteParams`
+/// machinery `path`/`query` use, so field access is fully typed
+/// without a dedicated `Type` variant. Mirrors the runtime's
+/// `AuthActor`: identity + tenant + display name + role/permission
+/// sets. Provider tokens are deliberately ABSENT — the login actor
+/// never carries connector workspace credentials (slice 51j).
+fn actor_type() -> Type {
+    Type::RouteParams(vec![
+        ("id".to_string(), Type::String),
+        ("tenant".to_string(), Type::String),
+        ("display_name".to_string(), Type::String),
+        ("roles".to_string(), Type::List(Box::new(Type::String))),
+        ("permissions".to_string(), Type::List(Box::new(Type::String))),
+    ])
 }
 
 fn collect_ident_spans_by_name_in_block(block: &Block, name: &str, spans: &mut Vec<Span>) {

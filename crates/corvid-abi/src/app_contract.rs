@@ -57,6 +57,26 @@ pub struct ContractIdentity {
     pub name: String,
     pub providers: Vec<ContractProvider>,
     pub session: ContractSession,
+    /// The auth routes the runtime auto-exposes for this identity
+    /// (slice 51h): a login + callback per provider, plus logout and
+    /// session. Derived — the program does not write them.
+    pub auth_routes: Vec<ContractAuthRoute>,
+    /// The mandatory OAuth safe-defaults every auth route enforces
+    /// (slice 51h). Listed so the contract is explicit about the
+    /// guaranteed posture rather than leaving it to documentation.
+    pub safeguards: Vec<String>,
+}
+
+/// One auto-exposed auth route (slice 51h).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractAuthRoute {
+    pub method: String,
+    pub path: String,
+    /// `login` | `callback` | `logout` | `session`.
+    pub purpose: String,
+    /// The provider wire-name, for `login` / `callback` routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 /// One configured identity provider.
@@ -177,6 +197,20 @@ pub struct ContractRoute {
     /// `Page<Item>` / `Stream<Item>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pagination: Option<Pagination>,
+    /// Auth policy (slice 51h) from a `requires authenticated|role|
+    /// permission` clause. Present = the route needs a login session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ContractRoutePolicy>,
+}
+
+/// A route's authentication/authorization policy (slice 51h).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractRoutePolicy {
+    pub authenticated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -365,6 +399,38 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
         })
         .collect();
     let session = decl.session.clone().unwrap_or_default();
+
+    // Auto-exposed auth routes (slice 51h): login + callback per
+    // provider, plus a shared logout and session endpoint.
+    let mut auth_routes = Vec::new();
+    for p in &decl.providers {
+        let provider = p.kind.wire_name();
+        auth_routes.push(ContractAuthRoute {
+            method: "GET".into(),
+            path: format!("/auth/{provider}/login"),
+            purpose: "login".into(),
+            provider: Some(provider.clone()),
+        });
+        auth_routes.push(ContractAuthRoute {
+            method: "GET".into(),
+            path: format!("/auth/{provider}/callback"),
+            purpose: "callback".into(),
+            provider: Some(provider),
+        });
+    }
+    auth_routes.push(ContractAuthRoute {
+        method: "POST".into(),
+        path: "/auth/logout".into(),
+        purpose: "logout".into(),
+        provider: None,
+    });
+    auth_routes.push(ContractAuthRoute {
+        method: "GET".into(),
+        path: "/auth/session".into(),
+        purpose: "session".into(),
+        provider: None,
+    });
+
     ContractIdentity {
         name: decl.name.name.clone(),
         providers,
@@ -375,7 +441,34 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
             same_site: session.cookie.same_site.wire_name().to_string(),
             rotate_on_privilege_change: session.rotate_on_privilege_change,
         },
+        auth_routes,
+        safeguards: mandatory_auth_safeguards(),
     }
+}
+
+/// The OAuth safe-defaults every auto-exposed auth route enforces
+/// (slice 51h). Named in the contract so the guaranteed posture is
+/// explicit and machine-readable, not just documented.
+fn mandatory_auth_safeguards() -> Vec<String> {
+    [
+        "authorization_code_with_pkce",
+        "signed_expiring_state",
+        "oidc_nonce",
+        "exact_redirect_uri_allowlist",
+        "jwks_signature_verification",
+        "iss_aud_exp_nbf_validation",
+        "secure_http_only_cookies",
+        "session_rotation_on_privilege_change",
+        "csrf_double_submit",
+        "refresh_token_rotation",
+        "encrypted_provider_tokens",
+        "token_revocation",
+        "redacted_auth_logs",
+        "minimal_scopes",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
@@ -529,6 +622,13 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .map(|e| e.name.name.clone())
             .collect(),
         pagination: pagination_for(&r.response.ty),
+        policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| {
+            ContractRoutePolicy {
+                authenticated: true,
+                roles: p.roles.clone(),
+                permissions: p.permissions.clone(),
+            }
+        }),
     }
 }
 
@@ -908,6 +1008,76 @@ tool stream_answer(m: String) -> Stream<String>
                 corvid_types::TypeWarningKind::IdentityInsecureSession { .. }
             )),
             "expected an insecure-session warning"
+        );
+    }
+
+    #[test]
+    fn identity_auto_exposes_auth_routes_with_safeguards() {
+        let contract = contract_for(
+            "identity app_users:
+    provider google
+    provider github
+",
+        );
+        let id = &contract.identities[0];
+        // login + callback per provider (2), plus logout + session.
+        assert_eq!(id.auth_routes.len(), 2 * 2 + 2);
+        assert!(id
+            .auth_routes
+            .iter()
+            .any(|r| r.path == "/auth/google/login" && r.purpose == "login"));
+        assert!(id
+            .auth_routes
+            .iter()
+            .any(|r| r.path == "/auth/github/callback" && r.purpose == "callback"));
+        assert!(id.auth_routes.iter().any(|r| r.path == "/auth/logout"));
+        assert!(id.auth_routes.iter().any(|r| r.path == "/auth/session"));
+        // The mandatory safe-defaults are named in the contract.
+        for required in [
+            "authorization_code_with_pkce",
+            "jwks_signature_verification",
+            "secure_http_only_cookies",
+            "refresh_token_rotation",
+        ] {
+            assert!(id.safeguards.iter().any(|s| s == required), "missing {required}");
+        }
+    }
+
+    #[test]
+    fn route_requires_policy_surfaces_and_binds_typed_actor() {
+        let contract = contract_for(
+            "identity app_users:
+    provider google
+
+server admin_api:
+    route GET \"/admin\" -> json String requires role(\"admin\"):
+        return actor.id
+",
+        );
+        let route = contract.routes.iter().find(|r| r.path == "/admin").unwrap();
+        let policy = route.policy.as_ref().expect("policy present");
+        assert!(policy.authenticated);
+        assert_eq!(policy.roles, vec!["admin".to_string()]);
+    }
+
+    #[test]
+    fn route_requires_without_identity_is_rejected() {
+        let src = "server admin_api:
+    route GET \"/admin\" -> json String requires authenticated:
+        return \"ok\"
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(
+            checked.errors.iter().any(|e| matches!(
+                e.kind,
+                corvid_types::TypeErrorKind::RoutePolicyWithoutIdentity { .. }
+            )),
+            "expected RoutePolicyWithoutIdentity, got {:?}",
+            checked.errors
         );
     }
 

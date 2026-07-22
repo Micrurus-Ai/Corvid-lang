@@ -134,6 +134,11 @@ pub enum TypeErrorKind {
     /// OIDC discovery URL.
     IdentityConfigInvalid { identity: String, message: String },
 
+    /// A route carries a `requires authenticated|role|permission`
+    /// policy (slice 51h) but the program declares no `identity`
+    /// block, so there is no way to authenticate a caller.
+    RoutePolicyWithoutIdentity { server: String, path: String },
+
     /// A malformed `@retry(...)` / `@idempotency(...)` annotation
     /// (slice 45q): zero attempts, key naming no parameter, or a
     /// key parameter of non-derivable type.
@@ -556,6 +561,11 @@ impl TypeErrorKind {
             }
             Self::IdentityConfigInvalid { identity, message } => {
                 format!("invalid `identity {identity}`: {message}")
+            }
+            Self::RoutePolicyWithoutIdentity { server, path } => {
+                format!(
+                    "route `{path}` in server `{server}` uses `requires ...` but the program declares no `identity` block to authenticate against"
+                )
             }
             Self::UnknownGenericHead { name, suggestion } => match suggestion {
                 Some(s) => format!("`{name}` is not a generic type — did you mean `{s}`?"),
@@ -1111,6 +1121,9 @@ impl TypeErrorKind {
             )),
             Self::IdentityConfigInvalid { .. } => Some(
                 "declare at least one `provider`; keep cookies `secure`+`http_only` and `same_site: strict|lax`. An unsafe cookie choice requires an explicit `insecure_opt_out: true`.".into(),
+            ),
+            Self::RoutePolicyWithoutIdentity { .. } => Some(
+                "add an `identity <name>:` block declaring the sign-in providers; the auth routes and the typed `actor` derive from it".into(),
             ),
         }
     }

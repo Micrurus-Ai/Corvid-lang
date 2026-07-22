@@ -456,6 +456,10 @@ struct Checker<'a> {
 
     /// Last-refresh snapshot per weak local.
     weak_refresh: HashMap<LocalId, EffectFrontier>,
+
+    /// Whether the file declares any `identity` block (slice 51h). A
+    /// route `requires` policy is only legal when it does.
+    has_identity: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -700,6 +704,10 @@ impl<'a> Checker<'a> {
             approvals_seen_in_agent: Vec::new(),
             effect_frontier: EffectFrontier::default(),
             weak_refresh: HashMap::new(),
+            has_identity: file
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Identity(_))),
         }
     }
 

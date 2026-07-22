@@ -3551,3 +3551,25 @@ fn parses_identity_block_with_providers_and_session() {
     assert!(session.cookie.secure);
     assert!(session.cookie.http_only);
 }
+
+#[test]
+fn parses_route_requires_policy() {
+    let src = "server admin_api:
+    route GET \"/admin\" -> json String requires authenticated and role(\"admin\") and permission(\"refund:write\"):
+        return actor.id
+";
+    let file = parse_file_src(src);
+    let server = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Server(s) => Some(s),
+            _ => None,
+        })
+        .unwrap();
+    let policy = server.routes[0].policy.as_ref().unwrap();
+    assert!(policy.authenticated);
+    assert_eq!(policy.roles, vec!["admin".to_string()]);
+    assert_eq!(policy.permissions, vec!["refund:write".to_string()]);
+    assert!(policy.requires_auth());
+}

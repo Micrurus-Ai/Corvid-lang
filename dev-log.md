@@ -2268,6 +2268,65 @@ Next per the Phase 51 queue: 51h-auth-routes-and-actors.
 
 ---
 
+## 2026-07-16 - 51h closed: route auth policies and the typed actor
+
+51g declared who can sign in; 51h says which routes require it and
+gives the handler a typed view of who's calling.
+
+A server route takes a `requires` clause:
+
+```
+server admin_api:
+    route GET "/me" -> json String requires authenticated:
+        return actor.display_name
+    route GET "/refunds" -> json String requires role("admin") and permission("refund:write"):
+        return actor.id
+```
+
+The `actor` bound in an authenticated route body is fully typed —
+`id`, `tenant`, `display_name`, `roles`, `permissions`. The trick is
+that it reuses the exact `RouteParams` synthetic-struct machinery that
+already types `path` and `query`, so `actor.display_name` type-checks
+and a typo is a compile error, all without a new `Type` variant or a
+codegen cascade. The actor deliberately carries NO provider tokens:
+the login identity and connector workspace tokens are separate
+surfaces (51j enforces the split).
+
+The checker refuses a `requires` policy when there's no `identity`
+block to authenticate against — there's no way to gate a route on an
+identity system you didn't declare.
+
+From the `identity` block the compiler auto-exposes the standard auth
+routes — `/auth/{provider}/login` + `/callback` per provider, plus
+`/auth/logout` and `/auth/session` — into the application contract and
+the OpenAPI projection (tagged `auth`, with redirect/session
+responses). The load-bearing move for the moat: every OAuth
+safe-default is a MACHINE-READABLE `safeguards` list on the contract,
+not prose — authorization_code_with_pkce, signed_expiring_state,
+oidc_nonce, exact_redirect_uri_allowlist, jwks_signature_verification,
+iss_aud_exp_nbf_validation, secure_http_only_cookies,
+session_rotation_on_privilege_change, csrf_double_submit,
+refresh_token_rotation, encrypted_provider_tokens, token_revocation,
+redacted_auth_logs, minimal_scopes. A tool, an auditor, or the dev
+console can read the guaranteed posture directly. A policy route
+projects OpenAPI `security` scoped to its roles/permissions
+(`role:admin`, `permission:refund:write`).
+
+Scope: 51h is the source + type + contract surface. The runtime
+route-mounting in `corvid serve` is a serve-integration follow-up —
+the storage-layer crypto for these routes (PKCE, hashed single-use
+state, nonce, session rotation, CSRF) already exists in
+`corvid-runtime/src/auth`, so mounting is wiring, not new crypto.
+
+Live-probed the contract + OpenAPI + `actor` typing + the no-identity
+rejection. Tests: parser (chained `requires ... and ...`), contract
+emitter (auth routes + safeguards + policy + typed-actor field
+access + no-identity reject), OpenAPI (auth paths + scoped security).
+
+Next per the Phase 51 queue: 51i-account-linking.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

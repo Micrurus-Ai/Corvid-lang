@@ -101,13 +101,24 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
         }
         operation.insert("responses".into(), Value::Object(responses));
 
-        // A route requiring an approval-bearing effect advertises
-        // security so tools prompt for auth.
-        if !route.requires.is_empty() {
-            operation.insert(
-                "security".into(),
-                json!([{ "corvidSession": route.requires }]),
-            );
+        // A route requiring an approval-bearing effect OR an auth
+        // policy advertises security so tools prompt for auth. An auth
+        // policy's roles/permissions ride as the session's scopes.
+        let mut scopes: Vec<String> = route.requires.clone();
+        if let Some(policy) = &route.policy {
+            for role in &policy.roles {
+                scopes.push(format!("role:{role}"));
+            }
+            for perm in &policy.permissions {
+                scopes.push(format!("permission:{perm}"));
+            }
+            if policy.authenticated && scopes.is_empty() {
+                // Authenticated with no finer scope still needs a session.
+                scopes.push("authenticated".to_string());
+            }
+        }
+        if !scopes.is_empty() {
+            operation.insert("security".into(), json!([{ "corvidSession": scopes }]));
         }
 
         let method = route.method.to_lowercase();
@@ -116,6 +127,46 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             .or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(map) = entry {
             map.insert(method, Value::Object(operation));
+        }
+    }
+
+    // Auto-exposed auth routes (slice 51h): a standard OpenAPI client
+    // sees the sign-in / callback / logout / session surface derived
+    // from the `identity` block.
+    for identity in &contract.identities {
+        for auth in &identity.auth_routes {
+            let summary = match auth.purpose.as_str() {
+                "login" => "Begin sign-in (Authorization Code + PKCE); redirects to the provider.",
+                "callback" => "OAuth callback: verifies state/nonce and the ID-token signature, then issues a session.",
+                "logout" => "Revoke the session and clear the session cookie.",
+                "session" => "Return the current authenticated actor, or 401 if unauthenticated.",
+                _ => "Auth route.",
+            };
+            let mut op = Map::new();
+            op.insert("summary".into(), json!(summary));
+            op.insert("tags".into(), json!(["auth"]));
+            op.insert(
+                "x-corvid-auth-safeguards".into(),
+                json!(identity.safeguards),
+            );
+            if let Some(provider) = &auth.provider {
+                op.insert("x-corvid-provider".into(), json!(provider));
+            }
+            let responses = match auth.purpose.as_str() {
+                "login" | "callback" => json!({ "302": { "description": "Redirect" } }),
+                "session" => json!({
+                    "200": { "description": "The authenticated actor" },
+                    "401": { "description": "Not authenticated" }
+                }),
+                _ => json!({ "204": { "description": "No Content" } }),
+            };
+            op.insert("responses".into(), responses);
+            let entry = paths
+                .entry(auth.path.clone())
+                .or_insert_with(|| Value::Object(Map::new()));
+            if let Value::Object(map) = entry {
+                map.insert(auth.method.to_lowercase(), Value::Object(op));
+            }
         }
     }
 
@@ -401,6 +452,7 @@ mod tests {
                 response_type: "Answer".into(),
                 requires: vec!["issue_refund".into()],
                 pagination: None,
+                policy: None,
             }],
             agents: vec![ContractCallable {
                 name: "chat".into(),
@@ -504,6 +556,7 @@ mod tests {
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,
+            policy: None,
         });
         let openapi = emit_openapi(&c);
         // Body carrying an upload is multipart/form-data.
@@ -548,6 +601,7 @@ mod tests {
                 item_type: "Item".into(),
                 cursor_param: Some("cursor".into()),
             }),
+            policy: None,
         });
         let openapi = emit_openapi(&c);
         let op = &openapi["paths"]["/items"]["get"];
@@ -565,6 +619,66 @@ mod tests {
             "#/components/schemas/Item"
         );
         assert_eq!(schema["properties"]["next_cursor"]["nullable"], true);
+    }
+
+    #[test]
+    fn identity_auth_routes_and_policy_project_to_openapi() {
+        use crate::app_contract::{
+            ContractAuthRoute, ContractIdentity, ContractRoutePolicy, ContractSession,
+        };
+        let mut c = sample();
+        c.identities.push(ContractIdentity {
+            name: "app_users".into(),
+            providers: vec![],
+            session: ContractSession {
+                lifetime_secs: None,
+                cookie_secure: true,
+                cookie_http_only: true,
+                same_site: "lax".into(),
+                rotate_on_privilege_change: true,
+            },
+            auth_routes: vec![
+                ContractAuthRoute {
+                    method: "GET".into(),
+                    path: "/auth/google/login".into(),
+                    purpose: "login".into(),
+                    provider: Some("google".into()),
+                },
+                ContractAuthRoute {
+                    method: "GET".into(),
+                    path: "/auth/session".into(),
+                    purpose: "session".into(),
+                    provider: None,
+                },
+            ],
+            safeguards: vec!["authorization_code_with_pkce".into()],
+        });
+        // A route with an auth policy.
+        c.routes.push(ContractRoute {
+            method: "GET".into(),
+            path: "/admin".into(),
+            path_params: vec![],
+            query_type: None,
+            body_type: None,
+            response_type: "Answer".into(),
+            requires: vec![],
+            pagination: None,
+            policy: Some(ContractRoutePolicy {
+                authenticated: true,
+                roles: vec!["admin".into()],
+                permissions: vec![],
+            }),
+        });
+        let openapi = emit_openapi(&c);
+        // Auth login path is present and carries the safeguards.
+        let login = &openapi["paths"]["/auth/google/login"]["get"];
+        assert_eq!(login["tags"][0], "auth");
+        assert_eq!(login["x-corvid-auth-safeguards"][0], "authorization_code_with_pkce");
+        assert!(openapi["paths"]["/auth/session"]["get"].is_object());
+        // The policy route advertises session security scoped to the role.
+        let admin = &openapi["paths"]["/admin"]["get"];
+        let scopes = &admin["security"][0]["corvidSession"];
+        assert_eq!(scopes[0], "role:admin");
     }
 
     #[test]

@@ -183,6 +183,7 @@ impl<'a> Parser<'a> {
             ty: response_ty,
         };
         let effect_row = self.parse_uses_clause()?;
+        let policy = self.parse_route_policy()?;
         self.expect(TokKind::Colon, "`:` after route signature")?;
         self.expect_newline()?;
         let body = self.parse_indented_block()?;
@@ -196,9 +197,75 @@ impl<'a> Parser<'a> {
             body_ty,
             response,
             effect_row,
+            policy,
             body,
             span: start.merge(end),
         })
+    }
+
+    /// `requires <item> [and <item>]*` where each item is
+    /// `authenticated`, `role("name")`, or `permission("name")`
+    /// (slice 51h). Returns `None` when there is no `requires` clause.
+    fn parse_route_policy(&mut self) -> Result<Option<corvid_ast::RoutePolicy>, ParseError> {
+        if !matches!(self.peek(), TokKind::KwRequires) {
+            return Ok(None);
+        }
+        let start = self.peek_span();
+        self.bump(); // requires
+        let mut policy = corvid_ast::RoutePolicy::default();
+        loop {
+            let (item, item_span) = self.expect_ident()?;
+            match item.as_str() {
+                "authenticated" => policy.authenticated = true,
+                "role" => {
+                    policy.roles.push(self.parse_policy_string_arg("role")?);
+                }
+                "permission" => {
+                    policy
+                        .permissions
+                        .push(self.parse_policy_string_arg("permission")?);
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("route requirement `{item}`"),
+                            expected: "`authenticated`, `role(\"...\")`, or `permission(\"...\")`"
+                                .into(),
+                        },
+                        span: item_span,
+                    });
+                }
+            }
+            // `and` chains multiple requirements; anything else ends it.
+            if matches!(self.peek(), TokKind::KwAnd) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        policy.span = start.merge(self.prev_span());
+        Ok(Some(policy))
+    }
+
+    fn parse_policy_string_arg(&mut self, clause: &str) -> Result<String, ParseError> {
+        self.expect(TokKind::LParen, "`(` after the route requirement")?;
+        let value = match self.peek().clone() {
+            TokKind::StringLit(s) => {
+                self.bump();
+                s
+            }
+            other => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(&other),
+                        expected: format!("a string literal naming the {clause}"),
+                    },
+                    span: self.peek_span(),
+                });
+            }
+        };
+        self.expect(TokKind::RParen, "`)` after the route requirement")?;
+        Ok(value)
     }
 
     fn parse_http_method(&mut self) -> Result<HttpMethod, ParseError> {

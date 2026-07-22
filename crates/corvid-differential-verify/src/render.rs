@@ -213,6 +213,9 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                     out.push_str(" uses ");
                     out.push_str(&render_effect_row_names(&route.effect_row.effects));
                 }
+                if let Some(policy) = &route.policy {
+                    render_route_policy(policy, out);
+                }
                 out.push_str(":\n");
                 render_block(&route.body, indent + 2, out);
             }
@@ -239,6 +242,23 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
             }
         }
         Decl::Identity(identity) => render_identity(identity, indent, out),
+    }
+}
+
+fn render_route_policy(policy: &corvid_ast::RoutePolicy, out: &mut String) {
+    let mut items = Vec::new();
+    if policy.authenticated {
+        items.push("authenticated".to_string());
+    }
+    for role in &policy.roles {
+        items.push(format!("role({})", render_string_literal(role)));
+    }
+    for perm in &policy.permissions {
+        items.push(format!("permission({})", render_string_literal(perm)));
+    }
+    if !items.is_empty() {
+        out.push_str(" requires ");
+        out.push_str(&items.join(" and "));
     }
 }
 

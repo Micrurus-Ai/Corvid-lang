@@ -673,6 +673,12 @@ impl Resolver {
             let body_id = self.fresh_local();
             self.current_scope_mut().insert("body", body_id);
         }
+        // A route with an auth policy (slice 51h) binds the
+        // authenticated `actor` in its body.
+        if route.policy.as_ref().is_some_and(|p| p.requires_auth()) {
+            let actor_id = self.fresh_local();
+            self.current_scope_mut().insert("actor", actor_id);
+        }
         self.resolve_block(&route.body);
         self.pop_scope();
     }

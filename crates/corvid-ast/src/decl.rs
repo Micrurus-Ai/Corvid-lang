@@ -259,8 +259,38 @@ pub struct HttpRouteDecl {
     pub response: RouteResponse,
     #[serde(default)]
     pub effect_row: EffectRow,
+    /// Authentication/authorization policy (slice 51h): `requires
+    /// authenticated`, `requires role("admin")`, `requires
+    /// permission("refund:write")`. `None` = a public route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<RoutePolicy>,
     pub body: Block,
     pub span: Span,
+}
+
+/// A route's auth policy (slice 51h). Any of the three may be present;
+/// naming a role or permission implies `authenticated`. The checker
+/// requires an `identity` block to be in scope for any non-empty
+/// policy, and binds a typed `actor` local in the route body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RoutePolicy {
+    /// `requires authenticated` — a valid login session must be present.
+    pub authenticated: bool,
+    /// `requires role("...")` — the actor must hold every listed role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
+    /// `requires permission("...")` — the actor must hold every listed
+    /// permission.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
+    pub span: Span,
+}
+
+impl RoutePolicy {
+    /// Any auth requirement at all — a role/permission implies auth.
+    pub fn requires_auth(&self) -> bool {
+        self.authenticated || !self.roles.is_empty() || !self.permissions.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
