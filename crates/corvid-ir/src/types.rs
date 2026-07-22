@@ -63,6 +63,12 @@ pub struct IrRoute {
     /// serve` executes any route body by invoking this agent by name
     /// through the ordinary agent machinery.
     pub handler_agent: String,
+    /// The `Upload<Format>` format tag (`Csv`, `Pdf`, `Image`, …) when
+    /// the route body is an upload (slice 52c-2). `corvid serve` uses
+    /// it to enforce the accepted MIME set on the multipart part. The
+    /// resolved inner `Type` loses the tag (the format name is not a
+    /// declared type), so it is carried here from the AST.
+    pub upload_format: Option<String>,
     pub span: Span,
 }
 
@@ -925,6 +931,17 @@ pub enum IrExprKind {
         trace: Box<IrExpr>,
         arms: Vec<IrReplayArm>,
         else_body: Box<IrExpr>,
+    },
+
+    /// `Page(items, next_cursor)` (slice 52c-2) — builds a cursor-
+    /// paginated response envelope. The interpreter materialises a
+    /// struct-shaped value `{ items, next_cursor, has_more }`, where
+    /// `has_more` is derived from `next_cursor`'s presence, so a
+    /// `Page<Item>` route serialises to the standard pagination
+    /// envelope at the HTTP boundary.
+    PageNew {
+        items: Box<IrExpr>,
+        next_cursor: Box<IrExpr>,
     },
 }
 

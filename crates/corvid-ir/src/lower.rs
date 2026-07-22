@@ -400,6 +400,7 @@ impl<'a> Lowerer<'a> {
                 .collect(),
             body: self.lower_block(&r.body),
             handler_agent: synthetic_route_agent_name(r.method, &r.path),
+            upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
             span: r.span,
         }
     }
@@ -1647,6 +1648,24 @@ impl<'a> Lowerer<'a> {
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::None)) => return IrExprKind::OptionNone,
+                Some(Binding::BuiltIn(BuiltIn::Page)) => {
+                    // `Page(items, next_cursor)` (slice 52c-2).
+                    let mut lowered = args.iter().map(|a| self.lower_expr(a));
+                    let items = lowered.next().unwrap_or_else(|| IrExpr {
+                        kind: IrExprKind::List { items: vec![] },
+                        ty: Type::Unknown,
+                        span: name.span,
+                    });
+                    let next_cursor = lowered.next().unwrap_or_else(|| IrExpr {
+                        kind: IrExprKind::OptionNone,
+                        ty: Type::Option(Box::new(Type::String)),
+                        span: name.span,
+                    });
+                    return IrExprKind::PageNew {
+                        items: Box::new(items),
+                        next_cursor: Box::new(next_cursor),
+                    };
+                }
                 Some(Binding::BuiltIn(BuiltIn::Range)) => {
                     // range(start, end) rides the BuiltinMethod IR
                     // with `start` as the receiver.
@@ -2091,6 +2110,22 @@ impl<'a> Lowerer<'a> {
             ),
             TypeRef::Function { .. } => Type::Unknown,
         }
+    }
+}
+
+/// Extract the `Upload<Format>` format tag (`Csv`, `Pdf`, …) from a
+/// route body type ref (slice 52c-2). Returns `None` for any other
+/// body type. The resolved `Type::Upload` loses the tag because the
+/// format name is not a declared type, so serve reads it from here.
+fn upload_format_tag(ty: &TypeRef) -> Option<String> {
+    match ty {
+        TypeRef::Generic { name, args, .. } if name.name == "Upload" && args.len() == 1 => {
+            match &args[0] {
+                TypeRef::Named { name, .. } => Some(name.name.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

@@ -872,15 +872,15 @@ Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the s
 
 #### The Backend Proves Its Own Contract, Or Refuses To Start
 
-Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. A `Stream<T>` route response streams as Server-Sent Events straight from the language's `Stream` type — one `data:` event per yield, `event: done` to close.
+Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (one `data:` event per yield, `event: done` to close); an `Upload<Format>` body is parsed from multipart with accepted-MIME + max-size enforcement and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope.
 
-**Contract Closure** keeps the advertised surface and the runtime from ever drifting: before `corvid serve` binds a listener it asserts a runtime execution path exists for every route the contract advertises. A route it cannot yet serve — an `Upload<Format>` body with no multipart parser, a `Page<Item>` response with no cursor envelope, or a `requires`-policy route with no authorization enforcement — is a startup error (`E5204`), never a silent runtime `501`. The developer's own source is the forcing function.
+**Contract Closure** keeps the advertised surface and the runtime from ever drifting: before `corvid serve` binds a listener it asserts a runtime execution path exists for every route the contract advertises. A route it cannot yet serve — currently a `requires`-policy route, whose authorization runtime is next — is a startup error (`E5204`), never a silent runtime `501`. The developer's own source is the forcing function.
 
 ```bash
-corvid serve examples/reference_app/src/main.cor   # path/query/body/stream routes all execute
-corvid check upload_app.cor                        # ok — the source compiles
-corvid serve upload_app.cor                        # error: E5204 Contract not executable
-                                                   #   (needs multipart uploads; refuses to start)
+corvid serve examples/reference_app/src/main.cor   # path/query/body/stream/upload/page routes all execute
+corvid check secure_app.cor                        # ok — the source compiles
+corvid serve secure_app.cor                        # error: E5204 Contract not executable
+                                                   #   (requires auth enforcement; refuses to start)
 ```
 
 Spec: [The Complete Application Runtime](./docs/reference/inventions.md#the-complete-application-runtime)

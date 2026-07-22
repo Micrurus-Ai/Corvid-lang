@@ -251,6 +251,27 @@ pub enum BuiltinMethodKind {
     /// through the BuiltinMethod IR with `start` as the receiver so
     /// no new IR variant is needed.
     RangeIntList,
+
+    // ----- HTTP-boundary uploads (slice 52c-2) --------------------
+    //
+    // Read accessors on an `Upload<Format>` request body. The value
+    // is materialised by `corvid serve` from the multipart request
+    // (after accepted-MIME + max-size enforcement), so the handler
+    // reads its parts through these methods.
+    /// `Upload<Format>.text() -> String` — the upload bytes decoded
+    /// as UTF-8 (lossy for non-UTF-8 content).
+    UploadText,
+    /// `Upload<Format>.bytes() -> List<Int>` — the raw upload bytes,
+    /// each 0–255.
+    UploadBytes,
+    /// `Upload<Format>.filename() -> String` — the client-supplied
+    /// file name (may be empty).
+    UploadFilename,
+    /// `Upload<Format>.content_type() -> String` — the part's MIME
+    /// type as received.
+    UploadContentType,
+    /// `Upload<Format>.size() -> Int` — the byte length of the upload.
+    UploadSize,
 }
 
 /// A builtin method's checked signature for a CONCRETE receiver
@@ -399,6 +420,16 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Map(k, v), "remove") => {
             sig(MapRemove, vec![(**k).clone()], Type::Option(v.clone()))
         }
+
+        // ----- Upload<Format> accessors (slice 52c-2) -------------
+        (Type::Upload(_), "text") => sig(UploadText, vec![], Type::String),
+        (Type::Upload(_), "bytes") => {
+            sig(UploadBytes, vec![], Type::List(Box::new(Type::Int)))
+        }
+        (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
+        (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
+        (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),
+
         _ => None,
     }
 }

@@ -713,6 +713,10 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
                 collect_called_agents_from_expr(s, stack);
             }
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            collect_called_agents_from_expr(items, stack);
+            collect_called_agents_from_expr(next_cursor, stack);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_called_agents_from_expr(receiver, stack);
             for arg in args {
@@ -862,6 +866,10 @@ fn walk_ir_expr_for_prompt(
             if let Some(s) = spread {
                 walk_ir_expr_for_prompt(s, prompt_map, found);
             }
+        }
+        IrExprKind::PageNew { items, next_cursor } => {
+            walk_ir_expr_for_prompt(items, prompt_map, found);
+            walk_ir_expr_for_prompt(next_cursor, prompt_map, found);
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             walk_ir_expr_for_prompt(receiver, prompt_map, found);

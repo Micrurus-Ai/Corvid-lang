@@ -612,6 +612,7 @@ impl<'a> Checker<'a> {
                 }
                 Type::Unknown
             }
+            BuiltIn::Page => self.check_page_call(name, args),
             _ => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::NotCallable {
@@ -625,6 +626,58 @@ impl<'a> Checker<'a> {
                 Type::Unknown
             }
         }
+    }
+
+    /// `Page(items, next_cursor)` (slice 52c-2) — constructs a
+    /// cursor-paginated response envelope. `items: List<Item>` and
+    /// `next_cursor: Option<String>`; `has_more` is derived at
+    /// construction from `next_cursor`'s presence. Returns
+    /// `Page<Item>`, mirroring the `Ok`/`Some` builtin constructors.
+    fn check_page_call(&mut self, name: &Ident, args: &[Expr]) -> Type {
+        if args.len() != 2 {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::ArityMismatch {
+                    callee: name.name.clone(),
+                    expected: 2,
+                    got: args.len(),
+                },
+                name.span,
+            ));
+            for arg in args {
+                let _ = self.check_expr(arg);
+            }
+            return Type::Page(Box::new(Type::Unknown));
+        }
+        let items_ty = self.check_expr(&args[0]);
+        let item_ty = match &items_ty {
+            Type::List(inner) => (**inner).clone(),
+            Type::Unknown => Type::Unknown,
+            other => {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: "List<Item>".into(),
+                        got: other.display_name(),
+                        context: "Page items".into(),
+                    },
+                    args[0].span(),
+                ));
+                Type::Unknown
+            }
+        };
+        let cursor_ty = self.check_expr(&args[1]);
+        let cursor_ok = matches!(&cursor_ty, Type::Option(inner) if matches!(**inner, Type::String))
+            || matches!(cursor_ty, Type::Unknown);
+        if !cursor_ok {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TypeMismatch {
+                    expected: "Option<String>".into(),
+                    got: cursor_ty.display_name(),
+                    context: "Page next_cursor".into(),
+                },
+                args[1].span(),
+            ));
+        }
+        Type::Page(Box::new(item_ty))
     }
 
     fn check_ask_call(&mut self, name: &Ident, args: &[Expr]) -> Type {

@@ -2913,6 +2913,71 @@ Next per the Phase 52 queue: 52c-2-upload-page-runtime.
 
 ---
 
+## 2026-07-22 - 52c-2 closed: Upload<Format> + Page<Item> execute — the boundary-type runtime is complete
+
+The two HTTP-boundary types with no runtime now run end-to-end, on the
+surface locked in the pre-phase chat.
+
+**Page<Item>** is constructed with `Page(items, next_cursor)` — the type
+name is callable, exactly like `Ok(x)`/`Some(x)`. The checker types it
+(`check_page_call`: `List<Item>` + `Option<String>` → `Page<Item>`), a
+new `IrExprKind::PageNew` lowers it, and the interpreter materialises a
+`{items, next_cursor, has_more}` struct value — `has_more` derived from
+the cursor's presence, the cursor unwrapped from its `Option` so the JSON
+envelope carries `next_cursor: "abc123"` (or `null`), not the tagged
+option form. The incoming cursor is an ordinary field of the route's
+typed `query` struct, so `value_to_json` serialises the whole envelope
+with no serve-side pagination code at all.
+
+**Upload<Format>** is read through methods (`body.text()`/`bytes()`/
+`filename()`/`content_type()`/`size()`) that ride the shared builtin-
+method table — five `BuiltinMethodKind` variants, checker + interpreter
+arms. `corvid serve` does the boundary work: parses the multipart request
+with `multer`, enforces the format's accepted MIME (`Csv` → `text/csv`,
+…) and an 8 MiB max size (a structured `400` on either violation), and
+builds the Upload struct value the methods read. Proven live — a valid
+CSV returns `{filename, bytes_len, preview}`; an `application/pdf` part
+is refused `400 unsupported_media_type`.
+
+Both capabilities flipped on in `RuntimeCapabilities::interpreter_tier()`,
+so Contract Closure now passes upload/page routes. The reference app
+grows `GET /orders/page` (cursor envelope) + `POST /orders/import`
+(multipart) — every HTTP shape the runtime supports is now exercised by
+the one fixture.
+
+Two things worth recording:
+
+- The `Upload<Format>` FORMAT TAG (`Csv`) is not a declared type, so the
+  resolved `Type::Upload(_)` loses it (inner `Unknown`). serve needs it
+  for MIME enforcement, so it rides a new `IrRoute.upload_format` field
+  populated in lowering from the AST body type ref.
+- Adding ONE `IrExprKind` variant (`PageNew`) rippled through ~20
+  exhaustive matches — the ABI prompt/agent walkers and all three
+  compiled codegen tiers (native Cranelift / Python / wasm). The compiled
+  tiers degrade `PageNew` loudly (`not_supported`), exactly like
+  `StructLiteral`/`MapLiteral`: `Page`/`Upload` are served by the
+  interpreter, not lowered natively.
+
+Docs kept honest again: every "refuses to start" example (tour, README,
+inventions.md §7, the serve_smoke refusal test) moved from an `Upload`
+route (which now serves) to a `requires authenticated` policy route —
+the ONLY remaining closure gap, whose authorization runtime lands in
+52h. Added File Uploads + Cursor Pagination Proof Matrix rows; regenerated
+core-semantics.md with the updated `contract.runtime_closure` description.
+
+Gate: workspace check; corvid-types/ir/vm (465) + corvid-driver closure
+(10, incl. end-to-end compile→closure) + corvid-guarantees (doc drift +
+refs) + corvid-cli bin (363) + serve_smoke (13, incl. multipart upload +
+page envelope + SSE + policy refusal) all green; corpus verify exits 1 on
+the two deliberate fixtures.
+
+**The Phase 52 boundary-type runtime is complete** — route execution,
+streaming, uploads, and pagination all serve; only authorization
+enforcement (52h) is gated. Next per the queue: 52d-effect-aware-
+scheduling.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

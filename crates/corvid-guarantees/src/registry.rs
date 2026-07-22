@@ -1378,18 +1378,21 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              walk the public HTTP surface the Application Contract \
              advertises (slice 52b) and assert a runtime execution path \
              exists for every route. A route the contract describes but \
-             the interpreter tier cannot yet execute — a `Stream<T>` \
-             response with no Server-Sent-Events endpoint, an \
-             `Upload<Format>` body with no multipart parser, a \
-             `Page<Item>` response with no cursor envelope, or a \
-             `requires`-policy route with no authorization enforcement \
-             — is a startup error (`E5204 Contract not executable`) that \
-             names the offending element and the capability it needs. \
-             It is never a silent runtime `501`: the developer's source \
-             is the forcing function. The closure surface is driven by a \
+             the interpreter tier cannot yet execute is a startup error \
+             (`E5204 Contract not executable`) that names the offending \
+             element and the capability it needs — never a silent \
+             runtime `501`: the developer's source is the forcing \
+             function. The closure surface is driven by a \
              `RuntimeCapabilities` snapshot that each Phase 52 slice \
-             flips as it lands the capability, so the running backend can \
-             never advertise more than it delivers.",
+             flips as it lands the capability, so the running backend \
+             can never advertise more than it delivers. As of slice \
+             52c-2 the interpreter tier serves route execution, \
+             `Stream<T>` responses (Server-Sent Events), `Upload<Format>` \
+             bodies (multipart), and `Page<Item>` responses (cursor \
+             envelope); a `requires`-policy route still refuses to start \
+             until authorization enforcement lands (slice 52h), and \
+             native tiers that lack a capability refuse the routes that \
+             need it.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-driver/src/contract_closure.rs::reference_shape_has_no_closure_gaps",

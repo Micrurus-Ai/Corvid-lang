@@ -37,6 +37,7 @@ tempfile = { workspace = true }
 time = { version = "0.3", features = ["parsing", "formatting"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "signal", "net"] }
 axum = "0.7"
+multer = "3"
 futures = "0.3"
 rayon = { workspace = true }
 libloading = "0.8"

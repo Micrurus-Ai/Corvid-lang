@@ -301,6 +301,7 @@ pub(crate) fn cmd_serve(
                     .collect(),
                 query_ty: route.query_ty.clone(),
                 body_ty: route.body_ty.clone(),
+                upload_format: route.upload_format.clone(),
                 param_names,
             });
             let filter = method_filter(route.method);
@@ -309,10 +310,19 @@ pub(crate) fn cmd_serve(
                 move |State(state): State<Arc<ServeState>>,
                       raw_path: RawPathParams,
                       RawQuery(raw_query): RawQuery,
+                      headers: axum::http::HeaderMap,
                       body: Bytes| {
                     let meta = meta.clone();
                     async move {
-                        run_route(state, meta, raw_path, raw_query.unwrap_or_default(), body).await
+                        run_route(
+                            state,
+                            meta,
+                            raw_path,
+                            raw_query.unwrap_or_default(),
+                            headers,
+                            body,
+                        )
+                        .await
                     }
                 },
             );
@@ -385,6 +395,9 @@ struct RouteMeta {
     path_params: Vec<(String, Type)>,
     query_ty: Option<Type>,
     body_ty: Option<Type>,
+    /// The `Upload<Format>` format tag when the body is an upload
+    /// (slice 52c-2) — drives accepted-MIME enforcement.
+    upload_format: Option<String>,
     /// The handler agent's param names, in order — drives which of
     /// `path`/`query`/`body`/`actor` values are assembled and how.
     param_names: Vec<String>,
@@ -455,6 +468,7 @@ async fn run_route(
     meta: Arc<RouteMeta>,
     raw_path: RawPathParams,
     raw_query: String,
+    headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
     let types_by_id: HashMap<DefId, &IrType> =
@@ -481,8 +495,16 @@ async fn run_route(
         None => None,
     };
 
-    // Request body → the declared body struct value.
+    // Request body → the declared body value. An `Upload<Format>` body
+    // is parsed from the multipart request (slice 52c-2); every other
+    // body type is typed JSON.
     let body_value = match &meta.body_ty {
+        Some(Type::Upload(_)) => {
+            match parse_multipart_upload(&headers, &body, meta.upload_format.as_deref()).await {
+                Ok(v) => Some(v),
+                Err(resp) => return resp,
+            }
+        }
         Some(ty) => {
             let json: serde_json::Value = match serde_json::from_slice(&body) {
                 Ok(j) => j,
@@ -512,6 +534,125 @@ async fn run_route(
         run_ir_with_runtime(&state.ir, Some(&meta.handler_agent), args.clone(), &state.runtime).await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     finish(outcome)
+}
+
+/// Maximum accepted upload size for the interpreter tier (slice 52c-2).
+/// A conservative default; per-format `@upload(max_size:)` overrides
+/// are a follow-up once the annotation is threaded to the runtime.
+const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
+
+/// Default accepted MIME types for a well-known upload format tag —
+/// mirrors the contract's `default_mime_for_format` (slice 51f) so the
+/// runtime enforces exactly what the contract advertises. An empty
+/// slice means "accept any" (unknown/custom format tag).
+fn accepted_mime_for_format(format: Option<&str>) -> &'static [&'static str] {
+    match format {
+        Some("Pdf") => &["application/pdf"],
+        Some("Csv") => &["text/csv"],
+        Some("Image") => &["image/png", "image/jpeg", "image/gif", "image/webp"],
+        Some("Json") => &["application/json"],
+        Some("Text") => &["text/plain"],
+        _ => &[],
+    }
+}
+
+/// Parse a multipart/form-data request into an `Upload<Format>` value
+/// (slice 52c-2). Takes the FIRST file part, enforces the format's
+/// accepted-MIME set and the max-size limit, and builds a struct value
+/// carrying `filename` / `content_type` / `size` / `bytes` for the
+/// `Upload` accessor methods. Returns a structured 400 on any
+/// violation.
+async fn parse_multipart_upload(
+    headers: &axum::http::HeaderMap,
+    body: &Bytes,
+    format: Option<&str>,
+) -> Result<Value, Response> {
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let boundary = match multer::parse_boundary(content_type) {
+        Ok(b) => b,
+        Err(_) => {
+            return Err(bad_request(
+                "invalid_upload",
+                "expected a multipart/form-data request with a boundary",
+            ))
+        }
+    };
+
+    // Feed the already-buffered body to multer as a single-chunk stream.
+    let owned = body.clone();
+    let stream = futures::stream::once(
+        async move { Ok::<_, std::convert::Infallible>(owned) },
+    );
+    let mut multipart = multer::Multipart::new(stream, boundary);
+
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => {
+                return Err(bad_request(
+                    "invalid_upload",
+                    "no file part found in the multipart request",
+                ))
+            }
+            Err(e) => return Err(bad_request("invalid_upload", &e.to_string())),
+        };
+        // The upload is the first part that carries a file name; plain
+        // form fields are skipped.
+        let Some(filename) = field.file_name().map(|s| s.to_string()) else {
+            continue;
+        };
+        let content_type = field
+            .content_type()
+            .map(|m| m.essence_str().to_string())
+            .unwrap_or_default();
+
+        let accepted = accepted_mime_for_format(format);
+        if !accepted.is_empty() && !accepted.iter().any(|m| *m == content_type) {
+            return Err(bad_request(
+                "unsupported_media_type",
+                &format!(
+                    "`{content_type}` is not accepted for Upload<{}>; expected one of: {}",
+                    format.unwrap_or("Format"),
+                    accepted.join(", ")
+                ),
+            ));
+        }
+
+        let data = match field.bytes().await {
+            Ok(b) => b,
+            Err(e) => return Err(bad_request("invalid_upload", &e.to_string())),
+        };
+        if data.len() > MAX_UPLOAD_BYTES {
+            return Err(bad_request(
+                "upload_too_large",
+                &format!(
+                    "upload is {} bytes; the limit is {MAX_UPLOAD_BYTES} bytes",
+                    data.len()
+                ),
+            ));
+        }
+
+        let bytes_list = Value::List(corvid_driver::ListValue::new(
+            data.iter().map(|b| Value::Int(*b as i64)),
+        ));
+        let upload = corvid_driver::StructValue::new(
+            DefId(0),
+            "Upload",
+            vec![
+                ("filename".to_string(), Value::String(filename.into())),
+                (
+                    "content_type".to_string(),
+                    Value::String(content_type.into()),
+                ),
+                ("size".to_string(), Value::Int(data.len() as i64)),
+                ("bytes".to_string(), bytes_list),
+            ],
+        );
+        return Ok(Value::Struct(upload));
+    }
 }
 
 /// Parse a URL query string (`a=1&b=x`) into the declared query struct

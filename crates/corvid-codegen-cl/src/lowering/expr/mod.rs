@@ -46,6 +46,10 @@ pub(super) fn lower_expr(
             "named struct literals are interpreter-only in 45n (positional construction compiles natively)",
             expr.span,
         )),
+        IrExprKind::PageNew { .. } => Err(CodegenError::not_supported(
+            "Page<Item> responses are interpreter-only in 52c-2 (served via corvid serve)",
+            expr.span,
+        )),
         IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
             "Map<K, V> is interpreter-only in 45g",
             expr.span,

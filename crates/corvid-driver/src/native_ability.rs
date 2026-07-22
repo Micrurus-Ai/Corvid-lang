@@ -261,6 +261,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // Named struct literals are interpreter-only in 45n.
         IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        // `Page<Item>` responses are interpreter-only in 52c-2.
+        IrExprKind::PageNew { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

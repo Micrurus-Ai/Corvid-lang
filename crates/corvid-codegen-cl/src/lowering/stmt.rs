@@ -849,6 +849,9 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
             fields.iter().any(|(_, v)| expr_mentions_local(v, target))
                 || spread.as_ref().is_some_and(|s| expr_mentions_local(s, target))
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_mentions_local(items, target) || expr_mentions_local(next_cursor, target)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

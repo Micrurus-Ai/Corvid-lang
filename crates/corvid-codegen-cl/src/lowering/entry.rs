@@ -61,6 +61,9 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
             fields.iter().any(|(_, v)| expr_uses_runtime(v))
                 || spread.as_ref().is_some_and(|s| expr_uses_runtime(s))
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_uses_runtime(items) || expr_uses_runtime(next_cursor)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }

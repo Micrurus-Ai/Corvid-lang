@@ -750,10 +750,62 @@ pub(super) fn eval_builtin_method(
             let items: Vec<Value> = (start..end).map(Value::Int).collect();
             Ok(Value::List(crate::value::ListValue::new(items)))
         }
+
+        // ----- Upload<Format> accessors (slice 52c-2) -------------
+        //
+        // `corvid serve` materialises the upload as a struct value with
+        // `filename` / `content_type` / `size` / `bytes` (List<Int>)
+        // fields. The accessors read them; `text()` decodes the bytes
+        // as UTF-8 (lossy).
+        UploadFilename => upload_field(&recv, "filename", span),
+        UploadContentType => upload_field(&recv, "content_type", span),
+        UploadSize => upload_field(&recv, "size", span),
+        UploadBytes => upload_field(&recv, "bytes", span),
+        UploadText => {
+            let bytes_v = upload_field(&recv, "bytes", span)?;
+            let bytes: Vec<u8> = match &bytes_v {
+                Value::List(l) => l
+                    .iter_cloned()
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::Int(i) => Some(*i as u8),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            Ok(Value::String(std::sync::Arc::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )))
+        }
+
         _ => {
             let s = want_string(&recv, span)?;
             eval_string_method(kind, s, args, span)
         }
+    }
+}
+
+/// Read a field from the `Upload<Format>` struct value `corvid serve`
+/// materialised for a route body (slice 52c-2).
+fn upload_field(recv: &Value, field: &str, span: Span) -> Result<Value, InterpError> {
+    match recv {
+        Value::Struct(s) => s.get_field(field).ok_or_else(|| {
+            InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: format!("Upload with `{field}` field"),
+                    got: recv.type_name(),
+                },
+                span,
+            )
+        }),
+        other => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch {
+                expected: "Upload".into(),
+                got: other.type_name(),
+            },
+            span,
+        )),
     }
 }
 

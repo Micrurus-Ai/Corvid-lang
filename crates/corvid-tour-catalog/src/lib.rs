@@ -728,24 +728,24 @@ tool echo_stream(m: String) -> Stream<String>
         name: "contract-closure",
         title: "The Backend Proves Its Own Contract, Or Refuses To Start",
         category: "The complete application runtime",
-        pitch: "Corvid closes the gap every other backend framework leaves open: the running server can advertise a public interface it does not actually implement. Before `corvid serve` binds a listener it walks the Application Contract's public HTTP surface and asserts a runtime execution path exists for EVERY route it advertises. A route the contract describes but the runtime cannot yet serve — an `Upload<Format>` body with no multipart parser, a `Page<Item>` response with no cursor envelope, or a `requires`-policy route with no authorization enforcement — is a startup error (`E5204 Contract not executable`) naming the offending route and the capability it needs. It is never a silent runtime 501. The source below COMPILES cleanly, but `corvid serve` refuses it until the upload runtime lands — the developer's own source is the forcing function. (`Stream<T>` responses already stream as Server-Sent Events, so a streaming route starts and serves.)",
+        pitch: "Corvid closes the gap every other backend framework leaves open: the running server can advertise a public interface it does not actually implement. Before `corvid serve` binds a listener it walks the Application Contract's public HTTP surface and asserts a runtime execution path exists for EVERY route it advertises. A route the contract describes but the runtime cannot yet serve is a startup error (`E5204 Contract not executable`) naming the offending route and the capability it needs — never a silent runtime 501. Route execution, `Stream<T>` (Server-Sent Events), `Upload<Format>` (multipart), and `Page<Item>` (cursor envelope) all serve today; the source below COMPILES cleanly, but its `requires authenticated` route makes `corvid serve` refuse to start until the authorization runtime lands — the developer's own source is the forcing function.",
         spec: "docs/reference/inventions.md#the-complete-application-runtime",
         roadmap: "Phase 52 contract closure (52b)",
         test: "crates/corvid-driver/src/contract_closure.rs tests + crates/corvid-cli/tests/serve_smoke.rs::serve_refuses_to_start_when_a_route_is_not_contract_closed",
-        non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grows in lockstep with the runtime (each Phase 52 slice flips one capability on). It does not itself implement uploads/pagination/auth — it refuses to start until those slices land, so the backend can never advertise more than it delivers.",
-        source: r#"type ImportReceipt:
-    accepted: Bool
+        non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grows in lockstep with the runtime (each Phase 52 slice flips one capability on). It does not itself implement the capabilities — it refuses to start until each lands, so the backend can never advertise more than it delivers.",
+        source: r#"identity users:
+    provider google
 
-agent take_import(body: Upload<Csv>) -> ImportReceipt:
-    return ImportReceipt(true)
+type Secret:
+    value: String
 
-server import_api:
+server secure_api:
     # This route COMPILES, but `corvid serve` refuses to start with
-    # E5204 until the multipart upload runtime (slice 52c-2) exists —
-    # the contract must never advertise an endpoint the runtime can't
-    # serve.
-    route POST "/import" body Upload<Csv> -> json ImportReceipt:
-        return take_import(body)
+    # E5204 until authorization enforcement (slice 52h) exists — the
+    # contract must never advertise an authenticated endpoint the
+    # runtime does not actually guard.
+    route GET "/secret" -> json Secret requires authenticated:
+        return Secret("classified")
 "#,
     },
 ];

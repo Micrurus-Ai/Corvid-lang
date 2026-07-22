@@ -198,6 +198,10 @@ fn scan_expr(expr: &IrExpr, hits: &mut Vec<StdlibToolCall>) {
                 scan_expr(v, hits);
             }
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            scan_expr(items, hits);
+            scan_expr(next_cursor, hits);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, hits);
             for a in args {

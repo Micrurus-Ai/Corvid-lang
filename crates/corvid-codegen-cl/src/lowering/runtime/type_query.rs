@@ -392,6 +392,10 @@ fn visit_expr_types(
                 visit_expr_types(s, seen, order, visit);
             }
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            visit_expr_types(items, seen, order, visit);
+            visit_expr_types(next_cursor, seen, order, visit);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);
             for a in args {

@@ -222,6 +222,9 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             fields.iter().any(|(_, v)| expr_mentions_local(v, local_id))
                 || spread.as_ref().is_some_and(|s| expr_mentions_local(s, local_id))
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_mentions_local(items, local_id) || expr_mentions_local(next_cursor, local_id)
+        }
         IrExprKind::Match { scrutinee, arms } => {
             expr_mentions_local(scrutinee, local_id)
                 || arms.iter().any(|arm| {
@@ -328,6 +331,9 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
         IrExprKind::StructLiteral { fields, spread, .. } => {
             fields.iter().all(|(_, v)| expr_is_effect_free(v))
                 && spread.as_ref().is_none_or(|s| expr_is_effect_free(s))
+        }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_is_effect_free(items) && expr_is_effect_free(next_cursor)
         }
         // A match is effect-free iff every part is; pattern binding
         // writes are locals, not shared-state effects.

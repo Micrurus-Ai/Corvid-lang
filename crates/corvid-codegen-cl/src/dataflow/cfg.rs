@@ -455,6 +455,10 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 out.extend(collect_reads(s, false));
             }
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            out.extend(collect_reads(items, false));
+            out.extend(collect_reads(next_cursor, false));
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             out.extend(collect_reads(receiver, false));
             for a in args {

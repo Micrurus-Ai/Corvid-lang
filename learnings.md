@@ -7013,3 +7013,82 @@ What this is NOT: not provider-native session continuation (resuming a
 model stream across a dropped connection is adapter work); not
 backpressure tuning across the HTTP boundary. The typed event transport
 from a `Stream<T>` route is what ships.
+
+## `Upload<Format>` bodies and `Page<Item>` responses execute (2026-07-22)
+
+The last two HTTP-boundary types now run end-to-end.
+
+**Pagination.** A handler builds a page with the `Page(items, next_cursor)`
+constructor — the type name is callable, exactly like `Ok(x)` / `Some(x)`:
+
+```
+type Item:
+    id: String
+    name: String
+
+type ItemQuery:
+    cursor: String
+    limit: Int
+
+server items_api:
+    route GET "/items" query ItemQuery -> json Page<Item>:
+        a = Item("i1", "first")
+        b = Item("i2", "second")
+        return Page([a, b], Some(query.cursor))
+```
+
+serves the standard cursor envelope:
+
+```
+$ curl -s 'localhost:PORT/items?cursor=abc123&limit=10'
+{"has_more":true,"items":[{"id":"i1","name":"first"},{"id":"i2","name":"second"}],"next_cursor":"abc123"}
+```
+
+`has_more` is DERIVED from `next_cursor` (a `Some(_)` cursor means another
+page exists), and the cursor is unwrapped from the `Option` so the envelope
+carries `next_cursor: "abc123"` or `null` — not the tagged option form. The
+incoming cursor is an ordinary field of the route's typed `query` struct.
+
+**Uploads.** An `Upload<Format>` body is read through METHODS, and serve does
+the multipart work at the boundary:
+
+```
+agent take_import(body: Upload<Csv>) -> ImportReceipt:
+    return ImportReceipt(body.filename(), body.size(), body.text())
+
+server import_api:
+    route POST "/import" body Upload<Csv> -> json ImportReceipt:
+        return take_import(body)
+```
+
+```
+$ curl -s -F "file=@data.csv;type=text/csv" localhost:PORT/import
+{"bytes_len":22,"filename":"data.csv","preview":"id,name\n1,alice\n2,bob\n"}
+
+$ curl -s -F "file=@data.csv;type=application/pdf" localhost:PORT/import
+{"detail":"`application/pdf` is not accepted for Upload<Csv>; expected one of: text/csv","error":"unsupported_media_type"}
+```
+
+`corvid serve` parses the multipart request (via `multer`), enforces the
+format's accepted MIME set (`Csv` → `text/csv`, `Pdf` → `application/pdf`, …)
+and an 8 MiB max size — a structured `400` on either violation — and
+materialises the upload as a value the five accessor methods read:
+`body.text()` (UTF-8 decode), `body.bytes()` (`List<Int>`), `body.filename()`,
+`body.content_type()`, `body.size()`.
+
+Two implementation notes worth keeping:
+
+- The `Upload<Format>` format tag (`Csv`) is NOT a declared type, so the
+  resolved `Type::Upload(_)` loses it (the inner is `Unknown`). serve needs
+  the tag for MIME enforcement, so it is carried on a new `IrRoute.upload_format`
+  field, populated in lowering straight from the AST body type ref.
+- Adding one `IrExprKind` variant (`PageNew`) touched ~20 exhaustive matches
+  across the ABI walkers and all three compiled-codegen tiers (native /
+  Python / wasm). Interpreter-only expression forms degrade LOUDLY in the
+  compiled tiers (a `not_supported` error), exactly like `StructLiteral` /
+  `MapLiteral` before them — `Page`/`Upload` are served by `corvid serve`, not
+  lowered natively (yet).
+
+What this is NOT: the interpreter tier buffers the whole upload body in memory
+(bounded by the max size); streaming very large uploads is later work. Native
+lowering of `Page`/`Upload` is deferred — the interpreter serves them.

@@ -337,6 +337,11 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"named struct literals are interpreter-only in 45n\"))",
                 );
             }
+            IrExprKind::PageNew { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
+                );
+            }
             IrExprKind::MapLiteral { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",

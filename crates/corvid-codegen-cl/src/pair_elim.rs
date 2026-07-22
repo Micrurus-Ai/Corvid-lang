@@ -240,6 +240,10 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
                     .map(|s| count_local_mentions_expr(s, local_id))
                     .unwrap_or(0)
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            count_local_mentions_expr(items, local_id)
+                + count_local_mentions_expr(next_cursor, local_id)
+        }
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -330,6 +334,8 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         // A struct literal clones field handles into a new cell —
         // conservative: observes refcounts.
         IrExprKind::StructLiteral { .. } => true,
+        // `Page(...)` builds a new struct cell (items + cursor handles).
+        IrExprKind::PageNew { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

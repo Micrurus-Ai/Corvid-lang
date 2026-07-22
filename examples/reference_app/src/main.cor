@@ -37,6 +37,14 @@ type OrderEvent:
     id: String
     status: String
 
+type OrderCursor:
+    cursor: String
+    limit: Int
+
+type ImportReceipt:
+    filename: String
+    bytes: Int
+
 # A streaming source: each yield becomes one Server-Sent Event.
 agent order_activity() -> Stream<OrderEvent>:
     yield OrderEvent("order-1", "placed")
@@ -62,6 +70,20 @@ server orders_api:
     # yielded event as `data: <json>`, then `event: done`.
     route GET "/orders/activity" -> json Stream<OrderEvent>:
         return order_activity()
+
+    # Cursor pagination → the `{items, next_cursor, has_more}` envelope
+    # (slice 52c-2). `Page(items, next_cursor)` derives `has_more`; the
+    # incoming cursor is read from the typed query struct.
+    route GET "/orders/page" query OrderCursor -> json Page<OrderSummary>:
+        first = OrderSummary("order-1", "open")
+        second = OrderSummary("order-2", "shipped")
+        return Page([first, second], Some(query.cursor))
+
+    # File upload → multipart parsing with accepted-MIME + max-size
+    # enforcement (slice 52c-2); the file is read via `body.filename()`
+    # / `body.size()` / `body.text()`.
+    route POST "/orders/import" body Upload<Csv> -> json ImportReceipt:
+        return ImportReceipt(body.filename(), body.size())
 
 agent main() -> String:
     return "orders_api reference application"

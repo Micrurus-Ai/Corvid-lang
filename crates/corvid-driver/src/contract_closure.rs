@@ -89,8 +89,14 @@ impl RuntimeCapabilities {
             // and flushes each chunk as a `data:` event with an `event:
             // done` terminator.
             streaming: true,
-            uploads: false,
-            pagination: false,
+            // `Upload<Format>` request bodies are parsed from multipart
+            // (accepted-MIME + max-size enforced) and read via
+            // `body.text()`/`bytes()`/… methods (slice 52c-2).
+            uploads: true,
+            // `Page<Item>` responses build a `{items, next_cursor,
+            // has_more}` envelope via the `Page(items, next_cursor)`
+            // constructor (slice 52c-2).
+            pagination: true,
             auth_enforcement: false,
         }
     }
@@ -245,6 +251,7 @@ mod tests {
             effect_names: vec![],
             body: empty_block(),
             handler_agent: handler.to_string(),
+            upload_format: None,
             span: span(),
         }
     }
@@ -312,26 +319,53 @@ mod tests {
         assert!(gaps.is_empty(), "streaming route should serve: {gaps:?}");
     }
 
-    /// Adversarial: an `Upload<Format>` body route refuses to start —
-    /// no multipart parser exists yet.
+    /// The upload detection path: with the `uploads` capability OFF, an
+    /// `Upload<Format>` body route is a gap. Slice 52c-2 shipped the
+    /// multipart runtime and turned the capability on in
+    /// `interpreter_tier()`, so this asserts detection against an
+    /// explicit uploads-off snapshot (the code path that guards native
+    /// tiers lacking multipart).
     #[test]
     fn upload_body_route_is_a_closure_gap() {
         let r = route(Type::String, Some(Type::Upload(Box::new(Type::String))), "h");
         let ir = ir_with(r, vec![handler_agent("h", false)]);
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        let caps = RuntimeCapabilities {
+            uploads: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1);
         assert!(gaps[0].missing_capability.contains("upload"));
     }
 
-    /// Adversarial: a `Page<Item>` response route refuses to start —
-    /// no cursor-envelope runtime exists yet.
+    /// The pagination detection path: with `pagination` OFF, a
+    /// `Page<Item>` response route is a gap. Slice 52c-2 turned the
+    /// capability on in `interpreter_tier()`.
     #[test]
     fn page_response_route_is_a_closure_gap() {
         let r = route(Type::Page(Box::new(Type::Struct(DefId(7)))), None, "h");
         let ir = ir_with(r, vec![handler_agent("h", false)]);
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        let caps = RuntimeCapabilities {
+            pagination: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1);
         assert!(gaps[0].missing_capability.contains("paginated"));
+    }
+
+    /// Positive: with `interpreter_tier()` (uploads + pagination ON as
+    /// of 52c-2), `Upload<Format>` and `Page<Item>` routes are NOT gaps
+    /// — they start and serve.
+    #[test]
+    fn upload_and_page_routes_start_under_interpreter_tier() {
+        let upload = route(Type::String, Some(Type::Upload(Box::new(Type::String))), "h");
+        let ir = ir_with(upload, vec![handler_agent("h", false)]);
+        assert!(check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier()).is_empty());
+
+        let page = route(Type::Page(Box::new(Type::Struct(DefId(7)))), None, "h2");
+        let ir = ir_with(page, vec![handler_agent("h2", false)]);
+        assert!(check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier()).is_empty());
     }
 
     /// Adversarial: a `requires`-policy route (handler binds `actor`)
@@ -362,12 +396,13 @@ mod tests {
     }
 
     /// End-to-end guard: an `Upload<Format>` body route, compiled through
-    /// the REAL pipeline (source → resolve → check → lower), must produce
-    /// an upload closure gap. This pins the `type_ref_to_type` lowering of
-    /// `Upload`/`Page` — without it the IR's `body_ty` is `Type::Unknown`
-    /// and closure silently passes a route the runtime can't serve (the
-    /// gap the hand-built unit tests above could not catch because they
-    /// construct `Type::Upload` directly, bypassing lowering).
+    /// the REAL pipeline (source → resolve → check → lower), is detected
+    /// as an upload gap when the capability is OFF. This pins the
+    /// `type_ref_to_type` lowering of `Upload`/`Page` — without it the
+    /// IR's `body_ty` is `Type::Unknown` and closure silently passes a
+    /// route the runtime can't serve (the gap the hand-built unit tests
+    /// could not catch because they construct `Type::Upload` directly,
+    /// bypassing lowering).
     #[test]
     fn compiled_upload_route_is_detected_as_a_closure_gap() {
         let source = r#"type R:
@@ -381,13 +416,23 @@ server a:
         return take(body)
 "#;
         let ir = crate::compile_to_ir(source).expect("source compiles");
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        let caps = RuntimeCapabilities {
+            uploads: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1, "expected one upload gap: {gaps:?}");
         assert!(gaps[0].missing_capability.contains("upload"));
+        // And under the full interpreter tier (52c-2), it serves.
+        assert!(
+            check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier()).is_empty(),
+            "upload route should serve under 52c-2"
+        );
     }
 
     /// End-to-end companion: a `Page<Item>` response route compiled
-    /// through the real pipeline produces a pagination gap.
+    /// through the real pipeline is detected as a pagination gap when
+    /// the capability is off, and serves under the full tier.
     #[test]
     fn compiled_page_route_is_detected_as_a_closure_gap() {
         let source = r#"type Item:
@@ -401,8 +446,16 @@ server a:
         return list_items()
 "#;
         let ir = crate::compile_to_ir(source).expect("source compiles");
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        let caps = RuntimeCapabilities {
+            pagination: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1, "expected one pagination gap: {gaps:?}");
         assert!(gaps[0].missing_capability.contains("paginated"));
+        assert!(
+            check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier()).is_empty(),
+            "page route should serve under 52c-2"
+        );
     }
 }

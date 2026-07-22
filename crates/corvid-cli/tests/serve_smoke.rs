@@ -1403,33 +1403,34 @@ server test_serve_q10_api:
 /// 52b Contract Closure gate. The Phase 52 invariant — *the running
 /// backend proves it implements its own contract, or it refuses to
 /// start* — made mechanical. An app that declares a route the runtime
-/// cannot yet execute (here an `Upload<Format>` body, whose multipart
-/// runtime arrives in slice 52c-2) MUST NOT start: `corvid serve`
-/// exits non-zero with an `E5204 Contract not executable` message
-/// naming the offending route, never a silent runtime `501`.
+/// cannot yet execute MUST NOT start: `corvid serve` exits non-zero
+/// with an `E5204 Contract not executable` message naming the
+/// offending route, never a silent runtime `501`.
 ///
-/// (Streaming was the original probe here; slice 52c-1 shipped the SSE
-/// runtime and flipped the `streaming` capability, so a `Stream<T>`
-/// route now starts. Upload is the remaining unimplemented boundary
-/// type, so the closure-refusal property is asserted against it.)
+/// The probe tracks whichever boundary type is still unimplemented.
+/// Streaming (52c-1), uploads + pagination (52c-2) have all shipped, so
+/// a `requires`-policy route — whose authorization runtime lands in
+/// slice 52h — is the remaining gap and the property is asserted
+/// against it.
 ///
-/// The source COMPILES fine (the type checker accepts `Upload<Format>`
-/// route bodies); closure is a serve-time runtime-path assertion,
-/// distinct from type checking. Uses `.output()` because the process is
-/// expected to exit promptly rather than bind a listener.
+/// The source COMPILES fine (the type checker accepts a `requires`
+/// route once an `identity` block is present); closure is a serve-time
+/// runtime-path assertion, distinct from type checking. Uses `.output()`
+/// because the process is expected to exit promptly rather than bind a
+/// listener.
 #[test]
 fn serve_refuses_to_start_when_a_route_is_not_contract_closed() {
     let dir = tempfile::tempdir().unwrap();
     let src_path = dir.path().join("main.cor");
-    let source = r#"type ImportReceipt:
-    accepted: Bool
+    let source = r#"identity users:
+    provider google
 
-agent take_import(body: Upload<Csv>) -> ImportReceipt:
-    return ImportReceipt(true)
+type Secret:
+    value: String
 
-server import_api:
-    route POST "/import" body Upload<Csv> -> json ImportReceipt:
-        return take_import(body)
+server secure_api:
+    route GET "/secret" -> json Secret requires authenticated:
+        return Secret("classified")
 "#;
     std::fs::write(&src_path, source).unwrap();
 
@@ -1453,7 +1454,7 @@ server import_api:
         "serve refusal must carry the `E5204` code: stderr=\n{stderr}"
     );
     assert!(
-        stderr.contains("/import") && stderr.contains("upload"),
+        stderr.contains("/secret") && stderr.contains("authorization"),
         "E5204 must name the offending route and the missing capability: stderr=\n{stderr}"
     );
     // Adversarial: it must NOT have printed the ready banner — the
@@ -1526,4 +1527,158 @@ server ticker_api:
             "SSE body must contain `{needle}`: body=\n{body}"
         );
     }
+}
+
+/// Minimal HTTP/1.1 multipart/form-data POST of a single file part.
+/// Returns `(status, body)`.
+fn http_post_multipart(
+    port: u16,
+    path: &str,
+    filename: &str,
+    content_type: &str,
+    file_bytes: &[u8],
+) -> Option<(u16, String)> {
+    let boundary = "----corvidtestboundary7MA4YWxkTrZu0gW";
+    let mut body: Vec<u8> = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .ok()?;
+    stream.write_all(&body).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let status: u16 = raw.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let resp_body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    Some((status, resp_body))
+}
+
+/// 52c-2 upload gate. An `Upload<Csv>` body route parses the multipart
+/// request, enforces the format's accepted MIME, and exposes the file
+/// through `body.filename()` / `body.size()` / `body.text()`. A wrong
+/// MIME is a structured `400`.
+#[test]
+fn serve_parses_a_multipart_upload_and_enforces_mime() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type ImportReceipt:
+    filename: String
+    bytes_len: Int
+    preview: String
+
+agent take_import(body: Upload<Csv>) -> ImportReceipt:
+    return ImportReceipt(body.filename(), body.size(), body.text())
+
+server import_api:
+    route POST "/import" body Upload<Csv> -> json ImportReceipt:
+        return take_import(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8205;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "upload app did not become ready on :{port}");
+
+    let csv = b"id,name\n1,alice\n2,bob\n";
+    let (status, body) =
+        http_post_multipart(port, "/import", "data.csv", "text/csv", csv).expect("POST failed");
+    assert_eq!(status, 200, "valid CSV upload status (body={body})");
+    let resp: serde_json::Value = serde_json::from_str(&body).expect("valid JSON");
+    assert_eq!(resp.get("filename").and_then(|v| v.as_str()), Some("data.csv"));
+    assert_eq!(resp.get("bytes_len").and_then(|v| v.as_i64()), Some(csv.len() as i64));
+    assert!(
+        resp.get("preview").and_then(|v| v.as_str()).unwrap_or("").contains("alice"),
+        "body.text() must decode the CSV: {body}"
+    );
+
+    // Wrong MIME → 400 unsupported_media_type.
+    let (bad_status, bad_body) =
+        http_post_multipart(port, "/import", "data.csv", "application/pdf", csv)
+            .expect("POST failed");
+    assert_eq!(bad_status, 400, "wrong MIME must be 400: {bad_body}");
+    assert!(
+        bad_body.contains("unsupported_media_type"),
+        "wrong MIME body must name the error: {bad_body}"
+    );
+}
+
+/// 52c-2 pagination gate. A `Page<Item>` response route built with
+/// `Page(items, next_cursor)` serves the standard cursor envelope
+/// `{items, next_cursor, has_more}`, with `next_cursor` unwrapped from
+/// the `Option` and `has_more` derived.
+#[test]
+fn serve_returns_a_page_cursor_envelope() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Item:
+    id: String
+    name: String
+
+type ItemQuery:
+    cursor: String
+    limit: Int
+
+server items_api:
+    route GET "/items" query ItemQuery -> json Page<Item>:
+        a = Item("i1", "first")
+        b = Item("i2", "second")
+        return Page([a, b], Some(query.cursor))
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8206;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "pagination app did not become ready on :{port}");
+
+    let (status, body) =
+        http_get(port, "/items?cursor=abc123&limit=10").expect("GET /items failed");
+    assert_eq!(status, 200, "page response status (body={body})");
+    let resp: serde_json::Value = serde_json::from_str(&body).expect("valid JSON");
+    assert_eq!(
+        resp.get("next_cursor").and_then(|v| v.as_str()),
+        Some("abc123"),
+        "next_cursor must be the unwrapped cursor string: {body}"
+    );
+    assert_eq!(
+        resp.get("has_more").and_then(|v| v.as_bool()),
+        Some(true),
+        "has_more must derive from Some(cursor): {body}"
+    );
+    let items = resp.get("items").and_then(|v| v.as_array()).expect("items array");
+    assert_eq!(items.len(), 2, "envelope must carry both items: {body}");
+    assert_eq!(items[0].get("id").and_then(|v| v.as_str()), Some("i1"));
 }

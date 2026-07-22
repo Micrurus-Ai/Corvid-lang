@@ -552,10 +552,14 @@ JSON body (`body.item`) each run their handler body through the ordinary agent
 machinery, so effects, approval, provenance, and replay apply to route execution
 automatically (slice 52a).
 
-A `Stream<T>` route response streams end-to-end as Server-Sent Events — serve
-consumes the interpreter's stream channel and flushes each yielded value as a
-`data:` event, terminated by `event: done` — so an AI streaming endpoint falls
-straight out of the language's `Stream` type with zero glue.
+The runtime executes the HTTP-boundary types the contract advertises. A
+`Stream<T>` route streams end-to-end as Server-Sent Events (`data:` per yield,
+`event: done` to close). An `Upload<Format>` body is parsed from the multipart
+request — accepted-MIME and max-size enforced at the boundary — and read through
+`body.text()` / `body.bytes()` / `body.filename()`. A `Page<Item>` response is
+built with `Page(items, next_cursor)` and serialized as the standard
+`{items, next_cursor, has_more}` cursor envelope, `has_more` derived. Each falls
+straight out of the language's own type with zero glue.
 
 **Contract Closure** guarantees the surface and the runtime can never drift.
 Before `corvid serve` / `corvid dev` bind a listener, they walk the public HTTP
@@ -564,25 +568,26 @@ exists for every route. A route the contract describes but the runtime cannot
 yet serve is a **startup error**, never a silent runtime `501`:
 
 ```corvid
-agent take_import(body: Upload<Csv>) -> ImportReceipt:
-    return ImportReceipt(true)
+identity users:
+    provider google
 
-server import_api:
-    route POST "/import" body Upload<Csv> -> json ImportReceipt:
-        return take_import(body)
+server secure_api:
+    route GET "/secret" -> json Secret requires authenticated:
+        return Secret("classified")
 ```
 
 ```bash
 corvid check main.cor   # ok — the source compiles cleanly
 corvid serve main.cor   # error: E5204 Contract not executable:
-                        #   route POST /import needs file uploads (multipart
-                        #   Upload<Format> parsing) — a runtime path for it does
-                        #   not exist yet. The backend refuses to start.
+                        #   route GET /secret needs authorization enforcement
+                        #   (authenticated actor + policy check) — a runtime
+                        #   path for it does not exist yet. Refuses to start.
 ```
 
 The closure surface is driven by a capability snapshot that each Phase 52 slice
-flips as it lands the capability (streaming ✓, uploads, pagination, authorization
-enforcement), so the running backend can never advertise more than it delivers.
+flips as it lands the capability (route execution ✓, streaming ✓, uploads ✓,
+pagination ✓, authorization enforcement next), so the running backend can never
+advertise more than it delivers.
 
 Why it is unique: every other framework lets a server route return `501` — or
 worse, a plausible-but-wrong response — for an endpoint its API docs promise. In
@@ -629,3 +634,5 @@ runtime can't serve refuses the whole process, loudly, at startup.
 | Route Execution (path/query/body) | Shipped (52a) | `corvid serve examples/reference_app/src/main.cor` | `crates/corvid-cli/src/serve_cmd.rs` tests + `crates/corvid-cli/tests/serve_smoke.rs` | [`inventions.md`](#the-complete-application-runtime) | Every declared route shape runs its handler body through the interpreter (path params, query structs, typed JSON bodies); malformed boundary input is a structured 400. Native-tier parity is later work. |
 | Contract Closure (refuse-to-start) | Shipped (52b) | `corvid serve` on an `Upload`/`Page`/policy route | `crates/corvid-driver/src/contract_closure.rs` tests + `crates/corvid-cli/tests/serve_smoke.rs::serve_refuses_to_start_when_a_route_is_not_contract_closed` | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | The backend refuses to start (E5204) when it advertises a route it cannot execute; grows in lockstep with the runtime (each Phase 52 slice flips one capability). It does not itself implement the missing capabilities. |
 | Streaming Route Responses (SSE) | Shipped (52c-1) | `corvid serve` a `Stream<T>` route, then `curl -N` it | `crates/corvid-cli/tests/serve_smoke.rs::serve_streams_a_stream_route_as_server_sent_events` | [`inventions.md`](#the-complete-application-runtime) | A `Stream<T>` route response flushes each yielded value as an SSE `data:` event with an `event: done` terminator; the transport falls straight out of the language's `Stream` type. Provider-native session continuation remains adapter work. |
+| File Uploads (multipart) | Shipped (52c-2) | `corvid serve` an `Upload<Format>` route, then `curl -F` it | `crates/corvid-cli/tests/serve_smoke.rs::serve_parses_a_multipart_upload_and_enforces_mime` | [`inventions.md`](#the-complete-application-runtime) | An `Upload<Format>` body is parsed from multipart with accepted-MIME + max-size enforcement (400 on violation), read via `body.text()`/`bytes()`/`filename()`/`content_type()`/`size()` methods. Interpreter tier buffers the whole body; streaming large uploads is later work. |
+| Cursor Pagination (Page envelope) | Shipped (52c-2) | `corvid serve` a `Page<Item>` route, then GET it | `crates/corvid-cli/tests/serve_smoke.rs::serve_returns_a_page_cursor_envelope` | [`inventions.md`](#the-complete-application-runtime) | `Page(items, next_cursor)` builds the `{items, next_cursor, has_more}` envelope (`has_more` derived, cursor unwrapped from `Option`); the incoming cursor is read from the route's typed query struct. |

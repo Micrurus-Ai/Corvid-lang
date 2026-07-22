@@ -7,16 +7,19 @@ and proves its new runtime capability against it, with no special
 cases. When Contract Closure is enforced (slice 52b), this app fails to
 start the moment a runtime path lags the contract it advertises.
 
-## Current surface (slice 52a — route execution)
+## Current surface (slices 52a–52c-2)
 
-A pure in-memory orders API exercising the three HTTP request shapes
-the runtime executes end-to-end through the interpreter:
+A pure in-memory orders API exercising every HTTP shape the runtime
+executes end-to-end through the interpreter:
 
-| Route                     | Shape          | Reads          |
-| ------------------------- | -------------- | -------------- |
-| `GET /orders/{id}`        | path parameter | `path.id`      |
-| `GET /orders`             | typed query    | `query.status`, `query.limit` |
-| `POST /orders`            | typed body     | `body.item`, `body.quantity`  |
+| Route                     | Shape             | Notes                                   |
+| ------------------------- | ----------------- | --------------------------------------- |
+| `GET /orders/{id}`        | path parameter    | `path.id`                               |
+| `GET /orders`             | typed query       | `query.status`, `query.limit`           |
+| `POST /orders`            | typed body        | `body.item`, `body.quantity`            |
+| `GET /orders/activity`    | `Stream<T>` → SSE | one `data:` event per yield             |
+| `GET /orders/page`        | `Page<Item>`      | `{items, next_cursor, has_more}` envelope |
+| `POST /orders/import`     | `Upload<Csv>`     | multipart; `body.filename()`/`size()`   |
 
 Run it:
 

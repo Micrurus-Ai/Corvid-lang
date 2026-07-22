@@ -474,6 +474,11 @@ fn collect_expr_imports(
             }
             Ok(())
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            collect_expr_imports(items, tools, prompts, plan, agent_name)?;
+            collect_expr_imports(next_cursor, tools, prompts, plan, agent_name)?;
+            Ok(())
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
             for arg in args {
@@ -968,6 +973,11 @@ fn emit_expr(
         IrExprKind::StructLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "named struct literals are interpreter-only in 45n".to_string(),
+            ));
+        }
+        IrExprKind::PageNew { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "Page<Item> is interpreter-only in 52c-2".to_string(),
             ));
         }
         IrExprKind::MapLiteral { .. } => {

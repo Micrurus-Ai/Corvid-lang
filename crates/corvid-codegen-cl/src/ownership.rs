@@ -316,6 +316,10 @@ fn expr_consumes_target(
                     .as_ref()
                     .is_some_and(|s| expr_consumes_target(s, target, sigs))
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_consumes_target(items, target, sigs)
+                || expr_consumes_target(next_cursor, target, sigs)
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -412,6 +416,9 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::StructLiteral { fields, spread, .. } => {
             fields.iter().any(|(_, v)| expr_references(v, target))
                 || spread.as_ref().is_some_and(|s| expr_references(s, target))
+        }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_references(items, target) || expr_references(next_cursor, target)
         }
         IrExprKind::Match { scrutinee, arms } => {
             expr_references(scrutinee, target)

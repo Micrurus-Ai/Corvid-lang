@@ -416,6 +416,10 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
                 scan_expr(s, max_id);
             }
         }
+        IrExprKind::PageNew { items, next_cursor } => {
+            scan_expr(items, max_id);
+            scan_expr(next_cursor, max_id);
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
             for a in args {
@@ -516,6 +520,9 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::StructLiteral { fields, spread, .. } => {
             fields.iter().any(|(_, v)| expr_reads_local(v, target))
                 || spread.as_ref().is_some_and(|s| expr_reads_local(s, target))
+        }
+        IrExprKind::PageNew { items, next_cursor } => {
+            expr_reads_local(items, target) || expr_reads_local(next_cursor, target)
         }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))

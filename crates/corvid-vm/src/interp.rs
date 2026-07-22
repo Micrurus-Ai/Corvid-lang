@@ -841,6 +841,37 @@ impl<'ir> Interpreter<'ir> {
 
             IrExprKind::OptionNone => Ok(ExprFlow::Value(Value::OptionNone)),
 
+            IrExprKind::PageNew { items, next_cursor } => {
+                let items_v = match self.eval_expr(items).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                };
+                let cursor_v = match self.eval_expr(next_cursor).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                };
+                // `has_more` is derived from `next_cursor`'s presence — a
+                // `Some(_)` cursor means another page exists. The cursor
+                // is unwrapped from the `Option` so the JSON envelope
+                // carries `next_cursor: "<cursor>"` or `null`, not the
+                // tagged option form (slice 52c-2).
+                let (has_more, next_cursor_field) = match cursor_v {
+                    Value::OptionSome(v) => (true, v.get()),
+                    Value::OptionNone => (false, Value::Nothing),
+                    other => (false, other),
+                };
+                let page = crate::value::StructValue::new(
+                    DefId(0),
+                    "Page",
+                    vec![
+                        ("items".to_string(), items_v),
+                        ("next_cursor".to_string(), next_cursor_field),
+                        ("has_more".to_string(), Value::Bool(has_more)),
+                    ],
+                );
+                Ok(ExprFlow::Value(Value::Struct(page)))
+            }
+
             IrExprKind::TryPropagate { inner } => {
                 let inner = match self.eval_expr(inner).await? {
                     ExprFlow::Value(v) => v,
