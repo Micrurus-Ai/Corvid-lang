@@ -498,6 +498,33 @@ export function useApp(client: CorvidClient) {
 }
 "#;
 
+/// Slice 51q — scaffold a frontend starter project into `out_dir`.
+pub fn run_generate_frontend(file: Option<&Path>, framework: &str, out_dir: &Path) -> Result<u8> {
+    if framework != "react" {
+        anyhow::bail!("unknown --framework `{framework}` — currently only `react` is supported");
+    }
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let files = corvid_abi::frontend_gen::emit_react_frontend(&contract);
+    for gf in &files {
+        let path = out_dir.join(&gf.filename);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(&path, &gf.contents)
+            .with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    println!(
+        "scaffolded a {framework} frontend into {} ({} file(s)). Next:\n  cd {} && npm install && VITE_CORVID_BACKEND=http://localhost:8080 npm run dev",
+        out_dir.display(),
+        files.len(),
+        out_dir.display(),
+    );
+    Ok(0)
+}
+
 /// Slice 51c — emit the AI-native metadata (`corvid-ai.json`).
 pub fn run_corvid_ai(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     let Some(contract) = build_contract(file)? else {

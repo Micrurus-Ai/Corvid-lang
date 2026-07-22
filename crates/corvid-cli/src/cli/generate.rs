@@ -23,4 +23,19 @@ pub enum GenerateCommand {
         #[arg(long, value_name = "DIR", default_value = "sdk/generated")]
         out: PathBuf,
     },
+    /// Scaffold a runnable frontend starter project from the contract.
+    /// `--framework react` emits a Vite + React + TypeScript app with
+    /// the generated typed client, a configured `CorvidClient`, and an
+    /// `App.tsx` wiring a form/stream per public agent — a STARTING
+    /// POINT you own and modify, not a file that is re-overwritten.
+    Frontend {
+        /// Source file. Defaults to `src/main.cor` in a project.
+        file: Option<PathBuf>,
+        /// Framework to scaffold. Currently `react`.
+        #[arg(long, default_value = "react")]
+        framework: String,
+        /// Output directory for the starter project.
+        #[arg(long, value_name = "DIR", default_value = "frontend")]
+        out: PathBuf,
+    },
 }

@@ -876,6 +876,11 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 framework.as_deref(),
                 &out,
             ),
+            GenerateCommand::Frontend {
+                file,
+                framework,
+                out,
+            } => contract_cmd::run_generate_frontend(file.as_deref(), &framework, &out),
         },
         Some(Command::Connectors { command }) => cmd_connectors(command),
         Some(Command::Auth { command }) => cmd_auth(command),

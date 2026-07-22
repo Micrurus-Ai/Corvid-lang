@@ -2653,6 +2653,39 @@ Next per the Phase 51 queue: 51q-frontend-scaffolding.
 
 ---
 
+## 2026-07-16 - 51q closed: `generate frontend` — a runnable app, not a snippet
+
+The pieces were all there — a typed client, hooks, components. 51q
+assembles them into a project you can `npm install && npm run dev` and
+see working. `corvid generate frontend --framework react` writes a
+complete Vite + React + TypeScript starter: the generated client under
+src/corvid/, a configured CorvidClient + Api in src/client.ts, and an
+App.tsx that reads the contract and wires a sign-in row (from the
+identity providers) plus a CorvidAgentForm per non-streaming agent and
+a CorvidStream per streaming one — numeric inputs coerced with
+Number(...), everything typed. Plus main.tsx, index.html,
+vite.config.ts, vite-env.d.ts, tsconfig, package.json, README.
+
+The distinction from the rest of the SDK is deliberate: the client,
+hooks, and components are SHIPPED and reused; the scaffold is a STARTING
+POINT you own. Regenerate a fresh project, then edit freely — nothing
+here is a file Corvid re-overwrites behind your back.
+
+The proof is the strongest kind for generated code: it runs the
+type-checker over the WHOLE emitted project. I generated an app with a
+record, an identity block, a non-streaming agent, a numeric agent, and
+a streaming agent, then ran tsc over App.tsx + client.ts + main.tsx +
+the generated corvid/* against real React and Vite types and the source
+packages. Zero errors. `import.meta.env` resolves through the emitted
+vite-env.d.ts; react-dom/client resolves; the form/stream per agent
+type-checks with the contract's types. `corvid generate frontend`
+really does hand you a working app.
+
+Next per the Phase 51 queue: 51r-contract-sweep (the invention contract
++ launch-story polish that closes Phase 51).
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
