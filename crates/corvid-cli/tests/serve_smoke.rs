@@ -1265,18 +1265,21 @@ server test_serve_q9_api:
     // get the approval-gated label. THIS is the load-bearing 33Q9
     // assertion — pre-33Q9 it was unconditionally labeled
     // approval-gated even though execute_classify never queues.
+    //
+    // Slice 52a removed the dispatch-shape classifier (every route now
+    // executes through the same synthetic-handler-agent path), so the
+    // banner no longer prints a `(body)`/`(literal)` shape label — only
+    // the approval tag distinguishes routes. The 33Q9 property is
+    // preserved: a non-approve route carries NO approval-gated tag.
     assert!(
         banner.contains("POST   /classify")
             && banner
                 .lines()
-                .any(|l| l.contains("/classify")
-                    && !l.contains("approval-gated")
-                    && l.contains("(body)")),
-        "POST /classify MUST be labeled `(body)` WITHOUT \
-         `approval-gated` (its agent execute_classify has NO approve \
-         boundary). Pre-33Q9 every body-dispatch route was \
-         unconditionally labeled approval-gated — that's the \
-         regression the maintainer trial caught. banner=\n{banner}"
+                .any(|l| l.contains("/classify") && !l.contains("approval-gated")),
+        "POST /classify MUST NOT be labeled `approval-gated` (its agent \
+         execute_classify has NO approve boundary). Pre-33Q9 every \
+         body-dispatch route was unconditionally labeled approval-gated \
+         — that's the regression the maintainer trial caught. banner=\n{banner}"
     );
 }
 
@@ -1394,5 +1397,67 @@ server test_serve_q10_api:
     assert!(
         detail.contains("classify_anything"),
         "detail must still name the unregistered tool: detail={detail:?}"
+    );
+}
+
+/// 52b Contract Closure gate. The Phase 52 invariant — *the running
+/// backend proves it implements its own contract, or it refuses to
+/// start* — made mechanical. An app that declares a route the runtime
+/// cannot yet execute (here a `Stream<T>` response, which needs the
+/// Server-Sent-Events endpoint that arrives in slice 52c) MUST NOT
+/// start: `corvid serve` exits non-zero with an `E5204 Contract not
+/// executable` message naming the offending route, never a silent
+/// runtime `501`.
+///
+/// The source COMPILES fine (the type checker accepts `Stream<T>` route
+/// returns); closure is a serve-time runtime-path assertion, distinct
+/// from type checking. Uses `.output()` because the process is expected
+/// to exit promptly rather than bind a listener.
+#[test]
+fn serve_refuses_to_start_when_a_route_is_not_contract_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type OrderEvent:
+    id: String
+    status: String
+
+agent order_stream() -> Stream<OrderEvent>:
+    yield OrderEvent("o1", "open")
+
+server streaming_api:
+    route GET "/orders/stream" -> json Stream<OrderEvent>:
+        return order_stream()
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let output = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg("127.0.0.1:8203")
+        .current_dir(repo_root())
+        .output()
+        .expect("run corvid serve");
+
+    assert!(
+        !output.status.success(),
+        "serve must exit non-zero when the contract is not closed; got {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("E5204"),
+        "serve refusal must carry the `E5204` code: stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains("/orders/stream") && stderr.contains("streaming"),
+        "E5204 must name the offending route and the missing capability: stderr=\n{stderr}"
+    );
+    // Adversarial: it must NOT have printed the ready banner — the
+    // closure check runs BEFORE the listener binds.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("listening on"),
+        "serve must refuse BEFORE binding a listener: stdout=\n{stdout}"
     );
 }

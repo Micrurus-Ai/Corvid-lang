@@ -6906,3 +6906,55 @@ What this is NOT:
 The reference application `examples/reference_app/src/main.cor` is
 the continuous Phase-52 fixture: it starts here exercising these
 three shapes and grows with every subsequent slice.
+
+## Contract Closure — the backend refuses to start rather than advertise a route it can't serve (2026-07-22)
+
+`corvid serve` now proves it implements its own contract before it
+binds a listener. It walks the public HTTP surface the Application
+Contract advertises and asserts a runtime execution path exists for
+every route. A route the contract describes but the interpreter tier
+cannot yet execute is a startup error (`E5204`), never a silent
+runtime `501`:
+
+```
+$ corvid check streaming_app.cor
+ok: streaming_app.cor — no errors
+
+$ corvid serve streaming_app.cor
+error: streaming_app.cor is not contract-closed — 1 route(s) the
+contract advertises cannot be executed by this runtime yet:
+  E5204 Contract not executable: route GET /orders/stream needs
+  streaming responses (Server-Sent Events) — a runtime path for it
+  does not exist yet (arrives in slice 52c). The backend refuses to
+  start rather than advertise a surface it cannot serve.
+$ echo $?
+1
+```
+
+The source COMPILES — closure is a serve-time runtime-path assertion,
+distinct from type checking. The gaps the check currently detects, and
+the slice that closes each:
+
+- `Stream<T>` response → SSE endpoint (52c)
+- `Upload<Format>` body → multipart parser (52c)
+- `Page<Item>` response → cursor envelope (52c)
+- `requires`-policy route → authorization enforcement (52h)
+
+The check reads a `RuntimeCapabilities` snapshot describing what the
+interpreter tier can execute as of the current slice. Each Phase 52
+slice that lands a capability flips one field to `true`, so the closure
+surface grows in lockstep with the runtime — the backend can never
+advertise more than it delivers. A policy route is detected via its
+synthetic handler agent's `actor` parameter (52a binds one only for
+`requires` routes).
+
+What this is NOT:
+
+- Not a type-check. A `Stream<T>` route type-checks fine; closure runs
+  at serve startup, over the routes the contract mounts.
+- Not a permanent ban. The same route starts cleanly the moment its
+  capability lands — `capability_present_closes_the_gap` proves a
+  streaming route is no longer a gap once `streaming` is `true`.
+
+Reference: guarantee `contract.runtime_closure` (RuntimeChecked) in
+core-semantics.md; `corvid tour --topic contract-closure`.

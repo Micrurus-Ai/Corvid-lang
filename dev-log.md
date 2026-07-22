@@ -2780,6 +2780,77 @@ Next per the Phase 52 queue: 52b-contract-closure.
 
 ---
 
+## 2026-07-22 - 52b closed: the backend proves its contract or refuses to start
+
+The Phase 52 invariant, made mechanical. `corvid serve` now walks the
+public HTTP surface the Application Contract advertises and asserts a
+runtime execution path exists for every route BEFORE it binds a
+listener. A route the contract describes but the interpreter tier
+cannot yet serve — a `Stream<T>` response with no SSE, an
+`Upload<Format>` body with no multipart parser, a `Page<Item>` response
+with no cursor envelope, or a `requires`-policy route with no
+authorization enforcement — is a startup error (`E5204 Contract not
+executable`) naming the offending route and the missing capability. It
+is never a silent runtime `501`. The Stream app I probed compiles
+cleanly with `corvid check` and refuses with exit 1 + E5204 under
+`corvid serve`; the reference app (no boundary types, no policy) still
+starts and serves.
+
+The design is a capability registry, not a hardcoded blocklist.
+`corvid_driver::check_contract_closure(ir, RuntimeCapabilities)` reads a
+snapshot of what the interpreter tier can execute as of the current
+slice; each Phase 52 slice that lands a capability flips one field on
+(streaming/uploads/pagination → 52c, auth enforcement → 52h). So 52b
+and 52c pair naturally — 52b forbids the boundary types, 52c enables
+them — and the running backend can never advertise more than it
+delivers. A policy route is detected through its synthetic handler
+agent's `actor` parameter, which 52a binds only for `requires` routes;
+`capability_present_closes_the_gap` proves a gap disappears the moment
+its capability lands.
+
+Shipped with full public proof (the invention contract): a
+`contract.runtime_closure` RuntimeChecked guarantee row (positive:
+reference shape + capability-present; adversarial: stream/upload/page/
+policy gaps), regenerated core-semantics.md, a README §"The Complete
+Application Runtime" entry, an inventions.md §7 section + two Proof
+Matrix rows (52a route execution + 52b closure), and a
+`corvid tour --topic contract-closure` demo whose source compiles
+through the driver.
+
+The honest part: running the serve_smoke integration suite (which I
+had NOT run during 52a — only the unit tests + corpus) surfaced two
+latent regressions 52a shipped, both from the synthetic-handler
+indirection:
+
+1. The startup banner's 33Q9 approve/non-approve label was
+   under-reporting EVERY real route. `agent_body_contains_approve`
+   inspected only the handler agent's immediate body, but the handler
+   body is now `return <handler>(...)` — the `approve` lives one call
+   deeper. Fixed with a transitive agent-call walker (visited-set
+   bounded; exotic stream/replay forms conservatively under-count, no
+   false positives).
+2. The banner dropped the old `(body)`/`(literal)` dispatch-shape
+   labels when 52a deleted the shape classifier. The 33Q9 test asserted
+   the incidental `(body)` label; updated to assert the preserved
+   load-bearing property (a non-approve route carries no
+   approval-gated tag).
+
+Lesson recorded for the loop: the per-slice validation gate must
+include `cargo test -p corvid-cli --test serve_smoke` whenever
+`serve_cmd.rs` or the route-lowering path changes — the unit tests
+alone don't exercise a live server.
+
+Gate: workspace check clean; corvid-driver (contract_closure),
+corvid-guarantees (registry well-formed + doc-drift + id-wired + refs
+resolve), corvid-cli bin (363) + serve_smoke (10) all green; corpus
+verify exits 1 on exactly the two deliberate fixtures.
+
+Next per the Phase 52 queue: 52c-boundary-type-runtime (the capability
+52b currently forbids — SSE for `Stream<T>`, multipart for
+`Upload<Format>`, cursor envelopes for `Page<Item>`).
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

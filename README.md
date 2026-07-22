@@ -868,6 +868,27 @@ Roadmap: [Phase 51 application surface](./ROADMAP.md)
 Proof: [contract + OpenAPI + SDK generators](./crates/corvid-abi/src/app_contract.rs) + [core-semantics `contract.matches_compiled_surface`](./docs/reference/core-semantics.md)
 Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the surface precisely enough that existing frontends consume it safely; it does not become a frontend language or design your app's UI.
 
+### The Complete Application Runtime
+
+#### The Backend Proves Its Own Contract, Or Refuses To Start
+
+Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`.
+
+**Contract Closure** keeps the advertised surface and the runtime from ever drifting: before `corvid serve` binds a listener it asserts a runtime execution path exists for every route the contract advertises. A route it cannot yet serve — a `Stream<T>` response with no SSE endpoint, an `Upload<Format>` body with no multipart parser, a `Page<Item>` response with no cursor envelope, or a `requires`-policy route with no authorization enforcement — is a startup error (`E5204`), never a silent runtime `501`. The developer's own source is the forcing function.
+
+```bash
+corvid serve examples/reference_app/src/main.cor   # path/query/body routes all execute
+corvid check streaming_app.cor                     # ok — the source compiles
+corvid serve streaming_app.cor                     # error: E5204 Contract not executable
+                                                   #   (needs streaming; refuses to start)
+```
+
+Spec: [The Complete Application Runtime](./docs/reference/inventions.md#the-complete-application-runtime)
+Tour: `corvid tour --topic contract-closure`
+Roadmap: [Phase 52 the complete application runtime](./ROADMAP.md)
+Proof: [route execution](./crates/corvid-cli/src/serve_cmd.rs) + [contract closure](./crates/corvid-driver/src/contract_closure.rs) + [core-semantics `contract.runtime_closure`](./docs/reference/core-semantics.md)
+Non-scope: Closure grows in lockstep with the runtime — each Phase 52 slice flips one capability on; it refuses to start until a capability lands rather than implementing it. Native-tier route execution is later work.
+
 ## Architecture
 
 ```text

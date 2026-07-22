@@ -724,6 +724,30 @@ public agent chat(message: String) -> Stream<String>:
 tool echo_stream(m: String) -> Stream<String>
 "#,
     },
+    TourTopic {
+        name: "contract-closure",
+        title: "The Backend Proves Its Own Contract, Or Refuses To Start",
+        category: "The complete application runtime",
+        pitch: "Corvid closes the gap every other backend framework leaves open: the running server can advertise a public interface it does not actually implement. Before `corvid serve` binds a listener it walks the Application Contract's public HTTP surface and asserts a runtime execution path exists for EVERY route it advertises. A route the contract describes but the runtime cannot yet serve — a `Stream<T>` response with no Server-Sent-Events endpoint, an `Upload<Format>` body with no multipart parser, a `Page<Item>` response with no cursor envelope, or a `requires`-policy route with no authorization enforcement — is a startup error (`E5204 Contract not executable`) naming the offending route and the capability it needs. It is never a silent runtime 501. The source below COMPILES cleanly, but `corvid serve` refuses it until the streaming runtime lands — the developer's own source is the forcing function.",
+        spec: "docs/reference/inventions.md#the-complete-application-runtime",
+        roadmap: "Phase 52 contract closure (52b)",
+        test: "crates/corvid-driver/src/contract_closure.rs tests + crates/corvid-cli/tests/serve_smoke.rs::serve_refuses_to_start_when_a_route_is_not_contract_closed",
+        non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grows in lockstep with the runtime (each Phase 52 slice flips one capability on). It does not itself implement streaming/uploads/pagination/auth — it refuses to start until those slices land, so the backend can never advertise more than it delivers.",
+        source: r#"type OrderEvent:
+    id: String
+    status: String
+
+agent order_stream() -> Stream<OrderEvent>:
+    yield OrderEvent("order-1", "open")
+
+server orders_api:
+    # This route COMPILES, but `corvid serve` refuses to start with
+    # E5204 until the streaming runtime (slice 52c) exists — the
+    # contract must never advertise an endpoint the runtime can't serve.
+    route GET "/orders/stream" -> json Stream<OrderEvent>:
+        return order_stream()
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

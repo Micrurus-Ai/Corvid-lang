@@ -150,6 +150,27 @@ pub(crate) fn cmd_serve(
         return Ok(1);
     }
 
+    // Contract Closure (slice 52b): the running backend proves it
+    // implements its own contract, or it refuses to start. Any public
+    // route the contract advertises but the interpreter tier cannot yet
+    // execute — a streaming/upload/pagination boundary type, or a
+    // `requires` policy with no authorization enforcement — is a startup
+    // error (E5204) naming the element, never a silent runtime 501.
+    let closure_gaps =
+        corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    if !closure_gaps.is_empty() {
+        eprintln!(
+            "error: {} is not contract-closed — {} route(s) the contract advertises \
+             cannot be executed by this runtime yet:",
+            file.display(),
+            closure_gaps.len()
+        );
+        for gap in &closure_gaps {
+            eprintln!("  {}", gap.message());
+        }
+        return Ok(1);
+    }
+
     let addr: SocketAddr = listen
         .parse()
         .with_context(|| format!("invalid --listen address `{listen}` (expected host:port)"))?;
@@ -1247,38 +1268,160 @@ fn register_cdylib_tool_handlers(ir: &IrFile, cdylib_path: &Path) -> Result<Tool
     Ok(registry)
 }
 
-/// 33Q9 helper — return true when `agent_name`'s body contains any
-/// reachable `IrStmt::Approve`. Walks nested `If` / `For` blocks
-/// recursively; does NOT follow calls into other agents (a
-/// conservative under-count). Used by the serve startup banner to
-/// accurately label routes as approval-gated vs not — pre-33Q9 every
-/// body-dispatch route was labeled approval-gated regardless of
-/// what the agent actually did.
+/// 33Q9 helper — return true when executing `agent_name` can reach an
+/// `IrStmt::Approve`, following agent calls transitively. Used by the
+/// serve startup banner to label routes as approval-gated vs not.
+///
+/// Slice 52a made every route dispatch through a synthetic handler
+/// agent whose body is `return <handler>(...)`, so the `approve`
+/// boundary usually lives one call deeper than the handler agent
+/// itself — the detection must follow agent calls or it under-reports
+/// every real route. A `visited` set bounds recursion through cycles.
+/// Exotic expression forms (stream combinators, replay) fall through
+/// to `false`: a conservative under-count with no false positives,
+/// matching the label's original contract.
 fn agent_body_contains_approve(ir: &IrFile, agent_name: &str) -> bool {
-    let Some(agent) = ir.agents.iter().find(|a| a.name == agent_name) else {
+    let mut visited = std::collections::HashSet::new();
+    agent_reaches_approve(ir, agent_name, &mut visited)
+}
+
+fn agent_reaches_approve(
+    ir: &IrFile,
+    agent_name: &str,
+    visited: &mut std::collections::HashSet<String>,
+) -> bool {
+    if !visited.insert(agent_name.to_string()) {
         return false;
-    };
-    block_contains_approve(&agent.body)
+    }
+    match ir.agents.iter().find(|a| a.name == agent_name) {
+        Some(agent) => block_reaches_approve(ir, &agent.body, visited),
+        None => false,
+    }
 }
 
-fn block_contains_approve(block: &corvid_ir::IrBlock) -> bool {
-    block.stmts.iter().any(stmt_contains_approve)
+fn block_reaches_approve(
+    ir: &IrFile,
+    block: &corvid_ir::IrBlock,
+    visited: &mut std::collections::HashSet<String>,
+) -> bool {
+    block
+        .stmts
+        .iter()
+        .any(|s| stmt_reaches_approve(ir, s, visited))
 }
 
-fn stmt_contains_approve(stmt: &IrStmt) -> bool {
+fn stmt_reaches_approve(
+    ir: &IrFile,
+    stmt: &IrStmt,
+    visited: &mut std::collections::HashSet<String>,
+) -> bool {
     match stmt {
         IrStmt::Approve { .. } => true,
+        IrStmt::Let { value, .. }
+        | IrStmt::Yield { value, .. }
+        | IrStmt::Destructure { value, .. }
+        | IrStmt::Assign { value, .. } => expr_reaches_approve(ir, value, visited),
+        IrStmt::Expr { expr, .. } => expr_reaches_approve(ir, expr, visited),
+        IrStmt::Return { value, .. } => {
+            value.as_ref().is_some_and(|e| expr_reaches_approve(ir, e, visited))
+        }
         IrStmt::If {
+            cond,
             then_block,
             else_block,
             ..
         } => {
-            block_contains_approve(then_block)
+            expr_reaches_approve(ir, cond, visited)
+                || block_reaches_approve(ir, then_block, visited)
                 || else_block
                     .as_ref()
-                    .is_some_and(block_contains_approve)
+                    .is_some_and(|b| block_reaches_approve(ir, b, visited))
         }
-        IrStmt::For { body, .. } => block_contains_approve(body),
+        IrStmt::For { iter, body, .. } => {
+            expr_reaches_approve(ir, iter, visited) || block_reaches_approve(ir, body, visited)
+        }
+        IrStmt::While { cond, body, .. } => {
+            expr_reaches_approve(ir, cond, visited) || block_reaches_approve(ir, body, visited)
+        }
+        IrStmt::Parallel { arms, .. } => arms
+            .iter()
+            .any(|arm| expr_reaches_approve(ir, &arm.call, visited)),
+        IrStmt::Break { .. }
+        | IrStmt::Continue { .. }
+        | IrStmt::Pass { .. }
+        | IrStmt::Dup { .. }
+        | IrStmt::Drop { .. } => false,
+    }
+}
+
+fn expr_reaches_approve(
+    ir: &IrFile,
+    expr: &corvid_ir::IrExpr,
+    visited: &mut std::collections::HashSet<String>,
+) -> bool {
+    use corvid_ir::{IrCallKind, IrExprKind};
+    match &expr.kind {
+        IrExprKind::Call {
+            kind: IrCallKind::Agent { .. },
+            callee_name,
+            args,
+        } => {
+            agent_reaches_approve(ir, callee_name, visited)
+                || args.iter().any(|a| expr_reaches_approve(ir, a, visited))
+        }
+        IrExprKind::Call { args, .. } => {
+            args.iter().any(|a| expr_reaches_approve(ir, a, visited))
+        }
+        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+            expr_reaches_approve(ir, receiver, visited)
+                || args.iter().any(|a| expr_reaches_approve(ir, a, visited))
+        }
+        IrExprKind::FieldAccess { target, .. } => expr_reaches_approve(ir, target, visited),
+        IrExprKind::Index { target, index } => {
+            expr_reaches_approve(ir, target, visited) || expr_reaches_approve(ir, index, visited)
+        }
+        IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
+            expr_reaches_approve(ir, left, visited) || expr_reaches_approve(ir, right, visited)
+        }
+        IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
+            expr_reaches_approve(ir, operand, visited)
+        }
+        IrExprKind::Match { scrutinee, arms } => {
+            expr_reaches_approve(ir, scrutinee, visited)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_reaches_approve(ir, g, visited))
+                        || expr_reaches_approve(ir, &arm.body, visited)
+                })
+        }
+        IrExprKind::StructLiteral { fields, spread, .. } => {
+            fields
+                .iter()
+                .any(|(_, e)| expr_reaches_approve(ir, e, visited))
+                || spread
+                    .as_ref()
+                    .is_some_and(|s| expr_reaches_approve(ir, s, visited))
+        }
+        IrExprKind::Lambda { body, .. } => expr_reaches_approve(ir, body, visited),
+        IrExprKind::MapLiteral { keys, values } => {
+            keys.iter().chain(values.iter()).any(|e| expr_reaches_approve(ir, e, visited))
+        }
+        IrExprKind::List { items } => {
+            items.iter().any(|e| expr_reaches_approve(ir, e, visited))
+        }
+        IrExprKind::UnwrapGrounded { value } => expr_reaches_approve(ir, value, visited),
+        IrExprKind::ResultOk { inner }
+        | IrExprKind::ResultErr { inner }
+        | IrExprKind::OptionSome { inner }
+        | IrExprKind::TryPropagate { inner }
+        | IrExprKind::TrustBoundary { inner } => expr_reaches_approve(ir, inner, visited),
+        IrExprKind::Ask { prompt, .. } => expr_reaches_approve(ir, prompt, visited),
+        IrExprKind::Choose { options } => expr_reaches_approve(ir, options, visited),
+        IrExprKind::TryRetry { body, .. } => expr_reaches_approve(ir, body, visited),
+        // Literals, locals, decls, option-none, weak/stream combinators,
+        // and replay fall through: no agent call reachable through them
+        // in a route handler (conservative under-count, no false positive).
         _ => false,
     }
 }

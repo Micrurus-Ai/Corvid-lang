@@ -540,6 +540,50 @@ prove the safe-defaults cannot be bypassed.
 Why it is unique: identity is usually a library you can misconfigure. In Corvid
 the insecure configuration is the one you have to fight the compiler for.
 
+## 7. The Complete Application Runtime
+
+### The Backend Proves Its Own Contract, Or Refuses To Start {#the-complete-application-runtime}
+
+Phase 51 makes a Corvid backend describe its whole public interface. Phase 52
+makes the runtime **prove it implements that interface** — the two must never
+disagree. Every declared route shape executes through the interpreter tier: a
+path parameter (`path.id`), a typed query struct (`query.status`), and a typed
+JSON body (`body.item`) each run their handler body through the ordinary agent
+machinery, so effects, approval, provenance, and replay apply to route execution
+automatically (slice 52a).
+
+**Contract Closure** guarantees the surface and the runtime can never drift.
+Before `corvid serve` / `corvid dev` bind a listener, they walk the public HTTP
+surface the Application Contract advertises and assert a runtime execution path
+exists for every route. A route the contract describes but the runtime cannot
+yet serve is a **startup error**, never a silent runtime `501`:
+
+```corvid
+agent order_stream() -> Stream<OrderEvent>:
+    yield OrderEvent("order-1", "open")
+
+server orders_api:
+    route GET "/orders/stream" -> json Stream<OrderEvent>:
+        return order_stream()
+```
+
+```bash
+corvid check main.cor   # ok — the source compiles cleanly
+corvid serve main.cor   # error: E5204 Contract not executable:
+                        #   route GET /orders/stream needs streaming responses
+                        #   (Server-Sent Events) — a runtime path for it does
+                        #   not exist yet. The backend refuses to start.
+```
+
+The closure surface is driven by a capability snapshot that each Phase 52 slice
+flips as it lands the capability (streaming, uploads, pagination, authorization
+enforcement), so the running backend can never advertise more than it delivers.
+
+Why it is unique: every other framework lets a server route return `501` — or
+worse, a plausible-but-wrong response — for an endpoint its API docs promise. In
+Corvid the developer's own source is the forcing function: writing a route the
+runtime can't serve refuses the whole process, loudly, at startup.
+
 ## Proof Matrix
 
 | Invention | Status | Runnable command | Test coverage | Spec | Explicit non-scope |
@@ -577,3 +621,5 @@ the insecure configuration is the one you have to fight the compiler for.
 | Typed SDKs In Four Languages | Shipped (51l, 51o) | `corvid generate sdk --language ts\|swift\|kotlin\|python` | `crates/corvid-abi/src/ts_client.rs` + `sdk_gen.rs` tests | [`inventions.md`](#the-application-surface) | One contract → typed models everywhere; the TS target is a full client (shipped `@corvid/client`), the others are typed models + a transport scaffold. |
 | Universal Dev Console | Shipped (51m) | `corvid dev` | `crates/corvid-abi/src/dev_console.rs` tests | [`inventions.md`](#the-application-surface) | One self-contained, contract-driven console for every app; execution targets a running `corvid serve`. |
 | React Hooks + Frontend Scaffold | Shipped (51n, 51p, 51q) | `corvid generate frontend --framework react` | `sdk/typescript/react` (tsc-checked) + `crates/corvid-abi/src/frontend_gen.rs` tests | [`inventions.md`](#the-application-surface) | Generic hooks specialized by the generated types + prototype components + a runnable starter; scaffolds you own, not product UI. |
+| Route Execution (path/query/body) | Shipped (52a) | `corvid serve examples/reference_app/src/main.cor` | `crates/corvid-cli/src/serve_cmd.rs` tests + `crates/corvid-cli/tests/serve_smoke.rs` | [`inventions.md`](#the-complete-application-runtime) | Every declared route shape runs its handler body through the interpreter (path params, query structs, typed JSON bodies); malformed boundary input is a structured 400. Native-tier parity is later work. |
+| Contract Closure (refuse-to-start) | Shipped (52b) | `corvid serve` on a `Stream`/`Upload`/`Page`/policy route | `crates/corvid-driver/src/contract_closure.rs` tests + `crates/corvid-cli/tests/serve_smoke.rs::serve_refuses_to_start_when_a_route_is_not_contract_closed` | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | The backend refuses to start (E5204) when it advertises a route it cannot execute; grows in lockstep with the runtime (each Phase 52 slice flips one capability). It does not itself implement the missing capabilities. |

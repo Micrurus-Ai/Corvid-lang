@@ -69,6 +69,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `auth.api_key_scope_subset_check` | auth | runtime_checked | runtime |
 | `auth.jwt_kid_rotation` | auth | runtime_checked | runtime |
 | `contract.matches_compiled_surface` | abi_descriptor | static | abi_emit |
+| `contract.runtime_closure` | server | runtime_checked | runtime |
 | `auth.jwt_tamper_and_fuzz_resistant` | auth | runtime_checked | runtime |
 | `auth.oauth_pkce_required` | auth | runtime_checked | runtime |
 | `auth.csrf_double_submit` | auth | runtime_checked | runtime |
@@ -712,6 +713,26 @@ After signature validation, the recovered attestation payload must bit-match the
 
 - `crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_rejects_missing_declared_contract_id`
 - `crates/corvid-driver/src/build/tests.rs::signed_claim_coverage_rejects_out_of_scope_contract_id`
+
+### Server runtime
+
+#### `contract.runtime_closure`
+- **class**: runtime_checked
+- **phase**: runtime
+
+Before `corvid serve` / `corvid dev` bind a listener, they walk the public HTTP surface the Application Contract advertises (slice 52b) and assert a runtime execution path exists for every route. A route the contract describes but the interpreter tier cannot yet execute — a `Stream<T>` response with no Server-Sent-Events endpoint, an `Upload<Format>` body with no multipart parser, a `Page<Item>` response with no cursor envelope, or a `requires`-policy route with no authorization enforcement — is a startup error (`E5204 Contract not executable`) that names the offending element and the capability it needs. It is never a silent runtime `501`: the developer's source is the forcing function. The closure surface is driven by a `RuntimeCapabilities` snapshot that each Phase 52 slice flips as it lands the capability, so the running backend can never advertise more than it delivers.
+
+**Positive tests:**
+
+- `crates/corvid-driver/src/contract_closure.rs::reference_shape_has_no_closure_gaps`
+- `crates/corvid-driver/src/contract_closure.rs::capability_present_closes_the_gap`
+
+**Adversarial tests:**
+
+- `crates/corvid-driver/src/contract_closure.rs::stream_response_route_is_a_closure_gap`
+- `crates/corvid-driver/src/contract_closure.rs::upload_body_route_is_a_closure_gap`
+- `crates/corvid-driver/src/contract_closure.rs::page_response_route_is_a_closure_gap`
+- `crates/corvid-driver/src/contract_closure.rs::policy_route_without_auth_enforcement_is_a_closure_gap`
 
 ### Durable jobs
 

@@ -8,6 +8,7 @@
 pub mod add_dimension;
 pub mod adversarial;
 pub mod approver;
+pub mod contract_closure;
 pub mod effect_diff;
 pub mod meta_verify;
 mod dimension_artifact;
@@ -52,6 +53,10 @@ pub use package_metadata::{
     package_metadata_from_source, render_package_metadata_markdown, PackageMetadata,
 };
 pub use approver::{simulate_approver, verify_approver_source};
+pub use contract_closure::{
+    check_contract_closure, ClosureGap, RuntimeCapabilities,
+    GUARANTEE_ID_CONTRACT_RUNTIME_CLOSURE,
+};
 pub use modules::{
     build_module_resolution, inspect_import_semantics, render_import_semantic_summaries,
     summarize_module_file, ModuleLoadError, NamedModuleSemanticSummary,
