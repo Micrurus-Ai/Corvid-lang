@@ -3016,6 +3016,66 @@ cancellation).
 
 ---
 
+## 2026-07-22 - 52d-2 closed: the cancellation×reversibility rule — a `parallel` arm past a non-reversible boundary is never cancelled
+
+The headline safety property of the effect-aware scheduler. `parallel`
+execution moved from `join_all` (run every arm to completion) to
+`FuturesUnordered` + **cooperative** cancellation. Each arm carries two
+flags: a shared `cancel` (the whole block's) and its own `crossed`. At
+every tool dispatch the arm checks `cancel`; if set AND the arm has not
+`crossed`, it stops with a `ParallelArmCancelled` sentinel BEFORE the
+next effect fires. The moment an arm dispatches an irreversible tool
+(`IrTool.effect_reversible == false`, from 52d-1) it sets `crossed` — so
+from then on it ignores cancellation and runs to completion. On the
+first REAL arm error the scheduler sets `cancel`, asking the still-in-
+flight reversible arms to stop. The flags propagate into sub-agent
+calls, so the tracking is transitive no matter how deep the arm's call
+graph.
+
+Cooperative, not preemptive, on purpose: a `futures::Abortable` race
+could abort an arm at the await INSIDE an irreversible tool dispatch,
+after it had already committed the side effect. Checking a flag at the
+dispatch boundary — before the effect — makes the rule race-free: the
+arm itself decides, at a safe point, and an arm that has crossed simply
+never asks.
+
+Each block records a `parallel.outcomes` HostEvent — per arm
+`completed` / `errored` / `cancelled` + whether it crossed — which
+replay skips (dispatch metadata), so it's the observability + the record
+52d-3 will reproduce, with zero replay perturbation. The block's result
+is the lowest-index REAL error (cancelled arms are the scheduler's own
+sentinel and never surface); a no-error block binds every arm's value
+exactly as before.
+
+Two DETERMINISTIC tests pin the semantics — the hard part, since live
+cancellation is timing-dependent:
+
+- `arm_past_irreversible_boundary_is_not_cancelled` (THE RULE): a
+  `tokio::Notify` orders things so arm `b` provably dispatches its
+  irreversible `commit_write` BEFORE arm `a` fails. `b` must still run
+  its second call to completion — and does, regardless of scheduler
+  timing, because a crossed arm never cancels. Verified via the outcomes
+  event (`b` completed + crossed) and a side-effect flag.
+- `reversible_arm_is_cancelled_after_a_sibling_fails`: arm `a` fails
+  immediately; arm `b` loops 2000× over a yielding reversible tool, so
+  the scheduler sets `cancel` and `b` stops cooperatively at its next
+  dispatch — recorded `cancelled`, not `completed`.
+
+Semantic shift, acknowledged in the design: live runs are now genuinely
+concurrent (which arm errors first is timing-dependent), so a specific
+run is pinned by its trace — which is exactly what 52d-3 (replay
+reproduces the recorded cancellation) makes deterministic.
+
+Gate: workspace check; corvid-vm (124, incl. the 2 new cancellation
+tests + parallel execution + arm-ordered-replay intact) + corvid-driver
+(226) green; corpus verify exits 1 on the two fixtures (non-erroring
+parallel blocks are byte-identical; the HostEvent is replay-skipped).
+
+Next: 52d-3 (replay reproduces the recorded cancellation) — closes the
+CTO's full-fidelity model + the invention proof.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

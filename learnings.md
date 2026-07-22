@@ -7106,3 +7106,46 @@ Two implementation notes worth keeping:
 What this is NOT: the interpreter tier buffers the whole upload body in memory
 (bounded by the max size); streaming very large uploads is later work. Native
 lowering of `Page`/`Upload` is deferred — the interpreter serves them.
+
+## `parallel` fails fast, and never cancels an arm past a non-reversible boundary (2026-07-22)
+
+A `parallel:` block used to run every arm to completion and then apply the
+error rule. It now **fails fast**: when one arm errors, the still-in-flight
+sibling arms are asked to stop — but with a hard guarantee that makes the
+concurrency safe:
+
+> A branch past a non-reversible effect boundary is never cancelled.
+
+The moment an arm dispatches an irreversible tool — one whose composed effect
+row is `reversible: false`, like a write or a `POST` — it is committed and runs
+to completion, even if a sibling has already failed. Only arms that have done
+nothing irreversible are cancelled, and they stop at a tool-dispatch boundary
+*before* their next effect fires, so a cancelled arm never leaves a
+half-finished irreversible action behind.
+
+```
+effect risky:
+    reversible: false
+    ...
+
+agent worker() -> Bool:
+    parallel:
+        a = might_fail()        # reversible; cancelled if a sibling fails first
+        b = commit_write()      # crosses the boundary → always completes
+    return b
+```
+
+The mechanism is COOPERATIVE, not preemptive: each arm checks a shared cancel
+flag at every tool dispatch. That is deliberate — a preemptive abort could stop
+an arm at the await *inside* an irreversible call, after the side effect had
+already happened. Checking at the dispatch boundary lets the arm decide at a
+safe point, so the rule holds without a race.
+
+A consequence to know: live `parallel` runs are now genuinely concurrent, so
+*which* arm errors first (and therefore which siblings get cancelled) is
+timing-dependent. A specific run is pinned by its trace — each block records a
+`parallel.outcomes` event with every arm's `completed`/`errored`/`cancelled`
+outcome — and replay reproduces that exact run deterministically (the replay
+side lands in the companion slice). The block's reported error is the
+lowest-index real error; a cancelled arm is an internal sentinel and never
+surfaces. A `parallel` block where no arm errors behaves exactly as before.

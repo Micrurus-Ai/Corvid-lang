@@ -1,5 +1,5 @@
 use super::expr::require_bool;
-use super::{Flow, Interpreter};
+use super::{ExprFlow, Flow, Interpreter};
 use crate::errors::{InterpError, InterpErrorKind};
 use super::expr::eval_binop;
 use crate::step::{StepAction, StepEvent, StmtKind};
@@ -406,45 +406,122 @@ impl<'ir> Interpreter<'ir> {
                     arm_runtimes.push(self.runtime.with_arm_tracer(tracer));
                 }
                 let ir = self.ir;
-                let mut futures = Vec::with_capacity(arms.len());
-                for (arm, arm_rt) in arms.iter().zip(arm_runtimes.iter()) {
+                // Reversibility-guarded fail-fast cancellation (slice
+                // 52d-2): one shared `cancel` flag, one `crossed` flag
+                // per arm. When an arm fails with a REAL error, the
+                // scheduler sets `cancel`; every other arm checks it at
+                // its next tool dispatch and stops cooperatively — unless
+                // it has set its `crossed` flag (past a non-reversible
+                // boundary), in which case it runs to completion.
+                let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let crossed_flags: Vec<Arc<std::sync::atomic::AtomicBool>> = arms
+                    .iter()
+                    .map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)))
+                    .collect();
+                let mut tasks = futures::stream::FuturesUnordered::new();
+                for (i, (arm, arm_rt)) in arms.iter().zip(arm_runtimes.iter()).enumerate() {
                     let env = self.env.clone();
                     let mocks = self.mock_tools.clone();
                     let budget = self.cost_budget.map(|b| b - self.cost_used);
-                    futures.push(async move {
+                    let arm_cancel = cancel.clone();
+                    let arm_crossed = crossed_flags[i].clone();
+                    tasks.push(async move {
                         let mut sub = Interpreter::new(ir, arm_rt);
                         sub.env = env;
                         sub.mock_tools = mocks;
                         sub.cost_budget = budget;
+                        sub.irreversible_crossed = Some(arm_crossed);
+                        sub.parallel_cancel = Some(arm_cancel);
                         let outcome = sub.eval_expr(&arm.call).await;
-                        (outcome, sub.cost_used)
+                        (i, outcome, sub.cost_used)
                     });
                 }
-                let results = futures::future::join_all(futures).await;
+                // Collect arm results as they finish; the first REAL
+                // error (not a cooperative cancellation) asks the
+                // remaining reversible arms to stop.
+                let mut settled: Vec<Option<(Result<ExprFlow, InterpError>, f64)>> =
+                    (0..arms.len()).map(|_| None).collect();
+                {
+                    use futures::stream::StreamExt;
+                    while let Some((i, outcome, cost)) = tasks.next().await {
+                        let real_error = matches!(
+                            &outcome,
+                            Err(e)
+                                if !matches!(e.kind, InterpErrorKind::ParallelArmCancelled)
+                        );
+                        settled[i] = Some((outcome, cost));
+                        if real_error {
+                            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                }
+                let results: Vec<(Result<ExprFlow, InterpError>, f64)> =
+                    settled.into_iter().map(|s| s.expect("every arm settles")).collect();
 
-                // 1. Flush arm trace buffers IN ARM ORDER.
+                // 1. Flush arm trace buffers IN ARM ORDER (a cancelled
+                //    arm's buffer holds only the events it ran before
+                //    stopping — its cancellation point).
                 for buffer in &buffers {
                     self.runtime.tracer().flush_buffer(buffer);
                 }
-                // 2. Charge costs in arm order (all arms ran; all
-                //    are paid — the parallel operator's Sum).
+                // 2. Charge each arm's ACTUAL cost in arm order —
+                //    completed, errored, and partially-run cancelled arms
+                //    all pay for what they actually did.
                 for (_, cost) in &results {
                     self.charge_cost(*cost, *span)?;
                 }
-                // 3. Error rule: first failed arm by index.
-                let mut values = Vec::with_capacity(results.len());
-                for (outcome, _) in results {
+                // 3. Record per-arm outcomes (observability + the record
+                //    52d-3 replay reproduces). A HostEvent, which replay
+                //    classifies as metadata and skips.
+                self.runtime.emit_host_event(
+                    "parallel.outcomes",
+                    serde_json::json!({
+                        "arms": arms
+                            .iter()
+                            .zip(results.iter())
+                            .zip(crossed_flags.iter())
+                            .map(|((arm, (outcome, _)), crossed)| {
+                                let tag = match outcome {
+                                    Ok(_) => "completed",
+                                    Err(e) if matches!(
+                                        e.kind,
+                                        InterpErrorKind::ParallelArmCancelled
+                                    ) => "cancelled",
+                                    Err(_) => "errored",
+                                };
+                                serde_json::json!({
+                                    "name": arm.name,
+                                    "outcome": tag,
+                                    "crossed_irreversible": crossed
+                                        .load(std::sync::atomic::Ordering::SeqCst),
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    }),
+                );
+                // 4. Outcome rule in ARM ORDER: the first arm (lowest
+                //    index) that errored or propagated wins; a cancelled
+                //    arm is the scheduler's own sentinel and is skipped
+                //    (it never surfaces as the block's result). If every
+                //    arm completed, bind each arm's value.
+                let mut binds: Vec<(corvid_resolve::LocalId, Value)> = Vec::new();
+                for (arm, (outcome, _)) in arms.iter().zip(results) {
                     match outcome {
                         Ok(flow) => match flow.into_value() {
-                            Ok(v) => values.push(v),
+                            Ok(v) => binds.push((arm.local_id, v)),
                             Err(v) => return Ok(Flow::Return(v)),
                         },
+                        Err(e)
+                            if matches!(e.kind, InterpErrorKind::ParallelArmCancelled) =>
+                        {
+                            // Cancelled — skip; a sibling's real error
+                            // will surface below or has a lower index.
+                        }
                         Err(e) => return Err(e),
                     }
                 }
-                // 4. Bind arm names.
-                for (arm, value) in arms.iter().zip(values) {
-                    self.env.bind(arm.local_id, value);
+                for (local_id, value) in binds {
+                    self.env.bind(local_id, value);
                 }
                 Ok(Flow::Normal)
             }

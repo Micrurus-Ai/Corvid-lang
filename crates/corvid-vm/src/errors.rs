@@ -44,6 +44,14 @@ pub enum InterpErrorKind {
     /// A streaming computation crossed the active cost budget.
     BudgetExceeded { budget: f64, used: f64 },
 
+    /// A `parallel` arm was cooperatively cancelled after a sibling
+    /// arm failed fast (slice 52d-2). This is a scheduler sentinel, not
+    /// a program error: the arm stopped at a tool-dispatch boundary
+    /// because it had NOT crossed a non-reversible effect boundary (the
+    /// cancellation×reversibility rule). It never escapes the
+    /// `parallel` block — the block reports the sibling's real error.
+    ParallelArmCancelled,
+
     /// A streaming prompt fell below its declared confidence floor.
     ConfidenceFloorBreached { floor: f64, actual: f64 },
 
@@ -90,6 +98,9 @@ impl fmt::Display for InterpErrorKind {
             }
             Self::BudgetExceeded { budget, used } => {
                 write!(f, "stream budget exceeded: used ${used:.4} over budget ${budget:.4}")
+            }
+            Self::ParallelArmCancelled => {
+                write!(f, "parallel arm cancelled after a sibling failed (reversible boundary)")
             }
             Self::ConfidenceFloorBreached { floor, actual } => {
                 write!(

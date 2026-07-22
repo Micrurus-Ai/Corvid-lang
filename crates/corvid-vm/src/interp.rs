@@ -105,6 +105,23 @@ struct Interpreter<'ir> {
     cost_used: f64,
     stream_cost_budget: Option<f64>,
     stream_cost_used: f64,
+    /// Reversibility boundary tracking for `parallel` arms (slice
+    /// 52d-2). When this sub-interpreter is one arm of a `parallel:`
+    /// block, the flag is set the moment the arm dispatches an
+    /// irreversible tool (`effect_reversible == false`). The block's
+    /// scheduler reads it to enforce the cancellation×reversibility
+    /// rule: an arm that has crossed a non-reversible boundary is never
+    /// cancelled, even when a sibling fails fast. `None` outside a
+    /// `parallel` arm.
+    irreversible_crossed: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The shared fail-fast cancellation flag of the enclosing
+    /// `parallel:` block (slice 52d-2). When a sibling arm errors, the
+    /// block's scheduler sets this; every OTHER arm checks it at each
+    /// tool dispatch and stops cooperatively — UNLESS it has already
+    /// crossed a non-reversible boundary (`irreversible_crossed`), in
+    /// which case it runs to completion (the rule). `None` outside a
+    /// `parallel` arm.
+    parallel_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -135,6 +152,8 @@ impl<'ir> Interpreter<'ir> {
             cost_used: 0.0,
             stream_cost_budget: None,
             stream_cost_used: 0.0,
+            irreversible_crossed: None,
+            parallel_cancel: None,
         }
     }
 
@@ -1204,6 +1223,39 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
 
+                // Cancellation×reversibility rule (slice 52d-2), checked
+                // at every tool-dispatch boundary. First: if this arm's
+                // `parallel` block asked to cancel (a sibling failed
+                // fast) AND this arm has NOT yet crossed a non-reversible
+                // boundary, stop cooperatively — BEFORE dispatching this
+                // next tool, so no further effect happens. An arm past a
+                // non-reversible boundary ignores cancellation and runs
+                // to completion.
+                let crossed = self
+                    .irreversible_crossed
+                    .as_ref()
+                    .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst));
+                if !crossed {
+                    if let Some(cancel) = &self.parallel_cancel {
+                        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                            return Err(InterpError::new(
+                                InterpErrorKind::ParallelArmCancelled,
+                                span,
+                            ));
+                        }
+                    }
+                }
+                // Then: the moment this arm dispatches an irreversible
+                // tool it is past the boundary — mark it so the scheduler
+                // never cancels it. Set BEFORE dispatch (conservative):
+                // once the irreversible call is in flight, cancelling the
+                // arm cannot undo it.
+                if !tool.effect_reversible {
+                    if let Some(flag) = &self.irreversible_crossed {
+                        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+
                 // Circuit breaker (slice 50k): after N consecutive
                 // failures this tool refuses fast with an error
                 // naming the breaker, until a success resets it.
@@ -1509,6 +1561,13 @@ impl<'ir> Interpreter<'ir> {
                 let mut sub = Interpreter::new(self.ir, self.runtime);
                 sub.mock_tools = self.mock_tools.clone();
                 sub.breaker_state = Arc::clone(&self.breaker_state);
+                // Propagate the `parallel` arm's reversibility + cancel
+                // flags into sub-agent calls (slice 52d-2), so an arm
+                // that reaches an irreversible tool THROUGH an agent call
+                // is still marked as crossed, and a reversible arm still
+                // cancels cooperatively no matter how deep the call.
+                sub.irreversible_crossed = self.irreversible_crossed.clone();
+                sub.parallel_cancel = self.parallel_cancel.clone();
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {
