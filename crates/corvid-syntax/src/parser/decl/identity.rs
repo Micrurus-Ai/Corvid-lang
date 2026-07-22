@@ -11,7 +11,8 @@ use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::Parser;
 use crate::token::TokKind;
 use corvid_ast::{
-    Ident, IdentityDecl, IdentityProvider, ProviderKind, SameSite, SessionConfig,
+    EmailMatchPolicy, Ident, IdentityDecl, IdentityProvider, LinkingConfig, ProviderKind, SameSite,
+    SessionConfig,
 };
 
 impl<'a> Parser<'a> {
@@ -32,6 +33,7 @@ impl<'a> Parser<'a> {
 
         let mut providers = Vec::new();
         let mut session = None;
+        let mut linking = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -57,10 +59,21 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
+            if self.peek_ident_is("linking") {
+                match self.parse_linking_config() {
+                    Ok(l) => linking = Some(l),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
+                }
+                continue;
+            }
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken {
                     got: crate::parser::describe_token(self.peek()),
-                    expected: "`provider ...` or `session:` inside an identity block".into(),
+                    expected: "`provider ...`, `session:`, or `linking:` inside an identity block"
+                        .into(),
                 },
                 span: self.peek_span(),
             });
@@ -74,8 +87,89 @@ impl<'a> Parser<'a> {
             name: Ident::new(name, name_span),
             providers,
             session,
+            linking,
             span: start.merge(end),
         })
+    }
+
+    /// `linking:` sub-block (slice 51i): only the `email_match` policy
+    /// and its `verified_domains` are configurable. The explicit
+    /// confirmation flow is structural and not expressible as off.
+    fn parse_linking_config(&mut self) -> Result<LinkingConfig, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // linking
+        self.expect(TokKind::Colon, "`:` after `linking`")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError {
+                kind: ParseErrorKind::ExpectedBlock,
+                span: self.peek_span(),
+            });
+        }
+        self.bump(); // Indent
+
+        let mut cfg = LinkingConfig::default();
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+                break;
+            }
+            let (key, key_span) = self.expect_ident()?;
+            self.expect(TokKind::Colon, "`:` after a linking key")?;
+            match key.as_str() {
+                "email_match" => {
+                    let (v, v_span) = self.expect_ident()?;
+                    cfg.email_match = match v.as_str() {
+                        "never" => EmailMatchPolicy::Never,
+                        "verified_domain" => EmailMatchPolicy::VerifiedDomain,
+                        _ => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: format!("`{v}`"),
+                                    expected: "`never` or `verified_domain`".into(),
+                                },
+                                span: v_span,
+                            });
+                        }
+                    };
+                }
+                "verified_domains" => match self.peek().clone() {
+                    TokKind::StringLit(s) => {
+                        self.bump();
+                        cfg.verified_domains.extend(
+                            s.split(',')
+                                .map(|d| d.trim().to_string())
+                                .filter(|d| !d.is_empty()),
+                        );
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: "a non-string `verified_domains` value".into(),
+                                expected: "a comma-separated domain string literal".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                },
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("linking key `{key}`"),
+                            expected: "`email_match` or `verified_domains`".into(),
+                        },
+                        span: key_span,
+                    });
+                }
+            }
+            self.expect_newline()?;
+        }
+        let end = self.peek_span();
+        if matches!(self.peek(), TokKind::Dedent) {
+            self.bump();
+        }
+        cfg.span = start.merge(end);
+        Ok(cfg)
     }
 
     /// `provider <builtin>` or `provider oidc "<url>" as <alias>`.

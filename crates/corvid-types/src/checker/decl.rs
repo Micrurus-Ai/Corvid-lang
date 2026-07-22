@@ -13,8 +13,8 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, Block, Expr, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind,
-    SameSite, ServerDecl, Span, Stmt,
+    AgentAttribute, AgentDecl, Block, EmailMatchPolicy, Expr, HttpMethod, HttpRouteDecl,
+    IdentityDecl, ProviderKind, SameSite, ServerDecl, Span, Stmt,
 };
 use corvid_resolve::Binding;
 use std::collections::HashSet;
@@ -268,6 +268,39 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
+
+        // Account-linking policy (slice 51i). The explicit-confirmation
+        // flow is structural (there is no way to turn it off), so the
+        // only thing to validate is the email-match policy and its
+        // verified domains.
+        if let Some(linking) = &decl.linking {
+            match linking.email_match {
+                EmailMatchPolicy::Never => {
+                    if !linking.verified_domains.is_empty() {
+                        self.errors.push(invalid(
+                            "`verified_domains` only applies to `email_match: verified_domain`; with `never` there is no domain-scoped linking".into(),
+                            linking.span,
+                        ));
+                    }
+                }
+                EmailMatchPolicy::VerifiedDomain => {
+                    if linking.verified_domains.is_empty() {
+                        self.errors.push(invalid(
+                            "`email_match: verified_domain` requires a non-empty `verified_domains` list — otherwise no email match can ever be trusted".into(),
+                            linking.span,
+                        ));
+                    }
+                    for domain in &linking.verified_domains {
+                        if !is_plausible_domain(domain) {
+                            self.errors.push(invalid(
+                                format!("`{domain}` is not a bare domain (expected e.g. `example.com`, no scheme/path/`@`)"),
+                                linking.span,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn check_http_route(&mut self, server: &ServerDecl, route: &HttpRouteDecl) {
@@ -344,6 +377,22 @@ fn actor_type() -> Type {
         ("roles".to_string(), Type::List(Box::new(Type::String))),
         ("permissions".to_string(), Type::List(Box::new(Type::String))),
     ])
+}
+
+/// A conservative "looks like a bare registrable domain" check for
+/// verified-domain linking (slice 51i): at least one dot, no scheme,
+/// path, whitespace, or `@`, and non-empty labels.
+fn is_plausible_domain(domain: &str) -> bool {
+    if domain.is_empty()
+        || domain.contains("://")
+        || domain.contains('/')
+        || domain.contains('@')
+        || domain.chars().any(|c| c.is_whitespace())
+    {
+        return false;
+    }
+    let labels: Vec<&str> = domain.split('.').collect();
+    labels.len() >= 2 && labels.iter().all(|l| !l.is_empty())
 }
 
 fn collect_ident_spans_by_name_in_block(block: &Block, name: &str, spans: &mut Vec<Span>) {

@@ -3573,3 +3573,28 @@ fn parses_route_requires_policy() {
     assert_eq!(policy.permissions, vec!["refund:write".to_string()]);
     assert!(policy.requires_auth());
 }
+
+#[test]
+fn parses_identity_linking_block() {
+    let src = "identity app_users:
+    provider google
+    linking:
+        email_match: verified_domain
+        verified_domains: \"example.com, corp.example.com\"
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    let linking = id.linking.as_ref().unwrap();
+    assert!(matches!(linking.email_match, corvid_ast::EmailMatchPolicy::VerifiedDomain));
+    assert_eq!(
+        linking.verified_domains,
+        vec!["example.com".to_string(), "corp.example.com".to_string()]
+    );
+}

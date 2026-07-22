@@ -140,6 +140,8 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
                 "callback" => "OAuth callback: verifies state/nonce and the ID-token signature, then issues a session.",
                 "logout" => "Revoke the session and clear the session cookie.",
                 "session" => "Return the current authenticated actor, or 401 if unauthenticated.",
+                "link_start" => "Start linking this provider to the signed-in account (requires an active session); returns a pending link to confirm.",
+                "link_confirm" => "Confirm ownership and complete the account link after authenticating the new provider. Never merges by email silently.",
                 _ => "Auth route.",
             };
             let mut op = Map::new();
@@ -158,8 +160,24 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
                     "200": { "description": "The authenticated actor" },
                     "401": { "description": "Not authenticated" }
                 }),
+                "link_start" => json!({
+                    "200": { "description": "A pending link to confirm" },
+                    "401": { "description": "Not authenticated" }
+                }),
+                "link_confirm" => json!({
+                    "200": { "description": "The account link was confirmed" },
+                    "401": { "description": "Not authenticated" },
+                    "409": { "description": "Ownership could not be proven; no merge performed" }
+                }),
                 _ => json!({ "204": { "description": "No Content" } }),
             };
+            // Linking requires an active session.
+            if matches!(auth.purpose.as_str(), "link_start" | "link_confirm") {
+                op.insert(
+                    "security".into(),
+                    json!([{ "corvidSession": ["authenticated"] }]),
+                );
+            }
             op.insert("responses".into(), responses);
             let entry = paths
                 .entry(auth.path.clone())
@@ -652,6 +670,11 @@ mod tests {
                 },
             ],
             safeguards: vec!["authorization_code_with_pkce".into()],
+            linking: crate::app_contract::ContractLinking {
+                confirmation_required: true,
+                email_match: "never".into(),
+                verified_domains: vec![],
+            },
         });
         // A route with an auth policy.
         c.routes.push(ContractRoute {

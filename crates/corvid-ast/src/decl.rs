@@ -99,7 +99,59 @@ pub struct IdentityDecl {
     pub providers: Vec<IdentityProvider>,
     #[serde(default)]
     pub session: Option<SessionConfig>,
+    /// Account-linking policy (slice 51i). `None` = the mandatory
+    /// defaults: explicit-confirmation linking, and email-match NEVER
+    /// silently merges accounts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linking: Option<LinkingConfig>,
     pub span: Span,
+}
+
+/// Account-linking configuration (slice 51i). Linking two providers to
+/// one account ALWAYS runs the explicit-confirmation flow (sign in →
+/// start link → authenticate the new provider → confirm ownership →
+/// approve → audit) — that is structural and cannot be turned off. The
+/// only knob is how email matches across providers are treated, which
+/// defaults to `never` (no automatic association at all).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinkingConfig {
+    pub email_match: EmailMatchPolicy,
+    /// Verified domains the operator controls, for
+    /// `email_match: verified_domain`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verified_domains: Vec<String>,
+    pub span: Span,
+}
+
+impl Default for LinkingConfig {
+    fn default() -> Self {
+        Self {
+            email_match: EmailMatchPolicy::Never,
+            verified_domains: Vec::new(),
+            span: Span::new(0, 0),
+        }
+    }
+}
+
+/// How a same-email account on a different provider is treated when a
+/// user signs in (slice 51i). Neither value ever performs a silent
+/// merge: `Never` ignores the match entirely; `VerifiedDomain` may
+/// only OFFER a link within an operator-verified domain, and the
+/// explicit-confirmation flow still runs before anything is linked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailMatchPolicy {
+    Never,
+    VerifiedDomain,
+}
+
+impl EmailMatchPolicy {
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            EmailMatchPolicy::Never => "never",
+            EmailMatchPolicy::VerifiedDomain => "verified_domain",
+        }
+    }
 }
 
 /// One configured identity provider.

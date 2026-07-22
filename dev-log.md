@@ -2327,6 +2327,57 @@ Next per the Phase 51 queue: 51i-account-linking.
 
 ---
 
+## 2026-07-16 - 51i closed: account linking where a silent merge is impossible
+
+The classic identity vulnerability is the silent email-match merge:
+sign in with GitHub, and because your GitHub email matches an existing
+Google-linked account, you're handed that account. 51i makes that
+shape unrepresentable.
+
+The `linking:` block exposes exactly one knob:
+
+```
+identity app_users:
+    provider google
+    provider github
+    linking:
+        email_match: verified_domain
+        verified_domains: "example.com, corp.example.com"
+```
+
+`email_match` defaults to `never` — a same-email account on a
+different provider is simply ignored. The only relaxation is
+`verified_domain`, and even that only permits OFFERING a link within a
+domain the operator has verified; the checker demands a non-empty,
+well-formed `verified_domains` list (no scheme, path, or `@`) and
+rejects `verified_domains` under `never` as meaningless.
+
+The load-bearing property: the explicit-confirmation flow — sign in →
+start link → authenticate the new provider → confirm ownership →
+approve → audit — is STRUCTURAL. There is no source syntax to disable
+it, so `confirmation_required` is always true in the contract. You
+cannot write a Corvid program that links accounts without the
+ownership-proof step.
+
+The compiler auto-exposes the linking routes
+(`/auth/link/{provider}/start` + `/auth/link/confirm`, both
+session-gated) into the contract and OpenAPI, the confirm route
+carrying a 409 for "ownership could not be proven; no merge
+performed." Four guarantees join the machine-readable safeguards list:
+explicit_link_confirmation, no_silent_email_merge, link_ownership_proof,
+link_audit_trail. An auditor reads the no-silent-merge guarantee
+directly off the contract.
+
+Live-probed the linking surface, the derived link routes, and both
+rejection paths. Tests: parser, contract emitter (defaults + link
+routes + verified domains), checker (two rejection cases). The
+round-trip renderer emits the block, so the corpus verify exercises
+it.
+
+Next per the Phase 51 queue: 51j-connector-user-auth.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

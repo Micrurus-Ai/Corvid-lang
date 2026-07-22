@@ -65,6 +65,21 @@ pub struct ContractIdentity {
     /// (slice 51h). Listed so the contract is explicit about the
     /// guaranteed posture rather than leaving it to documentation.
     pub safeguards: Vec<String>,
+    /// Account-linking policy (slice 51i).
+    pub linking: ContractLinking,
+}
+
+/// The account-linking posture surfaced to clients (slice 51i).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractLinking {
+    /// Always true — linking runs the explicit-confirmation flow, and
+    /// there is no way to disable it.
+    pub confirmation_required: bool,
+    /// `never` | `verified_domain` — how a same-email account on a
+    /// different provider is treated. Never a silent merge.
+    pub email_match: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verified_domains: Vec<String>,
 }
 
 /// One auto-exposed auth route (slice 51h).
@@ -431,6 +446,26 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
         provider: None,
     });
 
+    // Account-linking routes (slice 51i): start a link to another
+    // provider, then confirm ownership. Derived from the providers.
+    for p in &decl.providers {
+        let provider = p.kind.wire_name();
+        auth_routes.push(ContractAuthRoute {
+            method: "POST".into(),
+            path: format!("/auth/link/{provider}/start"),
+            purpose: "link_start".into(),
+            provider: Some(provider),
+        });
+    }
+    auth_routes.push(ContractAuthRoute {
+        method: "POST".into(),
+        path: "/auth/link/confirm".into(),
+        purpose: "link_confirm".into(),
+        provider: None,
+    });
+
+    let linking = decl.linking.clone().unwrap_or_default();
+
     ContractIdentity {
         name: decl.name.name.clone(),
         providers,
@@ -443,6 +478,11 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
         },
         auth_routes,
         safeguards: mandatory_auth_safeguards(),
+        linking: ContractLinking {
+            confirmation_required: true,
+            email_match: linking.email_match.wire_name().to_string(),
+            verified_domains: linking.verified_domains.clone(),
+        },
     }
 }
 
@@ -465,6 +505,11 @@ fn mandatory_auth_safeguards() -> Vec<String> {
         "token_revocation",
         "redacted_auth_logs",
         "minimal_scopes",
+        // Account-linking guarantees (slice 51i).
+        "explicit_link_confirmation",
+        "no_silent_email_merge",
+        "link_ownership_proof",
+        "link_audit_trail",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -1020,8 +1065,9 @@ tool stream_answer(m: String) -> Stream<String>
 ",
         );
         let id = &contract.identities[0];
-        // login + callback per provider (2), plus logout + session.
-        assert_eq!(id.auth_routes.len(), 2 * 2 + 2);
+        // login + callback per provider (2×2), plus logout + session,
+        // plus a link-start per provider (2) and one link-confirm.
+        assert_eq!(id.auth_routes.len(), 2 * 2 + 2 + 2 + 1);
         assert!(id
             .auth_routes
             .iter()
@@ -1058,6 +1104,96 @@ server admin_api:
         let policy = route.policy.as_ref().expect("policy present");
         assert!(policy.authenticated);
         assert_eq!(policy.roles, vec!["admin".to_string()]);
+    }
+
+    #[test]
+    fn linking_defaults_to_never_and_exposes_link_routes() {
+        let contract = contract_for(
+            "identity app_users:
+    provider google
+    provider github
+",
+        );
+        let id = &contract.identities[0];
+        // Defaults: confirmation always required, email-match never.
+        assert!(id.linking.confirmation_required);
+        assert_eq!(id.linking.email_match, "never");
+        // A link-start route per provider, plus one shared confirm.
+        assert!(id
+            .auth_routes
+            .iter()
+            .any(|r| r.path == "/auth/link/google/start" && r.purpose == "link_start"));
+        assert!(id
+            .auth_routes
+            .iter()
+            .any(|r| r.path == "/auth/link/confirm" && r.purpose == "link_confirm"));
+        // The never-silent-merge guarantees are named in the contract.
+        for g in ["explicit_link_confirmation", "no_silent_email_merge", "link_audit_trail"] {
+            assert!(id.safeguards.iter().any(|s| s == g), "missing {g}");
+        }
+    }
+
+    #[test]
+    fn linking_verified_domain_surfaces_domains() {
+        let contract = contract_for(
+            "identity app_users:
+    provider google
+    linking:
+        email_match: verified_domain
+        verified_domains: \"example.com, corp.example.com\"
+",
+        );
+        let linking = &contract.identities[0].linking;
+        assert_eq!(linking.email_match, "verified_domain");
+        assert_eq!(
+            linking.verified_domains,
+            vec!["example.com".to_string(), "corp.example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn linking_verified_domain_without_domains_is_rejected() {
+        let src = "identity app_users:
+    provider google
+    linking:
+        email_match: verified_domain
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(
+            checked.errors.iter().any(|e| matches!(
+                e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { .. }
+            )),
+            "expected IdentityConfigInvalid, got {:?}",
+            checked.errors
+        );
+    }
+
+    #[test]
+    fn linking_malformed_verified_domain_is_rejected() {
+        let src = "identity app_users:
+    provider google
+    linking:
+        email_match: verified_domain
+        verified_domains: \"https://example.com/path\"
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(
+            checked.errors.iter().any(|e| matches!(
+                e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { .. }
+            )),
+            "expected IdentityConfigInvalid for malformed domain, got {:?}",
+            checked.errors
+        );
     }
 
     #[test]

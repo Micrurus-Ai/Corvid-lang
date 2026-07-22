@@ -307,6 +307,19 @@ fn render_identity(identity: &corvid_ast::IdentityDecl, indent: usize, out: &mut
             out.push_str("insecure_opt_out: true\n");
         }
     }
+    if let Some(linking) = &identity.linking {
+        push_indent(indent + 1, out);
+        out.push_str("linking:\n");
+        push_indent(indent + 2, out);
+        out.push_str(&format!("email_match: {}\n", linking.email_match.wire_name()));
+        if !linking.verified_domains.is_empty() {
+            push_indent(indent + 2, out);
+            out.push_str(&format!(
+                "verified_domains: {}\n",
+                render_string_literal(&linking.verified_domains.join(", "))
+            ));
+        }
+    }
 }
 
 fn render_fixture(fixture: &FixtureDecl, indent: usize, out: &mut String) {
