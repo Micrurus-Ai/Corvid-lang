@@ -283,3 +283,48 @@ async fn reversible_arm_is_cancelled_after_a_sibling_fails() {
     );
     assert!(!b.2, "a cancelled reversible arm never crossed the boundary");
 }
+
+/// 52d-3 acceptance test (IGNORED until 52d-3 lands): replaying a
+/// recorded cancelling run must REPRODUCE the recorded cancellation
+/// deterministically — arm `a` errors, arm `b` stops at its recorded
+/// point (cancelled) — instead of diverging.
+///
+/// Empirically today (post-52d-2) replay of a cancelling run DIVERGES:
+/// `ReplayDivergence { step: 0, expected: RunCompleted{error}, got:
+/// tool_result boom }`. The live cancelling run is timing-dependent
+/// (arm `b` runs some number of ticks before stopping), so re-running
+/// it concurrently under Substitute mode consumes the recorded cursor
+/// in a different order / for a different arm-event count. 52d-3 makes
+/// the `parallel` block, on replay, READ the recorded per-arm outcomes
+/// and reproduce them: a `cancelled` arm replays to its recorded event
+/// count and stops (returning the cancellation sentinel) instead of
+/// running live and diverging.
+#[tokio::test]
+#[ignore = "52d-3: replay reproduction of parallel cancellation not yet implemented"]
+async fn replay_reproduces_a_recorded_cancellation() {
+    let ir = ir_of(CANCEL_SRC);
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("cancel_replay.jsonl");
+
+    // RECORD a cancelling run.
+    {
+        let rt = Runtime::builder()
+            .tracer(Tracer::open_path(&trace_path, "r-cancel-replay"))
+            .tool("boom", |_| async move { Err(tool_boom("boom")) })
+            .tool("tick", |_| async move {
+                tokio::task::yield_now().await;
+                Ok(json!(true))
+            })
+            .build();
+        let out = run_agent(&ir, "worker_cancel", vec![], &rt).await;
+        assert!(out.is_err(), "recorded run errors (arm a failed)");
+    }
+
+    // REPLAY must reproduce, not diverge.
+    let replay_rt = Runtime::builder().replay_from(&trace_path).build();
+    let out = run_agent(&ir, "worker_cancel", vec![], &replay_rt).await;
+    assert!(
+        out.is_err(),
+        "replay must reproduce the recorded error, not diverge: {out:?}"
+    );
+}
