@@ -66,3 +66,6 @@ venv/
 .env.*
 !.env.example
 .claude/settings.local.json
+
+# TypeScript SDK local typecheck deps
+sdk/**/node_modules/

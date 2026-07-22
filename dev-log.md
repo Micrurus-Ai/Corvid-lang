@@ -2555,6 +2555,42 @@ Next per the Phase 51 queue: 51n-react-hooks.
 
 ---
 
+## 2026-07-16 - 51n closed: React hooks that specialize themselves
+
+51l gave a typed client + `Api`; 51n makes it idiomatic in React
+without a line of per-app hook code. `@corvid/react` ships four generic
+hooks over `@corvid/client`:
+
+- `useCorvidAgent(call)` — invoke an agent, tracking data/error/loading.
+- `useCorvidStream(stream)` — consume a streaming agent's typed event
+  log, accumulating `chunks` and settling on a terminal `result`.
+- `useCorvidApprovals(client, events)` — pull `approval_required`
+  events out of a stream's log and resolve them approve/deny.
+- `useCorvidPaginated(fetchPage)` — cursor pagination with items,
+  loadMore, hasMore, first page on mount.
+
+The load-bearing property is that the hooks are GENERIC and the
+generated method signatures specialize them for free. You write
+`useCorvidAgent((q: string) => api.classify(q))` and `hook.data` is
+`Answer | null` — no type parameter, no annotation. The contract flowed
+all the way from the Corvid source through the generated `Api` into the
+hook's return type.
+
+Proven end-to-end: I generated an `Api` for an app with a record, a
+stream, and a paginated route, wrote a React component using all four
+hooks, and ran tsc. `classify.data?.text` typed as string,
+`chat.chunks[0]` as string, `useCorvidPaginated<Item>(...).items[0]?.id`
+as string — every one inferred from the contract, zero errors. The
+package itself also type-checks clean under strict/NodeNext.
+
+Depends only on @corvid/client and React as peer deps; nothing is
+per-app. (Local typecheck deps under sdk/**/node_modules are
+gitignored.)
+
+Next per the Phase 51 queue: 51o-sdk-generators.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

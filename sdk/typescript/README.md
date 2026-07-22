@@ -45,3 +45,28 @@ api.loginWith_google();                                // auth helper
 
 Define the backend once in Corvid; the frontend gets types, methods,
 streaming, auth, errors, and pagination for free.
+
+## React hooks (optional)
+
+`@corvid/react` (`react/`) layers idiomatic hooks over the same client
+and the generated `Api`. The hooks are generic — the generated method
+signatures specialize them at the call site:
+
+```tsx
+import { useCorvidAgent, useCorvidStream, useCorvidPaginated } from "@corvid/react";
+import { Api } from "./sdk/generated/api";
+
+const api = new Api(client);
+
+const classify = useCorvidAgent((q: string) => api.classify(q)); // classify.data: Answer | null
+const chat = useCorvidStream((m: string) => api.chat(m));        // chat.chunks: string[]
+const feed = useCorvidPaginated((c) => api.browse(c ?? ""));     // feed.items: Item[]
+```
+
+- `useCorvidAgent` / `useCorvidStream` — invoke an agent, tracking
+  `data`/`error`/`loading`, or consume a streaming agent's typed event
+  log with accumulated `chunks` and a terminal `result`.
+- `useCorvidApprovals` — surface `approval_required` events from a
+  stream and resolve them (`approve`/`deny`) through the client.
+- `useCorvidPaginated` — cursor pagination with `items`, `loadMore`,
+  and `hasMore`.
