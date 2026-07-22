@@ -2510,6 +2510,51 @@ Next per the Phase 51 queue: 51m-dev-console.
 
 ---
 
+## 2026-07-16 - 51m closed: one console every Corvid app gets for free
+
+Every backend framework eventually grows a "try it out" page — Swagger
+UI, a GraphQL playground, an admin panel. They're all bespoke. Because
+a Corvid app describes its entire surface in the contract, the console
+can be UNIVERSAL: one renderer, driven by the contract, working for
+every app without a line of per-app UI code.
+
+`emit_dev_console(contract, ai)` produces a single self-contained HTML
+page — inline CSS + JS, theme-aware, zero external requests. The
+contract and the corvid-ai metadata are embedded as inert
+`<script type="application/json">` blocks (so an app's strings can
+never break into script context), and a static JS renderer reads them
+to build the whole console: sign-in buttons per identity provider with
+the guaranteed-safeguards badges beneath them, a form per public agent
+with typed inputs and capability badges (streaming / grounded /
+approval / tainted / cost / latency / pagination), a Run button that
+either POSTs and pretty-prints the result or opens the SSE stream and
+renders a typed event log, and a type browser. The same page works for
+a one-agent toy and a twenty-route app — the only thing that differs is
+the embedded contract.
+
+`corvid dev` serves it. The server is deliberately boring: a tiny
+blocking std::net loop that answers three GETs (`/`,
+`/_corvid/contract.json`, `/_corvid/ai.json`) — no async runtime, no
+LLM wiring, nothing to fall over mid-demo. Execution targets a backend
+URL you set in the console, so you run `corvid serve` for the app and
+`corvid dev` for the console and drive one from the other. `--out`
+writes the HTML for static hosting.
+
+Live-probed by serving it and curling: `GET /` returns the 11.7 KB
+self-contained console, the JSON routes return the contract and
+metadata, unknown paths 404. Tests assert the page is self-contained
+(no external src/href) and that it embeds and renders the identity +
+streaming + `/agents/` + SSE surface.
+
+Model-comparison and trace/replay panels compose the existing
+`corvid observe` / model-diff surfaces and are a console-enrichment
+follow-up; this slice ships the contract-driven console and the
+`corvid dev` command.
+
+Next per the Phase 51 queue: 51n-react-hooks.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

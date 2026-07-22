@@ -47,6 +47,7 @@ mod connectors_cmd;
 mod contract_cmd;
 mod cost_frontier;
 mod deploy_cmd;
+mod dev_cmd;
 mod dispatch;
 mod doctor_cmd;
 mod eval_cmd;

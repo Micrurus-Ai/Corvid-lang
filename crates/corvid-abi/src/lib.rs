@@ -11,6 +11,7 @@ mod introspection_catalog;
 mod provenance_emit;
 pub mod app_contract;
 pub mod corvid_ai;
+pub mod dev_console;
 pub mod openapi;
 pub mod ts_client;
 mod schema;

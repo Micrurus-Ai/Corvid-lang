@@ -206,6 +206,26 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         with_tools_cdylib: Option<PathBuf>,
     },
+    /// The universal contract-driven dev console. Builds the app's
+    /// Application Contract and serves a single self-contained HTML
+    /// console that renders forms for every public agent/prompt,
+    /// sign-in buttons per identity provider, streaming execution with
+    /// a typed event log, capability badges (streaming / grounded /
+    /// approvals / cost / latency / pagination), a typed-error
+    /// inspector, and a type browser — all from the contract, working
+    /// for any Corvid app. Execution targets a backend base URL you set
+    /// in the console (point it at a running `corvid serve`). With
+    /// `--out <file>` it writes the console HTML instead of serving.
+    Dev {
+        /// Source file. Defaults to `src/main.cor` in a Corvid project.
+        file: Option<PathBuf>,
+        /// Address to bind, `host:port`.
+        #[arg(long, default_value = "127.0.0.1:7878")]
+        listen: String,
+        /// Write the console HTML to this file instead of serving it.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// Run verification suites.
     ///
     /// Targets:
