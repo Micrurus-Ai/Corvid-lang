@@ -2422,6 +2422,50 @@ Next per the Phase 51 queue: 51k-mock-idp-and-fuzz.
 
 ---
 
+## 2026-07-16 - 51k closed: the identity block proves itself adversarially
+
+51g-51j built the identity surface and its guarantees. 51k is the
+proof: a local mock identity provider whose ONLY token that verifies
+is the fully-correct one, demonstrated by breaking it every way we can
+and watching the verifier refuse each.
+
+`MockIdp` mints real Ed25519-signed ID tokens from a deterministic
+fixed-seed key and serves the matching JWKS through a `JwksFetcher`,
+so the whole verification path — kid resolution, signature check,
+iss/aud/exp validation — runs end-to-end in a unit test with no
+network and no system RNG. The honest token verifies through the real
+`JwtVerifier`.
+
+Then the mutators. Each `mint_*` helper breaks exactly one
+safe-default: `mint_alg_none` drops the signature and claims
+`alg=none`; `mint_tampered_signature` flips a signature byte;
+`mint_forged_kid` signs correctly but names a kid the JWKS doesn't
+have; `mint_with` edits the issuer, audience, or exp. The adversarial
+test runs all six and asserts every one is refused. The safe-defaults
+are not bypassable by construction.
+
+The byte-fuzz closes the denial-of-service angle: a deterministic
+xorshift PRNG (fixed seed, reproducible, no `Math.random`) generates
+2000 malformed byte sequences and feeds them to the verifier as both
+raw strings and random dotted three-segment tokens. Every input must
+yield a clean `Err` — never a panic, never a forged success. A parser
+that aborts on adversarial bytes is a DoS hole; this proves the JWT
+front door degrades gracefully.
+
+Registered as `auth.jwt_tamper_and_fuzz_resistant` (RuntimeChecked),
+the id wired as a literal at the enforcement site so the
+inverse-coverage sentinel links it to the mutator + fuzz tests;
+core-semantics.md regenerated.
+
+The identity block is complete: surface (51g), routes + typed actor
+(51h), account-linking (51i), connector-token separation (51j), and
+now the adversarial harness (51k). Phase 51 turns to the
+frontend/SDK track.
+
+Next per the Phase 51 queue: 51l-ts-client.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

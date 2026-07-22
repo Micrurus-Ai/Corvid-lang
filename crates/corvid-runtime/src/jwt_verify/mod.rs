@@ -32,9 +32,11 @@
 //! submodule produced them.
 
 pub mod jwks;
+pub mod mock_idp;
 pub mod verifier;
 
 pub use jwks::{JsonWebKey, JsonWebKeySet, JwksFetcher, ReqwestJwksFetcher};
+pub use mock_idp::{MockIdp, MockIdpFetcher};
 pub use verifier::JwtVerifier;
 
 /// Reasons a JWT verification can fail. Each variant maps to a

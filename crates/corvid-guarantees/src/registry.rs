@@ -1342,6 +1342,33 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         ],
     },
     Guarantee {
+        id: "auth.jwt_tamper_and_fuzz_resistant",
+        kind: GuaranteeKind::Auth,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "The local mock identity provider \
+             (`corvid-runtime/src/jwt_verify/mock_idp.rs`) mints \
+             Ed25519-signed ID tokens the real `JwtVerifier` accepts, \
+             and every source-bypass MUTATION it can produce is \
+             refused: dropping the signature (`alg=none`), tampering \
+             the signature bytes, forging the `kid`, swapping the \
+             issuer or audience, and backdating `exp`. A deterministic \
+             byte-fuzz (2000 malformed inputs) proves the JWT parser \
+             never panics and never forges a valid result on \
+             adversarial bytes — the safe-defaults cannot be bypassed \
+             and the verifier degrades gracefully rather than \
+             crashing.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-runtime/src/jwt_verify/mock_idp.rs::mock_idp_token_verifies_end_to_end",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-runtime/src/jwt_verify/mock_idp.rs::every_mutated_token_is_refused",
+            "crates/corvid-runtime/src/jwt_verify/mock_idp.rs::byte_fuzz_never_panics_and_never_forges",
+        ],
+    },
+    Guarantee {
         id: "auth.oauth_pkce_required",
         kind: GuaranteeKind::Auth,
         class: GuaranteeClass::RuntimeChecked,
