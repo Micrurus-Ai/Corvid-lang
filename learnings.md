@@ -6828,3 +6828,81 @@ What this is NOT:
   autonomous, so it can't reach human-required tools." If the
   agent reaches a dangerous tool of any trust level, it still
   needs an `approve` boundary.
+
+## Every HTTP route executes — path params, query, and typed bodies (2026-07-22)
+
+`corvid serve` now runs *every* declared route shape through the
+ordinary agent interpreter — including the path-parameter, typed-
+query, and typed-body routes that previously returned a `501
+not_implemented`. Given
+
+```
+server orders_api:
+    route GET "/orders/{id}" -> json OrderView:
+        return OrderView(path.id, "open", 42.0)
+
+    route GET "/orders" query OrderFilter -> json OrderPage:
+        summary = OrderSummary("order-1", query.status)
+        return OrderPage([summary], query.limit)
+
+    route POST "/orders" body NewOrder -> json OrderReceipt:
+        return OrderReceipt("order-new", true)
+```
+
+all three respond `200` with the handler's JSON:
+
+```
+$ curl -s localhost:8531/orders/order-42
+{"id":"order-42","status":"open","total":42.0}
+
+$ curl -s 'localhost:8531/orders?status=open&limit=5'
+{"count":5,"orders":[{"id":"order-1","status":"open"}]}
+
+$ curl -s -X POST localhost:8531/orders -d '{"item":"widget","quantity":3}'
+{"accepted":true,"id":"order-new"}
+```
+
+Malformed boundary input is a structured `400`, never a `500`:
+
+```
+$ curl -s 'localhost:8531/orders?status=open&limit=notanumber'
+{"detail":"`notanumber` is not an Int","error":"invalid_query"}
+
+$ curl -s 'localhost:8531/orders?status=open'
+{"detail":"missing query param `limit`","error":"invalid_query"}
+```
+
+How it works — a route is compiled to a **synthetic handler
+agent** named `__route__<METHOD>__<mangled-path>` whose parameters
+reuse the exact `path` / `query` / `body` / `actor` `LocalId`s the
+resolver bound in the route body. Because the params share the
+body's locals, the route body *is* the agent body: `path.id`,
+`query.status`, `body.item`, and `actor.id` resolve with no
+rewriting. Serve then:
+
+- registers the real axum path, translating `/orders/{id}` →
+  `/orders/:id`;
+- coerces each path parameter and each query-struct field from its
+  request string into the declared scalar type (`Int`/`Float`/
+  `Bool`/`String`);
+- decodes the request body as typed JSON into the declared body
+  struct;
+- assembles the arguments in the handler's declared parameter
+  order and invokes it through the same `run_ir_with_runtime` path
+  as any other agent — so effects, approval, provenance, and
+  replay all apply to route execution automatically.
+
+What this is NOT:
+
+- Not a route-shape allowlist. There is no "supported shape"
+  classifier any more; the old `dispatch_for`/`RoutePlan` code and
+  its `501` branch are deleted. Every route the contract advertises
+  is served.
+- Not yet an authenticated actor. A route carrying a `requires`
+  policy still binds an empty `actor` placeholder — real session-
+  derived actors and authorization enforcement land in the auth
+  slices. Route execution is proven; identity is not yet wired.
+
+The reference application `examples/reference_app/src/main.cor` is
+the continuous Phase-52 fixture: it starts here exercising these
+three shapes and grows with every subsequent slice.

@@ -21,7 +21,7 @@ pub use modules::{
     ModuleSemanticSummary, ResolvedModule,
 };
 pub use repl::{RedefinitionResult, ReplResolveSession, ResolvedTurn};
-pub use resolver::{resolve, ReplayPatternBinding, Resolved};
+pub use resolver::{resolve, ReplayPatternBinding, Resolved, RouteLocals};
 pub use scope::{Binding, BuiltIn, DeclEntry, DeclKind, DefId, LocalId, LocalScope, SymbolTable};
 
 #[cfg(test)]

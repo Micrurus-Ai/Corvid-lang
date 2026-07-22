@@ -2729,6 +2729,57 @@ code — the autonomous loop stops at this phase boundary.
 
 ---
 
+## 2026-07-22 - 52a closed: every HTTP route executes — Phase 52 opens
+
+The pre-phase chat reshaped Phase 52. It is no longer the launch
+phase — it is **The Complete Application Runtime**, the slice program
+that makes the running backend prove it implements its own contract or
+refuse to start. Phase 51 shipped the *definition* layer (contract,
+OpenAPI, SDKs, console, frontend). Phase 51's runtime, though, deferred
+execution at almost every seam: path-param routes, query routes, and
+typed-body routes all returned `501 not_implemented`. 52a closes the
+first and largest of those gaps — route execution itself.
+
+The design that unlocks it: a route compiles to a **synthetic handler
+agent**. `route GET "/orders/{id}"` lowers to an agent named
+`__route__GET__orders_id` whose parameters reuse the *exact*
+`path`/`query`/`body`/`actor` `LocalId`s the resolver already bound in
+the route body. Because the synthetic params share the body's locals,
+the route body simply *is* the agent body — `path.id`, `query.status`,
+`body.item` resolve with zero rewriting — and `corvid serve` runs it
+through the ordinary `run_ir_with_runtime` path. That means effects,
+approval, provenance, and replay apply to route execution for free;
+route handlers are not a second-class execution path.
+
+Serve now registers real axum routes (`/orders/{id}` → `/orders/:id`),
+coerces path params and query-struct fields from their request-string
+form into the declared scalar type, decodes typed JSON bodies, and
+assembles the handler's arguments in declared order. Malformed input is
+a structured `400` (`invalid_query`, `invalid_body`, `invalid_json`),
+never a `500`. The old `dispatch_for`/`RoutePlan` shape-classifier and
+its `501` branch — which existed only to decide which shapes were
+"served yet" — are deleted outright. There is no allowlist any more;
+every route the contract advertises runs.
+
+Proven live against the new reference application
+`examples/reference_app/src/main.cor` — the **continuous Phase-52
+fixture** that every subsequent slice extends. All three shapes return
+`200` with the handler's JSON; `limit=notanumber` and a missing `limit`
+both return `400` with a precise message. Gate green: workspace check
+clean, corvid-resolve/corvid-ir/corvid-cli suites pass (363 CLI tests),
+corpus verify exits 1 on exactly the two deliberate divergence
+fixtures.
+
+Not yet done, by design: a `requires` route still binds an empty
+`actor` placeholder — session-derived actors and authorization land in
+the auth slices (52g/52h). And the contract-closure invariant that will
+*forbid* a backend from starting when any contract element lacks a
+runtime path is 52b, next.
+
+Next per the Phase 52 queue: 52b-contract-closure.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

@@ -70,6 +70,35 @@ pub fn lower_with_modules(
     ir
 }
 
+/// High base for synthetic per-route handler-agent `DefId`s (slice
+/// 52a). Real declarations use small sequential ids, so this never
+/// collides; synthetic agents are invoked only by name.
+const SYNTHETIC_ROUTE_AGENT_DEF_ID_BASE: u32 = 0x4000_0000;
+
+/// The stable name of the synthetic handler agent for a route (slice
+/// 52a): `__route__<METHOD>__<mangled-path>`. Deterministic so the
+/// route and its handler agent agree without threading extra state.
+pub fn synthetic_route_agent_name(method: corvid_ast::HttpMethod, path: &str) -> String {
+    let mangled: String = path
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("__route__{}__{}", method.as_str(), mangled)
+}
+
+/// The synthetic struct type of the `actor` bound in an authenticated
+/// route body (slice 52a) — mirrors the checker's `actor_type()`:
+/// id / tenant / display_name / roles / permissions.
+fn actor_route_params_type() -> Type {
+    Type::RouteParams(vec![
+        ("id".to_string(), Type::String),
+        ("tenant".to_string(), Type::String),
+        ("display_name".to_string(), Type::String),
+        ("roles".to_string(), Type::List(Box::new(Type::String))),
+        ("permissions".to_string(), Type::List(Box::new(Type::String))),
+    ])
+}
+
 struct Lowerer<'a> {
     symbols: &'a SymbolTable,
     bindings: &'a HashMap<Span, Binding>,
@@ -97,6 +126,16 @@ struct Lowerer<'a> {
     /// whose body launders a grounded value through any slot-check.
     grounded_coercion_sites: &'a std::collections::HashSet<Span>,
     wrapping_arithmetic: bool,
+    /// Route-local side-table (slice 52a): per-route `path`/`query`/
+    /// `body`/`actor` `LocalId`s, so `lower_server` can build a
+    /// synthetic handler agent the runtime executes.
+    route_locals: &'a HashMap<Span, corvid_resolve::RouteLocals>,
+    /// Monotonic `DefId` allocator for synthetic per-route handler
+    /// agents (slice 52a). Starts at a high base so it never collides
+    /// with a real declaration's id; these agents are only ever
+    /// invoked by name, so the id just needs to be unique in the
+    /// runtime's `agents_by_id` map.
+    next_synthetic_def_id: u32,
 }
 
 impl<'a> Lowerer<'a> {
@@ -121,6 +160,8 @@ impl<'a> Lowerer<'a> {
             imported_calls: &checked.imported_calls,
             grounded_coercion_sites: &checked.grounded_coercion_sites,
             wrapping_arithmetic: false,
+            route_locals: &resolved.route_locals,
+            next_synthetic_def_id: SYNTHETIC_ROUTE_AGENT_DEF_ID_BASE,
         }
     }
 
@@ -249,7 +290,18 @@ impl<'a> Lowerer<'a> {
                         span: m.span,
                     });
                 }
-                Decl::Server(s) => servers.push(self.lower_server(s)),
+                Decl::Server(s) => {
+                    let server = self.lower_server(s);
+                    // Slice 52a: emit a synthetic handler agent per route
+                    // so `corvid serve` executes the route body through
+                    // the ordinary agent machinery.
+                    for (ir_route, ast_route) in server.routes.iter().zip(s.routes.iter()) {
+                        if let Some(handler) = self.build_route_handler_agent(ir_route, ast_route) {
+                            agents.push(handler);
+                        }
+                    }
+                    servers.push(server);
+                }
                 Decl::Identity(_) => {
                     // Slice 51g: an identity block is a static auth
                     // configuration surface (providers + session). It
@@ -347,8 +399,79 @@ impl<'a> Lowerer<'a> {
                 .map(|e| e.name.name.clone())
                 .collect(),
             body: self.lower_block(&r.body),
+            handler_agent: synthetic_route_agent_name(r.method, &r.path),
             span: r.span,
         }
+    }
+
+    /// Build the synthetic per-route handler agent (slice 52a): params
+    /// = `path` / `query` / `body` / `actor` reusing the route's
+    /// resolver `LocalId`s, body = the lowered route body. Returns
+    /// `None` if the resolver recorded no locals for this route (should
+    /// not happen for a well-formed route).
+    fn build_route_handler_agent(
+        &mut self,
+        ir_route: &IrRoute,
+        ast_route: &HttpRouteDecl,
+    ) -> Option<IrAgent> {
+        let locals = self.route_locals.get(&ast_route.span).copied()?;
+        let mut params = Vec::new();
+        // `path` — a synthetic struct of the declared path params.
+        let path_fields: Vec<(String, Type)> = ir_route
+            .path_params
+            .iter()
+            .map(|p| (p.name.clone(), p.ty.clone()))
+            .collect();
+        params.push(IrParam {
+            name: "path".to_string(),
+            local_id: locals.path,
+            ty: Type::RouteParams(path_fields),
+            span: ast_route.span,
+        });
+        if let (Some(query_local), Some(query_ty)) = (locals.query, ir_route.query_ty.clone()) {
+            params.push(IrParam {
+                name: "query".to_string(),
+                local_id: query_local,
+                ty: query_ty,
+                span: ast_route.span,
+            });
+        }
+        if let (Some(body_local), Some(body_ty)) = (locals.body, ir_route.body_ty.clone()) {
+            params.push(IrParam {
+                name: "body".to_string(),
+                local_id: body_local,
+                ty: body_ty,
+                span: ast_route.span,
+            });
+        }
+        if let Some(actor_local) = locals.actor {
+            params.push(IrParam {
+                name: "actor".to_string(),
+                local_id: actor_local,
+                ty: actor_route_params_type(),
+                span: ast_route.span,
+            });
+        }
+
+        let id = DefId(self.next_synthetic_def_id);
+        self.next_synthetic_def_id += 1;
+        Some(IrAgent {
+            id,
+            name: ir_route.handler_agent.clone(),
+            extern_abi: None,
+            params,
+            return_ty: ir_route.response_ty.clone(),
+            cost_budget: None,
+            wrapping_arithmetic: self.wrapping_arithmetic,
+            is_replayable: false,
+            pure_fn: false,
+            retry_max_attempts: None,
+            retry_backoff_ms: None,
+            idempotency_key_param: None,
+            body: ir_route.body.clone(),
+            span: ast_route.span,
+            borrow_sig: None,
+        })
     }
 
     fn lower_import(&self, i: &ImportDecl) -> IrImport {

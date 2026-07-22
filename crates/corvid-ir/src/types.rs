@@ -57,6 +57,12 @@ pub struct IrRoute {
     /// resolver introduced are referenced by `IrExprKind::Local` inside
     /// this block.
     pub body: IrBlock,
+    /// Name of the synthetic per-route handler agent (slice 52a) that
+    /// `lower_file` appends to `ir.agents`. Its params reuse the
+    /// route's `path`/`query`/`body`/`actor` `LocalId`s, so `corvid
+    /// serve` executes any route body by invoking this agent by name
+    /// through the ordinary agent machinery.
+    pub handler_agent: String,
     pub span: Span,
 }
 

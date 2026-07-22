@@ -41,10 +41,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{RawPathParams, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, on, MethodFilter};
+use axum::routing::{on, MethodFilter};
 use axum::{Json, Router};
 use corvid_ast::HttpMethod;
 use corvid_driver::{
@@ -52,7 +52,7 @@ use corvid_driver::{
     load_corvid_config_for, render_all_pretty,
     run_ir_with_runtime, InterpErrorKind, RunError, Runtime, RuntimeError, ToolRegistry, Value,
 };
-use corvid_ir::{IrCallKind, IrExprKind, IrFile, IrLiteral, IrRoute, IrStmt, IrType};
+use corvid_ir::{IrFile, IrStmt, IrType};
 use corvid_resolve::DefId;
 use corvid_runtime::approval_authorization::ApprovalActorContext;
 use corvid_runtime::approval_queue::ApprovalQueueRuntime;
@@ -130,23 +130,6 @@ struct ServeState {
     openapi_json: String,
 }
 
-/// How a route's handler is invoked per request.
-enum Dispatch {
-    /// `return <agent>(<literal args>)` — call the agent with the
-    /// pre-evaluated literal arguments.
-    Literal { agent: String, args: Vec<Value> },
-    /// `return <agent>(body)` — deserialize the request JSON into
-    /// `body_ty` and pass it as the single argument.
-    Body { agent: String, body_ty: Type },
-}
-
-/// A dispatchable route: its method/path plus how to invoke the handler.
-struct RoutePlan {
-    method: HttpMethod,
-    path: String,
-    dispatch: Dispatch,
-}
-
 pub(crate) fn cmd_serve(
     file: &Path,
     listen: &str,
@@ -165,17 +148,6 @@ pub(crate) fn cmd_serve(
     if ir.servers.is_empty() {
         eprintln!("error: no `server` block found in {}", file.display());
         return Ok(1);
-    }
-
-    let mut plans: Vec<RoutePlan> = Vec::new();
-    let mut not_served: Vec<(String, String)> = Vec::new();
-    for server in &ir.servers {
-        for route in &server.routes {
-            match dispatch_for(route) {
-                Some(plan) => plans.push(plan),
-                None => not_served.push((route.method.as_str().to_string(), route.path.clone())),
-            }
-        }
     }
 
     let addr: SocketAddr = listen
@@ -284,38 +256,58 @@ pub(crate) fn cmd_serve(
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
-    for plan in plans.iter() {
-        let filter = method_filter(plan.method);
-        let handler = match &plan.dispatch {
-            Dispatch::Literal { agent, args } => {
-                let agent = agent.clone();
-                let args = args.clone();
-                on(filter, move |State(state): State<Arc<ServeState>>| {
-                    let agent = agent.clone();
-                    let args = args.clone();
-                    async move { dispatch_literal(state, agent, args).await }
-                })
+    // Slice 52a: register EVERY declared route and execute its body via
+    // the synthetic per-route handler agent — any shape (path params,
+    // query struct, typed body). No more `501 not_implemented` for
+    // supported shapes. Routes sharing a path merge their methods.
+    let mut by_path: std::collections::BTreeMap<String, axum::routing::MethodRouter<Arc<ServeState>>> =
+        std::collections::BTreeMap::new();
+    for server in &state.ir.servers {
+        for route in &server.routes {
+            let param_names: Vec<String> = state
+                .ir
+                .agents
+                .iter()
+                .find(|a| a.name == route.handler_agent)
+                .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
+                .unwrap_or_default();
+            let meta = Arc::new(RouteMeta {
+                handler_agent: route.handler_agent.clone(),
+                path_params: route
+                    .path_params
+                    .iter()
+                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .collect(),
+                query_ty: route.query_ty.clone(),
+                body_ty: route.body_ty.clone(),
+                param_names,
+            });
+            let filter = method_filter(route.method);
+            let mr = on(
+                filter,
+                move |State(state): State<Arc<ServeState>>,
+                      raw_path: RawPathParams,
+                      RawQuery(raw_query): RawQuery,
+                      body: Bytes| {
+                    let meta = meta.clone();
+                    async move {
+                        run_route(state, meta, raw_path, raw_query.unwrap_or_default(), body).await
+                    }
+                },
+            );
+            let axum_path = corvid_route_to_axum_path(&route.path);
+            match by_path.remove(&axum_path) {
+                Some(existing) => {
+                    by_path.insert(axum_path, existing.merge(mr));
+                }
+                None => {
+                    by_path.insert(axum_path, mr);
+                }
             }
-            Dispatch::Body { agent, body_ty } => {
-                let agent = agent.clone();
-                let body_ty = body_ty.clone();
-                on(
-                    filter,
-                    move |State(state): State<Arc<ServeState>>, body: Bytes| {
-                        let agent = agent.clone();
-                        let body_ty = body_ty.clone();
-                        async move { dispatch_body(state, agent, body_ty, body).await }
-                    },
-                )
-            }
-        };
-        app = app.route(&plan.path, handler);
-    }
-    for (_method, path) in not_served.iter() {
-        if plans.iter().any(|p| &p.path == path) {
-            continue;
         }
-        app = app.route(path, any(not_implemented));
+    }
+    for (path, mr) in by_path {
+        app = app.route(&path, mr);
     }
 
     // Clone the Arc before `with_state` moves it so the startup
@@ -333,84 +325,234 @@ pub(crate) fn cmd_serve(
             .await
             .with_context(|| format!("bind {addr}"))?;
         println!("corvid serve: listening on http://{addr}");
-        for plan in &plans {
-            // Slice 33Q9: the label "approval-gated -> 202 + queued"
-            // is only accurate when the handler agent's body actually
-            // contains an `approve` boundary that the dispatch path
-            // can reach. Pre-33Q9 every `Dispatch::Body` route was
-            // unconditionally labeled approval-gated — misleading for
-            // routes whose agent has no syntactic `approve` (the
-            // route returns 200/500 directly, never 202). Filed by
-            // maintainer-as-reviewer-2026-06-05 P2.1.
-            //
-            // The check is a recursive IR walk on the handler agent's
-            // body, looking for any `IrStmt::Approve` reachable
-            // through nested `If` / `For` blocks. It's NOT a call-
-            // graph walk: an agent whose body only calls another
-            // agent that approves still gets the no-approve label.
-            // That's a conservative under-count — false negative
-            // possible but no false positive. The opposite direction
-            // is the one the trial reviewer hit.
-            let agent_name = match &plan.dispatch {
-                Dispatch::Literal { agent, .. } | Dispatch::Body { agent, .. } => agent.as_str(),
-            };
-            let approves = agent_body_contains_approve(&state_for_banner.ir, agent_name);
-            let body_suffix = match &plan.dispatch {
-                Dispatch::Body { .. } => "body",
-                Dispatch::Literal { .. } => "literal",
-            };
-            let kind = if approves {
-                format!("-> {agent_name} ({body_suffix}; approval-gated -> 202 + queued)")
-            } else {
-                format!("-> {agent_name} ({body_suffix})")
-            };
-            println!("  {:<6} {}  {kind}", plan.method.as_str(), plan.path);
+        // Slice 52a: every declared route is served — its body executes
+        // through the synthetic per-route handler agent. The
+        // approval-gated label (33Q9) is a recursive IR walk of the
+        // handler body for a reachable `IrStmt::Approve` (a conservative
+        // under-count — no false positives).
+        for server in &state_for_banner.ir.servers {
+            for route in &server.routes {
+                let approves =
+                    agent_body_contains_approve(&state_for_banner.ir, &route.handler_agent);
+                let tag = if approves {
+                    "  (approval-gated -> 202 + queued)"
+                } else {
+                    ""
+                };
+                println!("  {:<6} {}{tag}", route.method.as_str(), route.path);
+            }
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
         println!("  POST   /__approvals/<id>/approve   -> approve + re-execute the original request");
         println!("  POST   /__approvals/<id>/deny      -> deny + drop the pending invocation");
-        for (method, path) in &not_served {
-            println!("  {method:<6} {path}  -> 501 (not served)");
-        }
+        println!("  GET    /.well-known/corvid         -> the Application Contract");
+        println!("  GET    /openapi.json               -> OpenAPI 3.1");
         axum::serve(listener, app).await.context("serve").map(|_| ())
     })?;
     Ok(0)
 }
 
 /// Run a literal-arg handler agent and serialize its result to JSON.
-async fn dispatch_literal(state: Arc<ServeState>, agent: String, args: Vec<Value>) -> Response {
-    let outcome = run_ir_with_runtime(&state.ir, Some(&agent), args.clone(), &state.runtime).await;
-    capture_pending_invocation_if_queued(&state, &agent, &args, &outcome);
+
+/// Per-route metadata captured for the general request handler
+/// (slice 52a).
+struct RouteMeta {
+    /// Name of the synthetic per-route handler agent to invoke.
+    handler_agent: String,
+    /// Declared path params: `(name, type)` in path order.
+    path_params: Vec<(String, Type)>,
+    query_ty: Option<Type>,
+    body_ty: Option<Type>,
+    /// The handler agent's param names, in order — drives which of
+    /// `path`/`query`/`body`/`actor` values are assembled and how.
+    param_names: Vec<String>,
+}
+
+/// Convert a Corvid route path (`/orders/{id}`) to axum's colon-capture
+/// syntax (`/orders/:id`) (slice 52a).
+fn corvid_route_to_axum_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '{' {
+            out.push(':');
+            for seg in chars.by_ref() {
+                if seg == '}' {
+                    break;
+                }
+                out.push(seg);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Coerce a raw request string (path/query param) into a `Value` of the
+/// declared scalar type (slice 52a).
+fn coerce_str_to_value(raw: &str, ty: &Type) -> Result<Value, String> {
+    Ok(match ty {
+        Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| format!("`{raw}` is not an Int"))?),
+        Type::Float => {
+            Value::Float(raw.parse::<f64>().map_err(|_| format!("`{raw}` is not a Float"))?)
+        }
+        Type::Bool => Value::Bool(
+            raw.parse::<bool>().map_err(|_| format!("`{raw}` is not a Bool"))?,
+        ),
+        // String / TraceId / anything else the boundary carries as text.
+        _ => Value::String(raw.into()),
+    })
+}
+
+/// The unauthenticated `actor` placeholder bound in a route body when
+/// the route carries a policy (slice 52a). Real session-derived actors
+/// land in slices 52e/52f; until then the fields are empty so a body
+/// that reads `actor.id` runs, and authorization is not yet enforced.
+fn stub_actor_value() -> Value {
+    let empty_list = Value::List(corvid_driver::ListValue::new(std::iter::empty::<Value>()));
+    Value::Struct(corvid_driver::StructValue::new(
+        DefId(0),
+        "actor",
+        vec![
+            ("id".to_string(), Value::String("".into())),
+            ("tenant".to_string(), Value::String("".into())),
+            ("display_name".to_string(), Value::String("".into())),
+            ("roles".to_string(), empty_list.clone()),
+            ("permissions".to_string(), empty_list),
+        ],
+    ))
+}
+
+/// Execute a declared route: parse path params / query struct / typed
+/// body from the request, then invoke the route's synthetic handler
+/// agent with `[path, query?, body?, actor?]` in its declared param
+/// order (slice 52a).
+async fn run_route(
+    state: Arc<ServeState>,
+    meta: Arc<RouteMeta>,
+    raw_path: RawPathParams,
+    raw_query: String,
+    body: Bytes,
+) -> Response {
+    let types_by_id: HashMap<DefId, &IrType> =
+        state.ir.types.iter().map(|t| (t.id, t)).collect();
+
+    // Path params → a `path` struct value.
+    let path_lookup: HashMap<&str, &str> = raw_path.iter().collect();
+    let mut path_fields: Vec<(String, Value)> = Vec::new();
+    for (name, ty) in &meta.path_params {
+        let raw = path_lookup.get(name.as_str()).copied().unwrap_or("");
+        match coerce_str_to_value(raw, ty) {
+            Ok(v) => path_fields.push((name.clone(), v)),
+            Err(e) => return bad_request("invalid_path_param", &format!("{name}: {e}")),
+        }
+    }
+    let path_value = Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", path_fields));
+
+    // Query string → the declared query struct value.
+    let query_value = match &meta.query_ty {
+        Some(ty) => match query_string_to_value(&raw_query, ty, &types_by_id) {
+            Ok(v) => Some(v),
+            Err(e) => return bad_request("invalid_query", &e),
+        },
+        None => None,
+    };
+
+    // Request body → the declared body struct value.
+    let body_value = match &meta.body_ty {
+        Some(ty) => {
+            let json: serde_json::Value = match serde_json::from_slice(&body) {
+                Ok(j) => j,
+                Err(e) => return bad_request("invalid_json", &e.to_string()),
+            };
+            match json_to_value(json, ty, &types_by_id) {
+                Ok(v) => Some(v),
+                Err(e) => return bad_request("invalid_body", &format!("{e:?}")),
+            }
+        }
+        None => None,
+    };
+
+    // Assemble args in the handler agent's declared param order.
+    let mut args: Vec<Value> = Vec::new();
+    for name in &meta.param_names {
+        match name.as_str() {
+            "path" => args.push(path_value.clone()),
+            "query" => args.push(query_value.clone().unwrap_or(Value::Nothing)),
+            "body" => args.push(body_value.clone().unwrap_or(Value::Nothing)),
+            "actor" => args.push(stub_actor_value()),
+            _ => {}
+        }
+    }
+
+    let outcome =
+        run_ir_with_runtime(&state.ir, Some(&meta.handler_agent), args.clone(), &state.runtime).await;
+    capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     finish(outcome)
 }
 
-/// Deserialize the request body into the route's body type, then run the
-/// handler agent with it.
-async fn dispatch_body(
-    state: Arc<ServeState>,
-    agent: String,
-    body_ty: Type,
-    body: Bytes,
-) -> Response {
-    let json: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(j) => j,
-        Err(e) => {
-            return bad_request("invalid_json", &e.to_string());
-        }
+/// Parse a URL query string (`a=1&b=x`) into the declared query struct
+/// value, coercing each field from its string form (slice 52a).
+fn query_string_to_value(
+    query: &str,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Result<Value, String> {
+    let Type::Struct(def_id) = ty else {
+        return Err("query type must be a struct".to_string());
     };
-    let types_by_id: HashMap<DefId, &IrType> =
-        state.ir.types.iter().map(|t| (t.id, t)).collect();
-    let body_val = match json_to_value(json, &body_ty, &types_by_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return bad_request("invalid_body", &format!("{e:?}"));
+    let ir_type = types_by_id
+        .get(def_id)
+        .copied()
+        .ok_or_else(|| "unknown query struct type".to_string())?;
+    let pairs: HashMap<String, String> = query
+        .split('&')
+        .filter(|s| !s.is_empty())
+        .filter_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            Some((
+                urldecode(k),
+                urldecode(v),
+            ))
+        })
+        .collect();
+    let mut fields: Vec<(String, Value)> = Vec::new();
+    for field in &ir_type.fields {
+        let raw = pairs
+            .get(&field.name)
+            .cloned()
+            .ok_or_else(|| format!("missing query param `{}`", field.name))?;
+        fields.push((field.name.clone(), coerce_str_to_value(&raw, &field.ty)?));
+    }
+    Ok(Value::Struct(corvid_driver::StructValue::new(
+        ir_type.id,
+        ir_type.name.clone(),
+        fields,
+    )))
+}
+
+/// Minimal percent-decoding for query keys/values (slice 52a).
+fn urldecode(s: &str) -> String {
+    let bytes = s.replace('+', " ");
+    let mut out = String::with_capacity(bytes.len());
+    let mut chars = bytes.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hi = chars.next();
+            let lo = chars.next();
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                if let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16) {
+                    out.push(byte as char);
+                    continue;
+                }
+            }
+        } else {
+            out.push(c);
         }
-    };
-    let args = vec![body_val];
-    let outcome = run_ir_with_runtime(&state.ir, Some(&agent), args.clone(), &state.runtime).await;
-    capture_pending_invocation_if_queued(&state, &agent, &args, &outcome);
-    finish(outcome)
+    }
+    out
 }
 
 /// If the dispatch outcome surfaced an `ApprovalQueued` from the
@@ -934,17 +1076,6 @@ async fn serve_openapi(State(state): State<Arc<ServeState>>) -> Response {
         .into_response()
 }
 
-async fn not_implemented() -> Response {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": "not_implemented",
-            "detail": "this route shape is not served yet (path-param / query routes)",
-        })),
-    )
-        .into_response()
-}
-
 fn method_filter(m: HttpMethod) -> MethodFilter {
     match m {
         HttpMethod::Get => MethodFilter::GET,
@@ -1152,196 +1283,108 @@ fn stmt_contains_approve(stmt: &IrStmt) -> bool {
     }
 }
 
-/// Decide how (if at all) a route can be dispatched. Returns `None` for
-/// shapes not served yet (path-param / query routes, or handlers that
-/// aren't a single `return <agent>(...)`).
-fn dispatch_for(route: &IrRoute) -> Option<RoutePlan> {
-    if !route.path_params.is_empty() || route.query_ty.is_some() {
-        return None;
-    }
-    for stmt in &route.body.stmts {
-        if let IrStmt::Return {
-            value: Some(expr), ..
-        } = stmt
-        {
-            let IrExprKind::Call {
-                kind: IrCallKind::Agent { .. },
-                callee_name,
-                args,
-            } = &expr.kind
-            else {
-                return None;
-            };
-            // All-literal args → Literal dispatch.
-            if let Some(vals) = args.iter().map(literal_value).collect::<Option<Vec<_>>>() {
-                return Some(RoutePlan {
-                    method: route.method,
-                    path: route.path.clone(),
-                    dispatch: Dispatch::Literal {
-                        agent: callee_name.clone(),
-                        args: vals,
-                    },
-                });
-            }
-            // Single `body` argument + a declared body type → Body dispatch.
-            if args.len() == 1 {
-                if let (IrExprKind::Local { .. }, Some(body_ty)) =
-                    (&args[0].kind, route.body_ty.as_ref())
-                {
-                    return Some(RoutePlan {
-                        method: route.method,
-                        path: route.path.clone(),
-                        dispatch: Dispatch::Body {
-                            agent: callee_name.clone(),
-                            body_ty: body_ty.clone(),
-                        },
-                    });
-                }
-            }
-            return None;
-        }
-    }
-    None
-}
-
-fn literal_value(arg: &corvid_ir::IrExpr) -> Option<Value> {
-    match &arg.kind {
-        IrExprKind::Literal(lit) => Some(match lit {
-            IrLiteral::Int(n) => Value::Int(*n),
-            IrLiteral::Float(f) => Value::Float(*f),
-            IrLiteral::String(s) => Value::String(s.as_str().into()),
-            IrLiteral::Bool(b) => Value::Bool(*b),
-            IrLiteral::Nothing => Value::Nothing,
-        }),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use corvid_ast::{RouteResponseKind, Span};
-    use corvid_ir::{IrBlock, IrExpr};
-    use corvid_resolve::LocalId;
+    use corvid_ast::Span;
+    use corvid_ir::IrField;
 
-    fn span() -> Span {
-        Span::new(0, 0)
+    #[test]
+    fn axum_path_translates_single_brace_param() {
+        assert_eq!(corvid_route_to_axum_path("/orders/{id}"), "/orders/:id");
     }
 
-    fn lit(s: &str) -> IrExpr {
-        IrExpr {
-            kind: IrExprKind::Literal(IrLiteral::String(s.into())),
-            ty: Type::String,
-            span: span(),
-        }
+    #[test]
+    fn axum_path_translates_multiple_params() {
+        assert_eq!(
+            corvid_route_to_axum_path("/tenants/{tenant}/orders/{id}"),
+            "/tenants/:tenant/orders/:id"
+        );
     }
 
-    fn local(name: &str) -> IrExpr {
-        IrExpr {
-            kind: IrExprKind::Local {
-                local_id: LocalId(0),
-                name: name.into(),
-            },
-            ty: Type::String,
-            span: span(),
-        }
+    #[test]
+    fn axum_path_leaves_static_paths_untouched() {
+        assert_eq!(corvid_route_to_axum_path("/health"), "/health");
     }
 
-    fn route(method: HttpMethod, agent: &str, args: Vec<IrExpr>, body_ty: Option<Type>) -> IrRoute {
-        let call = IrExpr {
-            kind: IrExprKind::Call {
-                kind: IrCallKind::Agent { def_id: DefId(0) },
-                callee_name: agent.into(),
-                args,
-            },
-            ty: Type::String,
-            span: span(),
+    #[test]
+    fn coerce_parses_scalar_types() {
+        assert!(matches!(coerce_str_to_value("42", &Type::Int), Ok(Value::Int(42))));
+        assert!(matches!(
+            coerce_str_to_value("3.5", &Type::Float),
+            Ok(Value::Float(f)) if (f - 3.5).abs() < 1e-9
+        ));
+        assert!(matches!(
+            coerce_str_to_value("true", &Type::Bool),
+            Ok(Value::Bool(true))
+        ));
+        assert!(matches!(
+            coerce_str_to_value("hello", &Type::String),
+            Ok(Value::String(s)) if &*s == "hello"
+        ));
+    }
+
+    #[test]
+    fn coerce_rejects_malformed_int() {
+        assert!(coerce_str_to_value("notanint", &Type::Int).is_err());
+    }
+
+    #[test]
+    fn urldecode_handles_percent_and_plus() {
+        assert_eq!(urldecode("a%20b+c"), "a b c");
+        assert_eq!(urldecode("plain"), "plain");
+    }
+
+    #[test]
+    fn query_string_coerces_struct_fields() {
+        let ty = IrType {
+            id: DefId(9),
+            name: "Filter".into(),
+            fields: vec![
+                IrField {
+                    name: "limit".into(),
+                    ty: Type::Int,
+                    refinement: None,
+                    span: Span::new(0, 0),
+                },
+                IrField {
+                    name: "q".into(),
+                    ty: Type::String,
+                    refinement: None,
+                    span: Span::new(0, 0),
+                },
+            ],
+            variants: vec![],
+            span: Span::new(0, 0),
         };
-        IrRoute {
-            method,
-            path: "/x".into(),
-            path_params: vec![],
-            query_ty: None,
-            body_ty,
-            response_kind: RouteResponseKind::Json,
-            response_ty: Type::String,
-            effect_names: vec![],
-            body: IrBlock {
-                stmts: vec![IrStmt::Return {
-                    value: Some(call),
-                    span: span(),
-                }],
-                span: span(),
-            },
-            span: span(),
-        }
+        let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
+        types_by_id.insert(DefId(9), &ty);
+        let value =
+            query_string_to_value("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id)
+                .expect("coerces");
+        let Value::Struct(s) = value else {
+            panic!("expected struct")
+        };
+        assert!(matches!(s.get_field("limit"), Some(Value::Int(10))));
+        assert!(matches!(s.get_field("q"), Some(Value::String(v)) if &*v == "widgets"));
     }
 
     #[test]
-    fn get_zero_arg_handler_is_literal_dispatch() {
-        let plan = dispatch_for(&route(HttpMethod::Get, "make_manifest", vec![], None))
-            .expect("dispatchable");
-        match plan.dispatch {
-            Dispatch::Literal { agent, args } => {
-                assert_eq!(agent, "make_manifest");
-                assert!(args.is_empty());
-            }
-            _ => panic!("expected Literal"),
-        }
-    }
-
-    #[test]
-    fn get_literal_arg_handler_is_literal_dispatch() {
-        let plan = dispatch_for(&route(
-            HttpMethod::Get,
-            "auth_status",
-            vec![lit("user-1"), lit("tenant-1")],
-            None,
-        ))
-        .expect("dispatchable");
-        match plan.dispatch {
-            Dispatch::Literal { agent, args } => {
-                assert_eq!(agent, "auth_status");
-                assert_eq!(args.len(), 2);
-                assert!(matches!(&args[0], Value::String(s) if &**s == "user-1"));
-            }
-            _ => panic!("expected Literal"),
-        }
-    }
-
-    #[test]
-    fn post_body_handler_is_body_dispatch() {
-        let plan = dispatch_for(&route(
-            HttpMethod::Post,
-            "execute_approved_share",
-            vec![local("body")],
-            Some(Type::Struct(DefId(7))),
-        ))
-        .expect("dispatchable");
-        assert_eq!(plan.method, HttpMethod::Post);
-        match plan.dispatch {
-            Dispatch::Body { agent, body_ty } => {
-                assert_eq!(agent, "execute_approved_share");
-                assert!(matches!(body_ty, Type::Struct(DefId(7))));
-            }
-            _ => panic!("expected Body"),
-        }
-    }
-
-    #[test]
-    fn body_arg_without_body_type_is_not_dispatchable() {
-        // A `body` local but no declared body type — can't deserialize.
-        assert!(dispatch_for(&route(HttpMethod::Post, "handle", vec![local("body")], None)).is_none());
-    }
-
-    #[test]
-    fn path_param_route_is_not_dispatchable() {
-        let mut r = route(HttpMethod::Get, "make", vec![], None);
-        r.path_params.push(corvid_ir::IrRoutePathParam {
-            name: "id".into(),
-            ty: Type::String,
-            span: span(),
-        });
-        assert!(dispatch_for(&r).is_none());
+    fn query_string_reports_missing_field() {
+        let ty = IrType {
+            id: DefId(9),
+            name: "Filter".into(),
+            fields: vec![IrField {
+                name: "limit".into(),
+                ty: Type::Int,
+                refinement: None,
+                span: Span::new(0, 0),
+            }],
+            variants: vec![],
+            span: Span::new(0, 0),
+        };
+        let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
+        types_by_id.insert(DefId(9), &ty);
+        assert!(query_string_to_value("", &Type::Struct(DefId(9)), &types_by_id).is_err());
     }
 }

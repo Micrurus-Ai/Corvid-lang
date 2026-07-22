@@ -40,6 +40,24 @@ pub struct Resolved {
     /// collection; the checker and lowerer use it to type/construct
     /// variant calls.
     pub variant_owners: HashMap<DefId, (DefId, u32)>,
+    /// Route-local side-table (slice 52a): the `LocalId`s the resolver
+    /// binds for a server route's `path` / `query` / `body` / `actor`
+    /// locals, keyed by the route's span. IR lowering reads this to
+    /// build a synthetic per-route handler agent whose params reuse
+    /// these ids, so `corvid serve` can execute ANY route body (path /
+    /// query / typed body) through the ordinary agent machinery.
+    pub route_locals: HashMap<Span, RouteLocals>,
+}
+
+/// The `LocalId`s a route body binds for its request locals (slice
+/// 52a). `path` is always present; the rest exist when the route
+/// declares a query/body type or carries an auth policy.
+#[derive(Debug, Clone, Copy)]
+pub struct RouteLocals {
+    pub path: LocalId,
+    pub query: Option<LocalId>,
+    pub body: Option<LocalId>,
+    pub actor: Option<LocalId>,
 }
 
 /// Resolver-side handle for a replay pattern.
@@ -94,6 +112,7 @@ pub fn resolve(file: &File) -> Resolved {
         methods: r.methods,
         replay_pattern_bindings: r.replay_pattern_bindings,
         variant_owners: r.variant_owners,
+        route_locals: r.route_locals,
     }
 }
 
@@ -120,6 +139,9 @@ struct Resolver {
     /// presence-checked without walking the file a second time.
     known_approval_labels: HashSet<String>,
     variant_owners: HashMap<DefId, (DefId, u32)>,
+    /// Route-local side-table (slice 52a). Populated in
+    /// `resolve_http_route_decl`.
+    route_locals: HashMap<Span, RouteLocals>,
 }
 
 impl Resolver {
@@ -134,6 +156,7 @@ impl Resolver {
             replay_pattern_bindings: HashMap::new(),
             known_approval_labels: HashSet::new(),
             variant_owners: HashMap::new(),
+            route_locals: HashMap::new(),
         }
     }
 
@@ -665,20 +688,32 @@ impl Resolver {
         self.push_scope();
         let path_id = self.fresh_local();
         self.current_scope_mut().insert("path", path_id);
+        let mut route_locals = RouteLocals {
+            path: path_id,
+            query: None,
+            body: None,
+            actor: None,
+        };
         if route.query_ty.is_some() {
             let query_id = self.fresh_local();
             self.current_scope_mut().insert("query", query_id);
+            route_locals.query = Some(query_id);
         }
         if route.body_ty.is_some() {
             let body_id = self.fresh_local();
             self.current_scope_mut().insert("body", body_id);
+            route_locals.body = Some(body_id);
         }
         // A route with an auth policy (slice 51h) binds the
         // authenticated `actor` in its body.
         if route.policy.as_ref().is_some_and(|p| p.requires_auth()) {
             let actor_id = self.fresh_local();
             self.current_scope_mut().insert("actor", actor_id);
+            route_locals.actor = Some(actor_id);
         }
+        // Slice 52a: expose the route's request-local ids so IR lowering
+        // can build a synthetic handler agent the runtime executes.
+        self.route_locals.insert(route.span, route_locals);
         self.resolve_block(&route.body);
         self.pop_scope();
     }

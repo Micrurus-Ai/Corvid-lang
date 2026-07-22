@@ -85,7 +85,7 @@ pub use corvid_runtime::{
     RedactionSet, Runtime, RuntimeBuilder, RuntimeError, StdinApprover, ToolHandler, ToolRegistry,
     Tracer,
 };
-pub use corvid_vm::{build_struct, InterpError, InterpErrorKind, StructValue, Value};
+pub use corvid_vm::{build_struct, InterpError, InterpErrorKind, ListValue, StructValue, Value};
 
 use std::path::Path;
 

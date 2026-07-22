@@ -1,0 +1,51 @@
+# Corvid reference application — the Phase 52 continuous fixture.
+#
+# Every slice of Phase 52 extends this one file and proves the new
+# runtime capability against it. It begins as a pure in-memory orders
+# API exercising the three HTTP request shapes the runtime must
+# execute end-to-end (slice 52a): a path parameter, a typed query
+# struct, and a typed request body. Later slices grow it with data,
+# connectors, background jobs, and deployment evidence — no host-
+# language glue at any step.
+
+type OrderView:
+    id: String
+    status: String
+    total: Float
+
+type OrderSummary:
+    id: String
+    status: String
+
+type OrderPage:
+    orders: List<OrderSummary>
+    count: Int
+
+type OrderFilter:
+    status: String
+    limit: Int
+
+type NewOrder:
+    item: String
+    quantity: Int
+
+type OrderReceipt:
+    id: String
+    accepted: Bool
+
+server orders_api:
+    # Path parameter → `path.id`.
+    route GET "/orders/{id}" -> json OrderView:
+        return OrderView(path.id, "open", 42.0)
+
+    # Typed query struct → `query.status`, `query.limit`.
+    route GET "/orders" query OrderFilter -> json OrderPage:
+        summary = OrderSummary("order-1", query.status)
+        return OrderPage([summary], query.limit)
+
+    # Typed request body → `body.item`, `body.quantity`.
+    route POST "/orders" body NewOrder -> json OrderReceipt:
+        return OrderReceipt("order-new", true)
+
+agent main() -> String:
+    return "orders_api reference application"
