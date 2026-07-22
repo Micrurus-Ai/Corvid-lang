@@ -541,21 +541,6 @@ async fn run_route(
 /// are a follow-up once the annotation is threaded to the runtime.
 const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
 
-/// Default accepted MIME types for a well-known upload format tag —
-/// mirrors the contract's `default_mime_for_format` (slice 51f) so the
-/// runtime enforces exactly what the contract advertises. An empty
-/// slice means "accept any" (unknown/custom format tag).
-fn accepted_mime_for_format(format: Option<&str>) -> &'static [&'static str] {
-    match format {
-        Some("Pdf") => &["application/pdf"],
-        Some("Csv") => &["text/csv"],
-        Some("Image") => &["image/png", "image/jpeg", "image/gif", "image/webp"],
-        Some("Json") => &["application/json"],
-        Some("Text") => &["text/plain"],
-        _ => &[],
-    }
-}
-
 /// Parse a multipart/form-data request into an `Upload<Format>` value
 /// (slice 52c-2). Takes the FIRST file part, enforces the format's
 /// accepted-MIME set and the max-size limit, and builds a struct value
@@ -609,8 +594,14 @@ async fn parse_multipart_upload(
             .map(|m| m.essence_str().to_string())
             .unwrap_or_default();
 
-        let accepted = accepted_mime_for_format(format);
-        if !accepted.is_empty() && !accepted.iter().any(|m| *m == content_type) {
+        // The accepted MIME set is the contract's single source of truth
+        // (slice 52c-2) — every well-known format tag maps to its media
+        // types, and an unknown/custom tag falls back to
+        // `application/octet-stream`, so the runtime enforces exactly
+        // what the contract advertised (never accepts a type the
+        // frontend picker was told to reject).
+        let accepted = corvid_abi::app_contract::default_mime_for_format(format.unwrap_or(""));
+        if !accepted.iter().any(|m| *m == content_type) {
             return Err(bad_request(
                 "unsupported_media_type",
                 &format!(

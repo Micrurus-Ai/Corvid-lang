@@ -1626,6 +1626,79 @@ server import_api:
     );
 }
 
+/// 52c-2 upload coverage: uploads are NOT CSV-only. A binary
+/// `Upload<Pdf>` preserves its exact bytes, and an `Upload<Audio>`
+/// route accepts `audio/mpeg` — the format→MIME set is the contract's
+/// single source of truth (`default_mime_for_format`), so the runtime
+/// enforces exactly the media types the contract advertises for every
+/// well-known format, not just the few a hand-copied list happened to
+/// include.
+#[test]
+fn serve_uploads_support_binary_and_non_csv_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type UpReceipt:
+    filename: String
+    size: Int
+    mime: String
+
+agent take_pdf(body: Upload<Pdf>) -> UpReceipt:
+    return UpReceipt(body.filename(), body.size(), body.content_type())
+
+agent take_audio(body: Upload<Audio>) -> UpReceipt:
+    return UpReceipt(body.filename(), body.size(), body.content_type())
+
+server up_api:
+    route POST "/pdf" body Upload<Pdf> -> json UpReceipt:
+        return take_pdf(body)
+    route POST "/audio" body Upload<Audio> -> json UpReceipt:
+        return take_audio(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8207;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "upload app did not become ready on :{port}");
+
+    // A binary PDF with embedded non-UTF-8 bytes — the byte count must
+    // survive the multipart → List<Int> round-trip exactly.
+    let pdf: &[u8] = b"%PDF-1.4\n\x00\x01\x02\xff\xfe binary\n";
+    let (status, body) =
+        http_post_multipart(port, "/pdf", "doc.pdf", "application/pdf", pdf).expect("POST failed");
+    assert_eq!(status, 200, "binary PDF upload status (body={body})");
+    let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        resp.get("size").and_then(|v| v.as_i64()),
+        Some(pdf.len() as i64),
+        "binary bytes must be preserved exactly: {body}"
+    );
+    assert_eq!(resp.get("mime").and_then(|v| v.as_str()), Some("application/pdf"));
+
+    // Audio/mpeg must be accepted — the divergence fix (serve reused the
+    // contract's format→MIME map) added Audio/Video, which a hand-copied
+    // list had omitted (silently accepting ANY type for those formats).
+    let mp3: &[u8] = b"ID3\x03\x00\x00 audio";
+    let (a_status, a_body) =
+        http_post_multipart(port, "/audio", "clip.mp3", "audio/mpeg", mp3).expect("POST failed");
+    assert_eq!(a_status, 200, "audio upload status (body={a_body})");
+
+    // And a PDF sent to the audio route is refused (wrong media type).
+    let (bad, bad_body) =
+        http_post_multipart(port, "/audio", "doc.pdf", "application/pdf", pdf).expect("POST failed");
+    assert_eq!(bad, 400, "wrong media type must be 400: {bad_body}");
+    assert!(bad_body.contains("unsupported_media_type"));
+}
+
 /// 52c-2 pagination gate. A `Page<Item>` response route built with
 /// `Page(items, next_cursor)` serves the standard cursor envelope
 /// `{items, next_cursor, has_more}`, with `next_cursor` unwrapped from

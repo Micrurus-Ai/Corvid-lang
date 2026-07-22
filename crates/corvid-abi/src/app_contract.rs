@@ -617,7 +617,13 @@ fn upload_format_tag(ty: &TypeRef) -> Option<String> {
 /// Default accepted MIME types for a well-known upload format tag. An
 /// unknown tag falls back to `application/octet-stream` so the surface
 /// stays usable without special-casing every format.
-fn default_mime_for_format(format: &str) -> Vec<String> {
+///
+/// This is the SINGLE SOURCE OF TRUTH for the format→MIME mapping: the
+/// Application Contract advertises it (frontend pickers constrain to
+/// it) AND `corvid serve` enforces it on the multipart upload boundary
+/// (slice 52c-2), so the runtime can never accept a media type the
+/// contract did not promise.
+pub fn default_mime_for_format(format: &str) -> Vec<String> {
     let mimes: &[&str] = match format {
         "Pdf" => &["application/pdf"],
         "Image" => &["image/png", "image/jpeg", "image/gif", "image/webp"],

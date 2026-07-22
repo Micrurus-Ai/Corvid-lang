@@ -7070,11 +7070,25 @@ $ curl -s -F "file=@data.csv;type=application/pdf" localhost:PORT/import
 ```
 
 `corvid serve` parses the multipart request (via `multer`), enforces the
-format's accepted MIME set (`Csv` → `text/csv`, `Pdf` → `application/pdf`, …)
-and an 8 MiB max size — a structured `400` on either violation — and
-materialises the upload as a value the five accessor methods read:
-`body.text()` (UTF-8 decode), `body.bytes()` (`List<Int>`), `body.filename()`,
-`body.content_type()`, `body.size()`.
+format's accepted MIME set and an 8 MiB max size — a structured `400` on
+either violation — and materialises the upload as a value the five accessor
+methods read: `body.text()` (UTF-8 decode), `body.bytes()` (`List<Int>`),
+`body.filename()`, `body.content_type()`, `body.size()`.
+
+Uploads are NOT CSV-only. Every well-known format tag is supported —
+`Csv` → `text/csv`, `Pdf` → `application/pdf`, `Image` → png/jpeg/gif/webp,
+`Json` → `application/json`, `Text` → `text/plain`, `Audio` → mpeg/wav/ogg,
+`Video` → mp4/webm — and an unknown/custom tag (`Upload<Receipt>`) falls
+back to `application/octet-stream`. Binary content is preserved exactly:
+`body.bytes()` returns the raw bytes, so a PDF or PNG round-trips through the
+multipart → `List<Int>` path without loss (only `body.text()` is UTF-8-lossy,
+as expected). The format→MIME map is the CONTRACT's `default_mime_for_format`
+(`corvid_abi::app_contract`), shared by the Application Contract (frontend
+pickers constrain to it) AND serve's boundary enforcement — one source of
+truth, so the runtime can never accept a media type the contract told the
+frontend to reject. (An early copy of the map in serve had diverged: it
+omitted Audio/Video and accepted ANY type for them; sharing the contract
+function fixed it.)
 
 Two implementation notes worth keeping:
 
