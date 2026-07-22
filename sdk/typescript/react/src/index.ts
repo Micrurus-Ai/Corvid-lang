@@ -19,3 +19,6 @@ export {
   useCorvidPaginated,
   type PaginatedHandle,
 } from "./useCorvidPaginated.js";
+
+// Optional prototype/admin components (slice 51p).
+export * from "./components/index.js";

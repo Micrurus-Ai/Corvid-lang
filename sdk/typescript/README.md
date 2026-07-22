@@ -70,3 +70,25 @@ const feed = useCorvidPaginated((c) => api.browse(c ?? ""));     // feed.items: 
   stream and resolve them (`approve`/`deny`) through the client.
 - `useCorvidPaginated` — cursor pagination with `items`, `loadMore`,
   and `hasMore`.
+
+### Prototype components (optional)
+
+`@corvid/react` also ships headless-ish scaffolding components for
+standing up an admin panel or demo fast — **not** polished product UI.
+They accept `className` for restyling and specialize with the generated
+types:
+
+```tsx
+import { CorvidAgentForm, CorvidSignIn, CorvidStream } from "@corvid/react";
+
+<CorvidSignIn client={client} providers={["google", "github"]} />
+<CorvidAgentForm
+  fields={[{ name: "question" }]}
+  call={(v) => api.classify(v.question)}
+  renderResult={(a) => <p>{a.text}</p>}   // a: Answer, inferred
+/>
+```
+
+`CorvidAgentForm`, `CorvidStream`, `CorvidApprovalQueue`,
+`CorvidGroundedAnswer`, `CorvidReviewQueue`, `CorvidSignIn`. For real
+product UI, use the hooks directly.

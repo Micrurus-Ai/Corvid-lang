@@ -2622,6 +2622,37 @@ Next per the Phase 51 queue: 51p-components.
 
 ---
 
+## 2026-07-16 - 51p closed: prototype components that specialize themselves
+
+Six optional React components over the hooks, so you can stand up an
+admin panel or a demo in a few lines: `CorvidAgentForm` (typed inputs →
+run an agent, with renderResult/renderError slots), `CorvidStream`
+(chunks + a live typed event log), `CorvidApprovalQueue` (pending
+approvals from a stream → approve/deny), `CorvidGroundedAnswer` (a
+Grounded<T> value + its citation list), `CorvidReviewQueue` (a generic
+human-review list with accept/reject + load-more), and `CorvidSignIn`
+(a button per identity provider).
+
+The honest framing matters: these are SCAFFOLDS, not product UI. They're
+headless-ish (accept className), the styling is minimal-inline, and the
+docs and the component files all say "use the hooks directly for real
+product UI." Corvid owns the AI-backend↔frontend boundary; it does not
+claim to design your app. What it DOES give you is components that
+specialize with the generated types for free — a CorvidAgentForm whose
+`renderResult` receives your agent's exact `Answer`, a CorvidStream
+whose `renderChunk` receives a typed string.
+
+Proven with real JSX: the package type-checks under tsc strict +
+react-jsx (I verified the checker is actually running by injecting a
+bad call and watching it get caught), and a probe component using
+CorvidSignIn + CorvidAgentForm + CorvidStream against a generated Api
+type-checks with the result/chunk types inferred straight from the
+contract.
+
+Next per the Phase 51 queue: 51q-frontend-scaffolding.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

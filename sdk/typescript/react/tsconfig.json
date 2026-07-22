@@ -14,5 +14,5 @@
       "@corvid/client": ["../client/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
