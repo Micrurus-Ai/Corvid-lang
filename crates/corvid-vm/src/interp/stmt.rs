@@ -368,6 +368,36 @@ impl<'ir> Interpreter<'ir> {
             // (first failed arm BY INDEX — deterministic), then
             // arm names bind.
             IrStmt::Parallel { arms, span } => {
+                // Effect-aware scheduling (slice 52d-1): compute each
+                // arm's transitive effect profile (worst-case cost +
+                // whether every tool it reaches is reversible) and the
+                // block's combined profile, and record it as a
+                // `parallel.scheduled` host event. Replay classifies
+                // host events as dispatch metadata and skips them, so
+                // this is observability only — no execution change. The
+                // per-arm reversibility feeds the 52d-2 cancellation
+                // rule.
+                let arm_calls: Vec<&corvid_ir::IrExpr> = arms.iter().map(|a| &a.call).collect();
+                let (combined, per_arm) =
+                    crate::parallel_profile::block_effect_profile(self.ir, &arm_calls);
+                self.runtime.emit_host_event(
+                    "parallel.scheduled",
+                    serde_json::json!({
+                        "arm_count": arms.len(),
+                        "combined_cost": combined.cost,
+                        "combined_reversible": combined.reversible,
+                        "arms": arms
+                            .iter()
+                            .zip(per_arm.iter())
+                            .map(|(arm, p)| serde_json::json!({
+                                "name": arm.name,
+                                "cost": p.cost,
+                                "reversible": p.reversible,
+                            }))
+                            .collect::<Vec<_>>(),
+                    }),
+                );
+
                 let mut buffers = Vec::with_capacity(arms.len());
                 let mut arm_runtimes = Vec::with_capacity(arms.len());
                 for _ in arms {

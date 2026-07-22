@@ -161,6 +161,19 @@ pub struct IrTool {
     /// IR computes this once at lower time from the effect registry
     /// so the interpreter doesn't need to consult the registry.
     pub produces_grounded: bool,
+    /// The tool's composed worst-case cost (the `cost` dimension of its
+    /// effect row), pre-computed at lower time from the effect registry
+    /// (slice 52d-1). Used by effect-aware `parallel` scheduling to
+    /// compute a block's combined cost without consulting the registry
+    /// at runtime. Mirrors `produces_grounded`.
+    pub effect_cost: f64,
+    /// True unless the tool's composed effect row is `reversible:
+    /// false` (slice 52d-1). Composed via `LeastReversible` — one
+    /// irreversible effect makes the tool irreversible. The
+    /// cancellation×reversibility rule (52d-2) reads this at the
+    /// tool-execution site: an arm that has called an irreversible tool
+    /// is past a non-reversible boundary and must not be cancelled.
+    pub effect_reversible: bool,
     pub span: Span,
 }
 

@@ -287,7 +287,11 @@ impl Runtime {
         });
     }
 
-    fn emit_host_event(&self, name: &str, payload: serde_json::Value) {
+    /// Record a named host-side event with a JSON payload. Host events
+    /// are classified as dispatch metadata, so replay skips them — safe
+    /// for observability records (e.g. `parallel.scheduled`, slice
+    /// 52d-1) that must not perturb replay.
+    pub fn emit_host_event(&self, name: &str, payload: serde_json::Value) {
         if !self.tracer.is_enabled() {
             return;
         }

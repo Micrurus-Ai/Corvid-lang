@@ -19,6 +19,7 @@
 
 pub mod conv;
 pub mod cycle_collector;
+pub mod parallel_profile;
 pub mod env;
 pub mod errors;
 pub mod interp;

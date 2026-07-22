@@ -2978,6 +2978,44 @@ scheduling.
 
 ---
 
+## 2026-07-22 - 52d-1 closed: `parallel` blocks compute their effect profile (the awareness scheduling is built on)
+
+First increment of the full-cancellation 52d model (design locked
+82d4fa7c). Before a `parallel:` block runs, the runtime now computes
+each arm's effect profile — the transitive worst-case cost of every
+tool/prompt it can reach, and whether every one of them is reversible —
+plus the block's combined profile, and records a `parallel.scheduled`
+host event. Proven live: `corvid run` on a two-arm parallel program
+writes `{"name":"parallel.scheduled","payload":{"arm_count":2,"arms":
+[...],"combined_cost":...,"combined_reversible":...}}`.
+
+The per-tool cost + reversibility are pre-computed on `IrTool` at lower
+time (from the effect registry via `compose`, mirroring the existing
+`produces_grounded`), so the runtime walk needs no registry access — it
+SUMs cost and ANDs reversibility (via `LeastReversible`; If-branches take
+Max cost). `corvid_vm::parallel_profile` does the transitive walk (agent
+calls recurse, bounded by a visited set). This is exactly the per-arm
+reversibility the 52d-2 cancellation×reversibility rule reads.
+
+Replay-safe by construction: `parallel.scheduled` is a `HostEvent`,
+which `replay_dispatch::is_dispatch_metadata` already classifies as
+metadata and SKIPS, so it never perturbs the substitution cursor. Corpus
+verify still exits 1 on exactly the two divergence fixtures.
+
+Two scope calls, documented not fudged: combined-cost ADMISSION deferred
+to 52d-2 (`@budget` is charged at RUNTIME, so refusing on the static
+worst-case ceiling would false-positive-reject blocks whose actual cost
+fits — sound refuse-before-side-effects needs the reversibility-guarded
+model); rate-limit-domain serialization deferred (rate limits are a
+connector concept, nothing to serialize on until 52g).
+
+Gate: workspace check; corvid-ir (38) + corvid-vm (122) + corvid-driver
+(226 + 4 new parallel_profile integration tests) green; corpus verify
+exits 1 on the two fixtures. Next: 52d-2 (reversibility-guarded live
+cancellation).
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

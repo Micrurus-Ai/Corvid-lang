@@ -673,6 +673,18 @@ impl<'a> Lowerer<'a> {
             &t.effect_row,
             &self.effect_registry,
         );
+        let effect_names: Vec<String> = t
+            .effect_row
+            .effects
+            .iter()
+            .map(|e| e.name.name.clone())
+            .collect();
+        // Composed cost + reversibility, pre-computed from the registry
+        // for effect-aware `parallel` scheduling (slice 52d-1).
+        let effect_refs: Vec<&str> = effect_names.iter().map(|n| n.as_str()).collect();
+        let profile = self.effect_registry.compose(&effect_refs);
+        let effect_cost = numeric_profile_dimension(&profile, "cost");
+        let effect_reversible = profile_is_reversible(&profile);
         IrTool {
             breaker: t.breaker,
             id: self.remap_def_id(id),
@@ -680,14 +692,11 @@ impl<'a> Lowerer<'a> {
             params: self.lower_params(&t.params),
             return_ty: self.type_ref_to_type(&t.return_ty),
             effect: t.effect,
-            effect_names: t
-                .effect_row
-                .effects
-                .iter()
-                .map(|e| e.name.name.clone())
-                .collect(),
+            effect_names,
             confidence_gate,
             produces_grounded,
+            effect_cost,
+            effect_reversible,
             span: t.span,
         }
     }
@@ -2142,6 +2151,17 @@ fn confidence_profile_dimension(profile: &corvid_types::effects::ComposedProfile
         Some(corvid_ast::DimensionValue::Number(value)) => *value,
         _ => 1.0,
     }
+}
+
+/// A composed effect profile is reversible unless it carries an explicit
+/// `reversible: false` (slice 52d-1). Effects default to reversible; the
+/// `LeastReversible` composition rule inserts `Bool(false)` the moment
+/// any composed effect is irreversible.
+fn profile_is_reversible(profile: &corvid_types::effects::ComposedProfile) -> bool {
+    !matches!(
+        profile.dimensions.get("reversible"),
+        Some(corvid_ast::DimensionValue::Bool(false))
+    )
 }
 
 fn agent_cost_budget(agent: &AgentDecl) -> Option<f64> {
