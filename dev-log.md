@@ -2591,6 +2591,37 @@ Next per the Phase 51 queue: 51o-sdk-generators.
 
 ---
 
+## 2026-07-16 - 51o closed: one `generate sdk`, four languages, one contract
+
+`corvid generate sdk --language ts | swift | kotlin | python` reads the
+same Application Contract and emits a client SDK. TypeScript is the
+fully-realized target (the 51l client + methods over @corvid/client,
+and `--framework react` drops a hooks example over @corvid/react).
+Swift, Kotlin, and Python get typed MODELS: records become Codable
+structs / data classes / @dataclasses, and sum types become enums with
+associated values / sealed interfaces / tagged unions, through a
+per-language type map (Int→Int/Int/int, List<T>→[T]/List<T>/list[T],
+Option<T>→T?/T?/Optional[T], Upload→Data/ByteArray/bytes, …).
+
+These non-TS targets are deliberately scaffolds — the model layer, the
+part that MUST track the contract exactly, is generated; the transport
+is a stub to extend as demand proves. The point isn't a finished Swift
+networking stack today; it's that a Corvid app's types can be regen'd
+into Swift, Kotlin, and Python from the one contract, so an iOS app, an
+Android app, a Python worker, and the web frontend literally cannot
+disagree about the shape of an Answer or a RefundError.
+
+Live-probed all four from one source: Swift `enum RefundError` with
+`case approvalDenied(reason: String)`, Kotlin `sealed interface` with
+`data object PaymentNotFound` + `data class ApprovalDenied`, Python
+`@dataclass` per variant + `RefundError = Union[...]`, and the TS
+types.ts + api.ts + hooks.example.tsx. Tests cover language parsing and
+each generator's record + sum mapping plus the dispatch.
+
+Next per the Phase 51 queue: 51p-components.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

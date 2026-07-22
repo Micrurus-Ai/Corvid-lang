@@ -29,6 +29,7 @@ pub use super::capsule::CapsuleCommand;
 pub use super::claim::ClaimCommand;
 pub use super::connectors::{ConnectorsCommand, ConnectorsOauthCommand};
 pub use super::contract::ContractCommand;
+pub use super::generate::GenerateCommand;
 pub use super::deploy::DeployCommand;
 use super::jobs::JobsCommand;
 use super::migrate::MigrateCommand;
@@ -795,6 +796,15 @@ pub enum Command {
     Contract {
         #[command(subcommand)]
         command: ContractCommand,
+    },
+    /// Generate a client SDK for a Corvid app from its Application
+    /// Contract. `--language ts` emits the full TypeScript client
+    /// (`--framework react` also drops a hooks example); `swift`,
+    /// `kotlin`, and `python` emit typed models + a transport scaffold.
+    /// Every language reads the same contract, so types never drift.
+    Generate {
+        #[command(subcommand)]
+        command: GenerateCommand,
     },
     /// Inspect, validate, and exercise Corvid's built-in connectors
     /// (Gmail, Slack, GitHub/Linear tasks, Microsoft 365, calendar,

@@ -33,8 +33,8 @@ use crate::cli::package::PackageCommand;
 use crate::cli::root::{
     AbiCommand, AppCommand, ApprovalsCommand, ApproverCommand, AuthCommand, AuthKeysCommand,
     BenchCommand, BundleCommand, CapsuleCommand, ClaimCommand, Cli, Command, ConnectorsCommand,
-    ConnectorsOauthCommand, ContractCommand, DeployCommand, OpsCommand, ReceiptCommand,
-    ReleaseCommand, ReviewQueueCommand, TraceCommand, UpgradeCommand,
+    ConnectorsOauthCommand, ContractCommand, DeployCommand, GenerateCommand, OpsCommand,
+    ReceiptCommand, ReleaseCommand, ReviewQueueCommand, TraceCommand, UpgradeCommand,
 };
 use crate::commands::eval::*;
 use crate::commands::jobs::*;
@@ -863,6 +863,19 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 contract_cmd::run_ts_client(file.as_deref(), &out)
             }
             ContractCommand::RegenDoc { output } => contract_cmd::run_regen_doc(&output),
+        },
+        Some(Command::Generate { command }) => match command {
+            GenerateCommand::Sdk {
+                file,
+                language,
+                framework,
+                out,
+            } => contract_cmd::run_generate_sdk(
+                file.as_deref(),
+                &language,
+                framework.as_deref(),
+                &out,
+            ),
         },
         Some(Command::Connectors { command }) => cmd_connectors(command),
         Some(Command::Auth { command }) => cmd_auth(command),

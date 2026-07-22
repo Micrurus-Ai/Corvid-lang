@@ -425,6 +425,79 @@ pub fn run_ts_client(file: Option<&Path>, out_dir: &Path) -> Result<u8> {
     Ok(0)
 }
 
+/// Slice 51o — generate a client SDK in `language` into `out_dir`.
+/// TypeScript reuses the 51l client; Swift/Kotlin/Python emit typed
+/// models + a scaffold. `--framework react` (TS) drops a hooks example.
+pub fn run_generate_sdk(
+    file: Option<&Path>,
+    language: &str,
+    framework: Option<&str>,
+    out_dir: &Path,
+) -> Result<u8> {
+    use corvid_abi::sdk_gen::SdkLanguage;
+    let Some(lang) = SdkLanguage::parse(language) else {
+        anyhow::bail!("unknown --language `{language}` — expected `ts`, `swift`, `kotlin`, or `python`");
+    };
+    let Some(contract) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let mut files = corvid_abi::sdk_gen::emit_sdk(&contract, lang);
+
+    if lang == SdkLanguage::TypeScript && framework == Some("react") {
+        files.push(corvid_abi::ts_client::GeneratedFile {
+            filename: "hooks.example.tsx".to_string(),
+            contents: REACT_HOOKS_EXAMPLE.to_string(),
+        });
+    }
+
+    std::fs::create_dir_all(out_dir)
+        .with_context(|| format!("creating output directory `{}`", out_dir.display()))?;
+    for gf in &files {
+        let path = out_dir.join(&gf.filename);
+        std::fs::write(&path, &gf.contents)
+            .with_context(|| format!("writing `{}`", path.display()))?;
+        println!("wrote {} ({} bytes)", path.display(), gf.contents.len());
+    }
+    println!(
+        "generated {} SDK — {} type(s), {} agent(s). {}",
+        lang.slug(),
+        contract.types.len(),
+        contract.agents.len(),
+        match lang {
+            SdkLanguage::TypeScript =>
+                "import `@corvid/client` (and `@corvid/react` for hooks) for the transport.",
+            _ => "typed models track the contract; the transport is a scaffold to extend.",
+        }
+    );
+    Ok(0)
+}
+
+const REACT_HOOKS_EXAMPLE: &str = r#"// Example: driving the generated Api with @corvid/react hooks.
+//
+// The hooks are generic — the generated method signatures specialize
+// them, so `result.data` is the agent's exact return type with no
+// annotation. Replace `classify` / `chat` / `browse` with your app's
+// public agent names (see ./api.ts).
+import { CorvidClient } from "@corvid/client";
+import { useCorvidAgent, useCorvidStream, useCorvidPaginated } from "@corvid/react";
+import { Api } from "./api";
+
+export function useApp(client: CorvidClient) {
+  const api = new Api(client);
+
+  // A non-streaming agent: `result.data` is its typed return value.
+  // const result = useCorvidAgent((q: string) => api.classify(q));
+
+  // A streaming agent: `stream.chunks` is typed; iterate the event log.
+  // const stream = useCorvidStream((m: string) => api.chat(m));
+
+  // A Page<Item> route: `feed.items` is typed; call feed.loadMore().
+  // const feed = useCorvidPaginated((c) => api.browse(c ?? ""));
+
+  return { api };
+}
+"#;
+
 /// Slice 51c — emit the AI-native metadata (`corvid-ai.json`).
 pub fn run_corvid_ai(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     let Some(contract) = build_contract(file)? else {

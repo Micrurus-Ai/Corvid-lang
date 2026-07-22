@@ -13,6 +13,7 @@ pub mod app_contract;
 pub mod corvid_ai;
 pub mod dev_console;
 pub mod openapi;
+pub mod sdk_gen;
 pub mod ts_client;
 mod schema;
 mod signing;

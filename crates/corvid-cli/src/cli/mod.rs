@@ -25,6 +25,7 @@ pub mod claim;
 pub mod connectors;
 pub mod contract;
 pub mod deploy;
+pub mod generate;
 pub mod jobs;
 pub mod migrate;
 pub mod observe;
