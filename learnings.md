@@ -7488,7 +7488,32 @@ All three modes execute; the deployment chooses with `--mode`:
 So a `corvid run --mode real app.cor` records a trace you can later
 `--mode replay` deterministically, with no provider and no credential in sight.
 
-**Scope note (what executes today):** mock/real/replay all run end-to-end.
-Still additive (next slice): typed status→error mapping (`on status -> Variant`)
-and connector rate-limit / circuit-breaker; retry is already wired. See
-[dev-log.md](dev-log.md) (2026-07-23, 52g-3a / 52g-3b / 52g-3c).
+### An HTTP status can become a typed error the compiler makes you handle
+
+`on status <code> -> Variant` turns a provider status into a typed `Result` error.
+The operation must return `Result<Success, ErrorEnum>`, and each mapped variant
+must be a fieldless variant of that enum (checked at compile time):
+
+```corvid
+type GithubError:
+    | NotFound
+    | RateLimited
+
+operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+    GET "/repos/{owner}/{repo}"
+    on status 404 -> NotFound      # HTTP 404 -> Err(NotFound)
+    on status 429 -> RateLimited   # HTTP 429 -> Err(RateLimited)
+    mock: Ok(Repo("corvid"))
+```
+
+A 2xx decodes to `Ok(..)`; a mapped status becomes `Err(Variant)`; an unmapped
+non-2xx is a transport failure. Reliability composes too: `retry: N`,
+`rate_limit: N per Ns` (refuses the over-limit call before it's sent), and
+`circuit_breaker: N` (trips a repeatedly-failing operation) are declared on the
+connector and enforced by the runtime.
+
+**Scope note (what executes today):** the connector runtime is complete —
+mock/real/replay, typed status→error mapping, and retry/rate-limit/circuit-breaker
+all run end-to-end. Async provider state machines and provider-drift quarantine
+are later Phase 52 slices (52h/52i). See [dev-log.md](dev-log.md) (2026-07-23,
+52g-3a … 52g-3c).

@@ -4091,6 +4091,58 @@ Remaining (additive, next batch): typed status→error mapping (`on status
 
 ---
 
+## 2026-07-23 - 52g-3c-5/3c-6: an HTTP status becomes a typed error, and the connector invention ships its proof
+
+The last of the connector runtime: turning a provider's HTTP status into
+a typed `Result` error the compiler makes you handle, plus reliability
+and the invention's public proof. This closes 52g-3c.
+
+### `on status <code> -> Variant` → a typed `Err(Variant)`
+
+The design decision (confirmed with the CTO): an operation that maps
+statuses to typed errors must return `Result<Success, ErrorEnum>`. The
+checker enforces the coherence deferred back in 52g-2 — the return type
+must be a `Result`, its error side must be an enum, and every mapped
+variant must be a *fieldless* variant of that enum (a status carries no
+payload to fill fields). At dispatch a mapped status becomes
+`Err(Variant)`, a 2xx becomes `Ok(decoded body)`, and an unmapped non-2xx
+stays a transport failure.
+
+Making that work surfaced a real gap: `json_to_value` decoded a struct
+type as a RECORD and had no path for a sum type, so an enum could not
+round-trip through a tool result at all. The fix is small and general —
+when the target type is an enum, decode the `{"tag":"variant", ...}`
+envelope into a `Value::Enum` (the inverse of what `value_to_json` already
+emits). Connectors are the first caller, but every tool returning an enum
+benefits.
+
+### Reliability, mostly for free
+
+The circuit breaker is the nicest reuse in the slice: an operation lowers
+to an `IrTool`, the Tool arm already has breaker logic keyed on
+`IrTool.breaker`, so lowering the connector's `circuit_breaker: N` onto
+that field wires it end-to-end with no new runtime code. Retry was already
+wired (`connector.retry` → `HttpRetryPolicy`). Rate-limit is the one new
+piece: a per-connector fixed-window counter checked before a real request
+is sent — real-mode only, so it introduces no replay nondeterminism.
+
+### The invention ships its proof (52g-3c-6)
+
+`corvid tour --topic connectors` (its source compiles through the driver
+in `all_tour_sources_compile`), a `docs/reference/inventions.md` section +
+proof-matrix row, and a README catalog entry — the CLAUDE.md
+invention-shipping contract satisfied.
+
+Tests: 3 checker coherence (non-Result return, unknown mapped variant,
+valid) + 3 driver integration (404 → `Err(NotFound)`, 200 → `Ok(Repo)`,
+rate-limit refuses the second call). Gate (batched with 52g-3c-4's real
+path): corvid-ir + corvid-runtime + corvid-vm + corvid-types +
+corvid-driver + corvid-cli libs green; connector_modes integration (7)
+green; workspace check clean; corpus verify exits 1 on exactly the two
+fixtures. **52g-3c is closed.**
+
+---
+
 ## 2026-07-23 - 52g-3b: a connector declares which modes it may run in, and silence is a compile error
 
 Before an operation can *execute*, one consequential question has to be

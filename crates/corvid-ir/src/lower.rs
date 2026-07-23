@@ -386,7 +386,7 @@ impl<'a> Lowerer<'a> {
                 .symbols
                 .lookup_def(&op.name.name)
                 .expect("connector operation missing from symbol table");
-            tools.push(self.lower_operation_as_tool(op, tool_id));
+            tools.push(self.lower_operation_as_tool(op, tool_id, c.circuit_breaker));
             operations.push(IrOperation {
                 name: op.name.name.clone(),
                 tool_id: self.remap_def_id(tool_id),
@@ -430,7 +430,12 @@ impl<'a> Lowerer<'a> {
     /// effect row composes with budgets / approval / replay / taint
     /// exactly like a hand-written tool's. It carries no circuit
     /// breaker of its own (connector-level reliability lands in 52g-4).
-    fn lower_operation_as_tool(&self, op: &OperationDecl, id: DefId) -> IrTool {
+    fn lower_operation_as_tool(
+        &self,
+        op: &OperationDecl,
+        id: DefId,
+        circuit_breaker: Option<u64>,
+    ) -> IrTool {
         let mut confidence_gate: Option<f64> = None;
         for effect_ref in &op.effect_row.effects {
             if let Some(&threshold) = self.confidence_gates.get(&effect_ref.name.name) {
@@ -455,7 +460,11 @@ impl<'a> Lowerer<'a> {
         let effect_cost = numeric_profile_dimension(&profile, "cost");
         let effect_reversible = profile_is_reversible(&profile);
         IrTool {
-            breaker: None,
+            // The connector's `circuit_breaker: N` becomes the
+            // operation-tool's breaker threshold (slice 52g-3c-5), so the
+            // existing Tool-arm circuit-breaker machinery trips a
+            // repeatedly-failing connector operation for free.
+            breaker: circuit_breaker,
             id: self.remap_def_id(id),
             name: op.name.name.clone(),
             params: self.lower_params(&op.params),

@@ -594,6 +594,72 @@ impl<'a> Checker<'a> {
                 }
                 None => {}
             }
+
+            // `on status <code> -> Variant` coherence (slice 52g-3c-5,
+            // closing the 52g-2 deferral). An operation that maps statuses
+            // to typed errors must return `Result<Success, ErrorEnum>`,
+            // and every mapped variant must be a fieldless variant of that
+            // error enum — a status carries no payload to fill fields.
+            if !op.error_map.is_empty() {
+                let ret = self.type_ref_to_type(&op.return_ty);
+                match &ret {
+                    Type::Result(_ok, err) => match err.as_ref() {
+                        Type::Struct(enum_id) => {
+                            let enum_decl = self.types_by_id.get(enum_id).copied();
+                            match enum_decl {
+                                Some(decl) if !decl.variants.is_empty() => {
+                                    for mapping in &op.error_map {
+                                        match decl
+                                            .variants
+                                            .iter()
+                                            .find(|v| v.name.name == mapping.variant.name)
+                                        {
+                                            None => self.errors.push(invalid(
+                                                format!(
+                                                    "operation `{}` maps status {} to `{}`, which is not a variant of the error type `{}`",
+                                                    op.name.name, mapping.status, mapping.variant.name, decl.name.name
+                                                ),
+                                                mapping.span,
+                                            )),
+                                            Some(v) if !v.fields.is_empty() => self.errors.push(invalid(
+                                                format!(
+                                                    "operation `{}` maps status {} to `{}`, but that variant has fields — a status can only map to a fieldless variant",
+                                                    op.name.name, mapping.status, mapping.variant.name
+                                                ),
+                                                mapping.span,
+                                            )),
+                                            Some(_) => {}
+                                        }
+                                    }
+                                }
+                                _ => self.errors.push(invalid(
+                                    format!(
+                                        "operation `{}` maps statuses to error variants, so its error type must be an enum",
+                                        op.name.name
+                                    ),
+                                    op.span,
+                                )),
+                            }
+                        }
+                        other => self.errors.push(invalid(
+                            format!(
+                                "operation `{}` maps statuses to error variants, so its error type must be an enum, got `{}`",
+                                op.name.name,
+                                other.display_name()
+                            ),
+                            op.span,
+                        )),
+                    },
+                    other => self.errors.push(invalid(
+                        format!(
+                            "operation `{}` declares `on status` error mappings, so it must return `Result<Success, ErrorEnum>` — got `{}`",
+                            op.name.name,
+                            other.display_name()
+                        ),
+                        op.span,
+                    )),
+                }
+            }
         }
     }
 

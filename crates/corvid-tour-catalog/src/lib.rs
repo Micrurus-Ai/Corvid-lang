@@ -838,6 +838,42 @@ public agent whoami(handle: String) -> String:
     return handle
 "#,
     },
+    TourTopic {
+        name: "connectors",
+        title: "Protocol-Typed Connectors",
+        category: "The complete application runtime",
+        pitch: "Declare an external API in source as a `connector` — base URL, credentials, reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The inventions are what the language forces and what it composes. A credential is a `secret(...)` reference, never a literal (a bare-string credential is a parse error), and it is resolved at dispatch into a request header — it never enters the IR, a trace, or an error. A connector declares the execution `modes` it may run in (`mock`, `replay`, `real`) and the deployment picks one with `corvid run --mode`; there is NO default, so a program that reaches a real provider can never do so by silence — omitting `modes` is a compile error, and selecting a mode the connector doesn't allow refuses at startup. The SAME unchanged file runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request, and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the whole moat composes: a `dangerous` operation still needs a prior `approve`, budgets/taint/provenance still apply, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle. The source below COMPILES.",
+        spec: "docs/reference/inventions.md#protocol-typed-connectors",
+        roadmap: "Phase 52 connectors (52g)",
+        test: "crates/corvid-driver/tests/connector_modes.rs (mock/real/replay + status->error + rate-limit + secret-never-in-trace) + crates/corvid-runtime/src/connectors.rs request-builder tests",
+        non_scope: "The connector runtime does not make the provider honest; it enforces the Corvid-declared contract (modes, credentials, egress, typed errors, reliability) and quarantines a mismatched real response for the drift track.",
+        source: r#"effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+type GithubError:
+    | NotFound
+    | RateLimited
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    retry: 3
+    rate_limit: 60 per 60s
+    circuit_breaker: 5
+    modes: [mock, replay, real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 404 -> NotFound
+        on status 429 -> RateLimited
+        mock: Ok(Repo("corvid"))
+
+agent fetch(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+    return get_repo(owner, repo)
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

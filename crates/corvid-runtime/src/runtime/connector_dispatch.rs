@@ -33,22 +33,85 @@ impl Runtime {
         // unpermitted host, even though the base URL is fixed in source.
         self.http_policy.check(&request.url)?;
 
+        // Client-side rate limit (slice 52g-3c-5): a fixed-window counter
+        // per connector. An exceeded limit fails the call BEFORE the
+        // request is sent, so a runaway loop cannot flood the provider.
+        if let Some((limit, window_secs)) = spec.rate_limit {
+            self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;
+        }
+
         let response = self.http.send(&request).await?;
 
-        // A 2xx response body is decoded to the operation's return type
-        // by the VM. A non-2xx status without a declared `on status`
-        // mapping is a transport-level failure. Typed status->error
-        // mapping (turning a mapped status into a typed error variant)
-        // lands in the next sub-slice.
+        // Typed status -> error mapping (slice 52g-3c-5). A status named
+        // by an `on status <code> -> Variant` mapping becomes the typed
+        // (nullary) error variant: the JSON envelope decodes to
+        // `Err(Variant)` against the operation's `Result<_, Error>`
+        // return type. Checked FIRST so a mapped status wins over the
+        // 2xx/non-2xx split.
+        if let Some((_, variant)) = spec
+            .error_map
+            .iter()
+            .find(|(code, _)| *code == response.status)
+        {
+            return Ok(serde_json::json!({
+                "tag": "err",
+                "err": { "tag": "variant", "variant": variant, "fields": [] },
+            }));
+        }
+
+        // A 2xx body is decoded to the operation's success type. When the
+        // operation returns `Result<Success, Error>` it is wrapped as
+        // `Ok(..)`; otherwise the body decodes directly.
         if (200..300).contains(&response.status) {
             let body: serde_json::Value =
                 serde_json::from_str(&response.body).unwrap_or(serde_json::Value::Null);
-            Ok(body)
+            if spec.returns_result {
+                Ok(serde_json::json!({ "tag": "ok", "ok": body }))
+            } else {
+                Ok(body)
+            }
         } else {
+            // An unmapped non-2xx status is a transport-level failure.
             Err(RuntimeError::ToolFailed {
                 tool: spec.operation.clone(),
                 message: format!("provider returned HTTP {}", response.status),
             })
         }
+    }
+
+    /// Fixed-window rate limiter keyed by connector. Increments the
+    /// window count; when it exceeds `limit` within `window_secs`, the
+    /// call fails with a rate-limit error before any request is sent.
+    /// Uses wall-clock time — only real-mode dispatch reaches here, and
+    /// real mode is never replayed, so this introduces no replay
+    /// nondeterminism.
+    fn check_connector_rate_limit(
+        &self,
+        connector: &str,
+        limit: u64,
+        window_secs: u64,
+    ) -> Result<(), RuntimeError> {
+        let now_ms = crate::tracing::now_ms();
+        let window_ms = window_secs.saturating_mul(1000).max(1);
+        let mut state = self
+            .connector_rate_state
+            .lock()
+            .expect("connector rate state poisoned");
+        let entry = state.entry(connector.to_string()).or_insert((now_ms, 0));
+        if now_ms.saturating_sub(entry.0) >= window_ms {
+            // Window elapsed — reset.
+            *entry = (now_ms, 0);
+        }
+        if entry.1 >= limit {
+            return Err(RuntimeError::ToolFailed {
+                tool: connector.to_string(),
+                message: format!(
+                    "connector rate limit exceeded ({limit} per {window_secs}s) — refusing to \
+                     flood the provider"
+                ),
+            });
+        }
+        entry.1 += 1;
+        Ok(())
     }
 }

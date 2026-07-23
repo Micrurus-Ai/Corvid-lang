@@ -920,6 +920,28 @@ Roadmap: [Phase 52 identity runtime](./ROADMAP.md)
 Proof: [the login routes](./crates/corvid-cli/src/serve_auth/routes.rs) + [the provisioning executor](./crates/corvid-runtime/src/auth/provisioning.rs) + [the E5210 checker gate](./crates/corvid-types/src/checker/decl.rs)
 Non-scope: 52e mounts the login/session routes and provisions the actor; route-level enforcement of `requires authenticated|role|permission` policies and durable `approval_required` provisioning are later slices.
 
+#### Protocol-Typed Connectors
+
+Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
+
+```corvid
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    rate_limit: 60 per 60s
+    modes: [mock, replay, real]           # omit → compile error; no default
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 404 -> NotFound          # HTTP status → typed Err variant
+        mock: Ok(Repo("corvid"))
+```
+
+Spec: [Protocol-Typed Connectors](./docs/reference/inventions.md#protocol-typed-connectors)
+Tour: `corvid tour --topic connectors`
+Roadmap: [Phase 52 connectors](./ROADMAP.md)
+Proof: [the connector modes](./crates/corvid-driver/tests/connector_modes.rs) + [the request builder](./crates/corvid-runtime/src/connectors.rs) + [status→error coherence](./crates/corvid-types/src/checker/decl.rs)
+Non-scope: The runtime enforces the Corvid-declared contract (modes, credentials, egress, typed errors, reliability), not provider honesty; async provider state machines + provider-drift quarantine are later 52h/52i slices.
+
 ## Architecture
 
 ```text

@@ -43,9 +43,74 @@ agent main() -> String:
     )
 }
 
+/// A connector whose operation returns `Result<Repo, GithubError>` and
+/// maps HTTP 404 to the typed error variant `NotFound` (slice 52g-3c-5).
+fn source_with_errors(token_env: &str) -> String {
+    format!(
+        r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+type GithubError:
+    | NotFound
+    | RateLimited
+
+connector github:
+    base_url: "http://api.example.com"
+    auth: bearer(secret("{token_env}"))
+    modes: [mock, real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{{owner}}/{{repo}}"
+        on status 404 -> NotFound
+        mock: Ok(Repo("mock-repo"))
+
+agent main() -> Result<Repo, GithubError>:
+    return get_repo("micrurus", "corvid")
+"#
+    )
+}
+
+/// A connector with a client-side rate limit of 1 request per hour whose
+/// agent calls the operation twice — the second call must be refused
+/// before it reaches the provider (slice 52g-3c-5).
+fn source_rate_limited(token_env: &str) -> String {
+    format!(
+        r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "http://api.example.com"
+    auth: bearer(secret("{token_env}"))
+    rate_limit: 1 per 3600s
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{{owner}}/{{repo}}"
+        mock: Repo("mock-repo")
+
+agent main() -> String:
+    a = get_repo("micrurus", "corvid")
+    b = get_repo("micrurus", "corvid")
+    return b.name
+"#
+    )
+}
+
 fn compile(main_path: &Path) -> corvid_ir::IrFile {
     let source = std::fs::read_to_string(main_path).unwrap();
     compile_to_ir_with_config_at_path(&source, main_path, None).expect("connector program compiles")
+}
+
+fn compile_source(dir: &Path, src: &str) -> corvid_ir::IrFile {
+    let p = dir.join("main.cor");
+    std::fs::write(&p, src).unwrap();
+    compile_to_ir_with_config_at_path(src, &p, None).expect("connector program compiles")
 }
 
 fn write_source(dir: &Path, token_env: &str) -> std::path::PathBuf {
@@ -243,4 +308,132 @@ async fn real_mode_without_a_resolvable_credential_fails_the_call() {
     );
     // The failure carries the secret NAME, never a value (there is none).
     assert!(!text.contains("Bearer "), "no credential value in the error: {text}");
+}
+
+/// Typed status→error mapping (slice 52g-3c-5): a 200 decodes to
+/// `Ok(Repo)`, and the mapped HTTP 404 becomes the typed `Err(NotFound)`
+/// variant — not a transport failure. The operation returns
+/// `Result<Repo, GithubError>`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_mapped_status_becomes_a_typed_error_variant() {
+    const TOKEN_ENV: &str = "CORVID_TEST_GH_TOKEN_ERRMAP";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile_source(dir.path(), &source_with_errors(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-err");
+
+    // A server that returns 404 for this repo.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/micrurus/corvid"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let runtime = Runtime::builder()
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build();
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("a 404 maps to a typed error, not a transport failure");
+    std::env::remove_var(TOKEN_ENV);
+
+    match result {
+        Value::ResultErr(inner) => match inner.get() {
+            Value::Enum(e) => assert_eq!(
+                e.variant_name(),
+                "NotFound",
+                "HTTP 404 must map to the NotFound variant"
+            ),
+            other => panic!("expected Err(NotFound enum), got Err({other:?})"),
+        },
+        other => panic!("expected a typed Err(NotFound); got {other:?}"),
+    }
+}
+
+/// The success side of the same Result-returning operation: a 200
+/// decodes to `Ok(Repo)`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_2xx_decodes_to_ok_for_a_result_returning_operation() {
+    const TOKEN_ENV: &str = "CORVID_TEST_GH_TOKEN_OK";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile_source(dir.path(), &source_with_errors(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-ok");
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/micrurus/corvid"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"name":"corvid-ok"}"#))
+        .mount(&server)
+        .await;
+
+    let runtime = Runtime::builder()
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build();
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("a 200 decodes to Ok");
+    std::env::remove_var(TOKEN_ENV);
+
+    match result {
+        Value::ResultOk(inner) => match inner.get() {
+            Value::Struct(s) => assert_eq!(
+                s.get_field("name").unwrap(),
+                Value::String(std::sync::Arc::from("corvid-ok"))
+            ),
+            other => panic!("expected Ok(Repo), got Ok({other:?})"),
+        },
+        other => panic!("expected Ok(Repo); got {other:?}"),
+    }
+}
+
+/// Reliability: a client-side rate limit refuses the second call within
+/// the window BEFORE it reaches the provider (slice 52g-3c-5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_client_side_rate_limit_refuses_the_second_call_in_the_window() {
+    const TOKEN_ENV: &str = "CORVID_TEST_GH_TOKEN_RL";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile_source(dir.path(), &source_rate_limited(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-rl");
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/micrurus/corvid"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"name":"ok"}"#))
+        .mount(&server)
+        .await;
+
+    let runtime = Runtime::builder()
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build();
+
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("the second call in the window must be rate-limited");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err:?}").to_lowercase();
+    assert!(
+        text.contains("rate limit"),
+        "the failure must name the rate limit; got: {err:?}"
+    );
 }

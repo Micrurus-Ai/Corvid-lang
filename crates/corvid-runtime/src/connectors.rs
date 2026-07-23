@@ -72,12 +72,21 @@ pub struct ConnectorHttpSpec {
     pub body: Option<ConnectorBodySpec>,
     /// Credentials — secret NAMES only.
     pub auth: Option<ConnectorAuthSpec>,
-    /// `on status <code> -> Variant` mappings (slice 52g-3c-5 uses these
-    /// to turn a status into a typed error; carried here so the spec is
-    /// complete).
+    /// `on status <code> -> Variant` mappings (slice 52g-3c-5): a mapped
+    /// HTTP status becomes the named (nullary) error variant.
     pub error_map: Vec<(u16, String)>,
+    /// Whether the operation's return type is `Result<Success, Error>`
+    /// (slice 52g-3c-5). When true a 2xx body is wrapped as `Ok(..)` and
+    /// a mapped status becomes `Err(Variant)`; when false the body
+    /// decodes directly and a non-2xx is a transport failure.
+    pub returns_result: bool,
     /// Retry attempts (slice 52g-3c reliability). `None` = no retry.
     pub retry: Option<u64>,
+    /// Client-side rate limit `(limit, window_secs)` (slice 52g-3c-5).
+    /// `None` = unlimited. Enforced per connector before a real request
+    /// is sent; an exceeded limit fails the call rather than flooding
+    /// the provider.
+    pub rate_limit: Option<(u64, u64)>,
 }
 
 /// A recoverable failure while building a connector request — surfaced
@@ -153,7 +162,9 @@ pub fn connector_calls_from_ir(
                         .iter()
                         .map(|m| (m.status, m.variant.clone()))
                         .collect(),
+                    returns_result: matches!(tool.return_ty, corvid_types::Type::Result(_, _)),
                     retry: connector.retry,
+                    rate_limit: connector.rate_limit.map(|r| (r.limit, r.window_secs)),
                 },
             );
         }
@@ -395,7 +406,9 @@ mod tests {
                 secret: "GITHUB_TOKEN".to_string(),
             }),
             error_map: vec![],
+            returns_result: false,
             retry: None,
+            rate_limit: None,
         }
     }
 

@@ -2091,6 +2091,96 @@ connector github:
 }
 
 #[test]
+fn on_status_mapping_requires_a_result_return_type() {
+    // An operation that maps statuses to typed errors must return
+    // `Result<Success, ErrorEnum>` — a bare success return can't carry
+    // the error.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 404 -> NotFound
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                if message.contains("must return `Result")
+        )),
+        "on-status mapping without a Result return must error; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn on_status_variant_must_belong_to_the_error_enum() {
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+type GithubError:
+    | NotFound
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 429 -> RateLimited
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                if message.contains("not a variant of the error type")
+        )),
+        "an unknown mapped variant must error; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn a_valid_result_returning_operation_with_status_mapping_compiles() {
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+type GithubError:
+    | NotFound
+    | RateLimited
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 404 -> NotFound
+        on status 429 -> RateLimited
+"#;
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_grounded_provenance_flows_through_prompts() {
     // Grounded input into a prompt should ground the prompt result.
     let c = check(MUTATION_PROVENANCE_BASE);

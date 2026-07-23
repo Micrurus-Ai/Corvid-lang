@@ -684,6 +684,48 @@ Why it is unique: everywhere else, first-login provisioning is a runtime setting
 you can leave on its permissive default. In Corvid it is a decision the program
 must state to compile at all.
 
+### Protocol-Typed Connectors {#protocol-typed-connectors}
+
+```corvid
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    retry: 3
+    rate_limit: 60 per 60s
+    circuit_breaker: 5
+    modes: [mock, replay, real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET "/repos/{owner}/{repo}"
+        on status 404 -> NotFound
+        mock: Ok(Repo("corvid"))
+```
+
+An external API is declared in source as a `connector`, and each `operation` is a
+callable tool with a declarative HTTP body. Four things the language forces or
+composes make this different from a client library:
+
+1. **A credential is a `secret(...)` reference, never a literal** — a bare-string
+   credential is a parse error. It resolves at dispatch into a request header and
+   never enters the IR, a trace, or an error message.
+2. **The execution mode is chosen at the boundary, with no default.** A connector
+   declares the `modes` it may run in; the deployment selects one with
+   `corvid run --mode`. Omitting `modes` is a compile error, and selecting a mode
+   the connector doesn't allow (or one the runtime can't execute) refuses at
+   startup — a program can never reach a real provider by silence.
+3. **The same unchanged file runs three ways.** `mock` evaluates the compiled
+   `mock:` payload; `real` makes the HTTP request; `replay` serves a recorded
+   interaction and never falls through to a real call (the credential is absent
+   from the recording by construction).
+4. **An operation IS a tool, so the moat composes.** A `dangerous` operation still
+   needs a prior `approve`; budgets, taint, and provenance still apply; and
+   `on status <code> -> Variant` turns an HTTP status into a typed `Result` error
+   the compiler makes you handle.
+
+Why it is unique: other ecosystems express base URLs, auth, retries, mocks, and
+recorded fixtures as scattered runtime glue and test config. Corvid makes the
+integration — and the decision of whether it touches the real world — part of the
+program's static contract.
+
 ## Proof Matrix
 
 | Invention | Status | Runnable command | Test coverage | Spec | Explicit non-scope |
@@ -728,4 +770,5 @@ must state to compile at all.
 | Cursor Pagination (Page envelope) | Shipped (52c-2) | `corvid serve` a `Page<Item>` route, then GET it | `crates/corvid-cli/tests/serve_smoke.rs::serve_returns_a_page_cursor_envelope` | [`inventions.md`](#the-complete-application-runtime) | `Page(items, next_cursor)` builds the `{items, next_cursor, has_more}` envelope (`has_more` derived, cursor unwrapped from `Option`); the incoming cursor is read from the route's typed query struct. |
 | Reversibility-Guarded Parallel Cancellation | Shipped (52d) | `corvid tour --topic parallel-cancellation` | `crates/corvid-vm/src/tests/parallel.rs` (rule + replay-reproduction + adversarial) | [`core-semantics.md`](./core-semantics.md) (`parallel.cancellation_reversibility`) | A `parallel:` block fails fast, but a branch past a non-reversible effect boundary is never cancelled; live cancellation is recorded per arm and Substitute-mode replay reproduces it deterministically (cancelled arm stops at its recorded boundary, shielded arm reaches its terminal, non-cancelling blocks byte-identical). Cooperative at tool-dispatch boundaries, not preemptive. |
 | First-Login Provisioning Is A Compile-Time Decision | Shipped (52e) | `corvid tour --topic oauth-login` | `crates/corvid-cli/src/serve_auth/routes.rs` (`callback_tests`: open provisions+recognises, invited gate, reused-state / nonce-mismatch / tampered-token refused, userinfo) + `crates/corvid-cli/tests/serve_smoke.rs::serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider` + `crates/corvid-abi/src/app_contract.rs::identity_with_oauth_provider_but_no_provisioning_is_rejected` | [`inventions.md`](#first-login-is-an-explicit-compile-time-decision) | An `identity` block auto-mounts the login surface (PKCE + single-use state + nonce + JWKS/userinfo verify + safe cookie); omitting the first-login `provisioning:` policy is a compile error (E5210). Identity is keyed server-side on `(issuer, subject)` / `(provider, user_id)`, never email. Durable `approval_required` provisioning is a later slice. |
+| Protocol-Typed Connectors | Shipped (52g) | `corvid tour --topic connectors` | `crates/corvid-driver/tests/connector_modes.rs` (mock/real/replay, status→typed-error, rate-limit, secret-never-in-trace, real-without-credential) + `crates/corvid-runtime/src/connectors.rs` (request-builder: secret-only-in-header, unresolved-secret-named) + `crates/corvid-types/src/tests.rs` (`on_status_*` coherence) | [`inventions.md`](#protocol-typed-connectors) | Declared connectors run mock/real/replay from one file; credentials are `secret(...)` refs never in IR/trace, mode has no default (omission = compile error / startup refusal), `on status -> Variant` gives typed `Result` errors. Async provider state machines + provider-drift quarantine are later 52h/52i slices. |
 | Route Authorization Enforced Before The Handler | Shipped (52f) | `corvid tour --topic route-authorization` | `crates/corvid-runtime/tests/route_authz.rs` (forged cookie, expired/revoked session, cross-tenant, CSRF mismatch, authenticated-but-insufficient, permission-union, stale-role-after-revocation) + `crates/corvid-cli/tests/serve_smoke.rs::a_role_gated_route_allows_the_right_role_and_denies_others` (live: admin 200, plain 403, anonymous 401) + `::serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start` + `crates/corvid-runtime/src/auth/roles.rs` tests | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | A `requires authenticated\|role\|permission` route resolves the session to a verified typed `actor` and enforces tenant + role + permission (set membership + permission union) and CSRF double-submit on mutations BEFORE the handler or any effect runs — 401 unauthenticated, 403 under-privileged. The actor is only ever the authenticated one, never request-supplied. This closed the last Contract Closure gap. Route-path tenant scoping (an actor's tenant is the enforced tenant) and durable approval-endpoint reviewer auth are follow-ups. |

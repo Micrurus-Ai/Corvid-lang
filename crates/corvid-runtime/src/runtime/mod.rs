@@ -124,6 +124,12 @@ pub struct Runtime {
     connector_calls: std::sync::Arc<
         std::collections::HashMap<String, crate::connectors::ConnectorHttpSpec>,
     >,
+    /// Slice 52g-3c-5: per-connector client-side rate-limit windows
+    /// (`connector name -> (window_start_ms, count)`), shared across
+    /// `Runtime` clones. Consulted before a real request is sent so an
+    /// exceeded limit fails the call rather than flooding the provider.
+    connector_rate_state:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (u64, u64)>>>,
 }
 
 #[derive(Clone)]

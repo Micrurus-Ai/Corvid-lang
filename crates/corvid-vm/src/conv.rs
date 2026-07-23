@@ -296,6 +296,47 @@ pub fn json_to_value(
                 .get(def_id)
                 .copied()
                 .ok_or(ConvError::UnknownStructType(*def_id))?;
+            // A sum type (enum) decodes from a `{"tag":"variant", ...}`
+            // envelope (slice 52g-3c-5): find the named variant, decode
+            // its positional fields, and build a `Value::Enum`. This is
+            // the inverse of the `Value::Enum` case in `value_to_json`,
+            // and is what lets a tool/connector result carrying a typed
+            // error variant round-trip through JSON.
+            if !ir_type.variants.is_empty() {
+                let variant_name = map
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ConvError::TypeMismatch {
+                        expected: ir_type.name.clone(),
+                        got: "object without a `variant` tag".into(),
+                    })?;
+                let (idx, variant) = ir_type
+                    .variants
+                    .iter()
+                    .enumerate()
+                    .find(|(_, v)| v.name == variant_name)
+                    .ok_or_else(|| ConvError::TypeMismatch {
+                        expected: format!("a variant of `{}`", ir_type.name),
+                        got: format!("unknown variant `{variant_name}`"),
+                    })?;
+                let field_jsons = map
+                    .get("fields")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let mut fields = Vec::with_capacity(variant.fields.len());
+                for (i, field) in variant.fields.iter().enumerate() {
+                    let raw = field_jsons.get(i).cloned().unwrap_or(J::Null);
+                    fields.push(json_to_value(raw, &field.ty, types_by_id)?);
+                }
+                return Ok(Value::Enum(crate::value::EnumValue::new(
+                    ir_type.id,
+                    ir_type.name.clone(),
+                    idx as u32,
+                    variant.name.clone(),
+                    fields,
+                )));
+            }
             let mut fields = HashMap::new();
             for field in &ir_type.fields {
                 let raw = map

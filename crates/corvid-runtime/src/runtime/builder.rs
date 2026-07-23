@@ -486,6 +486,9 @@ impl RuntimeBuilder {
             queue: QueueRuntime::new(),
             connector_mode: self.connector_mode,
             connector_calls: std::sync::Arc::new(self.connector_calls),
+            connector_rate_state: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 }

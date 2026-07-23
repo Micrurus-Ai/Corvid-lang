@@ -21,6 +21,9 @@ type Issue:
     id: Int
 type NewIssue:
     title: String
+type GithubError:
+    | NotFound
+    | ValidationFailed
 
 connector github:
     base_url: "https://api.github.com"
@@ -32,11 +35,11 @@ connector github:
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
         mock: Repo(repo)
-    operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+    operation create_issue(owner: String, req: NewIssue) -> Result<Issue, GithubError> dangerous uses http_write:
         POST "/repos/{owner}/issues" body req
         on status 404 -> NotFound
         on status 422 -> ValidationFailed
-        mock: Issue(1)
+        mock: Ok(Issue(1))
 "#;
 
 #[test]
