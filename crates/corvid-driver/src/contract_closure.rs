@@ -280,6 +280,7 @@ mod tests {
                 span: span(),
             }],
             models: vec![],
+            connectors: vec![],
         }
     }
 

@@ -461,6 +461,7 @@ mod tests {
             mocks: vec![],
             servers: vec![],
             models: Vec::new(),
+            connectors: vec![],
         };
 
         assert!(matches!(

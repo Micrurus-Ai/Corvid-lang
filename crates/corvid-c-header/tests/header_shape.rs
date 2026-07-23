@@ -121,6 +121,7 @@ fn scalar_ir() -> IrFile {
         mocks: vec![],
         servers: vec![],
         models: Vec::new(),
+        connectors: vec![],
     }
 }
 
