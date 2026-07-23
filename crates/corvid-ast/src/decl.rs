@@ -111,6 +111,23 @@ pub struct IdentityDecl {
     /// open-registration by omission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provisioning: Option<ProvisioningPolicy>,
+    /// Role → permission declarations (slice 52f). Each names a role and
+    /// the permissions it grants; `requires role("...")` /
+    /// `requires permission("...")` on a route must reference a name
+    /// declared here, and an actor's effective permissions are the union
+    /// of its roles' permission sets. `None`/empty when the app gates
+    /// only on `authenticated`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<RoleDecl>,
+    pub span: Span,
+}
+
+/// One `name: "perm, perm"` entry in an identity block's `roles:`
+/// declaration (slice 52f).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleDecl {
+    pub name: String,
+    pub permissions: Vec<String>,
     pub span: Span,
 }
 
@@ -121,6 +138,13 @@ pub struct IdentityDecl {
 pub struct ProvisioningPolicy {
     pub first_login: FirstLoginPolicy,
     pub tenant: TenantAssignment,
+    /// The role a newly provisioned actor receives when no other source
+    /// assigns one (slice 52f). `None` = least privilege: an open signup
+    /// gets NO role and can reach only `authenticated` routes until
+    /// granted one. Granting authority is never silent — a default role
+    /// must be named explicitly. Must reference a declared role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_role: Option<String>,
     pub span: Span,
 }
 

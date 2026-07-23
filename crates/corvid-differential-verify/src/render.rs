@@ -311,6 +311,22 @@ fn render_identity(identity: &corvid_ast::IdentityDecl, indent: usize, out: &mut
                 ));
             }
         }
+        if let Some(default_role) = &provisioning.default_role {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("default_role: {default_role}\n"));
+        }
+    }
+    if !identity.roles.is_empty() {
+        push_indent(indent + 1, out);
+        out.push_str("roles:\n");
+        for role in &identity.roles {
+            push_indent(indent + 2, out);
+            out.push_str(&format!(
+                "{}: {}\n",
+                role.name,
+                render_string_literal(&role.permissions.join(", "))
+            ));
+        }
     }
     if let Some(session) = &identity.session {
         push_indent(indent + 1, out);

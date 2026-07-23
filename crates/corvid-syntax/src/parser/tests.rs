@@ -3647,6 +3647,41 @@ fn parses_provisioning_invited_from_invitation() {
 }
 
 #[test]
+fn parses_identity_roles_block_and_default_role() {
+    let src = "identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
+        default_role: member
+    roles:
+        admin: \"user:read, user:write\"
+        member: \"user:read\"
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(id.roles.len(), 2);
+    assert_eq!(id.roles[0].name, "admin");
+    assert_eq!(
+        id.roles[0].permissions,
+        vec!["user:read".to_string(), "user:write".to_string()]
+    );
+    assert_eq!(id.roles[1].name, "member");
+    assert_eq!(id.roles[1].permissions, vec!["user:read".to_string()]);
+    assert_eq!(
+        id.provisioning.as_ref().unwrap().default_role.as_deref(),
+        Some("member")
+    );
+}
+
+#[test]
 fn parses_provisioning_claim_mapping_with_allowlist() {
     let src = "identity users:
     provider google

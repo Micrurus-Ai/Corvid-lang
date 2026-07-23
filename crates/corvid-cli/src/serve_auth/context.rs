@@ -289,8 +289,10 @@ mod tests {
             provisioning: Some(ProvisioningPolicy {
                 first_login,
                 tenant,
+                default_role: None,
                 span: Span::new(0, 0),
             }),
+            roles: Vec::new(),
             span: Span::new(0, 0),
         }
     }

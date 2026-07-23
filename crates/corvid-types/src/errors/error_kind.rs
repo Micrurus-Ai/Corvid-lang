@@ -146,6 +146,16 @@ pub enum TypeErrorKind {
     /// block, so there is no way to authenticate a caller.
     RoutePolicyWithoutIdentity { server: String, path: String },
 
+    /// A route `requires role("x")` / `requires permission("p")` names an
+    /// authority (`kind` = "role" or "permission") that the identity
+    /// block's `roles:` never declares (slice 52f) — the requirement
+    /// could never be satisfied, so it is almost certainly a typo.
+    RoutePolicyUndeclaredAuthority {
+        kind: &'static str,
+        name: String,
+        path: String,
+    },
+
     /// A malformed `@retry(...)` / `@idempotency(...)` annotation
     /// (slice 45q): zero attempts, key naming no parameter, or a
     /// key parameter of non-derivable type.
@@ -579,6 +589,11 @@ impl TypeErrorKind {
             Self::RoutePolicyWithoutIdentity { server, path } => {
                 format!(
                     "route `{path}` in server `{server}` uses `requires ...` but the program declares no `identity` block to authenticate against"
+                )
+            }
+            Self::RoutePolicyUndeclaredAuthority { kind, name, path } => {
+                format!(
+                    "route `{path}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` — the requirement could never be satisfied"
                 )
             }
             Self::UnknownGenericHead { name, suggestion } => match suggestion {
@@ -1139,6 +1154,9 @@ impl TypeErrorKind {
             Self::RoutePolicyWithoutIdentity { .. } => Some(
                 "add an `identity <name>:` block declaring the sign-in providers; the auth routes and the typed `actor` derive from it".into(),
             ),
+            Self::RoutePolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
+                "declare it in the identity block's `roles:` — e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
+            )),
             Self::FirstLoginPolicyRequired { .. } => Some(
                 "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
             ),

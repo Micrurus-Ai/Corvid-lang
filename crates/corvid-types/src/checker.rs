@@ -460,6 +460,15 @@ struct Checker<'a> {
     /// Whether the file declares any `identity` block (slice 51h). A
     /// route `requires` policy is only legal when it does.
     has_identity: bool,
+
+    /// Role names declared in the identity block's `roles:` (slice 52f).
+    /// A `requires role("...")` clause must reference one of these.
+    identity_roles: std::collections::HashSet<String>,
+
+    /// The union of all permissions declared across the identity block's
+    /// roles (slice 52f). A `requires permission("...")` clause must
+    /// reference one of these.
+    identity_permissions: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -708,6 +717,24 @@ impl<'a> Checker<'a> {
                 .decls
                 .iter()
                 .any(|d| matches!(d, Decl::Identity(_))),
+            identity_roles: file
+                .decls
+                .iter()
+                .filter_map(|d| match d {
+                    Decl::Identity(id) => Some(id),
+                    _ => None,
+                })
+                .flat_map(|id| id.roles.iter().map(|r| r.name.clone()))
+                .collect(),
+            identity_permissions: file
+                .decls
+                .iter()
+                .filter_map(|d| match d {
+                    Decl::Identity(id) => Some(id),
+                    _ => None,
+                })
+                .flat_map(|id| id.roles.iter().flat_map(|r| r.permissions.iter().cloned()))
+                .collect(),
         }
     }
 

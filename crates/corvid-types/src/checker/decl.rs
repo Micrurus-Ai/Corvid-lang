@@ -251,6 +251,41 @@ impl<'a> Checker<'a> {
             ));
         }
 
+        // Role → permission declarations (slice 52f). Roles must be
+        // uniquely named and grant at least one permission; a
+        // `default_role` names the role an open signup receives, so it
+        // too must be declared (granting authority is never a typo).
+        let mut declared_roles = HashSet::new();
+        for role in &decl.roles {
+            if !declared_roles.insert(role.name.clone()) {
+                self.errors.push(invalid(
+                    format!("duplicate role `{}`", role.name),
+                    role.span,
+                ));
+            }
+            if role.permissions.is_empty() {
+                self.errors.push(invalid(
+                    format!(
+                        "role `{}` grants no permissions — list at least one, e.g. `{}: \"user:read\"`",
+                        role.name, role.name
+                    ),
+                    role.span,
+                ));
+            }
+        }
+        if let Some(provisioning) = &decl.provisioning {
+            if let Some(default_role) = &provisioning.default_role {
+                if !declared_roles.contains(default_role) {
+                    self.errors.push(invalid(
+                        format!(
+                            "`default_role: {default_role}` names a role that is not declared in `roles:`"
+                        ),
+                        provisioning.span,
+                    ));
+                }
+            }
+        }
+
         if let Some(session) = &decl.session {
             let cookie = &session.cookie;
             let mut unsafe_reasons = Vec::new();
@@ -411,6 +446,37 @@ impl<'a> Checker<'a> {
                         },
                         policy.span,
                     ));
+                }
+                // A `requires role/permission` clause must reference a name
+                // declared in the identity block's `roles:` — otherwise the
+                // requirement can never be satisfied and is almost certainly
+                // a typo (slice 52f). Only checked when an identity block
+                // exists (the missing-identity error above already fires).
+                if self.has_identity {
+                    for role in &policy.roles {
+                        if !self.identity_roles.contains(role) {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
+                                    kind: "role",
+                                    name: role.clone(),
+                                    path: route.path.clone(),
+                                },
+                                policy.span,
+                            ));
+                        }
+                    }
+                    for permission in &policy.permissions {
+                        if !self.identity_permissions.contains(permission) {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
+                                    kind: "permission",
+                                    name: permission.clone(),
+                                    path: route.path.clone(),
+                                },
+                                policy.span,
+                            ));
+                        }
+                    }
                 }
                 self.bind_route_local_by_name(&route.body, "actor", actor_type());
             }

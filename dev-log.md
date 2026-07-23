@@ -3470,6 +3470,58 @@ two fixtures.
 
 ---
 
+## 2026-07-23 - 52f-1: roles are declared, and an unsatisfiable `requires` won't compile
+
+52f opens the authorization runtime. The design fork — how a route
+enforces `requires role/permission` when the runtime's permission model
+was fingerprint-equality with no role→permission mapping and no way to
+assign a role — went to the CTO, who chose to build the full role model
+now, under least privilege.
+
+52f-1 lands the language surface. An identity block can declare its
+roles, and provisioning can name the role an open signup receives:
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+        default_role: member      # None ⇒ least privilege: no role by default
+    roles:
+        admin: "refund:write, user:read, user:write"
+        member: "user:read"
+```
+
+`default_role` is the load-bearing safety choice: an open signup gets NO
+role unless the app names one here — granting authority is never a silent
+default. Omit it and a new user can reach `authenticated` routes but no
+role- or permission-gated one until explicitly granted.
+
+The checker makes the role model coherent at compile time:
+- roles are uniquely named and each grants at least one permission;
+- `default_role` must reference a declared role;
+- **`requires role("x")` / `requires permission("p")` must reference a
+  name declared in `roles:`** — a new `RoutePolicyUndeclaredAuthority`
+  error. An unsatisfiable requirement (a typo, or a permission no role
+  grants) is a compile error, not a route that silently always-denies.
+
+AST (`RoleDecl` + `IdentityDecl.roles` + `ProvisioningPolicy.default_role`),
+parser (`roles:` block + `default_role`), checker (collects the declared
+roles/permissions up front, validates the identity block and every route
+policy), and the differential-verify printer round-trips the new fields.
+
+This is pure language surface — serve behaviour is unchanged, a
+`requires`-policy route still refuses to start (E5204). The runtime role
+storage + assignment + resolution (52f-2) and the serve enforcement +
+capability flip (52f-3) follow.
+
+Gate: 1 parser + 5 checker tests; corvid-types 305 + corvid-abi 77 +
+differential-verify 23 green; workspace check clean; corpus verify still
+exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

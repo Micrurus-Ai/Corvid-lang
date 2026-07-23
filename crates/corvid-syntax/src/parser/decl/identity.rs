@@ -12,7 +12,7 @@ use crate::parser::Parser;
 use crate::token::TokKind;
 use corvid_ast::{
     EmailMatchPolicy, FirstLoginPolicy, Ident, IdentityDecl, IdentityProvider, LinkingConfig,
-    ProviderKind, ProvisioningPolicy, SameSite, SessionConfig, TenantAssignment,
+    ProviderKind, ProvisioningPolicy, RoleDecl, SameSite, SessionConfig, TenantAssignment,
 };
 
 impl<'a> Parser<'a> {
@@ -35,6 +35,7 @@ impl<'a> Parser<'a> {
         let mut session = None;
         let mut linking = None;
         let mut provisioning = None;
+        let mut roles = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -80,11 +81,21 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
+            if self.peek_ident_is("roles") {
+                match self.parse_roles_block() {
+                    Ok(r) => roles = r,
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
+                }
+                continue;
+            }
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken {
                     got: crate::parser::describe_token(self.peek()),
                     expected:
-                        "`provider ...`, `session:`, `linking:`, or `provisioning:` inside an identity block"
+                        "`provider ...`, `session:`, `linking:`, `provisioning:`, or `roles:` inside an identity block"
                             .into(),
                 },
                 span: self.peek_span(),
@@ -101,8 +112,66 @@ impl<'a> Parser<'a> {
             session,
             linking,
             provisioning,
+            roles,
             span: start.merge(end),
         })
+    }
+
+    /// `roles:` sub-block (slice 52f). Each line is
+    /// `name: "perm, perm"` — a role and the comma-separated permissions
+    /// it grants. `requires role/permission` clauses must reference names
+    /// declared here.
+    fn parse_roles_block(&mut self) -> Result<Vec<RoleDecl>, ParseError> {
+        self.bump(); // roles
+        self.expect(TokKind::Colon, "`:` after `roles`")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError {
+                kind: ParseErrorKind::ExpectedBlock,
+                span: self.peek_span(),
+            });
+        }
+        self.bump(); // Indent
+
+        let mut roles = Vec::new();
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+                break;
+            }
+            let (name, name_span) = self.expect_ident()?;
+            self.expect(TokKind::Colon, "`:` after a role name")?;
+            let raw = match self.peek().clone() {
+                TokKind::StringLit(s) => {
+                    self.bump();
+                    s
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: crate::parser::describe_token(self.peek()),
+                            expected: "a comma-separated permission string, e.g. `\"refund:write, user:read\"`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+            };
+            let permissions: Vec<String> = raw
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect();
+            roles.push(RoleDecl {
+                name,
+                permissions,
+                span: name_span,
+            });
+            self.expect_newline()?;
+        }
+        if matches!(self.peek(), TokKind::Dedent) {
+            self.bump();
+        }
+        Ok(roles)
     }
 
     /// `provisioning:` sub-block (slice 52e). Both `first_login` and
@@ -125,6 +194,7 @@ impl<'a> Parser<'a> {
 
         let mut first_login: Option<FirstLoginPolicy> = None;
         let mut tenant: Option<TenantAssignment> = None;
+        let mut default_role: Option<String> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -133,6 +203,10 @@ impl<'a> Parser<'a> {
             let (key, key_span) = self.expect_ident()?;
             self.expect(TokKind::Colon, "`:` after a provisioning key")?;
             match key.as_str() {
+                "default_role" => {
+                    let (role, _) = self.expect_ident()?;
+                    default_role = Some(role);
+                }
                 "first_login" => {
                     let (v, v_span) = self.expect_ident()?;
                     first_login = Some(match v.as_str() {
@@ -157,7 +231,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("provisioning key `{key}`"),
-                            expected: "`first_login` or `tenant`".into(),
+                            expected: "`first_login`, `tenant`, or `default_role`".into(),
                         },
                         span: key_span,
                     });
@@ -198,6 +272,7 @@ impl<'a> Parser<'a> {
         Ok(ProvisioningPolicy {
             first_login,
             tenant,
+            default_role,
             span: start.merge(end),
         })
     }

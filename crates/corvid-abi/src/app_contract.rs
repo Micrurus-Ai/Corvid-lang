@@ -1126,6 +1126,8 @@ tool stream_answer(m: String) -> Stream<String>
     provisioning:
         first_login: open
         tenant: fixed(\"public\")
+    roles:
+        admin: \"user:read, user:write\"
 
 server admin_api:
     route GET \"/admin\" -> json String requires role(\"admin\"):
@@ -1368,6 +1370,85 @@ server admin_api:
                     if message.contains("provisioning")
             )),
             "expected a provisioning-without-provider rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_declared_role_and_permission_referenced_by_a_route_compiles() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"refund:write, user:read\"\n\nserver api:\n    route GET \"/admin\" -> json String requires role(\"admin\") and permission(\"refund:write\"):\n        return actor.id\n",
+        );
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn requires_an_undeclared_role_is_rejected() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\nserver api:\n    route GET \"/x\" -> json String requires role(\"superadmin\"):\n        return actor.id\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::RoutePolicyUndeclaredAuthority { kind, name, .. }
+                    if *kind == "role" && name == "superadmin"
+            )),
+            "expected an undeclared-role rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn requires_an_undeclared_permission_is_rejected() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\nserver api:\n    route GET \"/x\" -> json String requires permission(\"refund:write\"):\n        return actor.id\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::RoutePolicyUndeclaredAuthority { kind, name, .. }
+                    if *kind == "permission" && name == "refund:write"
+            )),
+            "expected an undeclared-permission rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn default_role_must_reference_a_declared_role() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n        default_role: member\n    roles:\n        admin: \"user:read\"\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("default_role")
+            )),
+            "expected a default_role rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_role_and_an_empty_role_are_rejected() {
+        let dup = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n        admin: \"user:write\"\n",
+        );
+        assert!(
+            dup.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("duplicate role")
+            )),
+            "expected a duplicate-role rejection, got {dup:?}"
+        );
+        let empty = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        ghost: \"\"\n",
+        );
+        assert!(
+            empty.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("grants no permissions")
+            )),
+            "expected an empty-role rejection, got {empty:?}"
         );
     }
 
