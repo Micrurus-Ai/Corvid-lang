@@ -23,11 +23,14 @@ fn connector_round_trips_through_ast_printer() {
     retry: 3
     rate_limit: 60 per 60s
     circuit_breaker: 5
+    modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
+        mock: Repo(repo)
     operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
         POST "/repos/{owner}/issues" body req
         on status 404 -> NotFound
+        mock: Issue(1)
 "#;
     let file = parse_source(source).expect("parse connector");
     let rendered = render_file(&file);
@@ -53,8 +56,18 @@ fn connector_round_trips_through_ast_printer() {
     assert_eq!(back.base_url, "https://api.github.com");
     assert_eq!(back.retry, Some(3));
     assert_eq!(back.circuit_breaker, Some(5));
+    assert_eq!(
+        back.modes,
+        vec![
+            corvid_ast::ConnectorMode::Mock,
+            corvid_ast::ConnectorMode::Real
+        ]
+    );
     assert_eq!(back.operations.len(), 2);
     assert_eq!(back.operations[1].error_map.len(), 1);
+    // The `mock:` payloads survive the round-trip.
+    assert!(back.operations[0].mock.is_some());
+    assert!(back.operations[1].mock.is_some());
 }
 
 #[test]

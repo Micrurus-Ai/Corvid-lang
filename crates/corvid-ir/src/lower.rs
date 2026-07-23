@@ -404,6 +404,7 @@ impl<'a> Lowerer<'a> {
                         variant: m.variant.name.clone(),
                     })
                     .collect(),
+                mock: op.mock.as_ref().map(|e| self.lower_expr(e)),
                 span: op.span,
             });
         }
@@ -417,6 +418,7 @@ impl<'a> Lowerer<'a> {
                 window_secs: r.window_secs,
             }),
             circuit_breaker: c.circuit_breaker,
+            modes: c.modes.clone(),
             operations,
             span: c.span,
         }

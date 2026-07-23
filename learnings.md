@@ -7414,9 +7414,41 @@ applies to it automatically**:
 - An operation whose effect row carries `data: grounded` returns `Grounded<T>`,
   so provenance propagates through connector reads.
 
-**Scope note (what executes today):** this slice makes operations *callable and
-type-checked* — the compiler fully understands them, and the safety composition
-above is enforced at compile time. Running one end-to-end (dispatching the HTTP
-request through the connector runtime, resolving the secret, mapping a response
-status to a typed error) is the very next slice. See
-[dev-log.md](dev-log.md) (2026-07-23, 52g-3a).
+### A connector declares which modes it may run in — silence is a compile error
+
+Whether an operation reaches a *real external provider* is a consequential
+choice, so a connector must declare its allowed execution modes in source, and
+omitting them is a compile error (never a silent default):
+
+```corvid
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock, real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo(repo)
+```
+
+- `modes: [...]` is the ALLOWED set (`mock`, `replay`, `real`). The deployment
+  selects exactly one at start. Omitting `modes` names the decision and fails to
+  compile — a connector can't back into real-provider access by silence.
+- If `mock` is an allowed mode, every operation must declare a `mock:` payload,
+  so mock mode is fully serveable. The payload is an ordinary expression, typed
+  against the operation's return type and resolved in the operation's parameter
+  scope — so `mock: Repo(repo)` may build its answer from the call's arguments.
+  A `mock: 42` on an operation returning `Repo` is a type error.
+
+**Scope note (what executes today):** these slices make operations *callable and
+type-checked*, and pin the mode/mock surface — the compiler fully understands
+connectors, and the safety composition above is enforced at compile time.
+Running one end-to-end (selecting the deployment mode, evaluating the mock in
+mock mode, or dispatching the real HTTP request with a resolved secret and
+mapping a response status to a typed error) is the next set of slices. See
+[dev-log.md](dev-log.md) (2026-07-23, 52g-3a / 52g-3b).

@@ -13,7 +13,8 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, Block, ConnectorAuth, ConnectorDecl, EmailMatchPolicy, Expr,
+    AgentAttribute, AgentDecl, Block, ConnectorAuth, ConnectorDecl, ConnectorMode, EmailMatchPolicy,
+    Expr,
     FirstLoginPolicy, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy,
     SameSite, ServerDecl, Span, Stmt, TenantAssignment,
 };
@@ -494,6 +495,28 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // A connector MUST declare its allowed execution modes — there
+        // is no default. Whether an operation reaches a real external
+        // provider is a consequential choice, so silence is a compile
+        // error naming the decision and its allowed values, never a
+        // default posture the author didn't choose.
+        if decl.modes.is_empty() {
+            self.errors.push(invalid(
+                "a connector must declare its allowed `modes: [...]` — one or more of `mock`, `replay`, `real`. There is no default; the deployment selects one at start (`corvid dev --mode mock`)".into(),
+                decl.span,
+            ));
+        }
+        let mut seen_modes = HashSet::new();
+        for m in &decl.modes {
+            if !seen_modes.insert(m.as_str()) {
+                self.errors.push(invalid(
+                    format!("mode `{}` is listed more than once in `modes`", m.as_str()),
+                    decl.span,
+                ));
+            }
+        }
+        let mock_allowed = decl.modes.contains(&ConnectorMode::Mock);
+
         // Each operation: a unique name, a path that starts with `/`, and
         // `{placeholders}` that name declared parameters.
         let mut seen = HashSet::new();
@@ -535,6 +558,41 @@ impl<'a> Checker<'a> {
                         op.span,
                     ));
                 }
+            }
+
+            // The `mock:` payload (52g-3b). If `mock` is one of the
+            // allowed modes, every operation must declare one so mock
+            // mode is fully serveable without a recorded cassette. A
+            // declared mock is type-checked against the operation's
+            // return type, with the operation's params in scope (so a
+            // mock may reference them, e.g. `mock: Repo(owner)`).
+            match &op.mock {
+                Some(mock_expr) => {
+                    self.bind_params(&op.params);
+                    let ret_ty = self.type_ref_to_type(&op.return_ty);
+                    let got = self.check_expr_as(mock_expr, Some(&ret_ty));
+                    if !got.is_assignable_to(&ret_ty) {
+                        self.errors.push(invalid(
+                            format!(
+                                "operation `{}` mock has type `{}`, but the operation returns `{}`",
+                                op.name.name,
+                                got.display_name(),
+                                ret_ty.display_name()
+                            ),
+                            mock_expr.span(),
+                        ));
+                    }
+                }
+                None if mock_allowed => {
+                    self.errors.push(invalid(
+                        format!(
+                            "operation `{}` needs a `mock:` payload because `mock` is one of the connector's allowed modes — mock mode must be fully serveable",
+                            op.name.name
+                        ),
+                        op.span,
+                    ));
+                }
+                None => {}
             }
         }
     }

@@ -58,6 +58,10 @@ pub struct IrConnector {
     pub rate_limit: Option<IrRateLimit>,
     /// Circuit-breaker consecutive-failure threshold (slice 52g-4).
     pub circuit_breaker: Option<u64>,
+    /// The execution modes this connector is allowed to run in (slice
+    /// 52g-3b). Never empty (the checker rejects an undeclared set).
+    /// The deployment selects exactly one at start.
+    pub modes: Vec<corvid_ast::ConnectorMode>,
     pub operations: Vec<IrOperation>,
     pub span: Span,
 }
@@ -96,6 +100,11 @@ pub struct IrOperation {
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
+    /// The `mock:` payload expression, lowered (slice 52g-3b). In
+    /// `mock` mode the runtime evaluates this to produce the operation
+    /// response. `None` when the connector's allowed modes exclude
+    /// `mock` (the checker requires one whenever `mock` is allowed).
+    pub mock: Option<IrExpr>,
     pub span: Span,
 }
 

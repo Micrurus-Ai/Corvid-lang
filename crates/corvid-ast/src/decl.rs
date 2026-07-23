@@ -456,10 +456,41 @@ pub struct ConnectorDecl {
     /// `circuit_breaker: N` — trip after N consecutive failures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<u64>,
+    /// `modes: [mock, replay, real]` — the execution modes this
+    /// connector is ALLOWED to run in (slice 52g-3b). There is no
+    /// default: a connector must declare its allowed modes, and the
+    /// deployment selects exactly one from this set at start
+    /// (`corvid dev --mode mock`). Whether an operation reaches a real
+    /// external provider is a consequential choice, so it is never a
+    /// silent default — omitting `modes` is a compile error.
+    pub modes: Vec<ConnectorMode>,
     pub operations: Vec<OperationDecl>,
     #[serde(default)]
     pub visibility: Visibility,
     pub span: Span,
+}
+
+/// An execution mode a connector is allowed to run in (slice 52g-3b).
+/// The allowed set is declared in source (`modes: [...]`); the
+/// deployment selects one. `mock` serves declared `mock` payloads;
+/// `replay` serves a recorded cassette; `real` reaches the external
+/// provider (and additionally requires explicit credentials + policy
+/// approval at deploy time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectorMode {
+    Mock,
+    Replay,
+    Real,
+}
+
+impl ConnectorMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mock => "mock",
+            Self::Replay => "replay",
+            Self::Real => "real",
+        }
+    }
 }
 
 /// How a connector authenticates its requests (slice 52g). Every
@@ -515,6 +546,13 @@ pub struct OperationDecl {
     /// error variant instead of the success return.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_map: Vec<StatusErrorMapping>,
+    /// `mock: <expr>` — the payload this operation returns in `mock`
+    /// mode (slice 52g-3b). The expression must produce the operation's
+    /// return type. When `mock` is one of the connector's allowed
+    /// modes, every operation must declare one, so mock mode is fully
+    /// serveable without a recorded cassette.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mock: Option<Expr>,
     pub span: Span,
 }
 

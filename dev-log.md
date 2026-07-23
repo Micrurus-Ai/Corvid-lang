@@ -3896,6 +3896,72 @@ two fixtures.
 
 ---
 
+## 2026-07-23 - 52g-3b: a connector declares which modes it may run in, and silence is a compile error
+
+Before an operation can *execute*, one consequential question has to be
+answered in source: may it reach a real external provider, or only a
+mock, or a recorded cassette? That is exactly the shape the CTO's
+no-hidden-defaults rule governs — a choice with a security/cost
+consequence and more than one reasonable policy must be declared, and
+omitting it must fail loudly rather than pick a default. So 52g-3b makes
+the mode set part of the connector's source, and its absence a compile
+error.
+
+### `modes: [...]` — the allowed set, declared, never defaulted
+
+A connector now carries `modes: [mock, replay, real]` — the execution
+modes it is *allowed* to run in. Omitting it is
+`ConnectorConfigInvalid`, and the message names the decision and its
+allowed values (`mock`, `replay`, `real`). The deployment selects
+exactly one from this set at start (52g-3d wires `--mode`); the source
+declares the envelope, the deployment picks the point. A connector can
+never back into real-provider access by silence.
+
+This follows the directive from the 52g mode-design chat verbatim:
+*"Source declares allowed modes; deployment explicitly selects one. No
+default."* The resolved mode will be recorded in the Application Contract
++ startup event as deployment evidence (52g-3d), and real mode will
+additionally require explicit credentials + policy approval (52g-4).
+
+### `mock:` — a mode you allow is a mode you must be able to serve
+
+If `mock` is in the allowed set, mock mode has to actually work — so
+every operation must declare a `mock:` payload, or it is a compile
+error. The payload is an ordinary expression, type-checked against the
+operation's return type and resolved in the operation's parameter scope,
+so it can build its answer from the call's arguments:
+
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo(repo)
+
+A `mock: 42` on an operation returning `Repo` is a type error, the same
+as any other mismatched expression. The mock lowers to an `IrExpr` on the
+`IrOperation`, ready for the runtime to evaluate in mock mode (52g-3c).
+
+### Keyword friction, again
+
+`mock` (KwMock, from the `mock` test-block decl) and `replay` (KwReplay)
+are reserved keywords, so — like `retry` and `on` before them — they do
+not lex as identifiers and are matched explicitly in the connector
+parser: in the `modes: [...]` list and at the `mock:` line. `real` is a
+plain identifier. This is the third time a connector key has collided
+with a keyword; the pattern is now routine.
+
+Wiring: AST (`ConnectorMode`, `ConnectorDecl.modes`, `OperationDecl.mock`)
++ parser + resolver (mock resolves under a pushed param scope, mirroring
+agent-body resolution) + checker (modes required + no-dups; mock required
+when mock allowed; mock types against the return) + IR
+(`IrConnector.modes`, `IrOperation.mock`) + differential-verify render
+(round-trips both). Tests: parser (modes + mock in the config test) + 4
+checker (no-modes error, mock-required-when-allowed, mock type-mismatch,
+mock-may-reference-params) + IR lowering (modes + mock carried) + render
+round-trip idempotence. Gate: workspace check clean;
+syntax/resolve/types/ir/differential-verify green; corpus verify exits 1
+on exactly the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

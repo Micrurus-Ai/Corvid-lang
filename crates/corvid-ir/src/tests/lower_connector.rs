@@ -28,12 +28,15 @@ connector github:
     retry: 3
     rate_limit: 60 per 60s
     circuit_breaker: 5
+    modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
+        mock: Repo(repo)
     operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
         POST "/repos/{owner}/issues" body req
         on status 404 -> NotFound
         on status 422 -> ValidationFailed
+        mock: Issue(1)
 "#;
 
 #[test]
@@ -76,6 +79,16 @@ fn connector_dispatch_metadata_is_carried_and_keyed_to_the_tools() {
     );
     assert_eq!(c.circuit_breaker, Some(5));
 
+    // The allowed execution modes carry through (never a default —
+    // the checker rejects an undeclared set).
+    assert_eq!(
+        c.modes,
+        vec![
+            corvid_ast::ConnectorMode::Mock,
+            corvid_ast::ConnectorMode::Real
+        ]
+    );
+
     // Credentials survive as the secret reference NAME, never a value —
     // so a trace can name which secret was used without revealing it.
     assert_eq!(
@@ -96,6 +109,8 @@ fn connector_dispatch_metadata_is_carried_and_keyed_to_the_tools() {
     assert_eq!(get_repo.path, "/repos/{owner}/{repo}");
     assert!(get_repo.body.is_none());
     assert!(get_repo.error_map.is_empty());
+    // The `mock:` payload lowered to an evaluable expression.
+    assert!(get_repo.mock.is_some(), "get_repo mock lowered");
     // The dispatch record points at the same DefId the callable tool
     // carries, so the runtime can resolve a tool call to its connector.
     let get_repo_tool = ir.tools.iter().find(|t| t.name == "get_repo").unwrap();

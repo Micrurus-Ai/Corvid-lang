@@ -3654,8 +3654,10 @@ fn parses_connector_with_config_and_operations() {
     retry: 3
     rate_limit: 60 per 60s
     circuit_breaker: 5
+    modes: [mock, replay, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET \"/repos/{owner}/{repo}\"
+        mock: Repo(repo)
     operation create_issue(owner: String, repo: String, req: NewIssue) -> Issue dangerous uses http_write:
         POST \"/repos/{owner}/{repo}/issues\" body req
         on status 404 -> NotFound
@@ -3679,6 +3681,14 @@ fn parses_connector_with_config_and_operations() {
     assert_eq!(c.retry, Some(3));
     assert_eq!(c.rate_limit.map(|r| (r.limit, r.window_secs)), Some((60, 60)));
     assert_eq!(c.circuit_breaker, Some(5));
+    assert_eq!(
+        c.modes,
+        vec![
+            corvid_ast::ConnectorMode::Mock,
+            corvid_ast::ConnectorMode::Replay,
+            corvid_ast::ConnectorMode::Real
+        ]
+    );
     assert_eq!(c.operations.len(), 2);
 
     let get_repo = &c.operations[0];
@@ -3687,6 +3697,7 @@ fn parses_connector_with_config_and_operations() {
     assert_eq!(get_repo.path, "/repos/{owner}/{repo}");
     assert!(get_repo.body.is_none());
     assert!(matches!(get_repo.effect, corvid_ast::Effect::Safe));
+    assert!(get_repo.mock.is_some(), "get_repo has a mock payload");
 
     let create = &c.operations[1];
     assert!(matches!(create.method, corvid_ast::HttpMethod::Post));

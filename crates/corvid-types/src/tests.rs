@@ -1850,6 +1850,7 @@ type Repo:
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
 
@@ -1876,6 +1877,7 @@ type Repo:
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
 
@@ -1911,6 +1913,7 @@ type NewIssue:
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
     operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
         POST "/repos/{owner}/issues" body req
 
@@ -1940,6 +1943,7 @@ type NewIssue:
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [real]
     operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
         POST "/repos/{owner}/issues" body req
 
@@ -1949,6 +1953,140 @@ agent make(owner: String, req: NewIssue) -> Issue uses http_write:
     return i
 "#;
     let c = check(ok);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn connector_without_declared_modes_is_a_compile_error() {
+    // Slice 52g-3b, the no-hidden-defaults rule: whether an operation
+    // can reach a real external provider is a consequential choice, so
+    // a connector MUST declare its allowed modes. Omission names the
+    // decision — it is never a silent default.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                if message.contains("must declare its allowed `modes")
+        )),
+        "a connector with no `modes` must be a compile error; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn mock_mode_requires_a_mock_payload_on_every_operation() {
+    // If `mock` is an allowed mode, mock mode must be fully serveable:
+    // every operation needs a declared `mock:` payload.
+    let missing = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+"#;
+    let c = check(missing);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                if message.contains("needs a `mock:` payload")
+        )),
+        "an operation with mock mode allowed but no mock must error; got: {:?}",
+        c.errors
+    );
+
+    // With a mock payload of the right type, it compiles.
+    let ok = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo("corvid")
+"#;
+    let c = check(ok);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn mock_payload_must_match_the_operation_return_type() {
+    // The mock is type-checked against the return type, with the
+    // operation's params in scope.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: 42
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                if message.contains("mock has type")
+        ) || matches!(&e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "a mock of the wrong type must error; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn mock_payload_may_reference_operation_params() {
+    // A mock resolves in the operation's param scope, so it can build
+    // its return value from the call's arguments.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo(repo)
+"#;
+    let c = check(src);
     assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
 }
 

@@ -12,8 +12,8 @@ use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::{describe_token, Parser};
 use crate::token::TokKind;
 use corvid_ast::{
-    BodyEncoding, ConnectorAuth, ConnectorDecl, Effect, Ident, OperationBody, OperationDecl,
-    RateLimitConfig, SecretRef, StatusErrorMapping, Visibility,
+    BodyEncoding, ConnectorAuth, ConnectorDecl, ConnectorMode, Effect, Ident, OperationBody,
+    OperationDecl, RateLimitConfig, SecretRef, StatusErrorMapping, Visibility,
 };
 
 impl<'a> Parser<'a> {
@@ -37,6 +37,7 @@ impl<'a> Parser<'a> {
         let mut retry: Option<u64> = None;
         let mut rate_limit: Option<RateLimitConfig> = None;
         let mut circuit_breaker: Option<u64> = None;
+        let mut modes: Vec<ConnectorMode> = Vec::new();
         let mut operations = Vec::new();
 
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -66,11 +67,12 @@ impl<'a> Parser<'a> {
                 "circuit_breaker" => {
                     circuit_breaker = Some(self.parse_u64_literal("circuit_breaker threshold")?)
                 }
+                "modes" => modes = self.parse_connector_modes()?,
                 _ => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("connector key `{key}`"),
-                            expected: "`base_url`, `auth`, `retry`, `rate_limit`, `circuit_breaker`, or `operation ...`".into(),
+                            expected: "`base_url`, `auth`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
                         },
                         span: key_span,
                     });
@@ -98,10 +100,56 @@ impl<'a> Parser<'a> {
             retry,
             rate_limit,
             circuit_breaker,
+            modes,
             operations,
             visibility: Visibility::Private,
             span: start.merge(end),
         })
+    }
+
+    /// `modes: [mock, replay, real]` — the allowed execution modes.
+    /// An empty or absent list is caught by the checker (a connector
+    /// MUST declare its allowed modes — there is no default).
+    fn parse_connector_modes(&mut self) -> Result<Vec<ConnectorMode>, ParseError> {
+        self.expect(TokKind::LBracket, "`[` to open the modes list")?;
+        let mut modes = Vec::new();
+        while !matches!(self.peek(), TokKind::RBracket | TokKind::Eof) {
+            // `mock` (KwMock) and `replay` (KwReplay) are reserved
+            // keywords; `real` lexes as an identifier. Match all three
+            // by token kind.
+            let mode_span = self.peek_span();
+            let mode = match self.peek() {
+                TokKind::KwMock => {
+                    self.bump();
+                    ConnectorMode::Mock
+                }
+                TokKind::KwReplay => {
+                    self.bump();
+                    ConnectorMode::Replay
+                }
+                _ if self.peek_ident_is("real") => {
+                    self.bump();
+                    ConnectorMode::Real
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(self.peek()),
+                            expected: "`mock`, `replay`, or `real` in the modes list".into(),
+                        },
+                        span: mode_span,
+                    });
+                }
+            };
+            modes.push(mode);
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RBracket, "`]` to close the modes list")?;
+        Ok(modes)
     }
 
     /// `auth: bearer(secret("X"))` | `header("Name", secret("X"))` |
@@ -240,12 +288,33 @@ impl<'a> Parser<'a> {
         };
         self.expect_newline()?;
 
-        // Optional `on status <code> -> <Variant>` lines.
+        // Optional `on status <code> -> <Variant>` lines and an
+        // optional `mock: <expr>` line (the mock-mode payload).
         let mut error_map = Vec::new();
+        let mut mock: Option<corvid_ast::Expr> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
+            }
+            // `mock` is a reserved keyword (also the `mock` test-block
+            // decl), so it does not lex as an identifier — match it
+            // explicitly, like `retry`/`on`.
+            if matches!(self.peek(), TokKind::KwMock) {
+                self.bump(); // mock
+                self.expect(TokKind::Colon, "`:` after `mock`")?;
+                if mock.is_some() {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "a second `mock:` on one operation".into(),
+                            expected: "at most one `mock:` payload per operation".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                mock = Some(self.parse_expr()?);
+                self.expect_newline()?;
+                continue;
             }
             error_map.push(self.parse_status_mapping()?);
             self.expect_newline()?;
@@ -265,6 +334,7 @@ impl<'a> Parser<'a> {
             path,
             body,
             error_map,
+            mock,
             span: start.merge(end),
         })
     }

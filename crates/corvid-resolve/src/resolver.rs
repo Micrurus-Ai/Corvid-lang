@@ -471,16 +471,25 @@ impl Resolver {
                     self.resolve_effect_row(&schedule.effect_row);
                 }
                 Decl::Connector(c) => {
-                    // 52g-1: resolve the type references each operation's
-                    // params / return declare, and its effect row, so
-                    // they bind to types + effects in scope. Lowering the
-                    // operations to callable tools lands in a later slice.
+                    // 52g-1/3b: resolve the type references each operation's
+                    // params / return declare, and its effect row. The
+                    // `mock:` payload expression (52g-3b) is resolved in a
+                    // scope where the operation's params are bound, so a
+                    // mock may reference them (e.g. `mock: Repo(owner)`).
                     for op in &c.operations {
+                        self.push_scope();
                         for param in &op.params {
                             self.resolve_type_ref(&param.ty);
+                            let id = self.fresh_local();
+                            self.current_scope_mut().insert(&param.name.name, id);
+                            self.bindings.insert(param.name.span, Binding::Local(id));
                         }
                         self.resolve_type_ref(&op.return_ty);
                         self.resolve_effect_row(&op.effect_row);
+                        if let Some(mock) = &op.mock {
+                            self.resolve_expr(mock);
+                        }
+                        self.pop_scope();
                     }
                 }
                 Decl::Extend(ext) => {

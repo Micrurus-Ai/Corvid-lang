@@ -788,6 +788,11 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
         push_indent(indent + 1, out);
         out.push_str(&format!("circuit_breaker: {cb}\n"));
     }
+    if !connector.modes.is_empty() {
+        push_indent(indent + 1, out);
+        let names: Vec<&str> = connector.modes.iter().map(|m| m.as_str()).collect();
+        out.push_str(&format!("modes: [{}]\n", names.join(", ")));
+    }
 
     for op in &connector.operations {
         push_indent(indent + 1, out);
@@ -828,6 +833,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
                 "on status {} -> {}\n",
                 mapping.status, mapping.variant.name
             ));
+        }
+        if let Some(mock) = &op.mock {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("mock: {}\n", render_expr(mock)));
         }
     }
 }
