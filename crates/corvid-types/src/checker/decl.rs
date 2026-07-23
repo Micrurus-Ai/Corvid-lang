@@ -13,9 +13,9 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, Block, EmailMatchPolicy, Expr, FirstLoginPolicy, HttpMethod,
-    HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy, SameSite, ServerDecl, Span,
-    Stmt, TenantAssignment,
+    AgentAttribute, AgentDecl, Block, ConnectorAuth, ConnectorDecl, EmailMatchPolicy, Expr,
+    FirstLoginPolicy, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy,
+    SameSite, ServerDecl, Span, Stmt, TenantAssignment,
 };
 use corvid_resolve::Binding;
 use std::collections::HashSet;
@@ -417,6 +417,128 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Validate a `connector` declaration (slice 52g): the base URL, the
+    /// auth secret references, the reliability values, and each
+    /// operation's path placeholders.
+    pub(super) fn check_connector(&mut self, decl: &ConnectorDecl) {
+        let name = decl.name.name.clone();
+        let invalid = |message: String, span: Span| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid {
+                    connector: name.clone(),
+                    message,
+                },
+                span,
+            )
+        };
+
+        // `base_url` must be an absolute `http(s)://` URL.
+        if !(decl.base_url.starts_with("https://") || decl.base_url.starts_with("http://")) {
+            self.errors.push(invalid(
+                format!(
+                    "`base_url` must be an absolute `http(s)://` URL, got `{}`",
+                    decl.base_url
+                ),
+                decl.span,
+            ));
+        }
+
+        // Auth credentials are `secret(...)` references — their names must
+        // be non-empty (the parser already forbids literals).
+        if let Some(auth) = &decl.auth {
+            let mut secret_names: Vec<&str> = Vec::new();
+            match auth {
+                ConnectorAuth::Bearer(s) => secret_names.push(&s.name),
+                ConnectorAuth::Header { name: header, value } => {
+                    if header.trim().is_empty() {
+                        self.errors.push(invalid(
+                            "a `header(...)` auth needs a non-empty header name".into(),
+                            decl.span,
+                        ));
+                    }
+                    secret_names.push(&value.name);
+                }
+                ConnectorAuth::Basic { username, password } => {
+                    secret_names.push(&username.name);
+                    secret_names.push(&password.name);
+                }
+            }
+            if secret_names.iter().any(|n| n.trim().is_empty()) {
+                self.errors.push(invalid(
+                    "a `secret(...)` reference must name a non-empty secret".into(),
+                    decl.span,
+                ));
+            }
+        }
+
+        // Reliability values, when present, must be non-zero to mean
+        // anything.
+        if decl.retry == Some(0) {
+            self.errors.push(invalid(
+                "`retry: 0` is a no-op — omit it, or give a positive count".into(),
+                decl.span,
+            ));
+        }
+        if decl.circuit_breaker == Some(0) {
+            self.errors.push(invalid(
+                "`circuit_breaker: 0` would trip immediately — give a positive threshold".into(),
+                decl.span,
+            ));
+        }
+        if let Some(rate) = &decl.rate_limit {
+            if rate.limit == 0 || rate.window_secs == 0 {
+                self.errors.push(invalid(
+                    "`rate_limit` needs a positive limit and window (`<n> per <secs>s`)".into(),
+                    decl.span,
+                ));
+            }
+        }
+
+        // Each operation: a unique name, a path that starts with `/`, and
+        // `{placeholders}` that name declared parameters.
+        let mut seen = HashSet::new();
+        for op in &decl.operations {
+            if !seen.insert(op.name.name.clone()) {
+                self.errors.push(invalid(
+                    format!("duplicate operation `{}`", op.name.name),
+                    op.span,
+                ));
+            }
+            if !op.path.starts_with('/') {
+                self.errors.push(invalid(
+                    format!("operation `{}` path must start with `/`, got `{}`", op.name.name, op.path),
+                    op.span,
+                ));
+            }
+            let param_names: HashSet<&str> =
+                op.params.iter().map(|p| p.name.name.as_str()).collect();
+            for placeholder in path_placeholders(&op.path) {
+                if !param_names.contains(placeholder.as_str()) {
+                    self.errors.push(invalid(
+                        format!(
+                            "operation `{}` path references `{{{placeholder}}}`, but it declares no parameter named `{placeholder}`",
+                            op.name.name
+                        ),
+                        op.span,
+                    ));
+                }
+            }
+            // A `body <param>` / `form <param>` must name a declared
+            // parameter.
+            if let Some(body) = &op.body {
+                if !param_names.contains(body.param.name.as_str()) {
+                    self.errors.push(invalid(
+                        format!(
+                            "operation `{}` body references `{}`, which is not a declared parameter",
+                            op.name.name, body.param.name
+                        ),
+                        op.span,
+                    ));
+                }
+            }
+        }
+    }
+
     fn check_http_route(&mut self, server: &ServerDecl, route: &HttpRouteDecl) {
         let path_fields = route
             .path_params
@@ -538,6 +660,26 @@ fn is_plausible_domain(domain: &str) -> bool {
     }
     let labels: Vec<&str> = domain.split('.').collect();
     labels.len() >= 2 && labels.iter().all(|l| !l.is_empty())
+}
+
+/// Extract the `{placeholder}` names from an operation path (slice 52g),
+/// e.g. `/repos/{owner}/{repo}` → `["owner", "repo"]`.
+fn path_placeholders(path: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = path;
+    while let Some(open) = rest.find('{') {
+        rest = &rest[open + 1..];
+        if let Some(close) = rest.find('}') {
+            let name = rest[..close].trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+            rest = &rest[close + 1..];
+        } else {
+            break;
+        }
+    }
+    names
 }
 
 fn collect_ident_spans_by_name_in_block(block: &Block, name: &str, spans: &mut Vec<Span>) {

@@ -1453,6 +1453,85 @@ server admin_api:
     }
 
     #[test]
+    fn a_valid_connector_compiles() {
+        let errors = check_errors_of(
+            "connector github:\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
+        );
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn connector_non_absolute_base_url_is_rejected() {
+        let errors = check_errors_of(
+            "connector svc:\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                    if message.contains("base_url")
+            )),
+            "expected a base_url rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn connector_path_placeholder_must_reference_a_parameter() {
+        let errors = check_errors_of(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                    if message.contains("itemId")
+            )),
+            "expected an unknown-placeholder rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn connector_duplicate_operation_and_zero_retry_rejected() {
+        let dup = check_errors_of(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
+        );
+        assert!(
+            dup.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                    if message.contains("duplicate operation")
+            )),
+            "expected a duplicate-operation rejection, got {dup:?}"
+        );
+        let retry = check_errors_of(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
+        );
+        assert!(
+            retry.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                    if message.contains("retry: 0")
+            )),
+            "expected a zero-retry rejection, got {retry:?}"
+        );
+    }
+
+    #[test]
+    fn connector_body_must_reference_a_parameter() {
+        let errors = check_errors_of(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::ConnectorConfigInvalid { message, .. }
+                    if message.contains("payload")
+            )),
+            "expected a body-param rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
     fn private_agents_are_not_in_the_contract() {
         let contract = contract_for(
             "\

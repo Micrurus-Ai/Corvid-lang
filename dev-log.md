@@ -3811,6 +3811,32 @@ exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52g-2: the connector checker
+
+The connector surface now validates. `check_connector` raises
+`ConnectorConfigInvalid` when a connector is malformed:
+
+- `base_url` must be an absolute `http(s)://` URL — a bare host is a
+  compile error;
+- `secret(...)` names must be non-empty (the parser already forbids a
+  literal credential);
+- `retry` / `circuit_breaker` must be non-zero (a `retry: 0` is a no-op;
+  a `circuit_breaker: 0` would trip immediately), and `rate_limit` needs
+  a positive limit and window;
+- each operation is uniquely named, its path starts with `/`, and — the
+  useful one — every `{placeholder}` in the path names a declared
+  parameter, as does each `body`/`form` binding. A `GET "/items/{itemId}"`
+  on an operation that declares `id` (not `itemId`) is a compile error,
+  not a request that silently omits the segment.
+
+5 checker tests. Two coherence checks wait for lowering (52g-3): the
+`on status <code> -> Variant` mapping must reference a real error variant
+of the operation's return type, and operations must register as callable
+symbols. Gate: corvid-types + corvid-abi green; workspace check clean;
+corpus verify still exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

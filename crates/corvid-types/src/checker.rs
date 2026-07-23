@@ -782,10 +782,7 @@ impl<'a> Checker<'a> {
                 }
                 Decl::Type(t) => self.check_field_refinements(t),
                 Decl::Identity(i) => self.check_identity(i),
-                // 52g-1: connector declarations parse and resolve; the
-                // checker validation (config, error mappings, secret
-                // refs) + tool lowering land in 52g-2/3.
-                Decl::Connector(_) => {}
+                Decl::Connector(c) => self.check_connector(c),
                 Decl::Tool(_)
                 | Decl::Store(_)
                 | Decl::Import(_)
