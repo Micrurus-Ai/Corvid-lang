@@ -632,6 +632,55 @@ those tasks have irreversibly done — and none can deterministically replay a
 cancelled concurrent run. Corvid's effect system knows exactly which branch has
 crossed a point of no return, and its trace pins the one true run.
 
+### First Login Is An Explicit Compile-Time Decision {#first-login-is-an-explicit-compile-time-decision}
+
+Declaring an `identity` block makes `corvid serve` mount the entire login
+surface — `/auth/{provider}/login`, `/callback`, `/logout`, `/session` — wired to
+Authorization Code + PKCE, a single-use signed state, an OIDC nonce, and JWKS
+signature verification, with a Secure/HttpOnly/SameSite session cookie. The
+invention is what the compiler forces you to decide *first*: **how an unknown,
+verified user becomes an account.** There is no silent default. An identity block
+that declares OAuth providers but does not state its first-login policy is a
+compile error:
+
+```
+E5210 First-login policy required: identity `users` declares OAuth providers but
+does not state how an unknown verified subject is provisioned.
+Add: provisioning: first_login: open | invited
+```
+
+```corvid
+identity users:
+    provider google
+    provider github
+    provisioning:
+        first_login: invited          # or: open
+        tenant: from_invitation        # or: fixed("public") / from_claim("org") allow "acme"
+```
+
+Because the choice sets an app's whole registration and tenancy posture, silence
+must not pick it — defaulting to auto-provision would let an enterprise app
+become open-registration the instant anyone with a matching account hit the
+callback. So the posture is declared in source (the "no hidden defaults for
+consequential policy" rule), `open` and `invited` are executable today, and
+`approval_required` parses but will not compile until the runtime can execute it
+completely — a policy is never silently downgraded to a weaker one.
+
+The identity a login resolves to is **always established server-side, keyed on the
+provider's own authoritative id** — `(issuer, subject)` from a verified ID token
+for OIDC providers, or `(provider, user_id)` from a server-to-server userinfo
+fetch for OAuth2-only providers (github/slack/discord). It is never an email and
+never a claim the caller controls: Corvid does not identify or merge accounts by
+email, and a tenant comes only from fixed config, a verified invitation, or an
+allowlisted issuer claim. The callback runs a strict order — validate the
+single-use state (PKCE + nonce), exchange the code, verify the token or fetch
+userinfo, recognise the subject or provision under the declared policy, and issue
+the session only after provisioning succeeds.
+
+Why it is unique: everywhere else, first-login provisioning is a runtime setting
+you can leave on its permissive default. In Corvid it is a decision the program
+must state to compile at all.
+
 ## Proof Matrix
 
 | Invention | Status | Runnable command | Test coverage | Spec | Explicit non-scope |
@@ -675,3 +724,4 @@ crossed a point of no return, and its trace pins the one true run.
 | File Uploads (multipart) | Shipped (52c-2) | `corvid serve` an `Upload<Format>` route, then `curl -F` it | `crates/corvid-cli/tests/serve_smoke.rs::serve_parses_a_multipart_upload_and_enforces_mime` | [`inventions.md`](#the-complete-application-runtime) | An `Upload<Format>` body is parsed from multipart with accepted-MIME + max-size enforcement (400 on violation), read via `body.text()`/`bytes()`/`filename()`/`content_type()`/`size()` methods. Interpreter tier buffers the whole body; streaming large uploads is later work. |
 | Cursor Pagination (Page envelope) | Shipped (52c-2) | `corvid serve` a `Page<Item>` route, then GET it | `crates/corvid-cli/tests/serve_smoke.rs::serve_returns_a_page_cursor_envelope` | [`inventions.md`](#the-complete-application-runtime) | `Page(items, next_cursor)` builds the `{items, next_cursor, has_more}` envelope (`has_more` derived, cursor unwrapped from `Option`); the incoming cursor is read from the route's typed query struct. |
 | Reversibility-Guarded Parallel Cancellation | Shipped (52d) | `corvid tour --topic parallel-cancellation` | `crates/corvid-vm/src/tests/parallel.rs` (rule + replay-reproduction + adversarial) | [`core-semantics.md`](./core-semantics.md) (`parallel.cancellation_reversibility`) | A `parallel:` block fails fast, but a branch past a non-reversible effect boundary is never cancelled; live cancellation is recorded per arm and Substitute-mode replay reproduces it deterministically (cancelled arm stops at its recorded boundary, shielded arm reaches its terminal, non-cancelling blocks byte-identical). Cooperative at tool-dispatch boundaries, not preemptive. |
+| First-Login Provisioning Is A Compile-Time Decision | Shipped (52e) | `corvid tour --topic oauth-login` | `crates/corvid-cli/src/serve_auth/routes.rs` (`callback_tests`: open provisions+recognises, invited gate, reused-state / nonce-mismatch / tampered-token refused, userinfo) + `crates/corvid-cli/tests/serve_smoke.rs::serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider` + `crates/corvid-abi/src/app_contract.rs::identity_with_oauth_provider_but_no_provisioning_is_rejected` | [`inventions.md`](#first-login-is-an-explicit-compile-time-decision) | An `identity` block auto-mounts the login surface (PKCE + single-use state + nonce + JWKS/userinfo verify + safe cookie); omitting the first-login `provisioning:` policy is a compile error (E5210). Identity is keyed server-side on `(issuer, subject)` / `(provider, user_id)`, never email. Mounts the login/session routes and provisions the actor; route-level enforcement of `requires` policies and durable `approval_required` are later slices. |

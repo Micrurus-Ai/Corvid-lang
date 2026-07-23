@@ -423,3 +423,317 @@ mod tests {
         assert_eq!(cookie_value(&headers, "absent"), None);
     }
 }
+
+/// The strict callback order, driven end-to-end against a mock IdP and a
+/// mock provider gateway — no live network, deterministic.
+#[cfg(test)]
+mod callback_tests {
+    use super::*;
+    use crate::serve_auth::context::CookieSettings;
+    use crate::serve_auth::identity::{ProviderGateway, TokenExchange, TokenResponse};
+    use crate::serve_auth::provider::IdentityVerification;
+    use corvid_runtime::jwt_verify::mock_idp::MockIdp;
+    use corvid_runtime::{
+        FirstLoginPolicy, InvitationCreate, SessionAuthRuntime, TenantSource,
+    };
+    use std::collections::HashMap;
+
+    const ISSUER: &str = "https://issuer.test";
+    const AUDIENCE: &str = "corvid-test";
+
+    struct StubGateway {
+        token: TokenResponse,
+        userinfo: serde_json::Value,
+    }
+    impl ProviderGateway for StubGateway {
+        fn exchange_code(
+            &self,
+            _c: &OAuthProviderConfig,
+            _e: &TokenExchange<'_>,
+        ) -> Result<TokenResponse, String> {
+            Ok(self.token.clone())
+        }
+        fn fetch_userinfo(&self, _u: &str, _a: &str) -> Result<serde_json::Value, String> {
+            Ok(self.userinfo.clone())
+        }
+    }
+
+    fn oidc_config() -> OAuthProviderConfig {
+        OAuthProviderConfig {
+            provider_name: "google".to_string(),
+            authorize_url: "https://issuer.test/authorize".to_string(),
+            token_url: "https://issuer.test/token".to_string(),
+            scopes: "openid email".to_string(),
+            verification: IdentityVerification::Oidc {
+                issuer: ISSUER.to_string(),
+                jwks_url: "https://issuer.test/jwks".to_string(),
+                algorithm: "EdDSA".to_string(),
+            },
+            client_id: AUDIENCE.to_string(),
+            client_secret: "secret".to_string(),
+        }
+    }
+
+    fn userinfo_config() -> OAuthProviderConfig {
+        OAuthProviderConfig {
+            provider_name: "github".to_string(),
+            authorize_url: "https://github.com/login/oauth/authorize".to_string(),
+            token_url: "https://github.com/login/oauth/access_token".to_string(),
+            scopes: "read:user".to_string(),
+            verification: IdentityVerification::Userinfo {
+                source_marker: "github".to_string(),
+                userinfo_url: "https://api.github.com/user".to_string(),
+            },
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        }
+    }
+
+    fn ctx(
+        auth: Arc<SessionAuthRuntime>,
+        gateway: Arc<dyn ProviderGateway + Send + Sync>,
+        jwks: Arc<dyn corvid_runtime::jwt_verify::JwksFetcher>,
+        first_login: FirstLoginPolicy,
+        tenant: TenantSource,
+    ) -> AuthContext {
+        AuthContext {
+            auth,
+            providers: HashMap::new(),
+            first_login,
+            tenant,
+            tenant_claim_name: None,
+            cookie: CookieSettings::default(),
+            session_lifetime_secs: 3600,
+            gateway,
+            jwks_fetcher: jwks,
+            public_base_url: None,
+            post_login_redirect: "/".to_string(),
+        }
+    }
+
+    /// Seed a pending Login OAuth state and return its raw `state` value.
+    fn seed_login_state(auth: &SessionAuthRuntime, id: &str, nonce: &str) -> String {
+        let state = format!("state-{id}");
+        auth.create_oauth_state(OAuthStateCreate {
+            id: format!("os-{id}"),
+            provider: "google".to_string(),
+            tenant_id: LOGIN_STATE_TENANT.to_string(),
+            actor_id: None,
+            purpose: OAuthStatePurpose::Login,
+            raw_state: state.clone(),
+            pkce_verifier_ref: "verifier".to_string(),
+            nonce_fingerprint: nonce_fingerprint(nonce),
+            expires_ms: now_ms().saturating_add(600_000),
+            replay_key: state.clone(),
+        })
+        .unwrap();
+        state
+    }
+
+    fn id_token(idp: &MockIdp, sub: &str, nonce: &str, email: &str) -> String {
+        idp.mint_with(|p| {
+            p["iss"] = ISSUER.into();
+            p["aud"] = AUDIENCE.into();
+            p["sub"] = sub.into();
+            p["email"] = email.into();
+            p["nonce"] = nonce.into();
+            p.as_object_mut().unwrap().remove("tenant");
+        })
+    }
+
+    #[test]
+    fn open_login_provisions_an_actor_then_recognises_it() {
+        let idp = MockIdp::new(ISSUER, AUDIENCE);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        let nonce = "login-nonce";
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "at".to_string(),
+                id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+            },
+            userinfo: serde_json::Value::Null,
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Open,
+            TenantSource::Fixed("public".to_string()),
+        );
+        let config = oidc_config();
+
+        // First login → a session for a freshly provisioned actor.
+        let state1 = seed_login_state(&auth, "1", nonce);
+        let token1 = run_callback(
+            &context, &config, "google", "code", &state1, "https://app/cb", "trace-1",
+        )
+        .expect("first callback succeeds");
+        let session1 = auth
+            .resolve_session_cookie(&token1, "check-1", now_ms())
+            .expect("session resolves");
+        assert_eq!(session1.actor.tenant_id, "public");
+        assert_eq!(session1.actor.auth_method, "oauth");
+        let actor_id = session1.actor.id.clone();
+
+        // Second login with the same subject → the SAME actor, recognised.
+        let state2 = seed_login_state(&auth, "2", nonce);
+        let token2 = run_callback(
+            &context, &config, "google", "code", &state2, "https://app/cb", "trace-2",
+        )
+        .expect("second callback succeeds");
+        let session2 = auth
+            .resolve_session_cookie(&token2, "check-2", now_ms())
+            .unwrap();
+        assert_eq!(session2.actor.id, actor_id, "same subject → same actor");
+    }
+
+    #[test]
+    fn a_reused_state_is_refused() {
+        let idp = MockIdp::new(ISSUER, AUDIENCE);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        let nonce = "n";
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "at".to_string(),
+                id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+            },
+            userinfo: serde_json::Value::Null,
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Open,
+            TenantSource::Fixed("public".to_string()),
+        );
+        let config = oidc_config();
+        let state = seed_login_state(&auth, "1", nonce);
+        run_callback(&context, &config, "google", "c", &state, "cb", "t1").unwrap();
+        // Second use of the same state → single-use violation.
+        let err = run_callback(&context, &config, "google", "c", &state, "cb", "t2").unwrap_err();
+        assert!(err.contains("already used") || err.contains("not found"), "got: {err}");
+    }
+
+    #[test]
+    fn a_nonce_mismatch_is_refused() {
+        let idp = MockIdp::new(ISSUER, AUDIENCE);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        // The token carries a DIFFERENT nonce than the login state.
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "at".to_string(),
+                id_token: Some(id_token(&idp, "sub-1", "attacker-nonce", "e@x.com")),
+            },
+            userinfo: serde_json::Value::Null,
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Open,
+            TenantSource::Fixed("public".to_string()),
+        );
+        let config = oidc_config();
+        let state = seed_login_state(&auth, "1", "the-real-nonce");
+        let err = run_callback(&context, &config, "google", "c", &state, "cb", "t").unwrap_err();
+        assert!(err.contains("nonce"), "got: {err}");
+    }
+
+    #[test]
+    fn a_tampered_token_is_refused() {
+        let idp = MockIdp::new(ISSUER, AUDIENCE);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "at".to_string(),
+                id_token: Some(idp.mint_tampered_signature()),
+            },
+            userinfo: serde_json::Value::Null,
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Open,
+            TenantSource::Fixed("public".to_string()),
+        );
+        let config = oidc_config();
+        let state = seed_login_state(&auth, "1", "n");
+        let err = run_callback(&context, &config, "google", "c", &state, "cb", "t").unwrap_err();
+        assert!(err.contains("verification failed"), "got: {err}");
+    }
+
+    #[test]
+    fn invited_login_refuses_without_an_invitation_and_admits_with_one() {
+        let idp = MockIdp::new(ISSUER, AUDIENCE);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        let nonce = "n";
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "at".to_string(),
+                id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+            },
+            userinfo: serde_json::Value::Null,
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Invited,
+            TenantSource::FromInvitation,
+        );
+        let config = oidc_config();
+
+        // No invitation → refused.
+        let state1 = seed_login_state(&auth, "1", nonce);
+        let err = run_callback(&context, &config, "google", "c", &state1, "cb", "t1").unwrap_err();
+        assert!(err.contains("no open invitation"), "got: {err}");
+
+        // Create the invitation → the next login is admitted into its tenant.
+        auth.create_invitation(InvitationCreate {
+            id: "inv-1".to_string(),
+            email: "ada@example.com".to_string(),
+            tenant_id: "acme".to_string(),
+            role_fingerprint: String::new(),
+            expires_ms: Some(now_ms() + 600_000),
+        })
+        .unwrap();
+        let state2 = seed_login_state(&auth, "2", nonce);
+        let token = run_callback(&context, &config, "google", "c", &state2, "cb", "t2")
+            .expect("invited login with an invitation succeeds");
+        let session = auth
+            .resolve_session_cookie(&token, "check", now_ms())
+            .unwrap();
+        assert_eq!(session.actor.tenant_id, "acme");
+    }
+
+    #[test]
+    fn userinfo_login_provisions_from_the_provider_user_id() {
+        let idp = MockIdp::new("unused", "unused");
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        let gateway = Arc::new(StubGateway {
+            token: TokenResponse {
+                access_token: "gho_token".to_string(),
+                id_token: None,
+            },
+            userinfo: serde_json::json!({ "id": 4210, "login": "ada", "email": "ada@x.com" }),
+        });
+        let context = ctx(
+            auth.clone(),
+            gateway,
+            Arc::new(idp.fetcher()),
+            FirstLoginPolicy::Open,
+            TenantSource::Fixed("public".to_string()),
+        );
+        let config = userinfo_config();
+        // A userinfo login needs no nonce; seed any state.
+        let state = seed_login_state(&auth, "1", "n");
+        let token = run_callback(&context, &config, "github", "c", &state, "cb", "t")
+            .expect("userinfo login succeeds");
+        let session = auth
+            .resolve_session_cookie(&token, "check", now_ms())
+            .unwrap();
+        assert_eq!(session.actor.tenant_id, "public");
+        assert_eq!(session.actor.display_name, "ada");
+    }
+}

@@ -3429,6 +3429,47 @@ adversarial state/nonce/token cases) and ships the invention proof.
 
 ---
 
+## 2026-07-23 - 52e-5: the full callback, proven against a mock IdP — 52e complete
+
+The strict callback order now runs end-to-end against a `MockIdp` (which
+mints ID tokens and serves a matching JWKS) and a mock provider gateway —
+deterministic, no live network. Six `callback_tests` cover the security
+surface:
+
+- **open** provisions a fresh actor on first login, then RECOGNISES the
+  same verified subject on the next login and lands on the same actor.
+- **invited** refuses a login with no matching invitation, and admits one
+  with an invitation into the invitation's tenant.
+- a **reused single-use state**, a **nonce mismatch**, and a **tampered
+  token** are each refused.
+- a **userinfo (github) login** provisions from the provider's numeric
+  user id — the OAuth2-only path, no ID token.
+
+Each test drives `run_callback` — the real handler body — so it exercises
+the whole order (validate state → exchange → verify → provision →
+session), not a reimplementation.
+
+Invention proof (the shipping contract): `corvid tour --topic oauth-login`
+(its source compiles through the driver), a README catalog entry, and a
+`docs/reference/inventions.md` §7 subsection
+(`#first-login-is-an-explicit-compile-time-decision`) plus a Proof-Matrix
+row. learnings.md gains the "`corvid serve` mounts your OAuth login
+surface" section.
+
+**Phase 52e is complete.** An `identity` block auto-mounts a login
+surface that is safe by construction; first-login provisioning is a
+decision the program must state to compile (E5210); identity is always
+server-verified and keyed on the provider's authoritative id, never
+email; and every declared provider resolves with no shortcut. 52e did not
+flip `auth_enforcement` — route-level enforcement of `requires` policies
+is 52f, which closes the last Contract Closure gap.
+
+Gate: workspace check clean; 28 serve_auth unit tests (incl. 6
+callback_tests) + tour tests green; corpus verify still exits 1 on the
+two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

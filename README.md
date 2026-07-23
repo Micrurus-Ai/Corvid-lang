@@ -902,6 +902,25 @@ Roadmap: [Phase 52 effect-aware scheduling](./ROADMAP.md)
 Proof: [the parallel scheduler](./crates/corvid-vm/src/interp/stmt.rs) + [replay reproduction](./crates/corvid-runtime/src/replay/mod.rs) + [core-semantics `parallel.cancellation_reversibility`](./docs/reference/core-semantics.md)
 Non-scope: Cooperative cancellation at tool-dispatch boundaries (an arm in a tight pure loop is not preempted); a tool is shielded exactly when it declares an irreversible effect.
 
+#### OAuth Login That's Safe By Construction
+
+Declare an `identity` block and `corvid serve` mounts the whole login surface — `/auth/{provider}/login`, `/callback`, `/logout`, `/session` — wired to Authorization Code + PKCE, a single-use signed state, an OIDC nonce, and JWKS verification, with a Secure/HttpOnly/SameSite session cookie. The invention is what the compiler makes you decide first: **how an unknown, verified user becomes an account.** An identity block that declares OAuth providers but omits its first-login policy is a compile error (`E5210 First-login policy required`) — no silent default, so an enterprise app can never accidentally ship open registration. You pick `open` (public signup) or `invited` (only against a pre-existing invitation); `approval_required` won't compile until the runtime can execute it. Identity is always established server-side and keyed on the provider's own authoritative id — `(issuer, subject)` from a verified ID token, or `(provider, user_id)` from a server-to-server userinfo fetch for OAuth2-only providers — never an email, never a caller-controlled claim.
+
+```corvid
+identity users:
+    provider google
+    provider github
+    provisioning:
+        first_login: invited          # omit this block → E5210, does not compile
+        tenant: from_invitation
+```
+
+Spec: [First Login Is An Explicit Compile-Time Decision](./docs/reference/inventions.md#first-login-is-an-explicit-compile-time-decision)
+Tour: `corvid tour --topic oauth-login`
+Roadmap: [Phase 52 identity runtime](./ROADMAP.md)
+Proof: [the login routes](./crates/corvid-cli/src/serve_auth/routes.rs) + [the provisioning executor](./crates/corvid-runtime/src/auth/provisioning.rs) + [the E5210 checker gate](./crates/corvid-types/src/checker/decl.rs)
+Non-scope: 52e mounts the login/session routes and provisions the actor; route-level enforcement of `requires authenticated|role|permission` policies and durable `approval_required` provisioning are later slices.
+
 ## Architecture
 
 ```text

@@ -788,6 +788,29 @@ agent worker() -> Bool:
     return b
 "#,
     },
+    TourTopic {
+        name: "oauth-login",
+        title: "OAuth Login That's Safe By Construction",
+        category: "The complete application runtime",
+        pitch: "Declare an `identity` block and `corvid serve` mounts the whole login surface for you — `/auth/{provider}/login`, `/callback`, `/logout`, `/session` — wired to Authorization Code + PKCE, a single-use signed state, an OIDC nonce, and JWKS signature verification, with a Secure/HttpOnly/SameSite session cookie. The invention is what the compiler forces you to decide FIRST: how an unknown, verified user becomes an account. There is NO silent default — an identity block that declares OAuth providers but does not state its first-login policy is a compile error (`E5210 First-login policy required`), so an enterprise app can never accidentally ship open registration. You choose `open` (public signup) or `invited` (only against a pre-existing invitation); `approval_required` won't compile until the runtime can execute it completely. Identity is ALWAYS established server-side and keyed on the provider's own authoritative id — `(issuer, subject)` from a verified ID token, or `(provider, user_id)` from a server-to-server userinfo fetch for OAuth2-only providers — never an email and never a claim the caller controls. A tenant comes from fixed config, a verified invitation, or an allowlisted issuer claim, never a bare token value. The source below COMPILES; omit the `provisioning:` block and it does not.",
+        spec: "docs/reference/inventions.md#first-login-is-an-explicit-compile-time-decision",
+        roadmap: "Phase 52 identity runtime (52e)",
+        test: "crates/corvid-cli/src/serve_auth/routes.rs (callback_tests: open provisions+recognises, invited gate, reused-state / nonce-mismatch / tampered-token refused, userinfo login) + crates/corvid-cli/tests/serve_smoke.rs::serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider + crates/corvid-abi/src/app_contract.rs identity_with_oauth_provider_but_no_provisioning_is_rejected",
+        non_scope: "52e mounts the login/session ROUTES and provisions the actor; route-level enforcement of `requires authenticated|role|permission` policies (and durable `approval_required` provisioning) lands in a following slice. `approval_required` parses but is rejected until the runtime can execute it.",
+        source: r#"identity users:
+    provider google
+    provider github
+    provisioning:
+        # No silent default: omit this block and the program does not
+        # compile (E5210). `invited` provisions an unknown verified
+        # subject only against a pre-existing invitation.
+        first_login: invited
+        tenant: from_invitation
+
+public agent whoami(handle: String) -> String:
+    return handle
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

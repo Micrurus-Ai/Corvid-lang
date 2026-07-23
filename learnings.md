@@ -7229,3 +7229,46 @@ is a separate, explicit-confirmation flow (see the account-linking section).
 
 This is the language surface; the login/callback/session routes that consume it
 mount in the following slices. See [dev-log.md](dev-log.md) (2026-07-23, 52e-1).
+
+---
+
+## `corvid serve` mounts your OAuth login surface (2026-07-23)
+
+Declaring an `identity` block is all it takes: `corvid serve` mounts the full
+login surface for you and wires it to the auth runtime.
+
+```corvid
+identity users:
+    provider google
+    provider github
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+```
+
+Serve mounts four routes:
+
+- `GET /auth/{provider}/login` — begins the flow: mints PKCE + a single-use
+  signed state + an OIDC nonce and 302-redirects to the provider.
+- `GET /auth/{provider}/callback` — completes it, in a strict order: validate
+  the state, exchange the code, verify the ID token (or fetch userinfo),
+  recognise-or-provision the actor, and set a session cookie. Any failure is a
+  generic `401` — the reason is audited, not leaked.
+- `POST /auth/logout` — revokes the session and clears the cookie.
+- `GET /auth/session` — returns the current actor, or `{"authenticated": false}`.
+
+Client credentials come from the environment — `CORVID_OAUTH_<PROVIDER>_CLIENT_ID`
+and `CORVID_OAUTH_<PROVIDER>_CLIENT_SECRET` — and a missing one makes `corvid
+serve` refuse to start naming the variable, rather than mounting a login route
+that can't authenticate. The session cookie carries the identity block's declared
+`secure` / `http_only` / `same_site`.
+
+Providers work whether or not they issue an OIDC ID token: google/microsoft/apple
+are verified by their ID token `(issuer, subject)`; github/slack/discord are
+verified by a server-side userinfo fetch keyed on `(provider, user_id)`. Either
+way the identity is established server-side.
+
+`corvid tour --topic oauth-login` walks through it. Route-level enforcement of
+`requires authenticated|role|permission` policies is a following slice — 52e
+mounts the login/session routes and provisions the actor; a `requires`-policy
+route still refuses to start until the authorization runtime lands.
