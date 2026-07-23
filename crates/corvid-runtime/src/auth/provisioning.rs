@@ -22,7 +22,6 @@
 
 use sha2::{Digest, Sha256};
 
-use super::invitations::normalize_email;
 use super::{AuthActor, Invitation, SessionAuthRuntime};
 use crate::errors::RuntimeError;
 

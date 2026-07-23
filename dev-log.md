@@ -3306,6 +3306,39 @@ fixtures. Next: 52e-4 serve wiring mounts the routes and calls
 
 ---
 
+## 2026-07-23 - 52e-4a: every declared provider resolves, none is faked
+
+A design fork opened at the serve boundary: the callback model verifies
+an ID token's `(issuer, subject)`, but the identity AST also permits
+providers that never issue an OIDC ID token — github, slack, discord are
+OAuth2-only — and those appear in the shipped README/tour surface. The
+CTO's call: support EVERY declared provider with no shortcut. OIDC
+providers verify the ID token; OAuth2-only providers do a
+server-to-server userinfo fetch after code exchange. Identity is always a
+value the provider vouches for, established server-side — never a
+client-forgeable claim. The external-identity key generalises from
+`(issuer, subject)` to `(identity_source, external_id)`, which the
+existing `auth_external_identities` columns already hold, so the storage
+from 52e-2/3 is untouched.
+
+52e-4a lands the pure, testable half of that: `resolve_provider` maps a
+declared provider to an `OAuthProviderConfig` carrying its authorize /
+token URLs and an `IdentityVerification` method — `Oidc { issuer,
+jwks_url }` for google/microsoft/apple, `Userinfo { source_marker,
+userinfo_url }` for github/slack/discord. The generic `oidc` provider
+returns `NeedsDiscovery` (the discovery fetch is an HTTP step, so it
+stays out of this pure layer). Client credentials come from
+`CORVID_OAUTH_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` through an injected
+reader; a missing or whitespace-only credential is an error naming the
+variable to set, never a silent empty string — a login route that cannot
+authenticate is not executable.
+
+New module `corvid-cli/src/serve_auth/` (facade + `provider.rs`), one
+responsibility per file. 5 tests. Gate: workspace check clean. The
+identity-resolution seam (52e-4b) and the route handlers (52e-4c) follow.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
