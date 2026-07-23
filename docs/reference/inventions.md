@@ -594,6 +594,41 @@ worse, a plausible-but-wrong response — for an endpoint its API docs promise. 
 Corvid the developer's own source is the forcing function: writing a route the
 runtime can't serve refuses the whole process, loudly, at startup.
 
+### Cancel Fast, But Never Past a Point of No Return {#parallel-cancellation}
+
+A `parallel:` block runs its arms concurrently and fails fast — when one arm
+errors, the others are asked to stop. Corvid adds the guarantee that makes
+concurrent effects safe: **a branch past a non-reversible effect boundary is
+never cancelled.** The moment an arm dispatches an irreversible tool — a write,
+a `POST`, any effect whose composed row is `reversible: false` — it is shielded
+and runs to completion, even if a sibling has already failed. Only arms that
+have done nothing irreversible are cancelled, and they stop at a tool-dispatch
+boundary *before* their next effect, so a cancelled arm never leaves a
+half-finished irreversible action behind.
+
+```corvid
+agent worker() -> Bool:
+    parallel:
+        a = read_arm()      # reversible — cancelled cleanly if a sibling fails
+        b = commit_arm()    # once it commits its write it is SHIELDED, always completes
+    return b
+```
+
+Cancellation is **cooperative, not preemptive** — each arm checks a shared flag
+at each tool-dispatch boundary — precisely so it can hold that line without a
+race (a preemptive abort could stop an arm *inside* an irreversible call, after
+the effect fired). And because live cancellation is timing-dependent, every
+block records each arm's outcome, reversibility, and dispatch boundary, and
+Substitute-mode replay **reproduces the exact run deterministically**: a
+cancelled arm replays to its recorded boundary and stops, a shielded arm reaches
+its recorded terminal, and non-cancelling blocks replay byte-identically. The
+replay/trace determinism moat holds through cancellation.
+
+Why it is unique: concurrent frameworks cancel tasks with no notion of what
+those tasks have irreversibly done — and none can deterministically replay a
+cancelled concurrent run. Corvid's effect system knows exactly which branch has
+crossed a point of no return, and its trace pins the one true run.
+
 ## Proof Matrix
 
 | Invention | Status | Runnable command | Test coverage | Spec | Explicit non-scope |
@@ -636,3 +671,4 @@ runtime can't serve refuses the whole process, loudly, at startup.
 | Streaming Route Responses (SSE) | Shipped (52c-1) | `corvid serve` a `Stream<T>` route, then `curl -N` it | `crates/corvid-cli/tests/serve_smoke.rs::serve_streams_a_stream_route_as_server_sent_events` | [`inventions.md`](#the-complete-application-runtime) | A `Stream<T>` route response flushes each yielded value as an SSE `data:` event with an `event: done` terminator; the transport falls straight out of the language's `Stream` type. Provider-native session continuation remains adapter work. |
 | File Uploads (multipart) | Shipped (52c-2) | `corvid serve` an `Upload<Format>` route, then `curl -F` it | `crates/corvid-cli/tests/serve_smoke.rs::serve_parses_a_multipart_upload_and_enforces_mime` | [`inventions.md`](#the-complete-application-runtime) | An `Upload<Format>` body is parsed from multipart with accepted-MIME + max-size enforcement (400 on violation), read via `body.text()`/`bytes()`/`filename()`/`content_type()`/`size()` methods. Interpreter tier buffers the whole body; streaming large uploads is later work. |
 | Cursor Pagination (Page envelope) | Shipped (52c-2) | `corvid serve` a `Page<Item>` route, then GET it | `crates/corvid-cli/tests/serve_smoke.rs::serve_returns_a_page_cursor_envelope` | [`inventions.md`](#the-complete-application-runtime) | `Page(items, next_cursor)` builds the `{items, next_cursor, has_more}` envelope (`has_more` derived, cursor unwrapped from `Option`); the incoming cursor is read from the route's typed query struct. |
+| Reversibility-Guarded Parallel Cancellation | Shipped (52d) | `corvid tour --topic parallel-cancellation` | `crates/corvid-vm/src/tests/parallel.rs` (rule + replay-reproduction + adversarial) | [`core-semantics.md`](./core-semantics.md) (`parallel.cancellation_reversibility`) | A `parallel:` block fails fast, but a branch past a non-reversible effect boundary is never cancelled; live cancellation is recorded per arm and Substitute-mode replay reproduces it deterministically (cancelled arm stops at its recorded boundary, shielded arm reaches its terminal, non-cancelling blocks byte-identical). Cooperative at tool-dispatch boundaries, not preemptive. |

@@ -7149,3 +7149,24 @@ outcome — and replay reproduces that exact run deterministically (the replay
 side lands in the companion slice). The block's reported error is the
 lowest-index real error; a cancelled arm is an internal sentinel and never
 surfaces. A `parallel` block where no arm errors behaves exactly as before.
+
+**Replay reproduces the cancellation (the companion slice, now landed).** Because
+a live cancelling run is timing-dependent, a Substitute-mode replay does NOT
+re-derive it — it reads the recorded per-arm outcomes and runs the arms
+sequentially in arm order, capping each recorded-`cancelled` arm at its recorded
+tool-dispatch count. So a replayed run reproduces the EXACT cancellation: the
+cancelled arm stops at its recorded boundary, a shielded (irreversible) arm
+reaches its recorded terminal, and a non-cancelling block replays
+byte-identically. `corvid replay` of a cancelling run reproduces the run's error
+rather than diverging. A trace whose outcomes record is missing/corrupt diverges
+HONESTLY (an explicit replay-divergence error), never a silent wrong result.
+
+One general fix fell out of this: a tool that FAILS is now replayable. Before,
+`call_tool` recorded a `ToolCall` and then `?`-propagated the failure before
+emitting a `ToolResult`, so a failing tool had no substitutable result and
+replaying any run that hit one diverged. Now a failed tool records its error
+verbatim (a reserved `__corvid_tool_error__` key in the substituted
+`ToolResult`), and replay reproduces it as an `Err` whose message matches the
+recorded run error exactly. This was the prerequisite for replaying a cancelling
+`parallel` run — the failing arm is what triggers the cancellation — but it
+makes every failing-tool run replayable, not just parallel ones.

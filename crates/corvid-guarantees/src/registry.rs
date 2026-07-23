@@ -809,6 +809,40 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     },
     // ----- Replay -------------------------------------------------
     Guarantee {
+        id: "parallel.cancellation_reversibility",
+        kind: GuaranteeKind::Replay,
+        class: GuaranteeClass::RuntimeChecked,
+        phase: Phase::Runtime,
+        description:
+            "A `parallel:` block fails fast, but a branch past a \
+             NON-REVERSIBLE effect boundary is never cancelled (slice \
+             52d): the moment an arm dispatches an irreversible tool \
+             (composed `reversible: false`) it is shielded and runs to \
+             completion even when a sibling fails; only arms that have \
+             done nothing irreversible are cancelled, and they stop at a \
+             tool-dispatch boundary BEFORE their next effect (cooperative, \
+             so no irreversible action is ever left half-done). The live \
+             cancellation is recorded per arm (`parallel.outcomes`: \
+             outcome + `crossed_irreversible` + terminal dispatch count), \
+             and Substitute-mode replay REPRODUCES it deterministically \
+             — a cancelled arm replays to its recorded dispatch boundary \
+             and stops, a shielded arm reaches its recorded terminal, and \
+             non-cancelling blocks replay byte-identically. A trace \
+             missing its outcomes record diverges honestly rather than \
+             inventing a cancellation.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-vm/src/tests/parallel.rs::arm_past_irreversible_boundary_is_not_cancelled",
+            "crates/corvid-vm/src/tests/parallel.rs::replay_reproduces_a_recorded_cancellation",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-vm/src/tests/parallel.rs::reversible_arm_is_cancelled_after_a_sibling_fails",
+            "crates/corvid-vm/src/tests/parallel.rs::replay_reproduces_multiple_cancellations",
+            "crates/corvid-vm/src/tests/parallel.rs::replay_reproduces_a_shielded_arm_reaching_its_terminal",
+            "crates/corvid-vm/src/tests/parallel.rs::replay_with_missing_outcomes_record_diverges_honestly",
+        ],
+    },
+    Guarantee {
         id: "replay.deterministic_pure_path",
         kind: GuaranteeKind::Replay,
         class: GuaranteeClass::RuntimeChecked,

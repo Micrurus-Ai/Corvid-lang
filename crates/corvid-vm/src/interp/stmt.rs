@@ -413,50 +413,103 @@ impl<'ir> Interpreter<'ir> {
                 // its next tool dispatch and stops cooperatively — unless
                 // it has set its `crossed` flag (past a non-reversible
                 // boundary), in which case it runs to completion.
-                let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let crossed_flags: Vec<Arc<std::sync::atomic::AtomicBool>> = arms
                     .iter()
                     .map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)))
                     .collect();
-                let mut tasks = futures::stream::FuturesUnordered::new();
-                for (i, (arm, arm_rt)) in arms.iter().zip(arm_runtimes.iter()).enumerate() {
-                    let env = self.env.clone();
+                // Per-arm tool-dispatch checkpoint counters (slice 52d-3):
+                // live, the terminal value is recorded; replay compares
+                // against it to reproduce a cancellation at its boundary.
+                let count_flags: Vec<Arc<std::sync::atomic::AtomicUsize>> = arms
+                    .iter()
+                    .map(|_| Arc::new(std::sync::atomic::AtomicUsize::new(0)))
+                    .collect();
+
+                let results: Vec<(Result<ExprFlow, InterpError>, f64)> = if self
+                    .runtime
+                    .is_replay_mode()
+                {
+                    // REPLAY (slice 52d-3): run arms SEQUENTIALLY in arm
+                    // order so the substitution cursor consumes the
+                    // recorded buffers in the same order they were
+                    // flushed, and reproduce each arm's recorded terminal
+                    // — a cancelled arm stops at exactly its recorded
+                    // dispatch count. No live `cancel` flag, no
+                    // concurrency: replay honors the trace, never live
+                    // timing, and (Substitute mode) never contacts a
+                    // provider.
+                    let recorded = self.runtime.replay_next_parallel_outcomes();
+                    let parent_env = self.env.clone();
                     let mocks = self.mock_tools.clone();
                     let budget = self.cost_budget.map(|b| b - self.cost_used);
-                    let arm_cancel = cancel.clone();
-                    let arm_crossed = crossed_flags[i].clone();
-                    tasks.push(async move {
+                    let mut results = Vec::with_capacity(arms.len());
+                    for (i, (arm, arm_rt)) in arms.iter().zip(arm_runtimes.iter()).enumerate() {
                         let mut sub = Interpreter::new(ir, arm_rt);
-                        sub.env = env;
-                        sub.mock_tools = mocks;
+                        sub.env = parent_env.clone();
+                        sub.mock_tools = mocks.clone();
                         sub.cost_budget = budget;
-                        sub.irreversible_crossed = Some(arm_crossed);
-                        sub.parallel_cancel = Some(arm_cancel);
+                        sub.irreversible_crossed = Some(crossed_flags[i].clone());
+                        sub.dispatch_count = Some(count_flags[i].clone());
+                        // Cap a recorded-cancelled arm at its recorded
+                        // dispatch boundary. Completed/errored (and
+                        // shielded/irreversible) arms return `None` here
+                        // and run to their recorded terminal via
+                        // substitution.
+                        if let Some(rec) = &recorded {
+                            sub.replay_cancel_after =
+                                rec.cancelled_arm_dispatch_count(i, &arm.name);
+                        }
                         let outcome = sub.eval_expr(&arm.call).await;
-                        (i, outcome, sub.cost_used)
-                    });
-                }
-                // Collect arm results as they finish; the first REAL
-                // error (not a cooperative cancellation) asks the
-                // remaining reversible arms to stop.
-                let mut settled: Vec<Option<(Result<ExprFlow, InterpError>, f64)>> =
-                    (0..arms.len()).map(|_| None).collect();
-                {
-                    use futures::stream::StreamExt;
-                    while let Some((i, outcome, cost)) = tasks.next().await {
-                        let real_error = matches!(
-                            &outcome,
-                            Err(e)
-                                if !matches!(e.kind, InterpErrorKind::ParallelArmCancelled)
-                        );
-                        settled[i] = Some((outcome, cost));
-                        if real_error {
-                            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                        results.push((outcome, sub.cost_used));
+                    }
+                    results
+                } else {
+                    // LIVE (slice 52d-2): reversibility-guarded fail-fast
+                    // cancellation. One shared `cancel` flag; on the first
+                    // REAL error the scheduler sets it and the reversible
+                    // in-flight arms stop at their next dispatch.
+                    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let mut tasks = futures::stream::FuturesUnordered::new();
+                    for (i, (arm, arm_rt)) in arms.iter().zip(arm_runtimes.iter()).enumerate() {
+                        let env = self.env.clone();
+                        let mocks = self.mock_tools.clone();
+                        let budget = self.cost_budget.map(|b| b - self.cost_used);
+                        let arm_cancel = cancel.clone();
+                        let arm_crossed = crossed_flags[i].clone();
+                        let arm_count = count_flags[i].clone();
+                        tasks.push(async move {
+                            let mut sub = Interpreter::new(ir, arm_rt);
+                            sub.env = env;
+                            sub.mock_tools = mocks;
+                            sub.cost_budget = budget;
+                            sub.irreversible_crossed = Some(arm_crossed);
+                            sub.parallel_cancel = Some(arm_cancel);
+                            sub.dispatch_count = Some(arm_count);
+                            let outcome = sub.eval_expr(&arm.call).await;
+                            (i, outcome, sub.cost_used)
+                        });
+                    }
+                    let mut settled: Vec<Option<(Result<ExprFlow, InterpError>, f64)>> =
+                        (0..arms.len()).map(|_| None).collect();
+                    {
+                        use futures::stream::StreamExt;
+                        while let Some((i, outcome, cost)) = tasks.next().await {
+                            let real_error = matches!(
+                                &outcome,
+                                Err(e)
+                                    if !matches!(e.kind, InterpErrorKind::ParallelArmCancelled)
+                            );
+                            settled[i] = Some((outcome, cost));
+                            if real_error {
+                                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                            }
                         }
                     }
-                }
-                let results: Vec<(Result<ExprFlow, InterpError>, f64)> =
-                    settled.into_iter().map(|s| s.expect("every arm settles")).collect();
+                    settled
+                        .into_iter()
+                        .map(|s| s.expect("every arm settles"))
+                        .collect()
+                };
 
                 // 1. Flush arm trace buffers IN ARM ORDER (a cancelled
                 //    arm's buffer holds only the events it ran before
@@ -476,11 +529,12 @@ impl<'ir> Interpreter<'ir> {
                 self.runtime.emit_host_event(
                     "parallel.outcomes",
                     serde_json::json!({
+                        "guarantee": crate::parallel_profile::GUARANTEE_ID_PARALLEL_CANCELLATION_REVERSIBILITY,
                         "arms": arms
                             .iter()
                             .zip(results.iter())
-                            .zip(crossed_flags.iter())
-                            .map(|((arm, (outcome, _)), crossed)| {
+                            .zip(crossed_flags.iter().zip(count_flags.iter()))
+                            .map(|((arm, (outcome, _)), (crossed, count))| {
                                 let tag = match outcome {
                                     Ok(_) => "completed",
                                     Err(e) if matches!(
@@ -493,6 +547,11 @@ impl<'ir> Interpreter<'ir> {
                                     "name": arm.name,
                                     "outcome": tag,
                                     "crossed_irreversible": crossed
+                                        .load(std::sync::atomic::Ordering::SeqCst),
+                                    // The tool-dispatch count at which this
+                                    // arm terminated — the boundary replay
+                                    // reproduces a cancellation at (52d-3).
+                                    "dispatch_count": count
                                         .load(std::sync::atomic::Ordering::SeqCst),
                                 })
                             })

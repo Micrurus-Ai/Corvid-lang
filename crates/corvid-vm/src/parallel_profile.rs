@@ -16,6 +16,15 @@
 use corvid_ir::{IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrStmt};
 use std::collections::HashSet;
 
+/// The guarantee-registry id anchored at the `parallel` scheduler
+/// (RuntimeChecked): a `parallel` arm past a non-reversible effect
+/// boundary is never cancelled when a sibling fails fast (52d-2), and a
+/// recorded cancellation replays to its exact boundary while a shielded
+/// arm reaches its recorded terminal (52d-3). Emitted on every
+/// `parallel.outcomes` event and rendered in `core-semantics.md`.
+pub const GUARANTEE_ID_PARALLEL_CANCELLATION_REVERSIBILITY: &str =
+    "parallel.cancellation_reversibility";
+
 /// The composed effect profile of one `parallel` arm (or a whole
 /// block): the summed worst-case cost of the tools/prompts it can reach
 /// and whether every one of them is reversible.

@@ -183,7 +183,42 @@ agent worker_cancel() -> Bool:
     return b
 
 tool boom_wait() -> Bool uses safe
+
+agent worker_multi() -> Bool:
+    parallel:
+        a = boom()
+        b = arm_loop()
+        c = arm_loop()
+    return a
+
+agent inner_par() -> Bool:
+    parallel:
+        p = tick()
+        q = tick()
+    return p
+
+agent arm_outer_b() -> Bool:
+    x = inner_par()
+    return x
+
+agent worker_nested() -> Bool:
+    parallel:
+        a = arm_outer_b()
+        b = arm_outer_b()
+    return a
 ";
+
+/// Record a run, drop the `parallel.outcomes` line, return the corrupt
+/// trace path.
+fn corrupt_trace_drop_outcomes(src: &std::path::Path, dst: &std::path::Path) {
+    let text = std::fs::read_to_string(src).unwrap();
+    let kept: String = text
+        .lines()
+        .filter(|l| !l.contains("\"parallel.outcomes\""))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(dst, kept).unwrap();
+}
 
 /// THE RULE (deterministic): an arm that has crossed a non-reversible
 /// effect boundary runs to completion even when a sibling fails fast.
@@ -284,23 +319,15 @@ async fn reversible_arm_is_cancelled_after_a_sibling_fails() {
     assert!(!b.2, "a cancelled reversible arm never crossed the boundary");
 }
 
-/// 52d-3 acceptance test (IGNORED until 52d-3 lands): replaying a
-/// recorded cancelling run must REPRODUCE the recorded cancellation
-/// deterministically — arm `a` errors, arm `b` stops at its recorded
-/// point (cancelled) — instead of diverging.
-///
-/// Empirically today (post-52d-2) replay of a cancelling run DIVERGES:
-/// `ReplayDivergence { step: 0, expected: RunCompleted{error}, got:
-/// tool_result boom }`. The live cancelling run is timing-dependent
-/// (arm `b` runs some number of ticks before stopping), so re-running
-/// it concurrently under Substitute mode consumes the recorded cursor
-/// in a different order / for a different arm-event count. 52d-3 makes
-/// the `parallel` block, on replay, READ the recorded per-arm outcomes
-/// and reproduce them: a `cancelled` arm replays to its recorded event
-/// count and stops (returning the cancellation sentinel) instead of
-/// running live and diverging.
+/// 52d-3: replaying a recorded cancelling run REPRODUCES the recorded
+/// cancellation deterministically instead of diverging. Before 52d-3,
+/// re-running the timing-dependent cancelling block concurrently under
+/// Substitute mode diverged (`ReplayDivergence step 0`). Now the
+/// `parallel` block, on replay, reads the recorded per-arm outcomes and
+/// runs arms sequentially with each cancelled arm capped at its recorded
+/// dispatch count — so `boom` (arm a) errors as recorded and the
+/// reversible looping arm b stops at its recorded boundary.
 #[tokio::test]
-#[ignore = "52d-3: replay reproduction of parallel cancellation not yet implemented"]
 async fn replay_reproduces_a_recorded_cancellation() {
     let ir = ir_of(CANCEL_SRC);
     let dir = tempfile::tempdir().unwrap();
@@ -320,11 +347,157 @@ async fn replay_reproduces_a_recorded_cancellation() {
         assert!(out.is_err(), "recorded run errors (arm a failed)");
     }
 
-    // REPLAY must reproduce, not diverge.
+    // REPLAY must reproduce the RECORDED error (boom), never a
+    // ReplayDivergence.
     let replay_rt = Runtime::builder().replay_from(&trace_path).build();
     let out = run_agent(&ir, "worker_cancel", vec![], &replay_rt).await;
+    let err = out.expect_err("replay must reproduce the recorded error");
+    let msg = format!("{:?}", err.kind);
+    assert!(
+        msg.contains("boom"),
+        "replay must reproduce the recorded `boom` error: {msg}"
+    );
+    assert!(
+        !msg.contains("Divergence"),
+        "replay must NOT diverge — it must reproduce the recorded cancellation: {msg}"
+    );
+}
+
+/// Adversarial: MULTIPLE reversible arms cancelled in one block. Arm a
+/// fails; arms b and c both loop reversibly and are both cancelled.
+/// Replay must reproduce all three outcomes without diverging.
+#[tokio::test]
+async fn replay_reproduces_multiple_cancellations() {
+    let ir = ir_of(CANCEL_SRC);
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("multi.jsonl");
+    {
+        let rt = Runtime::builder()
+            .tracer(Tracer::open_path(&trace_path, "r-multi"))
+            .tool("boom", |_| async move { Err(tool_boom("boom")) })
+            .tool("tick", |_| async move {
+                tokio::task::yield_now().await;
+                Ok(json!(true))
+            })
+            .build();
+        let out = run_agent(&ir, "worker_multi", vec![], &rt).await;
+        assert!(out.is_err());
+        let outcomes = parallel_outcomes(&trace_path);
+        assert_eq!(outcomes[0].1, "errored");
+        assert_eq!(outcomes[1].1, "cancelled");
+        assert_eq!(outcomes[2].1, "cancelled");
+    }
+    let replay_rt = Runtime::builder().replay_from(&trace_path).build();
+    let err = run_agent(&ir, "worker_multi", vec![], &replay_rt)
+        .await
+        .expect_err("replay reproduces the block error");
+    let msg = format!("{:?}", err.kind);
+    assert!(msg.contains("boom") && !msg.contains("Divergence"), "{msg}");
+}
+
+/// Adversarial: a SHIELDED (irreversible) arm reaches its recorded
+/// TERMINAL state on replay — it is never capped/cancelled. Records the
+/// rule scenario (arm b commits an irreversible write and completes),
+/// then replays and asserts the run reproduces without diverging.
+#[tokio::test]
+async fn replay_reproduces_a_shielded_arm_reaching_its_terminal() {
+    let ir = ir_of(CANCEL_SRC);
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("shield.jsonl");
+    {
+        let committed = Arc::new(tokio::sync::Notify::new());
+        let sig = committed.clone();
+        let wait = committed.clone();
+        let rt = Runtime::builder()
+            .tracer(Tracer::open_path(&trace_path, "r-shield"))
+            .tool("commit_write", move |_| {
+                let s = sig.clone();
+                async move {
+                    s.notify_one();
+                    Ok(json!(true))
+                }
+            })
+            .tool("after_commit", |_| async move { Ok(json!(true)) })
+            .tool("boom_wait", move |_| {
+                let w = wait.clone();
+                async move {
+                    w.notified().await;
+                    Err(tool_boom("boom after commit"))
+                }
+            })
+            .build();
+        let out = run_agent(&ir, "worker_rule", vec![], &rt).await;
+        assert!(out.is_err(), "block errors (arm a failed)");
+        let outcomes = parallel_outcomes(&trace_path);
+        let b = outcomes.iter().find(|(n, ..)| n == "b").unwrap();
+        assert_eq!(b.1, "completed", "recorded: crossed arm completed");
+        assert!(b.2, "recorded: arm b crossed the boundary");
+    }
+    // REPLAY: the shielded arm reaches its recorded terminal (completed);
+    // the block reproduces the recorded error without diverging.
+    let replay_rt = Runtime::builder().replay_from(&trace_path).build();
+    let err = run_agent(&ir, "worker_rule", vec![], &replay_rt)
+        .await
+        .expect_err("replay reproduces the block error");
+    let msg = format!("{:?}", err.kind);
+    assert!(msg.contains("boom") && !msg.contains("Divergence"), "{msg}");
+}
+
+/// Adversarial: NESTED `parallel` blocks. An outer block's arms each run
+/// an inner `parallel` block. Replay must pair each block's recorded
+/// outcomes with the right block (bracket-matched, entry order) and
+/// reproduce the (non-cancelling) run identically.
+#[tokio::test]
+async fn replay_reproduces_nested_parallel_blocks() {
+    let ir = ir_of(CANCEL_SRC);
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("nested.jsonl");
+    {
+        let rt = Runtime::builder()
+            .tracer(Tracer::open_path(&trace_path, "r-nested"))
+            .tool("tick", |_| async move { Ok(json!(true)) })
+            .build();
+        let out = run_agent(&ir, "worker_nested", vec![], &rt).await;
+        assert!(out.is_ok(), "nested run completes: {out:?}");
+    }
+    let replay_rt = Runtime::builder().replay_from(&trace_path).build();
+    let out = run_agent(&ir, "worker_nested", vec![], &replay_rt).await;
+    assert!(
+        out.is_ok(),
+        "nested parallel replay must reproduce, not diverge: {out:?}"
+    );
+}
+
+/// Adversarial: a MISSING/corrupt cancellation record. With the
+/// `parallel.outcomes` line dropped from the trace, replay has no
+/// per-arm outcomes to cap with, so a reversible arm runs unbounded and
+/// diverges HONESTLY — it must never silently produce a wrong result or
+/// panic.
+#[tokio::test]
+async fn replay_with_missing_outcomes_record_diverges_honestly() {
+    let ir = ir_of(CANCEL_SRC);
+    let dir = tempfile::tempdir().unwrap();
+    let good = dir.path().join("good.jsonl");
+    let corrupt = dir.path().join("corrupt.jsonl");
+    {
+        let rt = Runtime::builder()
+            .tracer(Tracer::open_path(&good, "r-corrupt"))
+            .tool("boom", |_| async move { Err(tool_boom("boom")) })
+            .tool("tick", |_| async move {
+                tokio::task::yield_now().await;
+                Ok(json!(true))
+            })
+            .build();
+        let _ = run_agent(&ir, "worker_cancel", vec![], &rt).await;
+    }
+    corrupt_trace_drop_outcomes(&good, &corrupt);
+
+    let replay_rt = Runtime::builder().replay_from(&corrupt).build();
+    let out = run_agent(&ir, "worker_cancel", vec![], &replay_rt).await;
+    // It must be an error (honest), not a silent success. A panic would
+    // fail the test outright.
     assert!(
         out.is_err(),
-        "replay must reproduce the recorded error, not diverge: {out:?}"
+        "a corrupt trace missing the outcomes record must diverge honestly, not succeed: {out:?}"
     );
 }

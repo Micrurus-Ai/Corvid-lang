@@ -748,6 +748,40 @@ server secure_api:
         return Secret("classified")
 "#,
     },
+    TourTopic {
+        name: "parallel-cancellation",
+        title: "Cancel Fast — But Never Past a Point of No Return",
+        category: "The complete application runtime",
+        pitch: "A `parallel:` block runs its arms concurrently and fails fast: when one arm errors, the others are asked to stop. But Corvid adds the guarantee that makes concurrent effects safe — a branch PAST A NON-REVERSIBLE EFFECT BOUNDARY is never cancelled. The moment an arm dispatches an irreversible tool (a write, a POST — any effect whose composed row is `reversible: false`) it is shielded and runs to completion, even if a sibling has already failed; only arms that have done nothing irreversible are cancelled, and they stop at a tool-dispatch boundary BEFORE their next effect, so a cancelled arm never leaves a half-finished irreversible action behind. Cancellation is cooperative, not a preemptive abort, precisely so it can hold that line without a race. And because live cancellation is timing-dependent, every block records each arm's outcome + reversibility + dispatch boundary, and Substitute-mode replay REPRODUCES the exact run deterministically — a cancelled arm replays to its recorded boundary and stops, a shielded arm reaches its recorded terminal, and non-cancelling blocks replay byte-identically.",
+        spec: "docs/reference/core-semantics.md (parallel.cancellation_reversibility)",
+        roadmap: "Phase 52 effect-aware scheduling (52d)",
+        test: "crates/corvid-vm/src/tests/parallel.rs (arm_past_irreversible_boundary_is_not_cancelled, replay_reproduces_a_recorded_cancellation, + adversarial cases)",
+        non_scope: "Cancellation is cooperative at tool-dispatch boundaries (an arm in a tight pure loop is not preempted); reversibility comes from the composed effect row, so a tool is shielded exactly when it declares an irreversible effect.",
+        source: r#"effect risky:
+    cost: $0.0
+    trust: autonomous
+    reversible: false
+
+tool commit_write() -> Bool uses risky
+tool read_data() -> Bool
+
+agent commit_arm() -> Bool:
+    return commit_write()
+
+agent read_arm() -> Bool:
+    return read_data()
+
+agent worker() -> Bool:
+    parallel:
+        # If a sibling fails first, this reversible read is cancelled
+        # cleanly before its next effect.
+        a = read_arm()
+        # Once this commits its irreversible write it is SHIELDED — it
+        # always runs to completion, and replay reproduces that exactly.
+        b = commit_arm()
+    return b
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

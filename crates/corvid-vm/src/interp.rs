@@ -122,6 +122,21 @@ struct Interpreter<'ir> {
     /// which case it runs to completion (the rule). `None` outside a
     /// `parallel` arm.
     parallel_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Per-arm tool-dispatch checkpoint counter (slice 52d-3). Shared
+    /// across the arm's sub-interpreters, it counts the tool dispatches
+    /// the arm actually PROCEEDS with. Live: the final value is the
+    /// arm's terminal dispatch count, recorded in `parallel.outcomes`.
+    /// Replay: compared against `replay_cancel_after` to reproduce a
+    /// recorded cancellation at exactly its recorded boundary. `None`
+    /// outside a `parallel` arm.
+    dispatch_count: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    /// Deterministic replay cancellation boundary (slice 52d-3). When
+    /// this arm was RECORDED as cancelled after N dispatches, replay
+    /// sets `Some(N)`; the arm cancels at its (N+1)th tool dispatch,
+    /// reproducing the recorded cancellation instead of re-deriving it
+    /// from live timing. `None` for completed/errored arms and outside
+    /// replay.
+    replay_cancel_after: Option<usize>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -154,6 +169,8 @@ impl<'ir> Interpreter<'ir> {
             stream_cost_used: 0.0,
             irreversible_crossed: None,
             parallel_cancel: None,
+            dispatch_count: None,
+            replay_cancel_after: None,
         }
     }
 
@@ -1223,6 +1240,24 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
 
+                // Replay reproduction of cancellation (slice 52d-3): a
+                // recorded-cancelled arm stops at exactly its recorded
+                // dispatch boundary, deterministically, instead of
+                // re-deriving cancellation from live timing. Checked
+                // BEFORE the live cooperative check so replay never
+                // depends on a concurrent sibling.
+                if let Some(limit) = self.replay_cancel_after {
+                    let n = self
+                        .dispatch_count
+                        .as_ref()
+                        .map_or(0, |c| c.load(std::sync::atomic::Ordering::SeqCst));
+                    if n >= limit {
+                        return Err(InterpError::new(
+                            InterpErrorKind::ParallelArmCancelled,
+                            span,
+                        ));
+                    }
+                }
                 // Cancellation×reversibility rule (slice 52d-2), checked
                 // at every tool-dispatch boundary. First: if this arm's
                 // `parallel` block asked to cancel (a sibling failed
@@ -1244,6 +1279,12 @@ impl<'ir> Interpreter<'ir> {
                             ));
                         }
                     }
+                }
+                // This dispatch will proceed — count it (slice 52d-3).
+                // Live: the arm's terminal count is recorded. Replay:
+                // the running count is what the cap above compares to.
+                if let Some(counter) = &self.dispatch_count {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 // Then: the moment this arm dispatches an irreversible
                 // tool it is past the boundary — mark it so the scheduler
@@ -1568,6 +1609,8 @@ impl<'ir> Interpreter<'ir> {
                 // cancels cooperatively no matter how deep the call.
                 sub.irreversible_crossed = self.irreversible_crossed.clone();
                 sub.parallel_cancel = self.parallel_cancel.clone();
+                sub.dispatch_count = self.dispatch_count.clone();
+                sub.replay_cancel_after = self.replay_cancel_after;
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {

@@ -58,7 +58,21 @@ pub(super) fn replayed_json_result(
     event: TraceEvent,
 ) -> Result<serde_json::Value, RuntimeError> {
     match event {
-        TraceEvent::ToolResult { result, .. } | TraceEvent::LlmResult { result, .. } => Ok(result),
+        TraceEvent::ToolResult { result, .. } | TraceEvent::LlmResult { result, .. } => {
+            // A tool that FAILED live records its error verbatim under a
+            // reserved key (slice 52d-3) so replay reproduces the same
+            // `Err` — otherwise a failing tool has no substitutable
+            // result and replay diverges. `RuntimeError::Other` displays
+            // the recorded string verbatim, so the reconstructed error
+            // matches the recorded run error exactly.
+            if let Some(msg) = result
+                .get(crate::replay::CORVID_TOOL_ERROR_KEY)
+                .and_then(|v| v.as_str())
+            {
+                return Err(RuntimeError::Other(msg.to_string()));
+            }
+            Ok(result)
+        }
         TraceEvent::ApprovalResponse { approved, .. } => Ok(serde_json::json!(approved)),
         other => Err(RuntimeError::ReplayDivergence(ReplayDivergence {
             step: 0,

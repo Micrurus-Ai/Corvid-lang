@@ -40,6 +40,14 @@ pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;
 
+/// Reserved key under which a FAILING tool records its error message in
+/// the substituted `ToolResult` (slice 52d-3), so replay reproduces the
+/// tool failure as an `Err` instead of diverging on a missing result.
+/// A run whose `parallel` arm fails — and thereby triggers reversibility-
+/// guarded cancellation — is only replayable because the failure is
+/// recorded here.
+pub const CORVID_TOOL_ERROR_KEY: &str = "__corvid_tool_error__";
+
 #[derive(Debug, Clone)]
 enum ReplayMode {
     Substitute,
@@ -57,6 +65,105 @@ pub struct ReplaySource {
     cursor: Arc<Mutex<TraceCursor>>,
     initial_rollout_seed: u64,
     mode: ReplayMode,
+    /// The recorded per-`parallel`-block arm outcomes (slice 52d-3), in
+    /// block-ENTRY order — the order the `parallel.scheduled` events
+    /// appear, which (because arm buffers flush in arm order) matches
+    /// the order a sequential replay enters blocks, including nested
+    /// ones. `parallel_cursor` hands them out one block-entry at a time.
+    parallel_outcomes: Arc<Vec<RecordedParallelOutcomes>>,
+    parallel_cursor: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// One recorded `parallel` arm's terminal state (slice 52d-3).
+#[derive(Debug, Clone)]
+pub struct RecordedParallelArm {
+    pub name: String,
+    /// `"completed"` / `"errored"` / `"cancelled"`.
+    pub outcome: String,
+    pub crossed_irreversible: bool,
+    /// The tool-dispatch count at which the arm terminated.
+    pub dispatch_count: usize,
+}
+
+/// The recorded arm outcomes of one `parallel` block, in arm order.
+#[derive(Debug, Clone, Default)]
+pub struct RecordedParallelOutcomes {
+    pub arms: Vec<RecordedParallelArm>,
+}
+
+impl RecordedParallelOutcomes {
+    /// If arm `i` (expected to be named `name`) was recorded as
+    /// `cancelled`, return its recorded dispatch boundary; otherwise
+    /// `None`. Guards against a corrupt record whose arm name/index
+    /// disagrees with the source — a mismatch is treated as "not
+    /// cancelled" so replay never invents a cancellation.
+    pub fn cancelled_arm_dispatch_count(&self, i: usize, name: &str) -> Option<usize> {
+        let arm = self.arms.get(i)?;
+        if arm.name != name {
+            return None;
+        }
+        (arm.outcome == "cancelled").then_some(arm.dispatch_count)
+    }
+
+    /// Whether this record has an arm for every index `0..arm_count`
+    /// with matching names — used to detect a corrupt/missing record.
+    pub fn matches_arm_names(&self, names: &[&str]) -> bool {
+        self.arms.len() == names.len()
+            && self.arms.iter().zip(names).all(|(a, n)| a.name == *n)
+    }
+}
+
+/// Bracket-match `parallel.scheduled` (block entry) ↔ `parallel.outcomes`
+/// (block exit) host events into per-block records, indexed by ENTRY
+/// order. A stack handles nesting: an `outcomes` event closes the most
+/// recently opened `scheduled`. A `scheduled` with no matching
+/// `outcomes` (truncated/corrupt trace) yields an empty record, so
+/// replay caps nothing for it (best-effort, never invents a cancel).
+fn compute_parallel_outcomes(events: &[TraceEvent]) -> Vec<RecordedParallelOutcomes> {
+    let mut by_entry: Vec<RecordedParallelOutcomes> = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    for ev in events {
+        let TraceEvent::HostEvent { name, payload, .. } = ev else {
+            continue;
+        };
+        if name == "parallel.scheduled" {
+            open.push(by_entry.len());
+            by_entry.push(RecordedParallelOutcomes::default());
+        } else if name == "parallel.outcomes" {
+            if let Some(idx) = open.pop() {
+                by_entry[idx] = parse_parallel_outcomes(payload);
+            }
+        }
+    }
+    by_entry
+}
+
+fn parse_parallel_outcomes(payload: &serde_json::Value) -> RecordedParallelOutcomes {
+    let arms = payload
+        .get("arms")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|a| RecordedParallelArm {
+                    name: a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    outcome: a
+                        .get("outcome")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    crossed_irreversible: a
+                        .get("crossed_irreversible")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    dispatch_count: a
+                        .get("dispatch_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    RecordedParallelOutcomes { arms }
 }
 
 impl ReplaySource {
@@ -166,13 +273,30 @@ impl ReplaySource {
             validate_mutation(&path, &events, mutation.step_1based, &mutation.replacement)?;
         }
 
+        let parallel_outcomes = compute_parallel_outcomes(&events);
+
         Ok(Self {
             path,
             events: Arc::new(events),
             cursor: Arc::new(Mutex::new(TraceCursor::new(start_index))),
             initial_rollout_seed,
             mode,
+            parallel_outcomes: Arc::new(parallel_outcomes),
+            parallel_cursor: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
+    }
+
+    /// Hand out the next recorded `parallel` block's arm outcomes, in
+    /// block-entry order (slice 52d-3). The interpreter calls this once
+    /// per `parallel` block it enters on replay; because a sequential
+    /// replay enters blocks in the same order they were recorded
+    /// (arm-ordered buffers preserve nesting order), the Nth call
+    /// returns the Nth block's record.
+    pub fn next_parallel_block_outcomes(&self) -> Option<RecordedParallelOutcomes> {
+        let idx = self
+            .parallel_cursor
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.parallel_outcomes.get(idx).cloned()
     }
 
     pub fn initial_rollout_seed(&self) -> u64 {

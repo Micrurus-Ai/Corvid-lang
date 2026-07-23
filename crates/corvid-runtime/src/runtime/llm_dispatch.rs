@@ -51,32 +51,54 @@ impl Runtime {
                 args: args.clone(),
             });
         }
-        let result = if is_stdlib_secret_tool(name) {
+        let dispatch_result: Result<serde_json::Value, RuntimeError> = if is_stdlib_secret_tool(name)
+        {
             // Secrets RE-READ on replay instead of substituting: the
             // trace deliberately never stores the value (the recorded
             // ToolResult below is redacted), so there is nothing to
             // substitute — the same read-passthrough rule db_query
             // follows. A changed environment at replay time diverges
             // honestly.
-            self.dispatch_stdlib_secret_tool(&args)?
+            self.dispatch_stdlib_secret_tool(&args)
         } else if let Some(replay) = self.replay_source()? {
-            replay.replay_tool_call(name, &args)?
+            replay.replay_tool_call(name, &args)
         } else if is_stdlib_cache_tool(name) {
-            self.dispatch_stdlib_cache_tool(name, &args)?
+            self.dispatch_stdlib_cache_tool(name, &args)
         } else if is_stdlib_io_tool(name) {
-            self.dispatch_stdlib_io_tool(name, args.clone()).await?
+            self.dispatch_stdlib_io_tool(name, args.clone()).await
         } else if is_stdlib_http_tool(name) {
-            self.dispatch_stdlib_http_tool(name, args.clone()).await?
+            self.dispatch_stdlib_http_tool(name, args.clone()).await
         } else if is_stdlib_time_tool(name) {
-            dispatch_stdlib_time_tool(name, &args)?
+            dispatch_stdlib_time_tool(name, &args)
         } else if is_stdlib_random_tool(name) {
-            dispatch_stdlib_random_tool(name, &args)?
+            dispatch_stdlib_random_tool(name, &args)
         } else if is_stdlib_rag_tool(name) {
-            self.dispatch_stdlib_rag_tool(name, &args).await?
+            self.dispatch_stdlib_rag_tool(name, &args).await
         } else if name == "mcp_call" {
-            self.dispatch_stdlib_mcp_tool(&args).await?
+            self.dispatch_stdlib_mcp_tool(&args).await
         } else {
-            self.tools.call(name, args.clone()).await?
+            self.tools.call(name, args.clone()).await
+        };
+        // Record a FAILING tool's error as a substitutable ToolResult
+        // (slice 52d-3) so replay reproduces it — e.g. a failing
+        // `parallel` arm that triggers reversibility-guarded
+        // cancellation — then propagate the error unchanged. (On replay
+        // the tracer is disabled, so this is a no-op there.)
+        let result = match dispatch_result {
+            Ok(v) => v,
+            Err(e) => {
+                if self.tracer.is_enabled() {
+                    self.tracer.emit(TraceEvent::ToolResult {
+                        ts_ms: now_ms(),
+                        run_id: self.tracer.run_id().to_string(),
+                        tool: name.to_string(),
+                        result: serde_json::json!({
+                            crate::replay::CORVID_TOOL_ERROR_KEY: e.to_string(),
+                        }),
+                    });
+                }
+                return Err(e);
+            }
         };
         if self.tracer.is_enabled() {
             // Traces must NEVER persist secret values: the recorded

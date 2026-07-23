@@ -889,6 +889,16 @@ Roadmap: [Phase 52 the complete application runtime](./ROADMAP.md)
 Proof: [route execution](./crates/corvid-cli/src/serve_cmd.rs) + [contract closure](./crates/corvid-driver/src/contract_closure.rs) + [core-semantics `contract.runtime_closure`](./docs/reference/core-semantics.md)
 Non-scope: Closure grows in lockstep with the runtime — each Phase 52 slice flips one capability on; it refuses to start until a capability lands rather than implementing it. Native-tier route execution is later work.
 
+#### Cancel Fast, But Never Past a Point of No Return
+
+A `parallel:` block runs its arms concurrently and fails fast — when one arm errors, the others are asked to stop. Corvid adds the guarantee that makes concurrent effects safe: **a branch past a non-reversible effect boundary is never cancelled.** The moment an arm dispatches an irreversible tool (a write, a `POST` — any effect whose composed row is `reversible: false`) it is shielded and runs to completion, even if a sibling failed; only arms that have done nothing irreversible are cancelled, and they stop at a tool-dispatch boundary *before* their next effect. Cancellation is cooperative, not a preemptive abort, so it holds that line without a race. And because live cancellation is timing-dependent, every block records each arm's outcome + reversibility + dispatch boundary, and Substitute-mode replay reproduces the exact run deterministically — a cancelled arm replays to its recorded boundary, a shielded arm reaches its recorded terminal, and non-cancelling blocks replay byte-identically.
+
+Spec: [Cancel Fast, But Never Past a Point of No Return](./docs/reference/inventions.md#parallel-cancellation)
+Tour: `corvid tour --topic parallel-cancellation`
+Roadmap: [Phase 52 effect-aware scheduling](./ROADMAP.md)
+Proof: [the parallel scheduler](./crates/corvid-vm/src/interp/stmt.rs) + [replay reproduction](./crates/corvid-runtime/src/replay/mod.rs) + [core-semantics `parallel.cancellation_reversibility`](./docs/reference/core-semantics.md)
+Non-scope: Cooperative cancellation at tool-dispatch boundaries (an arm in a tight pure loop is not preempted); a tool is shielded exactly when it declares an irreversible effect.
+
 ## Architecture
 
 ```text

@@ -287,8 +287,9 @@ pub use rag::{
 pub use record::Recorder;
 pub use redact::RedactionSet;
 pub use replay::{
-    LlmDivergence, MutationDivergence, ReplayDifferentialReport, ReplayDivergence,
-    ReplayMutationReport, ReplaySource, RunCompletionDivergence, SubstitutionDivergence,
+    LlmDivergence, MutationDivergence, RecordedParallelArm, RecordedParallelOutcomes,
+    ReplayDifferentialReport, ReplayDivergence, ReplayMutationReport, ReplaySource,
+    RunCompletionDivergence, SubstitutionDivergence,
 };
 pub use review_queue::{
     create_review_record, resolve_review_record, review_lineage_event, review_reason_for_event,

@@ -3076,6 +3076,61 @@ CTO's full-fidelity model + the invention proof.
 
 ---
 
+## 2026-07-23 - 52d-3 closed: replay REPRODUCES parallel cancellation — the full-fidelity 52d model is complete
+
+The load-bearing part of the CTO's chosen model. Live cancellation
+(52d-2) is timing-dependent, so a recorded cancelling run couldn't be
+replayed — re-running the block concurrently under Substitute mode
+diverged (`ReplayDivergence step 0`). 52d-3 makes replay honor the
+trace: on replay the `parallel` block runs arms SEQUENTIALLY in arm
+order (matching the arm-ordered buffer flush, so the substitution cursor
+stays aligned) and caps each recorded-`cancelled` arm at its recorded
+tool-dispatch count. A cancelled arm replays to its recorded boundary
+and stops; a shielded (irreversible) arm reaches its recorded terminal;
+non-cancelling blocks replay byte-identically (corpus verify still exits
+1 on exactly the two fixtures).
+
+The blocker was a PRE-EXISTING gap the cancellation trigger exposed: a
+FAILING tool recorded only a `ToolCall`, no `ToolResult` — `call_tool`
+did `self.tools.call(...).await?` and the `?` short-circuited before the
+result emit, so a failing tool wasn't replayable at all, and a
+`parallel` arm's failure is exactly what triggers cancellation.
+Restructured `call_tool` to emit-then-propagate: a failed tool now
+records its error verbatim under a reserved `__corvid_tool_error__` key
+in a substituted `ToolResult`, and `replayed_json_result` reproduces it
+as `RuntimeError::Other(<msg>)` — which displays the string verbatim, so
+the reconstructed run error matches the recorded one exactly. Failing
+tools are now replayable in general, not just for parallel.
+
+Peek API: `ReplaySource` bracket-matches `parallel.scheduled` ↔
+`parallel.outcomes` host events into per-block records in ENTRY order (a
+stack handles nesting; a `scheduled` with no matching `outcomes` yields
+an empty record, so a corrupt trace caps nothing and diverges honestly
+rather than inventing a cancellation). Exposed replay module →
+`Runtime::replay_next_parallel_outcomes` → interpreter.
+
+Nine parallel tests, incl. FOUR adversarial: multiple simultaneous
+cancellations, a shielded arm reaching its recorded terminal on replay,
+NESTED parallel blocks (proving the bracket-matched entry-order pairing),
+and a missing-outcomes-record trace diverging honestly. The
+`parallel.cancellation_reversibility` RuntimeChecked guarantee (id
+anchored in `parallel_profile.rs`, referenced in every
+`parallel.outcomes` event) + regenerated core-semantics.md; invention
+proof = README §"Cancel Fast, But Never Past a Point of No Return" +
+inventions.md §7 + `corvid tour --topic parallel-cancellation`.
+
+**Phase 52 slice 52d — effect-aware scheduling — is complete**, in the
+full-fidelity form the CTO chose: awareness (52d-1) → reversibility-
+guarded live cancellation (52d-2) → deterministic replay reproduction
+(52d-3). The replay/trace determinism moat holds THROUGH cancellation.
+
+Gate: workspace check; corvid-vm (129) + corvid-guarantees (28) +
+corvid-driver (226) + corvid-cli bin (363) + serve_smoke (14) green;
+corpus verify exits 1 on the two fixtures. Next per the queue: 52e (auth
+routes mounted) — opens Section B, Identity & Authorization Runtime.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

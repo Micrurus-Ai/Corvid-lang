@@ -32,6 +32,19 @@ impl Runtime {
         matches!(self.mode, RuntimeMode::Replay(_))
     }
 
+    /// Hand the interpreter the next recorded `parallel` block's arm
+    /// outcomes on replay (slice 52d-3), so it can reproduce the recorded
+    /// cancellation deterministically. `None` when live, or when the
+    /// trace has no more recorded blocks.
+    pub fn replay_next_parallel_outcomes(
+        &self,
+    ) -> Option<crate::replay::RecordedParallelOutcomes> {
+        match &self.mode {
+            RuntimeMode::Replay(source) => source.next_parallel_block_outcomes(),
+            _ => None,
+        }
+    }
+
     pub fn replay_uses_live_llm(&self) -> bool {
         matches!(&self.mode, RuntimeMode::Replay(source) if source.uses_live_llm())
     }
