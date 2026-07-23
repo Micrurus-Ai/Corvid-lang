@@ -3598,3 +3598,77 @@ fn parses_identity_linking_block() {
         vec!["example.com".to_string(), "corp.example.com".to_string()]
     );
 }
+
+#[test]
+fn parses_provisioning_open_with_fixed_tenant() {
+    let src = "identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    let prov = id.provisioning.as_ref().expect("provisioning parsed");
+    assert!(matches!(prov.first_login, corvid_ast::FirstLoginPolicy::Open));
+    match &prov.tenant {
+        corvid_ast::TenantAssignment::Fixed(id) => assert_eq!(id, "public"),
+        other => panic!("expected fixed tenant, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_provisioning_invited_from_invitation() {
+    let src = "identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    let prov = id.provisioning.as_ref().expect("provisioning parsed");
+    assert!(matches!(prov.first_login, corvid_ast::FirstLoginPolicy::Invited));
+    assert!(matches!(prov.tenant, corvid_ast::TenantAssignment::FromInvitation));
+}
+
+#[test]
+fn parses_provisioning_claim_mapping_with_allowlist() {
+    let src = "identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: from_claim(\"org_id\") allow \"acme, globex\"
+";
+    let file = parse_file_src(src);
+    let id = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Identity(i) => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    let prov = id.provisioning.as_ref().expect("provisioning parsed");
+    match &prov.tenant {
+        corvid_ast::TenantAssignment::ClaimMapping { claim, allowlist } => {
+            assert_eq!(claim, "org_id");
+            assert_eq!(allowlist, &vec!["acme".to_string(), "globex".to_string()]);
+        }
+        other => panic!("expected claim mapping, got {other:?}"),
+    }
+}

@@ -351,6 +351,9 @@ tool stream_answer(m: String) -> Stream<String>
             "identity app_users:
     provider google
     provider github
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 
 public agent hello(n: String) -> String:
     return n

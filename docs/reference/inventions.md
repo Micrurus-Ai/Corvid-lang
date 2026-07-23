@@ -570,6 +570,9 @@ yet serve is a **startup error**, never a silent runtime `501`:
 ```corvid
 identity users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
 
 server secure_api:
     route GET "/secret" -> json Secret requires authenticated:

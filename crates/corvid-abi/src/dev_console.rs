@@ -214,6 +214,9 @@ mod tests {
         let html = console_for(
             "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 
 public agent chat(message: String) -> Stream<String>:
     return stream_answer(message)

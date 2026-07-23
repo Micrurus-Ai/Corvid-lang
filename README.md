@@ -845,6 +845,9 @@ public type Answer:
 identity app_users:
     provider google
     provider github
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
 
 public agent classify(question: String) -> Answer:
     return Answer(question, 90)

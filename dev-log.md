@@ -3131,6 +3131,80 @@ routes mounted) — opens Section B, Identity & Authorization Runtime.
 
 ---
 
+## 2026-07-23 - 52e-1: first-login provisioning is explicit, or it is a compile error
+
+Section B (Identity & Authorization Runtime) opens with the OAuth
+security surface, and the first thing it lands is a *refusal*, not a
+feature. An `identity` block that declares OAuth providers must now also
+declare HOW an unknown, verified subject becomes an actor — there is no
+silent default:
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: open            # public signup
+        tenant: fixed("public")
+```
+
+Omit the `provisioning:` block and the checker refuses to compile:
+
+```
+E5210 First-login policy required: identity `users` declares OAuth
+providers but does not state how an unknown verified subject is
+provisioned. Add: provisioning: first_login: open | invited
+```
+
+### Why a compile error, not a default
+
+This is the "No hidden defaults for consequential policy" rule (added to
+CLAUDE.md this session) applied to its canonical case. First-login
+provisioning sets an app's entire registration/tenancy posture: default
+it to auto-provision and an enterprise app silently becomes
+open-registration the moment someone with a Google account hits the
+callback. So the posture is declared in source, and its omission names
+the missing decision — the same shape as insecure-session-config (51g)
+and the contract-closure refuse-to-start (52b). A program cannot back
+into an open door by silence.
+
+### The surface
+
+- **`first_login: open | invited | approval_required`.** 52e-1 accepts
+  `open` (auto-provision the verified subject) and `invited` (provision
+  only against a pre-existing invitation). `approval_required` *parses*
+  — so the checker can name it — but is REJECTED until 52f can execute
+  durable approval completely. A declared-but-unimplemented policy is
+  never silently degraded to a weaker one.
+- **`tenant: fixed("id") | from_invitation | from_claim("c") allow "a, b"`.**
+  A tenant is never taken from a bare, caller-controlled claim: it comes
+  from fixed config, a *verified* invitation (`from_invitation`, valid
+  only with `first_login: invited` — there is no invitation to read
+  otherwise), or an issuer claim constrained to a non-empty allowlist
+  (an empty allowlist would trust any value, so it is rejected).
+
+### What landed (52e-1, always-green increment)
+
+- AST: `ProvisioningPolicy` / `FirstLoginPolicy` / `TenantAssignment` on
+  `IdentityDecl` (`crates/corvid-ast/src/decl.rs`).
+- Parser: the `provisioning:` block + `fixed(...)` / `from_invitation` /
+  `from_claim(...) allow "..."` tenant grammar
+  (`crates/corvid-syntax/src/parser/decl/identity.rs`).
+- Checker: `TypeErrorKind::FirstLoginPolicyRequired` (E5210) + the four
+  policy-coherence rejections (`crates/corvid-types/src/checker/decl.rs`).
+- Every existing identity fixture across README / tour / inventions /
+  serve_smoke / abi tests now declares a `provisioning:` block — the
+  breaking change is absorbed, not papered over.
+
+The rest of 52e (first-login `LoginState`/`LinkState` storage split,
+serve wiring with the strict callback order, mock-IdP + adversarial
+tests + invention proof) follows as 52e-2..4.
+
+Gate: workspace check; corvid-syntax parser (+3) + corvid-abi checker
+(+7) + corvid-types (305) + serve_smoke (14) green; corpus verify exits
+1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

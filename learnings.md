@@ -7170,3 +7170,62 @@ verbatim (a reserved `__corvid_tool_error__` key in the substituted
 recorded run error exactly. This was the prerequisite for replaying a cancelling
 `parallel` run — the failing arm is what triggers the cancellation — but it
 makes every failing-tool run replayable, not just parallel ones.
+
+---
+
+## An OAuth identity must declare its first-login policy — omission is a compile error (2026-07-23)
+
+When an `identity` block declares OAuth providers, you must also declare how a
+first-time, verified subject becomes an actor. There is no default:
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: open            # public signup
+        tenant: fixed("public")
+```
+
+Leave `provisioning:` out and the program does not compile:
+
+```
+E5210 First-login policy required: identity `users` declares OAuth providers
+but does not state how an unknown verified subject is provisioned.
+Add: provisioning: first_login: open | invited
+```
+
+This is deliberate. First-login provisioning decides your app's whole
+registration and tenancy posture — if it defaulted to auto-provision, an
+enterprise app would silently become open-registration the moment anyone with a
+matching provider account hit the callback. Corvid treats any behavior with a
+security, privacy, tenancy, cost, or access consequence the same way: the
+posture is stated in your source, and omitting it is a compile error naming the
+missing decision (the "No hidden defaults for consequential policy" rule) — the
+same shape as insecure session cookies (which need a loud `insecure_opt_out`)
+and a contract route the runtime can't serve (which refuses to start).
+
+### The knobs
+
+**`first_login:`**
+- `open` — public signup: an unknown verified subject is auto-provisioned into a
+  new actor.
+- `invited` — the subject is provisioned only if it matches a pre-existing
+  invitation; otherwise the login is refused.
+- `approval_required` — *parses*, so the checker can name it, but is rejected
+  today (`E … not executable yet`); durable approval arrives in a later slice. A
+  policy Corvid can't execute completely is never silently downgraded to a
+  weaker one.
+
+**`tenant:`** — a new actor's tenant is never read from a bare, caller-controlled
+token claim:
+- `fixed("id")` — a constant from your application config.
+- `from_invitation` — the tenant recorded on the verified invitation (only valid
+  with `first_login: invited`).
+- `from_claim("org_id") allow "acme, globex"` — an explicitly configured issuer
+  claim, constrained to a non-empty allowlist; an unlisted value is refused.
+
+Login also never identifies or merges accounts by email — cross-provider linking
+is a separate, explicit-confirmation flow (see the account-linking section).
+
+This is the language surface; the login/callback/session routes that consume it
+mount in the following slices. See [dev-log.md](dev-log.md) (2026-07-23, 52e-1).

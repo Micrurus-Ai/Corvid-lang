@@ -1424,6 +1424,9 @@ fn serve_refuses_to_start_when_a_route_is_not_contract_closed() {
     let src_path = dir.path().join("main.cor");
     let source = r#"identity users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
 
 type Secret:
     value: String

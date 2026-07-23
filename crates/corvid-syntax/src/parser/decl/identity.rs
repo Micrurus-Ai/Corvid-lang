@@ -11,8 +11,8 @@ use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::Parser;
 use crate::token::TokKind;
 use corvid_ast::{
-    EmailMatchPolicy, Ident, IdentityDecl, IdentityProvider, LinkingConfig, ProviderKind, SameSite,
-    SessionConfig,
+    EmailMatchPolicy, FirstLoginPolicy, Ident, IdentityDecl, IdentityProvider, LinkingConfig,
+    ProviderKind, ProvisioningPolicy, SameSite, SessionConfig, TenantAssignment,
 };
 
 impl<'a> Parser<'a> {
@@ -34,6 +34,7 @@ impl<'a> Parser<'a> {
         let mut providers = Vec::new();
         let mut session = None;
         let mut linking = None;
+        let mut provisioning = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -42,6 +43,16 @@ impl<'a> Parser<'a> {
             if self.peek_ident_is("provider") {
                 match self.parse_identity_provider() {
                     Ok(p) => providers.push(p),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
+                }
+                continue;
+            }
+            if self.peek_ident_is("provisioning") {
+                match self.parse_provisioning_policy() {
+                    Ok(p) => provisioning = Some(p),
                     Err(e) => {
                         self.errors.push(e);
                         self.sync_to_statement_boundary();
@@ -72,8 +83,9 @@ impl<'a> Parser<'a> {
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken {
                     got: crate::parser::describe_token(self.peek()),
-                    expected: "`provider ...`, `session:`, or `linking:` inside an identity block"
-                        .into(),
+                    expected:
+                        "`provider ...`, `session:`, `linking:`, or `provisioning:` inside an identity block"
+                            .into(),
                 },
                 span: self.peek_span(),
             });
@@ -88,8 +100,181 @@ impl<'a> Parser<'a> {
             providers,
             session,
             linking,
+            provisioning,
             span: start.merge(end),
         })
+    }
+
+    /// `provisioning:` sub-block (slice 52e). Both `first_login` and
+    /// `tenant` are required — a first-login provisioning policy is
+    /// never a silent default. Parses `approval_required` too so the
+    /// checker can reject it with a clear "not executable until 52f"
+    /// message rather than the value being silently unavailable.
+    fn parse_provisioning_policy(&mut self) -> Result<ProvisioningPolicy, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // provisioning
+        self.expect(TokKind::Colon, "`:` after `provisioning`")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError {
+                kind: ParseErrorKind::ExpectedBlock,
+                span: self.peek_span(),
+            });
+        }
+        self.bump(); // Indent
+
+        let mut first_login: Option<FirstLoginPolicy> = None;
+        let mut tenant: Option<TenantAssignment> = None;
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+                break;
+            }
+            let (key, key_span) = self.expect_ident()?;
+            self.expect(TokKind::Colon, "`:` after a provisioning key")?;
+            match key.as_str() {
+                "first_login" => {
+                    let (v, v_span) = self.expect_ident()?;
+                    first_login = Some(match v.as_str() {
+                        "open" => FirstLoginPolicy::Open,
+                        "invited" => FirstLoginPolicy::Invited,
+                        "approval_required" => FirstLoginPolicy::ApprovalRequired,
+                        _ => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: format!("`{v}`"),
+                                    expected: "`open`, `invited`, or `approval_required`".into(),
+                                },
+                                span: v_span,
+                            });
+                        }
+                    });
+                }
+                "tenant" => {
+                    tenant = Some(self.parse_tenant_assignment()?);
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("provisioning key `{key}`"),
+                            expected: "`first_login` or `tenant`".into(),
+                        },
+                        span: key_span,
+                    });
+                }
+            }
+            self.expect_newline()?;
+        }
+        let end = self.peek_span();
+        if matches!(self.peek(), TokKind::Dedent) {
+            self.bump();
+        }
+
+        let first_login = first_login.ok_or_else(|| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: "a `provisioning:` block without `first_login`".into(),
+                expected: "`first_login: open | invited`".into(),
+            },
+            span: start.merge(end),
+        })?;
+        // `approval_required` needs no tenant here — the checker rejects
+        // it outright (not executable until 52f), so a missing tenant
+        // must not mask that clearer error.
+        let tenant = match (&first_login, tenant) {
+            (_, Some(t)) => t,
+            (FirstLoginPolicy::ApprovalRequired, None) => TenantAssignment::Fixed(String::new()),
+            (_, None) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "a `provisioning:` block without `tenant`".into(),
+                        expected:
+                            "`tenant: fixed(\"...\")`, `from_invitation`, or `from_claim(\"...\") allow \"...\"`"
+                                .into(),
+                    },
+                    span: start.merge(end),
+                });
+            }
+        };
+        Ok(ProvisioningPolicy {
+            first_login,
+            tenant,
+            span: start.merge(end),
+        })
+    }
+
+    /// `tenant: fixed("id")` | `from_invitation` | `from_claim("c") allow "a, b"`.
+    fn parse_tenant_assignment(&mut self) -> Result<TenantAssignment, ParseError> {
+        let (kind, kind_span) = self.expect_ident()?;
+        match kind.as_str() {
+            "fixed" => {
+                let id = self.parse_paren_string_arg("fixed")?;
+                Ok(TenantAssignment::Fixed(id))
+            }
+            "from_invitation" => Ok(TenantAssignment::FromInvitation),
+            "from_claim" => {
+                let claim = self.parse_paren_string_arg("from_claim")?;
+                if !self.peek_ident_is("allow") {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: crate::parser::describe_token(self.peek()),
+                            expected: "`allow \"...\"` allowlist after `from_claim(\"...\")`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                self.bump(); // allow
+                let allow = match self.peek().clone() {
+                    TokKind::StringLit(s) => {
+                        self.bump();
+                        s
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: "a non-string allowlist".into(),
+                                expected: "a comma-separated allowlist string literal".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                };
+                let allowlist: Vec<String> = allow
+                    .split(',')
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .collect();
+                Ok(TenantAssignment::ClaimMapping { claim, allowlist })
+            }
+            _ => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("tenant source `{kind}`"),
+                    expected: "`fixed(\"...\")`, `from_invitation`, or `from_claim(\"...\") allow \"...\"`"
+                        .into(),
+                },
+                span: kind_span,
+            }),
+        }
+    }
+
+    fn parse_paren_string_arg(&mut self, name: &str) -> Result<String, ParseError> {
+        self.expect(TokKind::LParen, "`(` after tenant source")?;
+        let value = match self.peek().clone() {
+            TokKind::StringLit(s) => {
+                self.bump();
+                s
+            }
+            _ => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: format!("a non-string `{name}` argument"),
+                        expected: "a string literal".into(),
+                    },
+                    span: self.peek_span(),
+                });
+            }
+        };
+        self.expect(TokKind::RParen, "`)` after the tenant source argument")?;
+        Ok(value)
     }
 
     /// `linking:` sub-block (slice 51i): only the `email_match` policy

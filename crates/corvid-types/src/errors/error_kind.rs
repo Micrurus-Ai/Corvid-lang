@@ -134,6 +134,13 @@ pub enum TypeErrorKind {
     /// OIDC discovery URL.
     IdentityConfigInvalid { identity: String, message: String },
 
+    /// An `identity Name:` block declares OAuth providers but does not
+    /// declare a first-login provisioning policy (slice 52e). There is
+    /// NO silent default: a program must not back into open-registration
+    /// (or any other tenancy posture) by omission, so the missing
+    /// decision is a compile error naming the allowed values.
+    FirstLoginPolicyRequired { identity: String },
+
     /// A route carries a `requires authenticated|role|permission`
     /// policy (slice 51h) but the program declares no `identity`
     /// block, so there is no way to authenticate a caller.
@@ -561,6 +568,13 @@ impl TypeErrorKind {
             }
             Self::IdentityConfigInvalid { identity, message } => {
                 format!("invalid `identity {identity}`: {message}")
+            }
+            Self::FirstLoginPolicyRequired { identity } => {
+                format!(
+                    "E5210 First-login policy required: identity `{identity}` declares OAuth \
+                     providers but does not state how an unknown verified subject is \
+                     provisioned. Add: provisioning: first_login: open | invited"
+                )
             }
             Self::RoutePolicyWithoutIdentity { server, path } => {
                 format!(
@@ -1124,6 +1138,9 @@ impl TypeErrorKind {
             ),
             Self::RoutePolicyWithoutIdentity { .. } => Some(
                 "add an `identity <name>:` block declaring the sign-in providers; the auth routes and the typed `actor` derive from it".into(),
+            ),
+            Self::FirstLoginPolicyRequired { .. } => Some(
+                "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
             ),
         }
     }

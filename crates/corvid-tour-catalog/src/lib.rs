@@ -711,6 +711,9 @@ public type RefundError:
 identity app_users:
     provider google
     provider github
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
     session:
         lifetime: 24h
         same_site: strict
@@ -735,6 +738,9 @@ tool echo_stream(m: String) -> Stream<String>
         non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grows in lockstep with the runtime (each Phase 52 slice flips one capability on). It does not itself implement the capabilities — it refuses to start until each lands, so the backend can never advertise more than it delivers.",
         source: r#"identity users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
 
 type Secret:
     value: String

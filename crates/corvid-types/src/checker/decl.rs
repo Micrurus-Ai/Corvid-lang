@@ -13,8 +13,9 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, Block, EmailMatchPolicy, Expr, HttpMethod, HttpRouteDecl,
-    IdentityDecl, ProviderKind, SameSite, ServerDecl, Span, Stmt,
+    AgentAttribute, AgentDecl, Block, EmailMatchPolicy, Expr, FirstLoginPolicy, HttpMethod,
+    HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy, SameSite, ServerDecl, Span,
+    Stmt, TenantAssignment,
 };
 use corvid_resolve::Binding;
 use std::collections::HashSet;
@@ -221,6 +222,35 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // First-login provisioning policy (slice 52e). A block that
+        // declares OAuth providers MUST also declare how an unknown
+        // verified subject is provisioned — there is no silent default,
+        // because the choice sets the app's registration/tenancy posture
+        // (see CLAUDE.md → "No hidden defaults for consequential policy").
+        if !decl.providers.is_empty() {
+            match &decl.provisioning {
+                None => {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::FirstLoginPolicyRequired {
+                            identity: name.clone(),
+                        },
+                        decl.span,
+                    ));
+                }
+                Some(provisioning) => {
+                    self.check_provisioning(&name, provisioning);
+                }
+            }
+        } else if let Some(provisioning) = &decl.provisioning {
+            // A `provisioning:` block with no providers has nothing to
+            // provision — the policy can never fire, so flag it rather
+            // than let it read as if it were in force.
+            self.errors.push(invalid(
+                "`provisioning:` requires at least one OAuth `provider`; without a provider no first login can occur".into(),
+                provisioning.span,
+            ));
+        }
+
         if let Some(session) = &decl.session {
             let cookie = &session.cookie;
             let mut unsafe_reasons = Vec::new();
@@ -300,6 +330,55 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// Validate a first-login `provisioning:` policy (slice 52e). The
+    /// policy must name only postures the runtime can execute completely
+    /// today, and a tenant must never be derived from a source that does
+    /// not match the chosen first-login mode.
+    fn check_provisioning(&mut self, identity: &str, provisioning: &ProvisioningPolicy) {
+        let invalid = |message: String, span: Span| {
+            TypeError::new(
+                TypeErrorKind::IdentityConfigInvalid {
+                    identity: identity.to_string(),
+                    message,
+                },
+                span,
+            )
+        };
+
+        // `approval_required` is parsed so the checker can name it, but
+        // the runtime cannot execute durable approval until slice 52f. A
+        // policy is never silently degraded to a weaker one, so reject it
+        // rather than fall back to `open`/`invited`.
+        if matches!(provisioning.first_login, FirstLoginPolicy::ApprovalRequired) {
+            self.errors.push(invalid(
+                "`first_login: approval_required` is not executable yet — durable approval arrives in a later slice. Use `open` or `invited` today.".into(),
+                provisioning.span,
+            ));
+        }
+
+        match &provisioning.tenant {
+            // A tenant taken from the invitation only makes sense when a
+            // verified invitation actually gates the login.
+            TenantAssignment::FromInvitation
+                if !matches!(provisioning.first_login, FirstLoginPolicy::Invited) =>
+            {
+                self.errors.push(invalid(
+                    "`tenant: from_invitation` requires `first_login: invited` — there is no invitation to read a tenant from otherwise".into(),
+                    provisioning.span,
+                ));
+            }
+            // An allowlisted claim mapping with an empty allowlist would
+            // admit every claim value, defeating the point of the gate.
+            TenantAssignment::ClaimMapping { allowlist, .. } if allowlist.is_empty() => {
+                self.errors.push(invalid(
+                    "`tenant: from_claim(...)` requires a non-empty `allow \"...\"` list — an empty allowlist would trust any claim value".into(),
+                    provisioning.span,
+                ));
+            }
+            _ => {}
         }
     }
 

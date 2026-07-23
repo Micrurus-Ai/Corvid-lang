@@ -251,6 +251,9 @@ mod tests {
         let files = emit_react_frontend(&contract_for(
             "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 
 public agent classify(question: String) -> String:
     return question

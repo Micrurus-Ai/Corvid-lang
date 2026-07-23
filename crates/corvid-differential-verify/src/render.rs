@@ -284,6 +284,34 @@ fn render_identity(identity: &corvid_ast::IdentityDecl, indent: usize, out: &mut
         }
         out.push('\n');
     }
+    if let Some(provisioning) = &identity.provisioning {
+        use corvid_ast::{FirstLoginPolicy, TenantAssignment};
+        push_indent(indent + 1, out);
+        out.push_str("provisioning:\n");
+        push_indent(indent + 2, out);
+        let first_login = match provisioning.first_login {
+            FirstLoginPolicy::Open => "open",
+            FirstLoginPolicy::Invited => "invited",
+            FirstLoginPolicy::ApprovalRequired => "approval_required",
+        };
+        out.push_str(&format!("first_login: {first_login}\n"));
+        push_indent(indent + 2, out);
+        match &provisioning.tenant {
+            TenantAssignment::Fixed(id) => {
+                out.push_str(&format!("tenant: fixed({})\n", render_string_literal(id)));
+            }
+            TenantAssignment::FromInvitation => {
+                out.push_str("tenant: from_invitation\n");
+            }
+            TenantAssignment::ClaimMapping { claim, allowlist } => {
+                out.push_str(&format!(
+                    "tenant: from_claim({}) allow {}\n",
+                    render_string_literal(claim),
+                    render_string_literal(&allowlist.join(", "))
+                ));
+            }
+        }
+    }
     if let Some(session) = &identity.session {
         push_indent(indent + 1, out);
         out.push_str("session:\n");

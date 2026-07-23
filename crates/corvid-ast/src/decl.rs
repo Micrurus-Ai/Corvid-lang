@@ -104,7 +104,56 @@ pub struct IdentityDecl {
     /// silently merges accounts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linking: Option<LinkingConfig>,
+    /// First-login provisioning policy (slice 52e). REQUIRED when the
+    /// block declares OAuth providers — there is NO silent default. When
+    /// providers are present and this is `None`, the checker raises
+    /// `E5210 First-login policy required`, so a program cannot back into
+    /// open-registration by omission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provisioning: Option<ProvisioningPolicy>,
     pub span: Span,
+}
+
+/// First-login provisioning policy (slice 52e). How an unknown verified
+/// OAuth subject becomes an actor, and how its tenant is assigned. Both
+/// are explicit — no consequential default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProvisioningPolicy {
+    pub first_login: FirstLoginPolicy,
+    pub tenant: TenantAssignment,
+    pub span: Span,
+}
+
+/// What happens when a first-time OAuth login presents a verified
+/// subject that is not yet linked to any actor (slice 52e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FirstLoginPolicy {
+    /// `open` — public signup: the unknown verified subject is
+    /// auto-provisioned into a new actor.
+    Open,
+    /// `invited` — the unknown subject is provisioned ONLY if it matches
+    /// a pre-existing invitation; otherwise the login is refused.
+    Invited,
+    /// `approval_required` — provisioning waits on durable approval
+    /// (slice 52f). Parsed so the checker can name it, but REJECTED
+    /// until 52f: the runtime cannot yet execute it, and a policy is
+    /// never silently degraded to a weaker one.
+    ApprovalRequired,
+}
+
+/// How a newly provisioned actor's tenant is assigned (slice 52e). Never
+/// a bare, caller-controlled ID-token claim.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TenantAssignment {
+    /// `tenant: fixed("<id>")` — a constant from application config.
+    Fixed(String),
+    /// `tenant: from_invitation` — the tenant recorded on the verified
+    /// invitation (only valid with `first_login: invited`).
+    FromInvitation,
+    /// `tenant: from_claim("<claim>") allow "<a>, <b>"` — an explicitly
+    /// configured issuer claim, constrained to a mandatory allowlist; an
+    /// unlisted claim value is refused.
+    ClaimMapping { claim: String, allowlist: Vec<String> },
 }
 
 /// Account-linking configuration (slice 51i). Linking two providers to

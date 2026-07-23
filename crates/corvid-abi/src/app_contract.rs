@@ -1007,6 +1007,9 @@ tool stream_answer(m: String) -> Stream<String>
     provider google
     provider github
     provider oidc \"https://issuer.example.com/.well-known/openid-configuration\" as corp
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     session:
         lifetime: 24h
         same_site: strict
@@ -1032,6 +1035,9 @@ tool stream_answer(m: String) -> Stream<String>
     fn identity_unsafe_cookie_without_opt_out_is_rejected() {
         let src = "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     session:
         secure: false
 ";
@@ -1054,6 +1060,9 @@ tool stream_answer(m: String) -> Stream<String>
     fn identity_unsafe_cookie_with_opt_out_warns_but_compiles() {
         let src = "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     session:
         secure: false
         insecure_opt_out: true
@@ -1079,6 +1088,9 @@ tool stream_answer(m: String) -> Stream<String>
             "identity app_users:
     provider google
     provider github
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 ",
         );
         let id = &contract.identities[0];
@@ -1111,6 +1123,9 @@ tool stream_answer(m: String) -> Stream<String>
         let contract = contract_for(
             "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 
 server admin_api:
     route GET \"/admin\" -> json String requires role(\"admin\"):
@@ -1129,6 +1144,9 @@ server admin_api:
             "identity app_users:
     provider google
     provider github
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
 ",
         );
         let id = &contract.identities[0];
@@ -1155,6 +1173,9 @@ server admin_api:
         let contract = contract_for(
             "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     linking:
         email_match: verified_domain
         verified_domains: \"example.com, corp.example.com\"
@@ -1172,6 +1193,9 @@ server admin_api:
     fn linking_verified_domain_without_domains_is_rejected() {
         let src = "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     linking:
         email_match: verified_domain
 ";
@@ -1194,6 +1218,9 @@ server admin_api:
     fn linking_malformed_verified_domain_is_rejected() {
         let src = "identity app_users:
     provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
     linking:
         email_match: verified_domain
         verified_domains: \"https://example.com/path\"
@@ -1231,6 +1258,116 @@ server admin_api:
             )),
             "expected RoutePolicyWithoutIdentity, got {:?}",
             checked.errors
+        );
+    }
+
+    /// Run the front-half of the pipeline and return the checker errors,
+    /// asserting the source lexes/parses/resolves cleanly first.
+    fn check_errors_of(src: &str) -> Vec<corvid_types::TypeError> {
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        corvid_types::typecheck(&file, &resolved).errors
+    }
+
+    #[test]
+    fn identity_with_oauth_provider_but_no_provisioning_is_rejected() {
+        // The whole point of slice 52e: an OAuth block must state its
+        // first-login posture — omission is a compile error, never a
+        // silent open-registration default.
+        let errors = check_errors_of("identity users:\n    provider google\n");
+        assert!(
+            errors.iter().any(|e| matches!(
+                e.kind,
+                corvid_types::TypeErrorKind::FirstLoginPolicyRequired { .. }
+            )),
+            "expected FirstLoginPolicyRequired, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn identity_provisioning_open_with_fixed_tenant_compiles() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n",
+        );
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn identity_provisioning_invited_from_invitation_compiles() {
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: invited\n        tenant: from_invitation\n",
+        );
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn identity_provisioning_approval_required_is_rejected_until_supported() {
+        // `approval_required` parses so the checker can name it, but the
+        // runtime cannot execute durable approval yet — reject rather
+        // than silently degrade to a weaker posture.
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: approval_required\n        tenant: fixed(\"public\")\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("approval_required")
+            )),
+            "expected an approval_required rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn identity_provisioning_from_invitation_requires_invited_mode() {
+        // A tenant read from an invitation makes no sense without an
+        // invitation gate.
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: from_invitation\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("from_invitation")
+            )),
+            "expected a from_invitation/invited mismatch, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn identity_provisioning_claim_mapping_empty_allowlist_is_rejected() {
+        // An empty allowlist would trust any claim value.
+        let errors = check_errors_of(
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: from_claim(\"org_id\") allow \"\"\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("allow")
+            )),
+            "expected an empty-allowlist rejection, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn provisioning_without_a_provider_is_rejected() {
+        // A provisioning policy with nothing to provision can never
+        // fire; flag it rather than let it read as if in force. (Also
+        // trips the no-providers error — both are IdentityConfigInvalid.)
+        let errors = check_errors_of(
+            "identity users:\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n",
+        );
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                corvid_types::TypeErrorKind::IdentityConfigInvalid { message, .. }
+                    if message.contains("provisioning")
+            )),
+            "expected a provisioning-without-provider rejection, got {errors:?}"
         );
     }
 
