@@ -11,7 +11,7 @@
 //! demand proves. Every language reads the SAME contract, so the types
 //! can never drift between platforms.
 
-use crate::app_contract::{ApplicationContract, ContractType};
+use crate::app_contract::ApplicationContract;
 use crate::ts_client::GeneratedFile;
 
 /// A target SDK language.
