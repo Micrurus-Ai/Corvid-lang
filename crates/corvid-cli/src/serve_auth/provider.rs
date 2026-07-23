@@ -28,8 +28,14 @@ use corvid_ast::{IdentityProvider, ProviderKind};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityVerification {
     /// Verify the ID token against the issuer's JWKS; identity is
-    /// `(issuer, subject)`.
-    Oidc { issuer: String, jwks_url: String },
+    /// `(issuer, subject)`. `algorithm` pins the expected signing
+    /// algorithm (the verifier still refuses `alg=none` and any
+    /// unsupported alg, and rejects a header/contract mismatch).
+    Oidc {
+        issuer: String,
+        jwks_url: String,
+        algorithm: String,
+    },
     /// Fetch the provider's user endpoint server-side; identity is
     /// `(source_marker, authoritative_user_id)`.
     Userinfo {
@@ -173,6 +179,7 @@ fn preset_for(kind: &ProviderKind) -> Preset {
                 verification: IdentityVerification::Oidc {
                     issuer: "https://accounts.google.com".to_string(),
                     jwks_url: "https://www.googleapis.com/oauth2/v3/certs".to_string(),
+                    algorithm: "RS256".to_string(),
                 },
             },
         },
@@ -187,6 +194,7 @@ fn preset_for(kind: &ProviderKind) -> Preset {
                     issuer: "https://login.microsoftonline.com/common/v2.0".to_string(),
                     jwks_url: "https://login.microsoftonline.com/common/discovery/v2.0/keys"
                         .to_string(),
+                    algorithm: "RS256".to_string(),
                 },
             },
         },
@@ -199,6 +207,7 @@ fn preset_for(kind: &ProviderKind) -> Preset {
                 verification: IdentityVerification::Oidc {
                     issuer: "https://appleid.apple.com".to_string(),
                     jwks_url: "https://appleid.apple.com/auth/keys".to_string(),
+                    algorithm: "RS256".to_string(),
                 },
             },
         },
@@ -288,6 +297,7 @@ mod tests {
             IdentityVerification::Oidc {
                 issuer: "https://accounts.google.com".to_string(),
                 jwks_url: "https://www.googleapis.com/oauth2/v3/certs".to_string(),
+                algorithm: "RS256".to_string(),
             }
         );
     }

@@ -7,5 +7,8 @@
 //!
 //! - [`provider`] — resolve a declared provider to its endpoints,
 //!   verification method, and client credentials.
+//! - [`identity`] — turn a code exchange into a server-verified external
+//!   identity (verify the ID token, or fetch userinfo).
 
+pub mod identity;
 pub mod provider;

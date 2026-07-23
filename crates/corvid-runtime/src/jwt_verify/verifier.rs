@@ -148,13 +148,22 @@ impl JwtVerifier {
                 JwtVerifyError::MissingClaim(contract.required_subject_claim.clone())
             })?
             .to_string();
-        let tenant = claims
-            .get(&contract.required_tenant_claim)
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                JwtVerifyError::MissingClaim(contract.required_tenant_claim.clone())
-            })?
-            .to_string();
+        // A tenant claim is required only when the contract names one.
+        // An empty `required_tenant_claim` means the token carries no
+        // tenant (e.g. a plain OIDC login where the tenant comes from the
+        // provisioning policy, not the ID token) — the tenant is simply
+        // absent, not an error.
+        let tenant = if contract.required_tenant_claim.is_empty() {
+            String::new()
+        } else {
+            claims
+                .get(&contract.required_tenant_claim)
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    JwtVerifyError::MissingClaim(contract.required_tenant_claim.clone())
+                })?
+                .to_string()
+        };
         let issuer = claims
             .get("iss")
             .and_then(|v| v.as_str())

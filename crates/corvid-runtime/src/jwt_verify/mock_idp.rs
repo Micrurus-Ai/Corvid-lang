@@ -224,6 +224,34 @@ mod tests {
         assert_eq!(claims.issuer, "https://issuer.test");
     }
 
+    /// A plain OIDC login token need not carry a tenant claim — the
+    /// tenant comes from the provisioning policy, not the ID token
+    /// (slice 52e). An empty `required_tenant_claim` skips the tenant
+    /// requirement rather than rejecting the token as MissingClaim.
+    #[test]
+    fn empty_required_tenant_claim_skips_the_requirement() {
+        let idp = idp();
+        let verifier = JwtVerifier::new(Arc::new(idp.fetcher()));
+        // A token with NO tenant claim at all.
+        let token = idp.mint_with(|p| {
+            p["iss"] = "https://issuer.test".into();
+            p["aud"] = "corvid-test".into();
+            p["sub"] = "sub-123".into();
+            p.as_object_mut().unwrap().remove("tenant");
+        });
+        let mut contract = idp.contract();
+        contract.required_tenant_claim = String::new();
+        let claims = verifier
+            .verify(&token, &contract, 2_000_000)
+            .expect("token without a tenant claim verifies when none is required");
+        assert_eq!(claims.subject, "sub-123");
+        assert_eq!(claims.tenant, "");
+        // And with a tenant claim still required, the same token is refused.
+        let strict = idp.contract();
+        let err = verifier.verify(&token, &strict, 2_000_000).unwrap_err();
+        assert_eq!(err.slug(), "missing_claim");
+    }
+
     /// Source-bypass mutators (slice 51k): every tampered token the
     /// mock can produce is REFUSED. This is the adversarial heart of
     /// the identity block — the safe-defaults cannot be bypassed by

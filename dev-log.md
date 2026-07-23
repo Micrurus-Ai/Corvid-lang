@@ -3339,6 +3339,45 @@ identity-resolution seam (52e-4b) and the route handlers (52e-4c) follow.
 
 ---
 
+## 2026-07-23 - 52e-4b: the callback's identity step, verified off-HTTP
+
+`resolve_identity` is the middle of the callback — steps 2 through 4:
+exchange the authorization code, then establish a *server-verified*
+external identity. It reduces both provider families to one
+`VerifiedExternalIdentity { source, external_id, email?, display_name?,
+tenant_claim? }`:
+
+- **OIDC** verifies the ID token through the runtime's `JwtVerifier`
+  (signature via JWKS, issuer, audience, expiry) AND checks the token's
+  `nonce` claim fingerprints to the nonce the login minted — binding the
+  token to THIS login, so a token issued to a different flow (or
+  replayed) is refused. Identity is the verified `(issuer, subject)`.
+- **Userinfo** fetches the provider's user endpoint with the access
+  token and takes `(source_marker, authoritative_user_id)`, tolerant of
+  the per-provider id key (`sub` / `id`, string or numeric).
+
+Every network call goes through a `ProviderGateway` trait; the JWKS fetch
+uses the existing pluggable `JwksFetcher`. So the whole seam is tested
+with a `MockIdp` (mints ID tokens + serves a matching JWKS) and a mock
+gateway returning canned tokens/userinfo — no live provider, and the
+adversarial cases (nonce mismatch, tampered signature) run in-process.
+
+One prerequisite change to the verifier: a tenant claim is now OPT-IN.
+The verifier used to require `required_tenant_claim` to be present, but a
+plain OIDC login token does not carry a tenant — the tenant comes from
+the provisioning policy, not the ID token. An empty `required_tenant_claim`
+now skips the requirement (tenant = ""); a named claim is still enforced
+as MissingClaim when absent, so the existing behaviour is unchanged where
+a tenant claim IS declared.
+
+New file `serve_auth/identity.rs`. Gate: corvid-runtime lib 346 green
+(+1 verifier test), serve_auth 11 green, workspace clean. Next: 52e-4c
+mounts the four routes and threads `resolve_identity` → `provision_login`
+→ session issuance through the strict callback order, plus the reqwest
+`ProviderGateway` for production.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
