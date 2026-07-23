@@ -118,7 +118,7 @@ impl SessionAuthRuntime {
     ) -> Result<(), RuntimeError> {
         self.insert_audit(
             "oauth.callback",
-            Some(&state.actor_id),
+            state.actor_id.as_deref(),
             Some(&state.tenant_id),
             None,
             None,

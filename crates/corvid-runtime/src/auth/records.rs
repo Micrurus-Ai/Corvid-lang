@@ -106,12 +106,47 @@ pub struct JwtContractDiagnostic {
     pub redacted: bool,
 }
 
+/// Why an OAuth flow was started, kept structural so a callback can
+/// never confuse a first-time login for an account link (52e).
+///
+/// - `Login` — a login (first-time or returning): there is NO bound
+///   actor at authorize time; the actor is determined at callback from
+///   the verified `(issuer, subject)` and, if unknown, the identity's
+///   declared first-login provisioning policy.
+/// - `Link` — account linking (51i): the state is bound to the
+///   ALREADY-authenticated actor, which the callback re-issues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthStatePurpose {
+    Login,
+    Link,
+}
+
+impl OAuthStatePurpose {
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Link => "link",
+        }
+    }
+
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "login" => Some(Self::Login),
+            "link" => Some(Self::Link),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthStateCreate {
     pub id: String,
     pub provider: String,
     pub tenant_id: String,
-    pub actor_id: String,
+    /// `None` for a `Login` flow (actor unknown until callback), `Some`
+    /// for a `Link` flow (the already-authenticated actor).
+    pub actor_id: Option<String>,
+    pub purpose: OAuthStatePurpose,
     pub raw_state: String,
     pub pkce_verifier_ref: String,
     pub nonce_fingerprint: String,
@@ -124,7 +159,10 @@ pub struct OAuthStateRecord {
     pub id: String,
     pub provider: String,
     pub tenant_id: String,
-    pub actor_id: String,
+    /// `None` for a `Login` flow, `Some` for a `Link` flow — see
+    /// [`OAuthStatePurpose`].
+    pub actor_id: Option<String>,
+    pub purpose: OAuthStatePurpose,
     pub state_hash: String,
     pub pkce_verifier_ref: String,
     pub nonce_fingerprint: String,
@@ -137,9 +175,25 @@ pub struct OAuthStateRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthCallbackResolution {
-    pub actor: AuthActor,
+    /// The bound actor for a `Link` flow; `None` for a `Login` flow,
+    /// whose actor the caller resolves from the verified subject.
+    pub actor: Option<AuthActor>,
     pub state: OAuthStateRecord,
     pub trace: AuthTraceContext,
+}
+
+/// A durable mapping from an external OAuth identity — keyed by the
+/// ID token's `(issuer, subject)`, never by email — to a Corvid actor
+/// (52e). Written when a login provisions or links an actor; read at
+/// callback to recognise a returning subject.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalIdentityLink {
+    pub provider: String,
+    pub issuer: String,
+    pub subject: String,
+    pub actor_id: String,
+    pub tenant_id: String,
+    pub created_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

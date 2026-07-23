@@ -3205,6 +3205,54 @@ Gate: workspace check; corvid-syntax parser (+3) + corvid-abi checker
 
 ---
 
+## 2026-07-23 - 52e-2: a login and an account-link are structurally different states
+
+Before any auth route could be wired, the OAuth storage layer had a
+gap: it only modelled account *linking*. `OAuthStateCreate` required an
+`actor_id` that referenced a pre-existing actor, and
+`resolve_oauth_callback` always returned that bound actor. A first-time
+LOGIN — where the actor is unknown until the verified ID token arrives at
+the callback — had no representable state.
+
+52e-2 makes the purpose structural, so a callback can never confuse the
+two:
+
+- `OAuthStatePurpose { Login, Link }`. A `Login` state carries
+  `actor_id: None`; a `Link` state carries `actor_id: Some(existing)`.
+  `create_oauth_state` enforces the coherence — a login state that tries
+  to bind an actor is rejected, and a link state with no actor is
+  rejected. `resolve_oauth_callback` now returns `actor: Option<AuthActor>`
+  (the bound actor for a link, `None` for a login) while keeping the
+  single-use / expiry / tenant checks identical for both.
+
+- A new `auth_external_identities` table keyed on **`(issuer, subject)`**
+  from the verified ID token — never on email. `find_actor_by_external_identity`
+  recognises a returning subject; `link_external_identity` durably binds a
+  verified identity to an actor. Re-homing the same `(issuer, subject)` to
+  a *different* actor is refused (an external identity is never silently
+  reassigned); an idempotent re-link of the same binding is fine.
+
+This is the "never identify or merge accounts by email" rule made
+concrete at the storage layer: identity is the token's `(issuer,
+subject)` pair, and there is simply no code path that maps an email to an
+actor.
+
+The ripple stayed inside `corvid-runtime/src/auth` — the OAuth state API
+had no external consumers yet (serve wires it in the following
+increments). `audit_oauth_denied` learned to handle the now-optional
+actor id.
+
+The provisioning executor that decides what to do when
+`find_actor_by_external_identity` returns `None` — `open` auto-provisions,
+`invited` matches a pre-existing invitation — lands next (52e-3), followed
+by the serve route mounting (52e-4) and the mock-IdP end-to-end +
+adversarial suite + invention proof (52e-5).
+
+Gate: workspace check; corvid-runtime lib 337 green (5 new auth::oauth
+tests); corpus verify still exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

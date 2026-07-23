@@ -161,7 +161,8 @@ impl SessionAuthRuntime {
                     id text primary key,
                     provider text not null,
                     tenant_id text not null,
-                    actor_id text not null,
+                    actor_id text,
+                    purpose text not null,
                     state_hash text not null unique,
                     pkce_verifier_ref text not null,
                     nonce_fingerprint text not null,
@@ -173,6 +174,16 @@ impl SessionAuthRuntime {
                 );
                 create index if not exists auth_oauth_states_tenant on auth_oauth_states(tenant_id);
                 create index if not exists auth_oauth_states_actor on auth_oauth_states(actor_id);
+                create table if not exists auth_external_identities (
+                    issuer text not null,
+                    subject text not null,
+                    provider text not null,
+                    actor_id text not null,
+                    tenant_id text not null,
+                    created_ms integer not null,
+                    primary key (issuer, subject)
+                );
+                create index if not exists auth_external_identities_actor on auth_external_identities(actor_id);
                 create table if not exists auth_audit_events (
                     id text primary key,
                     event_kind text not null,
