@@ -176,6 +176,21 @@ pub(crate) fn cmd_serve(
         return Ok(1);
     }
 
+    // Slice 52f: durable persistence is OPT-IN via an explicit data
+    // directory (`CORVID_SERVE_DATA_DIR`). When set, the approval queue,
+    // sessions, and external identities persist there and survive a
+    // restart; when unset, they stay in-memory (a dev restart fails
+    // closed — pending approvals and sessions are simply gone). Where
+    // sensitive auth/approval data lives is the operator's explicit
+    // choice, never a silent hardcoded path.
+    let data_dir = match serve_data_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return Ok(1);
+        }
+    };
+
     // Slice 52e: if the program declares an `identity` block, resolve its
     // login surface (providers, provisioning policy, cookie posture,
     // client credentials) BEFORE binding the listener. A consequential
@@ -184,7 +199,10 @@ pub(crate) fn cmd_serve(
     // works. The identity block is not lowered into IR, so read it from
     // the AST (the source already compiled cleanly above).
     let auth_context = match declared_identity(&source) {
-        Some(identity) => match crate::serve_auth::context::AuthContext::from_identity(&identity) {
+        Some(identity) => match crate::serve_auth::context::AuthContext::from_identity(
+            &identity,
+            data_dir.as_deref(),
+        ) {
             Ok(ctx) => Some(Arc::new(ctx)),
             Err(err) => {
                 eprintln!(
@@ -206,10 +224,15 @@ pub(crate) fn cmd_serve(
     // approval queue via `QueueApprover` and surfaces the queued
     // state as `RuntimeError::ApprovalQueued`. `finish` then answers
     // 202 + approval id. See `crate::serve_approval` for the rationale.
-    let approval_queue = Arc::new(
-        ApprovalQueueRuntime::open_in_memory()
+    // Slice 52f: durable when a data dir is configured, in-memory
+    // otherwise. A persisted queue survives a restart, so a dangerous
+    // action queued for approval is not lost when the server bounces.
+    let approval_queue = Arc::new(match &data_dir {
+        Some(dir) => ApprovalQueueRuntime::open(dir.join("approvals.sqlite"))
+            .context("open durable approval queue for `corvid serve`")?,
+        None => ApprovalQueueRuntime::open_in_memory()
             .context("open in-memory approval queue for `corvid serve`")?,
-    );
+    });
     // Tool registry composition (slices 33Q1a + 33Q1b):
     //
     // - `tools.py` autoloader (33Q1b) runs FIRST. If a `tools.py`
@@ -398,6 +421,15 @@ pub(crate) fn cmd_serve(
             .await
             .with_context(|| format!("bind {addr}"))?;
         println!("corvid serve: listening on http://{addr}");
+        match &data_dir {
+            Some(dir) => println!(
+                "  durable state (approvals + sessions) -> {}",
+                dir.display()
+            ),
+            None => println!(
+                "  state is in-memory (set CORVID_SERVE_DATA_DIR to persist approvals + sessions)"
+            ),
+        }
         // Slice 52a: every declared route is served — its body executes
         // through the synthetic per-route handler agent. The
         // approval-gated label (33Q9) is a recursive IR walk of the
@@ -430,6 +462,22 @@ pub(crate) fn cmd_serve(
         axum::serve(listener, app).await.context("serve").map(|_| ())
     })?;
     Ok(0)
+}
+
+/// Resolve the durable serve data directory from `CORVID_SERVE_DATA_DIR`
+/// (slice 52f). Returns `None` for the in-memory default, or `Some(dir)`
+/// after creating the directory. An empty value is treated as unset.
+fn serve_data_dir() -> Result<Option<std::path::PathBuf>, String> {
+    match std::env::var("CORVID_SERVE_DATA_DIR") {
+        Ok(value) if !value.trim().is_empty() => {
+            let dir = std::path::PathBuf::from(value.trim());
+            std::fs::create_dir_all(&dir).map_err(|e| {
+                format!("could not create CORVID_SERVE_DATA_DIR `{}`: {e}", dir.display())
+            })?;
+            Ok(Some(dir))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Extract the declared `identity` block from the source, if any. The

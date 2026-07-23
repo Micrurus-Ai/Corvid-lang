@@ -3631,6 +3631,44 @@ exits 1 on the two fixtures. Next: 52f-4 durable approval endpoints,
 
 ---
 
+## 2026-07-23 - 52f-4: a queued approval survives a restart
+
+Until now `corvid serve` kept its approval queue (and, since 52e, its
+sessions) in memory — a restart lost every pending approval and logged
+everyone out. 52f-4 makes both persist, but keeps that OPT-IN: set
+`CORVID_SERVE_DATA_DIR` and the approval queue (`approvals.sqlite`) and
+the session / external-identity store (`auth.sqlite`) live there and
+survive a restart; leave it unset and everything stays in-memory (a dev
+restart fails closed).
+
+Persistence is opt-in via an explicit path on purpose. Where sensitive
+auth and approval data lands on disk is the operator's decision, not a
+silent hardcoded default — the same "declare the consequential choice"
+posture the rest of the auth surface takes. The startup banner names
+which mode is active.
+
+It's a small change resting on machinery that already existed:
+`ApprovalQueueRuntime::open(path)` (durable) vs `open_in_memory()`, and
+`AuthContext::from_identity` now takes an optional data dir and opens the
+session store durably when given one.
+
+A serve_smoke test proves the guarantee end-to-end: it queues an approval
+(a `202` with an `approval_id`), stops the server, confirms
+`approvals.sqlite` was written, then starts a fresh server against the
+SAME data dir and finds the pending approval still listed at
+`GET /__approvals`.
+
+Deferred to 52f-4b: the approve/deny transitions still run as the
+anonymous `serve-reviewer` actor. Requiring a *verified* reviewer holding
+the `operator` role is a consequential access decision (who may approve?)
+that gets its own increment, reusing the 52f-3 enforcement path.
+
+Gate: workspace check clean; 6 approval serve_smoke tests (incl. the new
+durability restart test) + the in-memory path green; corpus verify still
+exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

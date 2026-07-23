@@ -1855,3 +1855,101 @@ server ping_api:
         .unwrap_or(0);
     assert_eq!(unknown_status, 404, "unknown provider must 404; raw=\n{unknown}");
 }
+
+/// Slice 52f durability gate. With `CORVID_SERVE_DATA_DIR` set, the
+/// approval queue persists to disk, so a dangerous action queued for
+/// approval SURVIVES a server restart — the pending approval is still
+/// listed after `corvid serve` is stopped and started again against the
+/// same data directory. Without the env var the queue is in-memory (a
+/// restart fails closed).
+#[test]
+fn a_queued_approval_survives_a_restart_with_a_durable_data_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let data_dir = dir.path().join("state");
+    let source = r#"type SendReq:
+    body: String
+
+type SendReceipt:
+    delivered: Bool
+
+effect send_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
+
+agent execute_send(req: SendReq) -> SendReceipt uses send_external:
+    approve SendMessage(req)
+    return send_message(req)
+
+server durable_api:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+        return execute_send(body)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8205;
+
+    // First run: queue an approval, then stop the server.
+    let approval_id = {
+        let child = Command::new(corvid_bin())
+            .arg("serve")
+            .arg(&src_path)
+            .arg("--listen")
+            .arg(format!("127.0.0.1:{port}"))
+            .env("CORVID_SERVE_DATA_DIR", &data_dir)
+            .current_dir(repo_root())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn corvid serve (run 1)");
+        let guard = ServedApp(child);
+        assert!(wait_until_ready(port), "run 1 did not become ready");
+
+        let (status, body) = http_post(port, "/send", r#"{"body":"persist me"}"#)
+            .expect("POST /send (run 1) failed");
+        assert_eq!(status, 202, "POST must queue (202); body={body}");
+        let resp: serde_json::Value = serde_json::from_str(&body).expect("202 body is JSON");
+        let id = resp
+            .get("approval_id")
+            .and_then(|v| v.as_str())
+            .expect("202 carries an approval_id")
+            .to_string();
+        drop(guard); // stop the first server
+        id
+    };
+
+    // The durable database was written.
+    assert!(
+        data_dir.join("approvals.sqlite").exists(),
+        "the durable approval database must exist at the data dir"
+    );
+
+    // Give the OS a moment to release the port before rebinding.
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Second run against the SAME data dir: the approval is still there.
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .env("CORVID_SERVE_DATA_DIR", &data_dir)
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn corvid serve (run 2)");
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "run 2 did not become ready");
+
+    let (list_status, list_body) =
+        http_get(port, "/__approvals").expect("GET /__approvals (run 2) failed");
+    assert_eq!(list_status, 200, "GET /__approvals must answer 200");
+    assert!(
+        list_body.contains(&approval_id),
+        "the queued approval `{approval_id}` must survive the restart: {list_body}"
+    );
+}

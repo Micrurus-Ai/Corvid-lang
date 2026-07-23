@@ -83,15 +83,23 @@ const DEFAULT_SESSION_LIFETIME_SECS: u64 = 8 * 3600;
 impl AuthContext {
     /// Build the auth context from a declared identity block, reading
     /// client credentials + configuration from the process environment.
-    /// Uses the production HTTP gateway + JWKS fetcher.
-    pub fn from_identity(identity: &IdentityDecl) -> Result<Self, String> {
+    /// Uses the production HTTP gateway + JWKS fetcher. When `data_dir`
+    /// is `Some`, the session + external-identity store persists there
+    /// (`auth.sqlite`) and survives a restart; otherwise it is in-memory
+    /// (slice 52f).
+    pub fn from_identity(
+        identity: &IdentityDecl,
+        data_dir: Option<&std::path::Path>,
+    ) -> Result<Self, String> {
         let gateway: Arc<dyn ProviderGateway + Send + Sync> =
             Arc::new(HttpProviderGateway::new()?);
         let jwks_fetcher: Arc<dyn JwksFetcher> = Arc::new(ReqwestJwksFetcher::default());
-        let auth = Arc::new(
-            SessionAuthRuntime::open_in_memory()
+        let auth = Arc::new(match data_dir {
+            Some(dir) => SessionAuthRuntime::open(dir.join("auth.sqlite"))
+                .map_err(|e| format!("failed to open durable auth store: {e}"))?,
+            None => SessionAuthRuntime::open_in_memory()
                 .map_err(|e| format!("failed to open auth store: {e}"))?,
-        );
+        });
         Self::build(identity, auth, gateway, jwks_fetcher, &|key| {
             std::env::var(key).ok()
         })
