@@ -374,6 +374,9 @@ fn run_via_interpreter_tier(
     // the process). A program that declares connectors then refuses to
     // start unless a mode was selected — see the closure check below.
     builder = builder.connector_mode(connector_mode);
+    // Slice 52g-3c-4: install the real-mode HTTP dispatch specs derived
+    // from the IR (unused in mock/replay, but installed uniformly).
+    builder = builder.connector_calls(corvid_runtime::connectors::connector_calls_from_ir(ir));
 
     builder = apply_env_llm_wiring(builder);
     let rt = builder.build();
@@ -390,7 +393,11 @@ fn run_via_interpreter_tier(
             egress_configured: rt.egress_configured(),
             replay_source_present: rt.has_replay_source(),
             secret_present: &secret_present,
-            executable_modes: &[corvid_ast::ConnectorMode::Mock],
+            executable_modes: &[
+                corvid_ast::ConnectorMode::Mock,
+                corvid_ast::ConnectorMode::Replay,
+                corvid_ast::ConnectorMode::Real,
+            ],
         };
         let refusals = crate::connector_startup::check_connector_startup(ir, &ctx);
         if !refusals.is_empty() {

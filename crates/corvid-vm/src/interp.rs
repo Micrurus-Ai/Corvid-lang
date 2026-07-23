@@ -244,6 +244,7 @@ impl<'ir> Interpreter<'ir> {
     /// any tool call. Every invocation records a redacted
     /// `connector.invocation` evidence event (connector, operation,
     /// mode, effects, outcome — never the arguments or the payload).
+    #[allow(clippy::too_many_arguments)]
     async fn dispatch_connector_operation(
         &self,
         connector: &'ir IrConnector,
@@ -251,6 +252,8 @@ impl<'ir> Interpreter<'ir> {
         tool: &'ir IrTool,
         callee_name: &str,
         arg_values: Vec<Value>,
+        json_args: &[serde_json::Value],
+        result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
         // The mode is chosen once at startup and validated by
@@ -275,20 +278,22 @@ impl<'ir> Interpreter<'ir> {
                 self.dispatch_connector_mock(connector, op, tool, callee_name, arg_values, span)
                     .await
             }
-            ConnectorMode::Replay => Err(InterpError::new(
-                InterpErrorKind::DispatchFailed(format!(
-                    "connector `{}` replay-mode dispatch arrives in slice 52g-3c-4",
-                    connector.name
-                )),
-                span,
-            )),
-            ConnectorMode::Real => Err(InterpError::new(
-                InterpErrorKind::DispatchFailed(format!(
-                    "connector `{}` real-mode dispatch arrives in slice 52g-3c-5",
-                    connector.name
-                )),
-                span,
-            )),
+            // Real and Replay both go through the runtime's `call_tool`,
+            // which routes by the runtime mode: in `replay` the recorded
+            // interaction is served FIRST and a real request is never
+            // made (strict no-real-fallback); in `real` the connector
+            // branch performs the HTTP request. Recording (ToolCall /
+            // ToolResult, credential-free) happens inside `call_tool`, so
+            // a real run is directly replayable.
+            ConnectorMode::Real | ConnectorMode::Replay => {
+                self.dispatch_connector_via_runtime(
+                    callee_name,
+                    json_args,
+                    result_decode_ty,
+                    span,
+                )
+                .await
+            }
         };
 
         // Evidence (req 8): record connector / operation / mode /
@@ -346,6 +351,32 @@ impl<'ir> Interpreter<'ir> {
                 span,
             )),
         }
+    }
+
+    /// Real/replay dispatch: route the operation through the runtime's
+    /// `call_tool`, which records the interaction (real) or serves it
+    /// from the recorded trace (replay, never real), then decode the
+    /// JSON response to the operation's return type. The credential is
+    /// resolved and attached inside `call_tool`'s connector branch — it
+    /// never reaches the VM or the recorded args/result.
+    async fn dispatch_connector_via_runtime(
+        &self,
+        callee_name: &str,
+        json_args: &[serde_json::Value],
+        result_decode_ty: &Type,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let result = self
+            .runtime
+            .call_tool(callee_name, json_args.to_vec())
+            .await
+            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
+            InterpError::new(
+                InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
+                span,
+            )
+        })
     }
 
     fn env_snapshot(&self) -> step::EnvSnapshot {
@@ -1561,8 +1592,17 @@ impl<'ir> Interpreter<'ir> {
                     // Tool arm, so the effect / approval / budget / taint
                     // / provenance / trace pipeline still brackets it —
                     // the operation IS a tool.
-                    self.dispatch_connector_operation(connector, op, tool, callee_name, arg_values, span)
-                        .await?
+                    self.dispatch_connector_operation(
+                        connector,
+                        op,
+                        tool,
+                        callee_name,
+                        arg_values,
+                        &json_args,
+                        result_decode_ty,
+                        span,
+                    )
+                    .await?
                 } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
                     let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
                     sub.bind_ir_params(callee_name, &mock.params, arg_values, span)?;

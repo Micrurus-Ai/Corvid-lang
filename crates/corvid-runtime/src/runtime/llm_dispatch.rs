@@ -76,6 +76,15 @@ impl Runtime {
             self.dispatch_stdlib_rag_tool(name, &args).await
         } else if name == "mcp_call" {
             self.dispatch_stdlib_mcp_tool(&args).await
+        } else if let Some(spec) = self.connector_calls.get(name) {
+            // Slice 52g-3c-4: a connector operation in `real` mode. This
+            // branch is reached ONLY when no replay source short-circuited
+            // above — so in `replay` mode a connector call is served from
+            // the recorded interaction and never falls through to a real
+            // request (strict no-real-fallback). The credential is
+            // resolved and attached to a header here and never enters the
+            // recorded ToolCall args or ToolResult body.
+            self.dispatch_connector_http(spec, &args).await
         } else {
             self.tools.call(name, args.clone()).await
         };

@@ -40,6 +40,7 @@ use std::sync::Arc;
 pub use builder::RuntimeBuilder;
 
 mod builder;
+mod connector_dispatch;
 mod io;
 mod jobs;
 mod llm_dispatch;
@@ -116,6 +117,13 @@ pub struct Runtime {
     /// choice with no default). The VM reads this at connector-operation
     /// dispatch to decide mock vs replay vs real.
     connector_mode: Option<corvid_ast::ConnectorMode>,
+    /// Slice 52g-3c-4: real-mode connector HTTP dispatch specs keyed by
+    /// operation tool name (`Arc` so `Runtime` clones stay cheap). Read
+    /// by the connector branch in `call_tool` when a call targets a
+    /// connector operation in `real` mode.
+    connector_calls: std::sync::Arc<
+        std::collections::HashMap<String, crate::connectors::ConnectorHttpSpec>,
+    >,
 }
 
 #[derive(Clone)]

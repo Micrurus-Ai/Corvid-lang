@@ -7470,8 +7470,25 @@ corvid run --mode real app.cor      # E5205: real mode not executable yet (arriv
   redacted `connector.invocation` event (connector/operation/mode/effects/
   outcome — never arguments or payload).
 
-**Scope note (what executes today):** `mock` mode runs end-to-end. `replay`
-(serve a recorded interaction, never real) and `real` (HTTP with a resolved
-secret that never enters a trace, status→typed-error) are the next slices;
-selecting them today refuses cleanly at startup. See [dev-log.md](dev-log.md)
-(2026-07-23, 52g-3a / 52g-3b / 52g-3c).
+### The same file runs in mock, real, and replay
+
+All three modes execute; the deployment chooses with `--mode`:
+
+- **`mock`** evaluates the compiled `mock` payload — no network, no secret.
+- **`real`** makes the HTTP request against the connector's `base_url`. The
+  credential resolves from the secret store at dispatch and rides ONLY in the
+  request header — it never appears in the URL, a body, the recorded trace, or
+  an error (an unresolved secret fails the call and names only the secret, never
+  a value). Outbound egress is gated by the always-on SSRF floor plus
+  `[http] allow`, so a connector never reaches an unpermitted host.
+- **`replay`** serves the recorded interaction and NEVER falls through to a real
+  request (a real run records ordinary `ToolCall`/`ToolResult` events, which
+  replay consumes; the credential is absent from them by construction).
+
+So a `corvid run --mode real app.cor` records a trace you can later
+`--mode replay` deterministically, with no provider and no credential in sight.
+
+**Scope note (what executes today):** mock/real/replay all run end-to-end.
+Still additive (next slice): typed status→error mapping (`on status -> Variant`)
+and connector rate-limit / circuit-breaker; retry is already wired. See
+[dev-log.md](dev-log.md) (2026-07-23, 52g-3a / 52g-3b / 52g-3c).

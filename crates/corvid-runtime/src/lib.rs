@@ -44,6 +44,7 @@ pub mod capability_contract;
 pub mod catalog;
 pub mod catalog_c_api;
 pub mod citation;
+pub mod connectors;
 pub mod db;
 pub mod effect_filter;
 pub mod ensemble;

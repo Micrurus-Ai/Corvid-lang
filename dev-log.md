@@ -4022,6 +4022,75 @@ are the next batch.
 
 ---
 
+## 2026-07-23 - 52g-3c-4: real HTTP, secret resolution, recording, and replay — the same file, three modes
+
+The security-sensitive connector path, done as one coherent batch (paused
+for it deliberately last session). The same unchanged `.cor` now runs in
+`mock`, `real`, and `replay`; the deployment picks the mode with
+`--mode`, and the evidence shows exactly which one executed.
+
+### The credential is resolved late and never escapes the header
+
+The load-bearing piece is a pure, isolated request builder
+(`corvid-runtime::connectors::build_connector_request`): it fills the
+`{path}` placeholders from the typed arguments, encodes the body, and
+attaches the credential — resolved from the secret store at the last
+moment — into an `Authorization`/custom header. It is unit-tested in
+isolation precisely because it's the sensitive step: a test asserts the
+bearer token appears in the header and NOWHERE else (not the URL, not a
+body), and that an unresolved secret is a named error carrying only the
+secret NAME, never a value.
+
+`Runtime::dispatch_connector_http` is the thin glue: resolve the secret,
+egress-gate the URL (the always-on SSRF floor plus `[http] allow` — a
+connector never reaches an unpermitted host even though its base URL is
+fixed in source), send through the injected `HttpClient`, hand the 2xx
+body back for the VM to decode.
+
+### Real and replay share one seam — so replay never falls through
+
+The connector branch lives in `call_tool`, placed AFTER the replay
+branch. That ordering IS the strict no-real-fallback guarantee: in replay
+mode the recorded interaction is served first and the connector branch is
+never reached, so no real request is made (egress is quarantined in
+replay besides). In real mode the branch does the HTTP and, because it's
+inside `call_tool`, the interaction is recorded as an ordinary
+`ToolCall`/`ToolResult` — which is exactly what replay consumes. The VM's
+real and replay arms are therefore identical (`call_tool` + decode); the
+runtime mode decides the behavior.
+
+### Recording is credential-free by construction
+
+Because the credential rides only in the request header — which
+`call_tool` does not record — the recorded trace carries the call
+arguments and the response body but never the secret. The record→replay
+test asserts the raw trace file does not contain the credential string,
+then replays the same file with the record-time server dropped and gets
+the recorded response back.
+
+Wiring: new `corvid-runtime::connectors` module (specs + pure builder +
+the single `connector_calls_from_ir` IR→spec projection);
+`RuntimeBuilder::connector_calls` + a `Runtime` field;
+`Runtime::dispatch_connector_http`; the `call_tool` connector branch; the
+VM's real/replay arms route through `call_tool`; `executable_modes`
+widened to `[Mock, Replay, Real]`. Retry is wired (`connector.retry` →
+`HttpRetryPolicy`).
+
+Tests: 5 pure request-builder + 4 driver integration on wiremock (real
+does the HTTP with the resolved secret in the header; the same file runs
+offline in mock; record-a-real-run-then-replay-without-the-provider with
+the credential absent from the trace; real-without-a-resolvable-credential
+fails the call and names the secret, never a value). Gate (batched):
+corvid-runtime + corvid-vm + corvid-driver libs + the connector_modes
+integration suite green; workspace check clean; corpus verify exits 1 on
+exactly the two fixtures.
+
+Remaining (additive, next batch): typed status→error mapping (`on status
+-> Variant`, which wants a `Result<Success, Error>` return + the deferred
+52g-2 variant-coherence check) and connector rate-limit / circuit-breaker.
+
+---
+
 ## 2026-07-23 - 52g-3b: a connector declares which modes it may run in, and silence is a compile error
 
 Before an operation can *execute*, one consequential question has to be

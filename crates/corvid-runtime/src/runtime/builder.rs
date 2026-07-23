@@ -68,6 +68,10 @@ pub struct RuntimeBuilder {
     /// choice with no default). Set once at build time and immutable for
     /// the process (`Runtime::connector_mode`).
     connector_mode: Option<corvid_ast::ConnectorMode>,
+    /// Slice 52g-3c-4: real-mode connector HTTP dispatch specs, keyed by
+    /// the operation's tool name. Built from the IR at startup by the
+    /// driver. Empty for programs with no connectors.
+    connector_calls: std::collections::HashMap<String, crate::connectors::ConnectorHttpSpec>,
 }
 
 impl Default for RuntimeBuilder {
@@ -93,6 +97,7 @@ impl Default for RuntimeBuilder {
             http_policy: HttpEgressPolicy::default(),
             http_client_override: None,
             connector_mode: None,
+            connector_calls: std::collections::HashMap::new(),
         }
     }
 }
@@ -224,6 +229,20 @@ impl RuntimeBuilder {
     /// selection is immutable once the runtime is built.
     pub fn connector_mode(mut self, mode: Option<corvid_ast::ConnectorMode>) -> Self {
         self.connector_mode = mode;
+        self
+    }
+
+    /// Slice 52g-3c-4: install the real-mode connector HTTP dispatch
+    /// specs (keyed by operation tool name). The driver derives these
+    /// from the IR at startup. In mock/replay mode they are unused (mock
+    /// evaluates the compiled payload in the VM; replay serves the
+    /// recorded interaction), but installing them unconditionally keeps
+    /// the wiring uniform.
+    pub fn connector_calls(
+        mut self,
+        calls: std::collections::HashMap<String, crate::connectors::ConnectorHttpSpec>,
+    ) -> Self {
+        self.connector_calls = calls;
         self
     }
 
@@ -466,6 +485,7 @@ impl RuntimeBuilder {
             )),
             queue: QueueRuntime::new(),
             connector_mode: self.connector_mode,
+            connector_calls: std::sync::Arc::new(self.connector_calls),
         }
     }
 }
