@@ -196,6 +196,33 @@ pub struct ExternalIdentityLink {
     pub created_ms: u64,
 }
 
+/// An operator-created invitation that gates `first_login: invited`
+/// provisioning (52e). Matched at callback against the verified email
+/// claim — which authorises provisioning a NEW actor, and is NOT the
+/// same as identifying or merging an existing account by email.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invitation {
+    pub id: String,
+    pub email: String,
+    pub tenant_id: String,
+    /// Optional role grant applied to the provisioned actor; empty means
+    /// no role.
+    pub role_fingerprint: String,
+    pub expires_ms: Option<u64>,
+    pub consumed_ms: Option<u64>,
+    pub created_ms: u64,
+}
+
+/// Fields to create an [`Invitation`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationCreate {
+    pub id: String,
+    pub email: String,
+    pub tenant_id: String,
+    pub role_fingerprint: String,
+    pub expires_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionRequirement {
     pub tenant_id: String,

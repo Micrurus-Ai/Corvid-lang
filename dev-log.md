@@ -3253,6 +3253,59 @@ tests); corpus verify still exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52e-3: the first-login decision, as one testable function
+
+With the Login/Link split and the `(issuer, subject)` identity map in
+place (52e-2), the actual security decision a login makes — *which actor
+does this verified subject become?* — lands as one runtime function,
+`SessionAuthRuntime::provision_login`, testable without any HTTP.
+
+The decision order:
+
+1. **Recognise.** If `(issuer, subject)` already maps to an actor, that
+   actor is returned and no policy runs. A returning user always lands on
+   the same actor, regardless of the current provisioning policy.
+2. **Provision.** Otherwise the declared `first_login` policy runs:
+   - `open` auto-provisions a new actor.
+   - `invited` first matches the *verified email* against an
+     operator-created invitation (`find_open_invitation_by_email`); with
+     no match, the login is refused before anything is written. On a
+     match the actor is provisioned and the invitation consumed.
+
+   Only `Open` and `Invited` are representable in the runtime —
+   `approval_required` is a compile error (the checker rejects it), so
+   the runtime never has to model a policy it cannot execute.
+
+The tenant comes from the declared `TenantSource`: `Fixed` config, the
+matched invitation (`FromInvitation`), or an issuer `Claim` constrained
+to an allowlist — a claim value outside the allowlist, or a missing
+claim, is refused. A tenant is never taken from a bare, caller-controlled
+value.
+
+Two design points worth recording:
+
+- **The new actor id is deterministic** — `sha256(issuer \0 subject)` —
+  so a racing double-callback upserts the *same* actor rather than
+  creating two. Recognition (step 1) already guards the common case; the
+  deterministic id closes the race.
+- **Invitation match is not account identification.** Matching a verified
+  email against an operator-created invitation authorises provisioning a
+  NEW actor; it is deliberately distinct from looking up an existing
+  account by email, which Corvid never does. Identity is always the
+  token's `(issuer, subject)`.
+
+Two new files, one responsibility each: `auth/provisioning.rs` (the
+executor + its policy enums) and `auth/invitations.rs` (the
+`auth_invitations` storage — create / find-open-by-email
+(case-insensitive, oldest-first, unexpired) / single-use consume).
+
+Gate: workspace check clean; corvid-runtime lib 345 green (8 new —
+5 provisioning, 3 invitation); corpus verify still exits 1 on the two
+fixtures. Next: 52e-4 serve wiring mounts the routes and calls
+`provision_login` inside the strict callback order.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

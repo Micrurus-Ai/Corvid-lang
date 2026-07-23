@@ -8,7 +8,9 @@ mod api_keys;
 mod approvals;
 mod audit;
 pub mod csrf;
+mod invitations;
 mod oauth;
+mod provisioning;
 mod records;
 pub mod scope;
 mod sessions;
@@ -16,6 +18,9 @@ pub use api_keys::{hash_api_key_secret, verify_api_key_secret};
 pub use approvals::{authorize_trace_permission, validate_jwt_verification_contract};
 pub use csrf::{mint_csrf_token, verify_csrf_double_submit, CsrfError, CsrfRequestMethod};
 pub use oauth::hash_oauth_state;
+pub use provisioning::{
+    FirstLoginPolicy, ProvisioningOutcome, ProvisioningRequest, TenantSource,
+};
 pub use records::*;
 pub use scope::{enforce_scope_grant, ApiKeyScope, ScopeError};
 pub use sessions::{hash_session_secret, PrivilegeChangeReason};
@@ -184,6 +189,16 @@ impl SessionAuthRuntime {
                     primary key (issuer, subject)
                 );
                 create index if not exists auth_external_identities_actor on auth_external_identities(actor_id);
+                create table if not exists auth_invitations (
+                    id text primary key,
+                    email text not null,
+                    tenant_id text not null,
+                    role_fingerprint text not null,
+                    expires_ms integer,
+                    consumed_ms integer,
+                    created_ms integer not null
+                );
+                create index if not exists auth_invitations_email on auth_invitations(email);
                 create table if not exists auth_audit_events (
                     id text primary key,
                     event_kind text not null,

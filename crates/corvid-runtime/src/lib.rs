@@ -194,9 +194,10 @@ pub use auth::{
     authorize_trace_permission, hash_api_key_secret, hash_oauth_state, hash_session_secret,
     validate_jwt_verification_contract, verify_api_key_secret, ApiKeyCreate, ApiKeyRecord,
     ApiKeyResolution, AuthActor, AuthAuditEvent, AuthTraceContext, AuthorizationDecision,
-    ExternalIdentityLink, JwtContractDiagnostic, JwtVerificationContract, OAuthCallbackResolution,
-    OAuthStateCreate, OAuthStatePurpose, OAuthStateRecord, PermissionRequirement,
-    SessionAuthRuntime, SessionCreate, SessionRecord, SessionResolution,
+    ExternalIdentityLink, FirstLoginPolicy, Invitation, InvitationCreate, JwtContractDiagnostic,
+    JwtVerificationContract, OAuthCallbackResolution, OAuthStateCreate, OAuthStatePurpose,
+    OAuthStateRecord, PermissionRequirement, ProvisioningOutcome, ProvisioningRequest,
+    SessionAuthRuntime, SessionCreate, SessionRecord, SessionResolution, TenantSource,
 };
 pub use calibration::{CalibrationObservation, CalibrationStats};
 pub use cache::{
