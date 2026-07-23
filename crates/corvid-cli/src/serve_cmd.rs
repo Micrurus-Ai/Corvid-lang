@@ -64,15 +64,6 @@ use libloading::{Library, Symbol};
 
 use crate::serve_approval::{QueueApprover, SERVE_DEFAULT_TENANT};
 
-/// Actor id every `/__approvals/:id/{approve,deny}` transition runs
-/// under at the slice MVP boundary. Per-request reviewer auth is a
-/// follow-up; today every reviewer is the same anonymous actor.
-const SERVE_REVIEWER_ACTOR: &str = "serve-reviewer";
-/// Role the reviewer claims. Must match the `required_role` set in
-/// `serve_approval::QueueApprover` (`operator`) for the queue's
-/// `authorize_approval_transition` to accept the transition.
-const SERVE_REVIEWER_ROLE: &str = "operator";
-
 /// What the serve loop remembers about each in-flight approval so the
 /// `/__approvals/:id/approve` handler can re-execute the original
 /// agent without the client having to re-POST. Captured when an
@@ -686,6 +677,159 @@ fn enforce_route_policy(
     Ok(authenticated_actor_value(&actor, &roles, &permissions))
 }
 
+/// The permission a reviewer must hold to decide an approval (slice
+/// 52f-4b). Declared like any other permission in the identity block's
+/// `roles:` — there is NO magic reviewer role, and no anonymous fallback.
+const APPROVALS_DECIDE_PERMISSION: &str = "approvals.decide";
+
+/// Enforce that the caller may decide an approval (slice 52f-4b). Returns
+/// the verified reviewer actor + the still-pending approval record, or a
+/// short-circuit `Response`:
+/// - `404` unknown approval id, `409` already-decided;
+/// - `401` no / invalid / expired / revoked session (no `serve-reviewer`
+///   fallback — an unauthenticated caller can never decide);
+/// - `403` CSRF failure, missing `approvals.decide` permission,
+///   cross-tenant approval, or self-approval (separation of duties).
+///
+/// Every outcome is recorded as a redacted `route.authz` audit event; the
+/// durable decision record itself is written by the queue transition the
+/// caller runs next.
+fn enforce_approval_reviewer(
+    state: &ServeState,
+    id: &str,
+    method: HttpMethod,
+    headers: &axum::http::HeaderMap,
+) -> Result<(corvid_runtime::AuthActor, corvid_runtime::approval_queue::ApprovalQueueRecord), Response>
+{
+    use corvid_runtime::{
+        authorize_route, verify_csrf_double_submit, CsrfRequestMethod, RouteAuthzOutcome,
+        RoutePolicyRequirement,
+    };
+
+    // 404 / 409 first — an unknown or already-decided id needs no auth.
+    let record = match state.approval_queue.get(id) {
+        Ok(Some(record)) if record.status == "pending" => record,
+        Ok(Some(record)) => {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "approval_already_decided",
+                    "id": id,
+                    "status": record.status,
+                })),
+            )
+                .into_response());
+        }
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
+            )
+                .into_response());
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "approval_queue_get_failed", "detail": e.to_string() })),
+            )
+                .into_response());
+        }
+    };
+
+    // Authentication is mandatory — no identity block means no way to
+    // authenticate a reviewer, so no one may decide.
+    let Some(ctx) = &state.auth_context else {
+        return Err(auth_error(
+            StatusCode::UNAUTHORIZED,
+            "approval decisions require an authenticated reviewer",
+        ));
+    };
+    let route = format!("POST /__approvals/{id}");
+    let summary = format!("permission:{APPROVALS_DECIDE_PERMISSION}");
+    let trace = format!("approval-authz-{}", crate::serve_auth::pkce::random_token());
+    let at = epoch_ms();
+    let deny_401 = || -> Response {
+        let _ = ctx
+            .auth
+            .record_authorization_decision(&route, None, None, &summary, false, &trace);
+        auth_error(StatusCode::UNAUTHORIZED, "authentication required")
+    };
+
+    // 1. Session.
+    let Some(token) = cookie_value(headers, &ctx.cookie.name) else {
+        return Err(deny_401());
+    };
+    let resolution = match ctx.auth.resolve_session_cookie(&token, &trace, at) {
+        Ok(resolution) => resolution,
+        Err(_) => return Err(deny_401()),
+    };
+    let actor = resolution.actor;
+    let deny_403 = |reason: &str| -> Response {
+        let _ = ctx.auth.record_authorization_decision(
+            &route,
+            Some(&actor.id),
+            Some(&actor.tenant_id),
+            &summary,
+            false,
+            &trace,
+        );
+        auth_error(StatusCode::FORBIDDEN, reason)
+    };
+
+    // 2. CSRF double-submit (approve/deny are mutations).
+    if CsrfRequestMethod::classify(method.as_str()) == CsrfRequestMethod::StateChanging {
+        let csrf_cookie = cookie_value(headers, "corvid_csrf");
+        let csrf_header = headers
+            .get("x-csrf-token")
+            .and_then(|value| value.to_str().ok());
+        if verify_csrf_double_submit(
+            CsrfRequestMethod::StateChanging,
+            csrf_header,
+            csrf_cookie.as_deref(),
+            &ctx.csrf_secret,
+        )
+        .is_err()
+        {
+            return Err(deny_403("csrf validation failed"));
+        }
+    }
+
+    // 3. Same-tenant reviewer.
+    if actor.tenant_id != record.tenant_id {
+        return Err(deny_403("cross-tenant approval"));
+    }
+
+    // 4. Declared `approvals.decide` permission (not a magic role).
+    let roles = match ctx.auth.actor_roles(&actor.id) {
+        Ok(roles) => roles,
+        Err(_) => return Err(deny_403("authorization failed")),
+    };
+    let requirement = RoutePolicyRequirement {
+        authenticated: true,
+        roles: Vec::new(),
+        permissions: vec![APPROVALS_DECIDE_PERMISSION.to_string()],
+    };
+    if let RouteAuthzOutcome::Denied(_) = authorize_route(&roles, &ctx.role_permissions, &requirement)
+    {
+        return Err(deny_403("reviewer lacks the approvals.decide permission"));
+    }
+
+    // 5. Separation of duties — a requester cannot approve their own request.
+    if actor.id == record.requester_actor_id {
+        return Err(deny_403("a requester cannot decide their own approval"));
+    }
+
+    let _ = ctx.auth.record_authorization_decision(
+        &route,
+        Some(&actor.id),
+        Some(&actor.tenant_id),
+        &summary,
+        true,
+        &trace,
+    );
+    Ok((actor, record))
+}
+
 /// A compact, redacted summary of what a route requires, for the audit
 /// event (e.g. `authenticated, role:admin, permission:refund:write`).
 fn requirement_summary(policy: &corvid_ir::IrRoutePolicy) -> String {
@@ -1219,42 +1363,17 @@ async fn list_approvals(State(state): State<Arc<ServeState>>) -> Response {
 async fn approve_approval(
     State(state): State<Arc<ServeState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
-    // Pre-check the record exists and is still pending so we can
-    // distinguish "unknown id" (404), "already decided" (409), and
-    // queue-runtime IO errors (500) — `queue.approve()` collapses
-    // these into a single Err.
-    match state.approval_queue.get(&id) {
-        Ok(Some(record)) if record.status == "pending" => {}
-        Ok(Some(record)) => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({
-                    "error": "approval_already_decided",
-                    "id": id,
-                    "status": record.status,
-                })),
-            )
-                .into_response();
-        }
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "approval_queue_get_failed",
-                    "detail": e.to_string(),
-                })),
-            )
-                .into_response();
-        }
-    }
+    // Slice 52f-4b: only a verified reviewer — a valid session, the
+    // `approvals.decide` permission, the approval's own tenant, and NOT
+    // the requester — may decide, with a CSRF double-submit. This
+    // short-circuits 404 (unknown) / 409 (already decided) / 401 / 403.
+    let (reviewer, record) =
+        match enforce_approval_reviewer(&state, &id, HttpMethod::Post, &headers) {
+            Ok(pair) => pair,
+            Err(resp) => return resp,
+        };
 
     // 33Q2 — peek the pending invocation BEFORE transitioning the
     // queue. If the handler errors, the approval stays at `pending`
@@ -1317,11 +1436,16 @@ async fn approve_approval(
         Ok(value) => {
             // Handler succeeded — NOW transition the queue and pop
             // the pending invocation. The 200 response carries the
-            // re-executed agent's result.
-            let actor = serve_reviewer_actor();
+            // re-executed agent's result. The transition records the
+            // durable decision under the VERIFIED reviewer (52f-4b); the
+            // queue's own tenant + self-approval checks run again as
+            // defense in depth (the reviewer's role is set to the
+            // approval's `required_role`, since the HTTP layer already
+            // authorized via the `approvals.decide` permission).
+            let actor = reviewer_context(&reviewer, &record);
             if let Err(e) = state.approval_queue.approve(
                 &id,
-                SERVE_DEFAULT_TENANT,
+                &record.tenant_id,
                 &actor,
                 Some("approved via /__approvals/:id/approve"),
             ) {
@@ -1400,43 +1524,19 @@ async fn approve_approval(
 async fn deny_approval(
     State(state): State<Arc<ServeState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
-    match state.approval_queue.get(&id) {
-        Ok(Some(record)) if record.status == "pending" => {}
-        Ok(Some(record)) => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({
-                    "error": "approval_already_decided",
-                    "id": id,
-                    "status": record.status,
-                })),
-            )
-                .into_response();
-        }
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "approval_queue_get_failed",
-                    "detail": e.to_string(),
-                })),
-            )
-                .into_response();
-        }
-    }
+    // Slice 52f-4b: same reviewer enforcement as approve — 404/409/401/403.
+    let (reviewer, record) =
+        match enforce_approval_reviewer(&state, &id, HttpMethod::Post, &headers) {
+            Ok(pair) => pair,
+            Err(resp) => return resp,
+        };
 
-    let actor = serve_reviewer_actor();
+    let actor = reviewer_context(&reviewer, &record);
     if let Err(e) = state.approval_queue.deny(
         &id,
-        SERVE_DEFAULT_TENANT,
+        &record.tenant_id,
         &actor,
         Some("denied via /__approvals/:id/deny"),
     ) {
@@ -1463,17 +1563,21 @@ async fn deny_approval(
         .into_response()
 }
 
-/// Reviewer actor context the `/approve` and `/deny` transitions run
-/// under. Per-request reviewer auth is a slice follow-up; today
-/// every reviewer is the same anonymous actor distinct from the
-/// requester (the queue's `authorize_approval_transition` rejects
-/// self-approval, so requester and reviewer ids must differ — they
-/// do: `serve-anonymous` vs `serve-reviewer`).
-fn serve_reviewer_actor() -> ApprovalActorContext {
+/// The queue-transition actor context for a VERIFIED reviewer (slice
+/// 52f-4b). The real authority — the `approvals.decide` permission — was
+/// already checked at the HTTP layer by `enforce_approval_reviewer`; the
+/// queue's own tenant + self-approval checks run again as defense in
+/// depth on the reviewer's real id + tenant, and its `required_role`
+/// check is satisfied by construction (there is no anonymous reviewer and
+/// no magic role gate).
+fn reviewer_context(
+    reviewer: &corvid_runtime::AuthActor,
+    record: &corvid_runtime::approval_queue::ApprovalQueueRecord,
+) -> ApprovalActorContext {
     ApprovalActorContext {
-        actor_id: SERVE_REVIEWER_ACTOR.to_string(),
-        tenant_id: SERVE_DEFAULT_TENANT.to_string(),
-        role: SERVE_REVIEWER_ROLE.to_string(),
+        actor_id: reviewer.id.clone(),
+        tenant_id: reviewer.tenant_id.clone(),
+        role: record.required_role.clone(),
     }
 }
 

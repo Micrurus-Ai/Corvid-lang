@@ -3709,6 +3709,55 @@ exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52f-4b: no approval releases an effect without a verified reviewer
+
+Route authorization landed in 52f-3, but one security-critical exception
+remained: the approval-decision endpoints. `/__approvals/:id/approve` and
+`/deny` ran as an anonymous `serve-reviewer` — and they authorize
+irreversible effects. Anyone who could reach the endpoint could release a
+queued dangerous action. 52f-4b closes that.
+
+The approve/deny transitions now require a VERIFIED reviewer, with no
+anonymous fallback (the `serve-reviewer` actor is gone).
+`enforce_approval_reviewer` runs before any transition, in order:
+
+- 404 unknown / 409 already-decided (checked first — no auth needed to
+  tell you an id is unknown or already settled);
+- 401 for a missing / forged / expired / revoked session;
+- 403 for a CSRF double-submit mismatch, for lacking the declared
+  `approvals.decide` **permission**, for a cross-tenant approval, or for
+  self-approval — a requester can never decide their own request.
+
+The authority is a permission the app DECLARES (`approvals.decide` in the
+identity block's `roles:`), not a magic hardcoded reviewer role. The
+queue's own tenant + self-approval checks still run under the real
+reviewer as defense in depth. The durable decision record is the queue
+transition (reviewer id + reason + timestamp) plus a redacted
+`route.authz` audit event (reviewer, authority, outcome, trace as the
+evidence link). The CSRF secret is now resolvable via `CORVID_CSRF_SECRET`
+so tokens survive a restart (and tests can present a valid double-submit).
+
+A live adversarial test drives every path against ONE queued approval:
+no-session and forged cookie → 401; missing CSRF, CSRF mismatch, missing
+`approvals.decide`, cross-tenant reviewer, and self-approval → denied; a
+reviewer whose role was just revoked → denied (the revocation invalidated
+the session); the approval survives every refusal; then a legitimate
+reviewer decides exactly once (200), and a replay is 409. The five
+existing approve/deny serve_smoke tests were updated to seed a reviewer
+session (the same `SessionAuthRuntime` the server opens).
+
+**Section B (Identity & Authorization Runtime) is fully closed.** The
+guarantee is now the strong one: no protected route executes and no
+approval releases an effect unless Corvid verifies the actor, tenant,
+authority, and decision at the request boundary.
+
+Gate: workspace check clean; the full serve_smoke suite (incl. the new
+adversarial approval test + the 5 updated ones) green single-threaded;
+corpus verify still exits 1 on the two fixtures. Next per the queue: 52g
+Protocol-Typed Connectors (Section C).
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

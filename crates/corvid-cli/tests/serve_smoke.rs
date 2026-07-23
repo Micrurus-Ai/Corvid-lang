@@ -99,6 +99,114 @@ fn http_post(port: u16, path: &str, json_body: &str) -> Option<(u16, String)> {
     Some((status, body))
 }
 
+/// Minimal HTTP/1.1 POST with extra request headers (Cookie /
+/// X-CSRF-Token) — for authenticated approval transitions (52f-4b).
+fn http_post_with_headers(
+    port: u16,
+    path: &str,
+    json_body: &str,
+    headers: &[(String, String)],
+) -> Option<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let body_bytes = json_body.as_bytes();
+    let mut req = format!(
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body_bytes.len()
+    );
+    for (name, value) in headers {
+        req.push_str(&format!("{name}: {value}\r\n"));
+    }
+    req.push_str("\r\n");
+    stream.write_all(req.as_bytes()).ok()?;
+    stream.write_all(body_bytes).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let status: u16 = raw.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    Some((status, body))
+}
+
+/// A fixed CSRF HMAC secret for reviewer tests — set as
+/// `CORVID_CSRF_SECRET` on the served process so a pre-computed CSRF
+/// token verifies (52f-4b).
+const TEST_CSRF_SECRET: &str = "corvid-test-csrf-secret-0123456789";
+
+/// An identity block declaring a `reviewer` role that grants
+/// `approvals.decide`, prepended to sources that exercise approval
+/// transitions. Its tenant matches the approval queue's default
+/// (`serve-default`), so a reviewer in that tenant may decide.
+const IDENTITY_WITH_REVIEWER: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("serve-default")
+    roles:
+        reviewer: "approvals.decide"
+
+"#;
+
+/// Add the reviewer serve env vars to a `Command` under construction and
+/// return it, so an existing `.arg(...)` chain can be wrapped.
+fn with_reviewer_env<'a>(cmd: &'a mut Command, data_dir: &std::path::Path) -> &'a mut Command {
+    cmd.envs(reviewer_serve_env(data_dir))
+}
+
+/// Env vars a reviewer-authenticated serve needs: a durable data dir (so
+/// the seeded session store is the one serve opens), a fixed CSRF secret,
+/// and OAuth credentials for the identity block's provider.
+fn reviewer_serve_env(data_dir: &std::path::Path) -> Vec<(String, String)> {
+    vec![
+        ("CORVID_SERVE_DATA_DIR".into(), data_dir.display().to_string()),
+        ("CORVID_CSRF_SECRET".into(), TEST_CSRF_SECRET.into()),
+        ("CORVID_OAUTH_GOOGLE_CLIENT_ID".into(), "test-client-id".into()),
+        ("CORVID_OAUTH_GOOGLE_CLIENT_SECRET".into(), "test-client-secret".into()),
+    ]
+}
+
+/// Seed a reviewer actor + session (tenant `serve-default`, holding the
+/// `reviewer` role) into the durable auth store BEFORE the server opens
+/// it — exactly the state a real login produces. Returns the request
+/// headers (`Cookie` + `X-CSRF-Token`) a reviewer presents on a decision.
+fn seed_reviewer_headers(data_dir: &std::path::Path) -> Vec<(String, String)> {
+    use corvid_runtime::{mint_csrf_token, AuthActor, SessionAuthRuntime, SessionCreate};
+    std::fs::create_dir_all(data_dir).unwrap();
+    let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
+    auth.upsert_actor(AuthActor {
+        id: "reviewer-1".into(),
+        tenant_id: "serve-default".into(),
+        display_name: "Reviewer".into(),
+        actor_kind: "user".into(),
+        auth_method: "oauth".into(),
+        assurance_level: "aal1".into(),
+        role_fingerprint: String::new(),
+        permission_fingerprint: String::new(),
+        created_ms: 0,
+        updated_ms: 0,
+    })
+    .unwrap();
+    auth.grant_actor_role("reviewer-1", "reviewer", 1).unwrap();
+    let binding = "csrf-reviewer";
+    auth.create_session(SessionCreate {
+        id: "sess-reviewer".into(),
+        actor_id: "reviewer-1".into(),
+        tenant_id: "serve-default".into(),
+        raw_token: "reviewer-token".into(),
+        issued_ms: 1,
+        expires_ms: 9_000_000_000_000,
+        csrf_binding_id: binding.into(),
+    })
+    .unwrap();
+    let csrf = mint_csrf_token(binding, TEST_CSRF_SECRET.as_bytes()).unwrap();
+    vec![
+        (
+            "Cookie".to_string(),
+            format!("corvid_session=reviewer-token; corvid_csrf={csrf}"),
+        ),
+        ("X-CSRF-Token".to_string(), csrf),
+    ]
+}
+
 /// Poll `/healthz` until it answers 200 or the deadline passes.
 fn wait_until_ready(port: u16) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -337,16 +445,22 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     // from the E0-serve-5 test, returning a deterministic receipt
     // the test can observe end-to-end.
     let source = format!(
-        "{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external:\n        return execute_send(body)\n"
+        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external:\n        return execute_send(body)\n"
     );
     std::fs::write(&src_path, source).unwrap();
 
     let port: u16 = 8196;
+    // 52f-4b: approvals are now decided by a VERIFIED reviewer. Seed a
+    // reviewer session (holding `approvals.decide`) into the durable
+    // store the server opens.
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
+        .envs(reviewer_serve_env(&data_dir))
         .current_dir(repo_root())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -375,10 +489,11 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
         .expect("202 body must carry an `approval_id`")
         .to_string();
 
-    let (approve_status, approve_body) = http_post(
+    let (approve_status, approve_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id}/approve"),
         "",
+        &reviewer,
     )
     .expect("POST /__approvals/<id>/approve failed");
     assert_eq!(
@@ -439,10 +554,11 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
         "second approval id must differ from the first (the QueueApprover's AtomicU64 sequence guarantees this)"
     );
 
-    let (deny_status, deny_body) = http_post(
+    let (deny_status, deny_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id_2}/deny"),
         "",
+        &reviewer,
     )
     .expect("POST /deny failed");
     assert_eq!(
@@ -578,7 +694,7 @@ server test_serve_q1b_api:
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
         return execute_echo(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     // tools.py at project root — that's where the autoloader's
     // walk-up-one-level rule expects it (next to `src/`).
@@ -602,6 +718,8 @@ async def echo_string(value: str) -> str:
     );
 
     let port: u16 = 8198;
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -609,6 +727,7 @@ async def echo_string(value: str) -> str:
         .arg(format!("127.0.0.1:{port}"))
         .current_dir(repo_root())
         .env("PYTHONPATH", &python_path)
+        .envs(reviewer_serve_env(&data_dir))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -645,10 +764,11 @@ async def echo_string(value: str) -> str:
     //    If the autoloader didn't wire echo_string into the runtime,
     //    this answers 500 "no handler registered for tool `echo_string`"
     //    and reproduces P1.1's regression.
-    let (approve_status, approve_body) = http_post(
+    let (approve_status, approve_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id}/approve"),
         "",
+        &reviewer,
     )
     .expect("POST /__approvals/<id>/approve failed");
     assert_eq!(
@@ -729,7 +849,7 @@ server test_serve_q6_api:
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
         return execute_echo(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let tools_py = r#"from corvid_runtime import tool
 
@@ -741,15 +861,18 @@ async def echo_string(value: str) -> str:
     std::fs::write(project_root.join("tools.py"), tools_py).unwrap();
 
     let port: u16 = 8200;
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
     // NO .env("PYTHONPATH", ...) — that's the load-bearing
     // assertion 33Q6 makes: bundled corvid_runtime resolves
-    // automatically.
+    // automatically. The reviewer env vars do not affect that.
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
         .current_dir(repo_root())
+        .envs(reviewer_serve_env(&data_dir))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -783,10 +906,11 @@ async def echo_string(value: str) -> str:
         .expect("202 body must carry an `approval_id`")
         .to_string();
 
-    let (approve_status, approve_body) = http_post(
+    let (approve_status, approve_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id}/approve"),
         "",
+        &reviewer,
     )
     .expect("POST /approve failed");
     assert_eq!(
@@ -875,9 +999,11 @@ server test_serve_q1a_api:
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
         return execute_echo(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let port: u16 = 8197;
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -886,6 +1012,7 @@ server test_serve_q1a_api:
         .arg("--with-tools-cdylib")
         .arg(&cdylib_path)
         .current_dir(repo_root())
+        .envs(reviewer_serve_env(&data_dir))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -921,10 +1048,11 @@ server test_serve_q1a_api:
     //    wiring, /approve would answer 500 "no handler registered for
     //    tool `echo_string`" AND drop the approval — the P1.1 regression
     //    documented in `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
-    let (approve_status, approve_body) = http_post(
+    let (approve_status, approve_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id}/approve"),
         "",
+        &reviewer,
     )
     .expect("POST /__approvals/<id>/approve failed");
     assert_eq!(
@@ -1025,21 +1153,26 @@ server test_serve_q2_api:
     route POST "/broken" body BrokenReq -> json BrokenReceipt uses broken_external:
         return execute_broken(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let port: u16 = 8199;
-    let child = Command::new(corvid_bin())
-        .arg("serve")
-        .arg(&src_path)
-        .arg("--listen")
-        .arg(format!("127.0.0.1:{port}"))
-        .arg("--with-tools-cdylib")
-        .arg(&cdylib_path)
-        .current_dir(repo_root())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
+    let child = with_reviewer_env(
+        Command::new(corvid_bin())
+            .arg("serve")
+            .arg(&src_path)
+            .arg("--listen")
+            .arg(format!("127.0.0.1:{port}"))
+            .arg("--with-tools-cdylib")
+            .arg(&cdylib_path),
+        &data_dir,
+    )
+    .current_dir(repo_root())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped())
+    .spawn()
+    .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
     let _guard = ServedApp(child);
 
     assert!(wait_until_ready(port), "server did not become ready on :{port}");
@@ -1064,7 +1197,7 @@ server test_serve_q2_api:
     //    reviewer with no way to recover.
     let approve_url = format!("/__approvals/{approval_id}/approve");
     let (approve_status, approve_body) =
-        http_post(port, &approve_url, "").expect("POST /approve failed");
+        http_post_with_headers(port, &approve_url, "", &reviewer).expect("POST /approve failed");
     assert_eq!(
         approve_status, 500,
         "POST /approve must answer 500 when the handler errors: {approve_body}"
@@ -1126,7 +1259,7 @@ server test_serve_q2_api:
     //    no number of retries against a permanently-broken handler
     //    can flip the approval state to `approved`).
     let (approve2_status, approve2_body) =
-        http_post(port, &approve_url, "").expect("POST /approve retry failed");
+        http_post_with_headers(port, &approve_url, "", &reviewer).expect("POST /approve retry failed");
     assert_eq!(
         approve2_status, 500,
         "second /approve against the still-broken handler must also \
@@ -1158,7 +1291,7 @@ server test_serve_q2_api:
     // 5. POST /deny → 200, approval terminates as denied. This is the
     //    reviewer's safety valve to exit a permanently-broken loop.
     let deny_url = format!("/__approvals/{approval_id}/deny");
-    let (deny_status, deny_body) = http_post(port, &deny_url, "").expect("POST /deny failed");
+    let (deny_status, deny_body) = http_post_with_headers(port, &deny_url, "", &reviewer).expect("POST /deny failed");
     assert_eq!(deny_status, 200, "POST /deny must answer 200: {deny_body}");
     let deny_resp: serde_json::Value = serde_json::from_str(&deny_body).unwrap();
     assert_eq!(
@@ -2087,5 +2220,167 @@ server admin_api:
     assert!(
         admin_body.contains("actor-admin"),
         "the handler must see the verified actor id: {admin_body}"
+    );
+}
+
+/// Slice 52f-4b adversarial gate. An approval decision is now a
+/// privileged, authenticated action. Against a single queued approval,
+/// EVERY unauthorized decision path is refused before the approval is
+/// consumed — only a verified reviewer with the `approvals.decide`
+/// permission, in the approval's tenant, who is NOT the requester, with a
+/// valid CSRF double-submit, may decide. Then a revoked-role reviewer is
+/// refused, and a valid decision succeeds exactly once.
+#[test]
+fn approval_decisions_reject_every_unauthorized_path() {
+    use corvid_runtime::{mint_csrf_token, AuthActor, SessionAuthRuntime, SessionCreate};
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let data_dir = dir.path().join("state");
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    // Seed a family of sessions into the durable auth store.
+    let csrf = |binding: &str| mint_csrf_token(binding, TEST_CSRF_SECRET.as_bytes()).unwrap();
+    let headers = |token: &str, binding: &str| -> Vec<(String, String)> {
+        let c = csrf(binding);
+        vec![
+            ("Cookie".to_string(), format!("corvid_session={token}; corvid_csrf={c}")),
+            ("X-CSRF-Token".to_string(), c),
+        ]
+    };
+    {
+        let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
+        let mk = |id: &str, tenant: &str| AuthActor {
+            id: id.into(), tenant_id: tenant.into(), display_name: id.into(),
+            actor_kind: "user".into(), auth_method: "oauth".into(), assurance_level: "aal1".into(),
+            role_fingerprint: String::new(), permission_fingerprint: String::new(),
+            created_ms: 0, updated_ms: 0,
+        };
+        let sess = |id: &str, actor: &str, tenant: &str, token: &str, binding: &str| SessionCreate {
+            id: id.into(), actor_id: actor.into(), tenant_id: tenant.into(),
+            raw_token: token.into(), issued_ms: 1, expires_ms: 9_000_000_000_000,
+            csrf_binding_id: binding.into(),
+        };
+        // A legitimate reviewer.
+        auth.upsert_actor(mk("rev", "serve-default")).unwrap();
+        auth.grant_actor_role("rev", "reviewer", 1).unwrap();
+        auth.create_session(sess("s-rev", "rev", "serve-default", "rev-token", "b-rev")).unwrap();
+        // A reviewer to have their role revoked mid-test.
+        auth.upsert_actor(mk("rev2", "serve-default")).unwrap();
+        auth.grant_actor_role("rev2", "reviewer", 1).unwrap();
+        auth.create_session(sess("s-rev2", "rev2", "serve-default", "rev2-token", "b-rev2")).unwrap();
+        // Authenticated but WITHOUT the approvals.decide permission.
+        auth.upsert_actor(mk("peon", "serve-default")).unwrap();
+        auth.create_session(sess("s-peon", "peon", "serve-default", "peon-token", "b-peon")).unwrap();
+        // A reviewer in a DIFFERENT tenant.
+        auth.upsert_actor(mk("outsider", "other-tenant")).unwrap();
+        auth.grant_actor_role("outsider", "reviewer", 1).unwrap();
+        auth.create_session(sess("s-out", "outsider", "other-tenant", "out-token", "b-out")).unwrap();
+        // The requester themself (serve-anonymous), even with the permission.
+        auth.upsert_actor(mk("serve-anonymous", "serve-default")).unwrap();
+        auth.grant_actor_role("serve-anonymous", "reviewer", 1).unwrap();
+        auth.create_session(sess("s-self", "serve-anonymous", "serve-default", "self-token", "b-self")).unwrap();
+    }
+
+    let source = format!("{IDENTITY_WITH_REVIEWER}{}", r#"type SendReq:
+    body: String
+
+type SendReceipt:
+    delivered: Bool
+
+effect send_external:
+    cost: $0.0
+    trust: human_required
+    data: external
+
+tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
+
+agent execute_send(req: SendReq) -> SendReceipt uses send_external:
+    approve SendMessage(req)
+    return SendReceipt(true)
+
+server adversary_api:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+        return execute_send(body)
+"#);
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8207;
+    let child = Command::new(corvid_bin())
+        .arg("serve").arg(&src_path).arg("--listen").arg(format!("127.0.0.1:{port}"))
+        .envs(reviewer_serve_env(&data_dir))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped())
+        .spawn().expect("spawn corvid serve");
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "server did not become ready");
+
+    // Queue one approval.
+    let (_s, body) = http_post(port, "/send", r#"{"body":"decide me"}"#).expect("POST /send");
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()
+        .get("approval_id").and_then(|v| v.as_str()).unwrap().to_string();
+    let url = format!("/__approvals/{id}/approve");
+
+    // None of these consume the approval — each is refused.
+    // 1. No session → 401.
+    assert_eq!(http_post(port, &url, "").unwrap().0, 401, "no session must be 401");
+    // 2. Forged cookie → 401.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &[("Cookie".into(), "corvid_session=forged".into())]).unwrap().0,
+        401, "a forged cookie must be 401"
+    );
+    // 3. Valid session, missing CSRF → 403.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &[("Cookie".into(), "corvid_session=rev-token".into())]).unwrap().0,
+        403, "a mutation without CSRF must be 403"
+    );
+    // 4. Valid session, CSRF mismatch → 403.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &[
+            ("Cookie".into(), format!("corvid_session=rev-token; corvid_csrf={}", csrf("b-rev"))),
+            ("X-CSRF-Token".into(), "wrong.deadbeef".into()),
+        ]).unwrap().0,
+        403, "a CSRF mismatch must be 403"
+    );
+    // 5. Authenticated but lacking approvals.decide → 403.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("peon-token", "b-peon")).unwrap().0,
+        403, "a reviewer without approvals.decide must be 403"
+    );
+    // 6. Cross-tenant reviewer → 403.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("out-token", "b-out")).unwrap().0,
+        403, "a cross-tenant reviewer must be 403"
+    );
+    // 7. Self-approval (the requester) → 403.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("self-token", "b-self")).unwrap().0,
+        403, "the requester must not decide their own approval"
+    );
+
+    // 8. Role revocation takes effect at once — revoke rev2's role, then
+    //    their decision is refused (the session is invalidated too).
+    {
+        let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
+        auth.revoke_actor_role("rev2", "reviewer", 2).unwrap();
+    }
+    let revoked_status = http_post_with_headers(port, &url, "", &headers("rev2-token", "b-rev2")).unwrap().0;
+    assert!(
+        revoked_status == 401 || revoked_status == 403,
+        "a reviewer whose role was revoked must be denied, got {revoked_status}"
+    );
+
+    // The approval is STILL pending after all the refusals.
+    let (_g, list) = http_get(port, "/__approvals").expect("GET /__approvals");
+    assert!(list.contains(&id), "the approval must survive every refused decision");
+
+    // 9. A legitimate reviewer decides → 200, exactly once; a replay 409s.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("rev-token", "b-rev")).unwrap().0,
+        200, "a verified reviewer with approvals.decide must succeed"
+    );
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("rev-token", "b-rev")).unwrap().0,
+        409, "a second decision on the same approval must be 409 (already decided)"
     );
 }

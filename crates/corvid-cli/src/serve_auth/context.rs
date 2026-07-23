@@ -189,8 +189,17 @@ impl AuthContext {
     }
 }
 
-/// A fresh 32-byte CSRF HMAC secret for this serve process.
+/// The CSRF HMAC secret for this serve process. An explicit
+/// `CORVID_CSRF_SECRET` (recommended for a durable/replicated deployment
+/// so tokens survive a restart and are consistent across replicas) is
+/// used verbatim; otherwise a fresh random 32-byte secret is generated
+/// per process.
 fn random_csrf_secret() -> Vec<u8> {
+    if let Ok(secret) = std::env::var("CORVID_CSRF_SECRET") {
+        if !secret.trim().is_empty() {
+            return secret.into_bytes();
+        }
+    }
     use rand_core::{OsRng, RngCore};
     let mut secret = vec![0u8; 32];
     OsRng.fill_bytes(&mut secret);

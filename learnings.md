@@ -7319,3 +7319,44 @@ invalidates the actor's sessions immediately.
 An unsatisfiable requirement never silently always-denies: `requires
 role("typo")` where `typo` isn't declared in `roles:` is a compile error. See
 [dev-log.md](dev-log.md) (2026-07-23, 52f).
+
+---
+
+## Approval decisions require a verified reviewer (2026-07-23)
+
+Approving or denying a queued dangerous action is a privileged, authenticated
+operation — `corvid serve` no longer lets an anonymous caller decide.
+
+The app declares who may decide with an ordinary permission:
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+    roles:
+        reviewer: "approvals.decide"
+```
+
+`POST /__approvals/{id}/approve` and `/deny` then require, in order:
+
+- an unknown id is `404` and an already-decided one is `409` (no auth needed to
+  learn that);
+- a valid, non-expired, non-revoked **session** — otherwise `401`;
+- a CSRF double-submit (the `X-CSRF-Token` header matching the `corvid_csrf`
+  cookie), the declared **`approvals.decide` permission**, the approval's own
+  tenant, and a reviewer who is **not the requester** — any failure is `403`.
+
+Separation of duties is enforced: whoever triggered an approval can never
+approve it themselves. Every decision writes a durable record (the reviewer, the
+authority used, the reason, the timestamp) plus a redacted `route.authz` audit
+event. Revoking a reviewer's role takes effect immediately — it also invalidates
+their sessions.
+
+Set `CORVID_CSRF_SECRET` for a durable/replicated deployment so CSRF tokens
+survive a restart and are consistent across replicas.
+
+The resulting guarantee: **no protected route executes and no approval releases
+an effect unless Corvid verifies the actor, tenant, authority, and decision at
+the request boundary.** See [dev-log.md](dev-log.md) (2026-07-23, 52f-4b).
