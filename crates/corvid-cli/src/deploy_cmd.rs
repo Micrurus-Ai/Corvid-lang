@@ -1,10 +1,87 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 use corvid_abi::{load_signing_key, sign_envelope, KeySource};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+
+const CORVID_REPOSITORY_URL: &str = "https://github.com/Micrurus-Ai/Corvid-lang";
+
+/// One resolved deployment shape consumed by every renderer. Keeping
+/// these values together prevents Docker, Compose, PaaS, Kubernetes and
+/// systemd output from independently inventing ports and paths.
+#[derive(Debug, Clone, Copy)]
+struct DeploymentPlan<'a> {
+    app_name: &'a str,
+    project_entrypoint: &'static str,
+    container_entrypoint: &'static str,
+    migrations_dir: &'static str,
+    health_path: &'static str,
+    readiness_path: &'static str,
+    port: u16,
+}
+
+impl<'a> DeploymentPlan<'a> {
+    fn new(app_name: &'a str) -> Self {
+        Self {
+            app_name,
+            project_entrypoint: "src/main.cor",
+            container_entrypoint: "/app/src/main.cor",
+            migrations_dir: "migrations",
+            health_path: "/healthz",
+            readiness_path: "/readyz",
+            port: 8000,
+        }
+    }
+}
+
+/// Compute a manifest-portable path from one directory to another.
+/// Deploy commands accept arbitrary `--out` locations, so renderers
+/// must not assume the default `target/<kind>` depth.
+fn relative_path(from_dir: &Path, target: &Path) -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("resolve current directory for deploy paths")?;
+    let from = if from_dir.is_absolute() {
+        from_dir.to_path_buf()
+    } else {
+        cwd.join(from_dir)
+    };
+    let target = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        cwd.join(target)
+    };
+    let from_components: Vec<Component<'_>> = from.components().collect();
+    let target_components: Vec<Component<'_>> = target.components().collect();
+    let common = from_components
+        .iter()
+        .zip(&target_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    // Different Windows drive prefixes have no relative representation.
+    if common == 0 {
+        return Ok(target);
+    }
+
+    let mut relative = PathBuf::new();
+    for component in &from_components[common..] {
+        if !matches!(component, Component::CurDir) {
+            relative.push("..");
+        }
+    }
+    for component in &target_components[common..] {
+        relative.push(component.as_os_str());
+    }
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    Ok(relative)
+}
+
+fn path_for_manifest(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
 
 #[derive(Serialize)]
 struct OciMetadata<'a> {
@@ -29,6 +106,7 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
+    let plan = DeploymentPlan::new(app_name);
     let source = app.join("src").join("main.cor");
     let source_bytes =
         fs::read(&source).with_context(|| format!("read app source `{}`", source.display()))?;
@@ -104,7 +182,7 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
         })?;
     let stage_path = stage.path().to_path_buf();
 
-    fs::write(stage_path.join("Dockerfile"), render_dockerfile(app_name, app))
+    fs::write(stage_path.join("Dockerfile"), render_dockerfile_with_plan(plan, app))
         .context("write Dockerfile")?;
 
     let source_sha256 = hex::encode(Sha256::digest(&source_bytes));
@@ -133,11 +211,11 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     fs::write(stage_path.join("oci-labels.json"), &metadata_json).context("write OCI metadata")?;
     fs::write(stage_path.join("env.schema.json"), render_env_schema()).context("write env schema")?;
     fs::write(stage_path.join("health.json"), render_health_config()).context("write health config")?;
-    fs::write(stage_path.join("migrate.sh"), render_migration_runner(app_name))
+    fs::write(stage_path.join("migrate.sh"), render_migration_runner(plan))
         .context("write migration runner")?;
     fs::write(
         stage_path.join("startup-checks.md"),
-        render_startup_checks(app_name),
+        render_startup_checks(plan),
     )
     .context("write startup checks")?;
     let attestation =
@@ -195,9 +273,21 @@ pub fn run_compose(app: &Path, out: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
+    let plan = DeploymentPlan::new(app_name);
     fs::create_dir_all(out)
         .with_context(|| format!("create compose deploy dir `{}`", out.display()))?;
-    fs::write(out.join("docker-compose.yml"), render_compose(app_name))
+    let context = relative_path(out, app)?;
+    let dockerfile = out.join("Dockerfile");
+    let dockerfile_from_context = relative_path(app, &dockerfile)?;
+    fs::write(&dockerfile, render_dockerfile_with_plan(plan, app)).context("write Dockerfile")?;
+    fs::write(
+        out.join("docker-compose.yml"),
+        render_compose(
+            plan,
+            &path_for_manifest(&context),
+            &path_for_manifest(&dockerfile_from_context),
+        ),
+    )
         .context("write docker-compose.yml")?;
     fs::write(out.join(".env.example"), render_compose_env(app_name))
         .context("write compose env")?;
@@ -214,10 +304,20 @@ pub fn run_paas(app: &Path, out: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
+    let plan = DeploymentPlan::new(app_name);
     fs::create_dir_all(out)
         .with_context(|| format!("create paas deploy dir `{}`", out.display()))?;
-    fs::write(out.join("fly.toml"), render_fly(app_name)).context("write fly.toml")?;
-    fs::write(out.join("render.yaml"), render_render(app_name)).context("write render.yaml")?;
+    let dockerfile = out.join("Dockerfile");
+    let dockerfile_from_app = relative_path(app, &dockerfile)?;
+    let dockerfile_from_app = path_for_manifest(&dockerfile_from_app);
+    fs::write(&dockerfile, render_dockerfile_with_plan(plan, app)).context("write Dockerfile")?;
+    fs::write(out.join("fly.toml"), render_fly(plan, &dockerfile_from_app))
+        .context("write fly.toml")?;
+    fs::write(
+        out.join("render.yaml"),
+        render_render(plan, &dockerfile_from_app),
+    )
+    .context("write render.yaml")?;
     fs::write(out.join("secrets.example"), render_paas_secrets(app_name))
         .context("write paas secrets")?;
     println!("fly manifest: {}", out.join("fly.toml").display());
@@ -230,9 +330,10 @@ pub fn run_k8s(app: &Path, out: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
+    let plan = DeploymentPlan::new(app_name);
     fs::create_dir_all(out)
         .with_context(|| format!("create k8s deploy dir `{}`", out.display()))?;
-    fs::write(out.join("deployment.yaml"), render_k8s(app_name)).context("write k8s deployment")?;
+    fs::write(out.join("deployment.yaml"), render_k8s(plan)).context("write k8s deployment")?;
     println!("k8s manifest: {}", out.join("deployment.yaml").display());
     Ok(())
 }
@@ -528,11 +629,12 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
+    let plan = DeploymentPlan::new(app_name);
     fs::create_dir_all(out)
         .with_context(|| format!("create systemd deploy dir `{}`", out.display()))?;
     fs::write(
         out.join(format!("{app_name}.service")),
-        render_systemd_service(app_name),
+        render_systemd_service(plan),
     )
     .context("write systemd service")?;
     fs::write(
@@ -563,7 +665,7 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
 /// HEALTHCHECK uses `corvid check` against the app's source as the
 /// liveness probe — if `corvid` cannot lex/parse/typecheck the
 /// shipped source, the binary is broken regardless of HTTP state.
-fn render_dockerfile(app_name: &str, app_root: &Path) -> String {
+fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> String {
     // The build context is the user's STANDALONE app dir, not the
     // Corvid monorepo. Pre-2026-06-04 this rendered a Dockerfile that
     // assumed monorepo layout (`cargo build -p corvid-cli`, `COPY
@@ -668,6 +770,9 @@ fn render_dockerfile(app_name: &str, app_root: &Path) -> String {
         }
     }
     let copy_block = copy_lines.trim_end();
+    let app_name = plan.app_name;
+    let container_entrypoint = plan.container_entrypoint;
+    let port = plan.port;
 
     format!(
         r#"# syntax=docker/dockerfile:1
@@ -736,9 +841,9 @@ COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
 {copy_block}
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD ["/usr/local/bin/corvid", "check", "/app/src/main.cor"]
+    CMD ["/usr/local/bin/corvid", "check", "{container_entrypoint}"]
 ENTRYPOINT ["/usr/local/bin/corvid"]
-CMD ["serve", "/app/src/main.cor", "--listen", "0.0.0.0:8000"]
+CMD ["serve", "{container_entrypoint}", "--listen", "0.0.0.0:{port}"]
 "#
     )
 }
@@ -766,22 +871,25 @@ fn render_health_config() -> &'static str {
 "#
 }
 
-fn render_migration_runner(app_name: &str) -> String {
+fn render_migration_runner(plan: DeploymentPlan<'_>) -> String {
+    let migrations_dir = plan.migrations_dir;
     format!(
         r#"#!/usr/bin/env sh
 set -eu
-corvid migrate status --dir examples/backend/{app_name}/migrations --database "$CORVID_DATABASE_URL"
-corvid migrate up --dir examples/backend/{app_name}/migrations --database "$CORVID_DATABASE_URL"
+corvid migrate status --dir {migrations_dir} --database "$CORVID_DATABASE_URL"
+corvid migrate up --dir {migrations_dir} --database "$CORVID_DATABASE_URL"
 "#
     )
 }
 
-fn render_startup_checks(app_name: &str) -> String {
+fn render_startup_checks(plan: DeploymentPlan<'_>) -> String {
+    let project_entrypoint = plan.project_entrypoint;
+    let migrations_dir = plan.migrations_dir;
     format!(
         r#"# Startup Checks
 
-- `corvid check examples/backend/{app_name}/src/main.cor`
-- `corvid migrate status --dir examples/backend/{app_name}/migrations --database "$CORVID_DATABASE_URL"`
+- `corvid check {project_entrypoint}`
+- `corvid migrate status --dir {migrations_dir} --database "$CORVID_DATABASE_URL"`
 - `CORVID_REQUIRE_APPROVALS=true`
 - `CORVID_TRACE_DIR` exists and is writable
 - `CORVID_CONNECTOR_MODE` is explicitly set
@@ -839,7 +947,7 @@ fn render_spdx_sbom(app_name: &str, source_sha256: &str) -> Result<String> {
             {
                 "SPDXID": "SPDXRef-Corvid-Runtime",
                 "name": "corvid",
-                "downloadLocation": "https://github.com/Corvid-lang/Corvid-lang",
+                "downloadLocation": CORVID_REPOSITORY_URL,
                 "versionInfo": corvid_version,
                 "filesAnalyzed": false,
                 "licenseConcluded": "NOASSERTION",
@@ -918,13 +1026,20 @@ Verification requirements:
 "#
 }
 
-fn render_compose(app_name: &str) -> String {
+fn render_compose(
+    plan: DeploymentPlan<'_>,
+    build_context: &str,
+    dockerfile: &str,
+) -> String {
+    let app_name = plan.app_name;
+    let port = plan.port;
+    let container_entrypoint = plan.container_entrypoint;
     format!(
         r#"services:
   {app_name}:
     build:
-      context: ../../..
-      dockerfile: examples/backend/{app_name}/deploy/Dockerfile
+      context: {build_context}
+      dockerfile: {dockerfile}
     environment:
       CORVID_APP_ENV: local
       CORVID_CONNECTOR_MODE: mock
@@ -932,11 +1047,11 @@ fn render_compose(app_name: &str) -> String {
       CORVID_TRACE_DIR: /data/traces
       CORVID_REQUIRE_APPROVALS: "true"
     ports:
-      - "8080:8080"
+      - "{port}:{port}"
     volumes:
       - {app_name}-data:/data
     healthcheck:
-      test: ["CMD", "corvid", "check", "examples/backend/{app_name}/src/main.cor"]
+      test: ["CMD", "corvid", "check", "{container_entrypoint}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -958,13 +1073,16 @@ CORVID_REQUIRE_APPROVALS=true
     )
 }
 
-fn render_fly(app_name: &str) -> String {
+fn render_fly(plan: DeploymentPlan<'_>, dockerfile: &str) -> String {
+    let app_name = plan.app_name;
+    let port = plan.port;
+    let health_path = plan.health_path;
     format!(
         r#"app = "{app_name}"
 primary_region = "iad"
 
 [build]
-  dockerfile = "examples/backend/{app_name}/deploy/Dockerfile"
+  dockerfile = "{dockerfile}"
 
 [env]
   CORVID_APP_ENV = "production"
@@ -977,7 +1095,7 @@ primary_region = "iad"
   destination = "/data"
 
 [[services]]
-  internal_port = 8080
+  internal_port = {port}
   protocol = "tcp"
 
   [[services.ports]]
@@ -988,19 +1106,21 @@ primary_region = "iad"
     interval = "30s"
     timeout = "10s"
     method = "get"
-    path = "/healthz"
+    path = "{health_path}"
 "#
     )
 }
 
-fn render_render(app_name: &str) -> String {
+fn render_render(plan: DeploymentPlan<'_>, dockerfile: &str) -> String {
+    let app_name = plan.app_name;
+    let health_path = plan.health_path;
     format!(
         r#"services:
   - type: web
     name: {app_name}
     env: docker
-    dockerfilePath: examples/backend/{app_name}/deploy/Dockerfile
-    healthCheckPath: /healthz
+    dockerfilePath: {dockerfile}
+    healthCheckPath: {health_path}
     envVars:
       - key: CORVID_APP_ENV
         value: production
@@ -1025,7 +1145,11 @@ CORVID_DEPLOY_SIGNING_KEY=<hex-encoded-ed25519-seed>
     )
 }
 
-fn render_k8s(app_name: &str) -> String {
+fn render_k8s(plan: DeploymentPlan<'_>) -> String {
+    let app_name = plan.app_name;
+    let port = plan.port;
+    let health_path = plan.health_path;
+    let readiness_path = plan.readiness_path;
     format!(
         r#"apiVersion: v1
 kind: ConfigMap
@@ -1055,18 +1179,18 @@ spec:
         - name: {app_name}
           image: corvid/{app_name}:local
           ports:
-            - containerPort: 8080
+            - containerPort: {port}
           envFrom:
             - configMapRef:
                 name: {app_name}-config
           readinessProbe:
             httpGet:
-              path: /readyz
-              port: 8080
+              path: {readiness_path}
+              port: {port}
           livenessProbe:
             httpGet:
-              path: /healthz
-              port: 8080
+              path: {health_path}
+              port: {port}
 ---
 apiVersion: v1
 kind: Service
@@ -1077,12 +1201,15 @@ spec:
     app: {app_name}
   ports:
     - port: 80
-      targetPort: 8080
+      targetPort: {port}
 "#
     )
 }
 
-fn render_systemd_service(app_name: &str) -> String {
+fn render_systemd_service(plan: DeploymentPlan<'_>) -> String {
+    let app_name = plan.app_name;
+    let project_entrypoint = plan.project_entrypoint;
+    let port = plan.port;
     format!(
         r#"[Unit]
 Description=Corvid {app_name}
@@ -1092,13 +1219,13 @@ Wants=network-online.target
 [Service]
 User={app_name}
 Group={app_name}
-WorkingDirectory=/opt/corvid
+WorkingDirectory=/opt/corvid/{app_name}
 Environment=CORVID_APP_ENV=production
 Environment=CORVID_CONNECTOR_MODE=mock
 Environment=CORVID_DATABASE_URL=sqlite:/var/lib/{app_name}/{app_name}.db
 Environment=CORVID_TRACE_DIR=/var/lib/{app_name}/traces
 Environment=CORVID_REQUIRE_APPROVALS=true
-ExecStart=/usr/local/bin/corvid run examples/backend/{app_name}/src/main.cor
+ExecStart=/usr/local/bin/corvid serve {project_entrypoint} --listen 0.0.0.0:{port}
 Restart=on-failure
 RestartSec=5s
 
@@ -1158,6 +1285,106 @@ mod tests {
             parsed["relationships"].as_array().is_some_and(|a| !a.is_empty()),
             "SBOM must declare at least one relationship"
         );
+        let runtime = parsed["packages"]
+            .as_array()
+            .and_then(|packages| packages.iter().find(|package| package["name"] == "corvid"))
+            .expect("SBOM contains the Corvid runtime package");
+        assert_eq!(runtime["downloadLocation"], CORVID_REPOSITORY_URL);
+    }
+
+    #[test]
+    fn every_deploy_renderer_consumes_one_port_and_standalone_paths() {
+        let plan = DeploymentPlan::new("test_app");
+        let compose = render_compose(plan, "../..", "target/compose/Dockerfile");
+        let fly = render_fly(plan, "target/paas/Dockerfile");
+        let render = render_render(plan, "target/paas/Dockerfile");
+        let k8s = render_k8s(plan);
+        let systemd = render_systemd_service(plan);
+        let migrations = render_migration_runner(plan);
+        let startup = render_startup_checks(plan);
+        let all = [
+            compose.as_str(),
+            fly.as_str(),
+            render.as_str(),
+            k8s.as_str(),
+            systemd.as_str(),
+            migrations.as_str(),
+            startup.as_str(),
+        ]
+        .join("\n");
+
+        assert!(!all.contains("examples/backend/"), "{all}");
+        assert!(!all.contains("8080"), "{all}");
+        assert!(compose.contains("\"8000:8000\""), "{compose}");
+        assert!(fly.contains("internal_port = 8000"), "{fly}");
+        assert!(k8s.contains("containerPort: 8000"), "{k8s}");
+        assert!(k8s.contains("targetPort: 8000"), "{k8s}");
+        assert!(
+            systemd.contains(
+                "ExecStart=/usr/local/bin/corvid serve src/main.cor --listen 0.0.0.0:8000"
+            ),
+            "{systemd}"
+        );
+        assert!(migrations.contains("--dir migrations"), "{migrations}");
+        assert!(startup.contains("corvid check src/main.cor"), "{startup}");
+    }
+
+    #[test]
+    fn deploy_paths_follow_custom_output_location() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app = temp.path().join("app");
+        let out = temp.path().join("some").join("custom").join("compose");
+        fs::create_dir_all(&app).expect("create app");
+        fs::create_dir_all(&out).expect("create out");
+
+        let context = relative_path(&out, &app).expect("relative context");
+        let dockerfile =
+            relative_path(&app, &out.join("Dockerfile")).expect("relative Dockerfile");
+        assert_eq!(path_for_manifest(&context), "../../../app");
+        assert_eq!(
+            path_for_manifest(&dockerfile),
+            "../some/custom/compose/Dockerfile"
+        );
+    }
+
+    #[test]
+    fn compose_and_paas_emit_self_contained_dockerfiles_at_custom_outputs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app = temp.path().join("app");
+        fs::create_dir_all(app.join("src")).expect("create app source");
+        fs::write(app.join("src/main.cor"), "agent main() -> Int:\n    return 0\n")
+            .expect("write source");
+        fs::write(app.join("corvid.toml"), "[package]\nname = \"app\"\n")
+            .expect("write config");
+
+        let compose_out = temp.path().join("generated/compose");
+        run_compose(&app, &compose_out).expect("render Compose");
+        assert!(compose_out.join("Dockerfile").is_file());
+        let compose =
+            fs::read_to_string(compose_out.join("docker-compose.yml")).expect("read Compose");
+        assert!(compose.contains("context: ../../app"), "{compose}");
+        assert!(
+            compose.contains("dockerfile: ../generated/compose/Dockerfile"),
+            "{compose}"
+        );
+        assert!(compose.contains("\"8000:8000\""), "{compose}");
+        assert!(!compose.contains("examples/backend"), "{compose}");
+
+        let paas_out = temp.path().join("generated/paas");
+        run_paas(&app, &paas_out).expect("render PaaS");
+        assert!(paas_out.join("Dockerfile").is_file());
+        let fly = fs::read_to_string(paas_out.join("fly.toml")).expect("read Fly");
+        let render = fs::read_to_string(paas_out.join("render.yaml")).expect("read Render");
+        assert!(
+            fly.contains("dockerfile = \"../generated/paas/Dockerfile\""),
+            "{fly}"
+        );
+        assert!(
+            render.contains("dockerfilePath: ../generated/paas/Dockerfile"),
+            "{render}"
+        );
+        assert!(!fly.contains("examples/backend"), "{fly}");
+        assert!(!render.contains("examples/backend"), "{render}");
     }
 
     /// 43O: when `corvid deploy package` runs without `--cdylib`,
@@ -1262,7 +1489,8 @@ mod tests {
     #[test]
     fn deploy_dockerfile_uses_distroless_runtime_base() {
         let app_root = tempdir_with_all_optional_paths();
-        let dockerfile = render_dockerfile("test_app", app_root.path());
+        let dockerfile =
+            render_dockerfile_with_plan(DeploymentPlan::new("test_app"), app_root.path());
 
         // The Dockerfile is multi-stage: one or more builder stages
         // (each `FROM <image> AS <name>`) followed by the runtime
@@ -1334,7 +1562,8 @@ mod tests {
         // would produce.
         let app_root = tempfile::tempdir().expect("tempdir");
 
-        let dockerfile = render_dockerfile("test_app", app_root.path());
+        let dockerfile =
+            render_dockerfile_with_plan(DeploymentPlan::new("test_app"), app_root.path());
 
         // Mandatory COPYs (structural minimum a `corvid new` app
         // always has) MUST be present.
@@ -1379,7 +1608,8 @@ mod tests {
     fn deploy_dockerfile_emits_copy_lines_for_present_optional_paths() {
         let app_root = tempdir_with_all_optional_paths();
 
-        let dockerfile = render_dockerfile("test_app", app_root.path());
+        let dockerfile =
+            render_dockerfile_with_plan(DeploymentPlan::new("test_app"), app_root.path());
 
         for present_optional in &[
             "COPY tools.py ./tools.py",
@@ -1417,7 +1647,8 @@ mod tests {
     #[test]
     fn deploy_dockerfile_pins_corvid_version_to_rendering_binary_sha() {
         let app_root = tempdir_with_all_optional_paths();
-        let dockerfile = render_dockerfile("test_app", app_root.path());
+        let dockerfile =
+            render_dockerfile_with_plan(DeploymentPlan::new("test_app"), app_root.path());
 
         let build_sha = env!("CORVID_BUILD_SHA");
         let build_date = env!("CORVID_BUILD_DATE");

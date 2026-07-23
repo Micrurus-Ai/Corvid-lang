@@ -129,17 +129,17 @@ const PACKAGE_JSON: &str = r#"{
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@corvid/client": "*",
-    "@corvid/react": "*",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "@corvid/client": "0.1.0",
+    "@corvid/react": "0.1.0",
+    "react": "18.3.0",
+    "react-dom": "18.3.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
-    "typescript": "^5.6.0",
-    "vite": "^5.4.0"
+    "@types/react": "18.3.0",
+    "@types/react-dom": "18.3.0",
+    "@vitejs/plugin-react": "4.3.0",
+    "typescript": "5.6.0",
+    "vite": "5.4.0"
   }
 }
 "#;
@@ -284,6 +284,18 @@ tool stream_answer(m: String) -> Stream<String>
         // A form for the non-streaming agent, a stream for the streaming one.
         assert!(app.contains("call={(v) => api.classify(v.question)}"));
         assert!(app.contains("stream={(message: string) => api.chat(message)}"));
+
+        // Generated applications are reproducible inputs: direct
+        // dependencies are exact versions, never moving `*`/caret ranges.
+        let package = &files
+            .iter()
+            .find(|f| f.filename == "package.json")
+            .unwrap()
+            .contents;
+        assert!(package.contains("\"@corvid/client\": \"0.1.0\""));
+        assert!(package.contains("\"@corvid/react\": \"0.1.0\""));
+        assert!(!package.contains("\": \"*\""));
+        assert!(!package.contains("\": \"^"));
     }
 
     #[test]

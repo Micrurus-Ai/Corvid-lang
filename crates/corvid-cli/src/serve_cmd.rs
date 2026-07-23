@@ -255,24 +255,29 @@ pub(crate) fn cmd_serve(
     )
     .build();
     // Build the Application Contract + OpenAPI so the live backend
-    // exposes its own machine-readable surface (slice 51r). Best-effort:
-    // the source already compiled to IR, so this should succeed; if not,
-    // fall back to `{}` and keep serving the routes.
+    // exposes its own machine-readable surface (slice 51r). Contract
+    // generation is part of startup closure: a backend must never bind
+    // while advertising an empty or stale machine-readable contract.
+    // The source already compiled to IR, so a failure here is an internal
+    // pipeline disagreement and is deliberately fatal.
     let generated_at =
         std::env::var("CORVID_BUILD_DATE").unwrap_or_else(|_| "unknown".to_string());
-    let (contract_json, openapi_json) = match compile_to_application_contract_with_config(
+    let contract = compile_to_application_contract_with_config(
         &source,
         &file.display().to_string(),
         &generated_at,
         config.as_ref(),
-    ) {
-        Ok(contract) => (
-            serde_json::to_string(&contract).unwrap_or_else(|_| "{}".to_string()),
-            serde_json::to_string(&corvid_abi::openapi::emit_openapi(&contract))
-                .unwrap_or_else(|_| "{}".to_string()),
-        ),
-        Err(_) => ("{}".to_string(), "{}".to_string()),
-    };
+    )
+    .map_err(|diags| {
+        anyhow::anyhow!(
+            "Application Contract generation failed after successful runtime compilation:\n{}",
+            render_all_pretty(&diags, file, &source)
+        )
+    })?;
+    let contract_json =
+        serde_json::to_string(&contract).context("serialize live Corvid Application Contract")?;
+    let openapi_json = serde_json::to_string(&corvid_abi::openapi::emit_openapi(&contract))
+        .context("serialize live Corvid OpenAPI contract")?;
 
     let state = Arc::new(ServeState {
         ir,
