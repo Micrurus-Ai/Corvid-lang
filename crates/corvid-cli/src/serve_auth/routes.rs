@@ -219,6 +219,7 @@ fn run_callback(
             display_name: identity.display_name.as_deref(),
             first_login: ctx.first_login,
             tenant: ctx.tenant.clone(),
+            default_role: ctx.default_role.as_deref(),
             trace_id,
             at_ms: at,
         })
@@ -368,6 +369,7 @@ mod tests {
             first_login: FirstLoginPolicy::Open,
             tenant: TenantSource::Fixed("public".to_string()),
             tenant_claim_name: None,
+            default_role: None,
             cookie: CookieSettings {
                 name: "corvid_session".to_string(),
                 secure,
@@ -502,6 +504,7 @@ mod callback_tests {
             first_login,
             tenant,
             tenant_claim_name: None,
+            default_role: None,
             cookie: CookieSettings::default(),
             session_lifetime_secs: 3600,
             gateway,
@@ -694,7 +697,7 @@ mod callback_tests {
             id: "inv-1".to_string(),
             email: "ada@example.com".to_string(),
             tenant_id: "acme".to_string(),
-            role_fingerprint: String::new(),
+            role: "member".to_string(),
             expires_ms: Some(now_ms() + 600_000),
         })
         .unwrap();

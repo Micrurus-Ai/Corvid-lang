@@ -57,6 +57,9 @@ pub struct AuthContext {
     pub first_login: FirstLoginPolicy,
     pub tenant: TenantSource,
     pub tenant_claim_name: Option<String>,
+    /// The role an `open` signup receives (`provisioning: default_role`),
+    /// or `None` for least privilege (slice 52f).
+    pub default_role: Option<String>,
     pub cookie: CookieSettings,
     pub session_lifetime_secs: u64,
     pub gateway: Arc<dyn ProviderGateway + Send + Sync>,
@@ -151,6 +154,7 @@ impl AuthContext {
             first_login,
             tenant,
             tenant_claim_name,
+            default_role: provisioning.default_role.clone(),
             cookie,
             session_lifetime_secs,
             gateway,

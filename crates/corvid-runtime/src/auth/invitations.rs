@@ -16,14 +16,14 @@ use crate::errors::RuntimeError;
 use crate::tracing::now_ms;
 
 const INVITATION_COLUMNS: &str =
-    "id, email, tenant_id, role_fingerprint, expires_ms, consumed_ms, created_ms";
+    "id, email, tenant_id, role, expires_ms, consumed_ms, created_ms";
 
 fn read_invitation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invitation> {
     Ok(Invitation {
         id: row.get(0)?,
         email: row.get(1)?,
         tenant_id: row.get(2)?,
-        role_fingerprint: row.get(3)?,
+        role: row.get(3)?,
         expires_ms: row.get::<_, Option<i64>>(4)?.map(|v| v as u64),
         consumed_ms: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         created_ms: row.get::<_, i64>(6)? as u64,
@@ -59,13 +59,13 @@ impl SessionAuthRuntime {
             .unwrap()
             .execute(
                 "insert into auth_invitations
-                 (id, email, tenant_id, role_fingerprint, expires_ms, consumed_ms, created_ms)
+                 (id, email, tenant_id, role, expires_ms, consumed_ms, created_ms)
                  values (?1, ?2, ?3, ?4, ?5, null, ?6)",
                 params![
                     input.id,
                     email,
                     input.tenant_id,
-                    input.role_fingerprint,
+                    input.role,
                     input.expires_ms.map(|v| v as i64),
                     now as i64,
                 ],
@@ -151,7 +151,7 @@ mod tests {
             id: "inv-1".to_string(),
             email: "Ada@Example.com".to_string(),
             tenant_id: "org-1".to_string(),
-            role_fingerprint: "sha256:admin".to_string(),
+            role: "sha256:admin".to_string(),
             expires_ms: Some(now + 60_000),
         })
         .unwrap();
@@ -182,7 +182,7 @@ mod tests {
             id: "inv-1".to_string(),
             email: "ada@example.com".to_string(),
             tenant_id: "org-1".to_string(),
-            role_fingerprint: String::new(),
+            role: String::new(),
             expires_ms: Some(now + 1_000),
         })
         .unwrap();
@@ -202,7 +202,7 @@ mod tests {
                 id: "inv-1".to_string(),
                 email: "ada@example.com".to_string(),
                 tenant_id: "org-1".to_string(),
-                role_fingerprint: String::new(),
+                role: String::new(),
                 expires_ms: Some(now.saturating_sub(1_000)),
             })
             .unwrap_err();

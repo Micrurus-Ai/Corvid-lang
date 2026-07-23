@@ -3522,6 +3522,52 @@ exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52f-2: actors hold roles, and authorization is set membership
+
+52f-1 declared the role model; 52f-2 makes it real in the runtime. An
+actor now holds a SET of role names (`auth_actor_roles`), granted only by
+an explicit `grant_actor_role` — authority is never inferred.
+
+Roles are assigned exactly where the language says they come from:
+
+- an **invited** login takes the invitation's role (the invitation's old
+  `role_fingerprint` field became a role NAME, `role`);
+- an **open** login takes the identity block's `provisioning: default_role`,
+  or NO role at all when none is declared — least privilege, the safe
+  default the "no hidden defaults" rule demands. `provision_login` gained
+  a `default_role` input, threaded through `AuthContext`.
+
+The authorization decision is a pure function:
+
+```
+authorize_route(actor_roles, role→permission map, RoutePolicyRequirement)
+    -> Allowed | Denied(reason)
+```
+
+It is **set membership, not fingerprint equality** — the old
+`authorize_trace_permission` could only ask "does the actor's whole
+permission set hash-match this one requirement." Now `requires role("admin")`
+means "holds admin among its roles," and `requires permission("refund:write")`
+means "refund:write is in the union of the permissions its roles grant."
+That union is what lets one actor with `member` + `admin` satisfy a
+permission either grants.
+
+New file `auth/roles.rs` (storage + the decision helper). 5 role tests
+(grant idempotent + queryable, held-role authorized, missing-role denied,
+ungranted-permission denied, union across multiple roles) + an
+open-signup-default-role provisioning test.
+
+This is the runtime model; it is not yet wired into request handling — a
+`requires`-policy route still refuses to start. 52f-3 shares the auth
+runtime into the app-route path, enforces the policy before the handler,
+binds the real typed `actor`, adds CSRF double-submit, and flips the
+`auth_enforcement` capability to close the last Contract Closure gap.
+
+Gate: corvid-runtime lib 352 + serve_auth 28 green; workspace check
+clean; corpus verify still exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

@@ -205,9 +205,10 @@ pub struct Invitation {
     pub id: String,
     pub email: String,
     pub tenant_id: String,
-    /// Optional role grant applied to the provisioned actor; empty means
-    /// no role.
-    pub role_fingerprint: String,
+    /// The role name granted to the actor this invitation provisions
+    /// (slice 52f); empty means no role. Must reference a role the
+    /// identity block declares.
+    pub role: String,
     pub expires_ms: Option<u64>,
     pub consumed_ms: Option<u64>,
     pub created_ms: u64,
@@ -219,7 +220,7 @@ pub struct InvitationCreate {
     pub id: String,
     pub email: String,
     pub tenant_id: String,
-    pub role_fingerprint: String,
+    pub role: String,
     pub expires_ms: Option<u64>,
 }
 

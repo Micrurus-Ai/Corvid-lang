@@ -12,6 +12,7 @@ mod invitations;
 mod oauth;
 mod provisioning;
 mod records;
+mod roles;
 pub mod scope;
 mod sessions;
 pub use api_keys::{hash_api_key_secret, verify_api_key_secret};
@@ -22,6 +23,7 @@ pub use provisioning::{
     FirstLoginPolicy, ProvisioningOutcome, ProvisioningRequest, TenantSource,
 };
 pub use records::*;
+pub use roles::{authorize_route, RouteAuthzOutcome, RoutePolicyRequirement};
 pub use scope::{enforce_scope_grant, ApiKeyScope, ScopeError};
 pub use sessions::{hash_session_secret, PrivilegeChangeReason};
 use sessions::read_actor_row;
@@ -193,12 +195,19 @@ impl SessionAuthRuntime {
                     id text primary key,
                     email text not null,
                     tenant_id text not null,
-                    role_fingerprint text not null,
+                    role text not null,
                     expires_ms integer,
                     consumed_ms integer,
                     created_ms integer not null
                 );
                 create index if not exists auth_invitations_email on auth_invitations(email);
+                create table if not exists auth_actor_roles (
+                    actor_id text not null,
+                    role text not null,
+                    granted_ms integer not null,
+                    primary key (actor_id, role)
+                );
+                create index if not exists auth_actor_roles_actor on auth_actor_roles(actor_id);
                 create table if not exists auth_audit_events (
                     id text primary key,
                     event_kind text not null,

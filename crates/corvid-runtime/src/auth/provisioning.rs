@@ -67,6 +67,11 @@ pub struct ProvisioningRequest<'a> {
     pub display_name: Option<&'a str>,
     pub first_login: FirstLoginPolicy,
     pub tenant: TenantSource,
+    /// The role granted to an `open` signup, from the identity block's
+    /// `provisioning: default_role` (slice 52f). `None` = least
+    /// privilege: no role by default. Ignored for `invited` logins,
+    /// which take their role from the matched invitation.
+    pub default_role: Option<&'a str>,
     pub trace_id: &'a str,
     pub at_ms: u64,
 }
@@ -138,10 +143,18 @@ impl SessionAuthRuntime {
         };
 
         let tenant_id = self.resolve_tenant(&req, invitation.as_ref())?;
-        let role_fingerprint = invitation
-            .as_ref()
-            .map(|inv| inv.role_fingerprint.clone())
-            .unwrap_or_default();
+        // The role a new actor receives (slice 52f): an invited login
+        // takes the invitation's role; an open login takes the declared
+        // `default_role`, or none (least privilege). A role is only ever
+        // added by this explicit grant.
+        let granted_role: Option<String> = match &invitation {
+            Some(inv) if !inv.role.trim().is_empty() => Some(inv.role.clone()),
+            Some(_) => None,
+            None => req
+                .default_role
+                .filter(|r| !r.trim().is_empty())
+                .map(str::to_string),
+        };
 
         let actor_id = derive_actor_id(req.issuer, req.subject);
         let display_name = req
@@ -155,16 +168,19 @@ impl SessionAuthRuntime {
             actor_kind: "user".to_string(),
             auth_method: "oauth".to_string(),
             assurance_level: "aal1".to_string(),
-            role_fingerprint,
+            role_fingerprint: String::new(),
             permission_fingerprint: String::new(),
             created_ms: 0,
             updated_ms: 0,
         })?;
 
-        // Bind the identity so the next login recognises it, then consume
-        // the invitation (after the actor exists, so a failed link never
-        // burns an invitation).
+        // Bind the identity so the next login recognises it, grant the
+        // role, then consume the invitation (after the actor exists, so a
+        // failed link never burns an invitation).
         self.link_external_identity(req.provider, req.issuer, req.subject, &actor_id, &tenant_id)?;
+        if let Some(role) = &granted_role {
+            self.grant_actor_role(&actor_id, role, req.at_ms)?;
+        }
         if let Some(inv) = &invitation {
             self.consume_invitation(&inv.id, req.at_ms)?;
         }
@@ -268,6 +284,7 @@ mod tests {
             display_name: None,
             first_login,
             tenant,
+            default_role: None,
             trace_id,
             at_ms: now_ms(),
         }
@@ -311,7 +328,7 @@ mod tests {
             id: "inv-1".to_string(),
             email: "ada@example.com".to_string(),
             tenant_id: "acme".to_string(),
-            role_fingerprint: "sha256:member".to_string(),
+            role: "member".to_string(),
             expires_ms: Some(now + 60_000),
         })
         .unwrap();
@@ -321,12 +338,28 @@ mod tests {
         let outcome = auth.provision_login(r).unwrap();
         assert!(outcome.provisioned);
         assert_eq!(outcome.actor.tenant_id, "acme");
-        assert_eq!(outcome.actor.role_fingerprint, "sha256:member");
+        // The invitation's role was granted to the new actor.
+        assert_eq!(auth.actor_roles(&outcome.actor.id).unwrap(), vec!["member".to_string()]);
         // The invitation is now consumed — a different subject cannot reuse it.
         assert!(auth
             .find_open_invitation_by_email("ada@example.com", now)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn open_signup_gets_the_default_role_or_none() {
+        let auth = SessionAuthRuntime::open_in_memory().unwrap();
+        // With a declared default_role, an open signup receives it.
+        let mut r = req("login-a", "iss", "sub-1", FirstLoginPolicy::Open, TenantSource::Fixed("public".into()));
+        r.default_role = Some("member");
+        let with_role = auth.provision_login(r).unwrap();
+        assert_eq!(auth.actor_roles(&with_role.actor.id).unwrap(), vec!["member".to_string()]);
+
+        // With no default_role, an open signup gets NO role (least privilege).
+        let r2 = req("login-b", "iss", "sub-2", FirstLoginPolicy::Open, TenantSource::Fixed("public".into()));
+        let no_role = auth.provision_login(r2).unwrap();
+        assert!(auth.actor_roles(&no_role.actor.id).unwrap().is_empty());
     }
 
     #[test]
