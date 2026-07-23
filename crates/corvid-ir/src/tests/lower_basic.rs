@@ -401,3 +401,23 @@ server demo_api:
         other => panic!("expected Call, got {other:?}"),
     }
 }
+
+#[test]
+fn lowers_direct_upload_policy_into_the_route_ir() {
+    let ir = lower_src(
+        r#"
+server imports:
+    @upload(max_mb: 3, mime: "text/csv, application/csv")
+    route POST "/imports" body Upload<Csv> -> json Int:
+        return body.size()
+"#,
+    );
+    let route = &ir.servers[0].routes[0];
+    assert_eq!(route.upload_format.as_deref(), Some("Csv"));
+    let policy = route.upload_policy.as_ref().expect("lowered upload policy");
+    assert_eq!(policy.max_bytes, Some(3 * 1024 * 1024));
+    assert_eq!(
+        policy.mime,
+        vec!["text/csv".to_string(), "application/csv".to_string()]
+    );
+}

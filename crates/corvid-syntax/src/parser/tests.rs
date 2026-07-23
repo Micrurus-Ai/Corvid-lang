@@ -3286,6 +3286,33 @@ server refund_api:
     }
 
     #[test]
+    fn server_upload_route_parses_explicit_boundary_policy() {
+        let src = r#"
+server imports:
+    @upload(max_mb: 12, mime: "text/csv, application/csv")
+    route POST "/imports" body Upload<Csv> -> json Int:
+        return body.size()
+"#;
+        let tokens = lex(src).expect("lex failed");
+        let (file, errors) = parse_file(&tokens);
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        let route = file
+            .decls
+            .iter()
+            .find_map(|decl| match decl {
+                Decl::Server(server) => server.routes.first(),
+                _ => None,
+            })
+            .expect("upload route");
+        let upload = route.upload.as_ref().expect("route upload policy");
+        assert_eq!(upload.max_bytes, Some(12 * 1024 * 1024));
+        assert_eq!(
+            upload.mime,
+            vec!["text/csv".to_string(), "application/csv".to_string()]
+        );
+    }
+
+    #[test]
     fn schedule_decl_parses_cron_manifest_surface() {
         let src = r#"
 effect send_email:

@@ -1739,6 +1739,7 @@ agent take_import(body: Upload<Csv>) -> ImportReceipt:
     return ImportReceipt(body.filename(), body.size(), body.text())
 
 server import_api:
+    @upload(max_bytes: 24, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json ImportReceipt:
         return take_import(body)
 "#;
@@ -1779,6 +1780,16 @@ server import_api:
         bad_body.contains("unsupported_media_type"),
         "wrong MIME body must name the error: {bad_body}"
     );
+
+    // The boundary enforces the route's exact 24-byte declaration,
+    // proving there is no interpreter-wide 8 MiB fallback.
+    let oversized = b"1234567890123456789012345";
+    let (large_status, large_body) =
+        http_post_multipart(port, "/import", "large.csv", "text/csv", oversized)
+            .expect("POST failed");
+    assert_eq!(large_status, 400, "oversized upload must be 400: {large_body}");
+    assert!(large_body.contains("upload_too_large"), "{large_body}");
+    assert!(large_body.contains("24 bytes"), "{large_body}");
 }
 
 /// 52c-2 upload coverage: uploads are NOT CSV-only. A binary
@@ -1804,8 +1815,10 @@ agent take_audio(body: Upload<Audio>) -> UpReceipt:
     return UpReceipt(body.filename(), body.size(), body.content_type())
 
 server up_api:
+    @upload(max_mb: 3)
     route POST "/pdf" body Upload<Pdf> -> json UpReceipt:
         return take_pdf(body)
+    @upload(max_mb: 1)
     route POST "/audio" body Upload<Audio> -> json UpReceipt:
         return take_audio(body)
 "#;
@@ -1838,6 +1851,27 @@ server up_api:
         "binary bytes must be preserved exactly: {body}"
     );
     assert_eq!(resp.get("mime").and_then(|v| v.as_str()), Some("application/pdf"));
+
+    // More than 2 MiB succeeds because the source-declared 3 MiB policy,
+    // not Axum's generic Bytes-extractor default, owns this boundary.
+    let above_framework_default = vec![0x41; 2 * 1024 * 1024 + 1];
+    let (large_status, large_body) = http_post_multipart(
+        port,
+        "/pdf",
+        "large.pdf",
+        "application/pdf",
+        &above_framework_default,
+    )
+    .expect("large POST failed");
+    assert_eq!(
+        large_status, 200,
+        "declared upload policy must override framework defaults: {large_body}"
+    );
+    let large_resp: serde_json::Value = serde_json::from_str(&large_body).unwrap();
+    assert_eq!(
+        large_resp.get("size").and_then(|v| v.as_i64()),
+        Some(above_framework_default.len() as i64)
+    );
 
     // Audio/mpeg must be accepted — the divergence fix (serve reused the
     // contract's format→MIME map) added Audio/Video, which a hand-copied

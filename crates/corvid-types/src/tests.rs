@@ -168,6 +168,75 @@ server refund_api:
 }
 
 #[test]
+fn upload_route_requires_an_explicit_maximum() {
+    let missing_policy = check(
+        r#"
+server api:
+    route POST "/imports" body Upload<Csv> -> json Int:
+        return body.size()
+"#,
+    );
+    assert!(
+        missing_policy.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteUploadPolicyInvalid { .. }
+        )),
+        "expected missing upload policy error, got {:?}",
+        missing_policy.errors
+    );
+
+    let missing_maximum = check(
+        r#"
+server api:
+    @upload(mime: "text/csv")
+    route POST "/imports" body Upload<Csv> -> json Int:
+        return body.size()
+"#,
+    );
+    assert!(
+        missing_maximum.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteUploadPolicyInvalid { .. }
+        )),
+        "expected missing maximum error, got {:?}",
+        missing_maximum.errors
+    );
+}
+
+#[test]
+fn route_upload_policy_is_rejected_on_a_non_upload_body() {
+    let checked = check(
+        r#"
+server api:
+    @upload(max_mb: 1)
+    route POST "/value" body String -> json String:
+        return body
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteUploadPolicyInvalid { .. }
+        )),
+        "expected misplaced upload policy error, got {:?}",
+        checked.errors
+    );
+}
+
+#[test]
+fn upload_route_with_explicit_maximum_typechecks() {
+    let checked = check(
+        r#"
+server api:
+    @upload(max_bytes: 32, mime: "text/csv")
+    route POST "/imports" body Upload<Csv> -> json Int:
+        return body.size()
+"#,
+    );
+    assert!(checked.errors.is_empty(), "errors: {:?}", checked.errors);
+}
+
+#[test]
 fn server_route_dangerous_tool_requires_approval() {
     let src = r#"
 type Receipt:

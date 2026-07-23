@@ -7057,6 +7057,7 @@ agent take_import(body: Upload<Csv>) -> ImportReceipt:
     return ImportReceipt(body.filename(), body.size(), body.text())
 
 server import_api:
+    @upload(max_mb: 25, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json ImportReceipt:
         return take_import(body)
 ```
@@ -7069,11 +7070,17 @@ $ curl -s -F "file=@data.csv;type=application/pdf" localhost:PORT/import
 {"detail":"`application/pdf` is not accepted for Upload<Csv>; expected one of: text/csv","error":"unsupported_media_type"}
 ```
 
-`corvid serve` parses the multipart request (via `multer`), enforces the
-format's accepted MIME set and an 8 MiB max size — a structured `400` on
-either violation — and materialises the upload as a value the five accessor
+`corvid serve` parses the multipart request (via `multer`) and enforces the
+route's exact source-declared MIME set and maximum—a structured `400` on
+either violation—and materialises the upload as a value the five accessor
 methods read: `body.text()` (UTF-8 decode), `body.bytes()` (`List<Int>`),
 `body.filename()`, `body.content_type()`, `body.size()`.
+
+The maximum has no default. A direct `body Upload<Format>` route without
+`@upload(max_mb: N)` or `@upload(max_bytes: N)` is a compile error; attaching
+`@upload` to a non-upload route or omitting the maximum is also rejected. The
+same policy is lowered into `IrRoute`, emitted in the Application Contract and
+OpenAPI, and enforced by serve, so clients and the running boundary agree.
 
 Uploads are NOT CSV-only. Every well-known format tag is supported —
 `Csv` → `text/csv`, `Pdf` → `application/pdf`, `Image` → png/jpeg/gif/webp,
@@ -7094,8 +7101,8 @@ Two implementation notes worth keeping:
 
 - The `Upload<Format>` format tag (`Csv`) is NOT a declared type, so the
   resolved `Type::Upload(_)` loses it (the inner is `Unknown`). serve needs
-  the tag for MIME enforcement, so it is carried on a new `IrRoute.upload_format`
-  field, populated in lowering straight from the AST body type ref.
+  the tag for MIME enforcement, so it is carried on `IrRoute.upload_format`;
+  the explicit size/MIME policy travels beside it as `IrRoute.upload_policy`.
 - Adding one `IrExprKind` variant (`PageNew`) touched ~20 exhaustive matches
   across the ABI walkers and all three compiled-codegen tiers (native /
   Python / wasm). Interpreter-only expression forms degrade LOUDLY in the

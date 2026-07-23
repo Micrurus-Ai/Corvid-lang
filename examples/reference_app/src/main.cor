@@ -82,6 +82,7 @@ server orders_api:
     # File upload → multipart parsing with accepted-MIME + max-size
     # enforcement (slice 52c-2); the file is read via `body.filename()`
     # / `body.size()` / `body.text()`.
+    @upload(max_mb: 25)
     route POST "/orders/import" body Upload<Csv> -> json ImportReceipt:
         return ImportReceipt(body.filename(), body.size())
 

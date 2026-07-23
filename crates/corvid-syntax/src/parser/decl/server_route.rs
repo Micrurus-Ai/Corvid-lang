@@ -97,7 +97,20 @@ impl<'a> Parser<'a> {
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
             }
-            match self.parse_http_route_decl() {
+            let upload = match self.peek_ahead(1) {
+                TokKind::Ident(name) if name == "upload" && matches!(self.peek(), TokKind::At) => {
+                    match self.parse_upload_spec() {
+                        Ok(spec) => Some(spec),
+                        Err(error) => {
+                            self.errors.push(error);
+                            self.sync_to_statement_boundary();
+                            continue;
+                        }
+                    }
+                }
+                _ => None,
+            };
+            match self.parse_http_route_decl(upload) {
                 Ok(route) => routes.push(route),
                 Err(e) => {
                     self.errors.push(e);
@@ -118,7 +131,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_http_route_decl(&mut self) -> Result<HttpRouteDecl, ParseError> {
+    fn parse_http_route_decl(
+        &mut self,
+        upload: Option<corvid_ast::UploadSpec>,
+    ) -> Result<HttpRouteDecl, ParseError> {
         let start = self.peek_span();
         self.expect(TokKind::KwRoute, "`route` inside a server block")?;
         let method = self.parse_http_method()?;
@@ -195,6 +211,7 @@ impl<'a> Parser<'a> {
             path_params,
             query_ty,
             body_ty,
+            upload,
             response,
             effect_row,
             policy,

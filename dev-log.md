@@ -16583,3 +16583,25 @@ failures, external reviewer files, fresh-session audit drift —
 goes through the same audit-and-update slice pattern that opened
 this session (`08a3cbd`), without asking the user to pick between
 options.
+
+## 2026-07-23 - 52c-3: upload policy is source-declared and contract-closed
+
+Removed the interpreter-wide 8 MiB upload constant. A direct
+`body Upload<Format>` route now requires an adjacent
+`@upload(max_mb: N)` or `@upload(max_bytes: N)` declaration; omission,
+a policy without a maximum, and a policy on a non-upload route are
+compile errors. The policy lowers through `IrRoute.upload_policy`, is
+emitted on the Application Contract route and OpenAPI request schema,
+and is resolved once into the live route metadata. Contract emission
+and serve share `resolved_mime_for_upload`, keeping explicit MIME
+overrides and format defaults single-sourced.
+
+Proof spans parser/checker/contract/OpenAPI tests plus the real server:
+the multipart smoke test accepts a valid CSV, rejects a wrong MIME, and
+rejects 25 bytes against the route's declared 24-byte ceiling with
+`upload_too_large`. A second live case accepts a file above Axum's
+generic 2 MiB extractor ceiling under a declared 3 MiB route policy,
+proving that framework defaults cannot silently override the Corvid
+contract. Uploads stream and stop reading as soon as the declared limit
+is crossed. The continuously-grown reference app now declares its 25
+MiB import posture in source.

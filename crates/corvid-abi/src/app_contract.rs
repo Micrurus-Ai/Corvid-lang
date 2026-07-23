@@ -261,6 +261,11 @@ pub struct ContractRoute {
     pub query_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_type: Option<String>,
+    /// Explicit multipart policy for a direct `Upload<Format>` route
+    /// body. Its maximum is source-declared and enforced by the live
+    /// boundary; it is never supplied by a runtime constant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<ContractUpload>,
     pub response_type: String,
     /// Permissions the route requires (from its effect row's trust /
     /// dangerous surface). Empty = no approval-requiring effect.
@@ -683,16 +688,25 @@ fn contract_upload(
     spec: Option<&corvid_ast::UploadSpec>,
 ) -> Option<ContractUpload> {
     let format = upload_format_tag(ty)?;
-    let accepted_mime = match spec {
-        Some(s) if !s.mime.is_empty() => s.mime.clone(),
-        _ => default_mime_for_format(&format),
-    };
+    let accepted_mime =
+        resolved_mime_for_upload(&format, spec.map_or(&[], |upload| upload.mime.as_slice()));
     Some(ContractUpload {
         format,
         accepted_mime,
         max_bytes: spec.and_then(|s| s.max_bytes),
         retention_days: spec.and_then(|s| s.retention_days),
     })
+}
+
+/// Resolve the accepted MIME set for an upload policy. This is shared
+/// by contract emission and the live multipart boundary so an explicit
+/// override and a format default cannot drift between those layers.
+pub fn resolved_mime_for_upload(format: &str, explicit: &[String]) -> Vec<String> {
+    if explicit.is_empty() {
+        default_mime_for_format(format)
+    } else {
+        explicit.to_vec()
+    }
 }
 
 /// The `Format` in `Upload<Format>`, or `None` if the type is not an
@@ -765,6 +779,10 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .collect(),
         query_type: r.query_ty.as_ref().map(type_ref_name),
         body_type: r.body_ty.as_ref().map(type_ref_name),
+        upload: r
+            .body_ty
+            .as_ref()
+            .and_then(|ty| contract_upload(ty, r.upload.as_ref())),
         response_type: type_ref_name(&r.response.ty),
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
@@ -1084,6 +1102,24 @@ public agent ingest(doc: DocSubmission) -> String:
         // A non-upload field carries no upload surface.
         let note = ty.fields.iter().find(|f| f.name == "note").unwrap();
         assert!(note.upload.is_none());
+    }
+
+    #[test]
+    fn direct_upload_route_surfaces_the_enforced_boundary_policy() {
+        let contract = contract_for(
+            "server imports:
+    @upload(max_bytes: 32, mime: \"text/csv\")
+    route POST \"/imports\" body Upload<Csv> -> json Int:
+        return body.size()
+",
+        );
+        let upload = contract.routes[0]
+            .upload
+            .as_ref()
+            .expect("route upload policy");
+        assert_eq!(upload.format, "Csv");
+        assert_eq!(upload.accepted_mime, vec!["text/csv".to_string()]);
+        assert_eq!(upload.max_bytes, Some(32));
     }
 
     #[test]

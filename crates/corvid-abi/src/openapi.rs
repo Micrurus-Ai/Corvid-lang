@@ -13,7 +13,9 @@
 //! OpenAPI document so ordinary tooling never trips on Corvid-specific
 //! shapes.
 
-use crate::app_contract::{ApplicationContract, ContractField, ContractType};
+use crate::app_contract::{
+    ApplicationContract, ContractField, ContractType, ContractUpload,
+};
 use serde_json::{json, Map, Value};
 
 /// Project the application contract to an OpenAPI 3.1 document.
@@ -64,19 +66,22 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
         }
 
         if let Some(body) = &route.body_type {
-            // A body carrying an upload field is multipart/form-data;
-            // otherwise it is JSON.
-            let media_type = if body_type_has_upload(body, contract) {
-                "multipart/form-data"
+            // A direct upload or a body carrying an upload field is
+            // multipart/form-data; otherwise it is JSON. A direct
+            // upload uses the route's explicit policy as its schema.
+            let (media_type, schema) = if let Some(upload) = &route.upload {
+                ("multipart/form-data", schema_for_upload(upload))
+            } else if body_type_has_upload(body, contract) {
+                ("multipart/form-data", schema_for_type_name(body))
             } else {
-                "application/json"
+                ("application/json", schema_for_type_name(body))
             };
             operation.insert(
                 "requestBody".into(),
                 json!({
                     "required": true,
                     "content": {
-                        media_type: { "schema": schema_for_type_name(body) }
+                        media_type: { "schema": schema }
                     }
                 }),
             );
@@ -241,22 +246,7 @@ fn schema_for_field(field: &ContractField) -> Value {
     // An `Upload<Format>` field is a binary string constrained to the
     // accepted MIME and max size — what a multipart form part carries.
     if let Some(upload) = &field.upload {
-        let mut map = Map::new();
-        map.insert("type".into(), json!("string"));
-        map.insert("format".into(), json!("binary"));
-        if let Some(first) = upload.accepted_mime.first() {
-            map.insert("contentMediaType".into(), json!(first));
-        }
-        if upload.accepted_mime.len() > 1 {
-            map.insert("x-corvid-accepted-mime".into(), json!(upload.accepted_mime));
-        }
-        if let Some(max) = upload.max_bytes {
-            map.insert("maxLength".into(), json!(max));
-        }
-        if let Some(days) = upload.retention_days {
-            map.insert("x-corvid-retention-days".into(), json!(days));
-        }
-        return Value::Object(map);
+        return schema_for_upload(upload);
     }
     let mut schema = match scalar_schema(&field.type_name) {
         Some(s) => s,
@@ -277,6 +267,25 @@ fn schema_for_field(field: &ContractField) -> Value {
         }
     }
     schema
+}
+
+fn schema_for_upload(upload: &ContractUpload) -> Value {
+    let mut map = Map::new();
+    map.insert("type".into(), json!("string"));
+    map.insert("format".into(), json!("binary"));
+    if let Some(first) = upload.accepted_mime.first() {
+        map.insert("contentMediaType".into(), json!(first));
+    }
+    if upload.accepted_mime.len() > 1 {
+        map.insert("x-corvid-accepted-mime".into(), json!(upload.accepted_mime));
+    }
+    if let Some(max) = upload.max_bytes {
+        map.insert("maxLength".into(), json!(max));
+    }
+    if let Some(days) = upload.retention_days {
+        map.insert("x-corvid-retention-days".into(), json!(days));
+    }
+    Value::Object(map)
 }
 
 /// A JSON Schema fragment for a scalar type name, or `None` for a
@@ -467,6 +476,7 @@ mod tests {
                 path_params: vec![],
                 query_type: None,
                 body_type: Some("RefundRequest".into()),
+                upload: None,
                 response_type: "Answer".into(),
                 requires: vec!["issue_refund".into()],
                 pagination: None,
@@ -572,6 +582,7 @@ mod tests {
             path_params: vec![],
             query_type: None,
             body_type: Some("DocSubmission".into()),
+            upload: None,
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,
@@ -587,6 +598,35 @@ mod tests {
         assert_eq!(file["format"], "binary");
         assert_eq!(file["contentMediaType"], "application/pdf");
         assert_eq!(file["maxLength"], 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn direct_upload_route_projects_its_exact_boundary_policy() {
+        let mut c = sample();
+        c.routes.push(ContractRoute {
+            method: "POST".into(),
+            path: "/imports".into(),
+            path_params: vec![],
+            query_type: None,
+            body_type: Some("Upload<Csv>".into()),
+            upload: Some(ContractUpload {
+                format: "Csv".into(),
+                accepted_mime: vec!["text/csv".into()],
+                max_bytes: Some(32),
+                retention_days: None,
+            }),
+            response_type: "Answer".into(),
+            requires: vec![],
+            pagination: None,
+            policy: None,
+        });
+        let schema =
+            &emit_openapi(&c)["paths"]["/imports"]["post"]["requestBody"]["content"]
+                ["multipart/form-data"]["schema"];
+        assert_eq!(schema["type"], "string");
+        assert_eq!(schema["format"], "binary");
+        assert_eq!(schema["contentMediaType"], "text/csv");
+        assert_eq!(schema["maxLength"], 32);
     }
 
     #[test]
@@ -613,6 +653,7 @@ mod tests {
             path_params: vec![],
             query_type: None,
             body_type: None,
+            upload: None,
             response_type: "Page<Item>".into(),
             requires: vec![],
             pagination: Some(Pagination {
@@ -684,6 +725,7 @@ mod tests {
             path_params: vec![],
             query_type: None,
             body_type: None,
+            upload: None,
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,

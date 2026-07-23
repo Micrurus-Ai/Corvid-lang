@@ -875,7 +875,14 @@ Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the s
 
 #### The Backend Proves Its Own Contract, Or Refuses To Start
 
-Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (one `data:` event per yield, `event: done` to close); an `Upload<Format>` body is parsed from multipart with accepted-MIME + max-size enforcement and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope.
+Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (one `data:` event per yield, `event: done` to close); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
+
+```corvid
+server imports:
+    @upload(max_mb: 25, mime: "text/csv")
+    route POST "/imports" body Upload<Csv> -> json ImportReceipt:
+        return import_rows(body)
+```
 
 **Contract Closure** keeps the advertised surface and the runtime from ever drifting: before `corvid serve` binds a listener it asserts a runtime execution path exists for every route the contract advertises. A route it cannot yet serve is a startup error (`E5204`), never a silent runtime `501`. That mechanism carried the runtime to completion — route execution, streaming, uploads, pagination, and now **authorization enforcement** all serve. A `requires authenticated|role|permission` route resolves the caller's session to a verified typed `actor` and enforces tenant + role + permission (and CSRF double-submit on mutations) *before* the handler or any effect runs; an unauthenticated request is a `401` and an under-privileged one a `403`.
 

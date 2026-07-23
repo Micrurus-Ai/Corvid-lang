@@ -156,6 +156,10 @@ pub struct IrRoute {
     /// serve` executes any route body by invoking this agent by name
     /// through the ordinary agent machinery.
     pub handler_agent: String,
+    /// The explicit source-declared boundary policy for a direct
+    /// `Upload<Format>` body. The checker guarantees this is present
+    /// and carries a maximum size whenever `upload_format` is present.
+    pub upload_policy: Option<corvid_ast::UploadSpec>,
     /// The `Upload<Format>` format tag (`Csv`, `Pdf`, `Image`, …) when
     /// the route body is an upload (slice 52c-2). `corvid serve` uses
     /// it to enforce the accepted MIME set on the multipart part. The

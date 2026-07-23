@@ -261,7 +261,7 @@ impl<'a> Parser<'a> {
                     ui.extend(self.parse_field_ui_hints()?);
                 }
                 TokKind::Ident(w) if w == "upload" && matches!(self.peek(), TokKind::At) => {
-                    upload = Some(self.parse_field_upload()?);
+                    upload = Some(self.parse_upload_spec()?);
                 }
                 _ => break,
             }
@@ -286,7 +286,7 @@ impl<'a> Parser<'a> {
     /// semantic constraints on an `Upload<Format>` field (slice 51f).
     /// Keys are optional and order-free; `mime` accepts a
     /// comma-separated list.
-    fn parse_field_upload(&mut self) -> Result<corvid_ast::UploadSpec, ParseError> {
+    pub(super) fn parse_upload_spec(&mut self) -> Result<corvid_ast::UploadSpec, ParseError> {
         let start = self.peek_span();
         self.bump(); // @
         self.bump(); // upload

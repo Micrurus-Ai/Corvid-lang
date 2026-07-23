@@ -40,7 +40,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{RawPathParams, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -350,33 +350,66 @@ pub(crate) fn cmd_serve(
                 query_ty: route.query_ty.clone(),
                 body_ty: route.body_ty.clone(),
                 upload_format: route.upload_format.clone(),
+                upload_policy: route.upload_policy.as_ref().and_then(|policy| {
+                    policy.max_bytes.map(|max_bytes| RouteUploadPolicy {
+                        max_bytes,
+                        accepted_mime: corvid_abi::app_contract::resolved_mime_for_upload(
+                            route.upload_format.as_deref().unwrap_or(""),
+                            &policy.mime,
+                        ),
+                    })
+                }),
                 param_names,
                 method: route.method,
                 route_path: route.path.clone(),
                 policy: route.policy.clone(),
             });
             let filter = method_filter(route.method);
-            let mr = on(
-                filter,
-                move |State(state): State<Arc<ServeState>>,
-                      raw_path: RawPathParams,
-                      RawQuery(raw_query): RawQuery,
-                      headers: axum::http::HeaderMap,
-                      body: Bytes| {
-                    let meta = meta.clone();
-                    async move {
-                        run_route(
-                            state,
-                            meta,
-                            raw_path,
-                            raw_query.unwrap_or_default(),
-                            headers,
-                            body,
-                        )
-                        .await
-                    }
-                },
-            );
+            let mr = if route.upload_format.is_some() {
+                on(
+                    filter,
+                    move |State(state): State<Arc<ServeState>>,
+                          raw_path: RawPathParams,
+                          RawQuery(raw_query): RawQuery,
+                          request: axum::extract::Request| {
+                        let meta = meta.clone();
+                        async move {
+                            let (parts, body) = request.into_parts();
+                            run_route(
+                                state,
+                                meta,
+                                raw_path,
+                                raw_query.unwrap_or_default(),
+                                parts.headers,
+                                RouteRequestBody::StreamingUpload(body),
+                            )
+                            .await
+                        }
+                    },
+                )
+            } else {
+                on(
+                    filter,
+                    move |State(state): State<Arc<ServeState>>,
+                          raw_path: RawPathParams,
+                          RawQuery(raw_query): RawQuery,
+                          headers: axum::http::HeaderMap,
+                          body: Bytes| {
+                        let meta = meta.clone();
+                        async move {
+                            run_route(
+                                state,
+                                meta,
+                                raw_path,
+                                raw_query.unwrap_or_default(),
+                                headers,
+                                RouteRequestBody::Buffered(body),
+                            )
+                            .await
+                        }
+                    },
+                )
+            };
             let axum_path = corvid_route_to_axum_path(&route.path);
             match by_path.remove(&axum_path) {
                 Some(existing) => {
@@ -504,6 +537,10 @@ struct RouteMeta {
     /// The `Upload<Format>` format tag when the body is an upload
     /// (slice 52c-2) — drives accepted-MIME enforcement.
     upload_format: Option<String>,
+    /// Source-declared upload policy resolved once at startup. `None`
+    /// is valid only for a non-upload route; the checker rejects an
+    /// upload boundary without an explicit maximum.
+    upload_policy: Option<RouteUploadPolicy>,
     /// The handler agent's param names, in order — drives which of
     /// `path`/`query`/`body`/`actor` values are assembled and how.
     param_names: Vec<String>,
@@ -516,6 +553,11 @@ struct RouteMeta {
     /// The route's `requires` authorization policy (slice 52f). When
     /// present, it is enforced before the handler runs.
     policy: Option<corvid_ir::IrRoutePolicy>,
+}
+
+struct RouteUploadPolicy {
+    max_bytes: u64,
+    accepted_mime: Vec<String>,
 }
 
 /// Convert a Corvid route path (`/orders/{id}`) to axum's colon-capture
@@ -923,7 +965,7 @@ async fn run_route(
     raw_path: RawPathParams,
     raw_query: String,
     headers: axum::http::HeaderMap,
-    body: Bytes,
+    body: RouteRequestBody,
 ) -> Response {
     // Slice 52f: enforce the route's `requires` policy BEFORE parsing the
     // body, assembling args, or executing any handler or effect. On
@@ -968,12 +1010,37 @@ async fn run_route(
     // body type is typed JSON.
     let body_value = match &meta.body_ty {
         Some(Type::Upload(_)) => {
-            match parse_multipart_upload(&headers, &body, meta.upload_format.as_deref()).await {
+            let Some(policy) = &meta.upload_policy else {
+                return internal_error(
+                    "upload_policy_missing",
+                    "compiled upload route reached runtime without its required policy",
+                );
+            };
+            let RouteRequestBody::StreamingUpload(body) = body else {
+                return internal_error(
+                    "upload_body_not_streaming",
+                    "compiled upload route reached a non-streaming request path",
+                );
+            };
+            match parse_multipart_upload(
+                &headers,
+                body,
+                meta.upload_format.as_deref(),
+                policy,
+            )
+            .await
+            {
                 Ok(v) => Some(v),
                 Err(resp) => return resp,
             }
         }
         Some(ty) => {
+            let RouteRequestBody::Buffered(body) = body else {
+                return internal_error(
+                    "request_body_mode_mismatch",
+                    "non-upload route reached the streaming upload request path",
+                );
+            };
             let json: serde_json::Value = match serde_json::from_slice(&body) {
                 Ok(j) => j,
                 Err(e) => return bad_request("invalid_json", &e.to_string()),
@@ -1008,10 +1075,10 @@ async fn run_route(
     finish(outcome)
 }
 
-/// Maximum accepted upload size for the interpreter tier (slice 52c-2).
-/// A conservative default; per-format `@upload(max_size:)` overrides
-/// are a follow-up once the annotation is threaded to the runtime.
-const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
+enum RouteRequestBody {
+    Buffered(Bytes),
+    StreamingUpload(Body),
+}
 
 /// Parse a multipart/form-data request into an `Upload<Format>` value
 /// (slice 52c-2). Takes the FIRST file part, enforces the format's
@@ -1021,8 +1088,9 @@ const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
 /// violation.
 async fn parse_multipart_upload(
     headers: &axum::http::HeaderMap,
-    body: &Bytes,
+    body: Body,
     format: Option<&str>,
+    policy: &RouteUploadPolicy,
 ) -> Result<Value, Response> {
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
@@ -1038,12 +1106,11 @@ async fn parse_multipart_upload(
         }
     };
 
-    // Feed the already-buffered body to multer as a single-chunk stream.
-    let owned = body.clone();
-    let stream = futures::stream::once(
-        async move { Ok::<_, std::convert::Infallible>(owned) },
-    );
-    let mut multipart = multer::Multipart::new(stream, boundary);
+    // Stream multipart data directly from the request body. This avoids
+    // Axum's generic Bytes-extractor ceiling silently overriding the
+    // source-declared upload policy, and lets Corvid stop reading as soon
+    // as the declared file limit is crossed.
+    let mut multipart = multer::Multipart::new(body.into_data_stream(), boundary);
 
     loop {
         let field = match multipart.next_field().await {
@@ -1072,30 +1139,36 @@ async fn parse_multipart_upload(
         // `application/octet-stream`, so the runtime enforces exactly
         // what the contract advertised (never accepts a type the
         // frontend picker was told to reject).
-        let accepted = corvid_abi::app_contract::default_mime_for_format(format.unwrap_or(""));
-        if !accepted.iter().any(|m| *m == content_type) {
+        if !policy.accepted_mime.iter().any(|m| *m == content_type) {
             return Err(bad_request(
                 "unsupported_media_type",
                 &format!(
                     "`{content_type}` is not accepted for Upload<{}>; expected one of: {}",
                     format.unwrap_or("Format"),
-                    accepted.join(", ")
+                    policy.accepted_mime.join(", ")
                 ),
             ));
         }
 
-        let data = match field.bytes().await {
-            Ok(b) => b,
-            Err(e) => return Err(bad_request("invalid_upload", &e.to_string())),
-        };
-        if data.len() > MAX_UPLOAD_BYTES {
-            return Err(bad_request(
-                "upload_too_large",
-                &format!(
-                    "upload is {} bytes; the limit is {MAX_UPLOAD_BYTES} bytes",
-                    data.len()
-                ),
-            ));
+        let mut field = field;
+        let mut data = Vec::new();
+        loop {
+            let chunk = match field.chunk().await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(e) => return Err(bad_request("invalid_upload", &e.to_string())),
+            };
+            let observed = (data.len() as u64).saturating_add(chunk.len() as u64);
+            if observed > policy.max_bytes {
+                return Err(bad_request(
+                    "upload_too_large",
+                    &format!(
+                        "upload exceeded the declared limit of {} bytes",
+                        policy.max_bytes
+                    ),
+                ));
+            }
+            data.extend_from_slice(&chunk);
         }
 
         let bytes_list = Value::List(corvid_driver::ListValue::new(
@@ -1638,6 +1711,14 @@ async fn get_approval(
 fn bad_request(error: &str, detail: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": error, "detail": detail })),
+    )
+        .into_response()
+}
+
+fn internal_error(error: &str, detail: &str) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
         Json(serde_json::json!({ "error": error, "detail": detail })),
     )
         .into_response()

@@ -4,7 +4,7 @@ use crate::effect::{BackpressurePolicy, Effect, EffectConstraint, EffectDecl, Ef
 use crate::expr::{BinaryOp, Expr};
 use crate::span::{Ident, Span};
 use crate::stmt::Block;
-use crate::ty::{Field, OwnershipAnnotation, Param, TypeRef};
+use crate::ty::{Field, OwnershipAnnotation, Param, TypeRef, UploadSpec};
 use serde::{Deserialize, Serialize};
 
 /// A full `.cor` source file.
@@ -384,6 +384,11 @@ pub struct HttpRouteDecl {
     pub query_ty: Option<TypeRef>,
     #[serde(default)]
     pub body_ty: Option<TypeRef>,
+    /// Explicit multipart boundary policy for a direct
+    /// `body Upload<Format>` route. Upload routes must declare this
+    /// policy; the runtime never invents a hidden size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<UploadSpec>,
     pub response: RouteResponse,
     #[serde(default)]
     pub effect_row: EffectRow,

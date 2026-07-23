@@ -156,6 +156,10 @@ pub enum TypeErrorKind {
         path: String,
     },
 
+    /// A route-level `@upload(...)` policy is missing, incomplete, or
+    /// attached to a route whose body is not `Upload<Format>`.
+    RouteUploadPolicyInvalid { path: String, message: String },
+
     /// A `connector Name:` block with an invalid configuration (slice
     /// 52g): a non-absolute `base_url`, a malformed reliability value, a
     /// duplicate operation, a path placeholder naming no parameter, etc.
@@ -600,6 +604,9 @@ impl TypeErrorKind {
                 format!(
                     "route `{path}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` — the requirement could never be satisfied"
                 )
+            }
+            Self::RouteUploadPolicyInvalid { path, message } => {
+                format!("invalid upload policy on route `{path}`: {message}")
             }
             Self::ConnectorConfigInvalid { connector, message } => {
                 format!("invalid `connector {connector}`: {message}")
@@ -1167,6 +1174,9 @@ impl TypeErrorKind {
             )),
             Self::FirstLoginPolicyRequired { .. } => Some(
                 "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
+            ),
+            Self::RouteUploadPolicyInvalid { .. } => Some(
+                "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),
             Self::ConnectorConfigInvalid { .. } => Some(
                 "`base_url` must be an absolute `http(s)://` URL; each operation path must start with `/` and its `{placeholders}` must name declared parameters; reliability values (`retry`, `rate_limit`, `circuit_breaker`) must be non-zero.".into(),

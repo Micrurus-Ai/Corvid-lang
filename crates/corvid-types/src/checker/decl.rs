@@ -664,6 +664,39 @@ impl<'a> Checker<'a> {
     }
 
     fn check_http_route(&mut self, server: &ServerDecl, route: &HttpRouteDecl) {
+        let body_is_upload = route
+            .body_ty
+            .as_ref()
+            .is_some_and(is_direct_upload_type);
+        match (&route.upload, body_is_upload) {
+            (None, true) => self.errors.push(TypeError::new(
+                TypeErrorKind::RouteUploadPolicyInvalid {
+                    path: route.path.clone(),
+                    message: "`body Upload<Format>` requires an explicit `@upload(max_mb: N)` policy; there is no runtime default".into(),
+                },
+                route.span,
+            )),
+            (Some(spec), true) if spec.max_bytes.is_none() => {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::RouteUploadPolicyInvalid {
+                        path: route.path.clone(),
+                        message: "`@upload` on a route must declare `max_mb` or `max_bytes`"
+                            .into(),
+                    },
+                    spec.span,
+                ));
+            }
+            (Some(spec), false) => self.errors.push(TypeError::new(
+                TypeErrorKind::RouteUploadPolicyInvalid {
+                    path: route.path.clone(),
+                    message: "`@upload(...)` is only valid on a route with `body Upload<Format>`"
+                        .into(),
+                },
+                spec.span,
+            )),
+            _ => {}
+        }
+
         let path_fields = route
             .path_params
             .iter()
@@ -751,6 +784,14 @@ impl<'a> Checker<'a> {
             }
         }
     }
+}
+
+fn is_direct_upload_type(ty: &corvid_ast::TypeRef) -> bool {
+    matches!(
+        ty,
+        corvid_ast::TypeRef::Generic { name, args, .. }
+            if name.name == "Upload" && args.len() == 1
+    )
 }
 
 /// The synthetic struct type bound as `actor` in an authenticated

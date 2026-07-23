@@ -561,6 +561,14 @@ built with `Page(items, next_cursor)` and serialized as the standard
 `{items, next_cursor, has_more}` cursor envelope, `has_more` derived. Each falls
 straight out of the language's own type with zero glue.
 
+An upload route has no hidden interpreter-wide size default. The source must put
+`@upload(max_mb: N)` or `@upload(max_bytes: N)` immediately before a direct
+`body Upload<Format>` route; omission is a compile error. The compiler emits
+that exact maximum and the resolved MIME set into the Application Contract and
+OpenAPI, and `corvid serve` enforces the same values at the multipart boundary.
+The contract, generated clients, and running backend therefore cannot disagree
+about the accepted file.
+
 **Contract Closure** guarantees the surface and the runtime can never drift.
 Before `corvid serve` / `corvid dev` bind a listener, they walk the public HTTP
 surface the Application Contract advertises and assert a runtime execution path

@@ -1426,7 +1426,13 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              (cursor envelope), and authorization enforcement (a \
              `requires authenticated|role|permission` route resolves the \
              caller's session to a verified `actor` and enforces it \
-             before the handler runs). The refuse-to-start mechanism \
+             before the handler runs). A direct `Upload<Format>` route \
+             must declare `@upload(max_bytes: N)` or \
+             `@upload(max_mb: N)`; the compiler lowers that policy into \
+             the Application Contract and OpenAPI, and the server streams \
+             the file while enforcing that exact limit and accepted MIME \
+             set. There is no runtime-only upload-size default. The \
+             refuse-to-start mechanism \
              still guards any future capability and native tiers that \
              lack a capability refuse the routes that need it.",
         out_of_scope_reason: "",

@@ -256,6 +256,7 @@ mod tests {
             effect_names: vec![],
             body: empty_block(),
             handler_agent: handler.to_string(),
+            upload_policy: None,
             upload_format: None,
             policy: None,
             span: span(),
@@ -427,6 +428,7 @@ agent take(body: Upload<Csv>) -> R:
     return R(true)
 
 server a:
+    @upload(max_mb: 1)
     route POST "/i" body Upload<Csv> -> json R:
         return take(body)
 "#;
