@@ -789,6 +789,33 @@ agent worker() -> Bool:
 "#,
     },
     TourTopic {
+        name: "route-authorization",
+        title: "Authority Is Enforced Before The Handler Runs",
+        category: "The complete application runtime",
+        pitch: "A route can declare who may call it — `requires authenticated`, `requires role(\"admin\")`, `requires permission(\"refund:write\")`, chained with `and` — and `corvid serve` enforces it BEFORE your handler or any effect runs. On each request to a `requires` route the runtime resolves the session cookie to a verified typed `actor` (missing / forged / expired / revoked → 401), checks tenant membership, then role and permission (a role is set membership; a permission is the union of the permissions the actor's roles grant) → 403 if insufficient, and requires a CSRF double-submit on cookie-authenticated mutations. The `actor` your handler sees is ONLY ever the authenticated one — never anything the request supplies. Roles come only from where you declared them (an invitation, or `provisioning: default_role`), so a new user gets no authority unless you grant it, and a `requires role(\"typo\")` that names no declared role is a COMPILE error, not a route that silently always-denies. Every decision is a redacted `route.authz` audit event. This closed the last Contract Closure gap: the interpreter tier now enforces every authority the Application Contract advertises.",
+        spec: "docs/reference/inventions.md#the-complete-application-runtime",
+        roadmap: "Phase 52 authorization enforcement (52f)",
+        test: "crates/corvid-runtime/tests/route_authz.rs (forged cookie, expired/revoked, cross-tenant, CSRF mismatch, authenticated-but-insufficient, permission-union) + crates/corvid-cli/tests/serve_smoke.rs::a_role_gated_route_allows_the_right_role_and_denies_others (live: admin 200, plain 403, anonymous 401)",
+        non_scope: "The enforced tenant is the actor's own (route-path tenant scoping is a follow-up); durable approval-endpoint reviewer authentication is a follow-up. Role/permission requirements are AND (all must hold), read fresh per request so a revoked role denies at once.",
+        source: r#"identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+        default_role: member
+    roles:
+        admin: "refund:write, user:read"
+        member: "user:read"
+
+server billing_api:
+    # Enforced before the handler runs: a caller without a session is
+    # 401, one lacking `admin` (or `refund:write`) is 403. `actor` is the
+    # verified caller — never anything the request supplies.
+    route GET "/refunds" -> json String requires role("admin") and permission("refund:write"):
+        return actor.id
+"#,
+    },
+    TourTopic {
         name: "oauth-login",
         title: "OAuth Login That's Safe By Construction",
         category: "The complete application runtime",

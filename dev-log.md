@@ -3669,6 +3669,46 @@ exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52f-5: a role-gated route, proven allow/deny through the live server
+
+52f-3 proved enforcement at the unit level and proved an unauthenticated
+request is a 401 through serve. 52f-5 closes the loop with the case that
+matters most: an authenticated caller WITH the role gets in, and one
+WITHOUT it does not — end-to-end through a live `corvid serve`.
+
+The test seeds two sessions (one actor with the `admin` role, one with
+none) into the durable store using the SAME `SessionAuthRuntime` the
+server opens — exactly the state a real login produces, not a test
+backdoor — then drives the role-gated route `requires role("admin") and
+permission("refund:write")` over HTTP:
+
+- the **anonymous** caller → `401`,
+- the **authenticated-but-role-less** session → `403`,
+- the **admin** session → `200`, and the handler sees the verified
+  `actor.id`.
+
+Every request travels the real `enforce_route_policy` path. This is the
+honest demonstration of the claim 52f-3 earned: authority is identified
+and enforced before the handler runs.
+
+Invention proof: a new `corvid tour --topic route-authorization` (its
+role-gated source compiles through the driver) and the inventions.md
+Proof-Matrix authz row now points at the tour + this end-to-end test.
+
+**Phase 52f (authorization enforcement) is complete** — declaration
+(52f-1), runtime role model (52f-2), request-boundary enforcement + the
+capability flip (52f-3), durable persistence (52f-4), and the end-to-end
+proof (52f-5). The one deliberate follow-up is 52f-4b: the approval-
+endpoint reviewer is still the anonymous `serve-reviewer`; requiring a
+verified `operator` is a consequential access decision left for its own
+increment.
+
+Gate: workspace check clean; tour sources compile; the role-gated e2e +
+enforcement + durability serve_smoke tests green; corpus verify still
+exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

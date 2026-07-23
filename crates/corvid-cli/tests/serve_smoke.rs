@@ -47,6 +47,31 @@ fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     Some((status, body))
 }
 
+/// Minimal HTTP/1.1 GET carrying a `Cookie` header. Returns `(status,
+/// body)` — for exercising session-authenticated routes.
+fn http_get_with_cookie(port: u16, path: &str, cookie: &str) -> Option<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .ok()?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+    )
+    .ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let status: u16 = raw
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    Some((status, body))
+}
+
 /// Minimal HTTP/1.1 POST over a raw socket. Returns `(status, body)`.
 fn http_post(port: u16, path: &str, json_body: &str) -> Option<(u16, String)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
@@ -1951,5 +1976,116 @@ server durable_api:
     assert!(
         list_body.contains(&approval_id),
         "the queued approval `{approval_id}` must survive the restart: {list_body}"
+    );
+}
+
+/// Slice 52f end-to-end authorization gate. A role-gated route, served
+/// live, ALLOWS a caller whose session holds the required role, DENIES an
+/// authenticated caller who lacks it (403), and DENIES an anonymous
+/// caller (401). The sessions are seeded through the same
+/// `SessionAuthRuntime` the server uses (persisted to the durable data
+/// dir) — exactly the state a real login would produce — so the request
+/// travels the real enforcement path (`enforce_route_policy`), not a
+/// test shortcut.
+#[test]
+fn a_role_gated_route_allows_the_right_role_and_denies_others() {
+    use corvid_runtime::{AuthActor, SessionAuthRuntime, SessionCreate};
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let data_dir = dir.path().join("state");
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    // Seed two actors + sessions into the durable store the server opens:
+    // one with the `admin` role, one with none.
+    let admin_token = "admin-session-token";
+    let plain_token = "plain-session-token";
+    {
+        let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
+        let mk_actor = |id: &str| AuthActor {
+            id: id.to_string(),
+            tenant_id: "public".to_string(),
+            display_name: id.to_string(),
+            actor_kind: "user".to_string(),
+            auth_method: "oauth".to_string(),
+            assurance_level: "aal1".to_string(),
+            role_fingerprint: String::new(),
+            permission_fingerprint: String::new(),
+            created_ms: 0,
+            updated_ms: 0,
+        };
+        auth.upsert_actor(mk_actor("actor-admin")).unwrap();
+        auth.upsert_actor(mk_actor("actor-plain")).unwrap();
+        auth.grant_actor_role("actor-admin", "admin", 1).unwrap();
+        let mk_session = |id: &str, actor: &str, token: &str| SessionCreate {
+            id: id.to_string(),
+            actor_id: actor.to_string(),
+            tenant_id: "public".to_string(),
+            raw_token: token.to_string(),
+            issued_ms: 1,
+            expires_ms: 9_000_000_000_000,
+            csrf_binding_id: format!("csrf-{id}"),
+        };
+        auth.create_session(mk_session("s-admin", "actor-admin", admin_token))
+            .unwrap();
+        auth.create_session(mk_session("s-plain", "actor-plain", plain_token))
+            .unwrap();
+    }
+
+    let source = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        admin: "billing:read"
+
+server admin_api:
+    route GET "/admin" -> json String requires role("admin"):
+        return actor.id
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8206;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .env("CORVID_SERVE_DATA_DIR", &data_dir)
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_ID", "test-client-id")
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_SECRET", "test-client-secret")
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn corvid serve");
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "server did not become ready");
+
+    // Anonymous → 401.
+    let (anon_status, _) = http_get(port, "/admin").expect("GET /admin (anon) failed");
+    assert_eq!(anon_status, 401, "an anonymous caller must be 401");
+
+    // Authenticated but without the role → 403.
+    let (plain_status, plain_body) =
+        http_get_with_cookie(port, "/admin", &format!("corvid_session={plain_token}"))
+            .expect("GET /admin (plain) failed");
+    assert_eq!(
+        plain_status, 403,
+        "an authenticated caller without `admin` must be 403; body={plain_body}"
+    );
+
+    // The admin session → 200, and the handler sees the verified actor id.
+    let (admin_status, admin_body) =
+        http_get_with_cookie(port, "/admin", &format!("corvid_session={admin_token}"))
+            .expect("GET /admin (admin) failed");
+    assert_eq!(
+        admin_status, 200,
+        "the admin session must be allowed; body={admin_body}"
+    );
+    assert!(
+        admin_body.contains("actor-admin"),
+        "the handler must see the verified actor id: {admin_body}"
     );
 }
