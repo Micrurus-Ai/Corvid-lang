@@ -62,6 +62,12 @@ pub struct RuntimeBuilder {
     /// docstring on `HttpClient::with_reqwest_client` for why this
     /// is the no-shortcut alternative to a test-only SSRF carve-out.
     http_client_override: Option<HttpClient>,
+    /// Slice 52g-3c: the deployment-selected connector execution mode.
+    /// `None` means no mode was selected — a program that declares
+    /// connectors then refuses to start (the selection is a consequential
+    /// choice with no default). Set once at build time and immutable for
+    /// the process (`Runtime::connector_mode`).
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 }
 
 impl Default for RuntimeBuilder {
@@ -86,6 +92,7 @@ impl Default for RuntimeBuilder {
             mcp: crate::mcp::McpRuntime::default(),
             http_policy: HttpEgressPolicy::default(),
             http_client_override: None,
+            connector_mode: None,
         }
     }
 }
@@ -207,6 +214,16 @@ impl RuntimeBuilder {
     /// diagnostic — the 33S0 security model.
     pub fn http_policy(mut self, policy: HttpEgressPolicy) -> Self {
         self.http_policy = policy;
+        self
+    }
+
+    /// Slice 52g-3c: select the connector execution mode for this
+    /// process. `None` (the default, when this setter isn't called)
+    /// means no mode was selected — a program that declares connectors
+    /// then refuses to start rather than pick a mode silently. The
+    /// selection is immutable once the runtime is built.
+    pub fn connector_mode(mut self, mode: Option<corvid_ast::ConnectorMode>) -> Self {
+        self.connector_mode = mode;
         self
     }
 
@@ -448,6 +465,7 @@ impl RuntimeBuilder {
                 crate::cache::CacheRuntime::new(),
             )),
             queue: QueueRuntime::new(),
+            connector_mode: self.connector_mode,
         }
     }
 }

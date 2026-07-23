@@ -8,6 +8,7 @@
 pub mod add_dimension;
 pub mod adversarial;
 pub mod approver;
+pub mod connector_startup;
 pub mod contract_closure;
 pub mod effect_diff;
 pub mod meta_verify;
@@ -53,6 +54,10 @@ pub use package_metadata::{
     package_metadata_from_source, render_package_metadata_markdown, PackageMetadata,
 };
 pub use approver::{simulate_approver, verify_approver_source};
+pub use connector_startup::{
+    check_connector_startup, connector_secret_names, ConnectorRuntimeContext,
+    ConnectorStartupError,
+};
 pub use contract_closure::{
     check_contract_closure, ClosureGap, RuntimeCapabilities,
     GUARANTEE_ID_CONTRACT_RUNTIME_CLOSURE,

@@ -3896,6 +3896,65 @@ two fixtures.
 
 ---
 
+## 2026-07-23 - 52g-3c-1: the connector startup closure — prove the selected mode is executable, or refuse to start
+
+Runtime dispatch of connector operations is a big deliverable (mock /
+replay / real, with a locked set of requirements). It opens with the
+part that has to be true before a single operation runs: the deployment
+must have chosen a mode, and that mode must be real and executable for
+every operation — proven at startup, refused loudly if not. This is the
+connector analogue of Contract Closure (52b) for HTTP routes.
+
+### The selected mode is immutable, and its absence is a refusal
+
+`RuntimeBuilder::connector_mode(Option<ConnectorMode>)` threads the
+deployment's choice onto the `Runtime` as an immutable field — set once
+at build, no setter afterwards. `None` means no mode was selected; a
+program that declares connectors then refuses to start, because whether
+an operation reaches a real provider is a consequential choice with no
+default (the same rule 52g-3b applied to the source `modes` list).
+
+### `check_connector_startup` — the E5205 refusals
+
+A new pure function in `corvid-driver::connector_startup` walks the
+lowered connectors against the runtime facts and returns every reason to
+refuse:
+
+- **No mode selected** while connectors exist.
+- **Mode not allowed** — the selected mode isn't in the connector's
+  declared `modes`.
+- **`real` without credentials or egress** — a `secret(...)` the auth
+  references doesn't resolve (only the NAME appears in the diagnostic,
+  never a value), or no outbound-network permission is configured
+  (`[http] allow`). A connector never reaches the network by default.
+- **`replay` without a recorded source** — replay must serve from a
+  cassette and never fall through to a real call.
+- **Operation not executable in the selected mode** — e.g. `mock` mode
+  but an operation declares no mock payload.
+
+The runtime facts come from three new `Runtime` accessors kept
+deliberately narrow: `egress_configured()` (a non-empty allowlist),
+`secret_present(name)` (presence only — the value never leaves the secret
+store), and `has_replay_source()`. This satisfies the locked
+requirements for startup refusal (1), allowed-mode membership (2), real's
+credential + egress gate (3), mode immutability (9), and every
+operation's executable-path check (10).
+
+Deliberately NOT here: the VM dispatch itself (evaluating the mock,
+serving replay, calling real) and the CLI `--mode` wiring — those are the
+next sub-slices. This one is the gate that runs before any of them.
+
+7 unit tests (no-mode refusal; no-connectors never refuses; disallowed
+mode; mock executable with a mock payload; real refuses without
+egress/credentials; real executable with both; replay refuses without a
+source, passes with one). Gate: workspace check clean; corvid-runtime +
+corvid-driver libs green (two pre-existing environmental native-cache
+tests fail after a full `cargo clean` — they exercise the native
+`run_with_target` link path, unrelated to connectors); corpus verify
+exits 1 on exactly the two fixtures.
+
+---
+
 ## 2026-07-23 - 52g-3b: a connector declares which modes it may run in, and silence is a compile error
 
 Before an operation can *execute*, one consequential question has to be

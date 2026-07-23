@@ -109,6 +109,13 @@ pub struct Runtime {
     /// operation.
     cache: std::sync::Arc<std::sync::Mutex<crate::cache::CacheRuntime>>,
     queue: QueueRuntime,
+    /// Slice 52g-3c: the deployment-selected connector execution mode,
+    /// set once at build time and immutable for the process. `None`
+    /// means no mode was selected; a program that declares connectors
+    /// refuses to start in that case (the selection is a consequential
+    /// choice with no default). The VM reads this at connector-operation
+    /// dispatch to decide mock vs replay vs real.
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 }
 
 #[derive(Clone)]
@@ -163,6 +170,43 @@ impl Runtime {
 
     pub fn tools(&self) -> &ToolRegistry {
         &self.tools
+    }
+
+    /// The deployment-selected connector execution mode (slice 52g-3c),
+    /// immutable for the process. `None` means none was selected — a
+    /// program with connectors refuses to start before reaching the VM,
+    /// so at dispatch time the VM treats `None` alongside connectors as
+    /// an internal invariant violation. The VM reads this to choose mock
+    /// / replay / real dispatch for a connector operation.
+    pub fn connector_mode(&self) -> Option<corvid_ast::ConnectorMode> {
+        self.connector_mode
+    }
+
+    /// Whether outbound-network egress is explicitly permitted (a
+    /// non-empty `[http] allow` list). The connector startup check reads
+    /// this to gate `real` mode — a connector never reaches the network
+    /// by default.
+    pub fn egress_configured(&self) -> bool {
+        self.http_policy.is_configured()
+    }
+
+    /// Whether a named secret resolves right now (slice 52g-3c). Used by
+    /// the connector startup check to validate that a `real`-mode
+    /// connector's `secret(...)` references are satisfiable before the
+    /// backend starts. Only the presence is returned — never the value.
+    pub fn secret_present(&self, name: &str) -> bool {
+        self.secrets
+            .read_env(name)
+            .map(|read| read.present)
+            .unwrap_or(false)
+    }
+
+    /// Whether this runtime is replaying from a recorded trace (slice
+    /// 52g-3c). The connector startup check reads this to gate `replay`
+    /// mode — replay must serve from a recorded interaction and never
+    /// fall through to a real call.
+    pub fn has_replay_source(&self) -> bool {
+        matches!(self.mode, RuntimeMode::Replay(_))
     }
 
     /// Read-only handle to the LLM adapter registry. Mirrors
