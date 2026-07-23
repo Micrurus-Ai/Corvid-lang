@@ -3948,10 +3948,77 @@ next sub-slices. This one is the gate that runs before any of them.
 mode; mock executable with a mock payload; real refuses without
 egress/credentials; real executable with both; replay refuses without a
 source, passes with one). Gate: workspace check clean; corvid-runtime +
-corvid-driver libs green (two pre-existing environmental native-cache
-tests fail after a full `cargo clean` — they exercise the native
-`run_with_target` link path, unrelated to connectors); corpus verify
-exits 1 on exactly the two fixtures.
+corvid-driver libs green (two native-cache tests transiently fail right
+after a full `cargo clean` until the native staticlib is built, then
+pass — environmental, unrelated to connectors); corpus verify exits 1 on
+exactly the two fixtures.
+
+---
+
+## 2026-07-23 - 52g-3c-2/3c-3: a connector operation executes in mock mode, and the mode is chosen at `corvid run`
+
+The startup closure (52g-3c-1) proves a mode is executable; this pair
+makes it actually execute — and makes `corvid run --mode` the place the
+deployment chooses. This is the first slice where a `connector`
+*produces a value*.
+
+### The dispatch seam is inside the Tool arm — so the moat still holds
+
+A connector `operation` lowers to an `IrTool`, so the VM already routes a
+call to it through the Tool arm, which is where the whole governed
+pipeline lives: replay-cancellation reproduction, the reversibility
+boundary, the circuit breaker, the confidence gate, the **approval
+gate**, and the taint/provenance decode. The connector branch is added to
+that arm's dispatch cascade (keyed by `IrOperation::tool_id`, alongside
+the existing `mock_tools` branch), so every one of those still brackets
+the operation. A test proves the load-bearing case: a `dangerous`
+connector operation with a DENYING approver is refused at runtime — a
+connector call cannot smuggle a dangerous effect past approval. (The
+compile-time gate from 52g-3a already forces the `approve`; this shows the
+runtime gate fires too.)
+
+### Mock mode evaluates the compiled expression, with typed args
+
+In the selected `mock` mode the VM builds a fresh sub-interpreter, binds
+the operation's parameters to the typed call `Value`s, and evaluates the
+COMPILED `mock` `IrExpr` — the real evaluator, real values, no JSON
+bypass. `mock: Repo(repo)` called as `get_repo("micrurus", "corvid")`
+returns a `Repo` whose name is the actual argument `"corvid"`, because
+`repo` resolves to its bound `Value`. If the mock were reconstructed from
+raw JSON, that parameter reference could not resolve.
+
+Every invocation emits a redacted `connector.invocation` host event —
+connector, operation, mode, effect names, outcome — and NEVER the
+arguments or the response payload. It's a host event, which replay
+classifies as dispatch metadata and skips, so evidence never perturbs
+replay.
+
+### The mode is selected at the boundary, refused before the handler
+
+`corvid run --mode mock|replay|real` parses into an immutable
+`connector_mode` on the runtime; `run_via_interpreter_tier` runs
+`check_connector_startup` right after building the runtime and prints the
+E5205 refusals + exits before any handler runs. Selecting a mode the
+runtime can't execute yet (replay/real, as of this slice) is itself a
+startup refusal — a new `executable_modes` capability on the startup
+context (the connector mirror of `RuntimeCapabilities`) so an
+unimplemented mode is never a first-call error. Reaching dispatch with no
+mode is an internal invariant, not a user-facing `UnknownTool` (the op
+resolved to a real tool; startup simply should have refused).
+
+Proven live: `--mode mock` returns `"corvid-mock"`; bare `corvid run`
+refuses with "mode not selected"; `--mode real` refuses with "mode not
+executable yet"; `--mode bogus` is a CLI error.
+
+Tests: 3 VM (mock-dispatch-with-typed-args; dangerous-can't-bypass-
+approval; dangerous-dispatches-once-approved) + 1 startup
+(not-executable-yet) + the live CLI checks. Gate (batched per the new
+cadence — one gate for the whole change, not per commit): corvid-vm 234 +
+corvid-driver 234 libs green; workspace check clean; corpus verify exits 1
+on exactly the two fixtures.
+
+Replay + real dispatch (and the full mock/replay/real acceptance demo)
+are the next batch.
 
 ---
 

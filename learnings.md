@@ -7445,10 +7445,33 @@ connector github:
   scope — so `mock: Repo(repo)` may build its answer from the call's arguments.
   A `mock: 42` on an operation returning `Repo` is a type error.
 
-**Scope note (what executes today):** these slices make operations *callable and
-type-checked*, and pin the mode/mock surface — the compiler fully understands
-connectors, and the safety composition above is enforced at compile time.
-Running one end-to-end (selecting the deployment mode, evaluating the mock in
-mock mode, or dispatching the real HTTP request with a resolved secret and
-mapping a response status to a typed error) is the next set of slices. See
-[dev-log.md](dev-log.md) (2026-07-23, 52g-3a / 52g-3b).
+### Mock mode executes today — `corvid run --mode mock`
+
+An operation whose connector allows `mock` executes end-to-end: the deployment
+picks the mode at the boundary, and the runtime evaluates the compiled `mock`
+payload with the call's typed arguments.
+
+```
+corvid run --mode mock app.cor      # get_repo("micrurus","corvid") -> Repo("corvid")
+corvid run app.cor                  # E5205: connector mode not selected — refuses to start
+corvid run --mode real app.cor      # E5205: real mode not executable yet (arrives next slice)
+```
+
+- The mode is **required and immutable**: a connector program with no `--mode`
+  refuses to start (never a first-call error), and the mode is fixed for the
+  process. Selecting a mode the connector's `modes` doesn't allow — or one the
+  runtime can't execute yet — is a startup refusal.
+- **Mock evaluates the compiled expression, not JSON.** `mock: Repo(repo)`
+  called with `repo = "corvid"` returns `Repo("corvid")` — the parameter
+  resolves to its bound value through the real evaluator.
+- **A connector op is a tool**, so its dispatch runs through the same governed
+  pipeline: a `dangerous` operation with a denying approver is refused at
+  runtime — a connector call cannot bypass approval. Every invocation records a
+  redacted `connector.invocation` event (connector/operation/mode/effects/
+  outcome — never arguments or payload).
+
+**Scope note (what executes today):** `mock` mode runs end-to-end. `replay`
+(serve a recorded interaction, never real) and `real` (HTTP with a resolved
+secret that never enters a trace, status→typed-error) are the next slices;
+selecting them today refuses cleanly at startup. See [dev-log.md](dev-log.md)
+(2026-07-23, 52g-3a / 52g-3b / 52g-3c).

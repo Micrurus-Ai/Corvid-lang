@@ -54,6 +54,15 @@ pub enum ConnectorStartupError {
     /// `replay` mode, but no recorded interaction source is present —
     /// replay must serve from a cassette and never fall through to real.
     ReplayWithoutSource { connector: String },
+    /// The selected mode is declared and otherwise valid, but the
+    /// runtime does not execute it yet (it arrives in a later slice).
+    /// Refusing at startup keeps the "prove it or refuse" invariant:
+    /// selecting a mode the runtime can't serve is never a first-call
+    /// error.
+    ModeNotExecutableYet {
+        connector: String,
+        mode: ConnectorMode,
+    },
     /// An operation has no executable path in the selected mode (e.g.
     /// `mock` mode but the operation declares no mock payload).
     OperationNotServeable {
@@ -106,6 +115,11 @@ impl ConnectorStartupError {
                  mode but no recorded interaction source is present. Replay serves from a \
                  recorded cassette and never falls through to a real call.",
             ),
+            Self::ModeNotExecutableYet { connector, mode } => format!(
+                "E5205 Connector mode not executable yet: connector `{connector}` was started in \
+                 `{}` mode, which this runtime does not execute yet. Select an executable mode.",
+                mode.as_str()
+            ),
             Self::OperationNotServeable {
                 connector,
                 operation,
@@ -132,6 +146,12 @@ pub struct ConnectorRuntimeContext<'a> {
     pub egress_configured: bool,
     pub replay_source_present: bool,
     pub secret_present: &'a dyn Fn(&str) -> bool,
+    /// The connector execution modes this runtime tier actually
+    /// executes as of the current slice (mirrors
+    /// [`crate::contract_closure::RuntimeCapabilities`]). Selecting a
+    /// declared-but-not-yet-implemented mode is a startup refusal, not a
+    /// first-call error. Grows as each mode's dispatch lands.
+    pub executable_modes: &'a [ConnectorMode],
 }
 
 /// The secret reference NAMES a connector's auth depends on. Never the
@@ -183,6 +203,17 @@ pub fn check_connector_startup(
             continue;
         }
 
+        // The runtime must actually execute the selected mode. A
+        // declared-but-not-yet-implemented mode refuses at startup, never
+        // at first call.
+        if !ctx.executable_modes.contains(&mode) {
+            errors.push(ConnectorStartupError::ModeNotExecutableYet {
+                connector: connector.name.clone(),
+                mode,
+            });
+            continue;
+        }
+
         // (3) + (4) Every operation must have an executable path in the
         // selected mode.
         match mode {
@@ -230,17 +261,24 @@ pub fn check_connector_startup(
 mod tests {
     use super::*;
 
+    const ALL_MODES: [ConnectorMode; 3] =
+        [ConnectorMode::Mock, ConnectorMode::Replay, ConnectorMode::Real];
+
     fn ctx<'a>(
         mode: Option<ConnectorMode>,
         egress: bool,
         replay: bool,
         secret: &'a dyn Fn(&str) -> bool,
     ) -> ConnectorRuntimeContext<'a> {
+        // Default: every mode is executable, so these tests exercise the
+        // other gates. The not-executable-yet gate has its own test with
+        // a restricted set.
         ConnectorRuntimeContext {
             selected_mode: mode,
             egress_configured: egress,
             replay_source_present: replay,
             secret_present: secret,
+            executable_modes: &ALL_MODES,
         }
     }
 
@@ -329,6 +367,27 @@ connector github:
         let errs =
             check_connector_startup(&ir, &ctx(Some(ConnectorMode::Real), true, false, &present));
         assert!(errs.is_empty(), "real mode should be executable: {errs:?}");
+    }
+
+    #[test]
+    fn a_declared_mode_the_runtime_cannot_execute_yet_refuses_at_startup() {
+        // `real` is a declared+allowed mode with credentials and egress,
+        // but if the runtime tier does not execute it yet, selecting it
+        // is a startup refusal — never a first-call error.
+        let ir = ir(GITHUB);
+        let present = |_: &str| true;
+        let mock_only = [ConnectorMode::Mock];
+        let restricted = ConnectorRuntimeContext {
+            selected_mode: Some(ConnectorMode::Real),
+            egress_configured: true,
+            replay_source_present: true,
+            secret_present: &present,
+            executable_modes: &mock_only,
+        };
+        let errs = check_connector_startup(&ir, &restricted);
+        assert!(errs
+            .iter()
+            .any(|e| matches!(e, ConnectorStartupError::ModeNotExecutableYet { .. })));
     }
 
     #[test]

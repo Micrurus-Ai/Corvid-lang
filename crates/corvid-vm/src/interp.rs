@@ -46,10 +46,10 @@ use crate::value::{
     value_confidence, BoxedValue, ClosureValue, ListValue, StreamChunk, StreamSender, Value,
 };
 use async_recursion::async_recursion;
-use corvid_ast::{BinaryOp, Span};
-use corvid_ir::{IrPattern, 
-    IrAgent, IrCallKind, IrExpr, IrExprKind, IrFile, IrFixture, IrMock, IrParam, IrPrompt, IrTool,
-    IrType,
+use corvid_ast::{BinaryOp, ConnectorMode, Span};
+use corvid_ir::{IrPattern,
+    IrAgent, IrCallKind, IrConnector, IrExpr, IrExprKind, IrFile, IrFixture, IrMock, IrOperation,
+    IrParam, IrPrompt, IrTool, IrType,
 };
 use corvid_resolve::{DefId, LocalId};
 use corvid_runtime::{DbValue, Runtime};
@@ -90,6 +90,13 @@ struct Interpreter<'ir> {
     prompts_by_id: HashMap<DefId, &'ir IrPrompt>,
     agents_by_id: HashMap<DefId, &'ir IrAgent>,
     fixtures_by_id: HashMap<DefId, &'ir IrFixture>,
+    /// Connector operations indexed by their lowered `IrTool` DefId
+    /// (slice 52g-3c). A tool-call whose `def_id` is in this map is a
+    /// connector operation: the VM dispatches it through the connector
+    /// path (in the deployment-selected mode) instead of the generic
+    /// tool registry. The value is the owning connector plus the
+    /// operation's declarative HTTP/mock metadata.
+    connector_ops_by_id: HashMap<DefId, (&'ir IrConnector, &'ir IrOperation)>,
     mock_tools: HashMap<DefId, &'ir IrMock>,
     /// Circuit-breaker state (slice 50k): per-tool CONSECUTIVE
     /// failure counts, shared across sub-interpreters within a run.
@@ -148,6 +155,11 @@ impl<'ir> Interpreter<'ir> {
         let agents_by_id: HashMap<DefId, &IrAgent> = ir.agents.iter().map(|a| (a.id, a)).collect();
         let fixtures_by_id: HashMap<DefId, &IrFixture> =
             ir.fixtures.iter().map(|f| (f.id, f)).collect();
+        let connector_ops_by_id: HashMap<DefId, (&IrConnector, &IrOperation)> = ir
+            .connectors
+            .iter()
+            .flat_map(|c| c.operations.iter().map(move |op| (op.tool_id, (c, op))))
+            .collect();
         Self {
             ir,
             env: Env::new(),
@@ -156,6 +168,7 @@ impl<'ir> Interpreter<'ir> {
             prompts_by_id,
             agents_by_id,
             fixtures_by_id,
+            connector_ops_by_id,
             mock_tools: HashMap::new(),
             breaker_state: Arc::new(std::sync::Mutex::new(HashMap::new())),
             runtime,
@@ -222,6 +235,117 @@ impl<'ir> Interpreter<'ir> {
             self.stream_locals.remove(&p.local_id);
         }
         Ok(())
+    }
+
+    /// Dispatch a connector operation (slice 52g-3c) in the
+    /// deployment-selected mode. The operation is an `IrTool`, so this
+    /// runs inside the Tool arm's effect / approval / budget / taint /
+    /// provenance / trace bracket — dispatch stays governed exactly like
+    /// any tool call. Every invocation records a redacted
+    /// `connector.invocation` evidence event (connector, operation,
+    /// mode, effects, outcome — never the arguments or the payload).
+    async fn dispatch_connector_operation(
+        &self,
+        connector: &'ir IrConnector,
+        op: &'ir IrOperation,
+        tool: &'ir IrTool,
+        callee_name: &str,
+        arg_values: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        // The mode is chosen once at startup and validated by
+        // `check_connector_startup`. Reaching dispatch with no mode is an
+        // internal invariant violation — never a user-facing
+        // `UnknownTool` (the operation resolved to a real tool; the
+        // deployment simply failed to select a mode, which startup should
+        // already have refused).
+        let mode = self.runtime.connector_mode().ok_or_else(|| {
+            InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector operation `{}.{}` reached dispatch with no selected mode — \
+                     startup validation should have refused to start",
+                    connector.name, op.name
+                )),
+                span,
+            )
+        })?;
+
+        let outcome_result = match mode {
+            ConnectorMode::Mock => {
+                self.dispatch_connector_mock(connector, op, tool, callee_name, arg_values, span)
+                    .await
+            }
+            ConnectorMode::Replay => Err(InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector `{}` replay-mode dispatch arrives in slice 52g-3c-4",
+                    connector.name
+                )),
+                span,
+            )),
+            ConnectorMode::Real => Err(InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector `{}` real-mode dispatch arrives in slice 52g-3c-5",
+                    connector.name
+                )),
+                span,
+            )),
+        };
+
+        // Evidence (req 8): record connector / operation / mode /
+        // effects / outcome — NEVER the arguments or the response
+        // payload. Emitted as a host event, which replay classifies as
+        // dispatch metadata and skips, so it never perturbs replay.
+        let outcome = if outcome_result.is_ok() { "ok" } else { "error" };
+        self.runtime.emit_host_event(
+            "connector.invocation",
+            serde_json::json!({
+                "connector": connector.name,
+                "operation": op.name,
+                "mode": mode.as_str(),
+                "effects": tool.effect_names,
+                "outcome": outcome,
+            }),
+        );
+        outcome_result
+    }
+
+    /// Mock-mode dispatch: evaluate the COMPILED `mock` expression with
+    /// the operation's parameters bound to the typed call arguments. The
+    /// real evaluator, real `Value`s — no JSON bypass. The startup check
+    /// guarantees a mock payload exists when mock mode is selected, so
+    /// its absence here is an internal invariant.
+    async fn dispatch_connector_mock(
+        &self,
+        connector: &'ir IrConnector,
+        op: &'ir IrOperation,
+        tool: &'ir IrTool,
+        callee_name: &str,
+        arg_values: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let mock_expr = op.mock.as_ref().ok_or_else(|| {
+            InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector `{}` operation `{}` selected mock mode but declares no mock \
+                     payload — startup validation should have refused to start",
+                    connector.name, op.name
+                )),
+                span,
+            )
+        })?;
+        let mut sub = Interpreter::new(self.ir, self.runtime);
+        sub.bind_ir_params(callee_name, &tool.params, arg_values, span)?;
+        match sub.eval_expr(mock_expr).await?.into_value() {
+            Ok(value) => Ok(value),
+            Err(_propagated) => Err(InterpError::new(
+                InterpErrorKind::Other(format!(
+                    "connector `{}` operation `{}` mock payload propagated an error instead of \
+                     producing a value",
+                    connector.name, op.name
+                )),
+                span,
+            )),
+        }
     }
 
     fn env_snapshot(&self) -> step::EnvSnapshot {
@@ -1429,7 +1553,17 @@ impl<'ir> Interpreter<'ir> {
                 }
 
                 let start = std::time::Instant::now();
-                let result_value = if let Some(mock) = self.mock_tools.get(def_id).copied() {
+                let result_value = if let Some((connector, op)) =
+                    self.connector_ops_by_id.get(def_id).copied()
+                {
+                    // Slice 52g-3c: a connector operation. Dispatch it in
+                    // the deployment-selected mode. This sits inside the
+                    // Tool arm, so the effect / approval / budget / taint
+                    // / provenance / trace pipeline still brackets it —
+                    // the operation IS a tool.
+                    self.dispatch_connector_operation(connector, op, tool, callee_name, arg_values, span)
+                        .await?
+                } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
                     let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
                     sub.bind_ir_params(callee_name, &mock.params, arg_values, span)?;
                     sub.eval_block(&mock.body)

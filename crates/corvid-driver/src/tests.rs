@@ -2209,7 +2209,7 @@ agent load(id: String) -> String:
         let src_path = tmp.path().join("pure.cor");
         std::fs::write(&src_path, NATIVE_ABLE_SRC).expect("write");
 
-        let code = run_with_target(&src_path, RunTarget::Auto, None, &[]).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Auto, None, &[], None).expect("run");
         assert_eq!(code, 0, "pure program should exit 0");
         // Cache populated under <tmpdir>/target/cache/native/.
         let cache_dir = tmp.path().join("target").join("cache").join("native");
@@ -2237,7 +2237,7 @@ agent load(id: String) -> String:
         let src_path = tmp.path().join("tooly.cor");
         std::fs::write(&src_path, TOOL_USING_SRC).expect("write");
 
-        let code = run_with_target(&src_path, RunTarget::Native, None, &[]).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Native, None, &[], None).expect("run");
         assert_eq!(
             code, 1,
             "native-required on a tool-using program must exit 1"
@@ -2263,7 +2263,7 @@ agent load(id: String) -> String:
         // staticlib which the cargo-test environment doesn't always
         // resolve cleanly.
         let args = vec!["41".to_string()];
-        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args, None).expect("run");
         assert_eq!(
             code, 0,
             "agent must run cleanly with the CLI-supplied Int arg"
@@ -2281,7 +2281,7 @@ agent load(id: String) -> String:
         std::fs::write(&src_path, PARAMETERIZED_SRC).expect("write");
 
         let args = vec!["not_a_number".to_string()];
-        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args, None).expect("run");
         assert_eq!(
             code, 1,
             "unparseable Int arg must exit 1 (not panic / crash)"
@@ -2298,6 +2298,6 @@ agent load(id: String) -> String:
         std::fs::write(&src_path, PARAMETERIZED_SRC).expect("write");
 
         let args = vec!["1".to_string()]; // only one arg for two-param agent
-        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args).expect("run");
+        let code = run_with_target(&src_path, RunTarget::Interpreter, None, &args, None).expect("run");
         assert_eq!(code, 1, "wrong arg count must exit 1");
     }

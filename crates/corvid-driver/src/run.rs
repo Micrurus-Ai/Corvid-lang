@@ -115,7 +115,7 @@ pub enum RunTarget {
 /// interpreter fallback with an announced-on-stderr reason otherwise.
 /// Equivalent to `run_with_target(path, RunTarget::Auto, None, &[])`.
 pub fn run_native(path: &Path) -> Result<u8, anyhow::Error> {
-    run_with_target(path, RunTarget::Auto, None, &[])
+    run_with_target(path, RunTarget::Auto, None, &[], None)
 }
 
 /// `corvid run <file> [--target=...] [--with-tools-lib <path>]`
@@ -131,6 +131,7 @@ pub fn run_with_target(
     target: RunTarget,
     tools_lib: Option<&Path>,
     args: &[String],
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
     // Env is loaded for both tiers: the native binary may read it via
     // libc `getenv` (the entry shim's leak-counter toggle does), and the
@@ -180,15 +181,15 @@ pub fn run_with_target(
                 Ok(1)
             }
         },
-        RunTarget::Interpreter => run_via_interpreter_tier(path, &ir, args),
+        RunTarget::Interpreter => run_via_interpreter_tier(path, &ir, args, connector_mode),
         RunTarget::Auto => match &scan {
-            Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib, args),
+            Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode),
             Err(reason) if tools_satisfy(reason) => {
-                try_native_then_interpret(path, &source, &ir, tools_lib, args)
+                try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode)
             }
             Err(reason) => {
                 eprintln!("↻ running via interpreter: {reason}");
-                run_via_interpreter_tier(path, &ir, args)
+                run_via_interpreter_tier(path, &ir, args, connector_mode)
             }
         },
     }
@@ -212,12 +213,13 @@ fn try_native_then_interpret(
     ir: &IrFile,
     tools_lib: Option<&Path>,
     args: &[String],
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
     match run_via_native_tier(path, source, ir, tools_lib, args) {
         Ok(code) => Ok(code),
         Err(err) if is_missing_staticlib_error(&err) => {
             eprintln!("↻ running via interpreter: native staticlib unavailable");
-            run_via_interpreter_tier(path, ir, args)
+            run_via_interpreter_tier(path, ir, args, connector_mode)
         }
         Err(err) => Err(err),
     }
@@ -328,6 +330,7 @@ fn run_via_interpreter_tier(
     path: &Path,
     ir: &IrFile,
     args: &[String],
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
     let trace_dir = trace_dir_for(path);
     let tracer = Tracer::open(&trace_dir, corvid_runtime::fresh_run_id())
@@ -367,8 +370,36 @@ fn run_via_interpreter_tier(
         builder = builder.mcp_servers(mcp_servers);
     }
 
+    // Slice 52g-3c: select the connector execution mode (immutable for
+    // the process). A program that declares connectors then refuses to
+    // start unless a mode was selected — see the closure check below.
+    builder = builder.connector_mode(connector_mode);
+
     builder = apply_env_llm_wiring(builder);
     let rt = builder.build();
+
+    // Slice 52g-3c: the connector startup closure. Prove the selected
+    // mode is real and executable for every operation, or refuse to
+    // start — the connector analogue of Contract Closure (52b). Mock is
+    // the executable mode as of this slice; replay/real arrive next and
+    // widen `executable_modes`.
+    {
+        let secret_present = |name: &str| rt.secret_present(name);
+        let ctx = crate::connector_startup::ConnectorRuntimeContext {
+            selected_mode: rt.connector_mode(),
+            egress_configured: rt.egress_configured(),
+            replay_source_present: rt.has_replay_source(),
+            secret_present: &secret_present,
+            executable_modes: &[corvid_ast::ConnectorMode::Mock],
+        };
+        let refusals = crate::connector_startup::check_connector_startup(ir, &ctx);
+        if !refusals.is_empty() {
+            for refusal in &refusals {
+                eprintln!("{}", refusal.message());
+            }
+            return Ok(1);
+        }
+    }
 
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -12,6 +12,7 @@ use corvid_types::typecheck;
 use serde_json::json;
 use std::sync::Arc;
 
+mod connector;
 mod stream;
 mod core;
 mod dispatch;

@@ -154,6 +154,13 @@ pub enum Command {
         /// interpreter (auto) or error out (native).
         #[arg(long, value_name = "PATH")]
         with_tools_lib: Option<PathBuf>,
+        /// Connector execution mode: `mock`, `replay`, or `real` (slice
+        /// 52g-3c). Required when the program declares a `connector` —
+        /// there is no default, and the selected mode must be one the
+        /// connector's `modes: [...]` allows. Omitting it for a
+        /// connector program is a startup refusal.
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
         /// Slice 33Q17a: positional arguments to forward to the
         /// entry agent. Each argument is parsed against the agent's
         /// declared parameter type — `Int` / `Float` / `Bool` /

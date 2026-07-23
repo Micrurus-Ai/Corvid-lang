@@ -135,10 +135,11 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             file,
             target,
             with_tools_lib,
+            mode,
             args,
         }) => {
             let file = resolve_project_source(file)?;
-            cmd_run(&file, &target, with_tools_lib.as_deref(), &args)
+            cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
         Some(Command::Serve {
             file,
