@@ -47,6 +47,19 @@ A 3,000-line file that does one thing cleanly is fine. A 400-line grab bag is no
 
 The hardest rule. No shortcuts anywhere. If a shipped surface conflicts with the spec, fix the surface rather than softening the spec (see `memory/project_phase_20_closed.md` for the canonical example).
 
+## No hidden defaults for consequential policy
+
+**Behavior with a security, privacy, tenancy, cost, or access consequence is NEVER a silently hardcoded default.** When such a choice has more than one reasonable policy, the developer's SOURCE must declare it explicitly, and OMITTING it is a compile error (or refuse-to-start) that names the missing decision and its allowed values — never a default the author didn't choose. The source is the forcing function; a program cannot back into a consequential posture by silence.
+
+Set by the CTO 2026-07-23 (OAuth first-login provisioning). The canonical case: an `identity` block that declares OAuth providers must also declare `provisioning: first_login: open | invited`; omitting it is `E52xx First-login policy required` — so an enterprise app can never *silently* become open-registration. Same shape as the existing precedents: insecure session config is a compile error absent a loud `insecure_opt_out` (51g); a `requires`-policy route refuses to start until authorization is actually enforced (52b); native codegen degrades loudly rather than silently producing `object`-shaped output.
+
+How to apply:
+
+1. **A consequential choice with multiple reasonable policies is declared in source, never inferred.** If picking one silently could surprise a security-conscious author (open vs. invited signup, permissive vs. strict CORS, redact vs. retain, cross-tenant vs. scoped), do not pick — require the declaration.
+2. **Omission is a compile error (or refuse-to-start)** that names the decision and the allowed values. Not a warning, not a default.
+3. **Only offer policy values the runtime can execute COMPLETELY today.** A declared-but-unimplemented value is rejected with a clear error (e.g. `approval_required` before durable-approval composition exists), never silently degraded to a weaker behavior.
+4. **Never derive a consequential identifier from an untrusted signal.** Tenancy, identity, and authority come from fixed configuration, a verified artifact, or an explicitly configured + allowlisted mapping — never a bare token/claim/header the caller controls (e.g. never assign a tenant from an arbitrary ID-token claim; never merge accounts by email).
+
 ## Single source of truth — check before you re-implement
 
 **Before writing any logic that mirrors behavior that already exists, search for the canonical implementation and reuse it. Do not hand-copy a mapping, projection, validation, or resolution into a second place.**
