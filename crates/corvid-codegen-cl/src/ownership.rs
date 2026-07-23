@@ -123,6 +123,7 @@ pub fn analyze(ir: IrFile) -> (IrFile, HashMap<DefId, AgentSummary>) {
         mocks: ir.mocks,
         servers: ir.servers,
         models: Vec::new(),
+        connectors: ir.connectors,
     };
     (out, summaries)
 }

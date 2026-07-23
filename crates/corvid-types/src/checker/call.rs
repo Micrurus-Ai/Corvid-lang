@@ -161,12 +161,27 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Type {
-        let tool = *self
-            .tools_by_id
-            .get(&def_id)
-            .expect("tool DefId not indexed");
+        // A call resolves to either a `tool` or a connector
+        // `operation` — both carry the same signature shape (params /
+        // effect / effect row / return), so a call to either types
+        // identically. We look the signature up from whichever table
+        // holds this DefId. Both `.get(..)` results are `&'a`
+        // references that do NOT borrow `self`, so subsequent
+        // `self`-mutating calls remain legal.
+        let (params, effect, effect_row, return_ty): (
+            &[Param],
+            Effect,
+            &corvid_ast::EffectRow,
+            &corvid_ast::TypeRef,
+        ) = if let Some(&tool) = self.tools_by_id.get(&def_id) {
+            (&tool.params, tool.effect, &tool.effect_row, &tool.return_ty)
+        } else if let Some(&op) = self.operations_by_id.get(&def_id) {
+            (&op.params, op.effect, &op.effect_row, &op.return_ty)
+        } else {
+            panic!("tool/operation DefId not indexed");
+        };
 
-        let arg_types = self.check_args_collecting_types(tool_name, &tool.params, args, false);
+        let arg_types = self.check_args_collecting_types(tool_name, params, args, false);
 
         // Effect check: a `dangerous` tool must have a prior matching
         // approve — and so must a tool whose composed effect row
@@ -176,10 +191,10 @@ impl<'a> Checker<'a> {
         // semantics but forgets the `dangerous` marker still gets
         // compile-time protection.
         let derived_trust = crate::effects::effect_row_trust_requires_approval(
-            &tool.effect_row,
+            effect_row,
             self.registry,
         );
-        if matches!(tool.effect, Effect::Dangerous) || derived_trust.is_some() {
+        if matches!(effect, Effect::Dangerous) || derived_trust.is_some() {
             let authorized = self
                 .approvals
                 .iter()
@@ -202,7 +217,7 @@ impl<'a> Checker<'a> {
                     .approvals_seen_in_agent
                     .iter()
                     .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
-                let is_dangerous = matches!(tool.effect, Effect::Dangerous);
+                let is_dangerous = matches!(effect, Effect::Dangerous);
                 let guarantee_id = if approve_exists_out_of_scope {
                     "approval.token_lexical_only"
                 } else if is_dangerous {
@@ -241,9 +256,9 @@ impl<'a> Checker<'a> {
         // compile error: attacker-influenced content cannot
         // parameterize a consequential action without an explicit
         // `trusted(...)` boundary.
-        let requires_approval = matches!(tool.effect, Effect::Dangerous)
+        let requires_approval = matches!(effect, Effect::Dangerous)
             || crate::effects::effect_row_trust_requires_approval(
-                &tool.effect_row,
+                effect_row,
                 self.registry,
             )
             .is_some();
@@ -264,9 +279,9 @@ impl<'a> Checker<'a> {
         }
 
         self.bump_effect(WeakEffect::ToolCall);
-        let ret = self.type_ref_to_type(&tool.return_ty);
-        let ret = self.ground_if_effect_grounded(&tool.effect_row, ret);
-        self.taint_if_effect_untrusted(&tool.effect_row, ret)
+        let ret = self.type_ref_to_type(return_ty);
+        let ret = self.ground_if_effect_grounded(effect_row, ret);
+        self.taint_if_effect_untrusted(effect_row, ret)
     }
 
     /// Provenance Propagation Design X (D1 part A): if a callee's

@@ -7360,3 +7360,63 @@ survive a restart and are consistent across replicas.
 The resulting guarantee: **no protected route executes and no approval releases
 an effect unless Corvid verifies the actor, tenant, authority, and decision at
 the request boundary.** See [dev-log.md](dev-log.md) (2026-07-23, 52f-4b).
+
+---
+
+## A connector `operation` is a callable tool, and the moat composes with it (2026-07-23)
+
+A `connector` block declares an external API once — its base URL, its
+credentials (always `secret(...)` references, never literals), and its
+reliability posture — and each `operation` inside it is a callable you invoke
+by name, exactly like a tool:
+
+```corvid
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+
+agent fetch(owner: String, repo: String) -> Repo uses http_read:
+    r = get_repo(owner, repo)   # a normal call — types as Repo
+    return r
+```
+
+There is **no new call syntax**: `get_repo(owner, repo)` is an ordinary call.
+Its arguments check against the operation's parameters (passing an `Int` where a
+`String` is declared is a compile error), and its declared return type flows to
+the caller.
+
+The point is what this composition buys you. Because an operation shares the
+exact call path a hand-written tool uses, **every effect-system guarantee
+applies to it automatically**:
+
+- A `dangerous` operation requires a prior `approve` — a connector *write* is
+  governable by construction:
+
+  ```corvid
+  operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+      POST "/repos/{owner}/issues" body req
+  ```
+  Calling `create_issue(...)` without an `approve CreateIssue(...)` on the line
+  before is a compile error.
+
+- An untrusted (`Tainted<T>`) value cannot reach an approval-gated operation
+  argument without an explicit `trusted(...)` boundary — the same prompt-
+  injection sink rule that guards dangerous tools.
+
+- An operation whose effect row carries `data: grounded` returns `Grounded<T>`,
+  so provenance propagates through connector reads.
+
+**Scope note (what executes today):** this slice makes operations *callable and
+type-checked* — the compiler fully understands them, and the safety composition
+above is enforced at compile time. Running one end-to-end (dispatching the HTTP
+request through the connector runtime, resolving the secret, mapping a response
+status to a typed error) is the very next slice. See
+[dev-log.md](dev-log.md) (2026-07-23, 52g-3a).

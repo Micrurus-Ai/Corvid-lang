@@ -43,6 +43,9 @@ mod tests {
     #[path = "lower_imports.rs"]
     mod lower_imports;
 
+    #[path = "lower_connector.rs"]
+    mod lower_connector;
+
     #[path = "types.rs"]
     mod types;
 }

@@ -380,6 +380,11 @@ struct Checker<'a> {
     /// total(o: Order) -> Int` indexes into `agents_by_id` under the
     /// method's allocated DefId, alongside file-level free agents.
     tools_by_id: HashMap<DefId, &'a ToolDecl>,
+    /// Connector operations, indexed by DefId (slice 52g-3). An
+    /// `operation` is a tool with a declarative body, so a call to one
+    /// is typed exactly like a tool call — its signature (params /
+    /// effect / effect row / return) lives here.
+    operations_by_id: HashMap<DefId, &'a corvid_ast::OperationDecl>,
     prompts_by_id: HashMap<DefId, &'a PromptDecl>,
     agents_by_id: HashMap<DefId, &'a AgentDecl>,
     fns_by_id: HashMap<DefId, &'a corvid_ast::FnDecl>,
@@ -599,6 +604,7 @@ impl<'a> Checker<'a> {
         registry: &'a crate::effects::EffectRegistry,
     ) -> Self {
         let mut tools = HashMap::new();
+        let mut operations = HashMap::new();
         let mut prompts = HashMap::new();
         let mut agents = HashMap::new();
         let mut fns = HashMap::new();
@@ -649,7 +655,16 @@ impl<'a> Checker<'a> {
                 }
                 Decl::Server(_) => {}
                 Decl::Identity(_) => {}
-                Decl::Connector(_) => {}
+                Decl::Connector(c) => {
+                    // 52g-3: each operation is a callable tool; index its
+                    // signature by DefId so a call to it types identically
+                    // to a tool call.
+                    for op in &c.operations {
+                        if let Some(id) = resolved.symbols.lookup_def(&op.name.name) {
+                            operations.insert(id, op);
+                        }
+                    }
+                }
                 Decl::Extend(ext) => {
                     // Index method decls by their allocated DefIds
                     // (from the resolver's
@@ -692,6 +707,7 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             tools_by_id: tools,
+            operations_by_id: operations,
             prompts_by_id: prompts,
             agents_by_id: agents,
             fns_by_id: fns,

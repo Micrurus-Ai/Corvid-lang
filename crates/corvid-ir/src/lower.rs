@@ -11,10 +11,11 @@ use crate::imports::{
 };
 use crate::types::*;
 use corvid_ast::{
-    AgentAttribute, AgentDecl, BinaryOp, Block, Decl, Effect, EvalAssert, EvalDecl, Expr,
-    ExtendMethodKind, ExternAbi, File, FixtureDecl, HttpRouteDecl, Ident, ImportDecl, ImportSource,
-    Literal, MockDecl, Param, PromptDecl, ReplayArm, ReplayPattern, ServerDecl, Span, Stmt,
-    TestDecl, ToolArgPattern, ToolDecl, TypeDecl, TypeRef, UnaryOp,
+    AgentAttribute, AgentDecl, BinaryOp, Block, ConnectorAuth, ConnectorDecl, Decl, Effect,
+    EvalAssert, EvalDecl, Expr, ExtendMethodKind, ExternAbi, File, FixtureDecl, HttpRouteDecl,
+    Ident, ImportDecl, ImportSource, Literal, MockDecl, OperationDecl, Param, PromptDecl, ReplayArm,
+    ReplayPattern, ServerDecl, Span, Stmt, TestDecl, ToolArgPattern, ToolDecl, TypeDecl, TypeRef,
+    UnaryOp,
 };
 use corvid_resolve::{
     resolver::MethodEntry, Binding, BuiltIn, DeclKind, DefId, LocalId, ModuleResolution, Resolved,
@@ -250,6 +251,7 @@ impl<'a> Lowerer<'a> {
         let mut mocks = Vec::new();
         let mut servers = Vec::new();
         let mut models = Vec::new();
+        let mut connectors = Vec::new();
 
         for decl in &file.decls {
             match decl {
@@ -315,11 +317,14 @@ impl<'a> Lowerer<'a> {
                     // manifests. They do not lower into executable IR
                     // until the scheduler runner slice.
                 }
-                Decl::Connector(_) => {
-                    // 52g-1: a connector parses + resolves; lowering each
-                    // operation to a callable tool (with a declarative
-                    // HTTP body dispatching through the connector runtime)
-                    // lands in 52g-3.
+                Decl::Connector(c) => {
+                    // 52g-3: each `operation` lowers to a callable IrTool
+                    // (so a call to it types + dispatches like any tool)
+                    // plus an IrConnector dispatch record carrying the
+                    // HTTP metadata the runtime turns into a
+                    // `ConnectorRequest`.
+                    let connector = self.lower_connector(c, &mut tools);
+                    connectors.push(connector);
                 }
                 Decl::Extend(ext) => {
                     // Lower each method into the appropriate per-kind
@@ -365,6 +370,101 @@ impl<'a> Lowerer<'a> {
             mocks,
             servers,
             models,
+            connectors,
+        }
+    }
+
+    /// Lower a `connector` block (slice 52g-3). Each `operation` is
+    /// appended to `tools` as an ordinary callable `IrTool`, and the
+    /// connector's HTTP dispatch metadata (base URL, credentials,
+    /// per-operation method/path/body/error-map, reliability) is
+    /// returned as an `IrConnector` keyed back to those tools by DefId.
+    fn lower_connector(&self, c: &ConnectorDecl, tools: &mut Vec<IrTool>) -> IrConnector {
+        let mut operations = Vec::with_capacity(c.operations.len());
+        for op in &c.operations {
+            let tool_id = self
+                .symbols
+                .lookup_def(&op.name.name)
+                .expect("connector operation missing from symbol table");
+            tools.push(self.lower_operation_as_tool(op, tool_id));
+            operations.push(IrOperation {
+                name: op.name.name.clone(),
+                tool_id: self.remap_def_id(tool_id),
+                method: op.method,
+                path: op.path.clone(),
+                body: op.body.as_ref().map(|b| IrOperationBody {
+                    param_name: b.param.name.clone(),
+                    encoding: b.encoding,
+                }),
+                error_map: op
+                    .error_map
+                    .iter()
+                    .map(|m| IrStatusErrorMapping {
+                        status: m.status,
+                        variant: m.variant.name.clone(),
+                    })
+                    .collect(),
+                span: op.span,
+            });
+        }
+        IrConnector {
+            name: c.name.name.clone(),
+            base_url: c.base_url.clone(),
+            auth: c.auth.as_ref().map(lower_connector_auth),
+            retry: c.retry,
+            rate_limit: c.rate_limit.map(|r| IrRateLimit {
+                limit: r.limit,
+                window_secs: r.window_secs,
+            }),
+            circuit_breaker: c.circuit_breaker,
+            operations,
+            span: c.span,
+        }
+    }
+
+    /// Lower a connector `operation` into a callable `IrTool`. An
+    /// operation IS a tool with a declarative HTTP body — same
+    /// signature shape (params / effect / effect row / return), so its
+    /// effect row composes with budgets / approval / replay / taint
+    /// exactly like a hand-written tool's. It carries no circuit
+    /// breaker of its own (connector-level reliability lands in 52g-4).
+    fn lower_operation_as_tool(&self, op: &OperationDecl, id: DefId) -> IrTool {
+        let mut confidence_gate: Option<f64> = None;
+        for effect_ref in &op.effect_row.effects {
+            if let Some(&threshold) = self.confidence_gates.get(&effect_ref.name.name) {
+                confidence_gate = match confidence_gate {
+                    Some(current) => Some(current.max(threshold)),
+                    None => Some(threshold),
+                };
+            }
+        }
+        let produces_grounded = corvid_types::effects::effect_row_is_grounded(
+            &op.effect_row,
+            &self.effect_registry,
+        );
+        let effect_names: Vec<String> = op
+            .effect_row
+            .effects
+            .iter()
+            .map(|e| e.name.name.clone())
+            .collect();
+        let effect_refs: Vec<&str> = effect_names.iter().map(|n| n.as_str()).collect();
+        let profile = self.effect_registry.compose(&effect_refs);
+        let effect_cost = numeric_profile_dimension(&profile, "cost");
+        let effect_reversible = profile_is_reversible(&profile);
+        IrTool {
+            breaker: None,
+            id: self.remap_def_id(id),
+            name: op.name.name.clone(),
+            params: self.lower_params(&op.params),
+            return_ty: self.type_ref_to_type(&op.return_ty),
+            effect: op.effect,
+            effect_names,
+            confidence_gate,
+            produces_grounded,
+            effect_cost,
+            effect_reversible,
+            span: op.span,
         }
     }
 
@@ -2146,6 +2246,25 @@ fn upload_format_tag(ty: &TypeRef) -> Option<String> {
             }
         }
         _ => None,
+    }
+}
+
+/// Lower a connector's `auth:` clause (slice 52g-3). Only the secret
+/// reference NAMES are carried — never a literal value — so a trace can
+/// name which secret was used without ever revealing it.
+fn lower_connector_auth(auth: &ConnectorAuth) -> IrConnectorAuth {
+    match auth {
+        ConnectorAuth::Bearer(secret) => IrConnectorAuth::Bearer {
+            secret: secret.name.clone(),
+        },
+        ConnectorAuth::Header { name, value } => IrConnectorAuth::Header {
+            name: name.clone(),
+            secret: value.name.clone(),
+        },
+        ConnectorAuth::Basic { username, password } => IrConnectorAuth::Basic {
+            username_secret: username.name.clone(),
+            password_secret: password.name.clone(),
+        },
     }
 }
 

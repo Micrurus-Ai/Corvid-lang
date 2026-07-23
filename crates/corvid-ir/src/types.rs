@@ -28,6 +28,90 @@ pub struct IrFile {
     pub servers: Vec<IrServer>,
     /// `model` declarations' runtime-relevant fields (slice 46a).
     pub models: Vec<IrModel>,
+    /// `connector` blocks lowered to IR (slice 52g-3). Each operation
+    /// also lowers to an `IrTool` in `tools` (so it is callable and
+    /// typed exactly like a tool); the connector entry here carries the
+    /// declarative HTTP dispatch metadata (base URL, credentials,
+    /// method/path/body, status→error map, reliability) the runtime
+    /// needs to build a `ConnectorRequest` when one of those tools is
+    /// called.
+    pub connectors: Vec<IrConnector>,
+}
+
+/// A `connector` block lowered to IR (slice 52g-3). Its operations
+/// are lowered into `IrFile::tools` as ordinary callable tools; the
+/// dispatch metadata that turns a tool call into an HTTP request lives
+/// here, keyed back to the tool by `IrOperation::tool_id`.
+#[derive(Debug, Clone)]
+pub struct IrConnector {
+    pub name: String,
+    /// Absolute `http(s)://` base URL. Operation paths are appended.
+    pub base_url: String,
+    /// Credential material, always as `secret(...)` reference NAMES —
+    /// never literal values (the parser rejects literals). Resolved to
+    /// live secrets by the runtime at dispatch, never embedded in a
+    /// trace.
+    pub auth: Option<IrConnectorAuth>,
+    /// Retry attempts (slice 52g-4 reliability). `None` = no retry.
+    pub retry: Option<u64>,
+    /// Token-bucket rate limit (slice 52g-4). `None` = unlimited.
+    pub rate_limit: Option<IrRateLimit>,
+    /// Circuit-breaker consecutive-failure threshold (slice 52g-4).
+    pub circuit_breaker: Option<u64>,
+    pub operations: Vec<IrOperation>,
+    pub span: Span,
+}
+
+/// Connector credentials — every field is a `secret(...)` reference
+/// NAME, resolved to a live value only at dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrConnectorAuth {
+    Bearer { secret: String },
+    Header { name: String, secret: String },
+    Basic { username_secret: String, password_secret: String },
+}
+
+/// A connector's token-bucket rate limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrRateLimit {
+    pub limit: u64,
+    pub window_secs: u64,
+}
+
+/// One connector `operation` lowered to dispatch metadata. The
+/// operation is ALSO an `IrTool` (looked up by `tool_id`); this record
+/// says how to turn a call to that tool into a `ConnectorRequest`.
+#[derive(Debug, Clone)]
+pub struct IrOperation {
+    pub name: String,
+    /// DefId of the `IrTool` this operation lowered to.
+    pub tool_id: DefId,
+    pub method: HttpMethod,
+    /// Path template appended to the connector base URL. `{name}`
+    /// placeholders bind from the operation's params by name.
+    pub path: String,
+    /// The request body: which param supplies it and how it encodes.
+    /// `None` = no body (e.g. a GET).
+    pub body: Option<IrOperationBody>,
+    /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
+    /// variant instead of a transport failure (slice 52g-4).
+    pub error_map: Vec<IrStatusErrorMapping>,
+    pub span: Span,
+}
+
+/// Which param supplies an operation's request body, and its encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrOperationBody {
+    pub param_name: String,
+    pub encoding: corvid_ast::BodyEncoding,
+}
+
+/// `on STATUS -> Variant` — maps an HTTP status code to a typed error
+/// variant name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrStatusErrorMapping {
+    pub status: u16,
+    pub variant: String,
 }
 
 /// A `server` block lowered to IR.

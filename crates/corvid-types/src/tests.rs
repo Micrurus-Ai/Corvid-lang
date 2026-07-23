@@ -1836,6 +1836,123 @@ agent digest(query: String) -> String:
 }
 
 #[test]
+fn connector_operation_is_callable_and_typed_like_a_tool() {
+    // Slice 52g-3: an `operation` is a callable symbol whose call
+    // types exactly like a tool call — args check against its params,
+    // and its return type flows to the caller. No new call syntax.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+
+agent fetch(owner: String, repo: String) -> Repo uses http_read:
+    r = get_repo(owner, repo)
+    return r
+"#;
+    let c = check(src);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn connector_operation_arg_type_mismatch_is_an_error() {
+    // The operation's params are enforced at the call site: a wrong
+    // argument type is a type error, proving operations flow through
+    // the same arg-checking path as tools.
+    let src = r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+
+agent fetch(owner: String) -> Repo uses http_read:
+    r = get_repo(owner, 42)
+    return r
+"#;
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::TypeMismatch { .. })),
+        "expected a type mismatch on the Int argument; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn connector_dangerous_operation_requires_prior_approval() {
+    // The moat composes: a `dangerous` operation call requires a prior
+    // `approve`, exactly like a hand-written dangerous tool, because
+    // both dispatch through the shared tool-call effect check. This is
+    // what makes a connector write governable by construction.
+    let src = r#"
+effect http_write:
+    cost: 2.0
+
+type Issue:
+    id: Int
+type NewIssue:
+    title: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+        POST "/repos/{owner}/issues" body req
+
+agent make(owner: String, req: NewIssue) -> Issue uses http_write:
+    i = create_issue(owner, req)
+    return i
+"#;
+    let c = check(src);
+    assert!(
+        c.errors
+            .iter()
+            .any(|e| matches!(e.kind, TypeErrorKind::UnapprovedDangerousCall { .. })),
+        "a dangerous operation must require approval; got: {:?}",
+        c.errors
+    );
+
+    // With the approve in place, it type-checks.
+    let ok = r#"
+effect http_write:
+    cost: 2.0
+
+type Issue:
+    id: Int
+type NewIssue:
+    title: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+        POST "/repos/{owner}/issues" body req
+
+agent make(owner: String, req: NewIssue) -> Issue uses http_write:
+    approve CreateIssue(owner, req)
+    i = create_issue(owner, req)
+    return i
+"#;
+    let c = check(ok);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn mutation_grounded_provenance_flows_through_prompts() {
     // Grounded input into a prompt should ground the prompt result.
     let c = check(MUTATION_PROVENANCE_BASE);

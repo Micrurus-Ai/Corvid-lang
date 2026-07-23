@@ -271,10 +271,23 @@ impl Resolver {
                 Decl::Schedule(_) => {
                     continue;
                 }
-                Decl::Connector(_) => {
-                    // 52g-1: the connector name is not itself a callable
-                    // symbol; its operations become callable in a later
-                    // slice. No top-level symbol yet.
+                Decl::Connector(c) => {
+                    // 52g-3: each `operation` becomes a callable tool
+                    // symbol, so an agent can call it by name. The
+                    // connector name itself is not a callable symbol.
+                    for op in &c.operations {
+                        if let Err(first_span) =
+                            self.symbols.declare(&op.name.name, DeclKind::Tool, op.span)
+                        {
+                            self.errors.push(ResolveError {
+                                kind: ResolveErrorKind::DuplicateDecl {
+                                    name: op.name.name.clone(),
+                                    first_span,
+                                },
+                                span: op.span,
+                            });
+                        }
+                    }
                     continue;
                 }
                 Decl::Extend(_) => {

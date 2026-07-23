@@ -3837,6 +3837,65 @@ corpus verify still exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52g-3a: an operation is a callable tool, and the moat composes with it
+
+The connector surface becomes *callable*. Until now a `connector` block
+parsed, resolved, and validated but produced no behavior — you could
+declare `operation get_repo(...)` but not call it. 52g-3a makes each
+operation a first-class callable, and — the load-bearing part — it does
+so by routing operations through the **exact same** call path as
+hand-written tools, so every property the tool path already guarantees
+composes onto connector operations for free.
+
+### An operation IS a tool with a declarative body
+
+The insight that shaped the implementation: an `OperationDecl` and a
+`ToolDecl` have the same signature shape — params, effect, effect row,
+return type. A call to either should type identically. So rather than a
+parallel call-checking path (which would drift — see the single-source-of-
+truth rule that already bit the serve MIME map and the IR
+`type_ref_to_type`), operations reuse `check_tool_call`:
+
+- **Resolver**: each `operation` name now declares a `DeclKind::Tool`
+  symbol (the connector name itself stays non-callable). Duplicate
+  operation names across the file are a resolve error.
+- **Checker**: a new `operations_by_id: HashMap<DefId, &OperationDecl>`
+  sits beside `tools_by_id`. `check_tool_call` resolves the callee's
+  signature from whichever map holds the DefId — one shared function,
+  two backing tables. Because the signature drives the effect check
+  unchanged, **the moat composes**: a `dangerous` operation demands a
+  prior `approve` (proven both directions in a test), the taint sink
+  rule refuses an untrusted argument to an approval-gated operation, and
+  a `data: grounded` effect row wraps the return in `Grounded<T>`.
+- **IR**: each operation lowers into `IrFile::tools` as an ordinary
+  `IrTool` (so the interpreter's tool-call machinery dispatches it by
+  name) PLUS an `IrConnector` dispatch record carrying the HTTP metadata
+  the runtime will need — base URL, `IrConnectorAuth` (holding only the
+  secret *reference names*, never a value, so a trace can name the
+  credential without leaking it), retry/rate_limit/circuit_breaker, and
+  per-operation method / path / `IrOperationBody` / `IrStatusErrorMapping`
+  — keyed back to each tool by DefId.
+
+### What's deliberately NOT here
+
+Runtime dispatch. A called operation currently still routes to
+`tools.call` (which has no handler for it), so *executing* one is 52g-3b:
+`Runtime::call_tool` will detect a connector-operation tool, build a
+`ConnectorRequest` from the call's args, and dispatch through
+`ConnectorRuntime::execute` (Mock mode first). Splitting here keeps the
+increment always-green: the compiler now fully understands connectors
+and operations — typing, the approval/taint/provenance composition, and
+the complete lowered dispatch metadata — as a self-contained, tested
+unit, with the runtime wiring as the next clean step.
+
+2 IR lowering tests (each operation → callable tool; dispatch metadata
+carried + DefId-keyed) + 3 checker tests (callable+typed, arg-type
+mismatch, dangerous-requires-approval both directions). Gate: workspace
+check clean; resolve/types/ir libs green; corpus verify exits 1 on the
+two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right
