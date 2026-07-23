@@ -47,6 +47,27 @@ fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     Some((status, body))
 }
 
+fn http_get_with_headers(
+    port: u16,
+    path: &str,
+    headers: &[(String, String)],
+) -> Option<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let mut request =
+        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let status: u16 = raw.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    Some((status, body))
+}
+
 /// Minimal HTTP/1.1 GET carrying a `Cookie` header. Returns `(status,
 /// body)` — for exercising session-authenticated routes.
 fn http_get_with_cookie(port: u16, path: &str, cookie: &str) -> Option<(u16, String)> {
@@ -169,13 +190,42 @@ fn reviewer_serve_env(data_dir: &std::path::Path) -> Vec<(String, String)> {
 /// it — exactly the state a real login produces. Returns the request
 /// headers (`Cookie` + `X-CSRF-Token`) a reviewer presents on a decision.
 fn seed_reviewer_headers(data_dir: &std::path::Path) -> Vec<(String, String)> {
+    seed_actor_headers(
+        data_dir,
+        "reviewer-1",
+        "serve-default",
+        Some("reviewer"),
+        "reviewer-token",
+        "csrf-reviewer",
+    )
+}
+
+fn seed_requester_headers(data_dir: &std::path::Path) -> Vec<(String, String)> {
+    seed_actor_headers(
+        data_dir,
+        "requester-1",
+        "serve-default",
+        None,
+        "requester-token",
+        "csrf-requester",
+    )
+}
+
+fn seed_actor_headers(
+    data_dir: &std::path::Path,
+    actor_id: &str,
+    tenant_id: &str,
+    role: Option<&str>,
+    raw_token: &str,
+    csrf_binding: &str,
+) -> Vec<(String, String)> {
     use corvid_runtime::{mint_csrf_token, AuthActor, SessionAuthRuntime, SessionCreate};
     std::fs::create_dir_all(data_dir).unwrap();
     let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
     auth.upsert_actor(AuthActor {
-        id: "reviewer-1".into(),
-        tenant_id: "serve-default".into(),
-        display_name: "Reviewer".into(),
+        id: actor_id.into(),
+        tenant_id: tenant_id.into(),
+        display_name: actor_id.into(),
         actor_kind: "user".into(),
         auth_method: "oauth".into(),
         assurance_level: "aal1".into(),
@@ -185,23 +235,24 @@ fn seed_reviewer_headers(data_dir: &std::path::Path) -> Vec<(String, String)> {
         updated_ms: 0,
     })
     .unwrap();
-    auth.grant_actor_role("reviewer-1", "reviewer", 1).unwrap();
-    let binding = "csrf-reviewer";
+    if let Some(role) = role {
+        auth.grant_actor_role(actor_id, role, 1).unwrap();
+    }
     auth.create_session(SessionCreate {
-        id: "sess-reviewer".into(),
-        actor_id: "reviewer-1".into(),
-        tenant_id: "serve-default".into(),
-        raw_token: "reviewer-token".into(),
+        id: format!("sess-{actor_id}"),
+        actor_id: actor_id.into(),
+        tenant_id: tenant_id.into(),
+        raw_token: raw_token.into(),
         issued_ms: 1,
         expires_ms: 9_000_000_000_000,
-        csrf_binding_id: binding.into(),
+        csrf_binding_id: csrf_binding.into(),
     })
     .unwrap();
-    let csrf = mint_csrf_token(binding, TEST_CSRF_SECRET.as_bytes()).unwrap();
+    let csrf = mint_csrf_token(csrf_binding, TEST_CSRF_SECRET.as_bytes()).unwrap();
     vec![
         (
             "Cookie".to_string(),
-            format!("corvid_session=reviewer-token; corvid_csrf={csrf}"),
+            format!("corvid_session={raw_token}; corvid_csrf={csrf}"),
         ),
         ("X-CSRF-Token".to_string(), csrf),
     ]
@@ -254,6 +305,11 @@ fn reference_apps_serve_their_schema_route() {
             .arg(&main)
             .arg("--listen")
             .arg(format!("127.0.0.1:{port}"))
+            .env("CORVID_OAUTH_GOOGLE_CLIENT_ID", "reference-client-id")
+            .env(
+                "CORVID_OAUTH_GOOGLE_CLIENT_SECRET",
+                "reference-client-secret",
+            )
             .current_dir(repo_root())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -318,17 +374,21 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return send_message(req)
 
 server test_serve_5_api:
-    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let port: u16 = 8195;
+    let data_dir = dir.path().join("state");
+    let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
+        .envs(reviewer_serve_env(&data_dir))
         .current_dir(repo_root())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -342,10 +402,11 @@ server test_serve_5_api:
     );
 
     // 1. POST → 202 with approval_id.
-    let (status, body) = http_post(
+    let (status, body) = http_post_with_headers(
         port,
         "/send",
         r#"{"body":"hello reviewer, please decide"}"#,
+        &requester,
     )
     .expect("POST /send failed");
     assert_eq!(
@@ -371,8 +432,8 @@ server test_serve_5_api:
     );
 
     // 2. GET /__approvals → list contains the approval id.
-    let (list_status, list_body) =
-        http_get(port, "/__approvals").expect("GET /__approvals failed");
+    let (list_status, list_body) = http_get_with_headers(port, "/__approvals", &reviewer)
+        .expect("GET /__approvals failed");
     assert_eq!(list_status, 200, "GET /__approvals must answer 200");
     assert!(
         list_body.contains(approval_id),
@@ -381,12 +442,21 @@ server test_serve_5_api:
 
     // 3. GET /__approvals/<id> → returns the queued record.
     let (one_status, one_body) =
-        http_get(port, &format!("/__approvals/{approval_id}")).expect("GET /__approvals/<id> failed");
+        http_get_with_headers(port, &format!("/__approvals/{approval_id}"), &reviewer)
+            .expect("GET /__approvals/<id> failed");
     assert_eq!(one_status, 200, "GET /__approvals/<id> must answer 200");
     let one: serde_json::Value =
         serde_json::from_str(&one_body).expect("GET /__approvals/<id> body must be valid JSON");
     assert_eq!(one.get("id").and_then(|v| v.as_str()), Some(approval_id));
     assert_eq!(one.get("status").and_then(|v| v.as_str()), Some("pending"));
+    assert_eq!(
+        one.get("requester_actor_id").and_then(|v| v.as_str()),
+        Some("requester-1")
+    );
+    assert_eq!(
+        one.get("tenant_id").and_then(|v| v.as_str()),
+        Some("serve-default")
+    );
     assert_eq!(
         one.get("action").and_then(|v| v.as_str()),
         Some("SendMessage"),
@@ -394,8 +464,12 @@ server test_serve_5_api:
     );
 
     // 4. GET /__approvals/<unknown> → 404.
-    let (missing_status, _) = http_get(port, "/__approvals/this-id-does-not-exist-anywhere")
-        .expect("GET /__approvals/<missing> failed");
+    let (missing_status, _) = http_get_with_headers(
+        port,
+        "/__approvals/this-id-does-not-exist-anywhere",
+        &reviewer,
+    )
+    .expect("GET /__approvals/<missing> failed");
     assert_eq!(
         missing_status, 404,
         "GET /__approvals/<missing> must answer 404"
@@ -445,7 +519,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     // from the E0-serve-5 test, returning a deterministic receipt
     // the test can observe end-to-end.
     let source = format!(
-        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external:\n        return execute_send(body)\n"
+        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external requires authenticated:\n        return execute_send(body)\n"
     );
     std::fs::write(&src_path, source).unwrap();
 
@@ -455,6 +529,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     // store the server opens.
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -474,10 +549,11 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     );
 
     // --- /approve path ---
-    let (post_status, post_body) = http_post(
+    let (post_status, post_body) = http_post_with_headers(
         port,
         "/send",
         r#"{"body":"hello, please approve"}"#,
+        &requester,
     )
     .expect("POST /send failed");
     assert_eq!(post_status, 202, "POST /send should answer 202: {post_body}");
@@ -521,7 +597,8 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
 
     // GET on the same id after approval → status: approved.
     let (one_status, one_body) =
-        http_get(port, &format!("/__approvals/{approval_id}")).expect("GET fetch failed");
+        http_get_with_headers(port, &format!("/__approvals/{approval_id}"), &reviewer)
+            .expect("GET fetch failed");
     assert_eq!(one_status, 200);
     let one: serde_json::Value = serde_json::from_str(&one_body).unwrap();
     assert_eq!(one.get("status").and_then(|v| v.as_str()), Some("approved"));
@@ -536,10 +613,11 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     );
 
     // --- /deny path ---
-    let (post2_status, post2_body) = http_post(
+    let (post2_status, post2_body) = http_post_with_headers(
         port,
         "/send",
         r#"{"body":"this one will be denied"}"#,
+        &requester,
     )
     .expect("second POST /send failed");
     assert_eq!(post2_status, 202);
@@ -572,8 +650,12 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     );
 
     // GET → status: denied.
-    let (denied_status, denied_body) =
-        http_get(port, &format!("/__approvals/{approval_id_2}")).expect("GET denied fetch failed");
+    let (denied_status, denied_body) = http_get_with_headers(
+        port,
+        &format!("/__approvals/{approval_id_2}"),
+        &reviewer,
+    )
+    .expect("GET denied fetch failed");
     assert_eq!(denied_status, 200);
     let denied: serde_json::Value = serde_json::from_str(&denied_body).unwrap();
     assert_eq!(
@@ -691,7 +773,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q1b_api:
-    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
@@ -720,6 +802,7 @@ async def echo_string(value: str) -> str:
     let port: u16 = 8198;
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -747,7 +830,8 @@ async def echo_string(value: str) -> str:
     let probe_value = "hello from tools.py";
     let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
     let (post_status, post_body_resp) =
-        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+        http_post_with_headers(port, "/echo", &post_body, &requester)
+            .expect("POST /echo failed");
     assert_eq!(
         post_status, 202,
         "POST /echo must answer 202: {post_body_resp}"
@@ -846,7 +930,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q6_api:
-    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
@@ -863,6 +947,7 @@ async def echo_string(value: str) -> str:
     let port: u16 = 8200;
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     // NO .env("PYTHONPATH", ...) — that's the load-bearing
     // assertion 33Q6 makes: bundled corvid_runtime resolves
     // automatically. The reviewer env vars do not affect that.
@@ -896,7 +981,8 @@ async def echo_string(value: str) -> str:
     let probe_value = "hello via bundled corvid_runtime";
     let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
     let (post_status, post_body_resp) =
-        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+        http_post_with_headers(port, "/echo", &post_body, &requester)
+            .expect("POST /echo failed");
     assert_eq!(post_status, 202, "POST /echo must answer 202: {post_body_resp}");
     let resp: serde_json::Value =
         serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
@@ -996,7 +1082,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q1a_api:
-    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external:
+    route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
@@ -1004,6 +1090,7 @@ server test_serve_q1a_api:
     let port: u16 = 8197;
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -1030,7 +1117,8 @@ server test_serve_q1a_api:
     let probe_value = "hello from the friends-and-family round";
     let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
     let (post_status, post_body_resp) =
-        http_post(port, "/echo", &post_body).expect("POST /echo failed");
+        http_post_with_headers(port, "/echo", &post_body, &requester)
+            .expect("POST /echo failed");
     assert_eq!(
         post_status, 202,
         "POST /echo must answer 202 (the approve boundary queues the call): {post_body_resp}"
@@ -1150,7 +1238,7 @@ agent execute_broken(req: BrokenReq) -> BrokenReceipt uses broken_external:
     return BrokenReceipt(out)
 
 server test_serve_q2_api:
-    route POST "/broken" body BrokenReq -> json BrokenReceipt uses broken_external:
+    route POST "/broken" body BrokenReq -> json BrokenReceipt uses broken_external requires authenticated:
         return execute_broken(body)
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
@@ -1158,6 +1246,7 @@ server test_serve_q2_api:
     let port: u16 = 8199;
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
     let child = with_reviewer_env(
         Command::new(corvid_bin())
             .arg("serve")
@@ -1181,7 +1270,8 @@ server test_serve_q2_api:
     let probe_value = "this approval will be retried then denied";
     let post_body = format!(r#"{{"value":"{probe_value}"}}"#);
     let (post_status, post_body_resp) =
-        http_post(port, "/broken", &post_body).expect("POST /broken failed");
+        http_post_with_headers(port, "/broken", &post_body, &requester)
+            .expect("POST /broken failed");
     assert_eq!(post_status, 202, "POST /broken must answer 202: {post_body_resp}");
     let resp: serde_json::Value =
         serde_json::from_str(&post_body_resp).expect("202 body must be valid JSON");
@@ -1229,7 +1319,7 @@ server test_serve_q2_api:
     // 3. GET /__approvals/<id> → status: pending + last_handler_error captured.
     let get_url = format!("/__approvals/{approval_id}");
     let (get_status, get_body) =
-        http_get(port, &get_url).expect("GET /__approvals/<id> failed");
+        http_get_with_headers(port, &get_url, &reviewer).expect("GET /__approvals/<id> failed");
     assert_eq!(get_status, 200, "GET /__approvals/<id> must answer 200");
     let one: serde_json::Value =
         serde_json::from_str(&get_body).expect("GET body must be valid JSON");
@@ -1277,8 +1367,8 @@ server test_serve_q2_api:
 
     // GET again — still pending, last_handler_error STILL populated
     // (and refreshed to whatever the second attempt produced).
-    let (get2_status, get2_body) =
-        http_get(port, &get_url).expect("second GET /__approvals/<id> failed");
+    let (get2_status, get2_body) = http_get_with_headers(port, &get_url, &reviewer)
+        .expect("second GET /__approvals/<id> failed");
     assert_eq!(get2_status, 200);
     let two: serde_json::Value = serde_json::from_str(&get2_body).unwrap();
     assert_eq!(
@@ -1357,19 +1447,21 @@ agent execute_classify(req: EchoReq) -> EchoReceipt:
     return EchoReceipt(req.value)
 
 server test_serve_q9_api:
-    route POST "/reset" body EchoReq -> json EchoReceipt uses echo_external:
+    route POST "/reset" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_reset(body)
     route POST "/classify" body EchoReq -> json EchoReceipt:
         return execute_classify(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let port: u16 = 8201;
+    let data_dir = dir.path().join("state");
     let mut child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
+        .envs(reviewer_serve_env(&data_dir))
         .current_dir(repo_root())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1382,7 +1474,11 @@ server test_serve_q9_api:
     if !wait_until_ready(port) {
         let _ = child.kill();
         let _ = child.wait();
-        panic!("server did not become ready on :{port}");
+        let mut stderr = String::new();
+        if let Some(mut pipe) = child.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        panic!("server did not become ready on :{port}; stderr={stderr}");
     }
 
     // The banner is written to stdout (println! goes there). Take
@@ -2077,12 +2173,14 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return send_message(req)
 
 server durable_api:
-    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#;
-    std::fs::write(&src_path, source).unwrap();
+    std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
     let port: u16 = 8205;
+    let reviewer = seed_reviewer_headers(&data_dir);
+    let requester = seed_requester_headers(&data_dir);
 
     // First run: queue an approval, then stop the server.
     let approval_id = {
@@ -2091,7 +2189,7 @@ server durable_api:
             .arg(&src_path)
             .arg("--listen")
             .arg(format!("127.0.0.1:{port}"))
-            .env("CORVID_SERVE_DATA_DIR", &data_dir)
+            .envs(reviewer_serve_env(&data_dir))
             .current_dir(repo_root())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -2100,8 +2198,9 @@ server durable_api:
         let guard = ServedApp(child);
         assert!(wait_until_ready(port), "run 1 did not become ready");
 
-        let (status, body) = http_post(port, "/send", r#"{"body":"persist me"}"#)
-            .expect("POST /send (run 1) failed");
+        let (status, body) =
+            http_post_with_headers(port, "/send", r#"{"body":"persist me"}"#, &requester)
+                .expect("POST /send (run 1) failed");
         assert_eq!(status, 202, "POST must queue (202); body={body}");
         let resp: serde_json::Value = serde_json::from_str(&body).expect("202 body is JSON");
         let id = resp
@@ -2128,7 +2227,7 @@ server durable_api:
         .arg(&src_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
-        .env("CORVID_SERVE_DATA_DIR", &data_dir)
+        .envs(reviewer_serve_env(&data_dir))
         .current_dir(repo_root())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -2137,8 +2236,8 @@ server durable_api:
     let _guard = ServedApp(child);
     assert!(wait_until_ready(port), "run 2 did not become ready");
 
-    let (list_status, list_body) =
-        http_get(port, "/__approvals").expect("GET /__approvals (run 2) failed");
+    let (list_status, list_body) = http_get_with_headers(port, "/__approvals", &reviewer)
+        .expect("GET /__approvals (run 2) failed");
     assert_eq!(list_status, 200, "GET /__approvals must answer 200");
     assert!(
         list_body.contains(&approval_id),
@@ -2310,10 +2409,12 @@ fn approval_decisions_reject_every_unauthorized_path() {
         auth.upsert_actor(mk("outsider", "other-tenant")).unwrap();
         auth.grant_actor_role("outsider", "reviewer", 1).unwrap();
         auth.create_session(sess("s-out", "outsider", "other-tenant", "out-token", "b-out")).unwrap();
-        // The requester themself (serve-anonymous), even with the permission.
-        auth.upsert_actor(mk("serve-anonymous", "serve-default")).unwrap();
-        auth.grant_actor_role("serve-anonymous", "reviewer", 1).unwrap();
-        auth.create_session(sess("s-self", "serve-anonymous", "serve-default", "self-token", "b-self")).unwrap();
+        // The requester themself, deliberately holding reviewer authority
+        // so the separation-of-duties check (not a missing permission)
+        // is what refuses self-approval.
+        auth.upsert_actor(mk("requester", "serve-default")).unwrap();
+        auth.grant_actor_role("requester", "reviewer", 1).unwrap();
+        auth.create_session(sess("s-self", "requester", "serve-default", "self-token", "b-self")).unwrap();
     }
 
     let source = format!("{IDENTITY_WITH_REVIEWER}{}", r#"type SendReq:
@@ -2334,7 +2435,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return SendReceipt(true)
 
 server adversary_api:
-    route POST "/send" body SendReq -> json SendReceipt uses send_external:
+    route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#);
     std::fs::write(&src_path, source).unwrap();
@@ -2350,10 +2451,48 @@ server adversary_api:
     assert!(wait_until_ready(port), "server did not become ready");
 
     // Queue one approval.
-    let (_s, body) = http_post(port, "/send", r#"{"body":"decide me"}"#).expect("POST /send");
+    let (_s, body) = http_post_with_headers(
+        port,
+        "/send",
+        r#"{"body":"decide me"}"#,
+        &headers("self-token", "b-self"),
+    )
+    .expect("POST /send");
     let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()
         .get("approval_id").and_then(|v| v.as_str()).unwrap().to_string();
     let url = format!("/__approvals/{id}/approve");
+
+    // Approval reads are authenticated and tenant scoped too.
+    assert_eq!(
+        http_get(port, "/__approvals").unwrap().0,
+        401,
+        "anonymous approval listing must be 401"
+    );
+    assert_eq!(
+        http_get_with_headers(port, "/__approvals", &headers("peon-token", "b-peon"))
+            .unwrap()
+            .0,
+        403,
+        "a reader without approvals.decide must be 403"
+    );
+    let (other_list_status, other_list) =
+        http_get_with_headers(port, "/__approvals", &headers("out-token", "b-out")).unwrap();
+    assert_eq!(other_list_status, 200);
+    assert!(
+        !other_list.contains(&id),
+        "a different tenant must never see the approval: {other_list}"
+    );
+    assert_eq!(
+        http_get_with_headers(
+            port,
+            &format!("/__approvals/{id}"),
+            &headers("out-token", "b-out"),
+        )
+        .unwrap()
+        .0,
+        404,
+        "a cross-tenant point read must not reveal the approval"
+    );
 
     // None of these consume the approval — each is refused.
     // 1. No session → 401.
@@ -2405,7 +2544,9 @@ server adversary_api:
     );
 
     // The approval is STILL pending after all the refusals.
-    let (_g, list) = http_get(port, "/__approvals").expect("GET /__approvals");
+    let (_g, list) =
+        http_get_with_headers(port, "/__approvals", &headers("rev-token", "b-rev"))
+            .expect("GET /__approvals");
     assert!(list.contains(&id), "the approval must survive every refused decision");
 
     // 9. A legitimate reviewer decides → 200, exactly once; a replay 409s.

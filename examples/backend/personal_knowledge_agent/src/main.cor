@@ -558,6 +558,12 @@ public @replayable
 agent knowledge_schema_manifest() -> KnowledgeSchemaManifest:
     return KnowledgeSchemaManifest("personal_knowledge_agent", 5, 18, 3, 3, 5, "mock")
 
+identity knowledge_users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("personal-knowledge")
+
 server personal_knowledge_agent_api:
     route GET "/config" -> json KnowledgeConfig:
         return knowledge_config()
@@ -585,15 +591,15 @@ server personal_knowledge_agent_api:
         return weekly_feedback_batch_job("tenant-1", "business_week")
     route GET "/jobs/daily-provenance-audit/mock" -> json KnowledgeJobRun uses files_read:
         return daily_provenance_audit_job("tenant-1", "2026-05-27")
-    route POST "/actions/share/chat" body ShareAnswerToChatRequest -> json ShareAnswerToChatReceipt uses chat_share:
+    route POST "/actions/share/chat" body ShareAnswerToChatRequest -> json ShareAnswerToChatReceipt uses chat_share requires authenticated:
         return execute_approved_share_answer_to_chat(body)
-    route POST "/actions/share/email" body ShareAnswerViaEmailRequest -> json ShareAnswerViaEmailReceipt uses email_share:
+    route POST "/actions/share/email" body ShareAnswerViaEmailRequest -> json ShareAnswerViaEmailReceipt uses email_share requires authenticated:
         return execute_approved_share_answer_via_email(body)
-    route POST "/actions/publish/authoritative" body PublishAuthoritativeAnswerRequest -> json PublishAuthoritativeAnswerReceipt uses kb_publish:
+    route POST "/actions/publish/authoritative" body PublishAuthoritativeAnswerRequest -> json PublishAuthoritativeAnswerReceipt uses kb_publish requires authenticated:
         return execute_approved_publish_authoritative_answer(body)
-    route POST "/actions/export/corpus" body ExportTenantCorpusRequest -> json ExportTenantCorpusReceipt uses corpus_export:
+    route POST "/actions/export/corpus" body ExportTenantCorpusRequest -> json ExportTenantCorpusReceipt uses corpus_export requires authenticated:
         return execute_approved_export_tenant_corpus(body)
-    route POST "/actions/share/cross-tenant" body CrossTenantIndexShareRequest -> json CrossTenantIndexShareReceipt uses cross_tenant_share:
+    route POST "/actions/share/cross-tenant" body CrossTenantIndexShareRequest -> json CrossTenantIndexShareReceipt uses cross_tenant_share requires authenticated:
         return execute_approved_cross_tenant_index_share(body)
 
 schedule "0 2 * * *" zone "America/New_York" -> nightly_reindex_job("tenant-1", "notes") uses files_read, local_embed, index_write

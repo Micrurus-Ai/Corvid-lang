@@ -697,6 +697,12 @@ public @replayable
 agent executive_schema_manifest() -> ExecutiveSchemaManifest:
     return ExecutiveSchemaManifest("personal_executive_agent", 5, 12, 5, 4, 5, "mock")
 
+identity executive_users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("personal-executive")
+
 server personal_executive_agent_api:
     route GET "/schema" -> json ExecutiveSchemaManifest:
         return executive_schema_manifest()
@@ -746,15 +752,15 @@ server personal_executive_agent_api:
     route GET "/approvals/surface" -> json ExecutiveApprovalSurface:
         auth = auth_status("user-1", "tenant-1", "trace-approval-surface")
         return approval_surface(auth, "trace-approval-surface")
-    route POST "/actions/follow-up/send" body FollowUpSendRequest -> json FollowUpSendReceipt uses send_email:
+    route POST "/actions/follow-up/send" body FollowUpSendRequest -> json FollowUpSendReceipt uses send_email requires authenticated:
         return execute_approved_follow_up(body)
-    route POST "/actions/calendar/edit" body CalendarEditRequest -> json CalendarEditReceipt uses calendar_write:
+    route POST "/actions/calendar/edit" body CalendarEditRequest -> json CalendarEditReceipt uses calendar_write requires authenticated:
         return execute_approved_calendar_edit(body)
-    route POST "/actions/task/edit" body TaskEditRequest -> json TaskEditReceipt uses task_write:
+    route POST "/actions/task/edit" body TaskEditRequest -> json TaskEditReceipt uses task_write requires authenticated:
         return execute_approved_task_edit(body)
-    route POST "/actions/chat/send" body ChatSendRequest -> json ChatSendReceipt uses chat_write:
+    route POST "/actions/chat/send" body ChatSendRequest -> json ChatSendReceipt uses chat_write requires authenticated:
         return execute_approved_chat_send(body)
-    route POST "/actions/calendar/share" body CalendarShareRequest -> json CalendarShareReceipt uses calendar_share:
+    route POST "/actions/calendar/share" body CalendarShareRequest -> json CalendarShareReceipt uses calendar_share requires authenticated:
         return execute_approved_calendar_share(body)
 
 schedule "0 7 * * 1-5" zone "America/New_York" -> daily_brief_job("active_users", "business_day") uses inbox_read, calendar_read, executive_llm

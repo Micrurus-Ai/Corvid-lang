@@ -478,6 +478,12 @@ public @replayable
 agent support_ops_contract_valid(dashboard: SupportEvalDashboard, sla: SupportSlaJob) -> Bool:
     return dashboard.grounded_replies >= 1 and dashboard.approval_gated_writes == 5 and dashboard.sla_jobs == 1 and sla.replay_key == "support:sla:ticket-1"
 
+identity support_users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("customer-support")
+
 server customer_support_agent_api:
     route GET "/config" -> json SupportConfig:
         return support_config()
@@ -491,15 +497,15 @@ server customer_support_agent_api:
         return support_sla_job()
     route GET "/eval/dashboard/mock" -> json SupportEvalDashboard:
         return support_eval_dashboard()
-    route POST "/replies/send" body SupportReplySendRequest -> json SupportReplySendReceipt uses support_write:
+    route POST "/replies/send" body SupportReplySendRequest -> json SupportReplySendReceipt uses support_write requires authenticated:
         return execute_approved_support_reply(body)
-    route POST "/refunds/issue" body SupportRefundRequest -> json SupportRefundReceipt uses refund_write:
+    route POST "/refunds/issue" body SupportRefundRequest -> json SupportRefundReceipt uses refund_write requires authenticated:
         return execute_approved_support_refund(body)
-    route POST "/tickets/escalate" body EscalateTicketRequest -> json EscalateTicketReceipt uses escalate_write:
+    route POST "/tickets/escalate" body EscalateTicketRequest -> json EscalateTicketReceipt uses escalate_write requires authenticated:
         return execute_approved_escalate_ticket(body)
-    route POST "/tickets/close" body CloseTicketRequest -> json CloseTicketReceipt uses ticket_write:
+    route POST "/tickets/close" body CloseTicketRequest -> json CloseTicketReceipt uses ticket_write requires authenticated:
         return execute_approved_close_ticket(body)
-    route POST "/credits/apply" body ApplyAccountCreditRequest -> json ApplyAccountCreditReceipt uses credit_write:
+    route POST "/credits/apply" body ApplyAccountCreditRequest -> json ApplyAccountCreditReceipt uses credit_write requires authenticated:
         return execute_approved_apply_account_credit(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)

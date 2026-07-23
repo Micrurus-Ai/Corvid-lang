@@ -18,7 +18,7 @@ use corvid_ast::{
     FirstLoginPolicy, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy,
     SameSite, ServerDecl, Span, Stmt, TenantAssignment,
 };
-use corvid_resolve::Binding;
+use corvid_resolve::{Binding, DefId};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -765,12 +765,33 @@ impl<'a> Checker<'a> {
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
         let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
-
         self.check_block(&route.body);
+        let reaches_approval = block_reaches_approval(
+            &route.body,
+            self.bindings,
+            &self.agents_by_id,
+            self.methods,
+            &self.types,
+            &mut HashSet::new(),
+        );
 
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
         self.saw_yield = prev_saw_yield;
+
+        if reaches_approval
+            && !route
+                .policy
+                .as_ref()
+                .is_some_and(corvid_ast::RoutePolicy::requires_auth)
+        {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::RouteApprovalRequiresAuthentication {
+                    path: route.path.clone(),
+                },
+                route.span,
+            ));
+        }
 
         let _ = server;
     }
@@ -783,6 +804,308 @@ impl<'a> Checker<'a> {
                 self.local_types.insert(local_id, ty.clone());
             }
         }
+    }
+}
+
+fn block_reaches_approval(
+    block: &Block,
+    bindings: &std::collections::HashMap<Span, Binding>,
+    agents: &std::collections::HashMap<DefId, &AgentDecl>,
+    methods: &std::collections::HashMap<
+        DefId,
+        std::collections::HashMap<String, corvid_resolve::resolver::MethodEntry>,
+    >,
+    types: &std::collections::HashMap<Span, Type>,
+    visited_agents: &mut HashSet<DefId>,
+) -> bool {
+    block.stmts.iter().any(|stmt| {
+        stmt_reaches_approval(stmt, bindings, agents, methods, types, visited_agents)
+    })
+}
+
+fn stmt_reaches_approval(
+    stmt: &Stmt,
+    bindings: &std::collections::HashMap<Span, Binding>,
+    agents: &std::collections::HashMap<DefId, &AgentDecl>,
+    methods: &std::collections::HashMap<
+        DefId,
+        std::collections::HashMap<String, corvid_resolve::resolver::MethodEntry>,
+    >,
+    types: &std::collections::HashMap<Span, Type>,
+    visited_agents: &mut HashSet<DefId>,
+) -> bool {
+    match stmt {
+        Stmt::Approve { .. } => true,
+        Stmt::Let { value, .. }
+        | Stmt::Yield { value, .. }
+        | Stmt::Destructure { value, .. } => {
+            expr_reaches_approval(value, bindings, agents, methods, types, visited_agents)
+        }
+        Stmt::Return { value, .. } => value.as_ref().is_some_and(|value| {
+            expr_reaches_approval(value, bindings, agents, methods, types, visited_agents)
+        }),
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_reaches_approval(cond, bindings, agents, methods, types, visited_agents)
+                || block_reaches_approval(
+                    then_block,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+                || else_block.as_ref().is_some_and(|block| {
+                    block_reaches_approval(
+                        block,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
+        }
+        Stmt::For { iter, body, .. } => {
+            expr_reaches_approval(iter, bindings, agents, methods, types, visited_agents)
+                || block_reaches_approval(
+                    body,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }
+        Stmt::While { cond, body, .. } => {
+            expr_reaches_approval(cond, bindings, agents, methods, types, visited_agents)
+                || block_reaches_approval(
+                    body,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }
+        Stmt::Parallel { arms, .. } => arms.iter().any(|arm| {
+            expr_reaches_approval(
+                &arm.call,
+                bindings,
+                agents,
+                methods,
+                types,
+                visited_agents,
+            )
+        }),
+        Stmt::Expr { expr, .. } => {
+            expr_reaches_approval(expr, bindings, agents, methods, types, visited_agents)
+        }
+        Stmt::Assign { target, value, .. } => {
+            expr_reaches_approval(target, bindings, agents, methods, types, visited_agents)
+                || expr_reaches_approval(
+                    value,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
+    }
+}
+
+fn expr_reaches_approval(
+    expr: &Expr,
+    bindings: &std::collections::HashMap<Span, Binding>,
+    agents: &std::collections::HashMap<DefId, &AgentDecl>,
+    methods: &std::collections::HashMap<
+        DefId,
+        std::collections::HashMap<String, corvid_resolve::resolver::MethodEntry>,
+    >,
+    types: &std::collections::HashMap<Span, Type>,
+    visited_agents: &mut HashSet<DefId>,
+) -> bool {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            let called_agent_reaches_approval = match callee.as_ref() {
+                Expr::Ident { name, .. } => match bindings.get(&name.span) {
+                    Some(Binding::Decl(def_id)) if visited_agents.insert(*def_id) => agents
+                        .get(def_id)
+                        .is_some_and(|agent| {
+                            block_reaches_approval(
+                                &agent.body,
+                                bindings,
+                                agents,
+                                methods,
+                                types,
+                                visited_agents,
+                            )
+                        }),
+                    _ => false,
+                },
+                Expr::FieldAccess { target, field, .. } => match types.get(&target.span()) {
+                    Some(Type::Struct(type_id)) => methods
+                        .get(type_id)
+                        .and_then(|entries| entries.get(&field.name))
+                        .filter(|entry| {
+                            entry.kind == corvid_resolve::resolver::MethodKind::Agent
+                        })
+                        .filter(|entry| visited_agents.insert(entry.def_id))
+                        .and_then(|entry| agents.get(&entry.def_id))
+                        .is_some_and(|agent| {
+                            block_reaches_approval(
+                                &agent.body,
+                                bindings,
+                                agents,
+                                methods,
+                                types,
+                                visited_agents,
+                            )
+                        }),
+                    _ => false,
+                },
+                _ => false,
+            };
+
+            called_agent_reaches_approval
+                || expr_reaches_approval(
+                    callee,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+                || args.iter().any(|arg| {
+                    expr_reaches_approval(
+                        arg,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
+        }
+        Expr::FieldAccess { target, .. }
+        | Expr::UnOp {
+            operand: target, ..
+        }
+        | Expr::Lambda { body: target, .. }
+        | Expr::TryPropagate { inner: target, .. }
+        | Expr::TrustBoundary { inner: target, .. }
+        | Expr::TryRetry { body: target, .. } => {
+            expr_reaches_approval(target, bindings, agents, methods, types, visited_agents)
+        }
+        Expr::Index { target, index, .. } | Expr::BinOp {
+            left: target,
+            right: index,
+            ..
+        } => {
+            expr_reaches_approval(target, bindings, agents, methods, types, visited_agents)
+                || expr_reaches_approval(
+                    index,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }
+        Expr::List { items, .. } => items.iter().any(|item| {
+            expr_reaches_approval(item, bindings, agents, methods, types, visited_agents)
+        }),
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            expr_reaches_approval(scrutinee, bindings, agents, methods, types, visited_agents)
+                || arms.iter().any(|arm| {
+                    arm.guard.as_ref().is_some_and(|guard| {
+                        expr_reaches_approval(
+                            guard,
+                            bindings,
+                            agents,
+                            methods,
+                            types,
+                            visited_agents,
+                        )
+                    }) || expr_reaches_approval(
+                        &arm.body,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
+        }
+        Expr::StructLiteral { fields, spread, .. } => {
+            fields.iter().any(|field| {
+                field.value.as_ref().is_some_and(|value| {
+                    expr_reaches_approval(
+                        value,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
+            }) || spread.as_ref().is_some_and(|spread| {
+                expr_reaches_approval(
+                    spread,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+            })
+        }
+        Expr::MapLiteral { entries, .. } => entries.iter().any(|(key, value)| {
+            expr_reaches_approval(key, bindings, agents, methods, types, visited_agents)
+                || expr_reaches_approval(
+                    value,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }),
+        Expr::Replay {
+            trace,
+            arms,
+            else_body,
+            ..
+        } => {
+            expr_reaches_approval(trace, bindings, agents, methods, types, visited_agents)
+                || arms.iter().any(|arm| {
+                    expr_reaches_approval(
+                        &arm.body,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
+                || expr_reaches_approval(
+                    else_body,
+                    bindings,
+                    agents,
+                    methods,
+                    types,
+                    visited_agents,
+                )
+        }
+        Expr::Literal { .. } | Expr::Ident { .. } => false,
     }
 }
 

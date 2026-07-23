@@ -237,6 +237,97 @@ server api:
 }
 
 #[test]
+fn approval_capable_route_requires_an_authenticated_requester() {
+    let checked = check(
+        r#"
+tool send_message(body: String) -> String dangerous
+
+agent send(body: String) -> String:
+    approve SendMessage(body)
+    return send_message(body)
+
+server api:
+    route POST "/send" body String -> json String:
+        return send(body)
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+        )),
+        "expected requester-authentication error, got {:?}",
+        checked.errors
+    );
+}
+
+#[test]
+fn authenticated_approval_route_typechecks() {
+    let checked = check(
+        r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+
+tool send_message(body: String) -> String dangerous
+
+agent send(body: String) -> String:
+    approve SendMessage(body)
+    return send_message(body)
+
+server api:
+    route POST "/send" body String -> json String requires authenticated:
+        return send(body)
+"#,
+    );
+    assert!(checked.errors.is_empty(), "errors: {:?}", checked.errors);
+}
+
+#[test]
+fn ordinary_agent_call_does_not_make_route_approval_capable() {
+    let checked = check(
+        r#"
+agent classify(body: String) -> String:
+    return body
+
+server api:
+    route POST "/classify" body String -> json String:
+        return classify(body)
+"#,
+    );
+    assert!(checked.errors.is_empty(), "errors: {:?}", checked.errors);
+}
+
+#[test]
+fn approval_capable_agent_method_requires_an_authenticated_requester() {
+    let checked = check(
+        r#"
+type Message:
+    body: String
+
+extend Message:
+    agent send(message: Message) -> String:
+        approve SendMessage(message.body)
+        return message.body
+
+server api:
+    route POST "/send" body Message -> json String:
+        return body.send()
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+        )),
+        "expected requester-authentication error through agent method, got {:?}",
+        checked.errors
+    );
+}
+
+#[test]
 fn server_route_dangerous_tool_requires_approval() {
     let src = r#"
 type Receipt:
@@ -262,13 +353,19 @@ server refund_api:
 #[test]
 fn server_route_approve_authorizes_dangerous_tool() {
     let src = r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+
 type Receipt:
     id: String
 
 tool issue_refund(id: String) -> Receipt dangerous
 
 server refund_api:
-    route POST "/refunds/{id}" -> json Receipt:
+    route POST "/refunds/{id}" -> json Receipt requires authenticated:
         approve IssueRefund(path.id)
         return issue_refund(path.id)
 "#;

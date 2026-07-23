@@ -34,19 +34,14 @@
 //! where `serve_cmd::finish` differentiates it from
 //! `ApprovalDenied`.
 //!
-//! **Why a synthesized default contract rather than per-route
-//! declarations.** The `ApprovalCreate` envelope the existing
-//! `ApprovalQueueRuntime::create()` expects carries per-tenant
-//! contract metadata (`required_role`, `data_class`, `max_cost_usd`,
-//! …) that today's `server` block doesn't declare. Wiring the
-//! source-level contract through into the queue is a separate
-//! slice (out of scope here; see follow-up `serve-6`). For this
-//! slice's MVP, every queued approval lives under a single
-//! `serve-default` tenant with a synthesized contract derived from
-//! the `ApprovalRequest::label` — enough to exercise the queue
-//! create / get / list path end-to-end, while keeping the source
-//! surface unchanged. The follow-up slice replaces the synthesized
-//! contract with a per-route declared one.
+//! **Requester and tenant are request-bound; contract metadata is
+//! still synthesized.** The verified route actor supplies both
+//! `requested_by` and `tenant_id`; there is no process-global tenant
+//! or anonymous requester fallback. The `ApprovalCreate` envelope also
+//! expects richer contract metadata (`required_role`, `data_class`,
+//! `max_cost_usd`, …) that today's `server` block does not yet
+//! declare. Those fields remain a visible follow-up rather than being
+//! confused with identity or tenancy.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -60,16 +55,14 @@ use corvid_runtime::RuntimeError;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 
-/// Tenant id every `corvid serve` approval is created under. Multi-
-/// tenant routing is a follow-up; for the MVP every served binary
-/// is single-tenant.
-pub const SERVE_DEFAULT_TENANT: &str = "serve-default";
-/// Requester actor id for every `corvid serve` request — the HTTP
-/// layer is anonymous at the slice MVP boundary. Per-request actor
-/// inference (from `Authorization` header, mTLS, session cookie) is
-/// a follow-up.
-pub const SERVE_DEFAULT_REQUESTER: &str = "serve-anonymous";
-
+/// Verified identity attached to approvals created during one served
+/// request. Both values are mandatory, so the queue cannot substitute
+/// a process-global tenant or anonymous requester.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalRequester {
+    pub actor_id: String,
+    pub tenant_id: String,
+}
 /// Approver that turns every `approve` boundary into a pending queue
 /// entry and surfaces the queued state as a `RuntimeError::
 /// ApprovalQueued`. The wrapped `ApprovalQueueRuntime` is the same
@@ -77,6 +70,7 @@ pub const SERVE_DEFAULT_REQUESTER: &str = "serve-anonymous";
 /// list / get / transition queue entries through its API surface.
 pub struct QueueApprover {
     queue: Arc<ApprovalQueueRuntime>,
+    requester: ApprovalRequester,
     /// Per-process monotonic counter, combined with the nanosecond
     /// wall clock to produce an approval id that's unique across
     /// every call in this serve process (a wall-clock collision
@@ -86,9 +80,10 @@ pub struct QueueApprover {
 }
 
 impl QueueApprover {
-    pub fn new(queue: Arc<ApprovalQueueRuntime>) -> Self {
+    pub fn new(queue: Arc<ApprovalQueueRuntime>, requester: ApprovalRequester) -> Self {
         Self {
             queue,
+            requester,
             next: AtomicU64::new(0),
         }
     }
@@ -117,15 +112,15 @@ impl Approver for QueueApprover {
             let label = &req.label;
             let create = ApprovalCreate {
                 id: approval_id.clone(),
-                tenant_id: SERVE_DEFAULT_TENANT.to_string(),
-                requester_actor_id: SERVE_DEFAULT_REQUESTER.to_string(),
+                tenant_id: self.requester.tenant_id.clone(),
+                requester_actor_id: self.requester.actor_id.clone(),
                 contract: ApprovalContractRecord {
                     id: format!("serve:{label}"),
                     version: "v1".to_string(),
                     action: label.clone(),
                     target_kind: "agent_call".to_string(),
                     target_id: format!("{label}-call"),
-                    tenant_id: SERVE_DEFAULT_TENANT.to_string(),
+                    tenant_id: self.requester.tenant_id.clone(),
                     required_role: "operator".to_string(),
                     max_cost_usd: 0.0,
                     data_class: "private".to_string(),
@@ -161,7 +156,13 @@ mod tests {
     #[tokio::test]
     async fn queue_approver_creates_pending_entry_and_returns_approval_queued() {
         let queue = fresh_queue();
-        let approver = QueueApprover::new(queue.clone());
+        let approver = QueueApprover::new(
+            queue.clone(),
+            ApprovalRequester {
+                actor_id: "requester-7".into(),
+                tenant_id: "tenant-blue".into(),
+            },
+        );
 
         let req = ApprovalRequest {
             label: "SendExecutiveFollowUp".to_string(),
@@ -176,8 +177,8 @@ mod tests {
                     .expect("queue get must not error")
                     .expect("queue must contain the freshly created approval");
                 assert_eq!(record.id, approval_id);
-                assert_eq!(record.tenant_id, SERVE_DEFAULT_TENANT);
-                assert_eq!(record.requester_actor_id, SERVE_DEFAULT_REQUESTER);
+                assert_eq!(record.tenant_id, "tenant-blue");
+                assert_eq!(record.requester_actor_id, "requester-7");
                 assert_eq!(record.action, "SendExecutiveFollowUp");
                 assert_eq!(record.status, "pending");
             }
@@ -196,7 +197,13 @@ mod tests {
         // (which on Windows it can — system clock granularity is
         // ~15ms historically).
         let queue = fresh_queue();
-        let approver = QueueApprover::new(queue.clone());
+        let approver = QueueApprover::new(
+            queue.clone(),
+            ApprovalRequester {
+                actor_id: "requester-7".into(),
+                tenant_id: "tenant-blue".into(),
+            },
+        );
 
         let mut ids = std::collections::HashSet::new();
         for _ in 0..50 {

@@ -16605,3 +16605,26 @@ proving that framework defaults cannot silently override the Corvid
 contract. Uploads stream and stop reading as soon as the declared limit
 is crossed. The continuously-grown reference app now declares its 25
 MiB import posture in source.
+
+## 2026-07-23 - 52f-4c: approval identity comes from the request
+
+Removed the approval queue's `serve-default` tenant and
+`serve-anonymous` requester. The compiler now rejects a served route
+that can reach `approve` without `requires authenticated`, following
+resolved agent calls transitively. This is an AST/call-graph property,
+not an effect-row heuristic; a regression test proves an ordinary agent
+call does not become approval-capable merely because its weak effect row
+is broad.
+
+At the live request boundary, Corvid installs a contextual
+`QueueApprover` carrying the verified actor id and tenant. Pending
+records store those values. Approval list/detail reads now reuse route
+authorization, require declared `approvals.decide` authority, scope
+lists to the reviewer's tenant, and return 404 for cross-tenant point
+reads. The five complete reference backends now declare identity and
+protect every approval-capable action route.
+
+Proof: 321 type-checker tests; the 18-test serve suite (serial because
+its fixed ports are not parallel-safe); requester/tenant queue unit
+tests; adversarial anonymous, insufficient-authority, cross-tenant,
+self-approval, and valid-reviewer live paths.

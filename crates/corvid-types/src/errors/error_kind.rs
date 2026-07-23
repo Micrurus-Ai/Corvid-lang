@@ -156,6 +156,12 @@ pub enum TypeErrorKind {
         path: String,
     },
 
+    /// Executing a route can reach an `approve` boundary, but the
+    /// route does not require an authenticated caller. Without a
+    /// verified requester there is no honest actor or tenant to put
+    /// on the durable approval record.
+    RouteApprovalRequiresAuthentication { path: String },
+
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
@@ -603,6 +609,11 @@ impl TypeErrorKind {
             Self::RoutePolicyUndeclaredAuthority { kind, name, path } => {
                 format!(
                     "route `{path}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` — the requirement could never be satisfied"
+                )
+            }
+            Self::RouteApprovalRequiresAuthentication { path } => {
+                format!(
+                    "route `{path}` can request approval but does not require an authenticated caller"
                 )
             }
             Self::RouteUploadPolicyInvalid { path, message } => {
@@ -1174,6 +1185,9 @@ impl TypeErrorKind {
             )),
             Self::FirstLoginPolicyRequired { .. } => Some(
                 "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
+            ),
+            Self::RouteApprovalRequiresAuthentication { .. } => Some(
+                "add `requires authenticated` to the route; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
             ),
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),

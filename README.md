@@ -118,6 +118,8 @@ Roadmap: [Phase 20 safety wave](./ROADMAP.md)
 Proof: [approval checker tests](./crates/corvid-types/src/lib.rs)
 Non-scope: Corvid proves the approval boundary exists; it does not decide whether approval is morally or legally correct.
 
+For served applications, an approval boundary also requires a verified requester. If a route can reach `approve`—directly or through called agents—but omits `requires authenticated`, the compiler rejects it. Pending records carry the authenticated actor and tenant; approval list/detail endpoints require declared review authority and never reveal another tenant's records.
+
 #### Dimensional Effects
 
 Effects are not flat tags. Cost, trust, reversibility, data, latency, confidence, and user-defined dimensions compose through their own algebra.

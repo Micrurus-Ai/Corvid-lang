@@ -7519,6 +7519,20 @@ non-2xx is a transport failure. Reliability composes too: `retry: N`,
 `circuit_breaker: N` (trips a repeatedly-failing operation) are declared on the
 connector and enforced by the runtime.
 
+### Approval queues must not invent identity
+
+An approval is a confused-deputy boundary: the requester and tenant
+must come from the authenticated HTTP request, never from a queue-wide
+fallback. Detect approval-capable routes from real approval sites and
+resolved call edges; broad effect summaries are intentionally
+conservative and produce false positives when used as reachability.
+
+Administrative reads are part of the same security surface as
+approve/deny transitions. Protect list and detail endpoints with the
+declared permission model, scope storage queries by the verified tenant,
+and make a cross-tenant point lookup indistinguishable from a missing
+record.
+
 **Scope note (what executes today):** the connector runtime is complete —
 mock/real/replay, typed status→error mapping, and retry/rate-limit/circuit-breaker
 all run end-to-end. Async provider state machines and provider-drift quarantine

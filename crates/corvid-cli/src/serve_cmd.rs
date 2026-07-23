@@ -62,7 +62,7 @@ use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 use libloading::{Library, Symbol};
 
-use crate::serve_approval::{QueueApprover, SERVE_DEFAULT_TENANT};
+use crate::serve_approval::{ApprovalRequester, QueueApprover};
 
 /// What the serve loop remembers about each in-flight approval so the
 /// `/__approvals/:id/approve` handler can re-execute the original
@@ -250,7 +250,11 @@ pub(crate) fn cmd_serve(
 
     let runtime = corvid_driver::apply_env_llm_wiring(
         Runtime::builder()
-            .approver(Arc::new(QueueApprover::new(approval_queue.clone())))
+            // The process-wide runtime has no requester identity. Every
+            // authenticated HTTP request installs its own contextual
+            // QueueApprover below; any accidental non-request path fails
+            // closed rather than minting an anonymous approval.
+            .approver(Arc::new(ProgrammaticApprover::always_no()))
             .tool_registry(host_tools.clone()),
     )
     .build();
@@ -621,13 +625,18 @@ fn stub_actor_value() -> Value {
 /// success, or a short-circuit `Response` (`401` unauthenticated, `403`
 /// unauthorized / CSRF failure). The actor is ALWAYS derived from the
 /// verified session — never from anything the request supplies.
+struct EnforcedRouteActor {
+    actor: corvid_runtime::AuthActor,
+    value: Value,
+}
+
 fn enforce_route_policy(
     state: &ServeState,
     policy: &corvid_ir::IrRoutePolicy,
     method: HttpMethod,
     route_path: &str,
     headers: &axum::http::HeaderMap,
-) -> Result<Value, Response> {
+) -> Result<EnforcedRouteActor, Response> {
     use corvid_runtime::{
         authorize_route, effective_permissions_for, verify_csrf_double_submit, CsrfRequestMethod,
         RouteAuthzOutcome, RoutePolicyRequirement,
@@ -721,7 +730,8 @@ fn enforce_route_policy(
         &trace,
     );
     let permissions = effective_permissions_for(&roles, &ctx.role_permissions);
-    Ok(authenticated_actor_value(&actor, &roles, &permissions))
+    let value = authenticated_actor_value(&actor, &roles, &permissions);
+    Ok(EnforcedRouteActor { actor, value })
 }
 
 /// The permission a reviewer must hold to decide an approval (slice
@@ -971,7 +981,7 @@ async fn run_route(
     // body, assembling args, or executing any handler or effect. On
     // success it yields the authenticated typed `actor`; a missing/invalid
     // session is 401, insufficient authority (or a CSRF failure) is 403.
-    let enforced_actor: Option<Value> = match &meta.policy {
+    let enforced_actor = match &meta.policy {
         Some(policy) if policy.requires_auth() => {
             match enforce_route_policy(&state, policy, meta.method, &meta.route_path, &headers) {
                 Ok(actor) => Some(actor),
@@ -1062,15 +1072,31 @@ async fn run_route(
             "body" => args.push(body_value.clone().unwrap_or(Value::Nothing)),
             "actor" => args.push(
                 enforced_actor
-                    .clone()
+                    .as_ref()
+                    .map(|enforced| enforced.value.clone())
                     .unwrap_or_else(stub_actor_value),
             ),
             _ => {}
         }
     }
 
-    let outcome =
-        run_ir_with_runtime(&state.ir, Some(&meta.handler_agent), args.clone(), &state.runtime).await;
+    let request_runtime = match &enforced_actor {
+        Some(enforced) => state.runtime.with_approver(Arc::new(QueueApprover::new(
+            state.approval_queue.clone(),
+            ApprovalRequester {
+                actor_id: enforced.actor.id.clone(),
+                tenant_id: enforced.actor.tenant_id.clone(),
+            },
+        ))),
+        None => state.runtime.clone(),
+    };
+    let outcome = run_ir_with_runtime(
+        &state.ir,
+        Some(&meta.handler_agent),
+        args.clone(),
+        &request_runtime,
+    )
+    .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     finish(outcome)
 }
@@ -1393,10 +1419,34 @@ fn is_approval_denied(kind: &InterpErrorKind) -> bool {
         )
 }
 
-/// `GET /__approvals` — list pending approvals for the `corvid serve`
-/// default tenant. Read-only at the slice MVP boundary.
-async fn list_approvals(State(state): State<Arc<ServeState>>) -> Response {
-    match state.approval_queue.list_by_tenant(SERVE_DEFAULT_TENANT) {
+/// Authenticate an approval-control-plane read. The authority is the
+/// same declared permission used for decisions; GET needs no CSRF but
+/// still resolves a fresh, non-revoked session on every request.
+fn enforce_approval_read(
+    state: &ServeState,
+    route_path: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<corvid_runtime::AuthActor, Response> {
+    let policy = corvid_ir::IrRoutePolicy {
+        authenticated: true,
+        roles: Vec::new(),
+        permissions: vec![APPROVALS_DECIDE_PERMISSION.to_string()],
+    };
+    enforce_route_policy(state, &policy, HttpMethod::Get, route_path, headers)
+        .map(|enforced| enforced.actor)
+}
+
+/// `GET /__approvals` — list pending approvals for the verified
+/// operator's tenant. No process-global tenant or cross-tenant scan.
+async fn list_approvals(
+    State(state): State<Arc<ServeState>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let actor = match enforce_approval_read(&state, "/__approvals", &headers) {
+        Ok(actor) => actor,
+        Err(response) => return response,
+    };
+    match state.approval_queue.list_by_tenant(&actor.tenant_id) {
         Ok(records) => {
             let entries: Vec<serde_json::Value> = records
                 .iter()
@@ -1663,9 +1713,14 @@ fn reviewer_context(
 async fn get_approval(
     State(state): State<Arc<ServeState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
+    let actor = match enforce_approval_read(&state, &format!("/__approvals/{id}"), &headers) {
+        Ok(actor) => actor,
+        Err(response) => return response,
+    };
     match state.approval_queue.get(&id) {
-        Ok(Some(record)) => {
+        Ok(Some(record)) if record.tenant_id == actor.tenant_id => {
             // 33Q2 — surface the captured `last_handler_error` (if any)
             // from `PendingInvocation` so a reviewer probing why an
             // approval is still `pending` after they POSTed /approve
@@ -1692,7 +1747,7 @@ async fn get_approval(
             }
             (StatusCode::OK, Json(body)).into_response()
         }
-        Ok(None) => (
+        Ok(Some(_)) | Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "approval_not_found", "id": id })),
         )

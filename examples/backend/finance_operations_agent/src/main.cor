@@ -533,6 +533,12 @@ agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
     recurring_ok = e.action == "ScheduleRecurringPayment" and e.required_role == "Admin" and e.data_class == "financial" and e.irreversible
     return payment_ok and cancel_ok and dispute_ok and export_ok and recurring_ok
 
+identity finance_users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("finance-operations")
+
 server finance_operations_agent_api:
     route GET "/config" -> json FinanceConfig:
         return finance_config()
@@ -542,15 +548,15 @@ server finance_operations_agent_api:
         return readonly_snapshot()
     route GET "/payments/intents/mock" -> json FinanceApprovalAuditSurface:
         return payment_approval_surface()
-    route POST "/payments/intents/submit" body PaymentIntentRequest -> json PaymentIntentReceipt uses payment_write:
+    route POST "/payments/intents/submit" body PaymentIntentRequest -> json PaymentIntentReceipt uses payment_write requires authenticated:
         return execute_approved_payment_intent(body)
-    route POST "/subscriptions/cancel" body CancelSubscriptionRequest -> json CancelSubscriptionReceipt uses subscription_write:
+    route POST "/subscriptions/cancel" body CancelSubscriptionRequest -> json CancelSubscriptionReceipt uses subscription_write requires authenticated:
         return execute_approved_cancel_subscription(body)
-    route POST "/transactions/dispute" body DisputeTransactionRequest -> json DisputeTransactionReceipt uses dispute_write:
+    route POST "/transactions/dispute" body DisputeTransactionRequest -> json DisputeTransactionReceipt uses dispute_write requires authenticated:
         return execute_approved_dispute_transaction(body)
-    route POST "/reports/export" body ExportFinancialReportRequest -> json ExportFinancialReportReceipt uses report_export:
+    route POST "/reports/export" body ExportFinancialReportRequest -> json ExportFinancialReportReceipt uses report_export requires authenticated:
         return execute_approved_export_financial_report(body)
-    route POST "/payments/recurring/schedule" body ScheduleRecurringPaymentRequest -> json ScheduleRecurringPaymentReceipt uses recurring_payment_write:
+    route POST "/payments/recurring/schedule" body ScheduleRecurringPaymentRequest -> json ScheduleRecurringPaymentReceipt uses recurring_payment_write requires authenticated:
         return execute_approved_schedule_recurring_payment(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)

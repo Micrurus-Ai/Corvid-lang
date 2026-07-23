@@ -27,6 +27,10 @@ corvid claim --explain approval.dangerous_call_requires_token
 - `approval.token_lexical_only` — an `approve` token authorizes only
   calls in its lexical scope. Body-wide approves are caught and
   reported with this id.
+- Served routes that can transitively reach an approval boundary must
+  require authentication. Pending records are attributed to the
+  verified actor and tenant; approval reads require declared review
+  authority and are tenant-scoped.
 - `grounded.no_silent_unwrap` — a `Grounded<T>` cannot be passed where
   a `T` is expected. Unwrap is one of three named methods, each
   recorded in the audit log.

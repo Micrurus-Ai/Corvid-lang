@@ -154,6 +154,16 @@ impl Runtime {
         RuntimeBuilder::default()
     }
 
+    /// Return a clone that shares the runtime's tools, providers,
+    /// stores, policies, and tracing state but delegates approval
+    /// requests to `approver`. HTTP servers use this to bind approval
+    /// creation to the verified actor for one request.
+    pub fn with_approver(&self, approver: Arc<dyn crate::approvals::Approver>) -> Self {
+        let mut clone = self.clone();
+        clone.approver = approver;
+        clone
+    }
+
     /// Return a new `Runtime` sharing every state-bearing field with
     /// `self` (tools, LLMs, approver, stores, rollout state, …) but
     /// emitting trace events to `tracer` instead of `self.tracer`.

@@ -466,6 +466,12 @@ agent approval_surface_valid(tenant_id: String, trace_id: String) -> Bool:
     release_ok = e.action == "TagRelease" and e.required_role == "Admin" and e.data_class == "code" and e.irreversible
     return comment_ok and patch_ok and pr_ok and merge_ok and release_ok
 
+identity maintenance_users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("code-maintenance")
+
 server code_maintenance_agent_api:
     route GET "/config" -> json CodeConfig:
         return code_config()
@@ -477,15 +483,15 @@ server code_maintenance_agent_api:
         return triage_issue_mock()
     route GET "/writes/plan/mock" -> json CodeWritePlan uses repo_read, ci_read, code_ai:
         return code_write_plan_mock()
-    route POST "/comments/post" body ReviewCommentRequest -> json ReviewCommentReceipt uses code_write:
+    route POST "/comments/post" body ReviewCommentRequest -> json ReviewCommentReceipt uses code_write requires authenticated:
         return execute_approved_review_comment(body)
-    route POST "/patches/propose" body PatchProposalRequest -> json PatchProposalReceipt uses code_write:
+    route POST "/patches/propose" body PatchProposalRequest -> json PatchProposalReceipt uses code_write requires authenticated:
         return execute_approved_patch_proposal(body)
-    route POST "/pull-requests/open" body OpenPullRequestRequest -> json OpenPullRequestReceipt uses pr_write:
+    route POST "/pull-requests/open" body OpenPullRequestRequest -> json OpenPullRequestReceipt uses pr_write requires authenticated:
         return execute_approved_open_pull_request(body)
-    route POST "/pull-requests/merge" body MergePullRequestRequest -> json MergePullRequestReceipt uses merge_write:
+    route POST "/pull-requests/merge" body MergePullRequestRequest -> json MergePullRequestReceipt uses merge_write requires authenticated:
         return execute_approved_merge_pull_request(body)
-    route POST "/releases/tag" body TagReleaseRequest -> json TagReleaseReceipt uses release_write:
+    route POST "/releases/tag" body TagReleaseRequest -> json TagReleaseReceipt uses release_write requires authenticated:
         return execute_approved_tag_release(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:
         return session_login(body)
