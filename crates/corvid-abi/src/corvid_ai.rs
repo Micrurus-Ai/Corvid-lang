@@ -182,6 +182,7 @@ mod tests {
             agents,
             prompts: vec![],
             identities: vec![],
+            connectors: vec![],
         }
     }
 

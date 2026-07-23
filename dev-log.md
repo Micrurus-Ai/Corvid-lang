@@ -4143,6 +4143,50 @@ fixtures. **52g-3c is closed.**
 
 ---
 
+## 2026-07-23 - 52g-3d: the connector surface is in the contract, and the resolved mode is deployment evidence — 52g CLOSED
+
+The audit layer, and the close of Protocol-Typed Connectors. Two records,
+each answering a different question:
+
+- **What CAN this app do?** The Application Contract gains a `connectors`
+  section — each connector's base URL, its ALLOWED modes, and its
+  operations (method / path / effects / dangerous / status→error map).
+  The static advertised surface. Deliberately absent: anything
+  credential-shaped. Only a `secret(...)` reference *name* would ever be
+  knowable, and even that is omitted — a test asserts the serialized
+  contract contains neither the secret name nor the auth scheme.
+- **What DID this deployment do?** The resolved mode is recorded at
+  startup as a `connector.mode_selected` host event (mode + connector
+  names) in `run_via_interpreter_tier`, right after the startup closure
+  passes. An auditor reading a run's trace sees which posture actually
+  executed — the contract says the envelope, the trace says the point
+  chosen inside it.
+
+That split is the honest design: a static, source-derived contract can't
+carry a per-deployment choice, so it advertises the allowed modes; the
+runtime records the selected one where deployment evidence belongs.
+
+Also fixed a fixture failing since 52g-3b: an app_contract test
+(`a_valid_connector_compiles`) whose connector predated the required
+`modes:` list, in a crate that slice's targeted gate didn't run — the same
+slipped-fixture shape as the native-cache tests. Meta-lesson reinforced: a
+required-field or required-decl change wants a broader test sweep than the
+touched crate's own lib.
+
+Tests: 1 contract (modes + operations surfaced, no credentials) + 1
+runtime (a run records `connector.mode_selected` in its trace). Gate
+(batched): corvid-abi 83 + corvid-driver libs green; workspace check
+clean; corpus verify exits 1 on exactly the two fixtures.
+
+**52g Protocol-Typed Connectors is CLOSED** — a `connector` declares an
+external API once, each `operation` is a governed callable, the same file
+runs mock/real/replay with credentials never in a trace, provider statuses
+become typed errors, reliability composes, and both the allowed surface
+and the executed posture are on the record. Next: 52h async provider state
+machines.
+
+---
+
 ## 2026-07-23 - 52g-3b: a connector declares which modes it may run in, and silence is a compile error
 
 Before an operation can *execute*, one consequential question has to be

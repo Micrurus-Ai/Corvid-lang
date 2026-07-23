@@ -480,6 +480,7 @@ mod tests {
             }],
             prompts: vec![],
             identities: vec![],
+            connectors: vec![],
         }
     }
 

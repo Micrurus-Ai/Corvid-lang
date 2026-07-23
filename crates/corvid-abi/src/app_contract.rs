@@ -45,6 +45,53 @@ pub struct ApplicationContract {
     /// when the program declares no `identity` block.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub identities: Vec<ContractIdentity>,
+    /// Declared `connector` surfaces (slice 52g-3d) — the external APIs
+    /// this application integrates, the execution modes each is ALLOWED
+    /// to run in, and the operations it exposes. This is the static
+    /// advertised surface (what the app CAN do); the mode a given
+    /// deployment actually SELECTED is recorded in the runtime's
+    /// `connector.mode_selected` startup event, not here. Empty when the
+    /// program declares no connectors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<ContractConnector>,
+}
+
+/// A declared `connector` in the contract (slice 52g-3d). Credentials
+/// are deliberately absent — only the secret REFERENCE names would ever
+/// be knowable, and even those are omitted; the contract advertises the
+/// integration surface, never anything credential-shaped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractConnector {
+    pub name: String,
+    pub base_url: String,
+    /// The execution modes this connector is allowed to run in
+    /// (`mock`/`replay`/`real`). The deployment selects exactly one at
+    /// start; there is no default.
+    pub modes: Vec<String>,
+    pub operations: Vec<ContractOperation>,
+}
+
+/// One `operation` of a connector in the contract (slice 52g-3d).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractOperation {
+    pub name: String,
+    pub method: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<String>,
+    /// Whether the operation is `dangerous` (requires an `approve`).
+    pub dangerous: bool,
+    /// `on status <code> -> Variant` mappings: the HTTP statuses that
+    /// become typed error variants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub error_map: Vec<ContractStatusError>,
+}
+
+/// One `on status <code> -> Variant` mapping in the contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractStatusError {
+    pub status: u16,
+    pub variant: String,
 }
 
 /// Public Corvid guarantee id the contract emitter enforces (slice
@@ -393,6 +440,15 @@ pub fn emit_application_contract(
         })
         .collect();
 
+    let connectors = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Connector(c) => Some(contract_connector(c)),
+            _ => None,
+        })
+        .collect();
+
     ApplicationContract {
         contract_version: CONTRACT_VERSION,
         compiler_version: opts.compiler_version.to_string(),
@@ -403,6 +459,42 @@ pub fn emit_application_contract(
         agents,
         prompts,
         identities,
+        connectors,
+    }
+}
+
+/// Project a declared `connector` into its contract surface (slice
+/// 52g-3d). Credentials never appear — the contract advertises the
+/// integration, not anything credential-shaped.
+fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
+    ContractConnector {
+        name: c.name.name.clone(),
+        base_url: c.base_url.clone(),
+        modes: c.modes.iter().map(|m| m.as_str().to_string()).collect(),
+        operations: c
+            .operations
+            .iter()
+            .map(|op| ContractOperation {
+                name: op.name.name.clone(),
+                method: op.method.as_str().to_string(),
+                path: op.path.clone(),
+                effects: op
+                    .effect_row
+                    .effects
+                    .iter()
+                    .map(|e| e.name.name.clone())
+                    .collect(),
+                dangerous: matches!(op.effect, corvid_ast::Effect::Dangerous),
+                error_map: op
+                    .error_map
+                    .iter()
+                    .map(|m| ContractStatusError {
+                        status: m.status,
+                        variant: m.variant.name.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
@@ -822,6 +914,57 @@ mod tests {
                 generated_at: "now",
             },
         )
+    }
+
+    #[test]
+    fn a_connector_surfaces_its_modes_and_operations_in_the_contract() {
+        // Slice 52g-3d: the contract advertises the connector integration
+        // surface — the ALLOWED modes and the operations — but never a
+        // credential (only a `secret(...)` reference name would ever be
+        // knowable, and even that is omitted).
+        let contract = contract_for(
+            "\
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+type GithubError:
+    | NotFound
+
+connector github:
+    base_url: \"https://api.github.com\"
+    auth: bearer(secret(\"GITHUB_TOKEN\"))
+    modes: [mock, replay, real]
+    operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
+        GET \"/repos/{owner}/{repo}\"
+        on status 404 -> NotFound
+        mock: Ok(Repo(\"corvid\"))
+",
+        );
+        let c = contract
+            .connectors
+            .iter()
+            .find(|c| c.name == "github")
+            .expect("github connector in contract");
+        assert_eq!(c.base_url, "https://api.github.com");
+        assert_eq!(c.modes, vec!["mock", "replay", "real"]);
+        assert_eq!(c.operations.len(), 1);
+        let op = &c.operations[0];
+        assert_eq!(op.name, "get_repo");
+        assert_eq!(op.method, "GET");
+        assert_eq!(op.path, "/repos/{owner}/{repo}");
+        assert_eq!(op.effects, vec!["http_read"]);
+        assert!(!op.dangerous);
+        assert_eq!(op.error_map.len(), 1);
+        assert_eq!(op.error_map[0].status, 404);
+        assert_eq!(op.error_map[0].variant, "NotFound");
+
+        // No credential material anywhere in the serialized contract.
+        let json = serde_json::to_string(&contract).unwrap();
+        assert!(!json.contains("GITHUB_TOKEN"), "no secret name in the contract");
+        assert!(!json.contains("bearer"), "no auth scheme in the contract");
     }
 
     #[test]
@@ -1455,7 +1598,7 @@ server admin_api:
     #[test]
     fn a_valid_connector_compiles() {
         let errors = check_errors_of(
-            "connector github:\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
+            "connector github:\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
         );
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }

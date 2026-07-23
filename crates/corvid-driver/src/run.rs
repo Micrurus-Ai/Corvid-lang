@@ -408,6 +408,21 @@ fn run_via_interpreter_tier(
         }
     }
 
+    // Slice 52g-3d: deployment evidence. When a program with connectors
+    // starts, record the RESOLVED mode as a startup event in the trace,
+    // so an audit of a run can see which posture actually executed
+    // (the Application Contract records the ALLOWED modes; this records
+    // the one selected). The closure above guarantees a mode is present.
+    if !ir.connectors.is_empty() {
+        if let Some(mode) = rt.connector_mode() {
+            let names: Vec<String> = ir.connectors.iter().map(|c| c.name.clone()).collect();
+            rt.emit_host_event(
+                "connector.mode_selected",
+                serde_json::json!({ "mode": mode.as_str(), "connectors": names }),
+            );
+        }
+    }
+
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -582,6 +597,69 @@ fn trace_dir_for(source_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::is_missing_staticlib_error;
+
+    /// Slice 52g-3d: a program that declares a connector records the
+    /// RESOLVED mode as a startup event, so an audit of a run can see
+    /// which posture actually executed.
+    #[test]
+    fn a_connector_program_records_the_selected_mode_at_startup() {
+        use super::{run_with_target, trace_dir_for, RunTarget};
+        use corvid_ast::ConnectorMode;
+        use corvid_trace_schema::{read_events_from_path, TraceEvent};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("main.cor");
+        std::fs::write(
+            &path,
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    modes: [mock, real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo("corvid")
+
+agent main() -> String:
+    r = get_repo("micrurus", "corvid")
+    return r.name
+"#,
+        )
+        .unwrap();
+
+        let code = run_with_target(
+            &path,
+            RunTarget::Interpreter,
+            None,
+            &[],
+            Some(ConnectorMode::Mock),
+        )
+        .expect("run");
+        assert_eq!(code, 0);
+
+        let trace_dir = trace_dir_for(&path);
+        let jsonl = std::fs::read_dir(&trace_dir)
+            .expect("trace dir exists")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().map(|x| x == "jsonl").unwrap_or(false))
+            .expect("a trace .jsonl was written");
+        let events = read_events_from_path(&jsonl).expect("trace deserializes");
+        let recorded = events.iter().any(|e| {
+            matches!(e, TraceEvent::HostEvent { name, payload, .. }
+                if name == "connector.mode_selected"
+                    && payload.get("mode").and_then(|m| m.as_str()) == Some("mock"))
+        });
+        assert!(
+            recorded,
+            "the trace must record connector.mode_selected=mock as deployment evidence"
+        );
+    }
 
     #[test]
     fn detects_missing_staticlib_diagnostic_phrase() {
