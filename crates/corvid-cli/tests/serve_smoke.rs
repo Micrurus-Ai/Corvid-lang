@@ -1758,3 +1758,106 @@ server items_api:
     assert_eq!(items.len(), 2, "envelope must carry both items: {body}");
     assert_eq!(items[0].get("id").and_then(|v| v.as_str()), Some("i1"));
 }
+
+/// Minimal HTTP/1.1 GET returning the FULL raw response (status line +
+/// headers + body), so a test can assert on the `Location` /
+/// `Set-Cookie` headers of a redirect.
+fn http_get_raw(port: u16, path: &str) -> Option<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    Some(raw)
+}
+
+/// Slice 52e end-to-end gate: an `identity` block makes `corvid serve`
+/// mount the OAuth login surface. `GET /auth/{provider}/login` must
+/// 302 to the provider's authorize URL carrying the client id, an opaque
+/// `state`, and a PKCE `code_challenge`; `GET /auth/session` without a
+/// cookie must report `authenticated: false`; an unknown provider is a
+/// 404. No live IdP is contacted — login only builds the redirect.
+#[test]
+fn serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+
+server ping_api:
+    route GET "/ping" -> json String:
+        return "pong"
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8204;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_ID", "test-client-id")
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_SECRET", "test-client-secret")
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server with an identity block did not become ready on :{port}"
+    );
+
+    // 1. GET /auth/google/login → 302 to Google's authorize URL.
+    let raw = http_get_raw(port, "/auth/google/login").expect("GET login failed");
+    let status: u16 = raw
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    assert_eq!(status, 302, "login must 302; raw=\n{raw}");
+    let location = raw
+        .lines()
+        .find_map(|l| l.strip_prefix("location: ").or_else(|| l.strip_prefix("Location: ")))
+        .expect("login 302 must carry a Location header");
+    assert!(
+        location.starts_with("https://accounts.google.com/o/oauth2/v2/auth"),
+        "Location must point at Google's authorize endpoint: {location}"
+    );
+    assert!(location.contains("client_id=test-client-id"), "Location: {location}");
+    assert!(location.contains("state="), "Location must carry state: {location}");
+    assert!(
+        location.contains("code_challenge=") && location.contains("code_challenge_method=S256"),
+        "Location must carry a PKCE S256 challenge: {location}"
+    );
+    assert!(location.contains("nonce="), "OIDC login must carry a nonce: {location}");
+
+    // 2. GET /auth/session with no cookie → 401 authenticated:false.
+    let (session_status, session_body) =
+        http_get(port, "/auth/session").expect("GET /auth/session failed");
+    assert_eq!(session_status, 401, "unauthenticated session must be 401");
+    assert!(
+        session_body.contains("\"authenticated\":false"),
+        "session body: {session_body}"
+    );
+
+    // 3. Unknown provider → 404.
+    let unknown = http_get_raw(port, "/auth/twitter/login").expect("GET unknown login failed");
+    let unknown_status: u16 = unknown
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    assert_eq!(unknown_status, 404, "unknown provider must 404; raw=\n{unknown}");
+}

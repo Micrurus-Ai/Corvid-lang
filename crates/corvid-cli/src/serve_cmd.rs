@@ -171,6 +171,27 @@ pub(crate) fn cmd_serve(
         return Ok(1);
     }
 
+    // Slice 52e: if the program declares an `identity` block, resolve its
+    // login surface (providers, provisioning policy, cookie posture,
+    // client credentials) BEFORE binding the listener. A consequential
+    // gap — a provider whose credentials or discovery cannot be resolved
+    // — refuses to start rather than mounting a login route that half
+    // works. The identity block is not lowered into IR, so read it from
+    // the AST (the source already compiled cleanly above).
+    let auth_context = match declared_identity(&source) {
+        Some(identity) => match crate::serve_auth::context::AuthContext::from_identity(&identity) {
+            Ok(ctx) => Some(Arc::new(ctx)),
+            Err(err) => {
+                eprintln!(
+                    "error: {} declares an `identity` block whose login surface cannot be served: {err}",
+                    file.display()
+                );
+                return Ok(1);
+            }
+        },
+        None => None,
+    };
+
     let addr: SocketAddr = listen
         .parse()
         .with_context(|| format!("invalid --listen address `{listen}` (expected host:port)"))?;
@@ -341,6 +362,16 @@ pub(crate) fn cmd_serve(
         app = app.route(&path, mr);
     }
 
+    // Slice 52e: mount the login surface (`/auth/{provider}/login`,
+    // `/callback`, `/logout`, `/session`) when an identity block is
+    // declared. `with_state` finalises the auth router with its own
+    // `AuthContext`, yielding a router compatible with the app's state so
+    // it merges cleanly.
+    let mounts_auth = auth_context.is_some();
+    if let Some(auth_ctx) = auth_context {
+        app = app.merge(crate::serve_auth::routes::auth_router().with_state(auth_ctx));
+    }
+
     // Clone the Arc before `with_state` moves it so the startup
     // banner below can still see the IR for the 33Q9 approval-label
     // check.
@@ -379,9 +410,29 @@ pub(crate) fn cmd_serve(
         println!("  POST   /__approvals/<id>/deny      -> deny + drop the pending invocation");
         println!("  GET    /.well-known/corvid         -> the Application Contract");
         println!("  GET    /openapi.json               -> OpenAPI 3.1");
+        if mounts_auth {
+            println!("  GET    /auth/<provider>/login      -> begin OAuth login (PKCE + state + nonce)");
+            println!("  GET    /auth/<provider>/callback   -> complete login, issue a session cookie");
+            println!("  POST   /auth/logout                -> revoke the session + clear the cookie");
+            println!("  GET    /auth/session               -> the current authenticated actor");
+        }
         axum::serve(listener, app).await.context("serve").map(|_| ())
     })?;
     Ok(0)
+}
+
+/// Extract the declared `identity` block from the source, if any. The
+/// identity block is a static auth-configuration surface that is not
+/// lowered into IR (slice 51g), so `corvid serve` reads it straight from
+/// the AST to build its login surface (slice 52e). The source already
+/// compiled to IR above, so a parse here does not re-surface errors.
+fn declared_identity(source: &str) -> Option<corvid_ast::IdentityDecl> {
+    let tokens = corvid_syntax::lex(source).ok()?;
+    let (file, _perr) = corvid_syntax::parse_file(&tokens);
+    file.decls.iter().find_map(|decl| match decl {
+        corvid_ast::Decl::Identity(identity) => Some(identity.clone()),
+        _ => None,
+    })
 }
 
 /// Run a literal-arg handler agent and serialize its result to JSON.

@@ -161,6 +161,31 @@ impl SessionAuthRuntime {
             .map_err(|err| RuntimeError::Other(format!("failed to read session: {err}")))
     }
 
+    /// Resolve a login session from its cookie token alone. The tenant
+    /// is read from the stored session (a cookie carries no independent
+    /// tenant context), then the standard `resolve_session` checks
+    /// (not-found / revoked / expired / actor-tenant) run. Used by the
+    /// login `/auth/session` and logout endpoints (52e).
+    pub fn resolve_session_cookie(
+        &self,
+        raw_token: &str,
+        trace_id: &str,
+        at_ms: u64,
+    ) -> Result<SessionResolution, RuntimeError> {
+        validate_non_empty("session token", raw_token)?;
+        validate_non_empty("trace id", trace_id)?;
+        let token_hash = hash_session_secret(raw_token);
+        let tenant_id = match self.get_session_by_hash(&token_hash)? {
+            Some(session) => session.tenant_id,
+            None => {
+                return Err(RuntimeError::Other(
+                    "session resolve denied: token not found".to_string(),
+                ))
+            }
+        };
+        self.resolve_session(raw_token, &tenant_id, trace_id, "", at_ms)
+    }
+
     pub fn resolve_session(
         &self,
         raw_token: &str,

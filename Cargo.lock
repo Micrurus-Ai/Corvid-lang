@@ -758,6 +758,7 @@ dependencies = [
  "multer",
  "rand_core 0.6.4",
  "rayon",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

@@ -3378,6 +3378,57 @@ mounts the four routes and threads `resolve_identity` → `provision_login`
 
 ---
 
+## 2026-07-23 - 52e-4c: `corvid serve` grows a login surface
+
+The pieces meet the HTTP layer. When a program declares an `identity`
+block, `corvid serve` now mounts four routes —
+`/auth/{provider}/login`, `/callback`, `POST /auth/logout`,
+`/auth/session` — and threads a login through the strict callback order.
+
+At startup, serve reads the identity block from the AST (it is not
+lowered into IR), resolves an `AuthContext` (providers + policy + cookie
+posture + client credentials), and merges the auth router. A
+consequential gap — a provider whose credentials or OIDC discovery can't
+be resolved — **refuses to start** naming it, rather than mounting a
+login route that half-works.
+
+- **login** mints PKCE + state + nonce (`pkce.rs`, OS CSPRNG), stores the
+  single-use *Login* OAuth state, and 302s to the provider's authorize
+  URL. PKCE + nonce ride along for the OIDC providers; the OAuth2-only
+  ones rely on the client secret + state.
+- **callback** runs the strict order inside `run_callback`: validate the
+  single-use state (recovering the PKCE verifier + nonce fingerprint) →
+  `resolve_identity` (exchange + verify) → `provision_login` (recognise
+  or provision) → `create_session`. All of it runs in `spawn_blocking` —
+  `reqwest`'s blocking client cannot run inside a Tokio context. A
+  failure at any step is an opaque `401`; the reason is audited, not
+  leaked.
+- **logout** revokes the session and clears the cookie; **session**
+  resolves the cookie to the current actor.
+
+The session cookie carries the identity block's declared
+Secure/HttpOnly/SameSite. One small runtime addition — `resolve_session_cookie`
+— resolves a login session from its token alone (a cookie carries no
+tenant context, so the tenant is read from the stored session, then the
+standard checks run).
+
+Four new files under `serve_auth/` (`pkce.rs`, `net.rs` — the reqwest
+`HttpProviderGateway`, `context.rs`, `routes.rs`), one responsibility
+each. A live serve_smoke test proves it end-to-end without a provider:
+`GET /auth/google/login` 302s to Google's authorize endpoint carrying the
+client id, an opaque `state`, a PKCE `S256` challenge, and a `nonce`;
+`GET /auth/session` with no cookie reports `authenticated: false` (401);
+an unknown provider is a 404.
+
+Gate: workspace check clean; 22 serve_auth unit tests + all 15
+serve_smoke tests green (single-threaded — one SSE test is flaky under
+parallel load, green in isolation); corpus verify still exits 1 on the
+two fixtures. Next: 52e-5 drives the FULL callback end-to-end against a
+mock IdP + mock userinfo (login→callback→session→logout, open + invited,
+adversarial state/nonce/token cases) and ships the invention proof.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

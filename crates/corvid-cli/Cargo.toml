@@ -50,6 +50,8 @@ wasmparser = "0.244.0"
 dirs = "5"
 hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
 cc = "1"

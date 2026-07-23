@@ -76,9 +76,10 @@ pub struct VerifiedExternalIdentity {
 pub struct IdentityResolution<'a> {
     pub config: &'a OAuthProviderConfig,
     pub exchange: TokenExchange<'a>,
-    /// The `nonce` the login minted (raw). Compared against the ID
-    /// token's `nonce` claim for OIDC; ignored for userinfo.
-    pub expected_nonce: Option<&'a str>,
+    /// The fingerprint of the `nonce` the login minted (as stored on the
+    /// OAuth state). The ID token's `nonce` claim is fingerprinted and
+    /// compared to it for OIDC; ignored for userinfo.
+    pub expected_nonce_fingerprint: Option<&'a str>,
     /// The claim to read the tenant from, when the provisioning policy
     /// maps the tenant from an issuer claim.
     pub tenant_claim_name: Option<&'a str>,
@@ -144,16 +145,16 @@ fn resolve_oidc(
         .verify(id_token, &contract, res.now_ms)
         .map_err(|e| format!("id token verification failed: {}", e.slug()))?;
 
-    // Bind the ID token to THIS login: its nonce claim must match the
-    // nonce the login minted. A missing or mismatched nonce is a replay
-    // or a token issued to a different flow.
-    if let Some(expected) = res.expected_nonce {
+    // Bind the ID token to THIS login: its nonce claim must fingerprint
+    // to the nonce the login minted. A missing or mismatched nonce is a
+    // replay or a token issued to a different flow.
+    if let Some(expected_fp) = res.expected_nonce_fingerprint {
         let claim = claims
             .raw
             .get("nonce")
             .and_then(|v| v.as_str())
             .ok_or("id token is missing the nonce claim")?;
-        if nonce_fingerprint(claim) != nonce_fingerprint(expected) {
+        if nonce_fingerprint(claim) != expected_fp {
             return Err("id token nonce does not match the login nonce".to_string());
         }
     }
@@ -278,7 +279,7 @@ mod tests {
         }
     }
 
-    fn oidc_config(idp: &MockIdp) -> OAuthProviderConfig {
+    fn oidc_config(_idp: &MockIdp) -> OAuthProviderConfig {
         OAuthProviderConfig {
             provider_name: "mock".to_string(),
             authorize_url: "https://issuer.test/authorize".to_string(),
@@ -332,7 +333,7 @@ mod tests {
                     redirect_uri: "https://app/callback",
                     pkce_verifier: "verifier",
                 },
-                expected_nonce: Some(nonce),
+                expected_nonce_fingerprint: Some(&nonce_fingerprint(nonce)),
                 tenant_claim_name: None,
                 now_ms: 2_000_000,
             },
@@ -367,7 +368,7 @@ mod tests {
                     redirect_uri: "r",
                     pkce_verifier: "v",
                 },
-                expected_nonce: Some("the-real-login-nonce"),
+                expected_nonce_fingerprint: Some(&nonce_fingerprint("the-real-login-nonce")),
                 tenant_claim_name: None,
                 now_ms: 2_000_000,
             },
@@ -391,7 +392,7 @@ mod tests {
                     redirect_uri: "r",
                     pkce_verifier: "v",
                 },
-                expected_nonce: None,
+                expected_nonce_fingerprint: None,
                 tenant_claim_name: None,
                 now_ms: 2_000_000,
             },
@@ -421,7 +422,7 @@ mod tests {
                     redirect_uri: "r",
                     pkce_verifier: "v",
                 },
-                expected_nonce: None,
+                expected_nonce_fingerprint: None,
                 tenant_claim_name: Some("org_id"),
                 now_ms: 2_000_000,
             },
@@ -450,7 +451,7 @@ mod tests {
                     redirect_uri: "r",
                     pkce_verifier: "v",
                 },
-                expected_nonce: None,
+                expected_nonce_fingerprint: None,
                 tenant_claim_name: None,
                 now_ms: 0,
             },
@@ -477,7 +478,7 @@ mod tests {
                     redirect_uri: "r",
                     pkce_verifier: "v",
                 },
-                expected_nonce: None,
+                expected_nonce_fingerprint: None,
                 tenant_claim_name: None,
                 now_ms: 0,
             },
