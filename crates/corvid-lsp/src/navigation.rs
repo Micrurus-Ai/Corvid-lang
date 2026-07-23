@@ -310,6 +310,10 @@ fn top_level_definitions(file: &File, resolved: &Resolved) -> Vec<Definition> {
                 identity.name.span,
                 SymbolKind::CLASS,
             ),
+            // 52g-1: a connector name is not yet a resolvable symbol
+            // (its operations become callable in a later slice), so it
+            // has no go-to-definition entry yet.
+            Decl::Connector(_) => {}
             // Schedule decls reference an existing target by name; the
             // navigation surface defines that target via its own
             // Decl::Agent / Decl::Tool entry, so the schedule itself

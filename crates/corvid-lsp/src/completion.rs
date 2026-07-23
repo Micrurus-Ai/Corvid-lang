@@ -260,6 +260,12 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 "identity",
                 format!("identity {}", identity.name.name),
             )),
+            Decl::Connector(connector) => items.add(symbol_item(
+                &connector.name.name,
+                CompletionItemKind::CLASS,
+                "connector",
+                format!("connector {}", connector.name.name),
+            )),
             Decl::Import(_) | Decl::Extend(_) => {}
         }
     }

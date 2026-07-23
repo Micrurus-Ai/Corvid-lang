@@ -1299,6 +1299,15 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
                     names.insert(provider.kind.wire_name());
                 }
             }
+            Decl::Connector(connector) => {
+                names.insert(connector.name.name.clone());
+                for op in &connector.operations {
+                    names.insert(op.name.name.clone());
+                    for param in &op.params {
+                        names.insert(param.name.name.clone());
+                    }
+                }
+            }
         }
     }
     names

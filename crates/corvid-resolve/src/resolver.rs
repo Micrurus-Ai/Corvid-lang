@@ -271,6 +271,12 @@ impl Resolver {
                 Decl::Schedule(_) => {
                     continue;
                 }
+                Decl::Connector(_) => {
+                    // 52g-1: the connector name is not itself a callable
+                    // symbol; its operations become callable in a later
+                    // slice. No top-level symbol yet.
+                    continue;
+                }
                 Decl::Extend(_) => {
                     // The parser accepts `extend T:`
                     // blocks; method registration into a per-type
@@ -450,6 +456,19 @@ impl Resolver {
                         self.resolve_expr(arg);
                     }
                     self.resolve_effect_row(&schedule.effect_row);
+                }
+                Decl::Connector(c) => {
+                    // 52g-1: resolve the type references each operation's
+                    // params / return declare, and its effect row, so
+                    // they bind to types + effects in scope. Lowering the
+                    // operations to callable tools lands in a later slice.
+                    for op in &c.operations {
+                        for param in &op.params {
+                            self.resolve_type_ref(&param.ty);
+                        }
+                        self.resolve_type_ref(&op.return_ty);
+                        self.resolve_effect_row(&op.effect_row);
+                    }
                 }
                 Decl::Extend(ext) => {
                     // Resolve each method body

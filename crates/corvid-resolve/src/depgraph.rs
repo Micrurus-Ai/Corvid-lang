@@ -85,6 +85,7 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Fixture(d) => Some(&d.name.name),
         Decl::Server(d) => Some(&d.name.name),
         Decl::Identity(d) => Some(&d.name.name),
+        Decl::Connector(d) => Some(&d.name.name),
         Decl::Mock(_) | Decl::Extend(_) | Decl::Effect(_) | Decl::Model(_) | Decl::Schedule(_) => {
             None
         }
@@ -161,6 +162,15 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
         Decl::Schedule(schedule) => {
             for arg in &schedule.args {
                 collect_expr_deps(arg, resolved, deps);
+            }
+        }
+        Decl::Connector(connector) => {
+            // A connector's operations reference the types their params
+            // and returns declare — collect those as deps so a connector
+            // orders after the types it uses.
+            for op in &connector.operations {
+                collect_params_deps(&op.params, resolved, deps);
+                collect_typeref_dep(&op.return_ty, resolved, deps);
             }
         }
         // An identity block references no other declaration — its

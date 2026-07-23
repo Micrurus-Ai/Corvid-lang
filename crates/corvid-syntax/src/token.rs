@@ -34,6 +34,9 @@ pub enum TokKind {
     KwSession,
     /// `identity <name>:` — the authenticated-user surface (slice 51g).
     KwIdentity,
+    /// `connector <name>:` — the protocol-typed integration surface
+    /// (slice 52g).
+    KwConnector,
     KwMemory,
     KwImport,
     KwAs,
@@ -213,6 +216,7 @@ impl TokKind {
             "type" => TokKind::KwType,
             "session" => TokKind::KwSession,
             "identity" => TokKind::KwIdentity,
+            "connector" => TokKind::KwConnector,
             "memory" => TokKind::KwMemory,
             "import" => TokKind::KwImport,
             "as" => TokKind::KwAs,

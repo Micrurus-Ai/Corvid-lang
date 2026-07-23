@@ -46,6 +46,8 @@ pub enum Decl {
     Schedule(ScheduleDecl),
     /// `identity Name:` authenticated-user surface (slice 51g).
     Identity(IdentityDecl),
+    /// `connector Name:` protocol-typed integration surface (slice 52g).
+    Connector(ConnectorDecl),
 }
 
 impl Decl {
@@ -68,6 +70,7 @@ impl Decl {
             Decl::Server(d) => d.span,
             Decl::Schedule(d) => d.span,
             Decl::Identity(d) => d.span,
+            Decl::Connector(d) => d.span,
         }
     }
 }
@@ -425,6 +428,119 @@ pub enum HttpMethod {
     Put,
     Patch,
     Delete,
+}
+
+/// A protocol-typed connector (slice 52g): a declarative, zero-glue
+/// integration with an external HTTP API. The connector declares its
+/// base URL, authentication (via `secret(...)` references — never a
+/// literal), and reliability posture; each `operation` inside it is a
+/// tool with a declarative HTTP body, so effects, budgets, approval,
+/// replay, and injection-taint all compose through the ordinary
+/// machinery. Lowers onto the Phase 41 connector runtime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectorDecl {
+    pub name: Ident,
+    /// `base_url: "https://api.example.com"` — the API root every
+    /// operation path is joined to.
+    pub base_url: String,
+    /// `auth: ...` — how each request authenticates. `None` = an
+    /// unauthenticated (public) API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<ConnectorAuth>,
+    /// `retry: N` — retry a failed idempotent operation up to N times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<u64>,
+    /// `rate_limit: N per <window>` — client-side rate limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimitConfig>,
+    /// `circuit_breaker: N` — trip after N consecutive failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<u64>,
+    pub operations: Vec<OperationDecl>,
+    #[serde(default)]
+    pub visibility: Visibility,
+    pub span: Span,
+}
+
+/// How a connector authenticates its requests (slice 52g). Every
+/// credential is a [`SecretRef`], resolved from the secret surface at
+/// runtime and never written into a trace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectorAuth {
+    /// `auth: bearer(secret("TOKEN"))` — `Authorization: Bearer <token>`.
+    Bearer(SecretRef),
+    /// `auth: header("X-Api-Key", secret("KEY"))` — a custom header.
+    Header { name: String, value: SecretRef },
+    /// `auth: basic(secret("USER"), secret("PASS"))` — HTTP Basic.
+    Basic { username: SecretRef, password: SecretRef },
+}
+
+/// A `secret("NAME")` reference (slice 52g) — the name of a secret the
+/// runtime resolves from its configured secret store. The value is never
+/// a literal in source and never enters a trace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretRef {
+    pub name: String,
+    pub span: Span,
+}
+
+/// A client-side rate limit: `rate_limit: <limit> per <window_secs>s`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    pub limit: u64,
+    pub window_secs: u64,
+}
+
+/// One `operation` inside a connector (slice 52g): a tool whose body is a
+/// declarative HTTP request. Its effect row (`uses ...`) makes budgets /
+/// approval / replay / taint compose; its response is mapped to a typed
+/// return or a typed error per status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OperationDecl {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_ty: TypeRef,
+    pub effect: Effect,
+    #[serde(default)]
+    pub effect_row: EffectRow,
+    pub method: HttpMethod,
+    /// The request path, joined to the connector `base_url`. May contain
+    /// `{param}` placeholders bound from the operation's parameters.
+    pub path: String,
+    /// `body <param>` (JSON) or `form <param>` (form-encoded) — the
+    /// parameter carrying the request body, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<OperationBody>,
+    /// `on status <code> -> Variant` — map a response status to a typed
+    /// error variant instead of the success return.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub error_map: Vec<StatusErrorMapping>,
+    pub span: Span,
+}
+
+/// The request-body binding of an operation (slice 52g).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationBody {
+    pub param: Ident,
+    pub encoding: BodyEncoding,
+}
+
+/// How an operation encodes its request body (slice 52g).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BodyEncoding {
+    /// `body <param>` — JSON.
+    Json,
+    /// `form <param>` — `application/x-www-form-urlencoded`.
+    Form,
+}
+
+/// `on status <code> -> Variant` (slice 52g) — a response-status →
+/// typed-error mapping.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusErrorMapping {
+    pub status: u16,
+    pub variant: Ident,
+    pub span: Span,
 }
 
 impl HttpMethod {

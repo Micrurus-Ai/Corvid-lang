@@ -3758,6 +3758,59 @@ Protocol-Typed Connectors (Section C).
 
 ---
 
+## 2026-07-23 - 52g-1: a connector is a source declaration, and a credential is never a literal
+
+Section C opens. Until now a Corvid program reached an external API only
+through host tools or MCP; the Phase 41 connector runtime existed but was
+configured by TOML manifests, invisible to the language. 52g-1 brings the
+integration into source as a first-class declaration:
+
+```corvid
+connector github:
+    base_url: "https://api.github.com"
+    auth: bearer(secret("GITHUB_TOKEN"))
+    retry: 3
+    rate_limit: 60 per 60s
+    circuit_breaker: 5
+
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+
+    operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+        POST "/repos/{owner}/issues" body req
+        on status 404 -> NotFound
+        on status 422 -> ValidationFailed
+```
+
+The load-bearing safety choice is in the grammar: a credential is a
+`secret("NAME")` reference, never a literal. `auth: bearer("raw-token")`
+is a parse error — you cannot accidentally hard-code a token into source.
+Each operation carries an effect row (`uses http_read`), so when the
+operations lower to callable tools (52g-3), budgets, approval, replay,
+and injection-taint compose through the ordinary machinery — an
+`operation` is just a tool with a declarative HTTP body.
+
+This increment is the AST + parser only: `connector` is a new keyword;
+the parser handles the config keys (`retry` and `on` are reserved
+keywords, so they're matched explicitly, not as identifiers), the three
+auth schemes, `rate_limit: N per Ns`, and each operation's request line
+(`<METHOD> "<path>" [body|form <param>]`) plus its `on status` mappings.
+The resolver binds the type references operations declare; the
+differential-verify printer round-trips a connector idempotently, so the
+new surface is never silently dropped.
+
+Adding `Decl::Connector` rippled a one-arm change through the resolver,
+checker, IR lowerer, LSP, and printer — the checker and lowerer arms are
+deliberate stubs (validation lands in 52g-2, tool lowering in 52g-3).
+Nothing is callable yet.
+
+Tests: 3 parser (full config + operations, header/basic auth, literal-
+credential-is-rejected) + a render round-trip. Gate: corvid-syntax 233 +
+differential-verify green; workspace check clean; corpus verify still
+exits 1 on the two fixtures.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

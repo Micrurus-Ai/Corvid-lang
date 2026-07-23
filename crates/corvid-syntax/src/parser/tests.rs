@@ -3647,6 +3647,105 @@ fn parses_provisioning_invited_from_invitation() {
 }
 
 #[test]
+fn parses_connector_with_config_and_operations() {
+    let src = "connector github:
+    base_url: \"https://api.github.com\"
+    auth: bearer(secret(\"GITHUB_TOKEN\"))
+    retry: 3
+    rate_limit: 60 per 60s
+    circuit_breaker: 5
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET \"/repos/{owner}/{repo}\"
+    operation create_issue(owner: String, repo: String, req: NewIssue) -> Issue dangerous uses http_write:
+        POST \"/repos/{owner}/{repo}/issues\" body req
+        on status 404 -> NotFound
+        on status 422 -> ValidationFailed
+";
+    let file = parse_file_src(src);
+    let c = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Connector(c) => Some(c),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(c.name.name, "github");
+    assert_eq!(c.base_url, "https://api.github.com");
+    assert!(matches!(
+        c.auth.as_ref().unwrap(),
+        corvid_ast::ConnectorAuth::Bearer(s) if s.name == "GITHUB_TOKEN"
+    ));
+    assert_eq!(c.retry, Some(3));
+    assert_eq!(c.rate_limit.map(|r| (r.limit, r.window_secs)), Some((60, 60)));
+    assert_eq!(c.circuit_breaker, Some(5));
+    assert_eq!(c.operations.len(), 2);
+
+    let get_repo = &c.operations[0];
+    assert_eq!(get_repo.name.name, "get_repo");
+    assert!(matches!(get_repo.method, corvid_ast::HttpMethod::Get));
+    assert_eq!(get_repo.path, "/repos/{owner}/{repo}");
+    assert!(get_repo.body.is_none());
+    assert!(matches!(get_repo.effect, corvid_ast::Effect::Safe));
+
+    let create = &c.operations[1];
+    assert!(matches!(create.method, corvid_ast::HttpMethod::Post));
+    assert!(matches!(create.effect, corvid_ast::Effect::Dangerous));
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body.param.name, "req");
+    assert!(matches!(body.encoding, corvid_ast::BodyEncoding::Json));
+    assert_eq!(create.error_map.len(), 2);
+    assert_eq!(create.error_map[0].status, 404);
+    assert_eq!(create.error_map[0].variant.name, "NotFound");
+    assert_eq!(create.error_map[1].status, 422);
+    assert_eq!(create.error_map[1].variant.name, "ValidationFailed");
+}
+
+#[test]
+fn parses_connector_header_and_basic_auth() {
+    let src = "connector svc:
+    base_url: \"https://svc.example.com\"
+    auth: header(\"X-Api-Key\", secret(\"API_KEY\"))
+    operation ping() -> Pong:
+        GET \"/ping\"
+";
+    let file = parse_file_src(src);
+    let c = file
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Connector(c) => Some(c),
+            _ => None,
+        })
+        .unwrap();
+    match c.auth.as_ref().unwrap() {
+        corvid_ast::ConnectorAuth::Header { name, value } => {
+            assert_eq!(name, "X-Api-Key");
+            assert_eq!(value.name, "API_KEY");
+        }
+        other => panic!("expected header auth, got {other:?}"),
+    }
+}
+
+#[test]
+fn connector_secret_must_not_be_a_literal() {
+    // A bare string where a `secret(...)` is required is a parse error —
+    // credentials are never literals.
+    let src = "connector svc:
+    base_url: \"https://svc.example.com\"
+    auth: bearer(\"raw-token\")
+    operation ping() -> Pong:
+        GET \"/ping\"
+";
+    let tokens = crate::lex(src).expect("lex");
+    let (_file, errors) = crate::parse_file(&tokens);
+    assert!(
+        !errors.is_empty(),
+        "a literal credential must be a parse error"
+    );
+}
+
+#[test]
 fn parses_identity_roles_block_and_default_role() {
     let src = "identity users:
     provider google

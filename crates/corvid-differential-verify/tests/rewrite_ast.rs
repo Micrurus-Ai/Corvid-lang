@@ -12,6 +12,51 @@ fn clean_corpus_round_trips_through_ast_printer() {
     }
 }
 
+/// A `connector` declaration round-trips through the AST printer without
+/// loss (slice 52g): parse → render → parse yields the same connector,
+/// so the printer is never silently lossy for the new surface.
+#[test]
+fn connector_round_trips_through_ast_printer() {
+    let source = r#"connector github:
+    base_url: "https://api.github.com"
+    auth: header("X-Api-Key", secret("KEY"))
+    retry: 3
+    rate_limit: 60 per 60s
+    circuit_breaker: 5
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+    operation create_issue(owner: String, req: NewIssue) -> Issue dangerous uses http_write:
+        POST "/repos/{owner}/issues" body req
+        on status 404 -> NotFound
+"#;
+    let file = parse_source(source).expect("parse connector");
+    let rendered = render_file(&file);
+    // The rendered source re-parses, and re-rendering is byte-identical:
+    // the printer is stable and never silently drops connector detail.
+    // (Spans shift on a round-trip, so idempotence — not struct equality
+    // — is the right invariant, as the corpus round-trip test also uses.)
+    let reparsed = parse_source(&rendered).expect("reparse rendered connector");
+    let rerendered = render_file(&reparsed);
+    assert_eq!(
+        rendered, rerendered,
+        "connector rendering must be idempotent (lossless):\n{rendered}"
+    );
+    // And every declared field survives to the reparsed AST.
+    let back = reparsed
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            corvid_ast::Decl::Connector(c) => Some(c),
+            _ => None,
+        })
+        .expect("connector survives the round-trip");
+    assert_eq!(back.base_url, "https://api.github.com");
+    assert_eq!(back.retry, Some(3));
+    assert_eq!(back.circuit_breaker, Some(5));
+    assert_eq!(back.operations.len(), 2);
+    assert_eq!(back.operations[1].error_map.len(), 1);
+}
+
 #[test]
 fn alpha_conversion_is_structural_and_preserves_effects() {
     let source = r#"

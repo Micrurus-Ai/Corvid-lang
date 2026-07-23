@@ -268,7 +268,7 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
-    fn parse_http_method(&mut self) -> Result<HttpMethod, ParseError> {
+    pub(super) fn parse_http_method(&mut self) -> Result<HttpMethod, ParseError> {
         let span = self.peek_span();
         let (method, method_span) = self.expect_ident()?;
         match method.as_str() {

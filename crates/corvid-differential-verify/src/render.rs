@@ -242,6 +242,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
             }
         }
         Decl::Identity(identity) => render_identity(identity, indent, out),
+        Decl::Connector(connector) => render_connector(connector, indent, out),
     }
 }
 
@@ -742,6 +743,91 @@ fn render_eval_assert(assertion: &EvalAssert) -> String {
         }
         EvalAssert::Ordering { before, after, .. } => {
             format!("assert called {} before {}", before.name, after.name)
+        }
+    }
+}
+
+fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &mut String) {
+    use corvid_ast::{BodyEncoding, ConnectorAuth, Effect, HttpMethod};
+    push_indent(indent, out);
+    out.push_str("connector ");
+    out.push_str(&connector.name.name);
+    out.push_str(":\n");
+
+    push_indent(indent + 1, out);
+    out.push_str(&format!(
+        "base_url: {}\n",
+        render_string_literal(&connector.base_url)
+    ));
+    let secret = |s: &corvid_ast::SecretRef| format!("secret({})", render_string_literal(&s.name));
+    if let Some(auth) = &connector.auth {
+        push_indent(indent + 1, out);
+        match auth {
+            ConnectorAuth::Bearer(s) => out.push_str(&format!("auth: bearer({})\n", secret(s))),
+            ConnectorAuth::Header { name, value } => out.push_str(&format!(
+                "auth: header({}, {})\n",
+                render_string_literal(name),
+                secret(value)
+            )),
+            ConnectorAuth::Basic { username, password } => out.push_str(&format!(
+                "auth: basic({}, {})\n",
+                secret(username),
+                secret(password)
+            )),
+        }
+    }
+    if let Some(retry) = connector.retry {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("retry: {retry}\n"));
+    }
+    if let Some(rate) = &connector.rate_limit {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("rate_limit: {} per {}s\n", rate.limit, rate.window_secs));
+    }
+    if let Some(cb) = connector.circuit_breaker {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("circuit_breaker: {cb}\n"));
+    }
+
+    for op in &connector.operations {
+        push_indent(indent + 1, out);
+        out.push_str("operation ");
+        out.push_str(&op.name.name);
+        out.push_str(&render_params(&op.params));
+        out.push_str(" -> ");
+        out.push_str(&render_type_ref(&op.return_ty));
+        if matches!(op.effect, Effect::Dangerous) {
+            out.push_str(" dangerous");
+        }
+        if !op.effect_row.effects.is_empty() {
+            out.push_str(" uses ");
+            out.push_str(&render_effect_row_names(&op.effect_row.effects));
+        }
+        out.push_str(":\n");
+        push_indent(indent + 2, out);
+        let method = match op.method {
+            HttpMethod::Get => "GET",
+            HttpMethod::Post => "POST",
+            HttpMethod::Put => "PUT",
+            HttpMethod::Patch => "PATCH",
+            HttpMethod::Delete => "DELETE",
+        };
+        out.push_str(method);
+        out.push(' ');
+        out.push_str(&render_string_literal(&op.path));
+        if let Some(body) = &op.body {
+            match body.encoding {
+                BodyEncoding::Json => out.push_str(&format!(" body {}", body.param.name)),
+                BodyEncoding::Form => out.push_str(&format!(" form {}", body.param.name)),
+            }
+        }
+        out.push('\n');
+        for mapping in &op.error_map {
+            push_indent(indent + 2, out);
+            out.push_str(&format!(
+                "on status {} -> {}\n",
+                mapping.status, mapping.variant.name
+            ));
         }
     }
 }

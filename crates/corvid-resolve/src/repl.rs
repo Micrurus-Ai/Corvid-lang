@@ -160,5 +160,6 @@ fn decl_kind_name(decl: &Decl) -> String {
         Decl::Server(_) => "server".into(),
         Decl::Schedule(_) => "schedule".into(),
         Decl::Identity(_) => "identity".into(),
+        Decl::Connector(_) => "connector".into(),
     }
 }

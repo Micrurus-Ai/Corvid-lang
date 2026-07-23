@@ -315,6 +315,12 @@ impl<'a> Lowerer<'a> {
                     // manifests. They do not lower into executable IR
                     // until the scheduler runner slice.
                 }
+                Decl::Connector(_) => {
+                    // 52g-1: a connector parses + resolves; lowering each
+                    // operation to a callable tool (with a declarative
+                    // HTTP body dispatching through the connector runtime)
+                    // lands in 52g-3.
+                }
                 Decl::Extend(ext) => {
                     // Lower each method into the appropriate per-kind
                     // IR vector. Methods get
