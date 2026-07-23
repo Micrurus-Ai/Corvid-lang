@@ -3568,6 +3568,69 @@ clean; corpus verify still exits 1 on the two fixtures.
 
 ---
 
+## 2026-07-23 - 52f-3: authority is enforced at every request boundary — the last closure gap closes
+
+52f-1 and 52f-2 defined authorization; 52f-3 makes it real. A route that
+declares `requires authenticated | role | permission` is now enforced by
+`corvid serve` BEFORE its handler — or any effect — runs.
+
+The route policy is lowered into the IR (`IrRoutePolicy`), and the ONE
+`AuthContext` — the same one the `/auth/...` login routes use — is shared
+into `ServeState`, so app-route enforcement and the login surface resolve
+sessions against a single store (no second auth implementation).
+`enforce_route_policy` runs the strict order:
+
+1. **Resolve the session cookie.** Missing, forged, expired, or revoked
+   → `401`. The tenant↔actor consistency check is part of resolution, so
+   tenant membership is enforced *before* any role is evaluated.
+2. **CSRF double-submit** on state-changing methods (POST/PUT/PATCH/
+   DELETE): the `X-CSRF-Token` header must match the readable `corvid_csrf`
+   cookie and carry a valid HMAC over the session binding → `403` on
+   mismatch. The login callback issues that cookie.
+3. **Roles + permissions**, read FRESH from the store every request (so a
+   revoked role denies immediately), checked as set membership + the
+   permission union across held roles → `403` if insufficient.
+4. **Bind the verified typed `actor`** — id / tenant / display_name /
+   roles / permissions — derived ONLY from the session, never from
+   anything the request supplies. Then the handler runs.
+
+Every decision emits a redacted `route.authz` audit event: the route, the
+actor reference, the tenant, the requirement summary, the outcome, and
+the trace id as the evidence link. `revoke_actor_role` invalidates the
+actor's sessions, so a privilege change forces re-authentication and no
+session keeps a stale authority context.
+
+Then `auth_enforcement` flipped to `true` in the interpreter tier's
+`RuntimeCapabilities` — **the last Contract Closure gap. The interpreter
+tier now serves every capability the Application Contract can advertise.**
+
+Adversarial coverage (`crates/corvid-runtime/tests/route_authz.rs`, 8
+tests) composes the exact runtime primitives serve calls — forged cookie,
+expired session, revoked-via-role-revocation, cross-tenant session, CSRF
+mismatch, authenticated-but-insufficient, permission-union (no
+escalation), and the happy path — plus the serve_smoke wiring proof (an
+unauthenticated request to a protected route is a `401`, and the
+classified body never leaks). The flip landed only after these passed.
+
+Because the flip changes what "refuses to start" means, the examples and
+docs were updated in the SAME increment (an acceptance requirement): the
+`contract-closure` tour topic, the README section, inventions.md (§7 +
+Proof-Matrix authz row), core-semantics.md, and the guarantee registry no
+longer claim an authenticated route refuses to start — it now serves and
+enforces. The serve_smoke test was rewritten to assert exactly that.
+
+Corvid can now honestly claim: **if a route declares authentication,
+roles, or permissions, the runtime identifies the actor and enforces that
+authority before any handler or effect executes.**
+
+Gate: corvid-runtime lib + route_authz (8) + serve_auth (28) + closure
+lib (policy gap/close) + corvid-abi (77) + corvid-types (305) +
+serve_smoke enforcement green; workspace check clean; corpus verify still
+exits 1 on the two fixtures. Next: 52f-4 durable approval endpoints,
+52f-5 login→role-gated end-to-end + invention proof.
+
+---
+
 ## 2026-07-14 - 49z closed: verify no longer eats the disk
 
 The differential verifier deletes each fixture's native binary right

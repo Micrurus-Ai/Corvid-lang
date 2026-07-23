@@ -148,8 +148,8 @@ async fn callback(
     })
     .await;
 
-    let session_token = match outcome {
-        Ok(Ok(token)) => token,
+    let login = match outcome {
+        Ok(Ok(login)) => login,
         // A login failure is deliberately opaque to the caller; the
         // specific reason is in the audit log.
         Ok(Err(_)) => return (StatusCode::UNAUTHORIZED, "login failed").into_response(),
@@ -158,15 +158,38 @@ async fn callback(
         }
     };
 
-    let cookie = session_cookie(&ctx, &session_token, ctx.session_lifetime_secs);
+    let session_cookie = session_cookie(&ctx, &login.session_token, ctx.session_lifetime_secs);
+    // The CSRF token is a readable (non-HttpOnly) cookie the client
+    // echoes in a header on mutations; double-submit binds it to the
+    // session. HMAC over the session's binding id makes it unforgeable.
+    let csrf_token =
+        corvid_runtime::mint_csrf_token(&login.csrf_binding, &ctx.csrf_secret).unwrap_or_default();
+    let csrf_cookie = csrf_cookie(&ctx, &csrf_token, ctx.session_lifetime_secs);
     (
         StatusCode::FOUND,
         [
-            (header::SET_COOKIE, cookie),
+            (header::SET_COOKIE, session_cookie),
+            (header::SET_COOKIE, csrf_cookie),
             (header::LOCATION, ctx.post_login_redirect.clone()),
         ],
     )
         .into_response()
+}
+
+/// The CSRF cookie name — readable by client JS (not HttpOnly), so it can
+/// be echoed in the `X-CSRF-Token` header on mutating requests.
+const CSRF_COOKIE_NAME: &str = "corvid_csrf";
+
+fn csrf_cookie(ctx: &AuthContext, value: &str, max_age_secs: u64) -> String {
+    // Deliberately NOT HttpOnly (the client must read it), but Secure +
+    // SameSite still apply per the identity block's cookie posture.
+    let mut cookie = format!("{CSRF_COOKIE_NAME}={value}; Path=/; Max-Age={max_age_secs}");
+    if ctx.cookie.secure {
+        cookie.push_str("; Secure");
+    }
+    cookie.push_str("; SameSite=");
+    cookie.push_str(ctx.cookie.same_site);
+    cookie
 }
 
 /// The blocking heart of the callback (steps 1–5). Returns the raw
@@ -180,7 +203,7 @@ fn run_callback(
     state: &str,
     redirect_uri: &str,
     trace_id: &str,
-) -> Result<String, String> {
+) -> Result<LoginSession, String> {
     let at = now_ms();
     // 1. Validate the single-use state (single-use / expiry / tenant),
     //    recovering the PKCE verifier and nonce fingerprint.
@@ -227,6 +250,7 @@ fn run_callback(
 
     // 7. Issue the session only after provisioning succeeds.
     let raw_token = random_token();
+    let csrf_binding = random_token();
     ctx.auth
         .create_session(SessionCreate {
             id: format!("session-{}", random_token()),
@@ -235,10 +259,22 @@ fn run_callback(
             raw_token: raw_token.clone(),
             issued_ms: at,
             expires_ms: at.saturating_add(ctx.session_lifetime_secs.saturating_mul(1000)),
-            csrf_binding_id: random_token(),
+            csrf_binding_id: csrf_binding.clone(),
         })
         .map_err(|e| e.to_string())?;
-    Ok(raw_token)
+    Ok(LoginSession {
+        session_token: raw_token,
+        csrf_binding,
+    })
+}
+
+/// The credentials a successful callback issues: the session token (an
+/// HttpOnly cookie) and the CSRF binding (a readable cookie the client
+/// echoes in a header on mutations).
+#[derive(Debug)]
+struct LoginSession {
+    session_token: String,
+    csrf_binding: String,
 }
 
 /// `POST /auth/logout` — revoke the session and clear the cookie.
@@ -370,6 +406,8 @@ mod tests {
             tenant: TenantSource::Fixed("public".to_string()),
             tenant_claim_name: None,
             default_role: None,
+            role_permissions: std::collections::HashMap::new(),
+            csrf_secret: vec![1, 2, 3, 4],
             cookie: CookieSettings {
                 name: "corvid_session".to_string(),
                 secure,
@@ -505,6 +543,8 @@ mod callback_tests {
             tenant,
             tenant_claim_name: None,
             default_role: None,
+            role_permissions: std::collections::HashMap::new(),
+            csrf_secret: vec![1, 2, 3, 4],
             cookie: CookieSettings::default(),
             session_lifetime_secs: 3600,
             gateway,
@@ -570,7 +610,7 @@ mod callback_tests {
         let token1 = run_callback(
             &context, &config, "google", "code", &state1, "https://app/cb", "trace-1",
         )
-        .expect("first callback succeeds");
+        .expect("first callback succeeds").session_token;
         let session1 = auth
             .resolve_session_cookie(&token1, "check-1", now_ms())
             .expect("session resolves");
@@ -583,7 +623,7 @@ mod callback_tests {
         let token2 = run_callback(
             &context, &config, "google", "code", &state2, "https://app/cb", "trace-2",
         )
-        .expect("second callback succeeds");
+        .expect("second callback succeeds").session_token;
         let session2 = auth
             .resolve_session_cookie(&token2, "check-2", now_ms())
             .unwrap();
@@ -703,7 +743,7 @@ mod callback_tests {
         .unwrap();
         let state2 = seed_login_state(&auth, "2", nonce);
         let token = run_callback(&context, &config, "google", "c", &state2, "cb", "t2")
-            .expect("invited login with an invitation succeeds");
+            .expect("invited login with an invitation succeeds").session_token;
         let session = auth
             .resolve_session_cookie(&token, "check", now_ms())
             .unwrap();
@@ -732,7 +772,7 @@ mod callback_tests {
         // A userinfo login needs no nonce; seed any state.
         let state = seed_login_state(&auth, "1", "n");
         let token = run_callback(&context, &config, "github", "c", &state, "cb", "t")
-            .expect("userinfo login succeeds");
+            .expect("userinfo login succeeds").session_token;
         let session = auth
             .resolve_session_cookie(&token, "check", now_ms())
             .unwrap();

@@ -23,7 +23,9 @@ pub use provisioning::{
     FirstLoginPolicy, ProvisioningOutcome, ProvisioningRequest, TenantSource,
 };
 pub use records::*;
-pub use roles::{authorize_route, RouteAuthzOutcome, RoutePolicyRequirement};
+pub use roles::{
+    authorize_route, effective_permissions_for, RouteAuthzOutcome, RoutePolicyRequirement,
+};
 pub use scope::{enforce_scope_grant, ApiKeyScope, ScopeError};
 pub use sessions::{hash_session_secret, PrivilegeChangeReason};
 use sessions::read_actor_row;

@@ -401,6 +401,11 @@ impl<'a> Lowerer<'a> {
             body: self.lower_block(&r.body),
             handler_agent: synthetic_route_agent_name(r.method, &r.path),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
+            policy: r.policy.as_ref().map(|p| crate::types::IrRoutePolicy {
+                authenticated: p.authenticated,
+                roles: p.roles.clone(),
+                permissions: p.permissions.clone(),
+            }),
             span: r.span,
         }
     }

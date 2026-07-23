@@ -69,7 +69,30 @@ pub struct IrRoute {
     /// resolved inner `Type` loses the tag (the format name is not a
     /// declared type), so it is carried here from the AST.
     pub upload_format: Option<String>,
+    /// The route's `requires` authorization policy (slice 52f), lowered
+    /// from the AST so `corvid serve` can enforce it before the handler
+    /// runs. `None` = a public route.
+    pub policy: Option<IrRoutePolicy>,
     pub span: Span,
+}
+
+/// A route's `requires authenticated|role|permission` clause, lowered
+/// into the IR (slice 52f). All listed roles AND all listed permissions
+/// must be satisfied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrRoutePolicy {
+    pub authenticated: bool,
+    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
+}
+
+impl IrRoutePolicy {
+    /// Whether the route requires authentication at all — an explicit
+    /// `authenticated`, or any role/permission requirement (which implies
+    /// it).
+    pub fn requires_auth(&self) -> bool {
+        self.authenticated || !self.roles.is_empty() || !self.permissions.is_empty()
+    }
 }
 
 /// A typed `{name}` path parameter on a route.

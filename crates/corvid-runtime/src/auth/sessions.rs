@@ -161,6 +161,30 @@ impl SessionAuthRuntime {
             .map_err(|err| RuntimeError::Other(format!("failed to read session: {err}")))
     }
 
+    /// Revoke every active session for an actor. Called on a privilege
+    /// change (a role grant/revoke) so no session keeps operating with a
+    /// stale authority context — the actor must re-authenticate, and the
+    /// new session reflects the new privileges (slice 52f). Returns the
+    /// number of sessions revoked.
+    pub fn revoke_actor_sessions(
+        &self,
+        actor_id: &str,
+        at_ms: u64,
+    ) -> Result<usize, RuntimeError> {
+        validate_non_empty("actor id", actor_id)?;
+        let revoked = self
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "update auth_sessions set revoked_ms = ?2, updated_ms = ?2
+                 where actor_id = ?1 and revoked_ms is null",
+                params![actor_id, at_ms as i64],
+            )
+            .map_err(|err| RuntimeError::Other(format!("failed to revoke actor sessions: {err}")))?;
+        Ok(revoked)
+    }
+
     /// Resolve a login session from its cookie token alone. The tenant
     /// is read from the stored session (a cookie carries no independent
     /// tenant context), then the standard `resolve_session` checks

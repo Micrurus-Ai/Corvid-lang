@@ -1400,26 +1400,20 @@ server test_serve_q10_api:
     );
 }
 
-/// 52b Contract Closure gate. The Phase 52 invariant — *the running
-/// backend proves it implements its own contract, or it refuses to
-/// start* — made mechanical. An app that declares a route the runtime
-/// cannot yet execute MUST NOT start: `corvid serve` exits non-zero
-/// with an `E5204 Contract not executable` message naming the
-/// offending route, never a silent runtime `501`.
+/// 52f authorization-enforcement gate. As of slice 52f the interpreter
+/// tier implements every capability the Application Contract can
+/// advertise — route execution, streaming, uploads, pagination, AND
+/// authorization enforcement — so a `requires authenticated` route no
+/// longer refuses to start: it STARTS and enforces. This is the last
+/// Contract Closure gap closing. (The refuse-to-start *mechanism* is
+/// still proven at the unit level in
+/// `corvid-driver::contract_closure` with a capability toggled off.)
 ///
-/// The probe tracks whichever boundary type is still unimplemented.
-/// Streaming (52c-1), uploads + pagination (52c-2) have all shipped, so
-/// a `requires`-policy route — whose authorization runtime lands in
-/// slice 52h — is the remaining gap and the property is asserted
-/// against it.
-///
-/// The source COMPILES fine (the type checker accepts a `requires`
-/// route once an `identity` block is present); closure is a serve-time
-/// runtime-path assertion, distinct from type checking. Uses `.output()`
-/// because the process is expected to exit promptly rather than bind a
-/// listener.
+/// Adversarial: a protected route MUST reject an unauthenticated request
+/// with `401` before its handler or any effect runs — the route must
+/// never return its body to a caller without a session.
 #[test]
-fn serve_refuses_to_start_when_a_route_is_not_contract_closed() {
+fn serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start() {
     let dir = tempfile::tempdir().unwrap();
     let src_path = dir.path().join("main.cor");
     let source = r#"identity users:
@@ -1437,35 +1431,35 @@ server secure_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let output = Command::new(corvid_bin())
+    let port: u16 = 8203;
+    let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
-        .arg("127.0.0.1:8203")
+        .arg(format!("127.0.0.1:{port}"))
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_ID", "test-client-id")
+        .env("CORVID_OAUTH_GOOGLE_CLIENT_SECRET", "test-client-secret")
         .current_dir(repo_root())
-        .output()
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .expect("run corvid serve");
+    let _guard = ServedApp(child);
 
+    // The server now STARTS — the `requires authenticated` route is
+    // contract-closed as of 52f.
     assert!(
-        !output.status.success(),
-        "serve must exit non-zero when the contract is not closed; got {:?}",
-        output.status
+        wait_until_ready(port),
+        "serve must START now that authorization enforcement exists (:{port})"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // An unauthenticated request is refused with 401 — the handler never
+    // runs and the classified body is never returned.
+    let (status, body) = http_get(port, "/secret").expect("GET /secret failed");
+    assert_eq!(status, 401, "an unauthenticated request must be 401; body={body}");
     assert!(
-        stderr.contains("E5204"),
-        "serve refusal must carry the `E5204` code: stderr=\n{stderr}"
-    );
-    assert!(
-        stderr.contains("/secret") && stderr.contains("authorization"),
-        "E5204 must name the offending route and the missing capability: stderr=\n{stderr}"
-    );
-    // Adversarial: it must NOT have printed the ready banner — the
-    // closure check runs BEFORE the listener binds.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.contains("listening on"),
-        "serve must refuse BEFORE binding a listener: stdout=\n{stdout}"
+        !body.contains("classified"),
+        "the protected body must NOT leak to an unauthenticated caller: {body}"
     );
 }
 

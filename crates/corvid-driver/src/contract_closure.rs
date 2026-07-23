@@ -97,7 +97,12 @@ impl RuntimeCapabilities {
             // has_more}` envelope via the `Page(items, next_cursor)`
             // constructor (slice 52c-2).
             pagination: true,
-            auth_enforcement: false,
+            // A `requires authenticated|role|permission` route is enforced
+            // before its handler runs (slice 52f): the session is resolved
+            // to a verified typed `actor`, tenant + role + permission are
+            // checked, and cookie-authenticated mutations require CSRF
+            // double-submit. This was the last Contract Closure gap.
+            auth_enforcement: true,
         }
     }
 }
@@ -155,7 +160,7 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
                     missing_capability:
                         "authorization enforcement (authenticated actor + policy check)"
                             .to_string(),
-                    provided_by: "52h",
+                    provided_by: "52f",
                 });
             }
         }
@@ -252,6 +257,7 @@ mod tests {
             body: empty_block(),
             handler_agent: handler.to_string(),
             upload_format: None,
+            policy: None,
             span: span(),
         }
     }
@@ -376,10 +382,18 @@ mod tests {
     fn policy_route_without_auth_enforcement_is_a_closure_gap() {
         let r = route(Type::String, None, "h");
         let ir = ir_with(r, vec![handler_agent("h", true)]);
-        let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+        // With authorization enforcement OFF, a `requires`-policy route is a
+        // gap (the historical pre-52f state).
+        let caps = RuntimeCapabilities {
+            auth_enforcement: false,
+            ..RuntimeCapabilities::interpreter_tier()
+        };
+        let gaps = check_contract_closure(&ir, caps);
         assert_eq!(gaps.len(), 1);
         assert!(gaps[0].missing_capability.contains("authorization"));
-        assert_eq!(gaps[0].provided_by, "52h");
+        assert_eq!(gaps[0].provided_by, "52f");
+        // As of 52f the interpreter tier enforces it, so the gap closes.
+        assert!(check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier()).is_empty());
     }
 
     /// Once a capability lands (here: streaming), the same route is no

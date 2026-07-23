@@ -731,11 +731,11 @@ tool echo_stream(m: String) -> Stream<String>
         name: "contract-closure",
         title: "The Backend Proves Its Own Contract, Or Refuses To Start",
         category: "The complete application runtime",
-        pitch: "Corvid closes the gap every other backend framework leaves open: the running server can advertise a public interface it does not actually implement. Before `corvid serve` binds a listener it walks the Application Contract's public HTTP surface and asserts a runtime execution path exists for EVERY route it advertises. A route the contract describes but the runtime cannot yet serve is a startup error (`E5204 Contract not executable`) naming the offending route and the capability it needs — never a silent runtime 501. Route execution, `Stream<T>` (Server-Sent Events), `Upload<Format>` (multipart), and `Page<Item>` (cursor envelope) all serve today; the source below COMPILES cleanly, but its `requires authenticated` route makes `corvid serve` refuse to start until the authorization runtime lands — the developer's own source is the forcing function.",
+        pitch: "Corvid closes the gap every other backend framework leaves open: the running server can advertise a public interface it does not actually implement. Before `corvid serve` binds a listener it walks the Application Contract's public HTTP surface and asserts a runtime execution path exists for EVERY route it advertises. A route the contract describes but the runtime cannot yet serve is a startup error (`E5204 Contract not executable`) naming the offending route and the capability it needs — never a silent runtime 501. That mechanism carried the runtime to completion: route execution, `Stream<T>` (Server-Sent Events), `Upload<Format>` (multipart), `Page<Item>` (cursor envelope), and — as of the latest slice — authorization enforcement ALL serve today. The source below COMPILES and now SERVES: its `requires authenticated` route resolves the caller's session to a verified typed `actor` and enforces it before the handler runs (an unauthenticated request is a 401, never the body). Each capability was a startup error until it landed; none is faked.",
         spec: "docs/reference/inventions.md#the-complete-application-runtime",
-        roadmap: "Phase 52 contract closure (52b)",
-        test: "crates/corvid-driver/src/contract_closure.rs tests + crates/corvid-cli/tests/serve_smoke.rs::serve_refuses_to_start_when_a_route_is_not_contract_closed",
-        non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grows in lockstep with the runtime (each Phase 52 slice flips one capability on). It does not itself implement the capabilities — it refuses to start until each lands, so the backend can never advertise more than it delivers.",
+        roadmap: "Phase 52 contract closure (52b) + authorization enforcement (52f)",
+        test: "crates/corvid-driver/src/contract_closure.rs tests + crates/corvid-cli/tests/serve_smoke.rs::serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start",
+        non_scope: "Closure asserts a runtime path EXISTS for every advertised element; it grew in lockstep with the runtime (each Phase 52 slice flipped one capability on) and the interpreter tier is now complete. The refuse-to-start mechanism still guards any future capability (and the native tier); it does not itself implement the capabilities — it refuses to start until each lands, so the backend can never advertise more than it delivers.",
         source: r#"identity users:
     provider google
     provisioning:
@@ -746,10 +746,10 @@ type Secret:
     value: String
 
 server secure_api:
-    # This route COMPILES, but `corvid serve` refuses to start with
-    # E5204 until authorization enforcement (slice 52h) exists — the
-    # contract must never advertise an authenticated endpoint the
-    # runtime does not actually guard.
+    # This route COMPILES and SERVES: `corvid serve` resolves the
+    # caller's session to a verified `actor` and enforces the policy
+    # before the handler runs — an unauthenticated request is a 401,
+    # never the classified body.
     route GET "/secret" -> json Secret requires authenticated:
         return Secret("classified")
 "#,

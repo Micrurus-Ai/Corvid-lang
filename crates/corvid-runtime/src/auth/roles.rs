@@ -40,6 +40,61 @@ impl SessionAuthRuntime {
         Ok(())
     }
 
+    /// Revoke a role from an actor and invalidate its active sessions, so
+    /// the reduced authority takes effect at once — the actor must
+    /// re-authenticate and any surviving session is denied on its next
+    /// request (roles are read fresh per request). Returns whether the
+    /// role had been held.
+    pub fn revoke_actor_role(
+        &self,
+        actor_id: &str,
+        role: &str,
+        at_ms: u64,
+    ) -> Result<bool, RuntimeError> {
+        validate_non_empty("actor id", actor_id)?;
+        validate_non_empty("role", role)?;
+        let removed = self
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "delete from auth_actor_roles where actor_id = ?1 and role = ?2",
+                params![actor_id, role],
+            )
+            .map_err(|err| RuntimeError::Other(format!("failed to revoke role: {err}")))?;
+        // Privilege change → invalidate sessions (slice 52f).
+        self.revoke_actor_sessions(actor_id, at_ms)?;
+        Ok(removed > 0)
+    }
+
+    /// Emit a redacted authorization-decision audit event for a route
+    /// request (slice 52f): the route, the actor reference + tenant, a
+    /// summary of what the route required, the allow/deny outcome, and
+    /// the trace id as the evidence link. No caller-supplied PII is
+    /// recorded — only the actor id the session resolved to.
+    pub fn record_authorization_decision(
+        &self,
+        route: &str,
+        actor_id: Option<&str>,
+        tenant_id: Option<&str>,
+        requirement_summary: &str,
+        allowed: bool,
+        trace_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let status = if allowed { "allowed" } else { "denied" };
+        let reason = format!("route {route} requires [{requirement_summary}] -> {status}");
+        self.insert_audit(
+            "route.authz",
+            actor_id,
+            tenant_id,
+            None,
+            None,
+            Some(trace_id),
+            status,
+            &reason,
+        )
+    }
+
     /// The set of role names an actor holds, sorted for determinism.
     pub fn actor_roles(&self, actor_id: &str) -> Result<Vec<String>, RuntimeError> {
         let conn = self.conn.lock().unwrap();
@@ -103,6 +158,20 @@ pub fn authorize_route(
         }
     }
     RouteAuthzOutcome::Allowed
+}
+
+/// The sorted union of permissions the actor's roles grant — for
+/// populating the typed `actor.permissions` a handler sees.
+pub fn effective_permissions_for(
+    actor_roles: &[String],
+    role_permissions: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut permissions: Vec<String> = effective_permissions(actor_roles, role_permissions)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    permissions.sort();
+    permissions
 }
 
 /// The union of the permissions granted by the actor's roles.

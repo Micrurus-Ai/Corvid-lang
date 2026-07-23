@@ -1420,13 +1420,15 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              `RuntimeCapabilities` snapshot that each Phase 52 slice \
              flips as it lands the capability, so the running backend \
              can never advertise more than it delivers. As of slice \
-             52c-2 the interpreter tier serves route execution, \
-             `Stream<T>` responses (Server-Sent Events), `Upload<Format>` \
-             bodies (multipart), and `Page<Item>` responses (cursor \
-             envelope); a `requires`-policy route still refuses to start \
-             until authorization enforcement lands (slice 52h), and \
-             native tiers that lack a capability refuse the routes that \
-             need it.",
+             52f the interpreter tier is complete — it serves route \
+             execution, `Stream<T>` responses (Server-Sent Events), \
+             `Upload<Format>` bodies (multipart), `Page<Item>` responses \
+             (cursor envelope), and authorization enforcement (a \
+             `requires authenticated|role|permission` route resolves the \
+             caller's session to a verified `actor` and enforces it \
+             before the handler runs). The refuse-to-start mechanism \
+             still guards any future capability and native tiers that \
+             lack a capability refuse the routes that need it.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-driver/src/contract_closure.rs::reference_shape_has_no_closure_gaps",

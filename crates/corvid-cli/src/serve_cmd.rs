@@ -128,6 +128,11 @@ struct ServeState {
     contract_json: String,
     /// The OpenAPI 3.1 JSON, served at `/openapi.json` (slice 51r).
     openapi_json: String,
+    /// The shared auth configuration (slice 52f) — the SAME
+    /// `AuthContext` the `/auth/...` login routes use, so app-route
+    /// enforcement and the login surface resolve sessions against one
+    /// store. `None` when the program declares no `identity` block.
+    auth_context: Option<Arc<crate::serve_auth::context::AuthContext>>,
 }
 
 pub(crate) fn cmd_serve(
@@ -263,6 +268,9 @@ pub(crate) fn cmd_serve(
         host_tools,
         contract_json,
         openapi_json,
+        // Share the ONE AuthContext with the app-route enforcement path
+        // (the login router below reuses the same Arc).
+        auth_context: auth_context.clone(),
     });
 
     let mut app: Router<Arc<ServeState>> = Router::new()
@@ -324,6 +332,9 @@ pub(crate) fn cmd_serve(
                 body_ty: route.body_ty.clone(),
                 upload_format: route.upload_format.clone(),
                 param_names,
+                method: route.method,
+                route_path: route.path.clone(),
+                policy: route.policy.clone(),
             });
             let filter = method_filter(route.method);
             let mr = on(
@@ -452,6 +463,15 @@ struct RouteMeta {
     /// The handler agent's param names, in order — drives which of
     /// `path`/`query`/`body`/`actor` values are assembled and how.
     param_names: Vec<String>,
+    /// The route's HTTP method (slice 52f) — drives CSRF classification
+    /// (state-changing methods require the double-submit check).
+    method: HttpMethod,
+    /// The route's declared path (slice 52f) — recorded in the
+    /// authorization-decision audit event.
+    route_path: String,
+    /// The route's `requires` authorization policy (slice 52f). When
+    /// present, it is enforced before the handler runs.
+    policy: Option<corvid_ir::IrRoutePolicy>,
 }
 
 /// Convert a Corvid route path (`/orders/{id}`) to axum's colon-capture
@@ -510,6 +530,192 @@ fn stub_actor_value() -> Value {
     ))
 }
 
+/// Enforce a route's `requires` authorization policy before the handler
+/// runs (slice 52f). Returns the authenticated typed `actor` value on
+/// success, or a short-circuit `Response` (`401` unauthenticated, `403`
+/// unauthorized / CSRF failure). The actor is ALWAYS derived from the
+/// verified session — never from anything the request supplies.
+fn enforce_route_policy(
+    state: &ServeState,
+    policy: &corvid_ir::IrRoutePolicy,
+    method: HttpMethod,
+    route_path: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<Value, Response> {
+    use corvid_runtime::{
+        authorize_route, effective_permissions_for, verify_csrf_double_submit, CsrfRequestMethod,
+        RouteAuthzOutcome, RoutePolicyRequirement,
+    };
+
+    let Some(ctx) = &state.auth_context else {
+        // A policy route cannot compile without an identity block, so this
+        // is unreachable in practice; refuse rather than run unguarded.
+        return Err(auth_error(StatusCode::UNAUTHORIZED, "authentication required"));
+    };
+    let summary = requirement_summary(policy);
+    let trace = format!("route-authz-{}", crate::serve_auth::pkce::random_token());
+    let at = epoch_ms();
+
+    // 1. Resolve the session cookie — missing / invalid / expired /
+    //    revoked all fail here (the tenant↔actor consistency check is part
+    //    of resolution, so tenant membership is enforced before any role
+    //    evaluation).
+    let deny_401 = |actor: Option<&str>, tenant: Option<&str>| -> Response {
+        let _ =
+            ctx.auth
+                .record_authorization_decision(route_path, actor, tenant, &summary, false, &trace);
+        auth_error(StatusCode::UNAUTHORIZED, "authentication required")
+    };
+    let Some(token) = cookie_value(headers, &ctx.cookie.name) else {
+        return Err(deny_401(None, None));
+    };
+    let resolution = match ctx.auth.resolve_session_cookie(&token, &trace, at) {
+        Ok(resolution) => resolution,
+        Err(_) => return Err(deny_401(None, None)),
+    };
+    let actor = resolution.actor;
+
+    // 2. CSRF double-submit for cookie-authenticated mutations.
+    if CsrfRequestMethod::classify(method.as_str()) == CsrfRequestMethod::StateChanging {
+        let csrf_cookie = cookie_value(headers, "corvid_csrf");
+        let csrf_header = headers
+            .get("x-csrf-token")
+            .and_then(|value| value.to_str().ok());
+        if verify_csrf_double_submit(
+            CsrfRequestMethod::StateChanging,
+            csrf_header,
+            csrf_cookie.as_deref(),
+            &ctx.csrf_secret,
+        )
+        .is_err()
+        {
+            let _ = ctx.auth.record_authorization_decision(
+                route_path,
+                Some(&actor.id),
+                Some(&actor.tenant_id),
+                &summary,
+                false,
+                &trace,
+            );
+            return Err(auth_error(StatusCode::FORBIDDEN, "csrf validation failed"));
+        }
+    }
+
+    // 3. Role + permission requirements (read FRESH per request, so a
+    //    revoked role denies immediately).
+    let roles = match ctx.auth.actor_roles(&actor.id) {
+        Ok(roles) => roles,
+        Err(_) => return Err(auth_error(StatusCode::FORBIDDEN, "authorization failed")),
+    };
+    let requirement = RoutePolicyRequirement {
+        authenticated: policy.authenticated,
+        roles: policy.roles.clone(),
+        permissions: policy.permissions.clone(),
+    };
+    if let RouteAuthzOutcome::Denied(_) = authorize_route(&roles, &ctx.role_permissions, &requirement)
+    {
+        let _ = ctx.auth.record_authorization_decision(
+            route_path,
+            Some(&actor.id),
+            Some(&actor.tenant_id),
+            &summary,
+            false,
+            &trace,
+        );
+        return Err(auth_error(StatusCode::FORBIDDEN, "insufficient authority"));
+    }
+
+    // 4. Allowed — audit and hand the handler the verified typed actor.
+    let _ = ctx.auth.record_authorization_decision(
+        route_path,
+        Some(&actor.id),
+        Some(&actor.tenant_id),
+        &summary,
+        true,
+        &trace,
+    );
+    let permissions = effective_permissions_for(&roles, &ctx.role_permissions);
+    Ok(authenticated_actor_value(&actor, &roles, &permissions))
+}
+
+/// A compact, redacted summary of what a route requires, for the audit
+/// event (e.g. `authenticated, role:admin, permission:refund:write`).
+fn requirement_summary(policy: &corvid_ir::IrRoutePolicy) -> String {
+    let mut parts = Vec::new();
+    if policy.authenticated {
+        parts.push("authenticated".to_string());
+    }
+    for role in &policy.roles {
+        parts.push(format!("role:{role}"));
+    }
+    for permission in &policy.permissions {
+        parts.push(format!("permission:{permission}"));
+    }
+    parts.join(", ")
+}
+
+/// The authenticated typed `actor` value bound into a policy route's
+/// handler (slice 52f) — id / tenant / display_name plus the actor's
+/// held roles and effective permissions.
+fn authenticated_actor_value(
+    actor: &corvid_runtime::AuthActor,
+    roles: &[String],
+    permissions: &[String],
+) -> Value {
+    let to_list = |items: &[String]| {
+        Value::List(corvid_driver::ListValue::new(
+            items.iter().map(|s| Value::String(s.clone().into())),
+        ))
+    };
+    Value::Struct(corvid_driver::StructValue::new(
+        DefId(0),
+        "actor",
+        vec![
+            ("id".to_string(), Value::String(actor.id.clone().into())),
+            ("tenant".to_string(), Value::String(actor.tenant_id.clone().into())),
+            (
+                "display_name".to_string(),
+                Value::String(actor.display_name.clone().into()),
+            ),
+            ("roles".to_string(), to_list(roles)),
+            ("permissions".to_string(), to_list(permissions)),
+        ],
+    ))
+}
+
+/// A JSON error `Response` with the given status (slice 52f). The body is
+/// deliberately generic — the specific reason is in the audit log, not
+/// leaked to the caller.
+fn auth_error(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        format!("{{\"error\":\"{message}\"}}"),
+    )
+        .into_response()
+}
+
+/// Read a cookie value out of the request `Cookie` header (slice 52f).
+fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    let raw = headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?;
+    let prefix = format!("{name}=");
+    raw.split(';')
+        .map(str::trim)
+        .find_map(|pair| pair.strip_prefix(&prefix).map(str::to_string))
+        .filter(|value| !value.is_empty())
+}
+
+/// Milliseconds since the Unix epoch (slice 52f).
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Execute a declared route: parse path params / query struct / typed
 /// body from the request, then invoke the route's synthetic handler
 /// agent with `[path, query?, body?, actor?]` in its declared param
@@ -522,6 +728,20 @@ async fn run_route(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Slice 52f: enforce the route's `requires` policy BEFORE parsing the
+    // body, assembling args, or executing any handler or effect. On
+    // success it yields the authenticated typed `actor`; a missing/invalid
+    // session is 401, insufficient authority (or a CSRF failure) is 403.
+    let enforced_actor: Option<Value> = match &meta.policy {
+        Some(policy) if policy.requires_auth() => {
+            match enforce_route_policy(&state, policy, meta.method, &meta.route_path, &headers) {
+                Ok(actor) => Some(actor),
+                Err(resp) => return resp,
+            }
+        }
+        _ => None,
+    };
+
     let types_by_id: HashMap<DefId, &IrType> =
         state.ir.types.iter().map(|t| (t.id, t)).collect();
 
@@ -576,7 +796,11 @@ async fn run_route(
             "path" => args.push(path_value.clone()),
             "query" => args.push(query_value.clone().unwrap_or(Value::Nothing)),
             "body" => args.push(body_value.clone().unwrap_or(Value::Nothing)),
-            "actor" => args.push(stub_actor_value()),
+            "actor" => args.push(
+                enforced_actor
+                    .clone()
+                    .unwrap_or_else(stub_actor_value),
+            ),
             _ => {}
         }
     }

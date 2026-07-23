@@ -7272,3 +7272,50 @@ way the identity is established server-side.
 `requires authenticated|role|permission` policies is a following slice — 52e
 mounts the login/session routes and provisions the actor; a `requires`-policy
 route still refuses to start until the authorization runtime lands.
+
+---
+
+## Authenticated routes are enforced before the handler runs (2026-07-23)
+
+A route can declare who may call it, and `corvid serve` enforces it — the check
+runs before your handler or any effect executes.
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+        default_role: member
+    roles:
+        admin: "refund:write, user:read"
+        member: "user:read"
+
+server billing_api:
+    route POST "/refunds" body RefundReq -> json Receipt requires role("admin") and permission("refund:write"):
+        # `actor` is the verified caller — id, tenant, roles, permissions.
+        return issue_refund(body)
+```
+
+What the runtime does on each request to a `requires` route:
+
+- **Resolves the session cookie to a verified `actor`.** No session, or a forged,
+  expired, or revoked one → `401`. The actor is *always* the authenticated one —
+  never anything the request body or headers supply.
+- **Checks tenant, then roles, then permissions.** A role is set membership
+  (`requires role("admin")` = the actor holds `admin`); a permission is the union
+  of the permissions its roles grant. Insufficient authority → `403`.
+- **Requires CSRF double-submit on mutations.** A POST/PUT/PATCH/DELETE must echo
+  the `corvid_csrf` cookie in an `X-CSRF-Token` header → `403` on mismatch.
+- **Binds the typed `actor`** into your handler — `actor.id`, `actor.tenant`,
+  `actor.display_name`, `actor.roles`, `actor.permissions`.
+
+Roles come only from where you declared them: an invited login takes its
+invitation's role; an open login takes `provisioning: default_role`, or none —
+least privilege, so a new user gets no authority unless you grant it. Every
+decision is written to a redacted `route.authz` audit event. Revoking a role
+invalidates the actor's sessions immediately.
+
+An unsatisfiable requirement never silently always-denies: `requires
+role("typo")` where `typo` isn't declared in `roles:` is a compile error. See
+[dev-log.md](dev-log.md) (2026-07-23, 52f).

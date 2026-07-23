@@ -60,6 +60,12 @@ pub struct AuthContext {
     /// The role an `open` signup receives (`provisioning: default_role`),
     /// or `None` for least privilege (slice 52f).
     pub default_role: Option<String>,
+    /// The identity block's role → permission mapping (slice 52f), used
+    /// to resolve an actor's effective permissions when enforcing a
+    /// route's `requires permission(...)`.
+    pub role_permissions: HashMap<String, Vec<String>>,
+    /// Per-serve secret for CSRF double-submit HMAC tokens (slice 52f).
+    pub csrf_secret: Vec<u8>,
     pub cookie: CookieSettings,
     pub session_lifetime_secs: u64,
     pub gateway: Arc<dyn ProviderGateway + Send + Sync>,
@@ -148,6 +154,12 @@ impl AuthContext {
             .and_then(|s| s.lifetime_secs)
             .unwrap_or(DEFAULT_SESSION_LIFETIME_SECS);
 
+        let role_permissions = identity
+            .roles
+            .iter()
+            .map(|r| (r.name.clone(), r.permissions.clone()))
+            .collect();
+
         Ok(Self {
             auth,
             providers,
@@ -155,6 +167,8 @@ impl AuthContext {
             tenant,
             tenant_claim_name,
             default_role: provisioning.default_role.clone(),
+            role_permissions,
+            csrf_secret: random_csrf_secret(),
             cookie,
             session_lifetime_secs,
             gateway,
@@ -165,6 +179,14 @@ impl AuthContext {
                 .unwrap_or_else(|| "/".to_string()),
         })
     }
+}
+
+/// A fresh 32-byte CSRF HMAC secret for this serve process.
+fn random_csrf_secret() -> Vec<u8> {
+    use rand_core::{OsRng, RngCore};
+    let mut secret = vec![0u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    secret
 }
 
 fn cookie_settings(identity: &IdentityDecl) -> CookieSettings {
