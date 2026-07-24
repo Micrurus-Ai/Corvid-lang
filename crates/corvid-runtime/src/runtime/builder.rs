@@ -452,6 +452,7 @@ impl RuntimeBuilder {
             }
         }
         Runtime {
+            protocol_invocations: Default::default(),
             tools: self.tools,
             llms,
             approver: self

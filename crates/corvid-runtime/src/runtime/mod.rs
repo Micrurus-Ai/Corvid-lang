@@ -54,6 +54,15 @@ pub(super) const APPROVAL_TOKEN_TTL_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Clone)]
 pub struct Runtime {
+    /// How many times each protocol callsite has executed in THIS run,
+    /// giving every invocation of a callsite a distinct identity so a
+    /// loop does not collapse into one intent. A resumed run re-executes
+    /// the agent from the start, so the counts rebuild deterministically
+    /// and a resume re-finds its own intents rather than creating new
+    /// ones — which is why this is per-run state and not durable state.
+    /// `Arc` so a cloned `Runtime` keeps counting the SAME run — a clone
+    /// represents the same execution, not a fresh one.
+    protocol_invocations: Arc<std::sync::Mutex<std::collections::HashMap<u32, u64>>>,
     tools: ToolRegistry,
     llms: LlmRegistry,
     approver: Arc<dyn Approver>,

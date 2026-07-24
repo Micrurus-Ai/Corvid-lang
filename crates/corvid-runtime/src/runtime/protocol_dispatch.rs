@@ -5,11 +5,15 @@
 //! job safe:
 //!
 //! 1. **Intent before submit.** The intent is written to the durable job
-//!    as a checkpoint BEFORE the submit request leaves the process, and
-//!    the submit itself carries an idempotency key derived from the
-//!    logical call. A crash between "intent recorded" and "submit
-//!    acknowledged" therefore cannot lose the work, and a resumed run
-//!    cannot create a second provider job.
+//!    as a checkpoint BEFORE the submit request leaves the process, so a
+//!    crash between "intent recorded" and "submit acknowledged" cannot
+//!    lose the work, and a job that already recorded its submit is never
+//!    re-submitted on resume.
+//!
+//!    The intent is keyed by the LOGICAL INVOCATION — connector,
+//!    operation, arguments, callsite, and which execution of that
+//!    callsite this is — so two intentional calls that happen to share
+//!    arguments stay two intents instead of collapsing into one.
 //! 2. **Bind only on a typed response.** The provider job id is taken
 //!    from the DECODED submit response and only then written into the
 //!    intent — never guessed, never assumed from the request.
@@ -41,7 +45,7 @@ use crate::tracing::now_ms;
 use corvid_trace_schema::TraceEvent;
 use crate::protocol::{
     bind_poll_path, bind_protocol_path, cancellation_disposition, intent_idempotency_key,
-    is_terminal, observe, poll_delay_ms, resume_verdict, CancellationDisposition,
+    is_terminal, observe, poll_delay_ms, resume_verdict, CancellationDisposition, InvocationIdentity,
     ProtocolIntentState, ResumeVerdict,
 };
 use crate::queue::JobCheckpointKind;
@@ -56,6 +60,7 @@ impl Runtime {
         operation: &str,
         protocol: &ProviderProtocolDecl,
         args: Vec<serde_json::Value>,
+        callsite: u32,
     ) -> Result<serde_json::Value, RuntimeError> {
         let spec = self
             .connector_calls
@@ -68,7 +73,7 @@ impl Runtime {
                      should have refused this"
                 ),
             })?;
-        self.dispatch_protocol_operation(&spec, protocol, &args)
+        self.dispatch_protocol_operation(&spec, protocol, &args, callsite)
             .await
     }
 
@@ -79,6 +84,7 @@ impl Runtime {
         spec: &ConnectorHttpSpec,
         protocol: &ProviderProtocolDecl,
         args: &[serde_json::Value],
+        callsite: u32,
     ) -> Result<serde_json::Value, RuntimeError> {
         // A protocol's intent must outlive the process, so it is only
         // executable inside a durable job. Refusing here (rather than
@@ -94,7 +100,22 @@ impl Runtime {
             ),
         })?;
 
-        let key = intent_idempotency_key(&spec.connector, &spec.operation, args);
+        // Which execution of this callsite this is, within this run. A
+        // resumed run replays the agent from the start, so the same call
+        // gets the same ordinal and re-finds its own intent.
+        let ordinal = {
+            let mut counts = self.protocol_invocations.lock().unwrap();
+            let slot = counts.entry(callsite).or_insert(0);
+            let ordinal = *slot;
+            *slot += 1;
+            ordinal
+        };
+        let key = intent_idempotency_key(
+            &spec.connector,
+            &spec.operation,
+            args,
+            InvocationIdentity { callsite, ordinal },
+        );
         let mut intent = self.load_protocol_intent(job, &key, protocol, &spec.operation)?;
 
         // (1) Record the intent BEFORE any submit, so a crash here is
@@ -108,9 +129,9 @@ impl Runtime {
             intent.bind_submit_response(&unwrap_ok_envelope(&response));
             self.checkpoint_protocol_intent(job, &key, &intent)?;
             // The lifecycle is evidence, not just control flow. `intent`
-            // is a SHA-256 of (connector, operation, args), so it
-            // correlates an operator's view of this work across restarts
-            // without carrying the arguments themselves.
+            // is a SHA-256 of the logical invocation, so it correlates an
+            // operator's view of this work across restarts without
+            // carrying the arguments themselves.
             self.emit_host_event(
                 "protocol.submitted",
                 serde_json::json!({
@@ -124,8 +145,16 @@ impl Runtime {
 
         // (3) Observe until a declared terminal state, or the deadline
         // forces the declared deadline target.
+        //
+        // The deadline is measured from INTENT CREATION, not from process
+        // start. Measuring from process start would hand a repeatedly
+        // restarted protocol a fresh full window every time, so a
+        // crash-looping deployment could poll a provider indefinitely
+        // while still appearing to respect a 10-minute deadline — and it
+        // would silently break the budget bound, which is computed from
+        // one deadline window.
         let started_ms = crate::tracing::now_ms();
-        let deadline_ms = protocol.deadline_secs.saturating_mul(1000);
+        let deadline_ms = intent.deadline_remaining_ms(protocol.deadline_secs, started_ms);
         // The provider's most recent `Retry-After`, if it asked us to
         // back off.
         let mut retry_after_hint: Option<u64> = None;

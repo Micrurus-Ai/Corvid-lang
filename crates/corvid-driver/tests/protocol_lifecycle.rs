@@ -609,6 +609,112 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
     );
 }
 
+/// The declared deadline bounds the PROTOCOL, not a process.
+///
+/// Measuring it from process start handed every restart a fresh full
+/// window, so a crash-looping deployment could poll a provider forever
+/// while appearing to respect its deadline — and it silently broke the
+/// budget bound, which assumes one deadline window. Here the intent is
+/// created with a deadline already in the past; a resumed run must move
+/// straight to the declared deadline target instead of polling again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restart_does_not_hand_the_protocol_a_fresh_deadline() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_DEADLINE";
+    let dir = tempfile::tempdir().expect("tempdir");
+    // `deadline: 2s` so the first run's own window is small.
+    let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 2, "resume"));
+    std::env::set_var(TOKEN_ENV, "tok-deadline");
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+
+    // Run 1: submit lands, the observation fails, `circuit_breaker: 1`
+    // aborts — leaving an in-flight intent with a creation timestamp.
+    {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-d","status":"queued"}"#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-d"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect_err("the breaker aborts this run mid-flight");
+    }
+
+    // The intent recorded WHEN it began — that is the whole fix.
+    let last = queue
+        .list_checkpoints(&job.id)
+        .expect("checkpoints")
+        .pop()
+        .expect("an in-flight intent was recorded");
+    assert!(
+        last.payload.get("created_ms").and_then(|v| v.as_u64()).is_some(),
+        "the intent must persist its creation time, or the deadline cannot survive a restart"
+    );
+
+    // Wait past the declared 2s deadline, then resume.
+    tokio::time::sleep(std::time::Duration::from_millis(2_200)).await;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    // The provider must not be polled again: the window is already spent.
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-d"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-d","status":"completed"}"#),
+        )
+        .expect(0)
+        .mount(&server)
+        .await;
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("an expired protocol must reach its deadline target, not keep polling");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err}");
+    assert!(
+        text.contains("deadline"),
+        "the resumed run must fail on the declared deadline; got: {text}"
+    );
+}
+
 /// The lifecycle is evidence, not just control flow.
 ///
 /// A protocol's history lives in job checkpoints, which an operator

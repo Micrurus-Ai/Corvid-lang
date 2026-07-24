@@ -3183,7 +3183,7 @@ replay \"t.jsonl\":
 
     #[test]
     fn replay_arm_without_as_keeps_capture_none() {
-        // Regression on the E-1 shape: no `as` tail �?' no capture.
+        // Regression on the E-1 shape: no `as` tail → no capture.
         let src = "\
 replay \"t.jsonl\":
     when llm(\"classify\") -> \"refund\"
@@ -3806,7 +3806,7 @@ fn parses_connector_with_config_and_operations() {
 #[test]
 fn parses_optional_protocol_cancel_endpoint() {
     // Slice 52h-3: `cancel` is optional, and its presence is what makes
-    // compensation possible (absent �?' a submitted intent can only
+    // compensation possible (absent → a submitted intent can only
     // detach). Unlike `poll` it may mutate, since cancelling is an action.
     let src = r#"connector video:
     base_url: "https://video.example.com"

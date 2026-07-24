@@ -122,6 +122,20 @@ pub struct ProtocolIntentState {
     /// a change, because "we cannot tell" is not "it is the same".
     #[serde(default)]
     pub protocol_canonical: Option<String>,
+    /// When this intent was created, in epoch milliseconds.
+    ///
+    /// The declared deadline is a bound on the PROTOCOL, not on a process.
+    /// Measuring it from process start would hand a repeatedly restarted
+    /// protocol a fresh full window every time, so a crash-looping
+    /// deployment could poll a provider forever while still "respecting"
+    /// a 10-minute deadline. It also silently breaks the budget bound,
+    /// which is computed from one deadline window.
+    ///
+    /// `None` means the checkpoint predates this field; such an intent
+    /// falls back to measuring from now, which is the old behaviour and
+    /// the only thing available for it.
+    #[serde(default)]
+    pub created_ms: Option<u64>,
 }
 
 /// The outcome of comparing an in-flight intent against the running
@@ -230,6 +244,20 @@ impl ProtocolIntentState {
             polls: 0,
             last_response: None,
             protocol_canonical: Some(protocol.canonical_encoding()),
+            created_ms: Some(crate::tracing::now_ms()),
+        }
+    }
+
+    /// Milliseconds remaining before the declared deadline forces the
+    /// deadline target, measured from intent CREATION so restarts cannot
+    /// extend it. Zero once the deadline has passed.
+    pub fn deadline_remaining_ms(&self, deadline_secs: u64, now_ms: u64) -> u64 {
+        let budget = deadline_secs.saturating_mul(1000);
+        match self.created_ms {
+            Some(created) => budget.saturating_sub(now_ms.saturating_sub(created)),
+            // Pre-dates the field: the only honest reading is a full
+            // window from now, which is what it already had.
+            None => budget,
         }
     }
 
@@ -252,7 +280,7 @@ pub fn is_terminal(protocol: &ProviderProtocolDecl, state: &str) -> bool {
 
 /// What cancelling an intent may actually do.
 ///
-/// This is the cancellation�-irreversibility rule composed with DURABLE
+/// This is the cancellation×irreversibility rule composed with DURABLE
 /// PROVIDER STATE. Before submit, nothing exists and cancelling is exact.
 /// After submit a provider-side job exists, and what Corvid may honestly
 /// do depends on whether the protocol DECLARED a cancel endpoint:
@@ -434,14 +462,38 @@ pub fn poll_delay_ms(protocol: &ProviderProtocolDecl, polls: u64) -> u64 {
     }
 }
 
+/// Which logical invocation this is: WHERE in the program the call was
+/// written, and WHICH execution of that callsite it is within the job.
+///
+/// Arguments alone are not an identity. "Ship order-1" written twice, or
+/// written once inside a loop that runs twice, is two intentional pieces
+/// of work — keying on `(connector, operation, args)` alone silently
+/// collapsed them into one intent, so the second call returned the
+/// first's result and its provider job was never created. Two parallel
+/// identical calls raced for the same row.
+///
+/// `callsite` is the source position of the call expression, so distinct
+/// call sites never collide. `ordinal` counts executions of that callsite
+/// within the durable job, so a loop produces distinct intents. A resumed
+/// run re-executes the agent from the start, so both are reproduced
+/// deterministically and a resume still re-finds its own intents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvocationIdentity {
+    pub callsite: u32,
+    pub ordinal: u64,
+}
+
 /// The durable idempotency key for an intent. Derived from the connector,
-/// operation, and the call's arguments, so the SAME logical call maps to
-/// the SAME durable row — a retry or a restart re-finds the existing
-/// intent instead of submitting a second provider job.
+/// operation, the call's arguments, AND the logical invocation identity,
+/// so the same logical call maps to the same durable row — a retry or a
+/// restart re-finds the existing intent instead of submitting a second
+/// provider job — while two DIFFERENT calls that happen to share
+/// arguments remain two intents.
 pub fn intent_idempotency_key(
     connector: &str,
     operation: &str,
     args: &[serde_json::Value],
+    invocation: InvocationIdentity,
 ) -> String {
     use sha2::{Digest, Sha256};
     let canonical = serde_json::to_string(args).unwrap_or_else(|_| "[]".to_string());
@@ -451,6 +503,10 @@ pub fn intent_idempotency_key(
     hasher.update(operation.as_bytes());
     hasher.update(b"\0");
     hasher.update(canonical.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(invocation.callsite.to_be_bytes());
+    hasher.update(b"\0");
+    hasher.update(invocation.ordinal.to_be_bytes());
     format!("protocol:{connector}:{operation}:{:x}", hasher.finalize())
 }
 
@@ -617,18 +673,54 @@ mod tests {
 
     #[test]
     fn the_same_logical_call_derives_the_same_idempotency_key() {
-        let a = intent_idempotency_key("ups", "ship", &[json!("o-1"), json!(3)]);
-        let b = intent_idempotency_key("ups", "ship", &[json!("o-1"), json!(3)]);
-        let different_args = intent_idempotency_key("ups", "ship", &[json!("o-2"), json!(3)]);
-        let different_op = intent_idempotency_key("ups", "cancel", &[json!("o-1"), json!(3)]);
-        assert_eq!(a, b, "a retry of the same call must reuse the same intent");
-        assert_ne!(a, different_args);
-        assert_ne!(a, different_op);
+        let at = |callsite, ordinal| InvocationIdentity { callsite, ordinal };
+        let args = [json!("o-1"), json!(3)];
+        let a = intent_idempotency_key("ups", "ship", &args, at(10, 0));
+        let b = intent_idempotency_key("ups", "ship", &args, at(10, 0));
+        assert_eq!(
+            a, b,
+            "a retry or a resume of the SAME invocation must reuse the same intent"
+        );
+        assert_ne!(
+            a,
+            intent_idempotency_key("ups", "ship", &[json!("o-2"), json!(3)], at(10, 0))
+        );
+        assert_ne!(
+            a,
+            intent_idempotency_key("ups", "cancel", &args, at(10, 0))
+        );
+    }
+
+    /// The bug this identity exists to fix: "ship order-1" written twice,
+    /// or written once in a loop that runs twice, is TWO pieces of work.
+    /// Keying on arguments alone collapsed them into one intent, so the
+    /// second call returned the first's result and its provider job was
+    /// never created — a silent lost write, and the mirror image of the
+    /// duplicate-submit risk.
+    #[test]
+    fn two_intentional_calls_with_identical_arguments_are_two_intents() {
+        let args = [json!("o-1")];
+        let at = |callsite, ordinal| InvocationIdentity { callsite, ordinal };
+
+        // Same operation and arguments, written at two places in source.
+        assert_ne!(
+            intent_idempotency_key("ups", "ship", &args, at(10, 0)),
+            intent_idempotency_key("ups", "ship", &args, at(42, 0)),
+            "two distinct call sites must not share an intent"
+        );
+
+        // One call site executed twice — a loop, or a retry the program
+        // wrote itself.
+        assert_ne!(
+            intent_idempotency_key("ups", "ship", &args, at(10, 0)),
+            intent_idempotency_key("ups", "ship", &args, at(10, 1)),
+            "two executions of one call site must not share an intent"
+        );
     }
 
     #[test]
     fn cancelling_before_submit_is_exact_but_after_submit_only_detaches() {
-        // The cancellation�-irreversibility rule composed with durable
+        // The cancellation×irreversibility rule composed with durable
         // provider state: before submit there is no provider work, so
         // cancellation is exact. After submit a real job exists that
         // Corvid cannot un-create, so cancellation degrades to
@@ -675,6 +767,49 @@ mod tests {
             ..protocol()
         };
         assert!(poll_delay_ms(&adaptive, 0) < poll_delay_ms(&adaptive, 5));
+    }
+
+    /// The deadline bounds the PROTOCOL, not a process. Measuring from
+    /// process start handed every restart a fresh full window, so a
+    /// crash-looping deployment could poll a provider indefinitely while
+    /// appearing to respect a 10-minute deadline — and it silently broke
+    /// the budget bound, which is computed from one deadline window.
+    #[test]
+    fn the_deadline_is_measured_from_intent_creation_not_from_process_start() {
+        let p = protocol();
+        let mut intent = ProtocolIntentState::new(&p);
+        let created = 1_000_000_u64;
+        intent.created_ms = Some(created);
+
+        // Fresh intent: the whole window.
+        assert_eq!(intent.deadline_remaining_ms(600, created), 600_000);
+
+        // Ten minutes of wall clock later — across any number of
+        // restarts — the window is spent, not renewed.
+        assert_eq!(intent.deadline_remaining_ms(600, created + 600_000), 0);
+        assert_eq!(
+            intent.deadline_remaining_ms(600, created + 5_000_000),
+            0,
+            "a long-restarted protocol must not be handed more time"
+        );
+
+        // Halfway through, a restart resumes with the REMAINDER.
+        assert_eq!(
+            intent.deadline_remaining_ms(600, created + 240_000),
+            360_000,
+            "a resume continues the original window rather than restarting it"
+        );
+    }
+
+    /// A checkpoint written before the timestamp existed cannot say when
+    /// it started, so it keeps the old behaviour rather than being
+    /// retroactively expired — the only honest reading available for it.
+    #[test]
+    fn an_intent_without_a_creation_time_falls_back_to_a_full_window() {
+        let p = protocol();
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.created_ms = None;
+        assert_eq!(intent.deadline_remaining_ms(600, 9_999_999), 600_000);
     }
 
     // --- Resume across a protocol change ---
