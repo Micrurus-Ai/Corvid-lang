@@ -16652,6 +16652,50 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-3 (part 2): the breaker gives up on observing, never on the intent
+
+Circuit-breaker admission for the poll loop, and the distinction that
+makes it correct.
+
+A long-running protocol has to survive a provider's transient hiccup. One
+failed observation says *nothing* about the submitted job — that work is
+still out there regardless of whether this particular GET succeeded. So a
+poll failure is TOLERATED: the loop keeps the intent as-is and observes
+again on the next tick.
+
+But polling a persistently broken provider forever is its own failure
+mode, so the connector's declared `circuit_breaker: N` consecutive failed
+observations trips and gives up. The declared deadline still bounds the
+whole loop independently.
+
+The important part is what tripping *means*. The breaker gives up on
+OBSERVING; it does not and cannot give up on the intent. A provider job
+was submitted and still exists, so the trip diagnostic says so explicitly
+("the submitted provider job is NOT cancelled") and the intent stays
+checkpointed in its last known state for a later resume. Conflating
+"I stopped watching" with "it didn't happen" is exactly the silent-orphan
+failure this section exists to prevent — the same reasoning behind part
+1's `Detached` disposition.
+
+`ConnectorHttpSpec` now carries the declared threshold, projected from
+`IrConnector.circuit_breaker` (the same declaration 52g-3c-5 already
+wired to the Tool-arm breaker for ordinary calls).
+
+Tests: 2 integration — a transient 500 is tolerated and the protocol
+still reaches `completed`; a permanently broken provider trips the
+breaker, names it, asserts the "NOT cancelled" wording, and leaves the
+intent checkpointed.
+
+Still remaining (part 3), both genuinely blocked rather than skipped:
+budget admission on the poll loop (charging N polls × cost against
+`@budget` wants poll counts threaded into the VM's cost accounting, or
+better, static worst-case poll cost folded into the checker's composed
+cost); and the cancel/compensate/detach-and-monitor API consuming
+`CancellationDisposition` — compensation cannot be honest until a cancel
+endpoint is *declarable*, which is a 52h-1 grammar addition.
+
+---
+
 ## 2026-07-24 - 52h-3 (part 1): a provider can slow us down, and a submitted intent is never "cancelled"
 
 Two governed properties on top of the durable lifecycle.

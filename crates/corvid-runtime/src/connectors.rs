@@ -87,6 +87,12 @@ pub struct ConnectorHttpSpec {
     /// is sent; an exceeded limit fails the call rather than flooding
     /// the provider.
     pub rate_limit: Option<(u64, u64)>,
+    /// Consecutive-failure threshold from the connector's
+    /// `circuit_breaker: N` (slice 52h-3). Governs the verified-protocol
+    /// poll loop: a transient poll failure is tolerated and retried on
+    /// the next tick, but N consecutive failures trip the breaker and
+    /// fail the protocol rather than polling a broken provider forever.
+    pub circuit_breaker: Option<u64>,
 }
 
 /// A recoverable failure while building a connector request — surfaced
@@ -165,6 +171,7 @@ pub fn connector_calls_from_ir(
                     returns_result: matches!(tool.return_ty, corvid_types::Type::Result(_, _)),
                     retry: connector.retry,
                     rate_limit: connector.rate_limit.map(|r| (r.limit, r.window_secs)),
+                    circuit_breaker: connector.circuit_breaker,
                 },
             );
         }
@@ -413,6 +420,7 @@ mod tests {
             returns_result: false,
             retry: None,
             rate_limit: None,
+            circuit_breaker: None,
         }
     }
 

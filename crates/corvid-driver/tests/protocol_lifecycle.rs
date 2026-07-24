@@ -57,6 +57,15 @@ agent main() -> Job uses http_write:
     )
 }
 
+/// A protocol whose connector declares `circuit_breaker: 2` — two
+/// consecutive failed observations trip it (slice 52h-3).
+fn source_with_breaker(token_env: &str) -> String {
+    source(token_env).replace(
+        "    modes: [real]",
+        "    circuit_breaker: 2\n    modes: [real]",
+    )
+}
+
 fn compile(dir: &std::path::Path, src: &str) -> corvid_ir::IrFile {
     let p = dir.join("main.cor");
     std::fs::write(&p, src).unwrap();
@@ -332,6 +341,134 @@ async fn a_provider_retry_after_slows_the_declared_cadence() {
     assert!(
         elapsed >= std::time::Duration::from_millis(3_500),
         "the provider's Retry-After must slow the loop; took {elapsed:?}"
+    );
+}
+
+/// Circuit-breaker admission, tolerant half (slice 52h-3): a TRANSIENT
+/// failed observation must not kill a long protocol — the submitted job
+/// is still out there, and one bad poll says nothing about it. The loop
+/// retries on the next tick and still reaches terminal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_transient_poll_failure_is_tolerated_and_the_protocol_still_completes() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_TOKEN_CB1";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source_with_breaker(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-proto");
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-cb","status":"queued"}"#),
+        )
+        .mount(&server)
+        .await;
+    // One transient 500 — below the breaker threshold of 2.
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-cb"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("upstream hiccup"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-cb"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-cb","status":"completed"}"#),
+        )
+        .mount(&server)
+        .await;
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("a transient poll failure must not kill the protocol");
+    std::env::remove_var(TOKEN_ENV);
+
+    match result {
+        Value::Struct(s) => assert_eq!(
+            s.get_field("status").unwrap(),
+            Value::String(Arc::from("completed"))
+        ),
+        other => panic!("expected the terminal Job struct; got {other:?}"),
+    }
+}
+
+/// Circuit-breaker admission, tripping half (slice 52h-3): polling a
+/// PERSISTENTLY broken provider forever is its own failure, so N
+/// consecutive failed observations trip the breaker. The diagnostic must
+/// say the provider job was NOT cancelled — the intent stays recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn consecutive_failed_observations_trip_the_declared_circuit_breaker() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_TOKEN_CB2";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source_with_breaker(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-proto");
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-dead","status":"queued"}"#),
+        )
+        .mount(&server)
+        .await;
+    // Always broken.
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-dead"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("down"))
+        .mount(&server)
+        .await;
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("a persistently broken provider must trip the breaker");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err:?}");
+    assert!(
+        text.contains("circuit breaker open"),
+        "the failure must name the tripped breaker; got: {text}"
+    );
+    assert!(
+        text.contains("NOT cancelled"),
+        "the diagnostic must state the provider job was not cancelled; got: {text}"
+    );
+    // The intent survives for a later resume — it is not discarded.
+    let checkpoints = queue.list_checkpoints(&job.id).expect("checkpoints");
+    assert!(
+        !checkpoints.is_empty(),
+        "the intent must remain recorded after the breaker trips"
     );
 }
 

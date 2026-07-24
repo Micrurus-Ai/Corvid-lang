@@ -104,6 +104,9 @@ impl Runtime {
         // The provider's most recent `Retry-After`, if it asked us to
         // back off (slice 52h-3).
         let mut retry_after_hint: Option<u64> = None;
+        // Consecutive failed observations, for circuit-breaker admission
+        // (slice 52h-3). Reset by any successful poll.
+        let mut consecutive_poll_failures: u64 = 0;
         loop {
             if is_terminal(protocol, &intent.state) {
                 break;
@@ -135,9 +138,45 @@ impl Runtime {
             tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
 
             let poll_spec = self.poll_spec_for(spec, protocol, &intent, args)?;
-            let (raw, meta) = self
+            // Circuit-breaker admission (slice 52h-3). A long-running
+            // protocol must survive a provider's transient hiccup — a
+            // single failed observation says nothing about the submitted
+            // job, which is still out there. So a poll failure is
+            // TOLERATED and retried on the next tick. But polling a
+            // persistently broken provider forever is its own failure, so
+            // `circuit_breaker: N` consecutive failures trips and gives
+            // up. The declared deadline still bounds the whole loop.
+            let (raw, meta) = match self
                 .dispatch_connector_http_detailed(&poll_spec, &[])
-                .await?;
+                .await
+            {
+                Ok(ok) => {
+                    consecutive_poll_failures = 0;
+                    ok
+                }
+                Err(err) => {
+                    consecutive_poll_failures += 1;
+                    let threshold = spec.circuit_breaker.unwrap_or(u64::MAX);
+                    if consecutive_poll_failures >= threshold {
+                        return Err(RuntimeError::ToolFailed {
+                            tool: spec.operation.clone(),
+                            message: format!(
+                                "provider protocol `{}`: circuit breaker open after {} \
+                                 consecutive failed observations (last: {}). The submitted \
+                                 provider job is NOT cancelled — the intent stays recorded in \
+                                 state `{}` for a later resume.",
+                                spec.operation,
+                                consecutive_poll_failures,
+                                err,
+                                intent.state
+                            ),
+                        });
+                    }
+                    // Tolerated: keep the intent as-is and observe again
+                    // on the next tick.
+                    continue;
+                }
+            };
             retry_after_hint = meta.retry_after_ms;
             let poll_response = unwrap_ok_envelope(&raw);
 
@@ -209,6 +248,7 @@ impl Runtime {
             returns_result: false,
             retry: spec.retry,
             rate_limit: spec.rate_limit,
+            circuit_breaker: spec.circuit_breaker,
         })
     }
 
