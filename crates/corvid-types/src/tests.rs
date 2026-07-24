@@ -1598,6 +1598,101 @@ agent bad(id: String, amount: Float) -> Receipt:
 }
 
 #[test]
+fn a_connector_operations_cost_counts_toward_the_budget() {
+    // Regression (slice 52h-3): a connector `operation` resolves as a
+    // Tool but lives inside `Decl::Connector`, so the cost analyzer's
+    // `find_tool` missed it and every connector call contributed $0 —
+    // `@budget` was unsound for connector-using programs. A $2.00
+    // operation under a $1.00 budget must be rejected.
+    let src = "\
+effect http_write:
+    cost: $2.00
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: \"https://api.github.com\"
+    modes: [real]
+    operation push_repo(owner: String) -> Repo dangerous uses http_write:
+        POST \"/push\" body owner
+
+@budget($1.00)
+agent bad(owner: String) -> Repo:
+    approve PushRepo(owner)
+    return push_repo(owner)
+";
+    let c = check(src);
+    assert!(
+        has_effect_violation(&c, "cost"),
+        "a connector operation's cost must count toward @budget; got: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn a_protocols_worst_case_polls_multiply_its_cost_for_budgets() {
+    // Slice 52h-3: a verified protocol does not make ONE request — it
+    // submits and then polls until a terminal state or the declared
+    // deadline. The worst case is knowable statically, so the budget
+    // must bound polling at compile time. deadline 60s / every 10s = 6
+    // polls, + 1 submit = 7 requests x $0.10 = $0.70.
+    let body = "\
+effect http_write:
+    cost: $0.10
+
+type Job:
+    id: String
+    status: String
+
+connector shipping:
+    base_url: \"https://api.example.com\"
+    modes: [real]
+    operation submit_job(order: String) -> Job dangerous uses http_write:
+        POST \"/jobs\" body order
+        async:
+            statuses: [queued, done]
+            initial: queued
+            terminal: [done]
+            deadline: 60s
+            deadline_target: done
+            idempotency: intent
+            poll GET \"/jobs/{id}\"
+            every: 10s
+            state queued:
+                on queued -> queued
+                on done -> done
+
+";
+    // $0.70 worst case exceeds a $0.50 budget.
+    let over = format!(
+        "{body}@budget($0.50)
+agent bad(order: String) -> Job:
+    approve SubmitJob(order)
+    return submit_job(order)
+"
+    );
+    let c = check(&over);
+    assert!(
+        has_effect_violation(&c, "cost"),
+        "polling cost must count toward @budget; got: {:?}",
+        c.errors
+    );
+
+    // ...and fits a $1.00 budget, so the bound is not merely "always
+    // reject".
+    let under = format!(
+        "{body}@budget($1.00)
+agent ok(order: String) -> Job:
+    approve SubmitJob(order)
+    return submit_job(order)
+"
+    );
+    let c = check(&under);
+    assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
 fn repair_attempts_multiply_worst_case_cost_for_budgets() {
     // `with repair 2` can re-ask twice: a $0.30 prompt's worst case
     // is $0.90, so a $0.50 budget must reject it. Without this the

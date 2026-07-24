@@ -16652,6 +16652,63 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-3 (part 3): the "blocked" items weren't blocked — and one hid a live budget hole
+
+I had marked two items blocked. Challenged on it, and the challenge was
+right: both were undone work plus a design choice I could make. *Blocked*
+should mean "cannot proceed without something external." Neither was.
+Worse, the mislabel hid a real soundness bug.
+
+### The budget hole (a 52g-3a regression)
+
+Slice 52g-3a made connector operations resolve as `DeclKind::Tool`. The
+cost analyzer looks a Tool up with `find_tool`, which only matches
+`Decl::Tool` — and a connector operation lives inside `Decl::Connector`.
+So the lookup returned `None`, the `?` dropped the cost node, and **every
+connector call has contributed $0 to `@budget` since 52g**. A `$2.00`
+operation compiled happily under `@budget($1.00)`.
+
+That is exactly the failure the decision principle warns about: a
+commodity feature must COMPOSE with the moat. `find_connector_operation`
+closes it.
+
+Then the protocol part, which is the better version of what I'd described
+as runtime "budget admission": a verified protocol does not make one
+request — it submits and then polls. The worst case is knowable from the
+declaration (`deadline / interval`, ceiling; conservative for adaptive),
+so the cost scales by `1 + worst_case_poll_count`, reusing the same
+`scale_tree` bounded loops use. Polling is now a COMPILE-TIME bound —
+which is the original 52h goal ("retry cost contributes to the max
+budget") and strictly better than admitting at runtime.
+
+### Cancel: the endpoint that makes compensation honest
+
+`cancel <METHOD> "<path>"` is now declarable in the `async:` block,
+mirroring `poll` (and allowed to mutate, because cancelling is an action).
+Its ABSENCE is meaningful, so the disposition is declaration-driven and
+three-way: `Cancelled` before submit, `Compensate` when an endpoint is
+declared, `Detached` when it is not.
+
+The durable job is the cancellation channel. A cancelled job compensates
+by calling the declared endpoint — with `{id}` bound from the submit
+response exactly like the poll path — or detaches with a diagnostic that
+says plainly the provider job is still running and NOT cancelled. And a
+FAILED compensation is never reported as a clean cancellation: the
+message says the provider job may still be running and the intent stays
+recorded.
+
+Tests: 2 checker (connector cost counts; protocol polls multiply cost, and
+still fit a larger budget so the bound isn't just "always reject"), 3
+engine (three-way disposition), 2 parser (cancel present / absent), 1
+integration (cancelling mid-flight demonstrably calls
+`POST /shipments/{id}/cancel`, verified by the mock's expectation).
+
+The lesson worth keeping: "blocked" is a claim about the world, and it
+deserves the same scrutiny as any other claim. Mine was wrong twice, and
+one of the wrong ones was sitting on a live bug.
+
+---
+
 ## 2026-07-24 - 52h-3 (part 2): the breaker gives up on observing, never on the intent
 
 Circuit-breaker admission for the poll loop, and the distinction that

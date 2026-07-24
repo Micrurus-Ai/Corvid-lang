@@ -372,6 +372,7 @@ impl<'a> Parser<'a> {
         let mut deadline_target = None;
         let mut idempotency = None;
         let mut poll = None;
+        let mut cancel = None;
         let mut interval = None;
         let mut states = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -395,6 +396,25 @@ impl<'a> Parser<'a> {
                     method,
                     path,
                     span: poll_start.merge(self.prev_span()),
+                });
+                self.expect_newline()?;
+                continue;
+            }
+            // `cancel <METHOD> "<path>"` — optional (slice 52h-3), and
+            // mirrors `poll`. Unlike `poll` it may mutate, because
+            // cancelling is an action.
+            if self.peek_ident_is("cancel") {
+                if !seen.insert("cancel".to_string()) {
+                    return self.duplicate_protocol_key("cancel");
+                }
+                let cancel_start = self.peek_span();
+                self.bump();
+                let method = self.parse_http_method()?;
+                let path = self.expect_string_literal("protocol cancel path")?.0;
+                cancel = Some(corvid_ast::ProtocolCancel {
+                    method,
+                    path,
+                    span: cancel_start.merge(self.prev_span()),
                 });
                 self.expect_newline()?;
                 continue;
@@ -475,6 +495,7 @@ impl<'a> Parser<'a> {
             deadline_target: deadline_target.unwrap(),
             idempotency: idempotency.unwrap(),
             poll: poll.unwrap(),
+            cancel,
             interval: interval.unwrap(),
             states,
             span: start.merge(end),

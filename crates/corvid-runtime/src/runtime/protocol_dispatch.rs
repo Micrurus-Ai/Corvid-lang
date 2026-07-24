@@ -29,8 +29,8 @@ use super::Runtime;
 use crate::connectors::ConnectorHttpSpec;
 use crate::errors::RuntimeError;
 use crate::protocol::{
-    bind_poll_path, intent_idempotency_key, is_terminal, observe, poll_delay_ms,
-    ProtocolIntentState,
+    bind_poll_path, bind_protocol_path, cancellation_disposition, intent_idempotency_key,
+    is_terminal, observe, poll_delay_ms, CancellationDisposition, ProtocolIntentState,
 };
 use crate::queue::JobCheckpointKind;
 use corvid_ast::ProviderProtocolDecl;
@@ -110,6 +110,19 @@ impl Runtime {
         loop {
             if is_terminal(protocol, &intent.state) {
                 break;
+            }
+            // Semantic cancellation (slice 52h-3). The durable job is the
+            // cancellation channel: if it was cancelled while we were
+            // observing, act on it at the next boundary rather than
+            // finishing work nobody wants. What "act on it" MEANS depends
+            // on the declaration and on whether we already submitted —
+            // see `cancellation_disposition`.
+            if let Ok(Some(current)) = job.queue.get(&job.job_id) {
+                if matches!(current.status, crate::queue::QueueJobStatus::Canceled) {
+                    return self
+                        .apply_protocol_cancellation(spec, protocol, &mut intent, job, &key, args)
+                        .await;
+                }
             }
             if crate::tracing::now_ms().saturating_sub(started_ms) >= deadline_ms {
                 // The deadline is a declared, checked transition target —
@@ -208,6 +221,110 @@ impl Runtime {
                     spec.operation, intent.state
                 ),
             })
+    }
+
+    /// Act on a cancelled durable job (slice 52h-3). The disposition is
+    /// decided by the DECLARATION plus whether we already submitted — it
+    /// is never an assumption about what the provider will tolerate.
+    async fn apply_protocol_cancellation(
+        &self,
+        spec: &ConnectorHttpSpec,
+        protocol: &ProviderProtocolDecl,
+        intent: &mut ProtocolIntentState,
+        job: &super::DurableJobContext,
+        key: &str,
+        args: &[serde_json::Value],
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let message = match cancellation_disposition(protocol, intent) {
+            // Nothing was submitted: no provider work exists, so this
+            // cancellation is exact.
+            CancellationDisposition::Cancelled => format!(
+                "provider protocol `{}` was cancelled before submit — no provider job was created",
+                spec.operation
+            ),
+            // A provider job exists AND the protocol declares how to
+            // cancel it, so carry the cancellation to the provider.
+            CancellationDisposition::Compensate => {
+                let cancel = protocol
+                    .cancel
+                    .as_ref()
+                    .expect("Compensate implies a declared cancel endpoint");
+                let path = bind_protocol_path(
+                    &cancel.path,
+                    &spec.operation,
+                    intent,
+                    &spec.param_names,
+                    args,
+                )
+                .map_err(|e| RuntimeError::ToolFailed {
+                    tool: spec.operation.clone(),
+                    message: e.message(),
+                })?;
+                let cancel_spec = self.request_spec_for(
+                    spec,
+                    cancel.method.as_str().to_string(),
+                    path.clone(),
+                );
+                // A failed compensation must not be reported as a clean
+                // cancellation — the provider job may still be running.
+                self.dispatch_connector_http(&cancel_spec, &[])
+                    .await
+                    .map_err(|err| RuntimeError::ToolFailed {
+                        tool: spec.operation.clone(),
+                        message: format!(
+                            "provider protocol `{}` was cancelled, but compensating via `{}` \
+                             FAILED ({err}) — the provider job may still be running; the intent \
+                             stays recorded in state `{}`",
+                            spec.operation, path, intent.state
+                        ),
+                    })?;
+                format!(
+                    "provider protocol `{}` was cancelled and compensated via `{}`",
+                    spec.operation, path
+                )
+            }
+            // A provider job exists and the protocol declares no way to
+            // cancel it. Detach and say so — never pretend it was undone.
+            CancellationDisposition::Detached => format!(
+                "provider protocol `{}` was cancelled after submit, but declares no `cancel` \
+                 endpoint — DETACHED in state `{}`. The provider job is still running and is \
+                 NOT cancelled; the intent stays recorded so it can be resumed or reconciled.",
+                spec.operation, intent.state
+            ),
+        };
+        // Whatever the disposition, the intent is recorded — the work is
+        // accounted for rather than silently dropped.
+        self.checkpoint_protocol_intent(job, key, intent)?;
+        Err(RuntimeError::ToolFailed {
+            tool: spec.operation.clone(),
+            message,
+        })
+    }
+
+    /// Build a connector spec for a protocol side-request (poll or
+    /// cancel): same base URL and credentials as the operation, with an
+    /// already-bound path.
+    fn request_spec_for(
+        &self,
+        spec: &ConnectorHttpSpec,
+        method: String,
+        path: String,
+    ) -> ConnectorHttpSpec {
+        ConnectorHttpSpec {
+            connector: spec.connector.clone(),
+            operation: spec.operation.clone(),
+            base_url: spec.base_url.clone(),
+            method,
+            path,
+            param_names: Vec::new(),
+            body: None,
+            auth: spec.auth.clone(),
+            error_map: Vec::new(),
+            returns_result: false,
+            retry: spec.retry,
+            rate_limit: spec.rate_limit,
+            circuit_breaker: spec.circuit_breaker,
+        }
     }
 
     /// Synthesize the poll request as a connector spec: same base URL and

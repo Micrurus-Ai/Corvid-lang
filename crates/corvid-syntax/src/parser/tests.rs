@@ -3804,6 +3804,85 @@ fn parses_connector_with_config_and_operations() {
 }
 
 #[test]
+fn parses_optional_protocol_cancel_endpoint() {
+    // Slice 52h-3: `cancel` is optional, and its presence is what makes
+    // compensation possible (absent → a submitted intent can only
+    // detach). Unlike `poll` it may mutate, since cancelling is an action.
+    let src = r#"connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, completed]
+            initial: queued
+            terminal: [completed]
+            deadline: 600s
+            deadline_target: completed
+            idempotency: intent
+            poll GET "/generations/{id}"
+            cancel POST "/generations/{id}/cancel"
+            every: 2s
+            state queued:
+                on queued -> queued
+                on completed -> completed
+"#;
+    let file = parse_file_src(src);
+    let connector = file
+        .decls
+        .iter()
+        .find_map(|decl| match decl {
+            Decl::Connector(connector) => Some(connector),
+            _ => None,
+        })
+        .expect("connector");
+    let protocol = connector.operations[0]
+        .protocol
+        .as_ref()
+        .expect("protocol");
+    let cancel = protocol.cancel.as_ref().expect("cancel endpoint");
+    assert!(matches!(cancel.method, corvid_ast::HttpMethod::Post));
+    assert_eq!(cancel.path, "/generations/{id}/cancel");
+}
+
+#[test]
+fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
+    let src = r#"connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, completed]
+            initial: queued
+            terminal: [completed]
+            deadline: 600s
+            deadline_target: completed
+            idempotency: intent
+            poll GET "/generations"
+            every: 2s
+            state queued:
+                on queued -> queued
+                on completed -> completed
+"#;
+    let file = parse_file_src(src);
+    let connector = file
+        .decls
+        .iter()
+        .find_map(|decl| match decl {
+            Decl::Connector(connector) => Some(connector),
+            _ => None,
+        })
+        .expect("connector");
+    assert!(connector.operations[0]
+        .protocol
+        .as_ref()
+        .expect("protocol")
+        .cancel
+        .is_none());
+}
+
+#[test]
 fn parses_verified_async_provider_protocol() {
     let src = r#"connector video:
     base_url: "https://video.example.com"

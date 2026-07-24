@@ -11,7 +11,7 @@
 //! Extracted from `effects.rs` as part of Phase 20i responsibility
 //! decomposition.
 
-use super::analyze::{find_agent, find_prompt, find_tool};
+use super::analyze::{find_agent, find_connector_operation, find_prompt, find_tool};
 use super::{
     ComposedProfile, CostEstimate, CostNodeKind, CostTreeNode, CostWarning, CostWarningKind,
     EffectRegistry,
@@ -27,6 +27,27 @@ pub use render::{format_numeric_dimension, render_cost_tree};
 // ---- Worst-case cost analysis ----
 
 const COST_DIMENSIONS: [&str; 3] = ["cost", "tokens", "latency_ms"];
+
+/// The most observations a verified provider protocol can make before its
+/// declared deadline forces a terminal state (slice 52h-3).
+///
+/// Deliberately conservative — a budget bound must never UNDER-estimate.
+/// A fixed cadence gives `deadline / interval`. An adaptive cadence backs
+/// off over time, so its true count is lower; we bound it by the fastest
+/// tick the adaptive schedule can produce (1s) rather than modelling the
+/// backoff, which over-approximates in the safe direction.
+fn worst_case_poll_count(protocol: &corvid_ast::ProviderProtocolDecl) -> u64 {
+    let per_poll_secs = match protocol.interval {
+        corvid_ast::ProtocolPollInterval::FixedSeconds(secs) => secs.max(1),
+        corvid_ast::ProtocolPollInterval::Adaptive => 1,
+    };
+    // Ceiling division, and always at least one observation: a protocol
+    // that never polls could never reach a terminal state.
+    protocol
+        .deadline_secs
+        .div_ceil(per_poll_secs)
+        .max(1)
+}
 
 pub fn compute_worst_case_cost(
     file: &corvid_ast::File,
@@ -659,15 +680,43 @@ impl<'a> CostAnalyzer<'a> {
         let entry = self.resolved.symbols.get(*def_id);
         match entry.kind {
             corvid_resolve::DeclKind::Tool => {
-                let tool = find_tool(self.file, &entry.name)?;
-                Some(effect_node_for_decl(
-                    &tool.name.name,
+                if let Some(tool) = find_tool(self.file, &entry.name) {
+                    return Some(effect_node_for_decl(
+                        &tool.name.name,
+                        CostNodeKind::Tool,
+                        &tool.effect_row,
+                        tool.effect,
+                        self.registry,
+                        span,
+                    ));
+                }
+                // A connector `operation` also resolves as a Tool but
+                // lives inside `Decl::Connector` (slice 52g-3a), so
+                // `find_tool` misses it. Costing it here is what keeps
+                // `@budget` sound for connector-using programs.
+                let op = find_connector_operation(self.file, &entry.name)?;
+                let node = effect_node_for_decl(
+                    &op.name.name,
                     CostNodeKind::Tool,
-                    &tool.effect_row,
-                    tool.effect,
+                    &op.effect_row,
+                    op.effect,
                     self.registry,
                     span,
-                ))
+                );
+                // A verified provider protocol does not make ONE request
+                // — it submits and then polls until a terminal state or
+                // the declared deadline. The worst case is knowable
+                // statically from the declaration, so the budget bounds
+                // polling at COMPILE time (slice 52h-3): scale by
+                // 1 submit + the worst-case poll count, reusing the same
+                // `scale_tree` a bounded loop uses.
+                match &op.protocol {
+                    Some(protocol) => {
+                        let requests = 1 + worst_case_poll_count(protocol);
+                        Some(scale_tree(node, requests, span))
+                    }
+                    None => Some(node),
+                }
             }
             corvid_resolve::DeclKind::Prompt => {
                 let prompt = find_prompt(self.file, &entry.name)?;

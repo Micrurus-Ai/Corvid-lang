@@ -472,6 +472,86 @@ async fn consecutive_failed_observations_trip_the_declared_circuit_breaker() {
     );
 }
 
+/// Semantic cancellation with a DECLARED cancel endpoint (slice 52h-3):
+/// cancelling the durable job mid-flight compensates by calling the
+/// provider's cancel endpoint — the placeholder bound from the submit
+/// response, exactly like the poll path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_job_compensates_through_the_declared_cancel_endpoint() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_TOKEN_COMP";
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Same protocol, plus a declared cancel endpoint.
+    let src = source(TOKEN_ENV).replace(
+        "            poll GET \"/shipments/{id}\"",
+        "            poll GET \"/shipments/{id}\"\n            cancel POST \"/shipments/{id}/cancel\"",
+    );
+    let ir = compile(dir.path(), &src);
+    std::env::set_var(TOKEN_ENV, "tok-proto");
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-x","status":"queued"}"#),
+        )
+        .mount(&server)
+        .await;
+    // Never terminal, so the loop keeps observing until we cancel it.
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-x"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-x","status":"processing"}"#),
+        )
+        .mount(&server)
+        .await;
+    // The compensation call MUST happen — `expect(1)` verifies on drop,
+    // and the path proves `{id}` came from the submit response.
+    Mock::given(method("POST"))
+        .and(path("/shipments/prov-x/cancel"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+
+    // Cancel the job shortly after the run starts, while it is polling.
+    let canceller = {
+        let queue = queue.clone();
+        let job_id = job.id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+            let _ = queue.cancel(&job_id);
+        })
+    };
+
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("a cancelled protocol does not return a terminal value");
+    let _ = canceller.await;
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err:?}");
+    assert!(
+        text.contains("compensated"),
+        "a declared cancel endpoint must be used to compensate; got: {text}"
+    );
+}
+
 /// Durability precondition: a protocol operation invoked OUTSIDE a
 /// durable job refuses, rather than silently degrading to a non-durable
 /// poll loop whose intent would be lost on restart.

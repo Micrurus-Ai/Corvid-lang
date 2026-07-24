@@ -855,6 +855,17 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             out.push_str("idempotency: intent\n");
             push_indent(indent + 3, out);
             out.push_str(&format!("poll {} {}\n", protocol.poll.method.as_str(), render_string_literal(&protocol.poll.path)));
+            // Slice 52h-3: the optional cancel endpoint round-trips too —
+            // its presence is what distinguishes compensation from
+            // detach, so dropping it would silently change semantics.
+            if let Some(cancel) = &protocol.cancel {
+                push_indent(indent + 3, out);
+                out.push_str(&format!(
+                    "cancel {} {}\n",
+                    cancel.method.as_str(),
+                    render_string_literal(&cancel.path)
+                ));
+            }
             push_indent(indent + 3, out);
             match protocol.interval {
                 corvid_ast::ProtocolPollInterval::FixedSeconds(seconds) => out.push_str(&format!("every: {seconds}s\n")),

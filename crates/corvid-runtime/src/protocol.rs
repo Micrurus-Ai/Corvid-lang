@@ -144,31 +144,38 @@ pub fn is_terminal(protocol: &ProviderProtocolDecl, state: &str) -> bool {
 /// What cancelling an intent may actually do (slice 52h-3).
 ///
 /// This is the cancellation×irreversibility rule composed with DURABLE
-/// PROVIDER STATE. Once an intent has submitted, a provider-side job
-/// exists that Corvid cannot un-create: the declaration has no cancel
-/// endpoint, so there is nothing honest to compensate with. Dropping the
-/// intent would leave real work running with nobody observing it — the
-/// silent-orphan failure. So a submitted intent is never "cancelled"; it
-/// is DETACHED, and that disposition is recorded.
+/// PROVIDER STATE. Before submit, nothing exists and cancelling is exact.
+/// After submit a provider-side job exists, and what Corvid may honestly
+/// do depends on whether the protocol DECLARED a cancel endpoint:
+/// with one, it can compensate; without one, the only truthful option is
+/// to detach and record, because dropping the intent would leave real
+/// work running with nobody observing it — the silent-orphan failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancellationDisposition {
     /// Nothing was submitted, so no provider work exists. Cancelling is
     /// exact: the intent simply never happened.
     Cancelled,
-    /// A provider job exists and cannot be un-created. The intent stops
-    /// being awaited but is recorded as detached, so the work is
-    /// accounted for rather than silently orphaned.
+    /// A provider job exists AND the protocol declares a cancel endpoint,
+    /// so the cancellation can be carried to the provider.
+    Compensate,
+    /// A provider job exists and the protocol declares no way to cancel
+    /// it. The intent stops being awaited but is recorded as detached, so
+    /// the work is accounted for rather than silently orphaned.
     Detached,
 }
 
 /// Decide what cancelling this intent means. Past the irreversible
-/// boundary (a submitted provider job), cancellation degrades to
-/// detach-and-record rather than pretending the work was undone.
-pub fn cancellation_disposition(intent: &ProtocolIntentState) -> CancellationDisposition {
-    if intent.submitted {
-        CancellationDisposition::Detached
-    } else {
-        CancellationDisposition::Cancelled
+/// boundary (a submitted provider job), cancellation either compensates
+/// through the declared endpoint or degrades to detach-and-record — it
+/// never pretends the work was undone.
+pub fn cancellation_disposition(
+    protocol: &ProviderProtocolDecl,
+    intent: &ProtocolIntentState,
+) -> CancellationDisposition {
+    match (intent.submitted, protocol.cancel.is_some()) {
+        (false, _) => CancellationDisposition::Cancelled,
+        (true, true) => CancellationDisposition::Compensate,
+        (true, false) => CancellationDisposition::Detached,
     }
 }
 
@@ -252,6 +259,19 @@ pub fn bind_poll_path(
     param_names: &[String],
     args: &[serde_json::Value],
 ) -> Result<String, ProtocolError> {
+    bind_protocol_path(&protocol.poll.path, operation, intent, param_names, args)
+}
+
+/// Bind any protocol path template (poll or cancel) from the
+/// submit-response fields plus the call arguments. One implementation so
+/// the two endpoints can never disagree about placeholder semantics.
+pub fn bind_protocol_path(
+    template: &str,
+    operation: &str,
+    intent: &ProtocolIntentState,
+    param_names: &[String],
+    args: &[serde_json::Value],
+) -> Result<String, ProtocolError> {
     let mut by_name: BTreeMap<&str, &serde_json::Value> = BTreeMap::new();
     // Call arguments first, then submit-response fields, so a response
     // field (the authoritative provider job id) wins over an argument of
@@ -262,11 +282,11 @@ pub fn bind_poll_path(
     for (name, value) in &intent.binding_fields {
         by_name.insert(name.as_str(), value);
     }
-    crate::connectors::fill_path(&protocol.poll.path, &by_name, operation).map_err(|_| {
+    crate::connectors::fill_path(template, &by_name, operation).map_err(|_| {
         // `fill_path` reports a missing binding as a request error; at
         // the protocol layer we name the placeholder precisely.
-        let missing = first_unbound_placeholder(&protocol.poll.path, &by_name)
-            .unwrap_or_else(|| "?".to_string());
+        let missing =
+            first_unbound_placeholder(template, &by_name).unwrap_or_else(|| "?".to_string());
         ProtocolError::UnboundPollPlaceholder {
             operation: operation.to_string(),
             placeholder: missing,
@@ -361,6 +381,7 @@ mod tests {
                 path: "/jobs/{id}".to_string(),
                 span: Span::new(0, 0),
             },
+            cancel: None,
             interval: ProtocolPollInterval::FixedSeconds(5),
             states: vec![
                 ProtocolStateDecl {
@@ -504,15 +525,32 @@ mod tests {
         let p = protocol();
         let mut intent = ProtocolIntentState::new(&p);
         assert_eq!(
-            cancellation_disposition(&intent),
+            cancellation_disposition(&p, &intent),
             CancellationDisposition::Cancelled
         );
 
         intent.bind_submit_response(&json!({"id": "prov-1"}));
         assert_eq!(
-            cancellation_disposition(&intent),
+            cancellation_disposition(&p, &intent),
             CancellationDisposition::Detached,
-            "a submitted intent must never be reported as cleanly cancelled"
+            "a submitted intent with no declared cancel endpoint must never be reported \
+             as cleanly cancelled"
+        );
+
+        // Declaring a cancel endpoint is what makes real compensation
+        // possible — the disposition follows the DECLARATION, not a
+        // hopeful assumption about the provider.
+        let with_cancel = ProviderProtocolDecl {
+            cancel: Some(corvid_ast::ProtocolCancel {
+                method: HttpMethod::Post,
+                path: "/jobs/{id}/cancel".to_string(),
+                span: Span::new(0, 0),
+            }),
+            ..protocol()
+        };
+        assert_eq!(
+            cancellation_disposition(&with_cancel, &intent),
+            CancellationDisposition::Compensate
         );
     }
 

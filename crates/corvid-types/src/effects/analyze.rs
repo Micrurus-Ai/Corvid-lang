@@ -389,6 +389,24 @@ pub(super) fn find_tool<'a>(
     })
 }
 
+/// Find a connector `operation` by name (slice 52h-3).
+///
+/// A connector operation resolves as `DeclKind::Tool` (slice 52g-3a) but
+/// lives inside a `Decl::Connector`, NOT a `Decl::Tool` — so `find_tool`
+/// cannot see it. Without this lookup the cost analyzer silently dropped
+/// every connector call, and `@budget` was unsound for connector-using
+/// programs: a `$2.00` operation contributed `$0`. Commodity features
+/// must compose with the moat, so cost analysis has to see them.
+pub(super) fn find_connector_operation<'a>(
+    file: &'a corvid_ast::File,
+    name: &str,
+) -> Option<&'a corvid_ast::OperationDecl> {
+    file.decls.iter().find_map(|d| match d {
+        corvid_ast::Decl::Connector(c) => c.operations.iter().find(|op| op.name.name == name),
+        _ => None,
+    })
+}
+
 pub(super) fn find_prompt<'a>(
     file: &'a corvid_ast::File,
     name: &str,

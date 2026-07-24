@@ -579,8 +579,26 @@ pub struct ProviderProtocolDecl {
     pub deadline_target: Ident,
     pub idempotency: ProtocolIdempotency,
     pub poll: ProtocolPoll,
+    /// `cancel <METHOD> "<path>"` — the provider's own cancellation
+    /// endpoint (slice 52h-3). OPTIONAL, and its absence is meaningful:
+    /// without it Corvid cannot un-create a submitted provider job, so
+    /// cancelling a submitted intent DETACHES (records and stops
+    /// awaiting) instead of compensating. Declaring it is what makes
+    /// real compensation possible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel: Option<ProtocolCancel>,
     pub interval: ProtocolPollInterval,
     pub states: Vec<ProtocolStateDecl>,
+    pub span: Span,
+}
+
+/// The provider's cancellation endpoint (slice 52h-3). Unlike `poll`,
+/// this one is expected to MUTATE — cancelling is an action — so it is
+/// not restricted to GET.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolCancel {
+    pub method: HttpMethod,
+    pub path: String,
     pub span: Span,
 }
 
