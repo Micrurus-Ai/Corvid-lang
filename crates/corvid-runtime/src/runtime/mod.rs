@@ -62,7 +62,7 @@ pub struct Runtime {
     /// ones — which is why this is per-run state and not durable state.
     /// `Arc` so a cloned `Runtime` keeps counting the SAME run — a clone
     /// represents the same execution, not a fresh one.
-    protocol_invocations: Arc<std::sync::Mutex<std::collections::HashMap<u32, u64>>>,
+    protocol_invocations: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
     tools: ToolRegistry,
     llms: LlmRegistry,
     approver: Arc<dyn Approver>,

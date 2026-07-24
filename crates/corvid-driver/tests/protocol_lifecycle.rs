@@ -674,6 +674,108 @@ async fn the_intent_key_reaches_the_provider_on_the_submit() {
     std::env::remove_var(TOKEN_ENV);
 }
 
+/// The refusal `on_protocol_change` cannot override.
+///
+/// 52h-4 caught a protocol whose GRAPH changed. This is the worse case it
+/// did not: the graph is untouched, but the connector now points
+/// somewhere else. The intent holds a job id one provider issued, so
+/// resuming would poll a different provider about it — at best a 404, at
+/// worst somebody else's job. `on_protocol_change: resume` is a decision
+/// about the graph and must not authorise it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_intent_refuses_to_resume_against_a_different_provider() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_PROVIDER";
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::env::set_var(TOKEN_ENV, "tok-provider");
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+
+    // Run 1 against api.example.com — submits, then the breaker aborts,
+    // leaving an in-flight intent bound to THAT provider.
+    {
+        let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 600, "resume"));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-p","status":"queued"}"#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-p"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect_err("the breaker aborts this run mid-flight");
+    }
+
+    // Run 2: the PROTOCOL is byte-identical; only the connector's
+    // base_url moved. The declaration still says `resume`.
+    let moved = source_migration(TOKEN_ENV, 600, "resume")
+        .replace("http://api.example.com", "http://other.example.com");
+    let ir = compile(dir.path(), &moved);
+    let server = MockServer::start().await;
+    // The new provider must be asked NOTHING.
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-p"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["other.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "other.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("an intent must not resume against a different provider");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err}");
+    assert!(
+        text.contains("DIFFERENT provider"),
+        "the refusal must name what happened; got: {text}"
+    );
+    assert!(
+        text.contains("not governed by `on_protocol_change`"),
+        "it must be clear the resume posture cannot authorise this; got: {text}"
+    );
+    assert!(
+        text.contains("base_url"),
+        "the diff must name what moved; got: {text}"
+    );
+}
+
 /// The declared deadline bounds the PROTOCOL, not a process.
 ///
 /// Measuring it from process start handed every restart a fresh full

@@ -136,7 +136,55 @@ pub struct ProtocolIntentState {
     /// the only thing available for it.
     #[serde(default)]
     pub created_ms: Option<u64>,
+    /// Canonical encoding of the PROVIDER this intent was submitted to:
+    /// the connector, its base URL, the credential SOURCE (a secret name,
+    /// never a value), and the request shape.
+    ///
+    /// The protocol graph and the provider are separate things that can
+    /// drift separately. A protocol whose `async:` block is untouched but
+    /// whose connector now points at a different `base_url` is a WORSE
+    /// situation than a vanished state: the intent holds a job id issued
+    /// by one provider and would resume by polling a different one, which
+    /// at best 404s and at worst addresses somebody else's job.
+    ///
+    /// `None` means the checkpoint predates this record — treated as a
+    /// change once there is work to strand, for the same reason as the
+    /// protocol encoding.
+    #[serde(default)]
+    pub provider_canonical: Option<String>,
 }
+
+/// Canonical encoding of the provider an intent is bound to.
+///
+/// Credentials appear only as the secret NAME that supplies them —
+/// rotating a secret's value is not provider drift, but pointing the
+/// connector at a different secret is, because it may authenticate as a
+/// different principal.
+pub fn provider_canonical_encoding(spec: &crate::connectors::ConnectorHttpSpec) -> String {
+    use crate::connectors::ConnectorAuthSpec;
+    let auth = match &spec.auth {
+        None => "none".to_string(),
+        Some(ConnectorAuthSpec::Bearer { secret }) => format!("bearer:{secret}"),
+        Some(ConnectorAuthSpec::Header { name, secret }) => format!("header:{name}:{secret}"),
+        Some(ConnectorAuthSpec::Basic {
+            username_secret,
+            password_secret,
+        }) => format!("basic:{username_secret}:{password_secret}"),
+    };
+    format!(
+        "encoding={}\nconnector={}\nbase_url={}\nmethod={}\npath={}\nauth={}",
+        PROVIDER_CANONICAL_ENCODING,
+        spec.connector,
+        spec.base_url,
+        spec.method,
+        spec.path,
+        auth
+    )
+}
+
+/// Versioned for the same reason the protocol encoding is: it lands in
+/// durable checkpoints that later builds read back.
+pub const PROVIDER_CANONICAL_ENCODING: &str = "corvid.provider.canonical.v1";
 
 /// The outcome of comparing an in-flight intent against the running
 /// declaration. Separated from the dispatcher so the decision is testable
@@ -157,13 +205,21 @@ pub enum ResumeVerdict {
         state: String,
         changes: Vec<String>,
     },
+    /// The PROVIDER changed under a submitted intent. Refused regardless
+    /// of `on_protocol_change`, which is a decision about the protocol
+    /// GRAPH and cannot authorise talking to a different provider: the
+    /// intent holds a job id one provider issued, and resuming would poll
+    /// another one about it.
+    RefusedProviderChanged { changes: Vec<String> },
 }
 
 impl ResumeVerdict {
     pub fn is_refusal(&self) -> bool {
         matches!(
             self,
-            Self::RefusedByPolicy { .. } | Self::RefusedStateVanished { .. }
+            Self::RefusedByPolicy { .. }
+                | Self::RefusedStateVanished { .. }
+                | Self::RefusedProviderChanged { .. }
         )
     }
 
@@ -174,6 +230,7 @@ impl ResumeVerdict {
             Self::ResumedAcrossChange { .. } => "resumed_across_change",
             Self::RefusedByPolicy { .. } => "refused_by_policy",
             Self::RefusedStateVanished { .. } => "refused_state_vanished",
+            Self::RefusedProviderChanged { .. } => "refused_provider_changed",
         }
     }
 
@@ -183,7 +240,8 @@ impl ResumeVerdict {
             Self::Unchanged => &[],
             Self::ResumedAcrossChange { changes }
             | Self::RefusedByPolicy { changes }
-            | Self::RefusedStateVanished { changes, .. } => changes,
+            | Self::RefusedStateVanished { changes, .. }
+            | Self::RefusedProviderChanged { changes } => changes,
         }
     }
 }
@@ -197,7 +255,32 @@ impl ResumeVerdict {
 pub fn resume_verdict(
     protocol: &ProviderProtocolDecl,
     intent: &ProtocolIntentState,
+    provider: Option<&str>,
 ) -> ResumeVerdict {
+    // The PROVIDER is checked first, and its refusal is not overridable.
+    // `on_protocol_change` is a decision about the protocol graph; an
+    // author writing `resume` is saying "this graph edit is safe to
+    // continue through", not "talk to whatever provider is configured
+    // now". A submitted intent holds a job id one provider issued, so
+    // resuming against another would poll a stranger about it.
+    if intent.submitted {
+        if let (Some(running), Some(recorded)) = (provider, intent.provider_canonical.as_deref()) {
+            if running != recorded {
+                return ResumeVerdict::RefusedProviderChanged {
+                    changes: corvid_ast::protocol_canonical_differences(recorded, running),
+                };
+            }
+        } else if provider.is_some() && intent.provider_canonical.is_none() {
+            return ResumeVerdict::RefusedProviderChanged {
+                changes: vec![
+                    "the checkpoint predates provider-identity recording, so it cannot prove it \
+                     was submitted to this provider"
+                        .to_string(),
+                ],
+            };
+        }
+    }
+
     let current = protocol.canonical_encoding();
     // A fresh intent has nothing to migrate. Only an intent that already
     // exists — and, when submitted, corresponds to a live provider job —
@@ -245,6 +328,9 @@ impl ProtocolIntentState {
             last_response: None,
             protocol_canonical: Some(protocol.canonical_encoding()),
             created_ms: Some(crate::tracing::now_ms()),
+            // Bound by the dispatcher before the submit leaves, so the
+            // recorded provider is the one that actually issued the job.
+            provider_canonical: None,
         }
     }
 
@@ -462,8 +548,8 @@ pub fn poll_delay_ms(protocol: &ProviderProtocolDecl, polls: u64) -> u64 {
     }
 }
 
-/// Which logical invocation this is: WHERE in the program the call was
-/// written, and WHICH execution of that callsite it is within the job.
+/// Which logical invocation this is: which execution of this operation,
+/// in order, within the durable job's run.
 ///
 /// Arguments alone are not an identity. "Ship order-1" written twice, or
 /// written once inside a loop that runs twice, is two intentional pieces
@@ -472,14 +558,19 @@ pub fn poll_delay_ms(protocol: &ProviderProtocolDecl, polls: u64) -> u64 {
 /// first's result and its provider job was never created. Two parallel
 /// identical calls raced for the same row.
 ///
-/// `callsite` is the source position of the call expression, so distinct
-/// call sites never collide. `ordinal` counts executions of that callsite
-/// within the durable job, so a loop produces distinct intents. A resumed
-/// run re-executes the agent from the start, so both are reproduced
-/// deterministically and a resume still re-finds its own intents.
+/// The ordinal is deliberately NOT a source position. A byte offset would
+/// make identity depend on file layout, so adding a comment above the
+/// call — or renaming a URL earlier in the file — would orphan every
+/// in-flight intent and silently re-submit its work. That is the same
+/// over-sensitivity spans are excluded from the protocol fingerprint to
+/// avoid, and it applies with more force here: a stranded fingerprint
+/// merely refuses, a stranded identity duplicates.
+///
+/// Execution order is what stays stable across a reformat, and a resumed
+/// run replays the agent from the start, so the Nth call to an operation
+/// is the Nth again and re-finds its own intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvocationIdentity {
-    pub callsite: u32,
     pub ordinal: u64,
 }
 
@@ -503,8 +594,6 @@ pub fn intent_idempotency_key(
     hasher.update(operation.as_bytes());
     hasher.update(b"\0");
     hasher.update(canonical.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(invocation.callsite.to_be_bytes());
     hasher.update(b"\0");
     hasher.update(invocation.ordinal.to_be_bytes());
     format!("protocol:{connector}:{operation}:{:x}", hasher.finalize())
@@ -678,22 +767,19 @@ mod tests {
 
     #[test]
     fn the_same_logical_call_derives_the_same_idempotency_key() {
-        let at = |callsite, ordinal| InvocationIdentity { callsite, ordinal };
+        let at = |ordinal| InvocationIdentity { ordinal };
         let args = [json!("o-1"), json!(3)];
-        let a = intent_idempotency_key("ups", "ship", &args, at(10, 0));
-        let b = intent_idempotency_key("ups", "ship", &args, at(10, 0));
+        let a = intent_idempotency_key("ups", "ship", &args, at(0));
+        let b = intent_idempotency_key("ups", "ship", &args, at(0));
         assert_eq!(
             a, b,
             "a retry or a resume of the SAME invocation must reuse the same intent"
         );
         assert_ne!(
             a,
-            intent_idempotency_key("ups", "ship", &[json!("o-2"), json!(3)], at(10, 0))
+            intent_idempotency_key("ups", "ship", &[json!("o-2"), json!(3)], at(0))
         );
-        assert_ne!(
-            a,
-            intent_idempotency_key("ups", "cancel", &args, at(10, 0))
-        );
+        assert_ne!(a, intent_idempotency_key("ups", "cancel", &args, at(0)));
     }
 
     /// The bug this identity exists to fix: "ship order-1" written twice,
@@ -705,21 +791,36 @@ mod tests {
     #[test]
     fn two_intentional_calls_with_identical_arguments_are_two_intents() {
         let args = [json!("o-1")];
-        let at = |callsite, ordinal| InvocationIdentity { callsite, ordinal };
+        let at = |ordinal| InvocationIdentity { ordinal };
 
-        // Same operation and arguments, written at two places in source.
+        // Two executions — whether they are two call sites or one call
+        // site running twice, the Nth call is a distinct piece of work.
         assert_ne!(
-            intent_idempotency_key("ups", "ship", &args, at(10, 0)),
-            intent_idempotency_key("ups", "ship", &args, at(42, 0)),
-            "two distinct call sites must not share an intent"
+            intent_idempotency_key("ups", "ship", &args, at(0)),
+            intent_idempotency_key("ups", "ship", &args, at(1)),
+            "two executions must not share an intent"
         );
-
-        // One call site executed twice — a loop, or a retry the program
-        // wrote itself.
         assert_ne!(
-            intent_idempotency_key("ups", "ship", &args, at(10, 0)),
-            intent_idempotency_key("ups", "ship", &args, at(10, 1)),
-            "two executions of one call site must not share an intent"
+            intent_idempotency_key("ups", "ship", &args, at(1)),
+            intent_idempotency_key("ups", "ship", &args, at(2)),
+        );
+    }
+
+    /// Identity must not depend on file layout. A byte offset would mean
+    /// adding a comment above the call orphans every in-flight intent and
+    /// silently re-submits its work — the same over-sensitivity spans are
+    /// excluded from the protocol fingerprint to avoid, but worse: a
+    /// stranded fingerprint merely refuses, a stranded identity
+    /// duplicates.
+    #[test]
+    fn the_invocation_identity_does_not_depend_on_source_position() {
+        let args = [json!("o-1")];
+        // Nothing about the key derives from where the call is written,
+        // so the same execution ordinal is the same intent no matter how
+        // the file is formatted.
+        assert_eq!(
+            intent_idempotency_key("ups", "ship", &args, InvocationIdentity { ordinal: 3 }),
+            intent_idempotency_key("ups", "ship", &args, InvocationIdentity { ordinal: 3 }),
         );
     }
 
@@ -815,6 +916,114 @@ mod tests {
         let mut intent = ProtocolIntentState::new(&p);
         intent.created_ms = None;
         assert_eq!(intent.deadline_remaining_ms(600, 9_999_999), 600_000);
+    }
+
+    // --- Resume across a PROVIDER change ---
+
+    /// The refusal `on_protocol_change` cannot override.
+    ///
+    /// An author writing `resume` is saying "this graph edit is safe to
+    /// continue through" — not "talk to whatever provider is configured
+    /// now". A submitted intent holds a job id ONE provider issued;
+    /// resuming against another polls a stranger about it, which at best
+    /// 404s and at worst addresses somebody else's job.
+    #[test]
+    fn a_changed_provider_refuses_even_when_the_protocol_says_resume() {
+        let p = ProviderProtocolDecl {
+            on_protocol_change: corvid_ast::ProtocolChangePolicy::Resume,
+            ..protocol()
+        };
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.submitted = true;
+        intent.provider_canonical = Some("encoding=v1\nbase_url=https://a.example.com".to_string());
+
+        let verdict = resume_verdict(
+            &p,
+            &intent,
+            Some("encoding=v1\nbase_url=https://b.example.com"),
+        );
+        assert!(
+            matches!(verdict, ResumeVerdict::RefusedProviderChanged { .. }),
+            "a different provider must refuse regardless of the resume posture; got {verdict:?}"
+        );
+        assert!(
+            verdict.changes().iter().any(|c| c.contains("base_url")),
+            "the diff must name what moved; got {:?}",
+            verdict.changes()
+        );
+    }
+
+    /// The same provider is not drift, so ordinary resumes still work.
+    #[test]
+    fn an_unchanged_provider_does_not_block_a_resume() {
+        let p = protocol();
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.submitted = true;
+        let provider = "encoding=v1\nbase_url=https://a.example.com";
+        intent.provider_canonical = Some(provider.to_string());
+        assert_eq!(
+            resume_verdict(&p, &intent, Some(provider)),
+            ResumeVerdict::Unchanged
+        );
+    }
+
+    /// Nothing has been submitted, so no provider issued anything and
+    /// there is nothing to be bound to.
+    #[test]
+    fn an_unsubmitted_intent_is_not_bound_to_a_provider() {
+        let p = protocol();
+        let intent = ProtocolIntentState::new(&p);
+        assert_eq!(
+            resume_verdict(&p, &intent, Some("encoding=v1\nbase_url=https://b.example.com")),
+            ResumeVerdict::Unchanged
+        );
+    }
+
+    /// Rotating a secret's VALUE is not provider drift; pointing the
+    /// connector at a different secret is, because it may authenticate as
+    /// a different principal. The encoding carries the secret NAME only,
+    /// so a rotation cannot strand in-flight work and a re-point cannot
+    /// slip through.
+    #[test]
+    fn the_provider_encoding_names_the_secret_not_its_value() {
+        use crate::connectors::{ConnectorAuthSpec, ConnectorHttpSpec};
+        let base = ConnectorHttpSpec {
+            extra_headers: Vec::new(),
+            connector: "ups".to_string(),
+            operation: "ship".to_string(),
+            base_url: "https://api.ups.com".to_string(),
+            method: "POST".to_string(),
+            path: "/ship".to_string(),
+            param_names: vec![],
+            body: None,
+            auth: Some(ConnectorAuthSpec::Bearer {
+                secret: "UPS_TOKEN".to_string(),
+            }),
+            error_map: vec![],
+            returns_result: false,
+            retry: None,
+            rate_limit: None,
+            circuit_breaker: None,
+        };
+        let encoded = provider_canonical_encoding(&base);
+        assert!(
+            encoded.contains("UPS_TOKEN"),
+            "the credential SOURCE is part of provider identity"
+        );
+
+        let mut repointed = base.clone();
+        repointed.auth = Some(ConnectorAuthSpec::Bearer {
+            secret: "OTHER_TOKEN".to_string(),
+        });
+        assert_ne!(
+            encoded,
+            provider_canonical_encoding(&repointed),
+            "pointing at a different secret may authenticate as a different principal"
+        );
+
+        let mut moved = base.clone();
+        moved.base_url = "https://staging.ups.com".to_string();
+        assert_ne!(encoded, provider_canonical_encoding(&moved));
     }
 
     // --- Resume across a protocol change ---
@@ -949,7 +1158,7 @@ mod tests {
     fn an_unchanged_protocol_resumes_normally() {
         let p = protocol();
         let intent = ProtocolIntentState::new(&p);
-        assert_eq!(resume_verdict(&p, &intent), ResumeVerdict::Unchanged);
+        assert_eq!(resume_verdict(&p, &intent, None), ResumeVerdict::Unchanged);
     }
 
     /// `refuse` is a refusal even though the new graph could technically
@@ -962,7 +1171,7 @@ mod tests {
         intent.submitted = true;
         intent.protocol_canonical = Some(earlier_encoding());
         assert!(matches!(
-            resume_verdict(&p, &intent),
+            resume_verdict(&p, &intent, None),
             ResumeVerdict::RefusedByPolicy { .. }
         ));
     }
@@ -977,7 +1186,7 @@ mod tests {
         intent.submitted = true;
         intent.protocol_canonical = Some(earlier_encoding());
         assert!(matches!(
-            resume_verdict(&p, &intent),
+            resume_verdict(&p, &intent, None),
             ResumeVerdict::ResumedAcrossChange { .. }
         ));
     }
@@ -996,7 +1205,7 @@ mod tests {
         intent.protocol_canonical = Some(earlier_encoding());
         intent.state = "a_state_that_was_deleted".to_string();
         assert!(matches!(
-            resume_verdict(&p, &intent),
+            resume_verdict(&p, &intent, None),
             ResumeVerdict::RefusedStateVanished { state, .. } if state == "a_state_that_was_deleted"
         ));
     }
@@ -1010,11 +1219,11 @@ mod tests {
         let p = protocol();
         let mut fresh = ProtocolIntentState::new(&p);
         fresh.protocol_canonical = None;
-        assert_eq!(resume_verdict(&p, &fresh), ResumeVerdict::Unchanged);
+        assert_eq!(resume_verdict(&p, &fresh, None), ResumeVerdict::Unchanged);
 
         let mut inflight = fresh.clone();
         inflight.submitted = true;
-        assert!(resume_verdict(&p, &inflight).is_refusal());
+        assert!(resume_verdict(&p, &inflight, None).is_refusal());
     }
 }
 

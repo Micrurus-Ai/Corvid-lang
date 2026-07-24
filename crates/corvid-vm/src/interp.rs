@@ -295,16 +295,7 @@ impl<'ir> Interpreter<'ir> {
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
-                        .call_protocol_operation(
-                            callee_name,
-                            protocol,
-                            json_args.to_vec(),
-                            // The call's source position identifies WHICH
-                            // call this is, so two calls to the same
-                            // operation with the same arguments remain two
-                            // distinct intents.
-                            span.start as u32,
-                        )
+                        .call_protocol_operation(callee_name, protocol, json_args.to_vec())
                         .await
                     {
                         Ok(result) => json_to_value(result, result_decode_ty, &self.types_by_id)

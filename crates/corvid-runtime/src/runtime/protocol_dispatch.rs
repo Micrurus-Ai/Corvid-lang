@@ -11,9 +11,12 @@
 //!    re-submitted on resume.
 //!
 //!    The intent is keyed by the LOGICAL INVOCATION — connector,
-//!    operation, arguments, callsite, and which execution of that
-//!    callsite this is — so two intentional calls that happen to share
-//!    arguments stay two intents instead of collapsing into one.
+//!    operation, arguments, and which execution of that operation this
+//!    is within the run — so two intentional calls that happen to share
+//!    arguments stay two intents instead of collapsing into one. The
+//!    ordinal is deliberately not a source position: identity must not
+//!    depend on file layout, or a reformat would orphan in-flight intents
+//!    and silently re-submit their work.
 //! 2. **Bind only on a typed response.** The provider job id is taken
 //!    from the DECODED submit response and only then written into the
 //!    intent — never guessed, never assumed from the request.
@@ -60,7 +63,6 @@ impl Runtime {
         operation: &str,
         protocol: &ProviderProtocolDecl,
         args: Vec<serde_json::Value>,
-        callsite: u32,
     ) -> Result<serde_json::Value, RuntimeError> {
         let spec = self
             .connector_calls
@@ -73,7 +75,7 @@ impl Runtime {
                      should have refused this"
                 ),
             })?;
-        self.dispatch_protocol_operation(&spec, protocol, &args, callsite)
+        self.dispatch_protocol_operation(&spec, protocol, &args)
             .await
     }
 
@@ -84,7 +86,6 @@ impl Runtime {
         spec: &ConnectorHttpSpec,
         protocol: &ProviderProtocolDecl,
         args: &[serde_json::Value],
-        callsite: u32,
     ) -> Result<serde_json::Value, RuntimeError> {
         // A protocol's intent must outlive the process, so it is only
         // executable inside a durable job. Refusing here (rather than
@@ -100,12 +101,12 @@ impl Runtime {
             ),
         })?;
 
-        // Which execution of this callsite this is, within this run. A
-        // resumed run replays the agent from the start, so the same call
-        // gets the same ordinal and re-finds its own intent.
+        // Which execution of this operation this is, within this run.
+        // A resumed run replays the agent from the start, so the Nth call
+        // is the Nth again and re-finds its own intent.
         let ordinal = {
             let mut counts = self.protocol_invocations.lock().unwrap();
-            let slot = counts.entry(callsite).or_insert(0);
+            let slot = counts.entry(spec.operation.clone()).or_insert(0);
             let ordinal = *slot;
             *slot += 1;
             ordinal
@@ -114,13 +115,20 @@ impl Runtime {
             &spec.connector,
             &spec.operation,
             args,
-            InvocationIdentity { callsite, ordinal },
+            InvocationIdentity { ordinal },
         );
-        let mut intent = self.load_protocol_intent(job, &key, protocol, &spec.operation)?;
+        let running_provider = crate::protocol::provider_canonical_encoding(spec);
+        let mut intent =
+            self.load_protocol_intent(job, &key, protocol, &spec.operation, &running_provider)?;
 
         // (1) Record the intent BEFORE any submit, so a crash here is
         // recoverable and a resume re-finds it instead of re-submitting.
         if !intent.submitted {
+            // Which provider this intent is being submitted to, recorded
+            // with the intent itself. A later run that finds a different
+            // provider configured must not poll it about a job id this
+            // one issued.
+            intent.provider_canonical = Some(running_provider.clone());
             self.checkpoint_protocol_intent(job, &key, &intent)?;
 
             // (2) Submit, carrying the intent key in the header the
@@ -603,6 +611,7 @@ impl Runtime {
         key: &str,
         protocol: &ProviderProtocolDecl,
         protocol_operation: &str,
+        running_provider: &str,
     ) -> Result<ProtocolIntentState, RuntimeError> {
         let checkpoints = job.queue.list_checkpoints(&job.job_id)?;
         let resumed = checkpoints
@@ -618,7 +627,7 @@ impl Runtime {
         // in flight. Resuming a live provider job against a graph it was
         // never started under is a consequential decision, so the
         // DECLARATION makes it — never this dispatcher.
-        let verdict = resume_verdict(protocol, &intent);
+        let verdict = resume_verdict(protocol, &intent, Some(running_provider));
 
         // Every outcome is recorded, including the uneventful one: an
         // audit needs to see that a resume was CHECKED and matched, not
@@ -654,6 +663,20 @@ impl Runtime {
                      flight, and the declaration says `on_protocol_change: refuse`. The intent \
                      stays checkpointed in state `{}` — nothing was re-submitted or \
                      re-polled{still_running}. What changed: {}",
+                    intent.state,
+                    describe_changes(&changes)
+                ),
+            }),
+            ResumeVerdict::RefusedProviderChanged { changes } => Err(RuntimeError::ToolFailed {
+                tool: protocol_operation.to_string(),
+                message: format!(
+                    "provider protocol `{protocol_operation}` has an in-flight intent that was \
+                     submitted to a DIFFERENT provider than the one now configured, so resuming \
+                     would poll a stranger about a job id this deployment did not issue. The \
+                     intent stays checkpointed in state `{}`{still_running}. This refusal is not \
+                     governed by `on_protocol_change` — that decides whether a changed protocol \
+                     GRAPH may resume, and cannot authorise talking to a different provider. What \
+                     changed: {}",
                     intent.state,
                     describe_changes(&changes)
                 ),
