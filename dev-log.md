@@ -16709,6 +16709,15 @@ protocol changed under it is a consequential-policy decision — a real
 provider job is out there — so the resume posture gets declared in
 source rather than inferred.
 
+Record correction: commit `af990b0e` also carries an unrelated work
+stream — installer editor-detection, the bundled VS Code extension, and
+the release workflow (`.github/workflows/release.yml`, `README.md`,
+`docs/book/01-install.md`, `extensions/vscode-corvid/*`, `install/*`).
+I staged with `git add -A` instead of the paths my slice touched, so that
+work landed under a protocol commit message. Left in place deliberately
+rather than rewriting pushed `main`. The slice's own changes are
+`protocol_dispatch.rs`, `protocol_lifecycle.rs`, and the three docs.
+
 ## 2026-07-24 - 52h-3 (part 3): the "blocked" items weren't blocked — and one hid a live budget hole
 
 I had marked two items blocked. Challenged on it, and the challenge was
