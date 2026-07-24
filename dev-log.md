@@ -16652,6 +16652,53 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-3 (part 1): a provider can slow us down, and a submitted intent is never "cancelled"
+
+Two governed properties on top of the durable lifecycle.
+
+**Cadence is a floor, not a suggestion.** The poll delay is
+`max(declared interval, provider Retry-After)`. A provider that asks for
+more room gets it; a provider that asks us to hammer it cannot — the
+source's declared interval is the floor. Only `Retry-After`'s
+delta-seconds form is honoured, because the HTTP-date form needs a
+trusted clock comparison and guessing would be worse than ignoring it. To
+carry this, connector dispatch grew a `_detailed` variant returning
+`ConnectorResponseMeta` (status + `Retry-After`); the plain entry point is
+unchanged, so ordinary connector calls are unaffected. Rate-limit
+admission already covers polls — the limiter runs inside dispatch, so a
+long-running protocol cannot outrun the connector's declared budget.
+
+**A submitted intent is never reported as cleanly cancelled.** This is
+the cancellation×irreversibility rule composed with durable PROVIDER
+state, and it is the honest half of the slice. Before submit, cancelling
+is exact — no provider work exists. After submit, a real job exists that
+Corvid cannot un-create, and the declaration has no cancel endpoint, so
+there is nothing truthful to compensate with. Dropping the intent would
+leave real work running with nobody observing it — the silent-orphan
+failure. So cancellation degrades to `Detached`: the intent stops being
+awaited, and that disposition is *recorded* rather than pretended away.
+
+Deliberately NOT claimed as complete: budget + circuit-breaker admission
+on the poll loop, and the cancel/compensate/detach-and-monitor API that
+consumes the disposition (compensation cannot be honest until a cancel
+endpoint is declarable). Those are part 2.
+
+Tests: 2 engine (disposition before/after submit) + 1 timing integration
+(a 3s `Retry-After` demonstrably stretches a 1s cadence past 3.5s).
+
+### Also: the native-staticlib gate trap, diagnosed properly
+
+Two corvid-driver native tests failed repeatedly this session. They are
+not flaky and not environmental in the hand-wave sense: `corvid-runtime`
+is `crate-type = ["lib","staticlib"]`, and `cargo test --lib` does NOT
+emit `target/debug/corvid_runtime.lib`. Without it the native tier
+silently falls back to the interpreter, so no binary is cached and the
+assertion fails. Any `cargo clean` — or any change to corvid-runtime —
+invalidates it. Fix: `cargo build -p corvid-runtime` before native-tier
+tests. Recorded in memory so it stops costing time.
+
+---
+
 ## 2026-07-24 - 52h-2: the durable intent runtime — a protocol submits once, and a restart proves it
 
 52h-1 made the temporal contract language data and honestly refused to

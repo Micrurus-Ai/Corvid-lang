@@ -13,12 +13,38 @@ use super::Runtime;
 use crate::connectors::{build_connector_request, ConnectorHttpSpec};
 use crate::errors::RuntimeError;
 
+/// What the provider said ABOUT the exchange, alongside the decoded
+/// payload (slice 52h-3). The governed scheduler needs the provider's own
+/// backoff request; ordinary connector calls ignore it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConnectorResponseMeta {
+    pub status: u16,
+    /// `Retry-After`, in milliseconds, when the provider asked us to wait.
+    /// Only the delta-seconds form is honoured; an HTTP-date form is
+    /// ignored rather than guessed at.
+    pub retry_after_ms: Option<u64>,
+}
+
 impl Runtime {
     pub(super) async fn dispatch_connector_http(
         &self,
         spec: &ConnectorHttpSpec,
         args: &[serde_json::Value],
     ) -> Result<serde_json::Value, RuntimeError> {
+        self.dispatch_connector_http_detailed(spec, args)
+            .await
+            .map(|(payload, _meta)| payload)
+    }
+
+    /// As [`Self::dispatch_connector_http`], but also reporting what the
+    /// provider said about the exchange (status + `Retry-After`). The
+    /// verified-protocol poll loop uses this so a provider can push back
+    /// on our cadence.
+    pub(super) async fn dispatch_connector_http_detailed(
+        &self,
+        spec: &ConnectorHttpSpec,
+        args: &[serde_json::Value],
+    ) -> Result<(serde_json::Value, ConnectorResponseMeta), RuntimeError> {
         // Resolve credentials from the secret store at the last moment.
         // The resolver hands the value ONLY to the request builder, which
         // places it in a header; it is never returned or recorded.
@@ -41,6 +67,10 @@ impl Runtime {
         }
 
         let response = self.http.send(&request).await?;
+        let meta = ConnectorResponseMeta {
+            status: response.status,
+            retry_after_ms: retry_after_ms(&response),
+        };
 
         // Typed status -> error mapping (slice 52g-3c-5). A status named
         // by an `on status <code> -> Variant` mapping becomes the typed
@@ -53,10 +83,13 @@ impl Runtime {
             .iter()
             .find(|(code, _)| *code == response.status)
         {
-            return Ok(serde_json::json!({
-                "tag": "err",
-                "err": { "tag": "variant", "variant": variant, "fields": [] },
-            }));
+            return Ok((
+                serde_json::json!({
+                    "tag": "err",
+                    "err": { "tag": "variant", "variant": variant, "fields": [] },
+                }),
+                meta,
+            ));
         }
 
         // A 2xx body is decoded to the operation's success type. When the
@@ -66,9 +99,9 @@ impl Runtime {
             let body: serde_json::Value =
                 serde_json::from_str(&response.body).unwrap_or(serde_json::Value::Null);
             if spec.returns_result {
-                Ok(serde_json::json!({ "tag": "ok", "ok": body }))
+                Ok((serde_json::json!({ "tag": "ok", "ok": body }), meta))
             } else {
-                Ok(body)
+                Ok((body, meta))
             }
         } else {
             // An unmapped non-2xx status is a transport-level failure.
@@ -114,4 +147,17 @@ impl Runtime {
         entry.1 += 1;
         Ok(())
     }
+}
+
+/// Read `Retry-After` (slice 52h-3). Only the delta-seconds form is
+/// honoured — an HTTP-date needs a trusted clock comparison, and guessing
+/// at it would be worse than ignoring it, so an unparseable value simply
+/// leaves the declared cadence in charge.
+fn retry_after_ms(response: &crate::http::HttpResponse) -> Option<u64> {
+    response
+        .headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("retry-after"))
+        .and_then(|h| h.value.trim().parse::<u64>().ok())
+        .map(|secs| secs.saturating_mul(1000))
 }

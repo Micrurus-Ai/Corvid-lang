@@ -101,6 +101,9 @@ impl Runtime {
         // forces the declared deadline target.
         let started_ms = crate::tracing::now_ms();
         let deadline_ms = protocol.deadline_secs.saturating_mul(1000);
+        // The provider's most recent `Retry-After`, if it asked us to
+        // back off (slice 52h-3).
+        let mut retry_after_hint: Option<u64> = None;
         loop {
             if is_terminal(protocol, &intent.state) {
                 break;
@@ -120,11 +123,22 @@ impl Runtime {
                 });
             }
 
-            let delay = poll_delay_ms(protocol, intent.polls);
+            // Governed cadence (slice 52h-3): never poll faster than the
+            // DECLARED interval, and never faster than the provider's own
+            // `Retry-After`. Taking the max means a provider can slow us
+            // down but never speed us up past what the source declared.
+            // (The connector's client-side rate limit admits each poll
+            // inside the dispatch below, so the poll loop cannot outrun
+            // the declared request budget either.)
+            let declared = poll_delay_ms(protocol, intent.polls);
+            let delay = retry_after_hint.map_or(declared, |asked| declared.max(asked));
             tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
 
             let poll_spec = self.poll_spec_for(spec, protocol, &intent, args)?;
-            let raw = self.dispatch_connector_http(&poll_spec, &[]).await?;
+            let (raw, meta) = self
+                .dispatch_connector_http_detailed(&poll_spec, &[])
+                .await?;
+            retry_after_hint = meta.retry_after_ms;
             let poll_response = unwrap_ok_envelope(&raw);
 
             observe(protocol, &spec.operation, &mut intent, &poll_response).map_err(|e| {

@@ -141,6 +141,37 @@ pub fn is_terminal(protocol: &ProviderProtocolDecl, state: &str) -> bool {
     protocol.terminal.iter().any(|t| t.name == state)
 }
 
+/// What cancelling an intent may actually do (slice 52h-3).
+///
+/// This is the cancellation×irreversibility rule composed with DURABLE
+/// PROVIDER STATE. Once an intent has submitted, a provider-side job
+/// exists that Corvid cannot un-create: the declaration has no cancel
+/// endpoint, so there is nothing honest to compensate with. Dropping the
+/// intent would leave real work running with nobody observing it — the
+/// silent-orphan failure. So a submitted intent is never "cancelled"; it
+/// is DETACHED, and that disposition is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationDisposition {
+    /// Nothing was submitted, so no provider work exists. Cancelling is
+    /// exact: the intent simply never happened.
+    Cancelled,
+    /// A provider job exists and cannot be un-created. The intent stops
+    /// being awaited but is recorded as detached, so the work is
+    /// accounted for rather than silently orphaned.
+    Detached,
+}
+
+/// Decide what cancelling this intent means. Past the irreversible
+/// boundary (a submitted provider job), cancellation degrades to
+/// detach-and-record rather than pretending the work was undone.
+pub fn cancellation_disposition(intent: &ProtocolIntentState) -> CancellationDisposition {
+    if intent.submitted {
+        CancellationDisposition::Detached
+    } else {
+        CancellationDisposition::Cancelled
+    }
+}
+
 /// Extract the provider status from a decoded poll response, per the
 /// `status`-field convention, and validate it against the declared
 /// universe. An undeclared status is an error, never a silent skip.
@@ -461,6 +492,28 @@ mod tests {
         assert_eq!(a, b, "a retry of the same call must reuse the same intent");
         assert_ne!(a, different_args);
         assert_ne!(a, different_op);
+    }
+
+    #[test]
+    fn cancelling_before_submit_is_exact_but_after_submit_only_detaches() {
+        // The cancellation×irreversibility rule composed with durable
+        // provider state: before submit there is no provider work, so
+        // cancellation is exact. After submit a real job exists that
+        // Corvid cannot un-create, so cancellation degrades to
+        // detach-and-record rather than silently orphaning it.
+        let p = protocol();
+        let mut intent = ProtocolIntentState::new(&p);
+        assert_eq!(
+            cancellation_disposition(&intent),
+            CancellationDisposition::Cancelled
+        );
+
+        intent.bind_submit_response(&json!({"id": "prov-1"}));
+        assert_eq!(
+            cancellation_disposition(&intent),
+            CancellationDisposition::Detached,
+            "a submitted intent must never be reported as cleanly cancelled"
+        );
     }
 
     #[test]
