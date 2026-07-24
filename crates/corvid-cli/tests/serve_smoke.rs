@@ -2582,3 +2582,186 @@ server adversary_api:
         409, "a second decision on the same approval must be 409 (already decided)"
     );
 }
+
+/// 52h-7: a served route that invokes a connector operation must be able
+/// to EXECUTE that connector. Before this, `corvid serve` installed no
+/// connector mode and no dispatch specs, so the Application Contract
+/// could advertise a connector a route could never reach — the gap the
+/// 52h audit found. This is the forcing-function test: it exercises a
+/// route calling a `mock`-mode connector end to end over HTTP.
+///
+/// Port 8196 (the hermetic tests own 8195+).
+#[test]
+fn a_served_route_executes_a_mock_mode_connector() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Repo:
+    name: String
+
+type RepoView:
+    name: String
+
+effect http_read:
+    cost: $0.0
+
+connector github:
+    base_url: "https://api.github.com"
+    modes: [mock, real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo("corvid-from-mock")
+
+agent lookup(owner: String, repo: String) -> RepoView uses http_read:
+    r = get_repo(owner, repo)
+    return RepoView(r.name)
+
+server repo_api:
+    route GET "/repo" -> json RepoView uses http_read:
+        return lookup("micrurus", "corvid")
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port: u16 = 8196;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--mode")
+        .arg("mock")
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "server did not become ready on :{port} — if it exited, serve likely refused a \
+         connector app it should now execute"
+    );
+
+    // The route calls the connector; in mock mode the compiled `mock:`
+    // payload is evaluated, so the response carries the mock repo name.
+    let (status, body) = http_get(port, "/repo").expect("GET /repo failed");
+    assert_eq!(
+        status, 200,
+        "a route calling a mock-mode connector must execute; got {status} body=`{body}`"
+    );
+    assert!(
+        body.contains("corvid-from-mock"),
+        "the response must carry the connector's mock payload; got: {body}"
+    );
+}
+
+/// The other half of the contract: a connector app served with NO --mode
+/// must refuse to start, not bind and fail at first request. This is the
+/// no-hidden-defaults rule reaching the serve entry point.
+#[test]
+fn serve_refuses_a_connector_app_without_a_selected_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Repo:
+    name: String
+
+type RepoView:
+    name: String
+
+effect http_read:
+    cost: $0.0
+
+connector github:
+    base_url: "https://api.github.com"
+    modes: [mock, real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+        mock: Repo("corvid-from-mock")
+
+agent lookup(owner: String, repo: String) -> RepoView uses http_read:
+    r = get_repo(owner, repo)
+    return RepoView(r.name)
+
+server repo_api:
+    route GET "/repo" -> json RepoView uses http_read:
+        return lookup("micrurus", "corvid")
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    // No --mode. The startup closure must refuse before binding.
+    let out = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg("127.0.0.1:8197")
+        .current_dir(repo_root())
+        .output()
+        .expect("run corvid serve");
+    assert!(
+        !out.status.success(),
+        "a connector app served without --mode must refuse to start"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("mode"),
+        "the refusal must name the missing mode decision; got: {stderr}"
+    );
+}
+
+/// The Phase 52 continuous reference application, served end to end.
+///
+/// The locked phase rule says one file grows every slice and stays a
+/// forcing function — but nothing actually SERVED `examples/reference_app`,
+/// so it silently stopped growing at 52c and the serve x connector gap
+/// slipped through (the 52h audit's finding #7). This test is the gate
+/// that rule needs: it serves the reference app in `mock` mode and drives
+/// its connector route, so a future slice that breaks the composition
+/// fails here instead of in review.
+///
+/// Port 8198.
+#[test]
+fn the_reference_application_serves_its_connector_route() {
+    let main = repo_root()
+        .join("examples")
+        .join("reference_app")
+        .join("src")
+        .join("main.cor");
+    assert!(main.exists(), "missing {}", main.display());
+
+    let port: u16 = 8198;
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&main)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--mode")
+        .arg("mock")
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+
+    assert!(
+        wait_until_ready(port),
+        "the reference app did not become ready on :{port} — if serve refused a connector \
+         app it should execute, that is the composition gap this gate exists to catch"
+    );
+
+    // A plain route still works (the app did not regress its 52a surface).
+    let (status, _) = http_get(port, "/orders/order-1").expect("GET /orders/{id}");
+    assert_eq!(status, 200, "the base order route must still serve");
+
+    // The connector route executes the mock-mode operation end to end.
+    let (status, body) =
+        http_get(port, "/orders/order-1/carrier").expect("GET /orders/{id}/carrier");
+    assert_eq!(
+        status, 200,
+        "the connector route must execute in mock mode; got {status} body=`{body}`"
+    );
+    assert!(
+        body.contains("mock-carrier"),
+        "the connector route must return the compiled mock payload; got: {body}"
+    );
+}

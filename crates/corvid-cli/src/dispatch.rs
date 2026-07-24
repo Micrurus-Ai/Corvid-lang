@@ -147,10 +147,16 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             host,
             port,
             with_tools_cdylib,
+            mode,
         }) => {
             let file = resolve_project_source(file)?;
             let composed_listen = compose_serve_listen(&listen, host.as_deref(), port);
-            cmd_serve(&file, &composed_listen, with_tools_cdylib.as_deref())
+            cmd_serve(
+                &file,
+                &composed_listen,
+                with_tools_cdylib.as_deref(),
+                mode.as_deref(),
+            )
         }
         Some(Command::Dev { file, listen, out }) => {
             crate::dev_cmd::cmd_dev(file.as_deref(), &listen, out.as_deref())

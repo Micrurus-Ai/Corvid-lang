@@ -45,6 +45,30 @@ type ImportReceipt:
     filename: String
     bytes: Int
 
+type Carrier:
+    name: String
+
+type CarrierQuote:
+    carrier: String
+
+# The read effect the carrier lookup performs. The connector operation
+# carries it so cost/effects compose through the same machinery every
+# other call uses.
+effect http_read:
+    cost: $0.0
+
+# A protocol-typed connector to a shipping carrier (slice 52g/52h). The
+# operation is a normal typed HTTP call; `mock:` gives it an executable
+# body so the reference app serves in `mock` mode with no live network
+# and no credential. The deployment selects the mode with
+# `corvid serve --mode mock`.
+connector shipping:
+    base_url: "https://carrier.example.com"
+    modes: [mock, real]
+    operation quote_carrier(zip: String) -> Carrier uses http_read:
+        GET "/carriers/{zip}"
+        mock: Carrier("mock-carrier")
+
 # A streaming source: each yield becomes one Server-Sent Event.
 agent order_activity() -> Stream<OrderEvent>:
     yield OrderEvent("order-1", "placed")
@@ -85,6 +109,15 @@ server orders_api:
     @upload(max_mb: 25)
     route POST "/orders/import" body Upload<Csv> -> json ImportReceipt:
         return ImportReceipt(body.filename(), body.size())
+
+    # A route that calls a connector operation (slice 52g/52h). It
+    # forces `corvid serve` to actually execute the connector in the
+    # deployment-selected mode — the composition the 52h audit found
+    # missing. In `mock` mode this returns the connector's compiled
+    # `mock:` payload with no network and no credential.
+    route GET "/orders/{id}/carrier" -> json CarrierQuote:
+        carrier = quote_carrier(path.id)
+        return CarrierQuote(carrier.name)
 
 agent main() -> String:
     return "orders_api reference application"

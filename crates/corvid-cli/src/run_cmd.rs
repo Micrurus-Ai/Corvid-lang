@@ -19,7 +19,10 @@ use std::path::Path;
 /// Parse the `--mode` value into a connector execution mode. `None`
 /// (the flag omitted) stays `None` — a connector program then refuses
 /// to start at the connector startup closure, naming the decision.
-fn parse_connector_mode(mode: Option<&str>) -> Result<Option<ConnectorMode>> {
+///
+/// Shared with `corvid serve` so the two entry points resolve the mode
+/// identically; a second copy would be a place for them to drift.
+pub(crate) fn parse_connector_mode(mode: Option<&str>) -> Result<Option<ConnectorMode>> {
     match mode {
         None => Ok(None),
         Some("mock") => Ok(Some(ConnectorMode::Mock)),

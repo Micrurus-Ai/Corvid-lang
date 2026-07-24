@@ -130,7 +130,9 @@ pub(crate) fn cmd_serve(
     file: &Path,
     listen: &str,
     tools_cdylib: Option<&Path>,
+    mode: Option<&str>,
 ) -> Result<u8> {
+    let connector_mode = crate::run_cmd::parse_connector_mode(mode)?;
     let source =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
     let config = load_corvid_config_for(file);
@@ -255,9 +257,54 @@ pub(crate) fn cmd_serve(
             // QueueApprover below; any accidental non-request path fails
             // closed rather than minting an anonymous approval.
             .approver(Arc::new(ProgrammaticApprover::always_no()))
-            .tool_registry(host_tools.clone()),
+            .tool_registry(host_tools.clone())
+            // A served route that calls a connector operation must be able
+            // to EXECUTE it. Without these two, the contract could
+            // advertise a connector a route can never reach — the gap the
+            // 52h audit found. The selected mode is validated below before
+            // the server binds.
+            .connector_mode(connector_mode)
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir)),
     )
     .build();
+
+    // Connector startup closure, the same one `corvid run` enforces: a
+    // program that declares connectors must have a real, executable mode
+    // selected for every operation, or it refuses to start. Refusing here
+    // (before binding) rather than at first request is what keeps
+    // Contract Closure honest for connector-using routes.
+    if !ir.connectors.is_empty() {
+        let secret_present = |name: &str| runtime.secret_present(name);
+        let ctx = corvid_driver::ConnectorRuntimeContext {
+            selected_mode: runtime.connector_mode(),
+            egress_configured: runtime.egress_configured(),
+            replay_source_present: runtime.has_replay_source(),
+            secret_present: &secret_present,
+            executable_modes: &[
+                corvid_ast::ConnectorMode::Mock,
+                corvid_ast::ConnectorMode::Replay,
+                corvid_ast::ConnectorMode::Real,
+            ],
+        };
+        let refusals = corvid_driver::check_connector_startup(&ir, &ctx);
+        if !refusals.is_empty() {
+            for refusal in &refusals {
+                eprintln!("{}", refusal.message());
+            }
+            return Ok(1);
+        }
+        // The resolved mode is deployment evidence, exactly as `corvid
+        // run` records it.
+        if let Some(selected) = runtime.connector_mode() {
+            runtime.emit_host_event(
+                "connector.mode_selected",
+                serde_json::json!({
+                    "mode": selected.as_str(),
+                    "connectors": ir.connectors.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                }),
+            );
+        }
+    }
     // Build the Application Contract + OpenAPI so the live backend
     // exposes its own machine-readable surface (slice 51r). Contract
     // generation is part of startup closure: a backend must never bind

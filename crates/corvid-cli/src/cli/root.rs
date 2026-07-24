@@ -213,6 +213,14 @@ pub enum Command {
         /// its Cargo.toml.
         #[arg(long, value_name = "PATH")]
         with_tools_cdylib: Option<PathBuf>,
+        /// Connector execution mode: `mock`, `replay`, or `real`. A
+        /// program that declares connectors REQUIRES this — there is no
+        /// default, and the selected mode must be one the connector's
+        /// `modes: [...]` allows. Omitting it for a connector app is a
+        /// startup refusal naming the decision, exactly as `corvid run
+        /// --mode` behaves; a program with no connectors ignores it.
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
     },
     /// The universal contract-driven dev console. Builds the app's
     /// Application Contract and serves a single self-contained HTML
