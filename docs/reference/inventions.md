@@ -804,10 +804,31 @@ surprise.
 **What the runtime guarantees.** The intent is checkpointed *before* the submit
 request leaves the process, so a crash between "intent recorded" and "submit
 acknowledged" cannot lose the work. The provider job id is bound only from the
-DECODED response — never guessed, never assumed from the request. Every observed
-transition is checkpointed, so a restart resumes at the last observation instead
-of re-submitting. The call returns only on a declared terminal state: the submit
-response is never mistaken for completion.
+JSON-decoded response — never guessed, never assumed from the request. Every
+observed transition is checkpointed, so a restart resumes at the last observation
+instead of re-submitting. The call returns only on a declared terminal state: the
+submit response is never mistaken for completion.
+
+**What it does NOT yet guarantee (open work, tracked as 52h-6).** Three claims
+that appear elsewhere in this document's history are narrower than they read, and
+are corrected here rather than left standing:
+
+1. **Not exactly-once against the provider.** The intent key is a durable
+   checkpoint label; it is never transmitted as an idempotency header, body field,
+   or path value. A crash in the window between the provider accepting a submit
+   and Corvid checkpointing that fact resumes into a *second* submit, and the
+   provider has no way to recognise it. Exactly-once needs a provider-visible
+   idempotency transport plus a logical invocation identity — the current key is
+   `hash(connector, operation, args)`, so two *intentional* identical calls in one
+   job also collapse into one intent.
+2. **The deadline is not preserved across restarts.** It is measured from process
+   start, not intent creation, so a repeatedly restarted protocol receives a fresh
+   full window each time. This also weakens the budget bound, which assumes one
+   deadline window.
+3. **"Typed response" means JSON-decoded, not schema-validated.** Binding happens
+   on raw JSON; type decoding occurs after the lifecycle returns. A malformed
+   submit response can create a provider job and fail later. Validation at the
+   boundary is 52i.
 
 **What happens when things go wrong.** A provider's `Retry-After` can slow the
 declared cadence but never speed it past what the source declared. Transient poll
@@ -834,7 +855,7 @@ so what it predicts is what runs.
 
 Why it is unique: other ecosystems give you a job queue, or a retry library, or a
 state-machine DSL, and leave the correspondence between them to code review.
-Corvid makes the provider's *timeline* a checked part of the program — exactly-once
+Corvid makes the provider's *timeline* a checked part of the program — durable
 submission, budget-bounded polling, honest cancellation, and replayable history
 falling out of one declaration.
 
@@ -882,7 +903,7 @@ falling out of one declaration.
 | Cursor Pagination (Page envelope) | Shipped (52c-2) | `corvid serve` a `Page<Item>` route, then GET it | `crates/corvid-cli/tests/serve_smoke.rs::serve_returns_a_page_cursor_envelope` | [`inventions.md`](#the-complete-application-runtime) | `Page(items, next_cursor)` builds the `{items, next_cursor, has_more}` envelope (`has_more` derived, cursor unwrapped from `Option`); the incoming cursor is read from the route's typed query struct. |
 | Reversibility-Guarded Parallel Cancellation | Shipped (52d) | `corvid tour --topic parallel-cancellation` | `crates/corvid-vm/src/tests/parallel.rs` (rule + replay-reproduction + adversarial) | [`core-semantics.md`](./core-semantics.md) (`parallel.cancellation_reversibility`) | A `parallel:` block fails fast, but a branch past a non-reversible effect boundary is never cancelled; live cancellation is recorded per arm and Substitute-mode replay reproduces it deterministically (cancelled arm stops at its recorded boundary, shielded arm reaches its terminal, non-cancelling blocks byte-identical). Cooperative at tool-dispatch boundaries, not preemptive. |
 | First-Login Provisioning Is A Compile-Time Decision | Shipped (52e) | `corvid tour --topic oauth-login` | `crates/corvid-cli/src/serve_auth/routes.rs` (`callback_tests`: open provisions+recognises, invited gate, reused-state / nonce-mismatch / tampered-token refused, userinfo) + `crates/corvid-cli/tests/serve_smoke.rs::serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider` + `crates/corvid-abi/src/app_contract.rs::identity_with_oauth_provider_but_no_provisioning_is_rejected` | [`inventions.md`](#first-login-is-an-explicit-compile-time-decision) | An `identity` block auto-mounts the login surface (PKCE + single-use state + nonce + JWKS/userinfo verify + safe cookie); omitting the first-login `provisioning:` policy is a compile error (E5210). Identity is keyed server-side on `(issuer, subject)` / `(provider, user_id)`, never email. Durable `approval_required` provisioning is a later slice. |
-| Verified Provider Protocols | Shipped (52h) | `corvid tour --topic verified-provider-protocols` / `corvid connectors simulate <file>` | `crates/corvid-driver/tests/protocol_lifecycle.rs` (submit-once + id-bound-from-typed-response + terminal-only return; resume never re-submits; `Retry-After` slows the declared cadence; breaker tolerates then trips; cancel compensates through the declared endpoint; recorded lifecycle replays with the provider gone; a gapped recording refuses at the gap; a changed protocol refuses or resumes with ZERO re-submits) + `crates/corvid-runtime/src/protocol.rs` (transition engine, binding conventions, resume verdicts, fingerprint stability) + `crates/corvid-runtime/src/protocol_simulate.rs` + `crates/corvid-cli/tests/connectors_simulate.rs` + `crates/corvid-abi/src/ts_client.rs` (typed state union) | [`inventions.md`](#verified-provider-protocols) | A declared `async:` block becomes a durable, exactly-once, budget-bounded, replayable state machine: intent checkpointed before submit, job id bound only from the decoded response, terminal-only return, governed cadence, honest cancellation (compensate/detach), lifecycle replay with strict no-real-fallback, and required `on_protocol_change` with derived graph fingerprints. Live payload-conformance and drift quarantine are 52i; the end-to-end kill→drift→quarantine→repair demonstration is 52h-5b. |
+| Verified Provider Protocols | Shipped (52h) | `corvid tour --topic verified-provider-protocols` / `corvid connectors simulate <file>` | `crates/corvid-driver/tests/protocol_lifecycle.rs` (submit-once + id-bound-from-typed-response + terminal-only return; resume never re-submits; `Retry-After` slows the declared cadence; breaker tolerates then trips; cancel compensates through the declared endpoint; recorded lifecycle replays with the provider gone; a gapped recording refuses at the gap; a changed protocol refuses or resumes with ZERO re-submits) + `crates/corvid-runtime/src/protocol.rs` (transition engine, binding conventions, resume verdicts, fingerprint stability) + `crates/corvid-runtime/src/protocol_simulate.rs` + `crates/corvid-cli/tests/connectors_simulate.rs` + `crates/corvid-abi/src/ts_client.rs` (typed state union) | [`inventions.md`](#verified-provider-protocols) | A declared `async:` block becomes a durable, budget-bounded, replayable state machine: intent checkpointed before submit, job id bound only from the decoded response, terminal-only return, governed cadence, honest cancellation (compensate/detach), lifecycle replay with strict no-real-fallback, and required `on_protocol_change` with derived graph fingerprints. NOT yet exactly-once against the provider (intent key not transmitted; crash-after-accept can duplicate) and the deadline is not preserved across restarts — both tracked as 52h-6. Live payload-conformance and drift quarantine are 52i; the end-to-end kill→drift→quarantine→repair demonstration is 52h-5b. |
 | Protocol-Typed Connectors | Shipped (52g) | `corvid tour --topic connectors` | `crates/corvid-driver/tests/connector_modes.rs` (mock/real/replay, status→typed-error, rate-limit, secret-never-in-trace, real-without-credential) + `crates/corvid-runtime/src/connectors.rs` (request-builder: secret-only-in-header, unresolved-secret-named) + `crates/corvid-types/src/tests.rs` (`on_status_*` coherence) | [`inventions.md`](#protocol-typed-connectors) | Declared connectors run mock/real/replay from one file; credentials are `secret(...)` refs never in IR/trace, mode has no default (omission = compile error / startup refusal), `on status -> Variant` gives typed `Result` errors. Async provider state machines + provider-drift quarantine are later 52h/52i slices. |
 | Route Authorization Enforced Before The Handler | Shipped (52f) | `corvid tour --topic route-authorization` | `crates/corvid-runtime/tests/route_authz.rs` (forged cookie, expired/revoked session, cross-tenant, CSRF mismatch, authenticated-but-insufficient, permission-union, stale-role-after-revocation) + `crates/corvid-cli/tests/serve_smoke.rs::a_role_gated_route_allows_the_right_role_and_denies_others` (live: admin 200, plain 403, anonymous 401) + `::serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start` + `crates/corvid-runtime/src/auth/roles.rs` tests | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | A `requires authenticated\|role\|permission` route resolves the session to a verified typed `actor` and enforces tenant + role + permission (set membership + permission union) and CSRF double-submit on mutations BEFORE the handler or any effect runs — 401 unauthenticated, 403 under-privileged. The actor is only ever the authenticated one, never request-supplied. This closed the last Contract Closure gap. |
 | Complete Source-Declared Approval Policy | Shipped (52f-4d) | `corvid check` an approval-capable served route | `corvid-syntax::server_approval_route_*` + `corvid-types::approval_route_*` + `corvid-abi::approval_route_surfaces_its_complete_runtime_policy` + `serve_smoke::approval_decisions_reject_every_unauthorized_path` | [`core-semantics.md`](./core-semantics.md) (`approval.policy_clause_static_check`) | All six policy fields are mandatory and compile into the queue. Runtime proves exact role + permission + tenant + CSRF + separation of duties; Corvid proves policy completeness and enforcement, not whether a human's decision is wise. |
