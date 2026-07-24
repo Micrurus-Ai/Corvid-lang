@@ -33,6 +33,7 @@ pub mod check;
 pub mod list;
 pub mod oauth;
 pub mod run;
+pub mod simulate;
 pub(crate) mod support;
 pub mod verify_webhook;
 
@@ -44,5 +45,7 @@ pub use list::*;
 pub use oauth::*;
 #[allow(unused_imports)]
 pub use run::*;
+#[allow(unused_imports)]
+pub use simulate::*;
 #[allow(unused_imports)]
 pub use verify_webhook::*;

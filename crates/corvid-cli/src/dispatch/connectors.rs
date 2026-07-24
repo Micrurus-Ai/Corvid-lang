@@ -35,7 +35,11 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
                         e.modes.join(","),
                         e.scope_count,
                         if e.rate_limit_summary.len() > 27 {
-                            format!("{}â€¦", &e.rate_limit_summary[..26])
+                            // U+2026 HORIZONTAL ELLIPSIS. This literal was
+                            // mojibake — the same round-trip through
+                            // Windows-1252 documented for the checkmarks
+                            // below, which the earlier fix missed here.
+                            format!("{}\u{2026}", &e.rate_limit_summary[..26])
                         } else {
                             e.rate_limit_summary.clone()
                         },
@@ -232,6 +236,30 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
                 }))?
             );
             Ok(0)
+        }
+        ConnectorsCommand::Simulate {
+            file,
+            operation,
+            deny,
+            json,
+        } => {
+            let simulations = connectors_cmd::run_simulate(&file, operation.as_deref())?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&connectors_cmd::to_json(&simulations))?
+                );
+            } else {
+                print!("{}", connectors_cmd::render(&simulations));
+            }
+            let code = connectors_cmd::exit_code(&simulations, &deny);
+            if code != 0 && !json {
+                eprintln!("denied by --deny:");
+                for (operation, detail) in connectors_cmd::denied_findings(&simulations, &deny) {
+                    eprintln!("  {operation}: {detail}");
+                }
+            }
+            Ok(code)
         }
         ConnectorsCommand::Oauth { command } => match command {
             ConnectorsOauthCommand::Init {

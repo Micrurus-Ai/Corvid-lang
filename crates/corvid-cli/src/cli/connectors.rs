@@ -103,6 +103,40 @@ pub enum ConnectorsCommand {
         #[command(subcommand)]
         command: ConnectorsOauthCommand,
     },
+    /// Explore what a provider could do to a declared `async:`
+    /// protocol, without calling one.
+    ///
+    /// The checker proves a protocol is well-formed; this answers
+    /// the different question of what its legal provider
+    /// behaviours actually cost you. For every protocol-bearing
+    /// operation in the file it reports the shortest provider
+    /// behaviour reaching each terminal state, the behaviours that
+    /// never terminate on their own (a slow provider holds the
+    /// intent until the declared deadline fires), the worst-case
+    /// observation count the budget is charged for, and terminal
+    /// states no behaviour can reach.
+    ///
+    /// Informational by default: every behaviour it reports is
+    /// LEGAL, so none of them is an error. Pass `--deny <KIND>` to
+    /// make CI fail on a class your team has decided it will not
+    /// accept — e.g. `--deny non_terminating` for a protocol that
+    /// must not be stallable by a slow provider.
+    Simulate {
+        /// The `.cor` source file to explore.
+        file: PathBuf,
+        /// Limit exploration to one operation by name.
+        #[arg(long, value_name = "NAME")]
+        operation: Option<String>,
+        /// Fail (exit 1) when a finding of this kind is present.
+        /// Repeatable. Kinds: `non_terminating`,
+        /// `immediate_terminal`, `deadline_reachable`,
+        /// `unreachable_terminal`.
+        #[arg(long, value_name = "KIND")]
+        deny: Vec<String>,
+        /// Emit machine-readable JSON instead of a human report.
+        #[arg(long)]
+        json: bool,
+    },
     /// Verify an inbound webhook payload's HMAC-SHA256 signature
     /// against a manifest-declared secret stored in an env var.
     /// Exits 0 on a valid signature, 1 on mismatch. Pass

@@ -772,6 +772,26 @@ impl ProviderProtocolDecl {
         canon
     }
 
+    /// The most observations this protocol can make before its declared
+    /// deadline forces a terminal state.
+    ///
+    /// This is the bound the budget analysis charges for and the bound the
+    /// counterfactual simulator reports, deliberately from ONE definition:
+    /// a simulator that predicted a different worst case than the compiler
+    /// charged for would be worse than no simulator.
+    ///
+    /// Adaptive cadence is treated conservatively as one second — it backs
+    /// off from a floor, so assuming the floor can only over-count.
+    pub fn worst_case_poll_count(&self) -> u64 {
+        let per_poll_secs = match self.interval {
+            ProtocolPollInterval::FixedSeconds(secs) => secs.max(1),
+            ProtocolPollInterval::Adaptive => 1,
+        };
+        // Ceiling division, and always at least one observation: a protocol
+        // that never polls could never reach a terminal state.
+        self.deadline_secs.div_ceil(per_poll_secs).max(1)
+    }
+
     /// `sha256:<hex>` over the canonical encoding — self-describing, so a
     /// value read back from a durable checkpoint names the algorithm that
     /// produced it instead of being an anonymous hex blob.

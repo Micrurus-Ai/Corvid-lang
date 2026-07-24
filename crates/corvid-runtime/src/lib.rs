@@ -47,6 +47,7 @@ pub mod citation;
 pub mod connectors;
 pub mod db;
 pub mod protocol;
+pub mod protocol_simulate;
 pub mod effect_filter;
 pub mod ensemble;
 pub mod env;

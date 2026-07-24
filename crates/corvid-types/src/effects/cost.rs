@@ -36,17 +36,11 @@ const COST_DIMENSIONS: [&str; 3] = ["cost", "tokens", "latency_ms"];
 /// off over time, so its true count is lower; we bound it by the fastest
 /// tick the adaptive schedule can produce (1s) rather than modelling the
 /// backoff, which over-approximates in the safe direction.
+/// The worst-case observation count lives on the declaration itself, so
+/// the budget charged here and the bound the counterfactual simulator
+/// reports come from one definition and cannot drift apart.
 fn worst_case_poll_count(protocol: &corvid_ast::ProviderProtocolDecl) -> u64 {
-    let per_poll_secs = match protocol.interval {
-        corvid_ast::ProtocolPollInterval::FixedSeconds(secs) => secs.max(1),
-        corvid_ast::ProtocolPollInterval::Adaptive => 1,
-    };
-    // Ceiling division, and always at least one observation: a protocol
-    // that never polls could never reach a terminal state.
-    protocol
-        .deadline_secs
-        .div_ceil(per_poll_secs)
-        .max(1)
+    protocol.worst_case_poll_count()
 }
 
 pub fn compute_worst_case_cost(
