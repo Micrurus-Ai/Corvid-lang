@@ -838,6 +838,37 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             push_indent(indent + 2, out);
             out.push_str(&format!("mock: {}\n", render_expr(mock)));
         }
+        if let Some(protocol) = &op.protocol {
+            push_indent(indent + 2, out);
+            out.push_str("async:\n");
+            push_indent(indent + 3, out);
+            out.push_str(&format!("statuses: [{}]\n", protocol.statuses.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")));
+            push_indent(indent + 3, out);
+            out.push_str(&format!("initial: {}\n", protocol.initial.name));
+            push_indent(indent + 3, out);
+            out.push_str(&format!("terminal: [{}]\n", protocol.terminal.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")));
+            push_indent(indent + 3, out);
+            out.push_str(&format!("deadline: {}s\n", protocol.deadline_secs));
+            push_indent(indent + 3, out);
+            out.push_str(&format!("deadline_target: {}\n", protocol.deadline_target.name));
+            push_indent(indent + 3, out);
+            out.push_str("idempotency: intent\n");
+            push_indent(indent + 3, out);
+            out.push_str(&format!("poll {} {}\n", protocol.poll.method.as_str(), render_string_literal(&protocol.poll.path)));
+            push_indent(indent + 3, out);
+            match protocol.interval {
+                corvid_ast::ProtocolPollInterval::FixedSeconds(seconds) => out.push_str(&format!("every: {seconds}s\n")),
+                corvid_ast::ProtocolPollInterval::Adaptive => out.push_str("every: adaptive\n"),
+            }
+            for state in &protocol.states {
+                push_indent(indent + 3, out);
+                out.push_str(&format!("state {}:\n", state.name.name));
+                for transition in &state.transitions {
+                    push_indent(indent + 4, out);
+                    out.push_str(&format!("on {} -> {}\n", transition.status.name, transition.target.name));
+                }
+            }
+        }
     }
 }
 

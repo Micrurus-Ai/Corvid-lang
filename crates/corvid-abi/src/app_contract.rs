@@ -85,6 +85,41 @@ pub struct ContractOperation {
     /// become typed error variants.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_map: Vec<ContractStatusError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<ContractProviderProtocol>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractProviderProtocol {
+    pub statuses: Vec<String>,
+    pub initial: String,
+    pub terminal: Vec<String>,
+    pub deadline_secs: u64,
+    pub deadline_target: String,
+    pub idempotency: String,
+    pub poll_method: String,
+    pub poll_path: String,
+    pub interval: ContractProtocolInterval,
+    pub states: Vec<ContractProtocolState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractProtocolInterval {
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractProtocolState {
+    pub name: String,
+    pub transitions: Vec<ContractProtocolTransition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractProtocolTransition {
+    pub status: String,
+    pub target: String,
 }
 
 /// One `on status <code> -> Variant` mapping in the contract.
@@ -511,8 +546,40 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
                         variant: m.variant.name.clone(),
                     })
                     .collect(),
+                protocol: op.protocol.as_ref().map(contract_provider_protocol),
             })
             .collect(),
+    }
+}
+
+fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> ContractProviderProtocol {
+    let interval = match protocol.interval {
+        corvid_ast::ProtocolPollInterval::FixedSeconds(seconds) => ContractProtocolInterval {
+            mode: "fixed".into(),
+            seconds: Some(seconds),
+        },
+        corvid_ast::ProtocolPollInterval::Adaptive => ContractProtocolInterval {
+            mode: "adaptive".into(),
+            seconds: None,
+        },
+    };
+    ContractProviderProtocol {
+        statuses: protocol.statuses.iter().map(|s| s.name.clone()).collect(),
+        initial: protocol.initial.name.clone(),
+        terminal: protocol.terminal.iter().map(|s| s.name.clone()).collect(),
+        deadline_secs: protocol.deadline_secs,
+        deadline_target: protocol.deadline_target.name.clone(),
+        idempotency: "intent".into(),
+        poll_method: protocol.poll.method.as_str().into(),
+        poll_path: protocol.poll.path.clone(),
+        interval,
+        states: protocol.states.iter().map(|state| ContractProtocolState {
+            name: state.name.name.clone(),
+            transitions: state.transitions.iter().map(|transition| ContractProtocolTransition {
+                status: transition.status.name.clone(),
+                target: transition.target.name.clone(),
+            }).collect(),
+        }).collect(),
     }
 }
 
@@ -1004,6 +1071,35 @@ connector github:
         let json = serde_json::to_string(&contract).unwrap();
         assert!(!json.contains("GITHUB_TOKEN"), "no secret name in the contract");
         assert!(!json.contains("bearer"), "no auth scheme in the contract");
+    }
+
+    #[test]
+    fn a_verified_provider_protocol_is_frontend_consumable_contract_data() {
+        let contract = contract_for(r#"connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#);
+        let protocol = contract.connectors[0].operations[0].protocol.as_ref().expect("protocol");
+        assert_eq!(protocol.initial, "queued");
+        assert_eq!(protocol.terminal, vec!["completed", "failed"]);
+        assert_eq!(protocol.deadline_secs, 600);
+        assert_eq!(protocol.interval.mode, "adaptive");
+        assert_eq!(protocol.states[0].transitions.len(), 3);
     }
 
     #[test]

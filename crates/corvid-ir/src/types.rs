@@ -105,6 +105,8 @@ pub struct IrOperation {
     /// response. `None` when the connector's allowed modes exclude
     /// `mock` (the checker requires one whenever `mock` is allowed).
     pub mock: Option<IrExpr>,
+    /// The exact temporal graph accepted by the checker.
+    pub protocol: Option<corvid_ast::ProviderProtocolDecl>,
     pub span: Span,
 }
 

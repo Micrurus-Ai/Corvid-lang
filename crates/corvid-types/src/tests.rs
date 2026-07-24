@@ -2132,6 +2132,68 @@ agent fetch(owner: String, repo: String) -> Repo uses http_read:
     assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
 }
 
+const VERIFIED_PROVIDER_PROTOCOL: &str = r#"
+connector video:
+    base_url: "https://video.example.com"
+    retry: 3
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, processing, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            state queued:
+                on queued -> queued
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+            state processing:
+                on queued -> processing
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+"#;
+
+#[test]
+fn verified_provider_protocol_proves_a_total_bounded_graph() {
+    let checked = check(VERIFIED_PROVIDER_PROTOCOL);
+    assert!(checked.errors.is_empty(), "errors: {:?}", checked.errors);
+}
+
+#[test]
+fn provider_protocol_rejects_a_non_exhaustive_state() {
+    let src = VERIFIED_PROVIDER_PROTOCOL.replace(
+        "                on failed -> failed\n            state processing:",
+        "            state processing:",
+    );
+    let checked = check(&src);
+    assert!(checked.errors.iter().any(|error| matches!(
+        &error.kind,
+        TypeErrorKind::ConnectorConfigInvalid { message, .. }
+            if message.contains("state `queued` is not exhaustive") && message.contains("failed")
+    )), "errors: {:?}", checked.errors);
+}
+
+#[test]
+fn mutating_provider_protocol_must_use_the_approval_boundary() {
+    let src = VERIFIED_PROVIDER_PROTOCOL.replace(
+        "operation generate(input: String) -> String dangerous:",
+        "operation generate(input: String) -> String:",
+    );
+    let checked = check(&src);
+    assert!(checked.errors.iter().any(|error| matches!(
+        &error.kind,
+        TypeErrorKind::ConnectorConfigInvalid { message, .. }
+            if message.contains("must be declared `dangerous`")
+    )), "errors: {:?}", checked.errors);
+}
+
 #[test]
 fn connector_operation_arg_type_mismatch_is_an_error() {
     // The operation's params are enforced at the call site: a wrong

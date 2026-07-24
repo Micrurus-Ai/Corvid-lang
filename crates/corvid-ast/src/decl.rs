@@ -562,6 +562,57 @@ pub struct OperationDecl {
     /// serveable without a recorded cassette.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mock: Option<Expr>,
+    /// A finite, checked long-running provider protocol. The first
+    /// request above submits work; this declares how Corvid observes it
+    /// until an explicit terminal state or deadline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<ProviderProtocolDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderProtocolDecl {
+    pub statuses: Vec<Ident>,
+    pub initial: Ident,
+    pub terminal: Vec<Ident>,
+    pub deadline_secs: u64,
+    pub deadline_target: Ident,
+    pub idempotency: ProtocolIdempotency,
+    pub poll: ProtocolPoll,
+    pub interval: ProtocolPollInterval,
+    pub states: Vec<ProtocolStateDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtocolIdempotency {
+    Intent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolPoll {
+    pub method: HttpMethod,
+    pub path: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtocolPollInterval {
+    FixedSeconds(u64),
+    Adaptive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolStateDecl {
+    pub name: Ident,
+    pub transitions: Vec<ProtocolTransition>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolTransition {
+    pub status: Ident,
+    pub target: Ident,
     pub span: Span,
 }
 

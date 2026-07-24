@@ -1408,4 +1408,32 @@ test lookup_trace from_trace "traces/lookup.jsonl":
         let rendered = render_file(&file);
         parse_source(&rendered).expect("round-trip parse");
     }
+
+    #[test]
+    fn renders_and_reparses_verified_provider_protocols() {
+        let source = r#"
+connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#;
+        let file = parse_source(source).expect("parse");
+        let rendered = render_file(&file);
+        let reparsed = parse_source(&rendered).expect("round-trip parse");
+        assert_eq!(rendered, render_file(&reparsed));
+    }
 }

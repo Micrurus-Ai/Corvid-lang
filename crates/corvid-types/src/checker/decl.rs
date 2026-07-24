@@ -14,9 +14,9 @@ use crate::errors::{TypeError, TypeErrorKind, TypeWarning, TypeWarningKind};
 use crate::types::Type;
 use corvid_ast::{
     AgentAttribute, AgentDecl, Block, ConnectorAuth, ConnectorDecl, ConnectorMode, EmailMatchPolicy,
-    Expr,
+    Effect, Expr,
     FirstLoginPolicy, HttpMethod, HttpRouteDecl, IdentityDecl, ProviderKind, ProvisioningPolicy,
-    SameSite, ServerDecl, Span, Stmt, TenantAssignment,
+    ProtocolPollInterval, ProviderProtocolDecl, SameSite, ServerDecl, Span, Stmt, TenantAssignment,
 };
 use corvid_resolve::{Binding, DefId};
 use std::collections::HashSet;
@@ -557,6 +557,12 @@ impl<'a> Checker<'a> {
                         ),
                         op.span,
                     ));
+                }
+            }
+
+            if let Some(protocol) = &op.protocol {
+                for (message, span) in validate_provider_protocol(op, protocol) {
+                    self.errors.push(invalid(message, span));
                 }
             }
 
@@ -1192,6 +1198,113 @@ fn is_plausible_domain(domain: &str) -> bool {
     }
     let labels: Vec<&str> = domain.split('.').collect();
     labels.len() >= 2 && labels.iter().all(|l| !l.is_empty())
+}
+
+fn validate_provider_protocol(
+    operation: &corvid_ast::OperationDecl,
+    protocol: &ProviderProtocolDecl,
+) -> Vec<(String, Span)> {
+    let mut errors = Vec::new();
+    let prefix = || format!("operation `{}` async protocol", operation.name.name);
+
+    let mut statuses = HashSet::new();
+    if protocol.statuses.is_empty() {
+        errors.push((format!("{} must declare a non-empty `statuses` universe", prefix()), protocol.span));
+    }
+    for status in &protocol.statuses {
+        if !statuses.insert(status.name.clone()) {
+            errors.push((format!("{} declares provider status `{}` more than once", prefix(), status.name), status.span));
+        }
+    }
+
+    let mut terminal = HashSet::new();
+    if protocol.terminal.is_empty() {
+        errors.push((format!("{} must declare at least one terminal state", prefix()), protocol.span));
+    }
+    for state in &protocol.terminal {
+        if !terminal.insert(state.name.clone()) {
+            errors.push((format!("{} declares terminal state `{}` more than once", prefix(), state.name), state.span));
+        }
+    }
+
+    let mut nonterminal = HashSet::new();
+    for state in &protocol.states {
+        if terminal.contains(&state.name.name) {
+            errors.push((format!("{} declares terminal state `{}` with outgoing transitions", prefix(), state.name.name), state.span));
+        }
+        if !nonterminal.insert(state.name.name.clone()) {
+            errors.push((format!("{} declares state `{}` more than once", prefix(), state.name.name), state.span));
+        }
+    }
+    let declared: HashSet<String> = nonterminal.union(&terminal).cloned().collect();
+    if !declared.contains(&protocol.initial.name) {
+        errors.push((format!("{} initial state `{}` is not declared", prefix(), protocol.initial.name), protocol.initial.span));
+    }
+    if protocol.deadline_secs == 0 {
+        errors.push((format!("{} `deadline` must be greater than zero", prefix()), protocol.span));
+    }
+    if !terminal.contains(&protocol.deadline_target.name) {
+        errors.push((format!("{} `deadline_target` `{}` must name a terminal state", prefix(), protocol.deadline_target.name), protocol.deadline_target.span));
+    }
+    if protocol.poll.method != HttpMethod::Get {
+        errors.push((format!("{} polling must use `GET` so observation cannot mutate provider state", prefix()), protocol.poll.span));
+    }
+    if !protocol.poll.path.starts_with('/') {
+        errors.push((format!("{} poll path must start with `/`, got `{}`", prefix(), protocol.poll.path), protocol.poll.span));
+    }
+    if matches!(protocol.interval, ProtocolPollInterval::FixedSeconds(0)) {
+        errors.push((format!("{} fixed poll interval must be greater than zero", prefix()), protocol.span));
+    }
+    if operation.method != HttpMethod::Get && operation.effect != Effect::Dangerous {
+        errors.push((
+            format!("{} submits with `{}` and must be declared `dangerous` so approval is enforced before provider I/O", prefix(), operation.method.as_str()),
+            operation.span,
+        ));
+    }
+
+    for state in &protocol.states {
+        let mut handled = HashSet::new();
+        for transition in &state.transitions {
+            if !statuses.contains(&transition.status.name) {
+                errors.push((format!("{} state `{}` handles undeclared provider status `{}`", prefix(), state.name.name, transition.status.name), transition.status.span));
+            }
+            if !handled.insert(transition.status.name.clone()) {
+                errors.push((format!("{} state `{}` handles status `{}` more than once", prefix(), state.name.name, transition.status.name), transition.span));
+            }
+            if !declared.contains(&transition.target.name) {
+                errors.push((format!("{} state `{}` transitions to undeclared state `{}`", prefix(), state.name.name, transition.target.name), transition.target.span));
+            }
+        }
+        let missing: Vec<_> = protocol.statuses.iter()
+            .filter(|status| !handled.contains(&status.name))
+            .map(|status| status.name.as_str()).collect();
+        if !missing.is_empty() {
+            errors.push((format!("{} state `{}` is not exhaustive; missing status{} {}", prefix(), state.name.name, if missing.len() == 1 { "" } else { "es" }, missing.join(", ")), state.span));
+        }
+    }
+
+    if declared.contains(&protocol.initial.name) {
+        let transitions: std::collections::HashMap<&str, Vec<&str>> = protocol.states.iter()
+            .map(|state| (state.name.name.as_str(), state.transitions.iter().map(|t| t.target.name.as_str()).collect()))
+            .collect();
+        let mut reachable = HashSet::new();
+        let mut queue = std::collections::VecDeque::from([protocol.initial.name.as_str()]);
+        while let Some(state) = queue.pop_front() {
+            if !reachable.insert(state) { continue; }
+            if let Some(targets) = transitions.get(state) {
+                queue.extend(targets.iter().copied());
+            }
+        }
+        for state in &declared {
+            if !reachable.contains(state.as_str()) {
+                errors.push((format!("{} state `{state}` is unreachable from initial state `{}`", prefix(), protocol.initial.name), protocol.span));
+            }
+        }
+        if terminal.iter().all(|state| !reachable.contains(state.as_str())) {
+            errors.push((format!("{} has no terminal state reachable from `{}`", prefix(), protocol.initial.name), protocol.span));
+        }
+    }
+    errors
 }
 
 /// Extract the `{placeholder}` names from an operation path (slice 52g),

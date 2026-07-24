@@ -16651,3 +16651,29 @@ Proof: 321 type-checker tests; the 18-test serve suite (serial because
 its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
+
+## 2026-07-24 - 52h-1: verified provider protocols become language data
+
+Phase 52h was expanded from ordinary async polling into Verified
+Provider Protocols: one declared temporal contract that will drive
+durability, exactly-once intent, governed scheduling, semantic
+cancellation, lifecycle replay, migration, frontend progress, and
+proof-linked events. Phase 52i is its live-conformance and quarantine
+half.
+
+The first compiler slice is complete. A connector operation may carry
+an `async:` protocol with an explicit status universe, initial and
+terminal states, deadline behavior, durable intent idempotency, poll
+request, fixed/adaptive cadence, and total transition tables. The
+checker proves graph closure and reachability and rejects mutating
+polls, zero bounds, and mutating submissions that do not pass through
+the existing `dangerous` approval boundary. The exact checked graph is
+preserved in IR and emitted in the Application Contract, allowing
+generated clients to consume the same state machine.
+
+Contract Closure remains honest: startup refuses any protocol-bearing
+operation until the durable lifecycle executor lands. It never treats
+the provider's submit response as completion. Focused parser, checker,
+contract, startup, and differential-render tests are green; workspace
+check is green with the required Python 3.14 ABI-forward compatibility
+environment flag.

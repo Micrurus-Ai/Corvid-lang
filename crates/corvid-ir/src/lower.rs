@@ -404,8 +404,9 @@ impl<'a> Lowerer<'a> {
                         variant: m.variant.name.clone(),
                     })
                     .collect(),
-                mock: op.mock.as_ref().map(|e| self.lower_expr(e)),
-                span: op.span,
+                  mock: op.mock.as_ref().map(|e| self.lower_expr(e)),
+                  protocol: op.protocol.clone(),
+                  span: op.span,
             });
         }
         IrConnector {

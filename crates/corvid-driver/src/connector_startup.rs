@@ -214,6 +214,20 @@ pub fn check_connector_startup(
             continue;
         }
 
+        // Advertising a temporal contract without executing it would
+        // violate Contract Closure. Refuse until the durable lifecycle
+        // engine is installed.
+        for op in &connector.operations {
+            if op.protocol.is_some() {
+                errors.push(ConnectorStartupError::OperationNotServeable {
+                    connector: connector.name.clone(),
+                    operation: op.name.clone(),
+                    mode,
+                    reason: "declares a verified async provider protocol, but this runtime tier does not execute protocol lifecycles yet".to_string(),
+                });
+            }
+        }
+
         // (3) + (4) Every operation must have an executable path in the
         // selected mode.
         match mode {
@@ -404,5 +418,37 @@ connector github:
         let ok =
             check_connector_startup(&ir, &ctx(Some(ConnectorMode::Replay), false, true, &always));
         assert!(ok.is_empty(), "replay with a source should be executable: {ok:?}");
+    }
+
+    #[test]
+    fn a_verified_protocol_refuses_until_the_lifecycle_runtime_exists() {
+        let source = r#"
+connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: 2s
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#;
+        let ir = ir(source);
+        let present = |_: &str| true;
+        let errors = check_connector_startup(&ir, &ctx(Some(ConnectorMode::Real), true, false, &present));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ConnectorStartupError::OperationNotServeable { reason, .. }
+                if reason.contains("does not execute protocol lifecycles yet")
+        )));
     }
 }

@@ -3804,6 +3804,45 @@ fn parses_connector_with_config_and_operations() {
 }
 
 #[test]
+fn parses_verified_async_provider_protocol() {
+    let src = r#"connector video:
+    base_url: "https://video.example.com"
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/generations" body input
+        async:
+            statuses: [queued, processing, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            state queued:
+                on queued -> queued
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+            state processing:
+                on queued -> processing
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+"#;
+    let file = parse_file_src(src);
+    let connector = file.decls.iter().find_map(|decl| match decl {
+        Decl::Connector(connector) => Some(connector),
+        _ => None,
+    }).expect("connector");
+    let protocol = connector.operations[0].protocol.as_ref().expect("protocol");
+    assert_eq!(protocol.statuses.len(), 4);
+    assert_eq!(protocol.initial.name, "queued");
+    assert_eq!(protocol.deadline_secs, 600);
+    assert_eq!(protocol.states.len(), 2);
+}
+
+#[test]
 fn parses_connector_header_and_basic_auth() {
     let src = "connector svc:
     base_url: \"https://svc.example.com\"

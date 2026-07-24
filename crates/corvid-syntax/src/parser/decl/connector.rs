@@ -13,7 +13,9 @@ use crate::parser::{describe_token, Parser};
 use crate::token::TokKind;
 use corvid_ast::{
     BodyEncoding, ConnectorAuth, ConnectorDecl, ConnectorMode, Effect, Ident, OperationBody,
-    OperationDecl, RateLimitConfig, SecretRef, StatusErrorMapping, Visibility,
+    OperationDecl, ProtocolIdempotency, ProtocolPoll, ProtocolPollInterval, ProtocolStateDecl,
+    ProtocolTransition, ProviderProtocolDecl, RateLimitConfig, SecretRef, StatusErrorMapping,
+    Visibility,
 };
 
 impl<'a> Parser<'a> {
@@ -292,6 +294,7 @@ impl<'a> Parser<'a> {
         // optional `mock: <expr>` line (the mock-mode payload).
         let mut error_map = Vec::new();
         let mut mock: Option<corvid_ast::Expr> = None;
+        let mut protocol = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -316,6 +319,19 @@ impl<'a> Parser<'a> {
                 self.expect_newline()?;
                 continue;
             }
+            if self.peek_ident_is("async") {
+                if protocol.is_some() {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "a second `async:` block on one operation".into(),
+                            expected: "at most one verified provider protocol per operation".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                protocol = Some(self.parse_provider_protocol()?);
+                continue;
+            }
             error_map.push(self.parse_status_mapping()?);
             self.expect_newline()?;
         }
@@ -335,7 +351,190 @@ impl<'a> Parser<'a> {
             body,
             error_map,
             mock,
+            protocol,
             span: start.merge(end),
+        })
+    }
+
+    fn parse_provider_protocol(&mut self) -> Result<ProviderProtocolDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump();
+        self.expect(TokKind::Colon, "`:` after `async`")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError { kind: ParseErrorKind::ExpectedBlock, span: self.peek_span() });
+        }
+        self.bump();
+        let mut statuses = None;
+        let mut initial = None;
+        let mut terminal = None;
+        let mut deadline_secs = None;
+        let mut deadline_target = None;
+        let mut idempotency = None;
+        let mut poll = None;
+        let mut interval = None;
+        let mut states = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) { break; }
+            if self.peek_ident_is("state") {
+                states.push(self.parse_protocol_state()?);
+                continue;
+            }
+            if self.peek_ident_is("poll") {
+                if !seen.insert("poll".to_string()) {
+                    return self.duplicate_protocol_key("poll");
+                }
+                let poll_start = self.peek_span();
+                self.bump();
+                let method = self.parse_http_method()?;
+                let path = self.expect_string_literal("protocol poll path")?.0;
+                poll = Some(ProtocolPoll {
+                    method,
+                    path,
+                    span: poll_start.merge(self.prev_span()),
+                });
+                self.expect_newline()?;
+                continue;
+            }
+            let (key, key_span) = self.expect_ident()?;
+            if !seen.insert(key.clone()) {
+                return self.duplicate_protocol_key(&key);
+            }
+            self.expect(TokKind::Colon, "`:` after an async protocol key")?;
+            match key.as_str() {
+                "statuses" => statuses = Some(self.parse_protocol_ident_list()?),
+                "initial" => initial = Some(self.parse_protocol_ident()?),
+                "terminal" => terminal = Some(self.parse_protocol_ident_list()?),
+                "deadline" => {
+                    deadline_secs = Some(self.parse_u64_literal("protocol deadline")?);
+                    if self.peek_ident_is("s") { self.bump(); }
+                }
+                "deadline_target" => deadline_target = Some(self.parse_protocol_ident()?),
+                "idempotency" => {
+                    if !self.peek_ident_is("intent") {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(self.peek()),
+                                expected: "`intent` (the durable pre-submit identity strategy)".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                    self.bump();
+                    idempotency = Some(ProtocolIdempotency::Intent);
+                }
+                "every" => {
+                    if self.peek_ident_is("adaptive") {
+                        self.bump();
+                        interval = Some(ProtocolPollInterval::Adaptive);
+                    } else {
+                        let seconds = self.parse_u64_literal("poll interval")?;
+                        if self.peek_ident_is("s") { self.bump(); }
+                        interval = Some(ProtocolPollInterval::FixedSeconds(seconds));
+                    }
+                }
+                _ => return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: format!("async protocol key `{key}`"),
+                        expected: "`statuses`, `initial`, `terminal`, `deadline`, `deadline_target`, `idempotency`, `poll`, `every`, or `state ...`".into(),
+                    },
+                    span: key_span,
+                }),
+            }
+            self.expect_newline()?;
+        }
+        let end = self.peek_span();
+        if matches!(self.peek(), TokKind::Dedent) { self.bump(); }
+        let missing = [
+            statuses.is_none().then_some("statuses"),
+            initial.is_none().then_some("initial"),
+            terminal.is_none().then_some("terminal"),
+            deadline_secs.is_none().then_some("deadline"),
+            deadline_target.is_none().then_some("deadline_target"),
+            idempotency.is_none().then_some("idempotency"),
+            poll.is_none().then_some("poll"),
+            interval.is_none().then_some("every"),
+        ].into_iter().flatten().collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("incomplete verified provider protocol (missing {})", missing.join(", ")),
+                    expected: "all protocol boundary decisions explicitly declared".into(),
+                },
+                span: start.merge(end),
+            });
+        }
+        Ok(ProviderProtocolDecl {
+            statuses: statuses.unwrap(),
+            initial: initial.unwrap(),
+            terminal: terminal.unwrap(),
+            deadline_secs: deadline_secs.unwrap(),
+            deadline_target: deadline_target.unwrap(),
+            idempotency: idempotency.unwrap(),
+            poll: poll.unwrap(),
+            interval: interval.unwrap(),
+            states,
+            span: start.merge(end),
+        })
+    }
+
+    fn parse_protocol_state(&mut self) -> Result<ProtocolStateDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump();
+        let name = self.parse_protocol_ident()?;
+        self.expect(TokKind::Colon, "`:` after protocol state name")?;
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError { kind: ParseErrorKind::ExpectedBlock, span: self.peek_span() });
+        }
+        self.bump();
+        let mut transitions = Vec::new();
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            self.skip_newlines();
+            if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) { break; }
+            let transition_start = self.peek_span();
+            self.expect(TokKind::KwOn, "`on <provider_status> -> <state>`")?;
+            let status = self.parse_protocol_ident()?;
+            self.expect(TokKind::Arrow, "`->` after provider status")?;
+            let target = self.parse_protocol_ident()?;
+            transitions.push(ProtocolTransition {
+                status,
+                target,
+                span: transition_start.merge(self.prev_span()),
+            });
+            self.expect_newline()?;
+        }
+        let end = self.peek_span();
+        if matches!(self.peek(), TokKind::Dedent) { self.bump(); }
+        Ok(ProtocolStateDecl { name, transitions, span: start.merge(end) })
+    }
+
+    fn parse_protocol_ident_list(&mut self) -> Result<Vec<Ident>, ParseError> {
+        self.expect(TokKind::LBracket, "`[` to open the protocol name list")?;
+        let mut values = Vec::new();
+        while !matches!(self.peek(), TokKind::RBracket | TokKind::Eof) {
+            values.push(self.parse_protocol_ident()?);
+            if matches!(self.peek(), TokKind::Comma) { self.bump(); } else { break; }
+        }
+        self.expect(TokKind::RBracket, "`]` to close the protocol name list")?;
+        Ok(values)
+    }
+
+    fn parse_protocol_ident(&mut self) -> Result<Ident, ParseError> {
+        let (name, span) = self.expect_ident()?;
+        Ok(Ident::new(name, span))
+    }
+
+    fn duplicate_protocol_key<T>(&self, key: &str) -> Result<T, ParseError> {
+        Err(ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: format!("duplicate async protocol key `{key}`"),
+                expected: "each protocol boundary decision exactly once".into(),
+            },
+            span: self.peek_span(),
         })
     }
 
