@@ -21,13 +21,24 @@
 //!    declared terminal state is reached, or when the declared deadline
 //!    forces the declared deadline target.
 //!
-//! Mock, replay, and real all share this engine: the submit and poll
-//! requests bottom out at the same connector dispatch, so the mode is
-//! decided there, not here.
+//! 5. **The lifecycle is replayable** (slice 52h-4). Every provider
+//!    exchange — submit, each observation, and the compensation — goes
+//!    through [`Runtime::protocol_exchange`], which records it as a
+//!    substitutable trace event and, when replaying, serves it from the
+//!    recording instead of the provider.
+//!
+//! Mock, replay, and real all share this engine. Mock is decided below
+//! this file (at the connector dispatch); replay is decided HERE, in
+//! `protocol_exchange`, because the protocol driver deliberately bypasses
+//! `call_tool` — it needs response metadata and its own durability — and
+//! so must honour the same no-real-fallback contract itself.
 
 use super::Runtime;
 use crate::connectors::ConnectorHttpSpec;
 use crate::errors::RuntimeError;
+use crate::runtime::connector_dispatch::ConnectorResponseMeta;
+use crate::tracing::now_ms;
+use corvid_trace_schema::TraceEvent;
 use crate::protocol::{
     bind_poll_path, bind_protocol_path, cancellation_disposition, intent_idempotency_key,
     is_terminal, observe, poll_delay_ms, CancellationDisposition, ProtocolIntentState,
@@ -92,7 +103,7 @@ impl Runtime {
 
             // (2) Submit, then bind the provider job id from the DECODED
             // response — never before it is typed.
-            let response = self.dispatch_connector_http(spec, args).await?;
+            let (response, _) = self.protocol_exchange(&spec.operation, spec, args).await?;
             intent.bind_submit_response(&unwrap_ok_envelope(&response));
             self.checkpoint_protocol_intent(job, &key, &intent)?;
         }
@@ -148,9 +159,18 @@ impl Runtime {
             // the declared request budget either.)
             let declared = poll_delay_ms(protocol, intent.polls);
             let delay = retry_after_hint.map_or(declared, |asked| declared.max(asked));
-            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            // A REPLAYED lifecycle does not re-live the wall clock (slice
+            // 52h-4). The recorded observation sequence already encodes
+            // the cadence that actually happened; sleeping it again would
+            // make replaying a day-long protocol take a day, and would
+            // race the declared deadline against replay wall-time rather
+            // than against the provider.
+            if self.replay_source()?.is_none() {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
 
             let poll_spec = self.poll_spec_for(spec, protocol, &intent, args)?;
+            let poll_label = format!("{}.poll", spec.operation);
             // Circuit-breaker admission (slice 52h-3). A long-running
             // protocol must survive a provider's transient hiccup — a
             // single failed observation says nothing about the submitted
@@ -159,15 +179,23 @@ impl Runtime {
             // persistently broken provider forever is its own failure, so
             // `circuit_breaker: N` consecutive failures trips and gives
             // up. The declared deadline still bounds the whole loop.
-            let (raw, meta) = match self
-                .dispatch_connector_http_detailed(&poll_spec, &[])
-                .await
-            {
+            let (raw, meta) = match self.protocol_exchange(&poll_label, &poll_spec, &[]).await {
                 Ok(ok) => {
                     consecutive_poll_failures = 0;
                     ok
                 }
                 Err(err) => {
+                    // A replay divergence is NOT a provider hiccup, so the
+                    // breaker must not absorb it (slice 52h-4). In replay
+                    // there IS no provider to be transiently unwell — a
+                    // divergence means the RECORDING does not cover this
+                    // observation, which no amount of retrying can fix.
+                    // Tolerating it would also spin the loop against a
+                    // cursor that never advances until the deadline, and
+                    // report a gap in the trace as a provider timeout.
+                    if matches!(err, RuntimeError::ReplayDivergence(_)) {
+                        return Err(err);
+                    }
                     consecutive_poll_failures += 1;
                     let threshold = spec.circuit_breaker.unwrap_or(u64::MAX);
                     if consecutive_poll_failures >= threshold {
@@ -223,6 +251,83 @@ impl Runtime {
             })
     }
 
+    /// One provider exchange, through the same record/replay bracket
+    /// ordinary tool calls get (slice 52h-4).
+    ///
+    /// `call_tool` consults the replay source BEFORE dispatching, which
+    /// is what gives every other effect strict no-real-fallback. The
+    /// protocol driver does not go through `call_tool`, so without this
+    /// bracket a replayed lifecycle would reach for the live provider —
+    /// re-submitting work that already happened. Here the replay source
+    /// is consulted first and there is no path from that branch to the
+    /// network.
+    ///
+    /// `label` names the lifecycle boundary — the operation itself for
+    /// the submit, `<op>.poll` for an observation, `<op>.cancel` for the
+    /// compensation — so a recorded observation can never be substituted
+    /// for a submit. Observations deliberately SHARE one label: the
+    /// replay cursor is strictly positional, so N recorded observations
+    /// reproduce in exactly the order the provider produced them, which
+    /// is the whole point of replaying a lifecycle rather than a call.
+    async fn protocol_exchange(
+        &self,
+        label: &str,
+        spec: &ConnectorHttpSpec,
+        args: &[serde_json::Value],
+    ) -> Result<(serde_json::Value, ConnectorResponseMeta), RuntimeError> {
+        if self.tracer.is_enabled() {
+            self.tracer.emit(TraceEvent::ToolCall {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: label.to_string(),
+                args: args.to_vec(),
+            });
+        }
+        let dispatched = match self.replay_source()? {
+            // A replayed exchange carries no live response metadata: the
+            // cadence the provider asked for is already baked into the
+            // recorded sequence of observations, and no caller reads
+            // `status` off this value (the status→error mapping happens
+            // inside the dispatch, before the payload was recorded).
+            Some(replay) => replay
+                .replay_tool_call(label, args)
+                .map(|value| (value, ConnectorResponseMeta::default())),
+            None => self.dispatch_connector_http_detailed(spec, args).await,
+        };
+        // A FAILED exchange is recorded too, and as a substitutable
+        // result — otherwise replay would reproduce a lifecycle in which
+        // the provider never faltered, and the circuit-breaker tolerance
+        // path (the one worth replaying) would silently vanish.
+        let (payload, meta) = match dispatched {
+            Ok(ok) => ok,
+            Err(err) => {
+                if self.tracer.is_enabled() {
+                    self.tracer.emit(TraceEvent::ToolResult {
+                        ts_ms: now_ms(),
+                        run_id: self.tracer.run_id().to_string(),
+                        tool: label.to_string(),
+                        result: serde_json::json!({
+                            crate::replay::CORVID_TOOL_ERROR_KEY: err.to_string(),
+                        }),
+                    });
+                }
+                return Err(err);
+            }
+        };
+        if self.tracer.is_enabled() {
+            // The credential never reaches here: it is resolved and
+            // attached to a header inside the dispatch, so neither the
+            // recorded args nor the recorded payload can carry it.
+            self.tracer.emit(TraceEvent::ToolResult {
+                ts_ms: now_ms(),
+                run_id: self.tracer.run_id().to_string(),
+                tool: label.to_string(),
+                result: payload.clone(),
+            });
+        }
+        Ok((payload, meta))
+    }
+
     /// Act on a cancelled durable job (slice 52h-3). The disposition is
     /// decided by the DECLARATION plus whether we already submitted — it
     /// is never an assumption about what the provider will tolerate.
@@ -267,8 +372,12 @@ impl Runtime {
                 );
                 // A failed compensation must not be reported as a clean
                 // cancellation — the provider job may still be running.
-                self.dispatch_connector_http(&cancel_spec, &[])
-                    .await
+                self.protocol_exchange(
+                    &format!("{}.cancel", spec.operation),
+                    &cancel_spec,
+                    &[],
+                )
+                .await
                     .map_err(|err| RuntimeError::ToolFailed {
                         tool: spec.operation.clone(),
                         message: format!(

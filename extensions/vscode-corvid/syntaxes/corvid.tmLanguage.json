@@ -4,11 +4,16 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
-    { "include": "#numbers" },
     { "include": "#annotations" },
+    { "include": "#declarations" },
     { "include": "#keywords" },
     { "include": "#aiNative" },
-    { "include": "#types" }
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#members" },
+    { "include": "#calls" },
+    { "include": "#operators" },
+    { "include": "#numbers" }
   ],
   "repository": {
     "comments": {
@@ -54,8 +59,52 @@
     "annotations": {
       "patterns": [
         {
-          "name": "storage.modifier.annotation.corvid",
-          "match": "@[A-Za-z_][A-Za-z0-9_]*"
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.annotation.corvid"
+            },
+            "2": {
+              "name": "storage.modifier.annotation.corvid"
+            }
+          }
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(agent|tool|prompt|operation|fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.corvid"
+            },
+            "2": {
+              "name": "entity.name.function.corvid"
+            }
+          }
+        },
+        {
+          "match": "\\b(type|effect|model|connector|server|identity|memory|session|eval|test|fixture|mock|extend)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.corvid"
+            },
+            "2": {
+              "name": "entity.name.type.corvid"
+            }
+          }
+        },
+        {
+          "match": "\\b(import)\\s+([A-Za-z_][A-Za-z0-9_./-]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.corvid"
+            },
+            "2": {
+              "name": "entity.name.namespace.corvid"
+            }
+          }
         }
       ]
     },
@@ -63,15 +112,15 @@
       "patterns": [
         {
           "name": "keyword.declaration.corvid",
-          "match": "\\b(agent|tool|prompt|effect|type|model|eval|extend|import|public)\\b"
+          "match": "\\b(agent|tool|prompt|effect|type|model|eval|test|fixture|mock|extend|connector|operation|server|identity|memory|session|schedule|fn|pub|public|package)\\b"
         },
         {
           "name": "keyword.control.corvid",
-          "match": "\\b(if|else|for|in|return|yield|break|continue|pass|try|retry|on|error|times|backoff|replay|when)\\b"
+          "match": "\\b(if|elif|else|for|while|in|match|return|yield|break|continue|pass|try|retry|on|error|times|backoff|replay|when|as|import)\\b"
         },
         {
-          "name": "constant.language.corvid",
-          "match": "\\b(true|false|nothing|Ok|Err|Some|None)\\b"
+          "name": "storage.modifier.corvid",
+          "match": "\\b(dangerous|async|extern|deterministic|replayable)\\b"
         }
       ]
     },
@@ -79,7 +128,19 @@
       "patterns": [
         {
           "name": "keyword.other.ai-native.corvid",
-          "match": "\\b(uses|dangerous|approve|budget|trust|reversible|grounded|cacheable|calibrated|cites|strictly|requires|output_format|route|progressive|rollout|ensemble|vote|adversarial|propose|challenge|adjudicate|confidence|tokens|latency|cost)\\b"
+          "match": "\\b(uses|approve|assert|assert_snapshot|budget|trust|reversible|grounded|cacheable|calibrated|cites|strictly|requires|permission|role|output_format|route|progressive|below|rollout|ensemble|vote|adversarial|propose|challenge|adjudicate|confidence|tokens|latency|cost|provisioning|modes|status|terminal|deadline|idempotency|poll|zone)\\b"
+        },
+        {
+          "name": "support.constant.ai-mode.corvid",
+          "match": "\\b(mock|real|replay|open|invited|approval_required|adaptive)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.corvid",
+          "match": "\\b(true|false|nothing|Ok|Err|Some|None)\\b"
         }
       ]
     },
@@ -87,7 +148,43 @@
       "patterns": [
         {
           "name": "support.type.corvid",
-          "match": "\\b(Int|Float|String|Bool|Nothing|List|Stream|Result|Option|Grounded|Weak|Partial|ResumeToken)\\b"
+          "match": "\\b(Int|Float|String|Bool|Nothing|List|Map|Stream|Result|Option|Grounded|Tainted|Weak|Partial|ResumeToken|Upload|Page|TraceId|DbHandle|JsonValue|JsonBuilder)\\b"
+        },
+        {
+          "name": "entity.name.type.corvid",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "members": {
+      "patterns": [
+        {
+          "name": "variable.other.property.corvid",
+          "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.member.corvid",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)"
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.corvid",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.corvid",
+          "match": "->|\\?\\?|\\?|==|!=|<=|>=|\\+|-|\\*|/|%|=|<|>|\\band\\b|\\bor\\b|\\bnot\\b"
+        },
+        {
+          "name": "punctuation.separator.corvid",
+          "match": "[,:]"
         }
       ]
     }

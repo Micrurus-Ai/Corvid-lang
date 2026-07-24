@@ -14,6 +14,11 @@ Unix (macOS + Linux):
 curl -fsSL https://corvid-lang.org/install.sh | sh
 ```
 
+The official archive includes the matching Corvid editor extension and
+language server. The installer detects VS Code, Cursor, VSCodium, and
+Windsurf and installs the extension automatically, so `.cor` files are
+highlighted immediately. Set `CORVID_SKIP_EDITOR_EXTENSION=1` to opt out.
+
 Windows (PowerShell):
 
 ```powershell

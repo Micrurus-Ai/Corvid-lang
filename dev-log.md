@@ -16652,6 +16652,63 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-4 (part 1): a protocol is a lifecycle, so replay has to be one too
+
+52h-2's file header said mock, replay, and real all share the engine —
+"the submit and poll requests bottom out at the same connector dispatch,
+so the mode is decided there, not here."
+
+Half of that was false. Strict no-real-fallback does not live at the
+connector dispatch; it lives in `call_tool`, which consults the replay
+source *before* dispatching. The protocol driver deliberately bypasses
+`call_tool` — it needs response metadata and its own durability — and so
+inherited none of it. A protocol could not replay at all. It failed
+closed on the egress quarantine, so it never made a silent live call, but
+it reproduced nothing.
+
+I found it by reading my own claim against the code. No test covered
+protocol replay, which is exactly why the sentence survived the slice
+that made it untrue.
+
+`protocol_exchange` is now the record/replay bracket for every provider
+exchange. Replay is consulted first and that branch has no path to the
+network. Each boundary is recorded under its own label — the operation
+for the submit, `<op>.poll` for an observation, `<op>.cancel` for the
+compensation — so an observation can never be substituted for a submit.
+Observations deliberately share one label, because the replay cursor is
+strictly positional: N recorded observations reproduce in exactly the
+order the provider produced them. That is the difference between
+replaying a lifecycle and replaying a call. Failed exchanges are recorded
+as substitutable results too, otherwise replay would reproduce a
+lifecycle in which the provider never faltered and the circuit-breaker
+tolerance path — the one worth replaying — would silently vanish.
+
+A replayed lifecycle does not re-live the wall clock. Sleeping the
+declared cadence again would make replaying a day-long protocol take a
+day, and would race the deadline against replay wall-time rather than
+against the provider.
+
+Then the test taught me something. It passed — after 601 seconds.
+
+The circuit breaker was absorbing the replay divergence. The loop spun
+against a cursor that never advances, hit the 600s deadline, and reported
+a gap in the recording as a *provider timeout*. Green, for the wrong
+reason, asserting the wrong claim. A replay divergence is not a provider
+hiccup: in replay there is no provider to be transiently unwell, and no
+amount of retrying repairs a recording that never covered the
+observation. Divergence is fatal at the gap now.
+
+The lesson is about the test, not the bug. "It fails" was too weak an
+assertion — it was satisfied by a failure with the wrong cause, the wrong
+message, and a 600s wait. An adversarial test should assert *how* a run
+fails: the message says "diverge", does not say "deadline", and the
+refusal is immediate.
+
+Part 2, version migration, is still open. An in-flight intent whose
+protocol changed under it is a consequential-policy decision — a real
+provider job is out there — so the resume posture gets declared in
+source rather than inferred.
+
 ## 2026-07-24 - 52h-3 (part 3): the "blocked" items weren't blocked — and one hid a live budget hole
 
 I had marked two items blocked. Challenged on it, and the challenge was

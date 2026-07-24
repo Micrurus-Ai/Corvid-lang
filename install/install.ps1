@@ -7,6 +7,7 @@
 #   $env:CORVID_REPO     = "Micrurus-Ai/Corvid-lang"          # source repo
 #   $env:CORVID_VERSION  = "latest" | "nightly" | "v0.0.1"    # release tag (slice 35V2-P33-install-script-nightly)
 #   $env:CORVID_HOME     = "$env:USERPROFILE\.corvid"         # install root
+#   $env:CORVID_SKIP_EDITOR_EXTENSION = "1"                    # opt out of automatic editor support
 
 $ErrorActionPreference = 'Stop'
 
@@ -25,6 +26,43 @@ function Ok($m)   { Write-Host "    $m" -ForegroundColor Green }
 function Warn2($m){ Write-Host "    $m" -ForegroundColor Yellow }
 
 function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+
+function Install-EditorSupport {
+    if ($env:CORVID_SKIP_EDITOR_EXTENSION -eq '1') {
+        Warn2 "Skipping editor support (CORVID_SKIP_EDITOR_EXTENSION=1)"
+        return
+    }
+
+    $vsix = Join-Path $Root 'extensions\corvid.vsix'
+    if (-not (Test-Path $vsix)) {
+        Warn2 "Bundled Corvid editor extension not found; syntax highlighting was not installed"
+        return
+    }
+
+    $editors = @(
+        @{ Name = 'VS Code';  Command = 'code' },
+        @{ Name = 'Cursor';   Command = 'cursor' },
+        @{ Name = 'VSCodium'; Command = 'codium' },
+        @{ Name = 'Windsurf'; Command = 'windsurf' }
+    )
+    $found = $false
+
+    foreach ($editor in $editors) {
+        if (-not (Have $editor.Command)) { continue }
+        $found = $true
+        Step "Installing Corvid syntax highlighting for $($editor.Name)"
+        & $editor.Command --install-extension $vsix --force
+        if ($LASTEXITCODE -eq 0) {
+            Ok "$($editor.Name) will highlight .cor files automatically"
+        } else {
+            Warn2 "$($editor.Name) extension installation failed (exit $LASTEXITCODE)"
+        }
+    }
+
+    if (-not $found) {
+        Warn2 "No supported editor CLI found; the bundled extension remains at $vsix"
+    }
+}
 
 # --- target detection -----------------------------------------------------
 $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -142,6 +180,30 @@ if (-not $installed) {
     if (Test-Path $stdSrc) {
         Copy-Item -Recurse -Force $stdSrc (Join-Path $Root 'std')
     }
+
+    # Source-fallback installs do not have the release archive's bundled
+    # VSIX. Package the exact checked-out extension when Node is available
+    # so editor highlighting remains automatic on this path too.
+    $extensionSrc = Join-Path $src 'extensions\vscode-corvid'
+    if ((Test-Path $extensionSrc) -and (Have 'npm') -and (Have 'npx')) {
+        Step "Packaging Corvid editor support"
+        $extensionOut = Join-Path $Root 'extensions'
+        New-Item -ItemType Directory -Force -Path $extensionOut | Out-Null
+        npm ci --prefix $extensionSrc
+        if ($LASTEXITCODE -eq 0) {
+            Push-Location $extensionSrc
+            try {
+                npx --yes '@vscode/vsce@3.6.2' package --out (Join-Path $extensionOut 'corvid.vsix')
+            } finally {
+                Pop-Location
+            }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Warn2 "Could not package editor support from source"
+        }
+    } else {
+        Warn2 "Node/npm not found; source fallback could not package editor support"
+    }
     Ok "Built from source"
 }
 
@@ -172,6 +234,12 @@ if ($env:GITHUB_PATH -and (Test-Path $env:GITHUB_PATH)) {
 if ($env:GITHUB_ENV -and (Test-Path $env:GITHUB_ENV)) {
     Add-Content -Path $env:GITHUB_ENV -Value "CORVID_HOME=$Root"
 }
+
+# --- editor support -------------------------------------------------------
+# Official release archives carry a version-matched VSIX. Installing it
+# here makes opening any `.cor` file colorful immediately; no separate
+# Marketplace search or manual extension step is required.
+Install-EditorSupport
 
 # --- verify ---------------------------------------------------------------
 $exe = Join-Path $bin 'corvid.exe'

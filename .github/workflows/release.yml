@@ -85,6 +85,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extensions/vscode-corvid/package-lock.json
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}-${{ steps.tag.outputs.channel }}
@@ -111,18 +117,39 @@ jobs:
         env:
           CORVID_BUILD_SHA: ${{ steps.tag.outputs.short_sha }}
           CORVID_BUILD_DATE: ${{ steps.tag.outputs.commit_date }}
-        run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli
+        run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli -p corvid-lsp
+
+      # Bundle the editor grammar with the compiler release rather than
+      # requiring a separately published Marketplace version. The
+      # installer feeds this VSIX to every supported editor CLI it finds,
+      # so highlighting is automatic and version-matched with Corvid.
+      - name: Package Corvid editor extension
+        shell: bash
+        run: |
+          npm ci --prefix extensions/vscode-corvid
+          (
+            cd extensions/vscode-corvid
+            npx --yes @vscode/vsce@3.6.2 package \
+              --out "$GITHUB_WORKSPACE/dist/corvid.vsix"
+          )
 
       - name: Stage artifact
         shell: bash
         run: |
           name="corvid-${{ matrix.target }}"
           stage="dist/$name"
-          mkdir -p "$stage/bin" "$stage/lib"
+          mkdir -p "$stage/bin" "$stage/lib" "$stage/extensions"
           case "${{ matrix.target }}" in
-            *windows*) cp "target/${{ matrix.target }}/release/corvid.exe" "$stage/bin/" ;;
-            *)         cp "target/${{ matrix.target }}/release/corvid" "$stage/bin/" ;;
+            *windows*)
+              cp "target/${{ matrix.target }}/release/corvid.exe" "$stage/bin/"
+              cp "target/${{ matrix.target }}/release/corvid-lsp.exe" "$stage/bin/"
+              ;;
+            *)
+              cp "target/${{ matrix.target }}/release/corvid" "$stage/bin/"
+              cp "target/${{ matrix.target }}/release/corvid-lsp" "$stage/bin/"
+              ;;
           esac
+          cp "dist/corvid.vsix" "$stage/extensions/"
           # Stage the runtime staticlib alongside the bin under
           # `$stage/lib/` so post-install discovery via
           # `staticlib_discovery::SiblingLibDir` (which checks

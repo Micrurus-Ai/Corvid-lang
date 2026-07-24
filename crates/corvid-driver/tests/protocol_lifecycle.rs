@@ -593,3 +593,236 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
         "the refusal must name the durable-job requirement; got: {text}"
     );
 }
+
+/// Slice 52h-4 — the acceptance path for lifecycle replay.
+///
+/// A protocol is not one call, it is a lifecycle: a submit plus a
+/// sequence of observations spread over real time. Replaying it must
+/// reproduce that whole sequence from the recording and NEVER reach the
+/// provider — otherwise "replay" would re-submit work that already
+/// happened, the exact failure durable intent exists to prevent.
+///
+/// Records a real lifecycle, then replays the SAME file with no provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_lifecycle_replays_without_touching_the_provider() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_REPLAY_TOKEN";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-replay-secret");
+
+    // --- Record: a real lifecycle (submit + two observations). ---
+    let trace_dir = tempfile::tempdir().expect("trace dir");
+    let trace_path = {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-r","status":"queued"}"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"id":"prov-r","status":"processing"}"#),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"id":"prov-r","status":"completed"}"#),
+            )
+            .mount(&server)
+            .await;
+
+        let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+        let job = queue
+            .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+            .expect("enqueue");
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .trace_to(trace_dir.path())
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect("the recorded lifecycle reaches a terminal state");
+        let p = runtime.tracer().path().to_path_buf();
+        drop(runtime);
+        p
+        // `server` drops here: from this point there is no provider.
+    };
+
+    // Each lifecycle boundary is recorded UNDER ITS OWN LABEL, so an
+    // observation can never be substituted for a submit.
+    let raw = std::fs::read_to_string(&trace_path).expect("trace readable");
+    assert!(
+        raw.contains(r#""tool":"submit_shipment""#),
+        "the submit boundary must be recorded"
+    );
+    assert!(
+        raw.contains(r#""tool":"submit_shipment.poll""#),
+        "each observation boundary must be recorded under its own label"
+    );
+    // The credential is attached to a header inside the dispatch, so it
+    // cannot reach the recording.
+    assert!(
+        !raw.contains("tok-replay-secret"),
+        "the credential must never appear in a recorded lifecycle"
+    );
+
+    // --- Replay: same file, fresh durable job, NO provider. ---
+    // A fresh job means the intent starts empty, so the lifecycle really
+    // re-executes against the recording instead of short-circuiting on an
+    // already-terminal checkpoint.
+    let replay_queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("replay queue"));
+    let replay_job = replay_queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let replay_runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Replay))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .replay_from(&trace_path)
+        .build()
+        .with_durable_job(replay_queue.clone(), replay_job.id.clone());
+    let replayed = run_ir_with_runtime(&ir, None, vec![], &replay_runtime)
+        .await
+        .expect("replay reproduces the lifecycle from the recording");
+    std::env::remove_var(TOKEN_ENV);
+
+    match replayed {
+        Value::Struct(s) => assert_eq!(
+            s.get_field("status").unwrap(),
+            Value::String(Arc::from("completed")),
+            "replay must reach the same terminal observation"
+        ),
+        other => panic!("expected the terminal Job struct; got {other:?}"),
+    }
+
+    // Replay walked the same transitions and checkpointed them, so a
+    // replayed lifecycle is auditable exactly like the original.
+    let checkpoints = replay_queue
+        .list_checkpoints(&replay_job.id)
+        .expect("checkpoints");
+    let last = checkpoints.last().expect("replay checkpoints the lifecycle");
+    assert_eq!(
+        last.payload.get("state").and_then(|s| s.as_str()),
+        Some("completed"),
+        "the replayed intent must end in the same terminal state"
+    );
+}
+
+/// Strict no-real-fallback, adversarially. When the recording does not
+/// cover an exchange, replay must REFUSE — never quietly finish the
+/// lifecycle by asking the live provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lifecycle_replay_missing_an_observation_refuses_instead_of_calling_the_provider() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_REPLAY_GAP_TOKEN";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-gap");
+
+    let trace_dir = tempfile::tempdir().expect("trace dir");
+    let trace_path = {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-g","status":"queued"}"#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-g"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"id":"prov-g","status":"completed"}"#),
+            )
+            .mount(&server)
+            .await;
+        let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+        let job = queue
+            .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+            .expect("enqueue");
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .trace_to(trace_dir.path())
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect("recorded run completes");
+        let p = runtime.tracer().path().to_path_buf();
+        drop(runtime);
+        p
+    };
+
+    // Excise the observations, keeping the submit. The recording now
+    // describes a lifecycle that was never finished.
+    let gapped = trace_path.with_extension("gapped.jsonl");
+    let kept: String = std::fs::read_to_string(&trace_path)
+        .expect("trace readable")
+        .lines()
+        .filter(|line| !line.contains("submit_shipment.poll"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(&gapped, kept).expect("write gapped trace");
+
+    let replay_queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("replay queue"));
+    let replay_job = replay_queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let replay_runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Replay))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .replay_from(&gapped)
+        .build()
+        .with_durable_job(replay_queue.clone(), replay_job.id.clone());
+    let started = std::time::Instant::now();
+    let err = run_ir_with_runtime(&ir, None, vec![], &replay_runtime)
+        .await
+        .expect_err("an uncovered observation must refuse, not fall through to the provider");
+    let elapsed = started.elapsed();
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err}").to_lowercase();
+    assert!(
+        text.contains("diverge"),
+        "the refusal must be a replay divergence, not a network failure; got: {text}"
+    );
+    // It must refuse AT THE GAP. The circuit breaker exists for a
+    // provider's transient unwellness, and in replay there is no provider
+    // — absorbing the divergence would spin against a cursor that never
+    // advances and finally report the missing recording as a provider
+    // timeout, which is a different (and false) claim.
+    assert!(
+        !text.contains("deadline"),
+        "a gap in the recording must not be reported as a provider deadline; got: {text}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "the divergence must be fatal immediately, not tolerated until the declared deadline \
+         (took {elapsed:?})"
+    );
+}

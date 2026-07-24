@@ -31,6 +31,12 @@ Install ([Windows PowerShell](#install) — macOS / Linux below):
 curl -fsSL https://raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.sh | sh
 ```
 
+Official installers also detect VS Code, Cursor, VSCodium, and Windsurf
+and install the bundled Corvid extension automatically. Opening a `.cor`
+file therefore gets syntax highlighting and language support immediately.
+Set `CORVID_SKIP_EDITOR_EXTENSION=1` only when editor integration is not
+wanted.
+
 First program:
 
 ```bash

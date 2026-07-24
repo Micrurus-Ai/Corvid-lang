@@ -11,6 +11,7 @@
 #                    release tag like `v0.0.1` /
 #                    `nightly-2026-06-04-d23d381`)
 #   CORVID_HOME     (default: $HOME/.corvid)
+#   CORVID_SKIP_EDITOR_EXTENSION=1 (opt out of automatic editor support)
 #
 # Canonical source: https://github.com/Micrurus-Ai/Corvid-lang/blob/main/install/install.sh
 # This file is also mirrored to Micrurus-Ai/corvid-installer for the
@@ -28,6 +29,37 @@ ok()    { printf '\033[32m    %s\033[0m\n' "$*"; }
 warn()  { printf '\033[33m    %s\033[0m\n' "$*"; }
 die()   { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 have()  { command -v "$1" >/dev/null 2>&1; }
+
+install_editor_support() {
+    if [ "${CORVID_SKIP_EDITOR_EXTENSION:-0}" = "1" ]; then
+        warn "Skipping editor support (CORVID_SKIP_EDITOR_EXTENSION=1)"
+        return
+    fi
+
+    vsix="$ROOT/extensions/corvid.vsix"
+    if [ ! -f "$vsix" ]; then
+        warn "Bundled Corvid editor extension not found; syntax highlighting was not installed"
+        return
+    fi
+
+    found=0
+    for editor in code cursor codium windsurf; do
+        if ! have "$editor"; then
+            continue
+        fi
+        found=1
+        step "Installing Corvid syntax highlighting with $editor"
+        if "$editor" --install-extension "$vsix" --force; then
+            ok "$editor will highlight .cor files automatically"
+        else
+            warn "$editor extension installation failed; run: $editor --install-extension \"$vsix\" --force"
+        fi
+    done
+
+    if [ "$found" -eq 0 ]; then
+        warn "No supported editor CLI found; the bundled extension remains at $vsix"
+    fi
+}
 
 dl() {
     if   have curl; then curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1"
@@ -162,6 +194,25 @@ if [ "$installed" -eq 0 ]; then
         rm -rf "$ROOT/std"
         cp -R "$src/std" "$ROOT/std"
     fi
+
+    # Source-fallback installs do not have the release archive's bundled
+    # VSIX. Package the exact checked-out extension when Node is available
+    # so editor highlighting remains automatic on this path too.
+    extension_src="$src/extensions/vscode-corvid"
+    if [ -d "$extension_src" ] && have npm && have npx; then
+        step "Packaging Corvid editor support"
+        mkdir -p "$ROOT/extensions"
+        if npm ci --prefix "$extension_src" \
+            && (cd "$extension_src" \
+                && npx --yes @vscode/vsce@3.6.2 package \
+                    --out "$ROOT/extensions/corvid.vsix"); then
+            ok "Packaged Corvid editor extension"
+        else
+            warn "Could not package editor support from source"
+        fi
+    else
+        warn "Node/npm not found; source fallback could not package editor support"
+    fi
     ok "Built from source"
 fi
 
@@ -207,6 +258,12 @@ fi
 
 export CORVID_HOME="$ROOT"
 export PATH="$bin:$PATH"
+
+# --- editor support -------------------------------------------------------
+# Official release archives carry a version-matched VSIX. Installing it
+# here makes opening any `.cor` file colorful immediately; no separate
+# Marketplace search or manual extension step is required.
+install_editor_support
 
 # --- verify ---------------------------------------------------------------
 if [ -x "$bin/corvid" ]; then

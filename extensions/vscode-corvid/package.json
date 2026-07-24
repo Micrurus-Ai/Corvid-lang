@@ -5,6 +5,20 @@
   "version": "0.0.1",
   "publisher": "corvid-lang",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Micrurus-Ai/Corvid-lang.git",
+    "directory": "extensions/vscode-corvid"
+  },
+  "files": [
+    "language-configuration.json",
+    "LICENSE",
+    "node_modules/**",
+    "README.md",
+    "snippets/**",
+    "src/**",
+    "syntaxes/**"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -80,6 +94,9 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0"
+  },
+  "overrides": {
+    "brace-expansion": "2.1.2"
   },
   "scripts": {
     "verify": "node ./scripts/verify.mjs"

@@ -7545,6 +7545,90 @@ non-2xx is a transport failure. Reliability composes too: `retry: N`,
 `circuit_breaker: N` (trips a repeatedly-failing operation) are declared on the
 connector and enforced by the runtime.
 
+### An operation can declare the provider's protocol, not just its request
+
+Some provider calls do not finish when the response arrives — you submit, and
+the real work happens later. Writing that by hand means a hand-rolled poll loop
+whose timeout, retry, cancellation, and crash behavior nobody checks.
+
+An `async:` block on an operation declares the temporal contract instead:
+
+```corvid
+operation submit_shipment(order: String) -> Job dangerous uses http_write:
+    POST "/shipments" body order
+    async:
+        statuses: [queued, processing, completed, failed]
+        initial: queued
+        terminal: [completed, failed]
+        deadline: 600s
+        deadline_target: failed
+        idempotency: intent
+        poll GET "/shipments/{id}"
+        every: 30s
+        cancel POST "/shipments/{id}/cancel"   # optional
+        state queued:
+            on queued -> queued
+            on processing -> processing
+            on completed -> completed
+            on failed -> failed
+        state processing:
+            on queued -> processing
+            on processing -> processing
+            on completed -> completed
+            on failed -> failed
+```
+
+The call returns only when a **terminal** state is reached — the submit response
+is never mistaken for completion. `{id}` binds from the DECODED submit response
+(a response field beats a same-named call argument), so the poll can never
+address a job the provider did not confirm. A status the declaration never
+listed is refused *without* advancing the intent.
+
+What the compiler proves before you run it: every status and state is declared
+once, transition tables are total, every target exists, every state reaches a
+terminal, deadlines and intervals are non-zero, the poll request does not mutate,
+and a mutating submission passes through the `dangerous` approval boundary.
+The worst-case poll count (`deadline / interval`) multiplies the operation's cost
+for `@budget`, so a protocol cannot poll its way past a declared ceiling.
+
+**A protocol must run inside a durable job.** Its intent has to survive a
+restart, so it refuses to run anywhere else rather than silently degrading to a
+poll loop that a crash would lose. The intent is checkpointed *before* the submit
+leaves the process, and every observed transition is checkpointed after — so a
+restart resumes at the last observation and **never submits twice**.
+
+Cancelling the job does what the declaration supports, and says which:
+
+- before submit — cancelled exactly, no provider work exists;
+- after submit, with a `cancel` endpoint — compensated by calling it (a FAILED
+  compensation is never reported as a clean cancellation);
+- after submit, without one — **detached**, and the error says plainly that the
+  provider job is still running and is NOT cancelled.
+
+A provider's `Retry-After` can slow the declared cadence but never speed it up
+past what the source declared. Transient poll failures are tolerated (the
+submitted job is still out there); `circuit_breaker: N` consecutive failures give
+up on observing, while the intent stays checkpointed for a later resume.
+
+### Replaying a protocol replays the whole lifecycle
+
+`--mode replay` reproduces a protocol the way it reproduces any other effect:
+from the recording, never from the provider. Because a protocol is a lifecycle
+rather than a call, every boundary is recorded separately — the submit under the
+operation's name, each observation as `<op>.poll`, the compensation as
+`<op>.cancel`. Observations replay in exactly the order the provider produced
+them, so a run that went `queued → processing → completed` replays as those
+three observations, not one.
+
+Failed exchanges are recorded too, so a lifecycle that survived a provider
+hiccup replays *with* the hiccup instead of a suspiciously clean history.
+Replay does not re-live the wall clock: a day-long protocol replays in
+milliseconds, because the recorded sequence already encodes the cadence.
+
+If the recording does not cover an exchange, replay **refuses at that point** —
+it never quietly finishes the lifecycle by asking the live provider, and it
+never reports the gap as a provider timeout.
+
 ### Approval queues must not invent identity
 
 An approval is a confused-deputy boundary: the requester and tenant
