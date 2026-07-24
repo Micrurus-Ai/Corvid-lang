@@ -1,4 +1,4 @@
-//! Durable verified-provider-protocol execution (slice 52h-2).
+//! Durable verified-provider-protocol execution.
 //!
 //! Proves the lifecycle end-to-end against a loopback provider: submit
 //! once, bind the provider job id from the TYPED response, poll through
@@ -39,6 +39,7 @@ connector shipping:
             idempotency: intent
             poll GET "/shipments/{{id}}"
             every: 1s
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on processing -> processing
@@ -58,12 +59,26 @@ agent main() -> Job uses http_write:
 }
 
 /// A protocol whose connector declares `circuit_breaker: 2` — two
-/// consecutive failed observations trip it (slice 52h-3).
+/// consecutive failed observations trip it.
 fn source_with_breaker(token_env: &str) -> String {
     source(token_env).replace(
         "    modes: [real]",
         "    circuit_breaker: 2\n    modes: [real]",
     )
+}
+
+/// A protocol whose graph can be edited (`deadline_secs`) and whose
+/// resume posture can be chosen, for the migration tests.
+/// `circuit_breaker: 1` lets a run abort mid-flight so the next run finds
+/// a genuinely IN-FLIGHT intent rather than a completed one.
+fn source_migration(token_env: &str, deadline_secs: u64, policy: &str) -> String {
+    source(token_env)
+        .replace("    modes: [real]", "    circuit_breaker: 1\n    modes: [real]")
+        .replace("deadline: 600s", &format!("deadline: {deadline_secs}s"))
+        .replace(
+            "on_protocol_change: refuse",
+            &format!("on_protocol_change: {policy}"),
+        )
 }
 
 fn compile(dir: &std::path::Path, src: &str) -> corvid_ir::IrFile {
@@ -264,7 +279,7 @@ async fn resuming_the_same_job_never_submits_a_second_provider_job() {
     // submit and one poll across the two runs.
 }
 
-/// Governed cadence (slice 52h-3): a provider's `Retry-After` is
+/// Governed cadence: a provider's `Retry-After` is
 /// honoured, and the elapsed time proves it — the run must take at least
 /// the requested backoff, which is longer than the declared 1s interval.
 /// A provider can slow us down; it can never speed us past what the
@@ -344,7 +359,7 @@ async fn a_provider_retry_after_slows_the_declared_cadence() {
     );
 }
 
-/// Circuit-breaker admission, tolerant half (slice 52h-3): a TRANSIENT
+/// Circuit-breaker admission, tolerant half: a TRANSIENT
 /// failed observation must not kill a long protocol — the submitted job
 /// is still out there, and one bad poll says nothing about it. The loop
 /// retries on the next tick and still reaches terminal.
@@ -408,7 +423,7 @@ async fn a_transient_poll_failure_is_tolerated_and_the_protocol_still_completes(
     }
 }
 
-/// Circuit-breaker admission, tripping half (slice 52h-3): polling a
+/// Circuit-breaker admission, tripping half: polling a
 /// PERSISTENTLY broken provider forever is its own failure, so N
 /// consecutive failed observations trip the breaker. The diagnostic must
 /// say the provider job was NOT cancelled — the intent stays recorded.
@@ -472,7 +487,7 @@ async fn consecutive_failed_observations_trip_the_declared_circuit_breaker() {
     );
 }
 
-/// Semantic cancellation with a DECLARED cancel endpoint (slice 52h-3):
+/// Semantic cancellation with a DECLARED cancel endpoint:
 /// cancelling the durable job mid-flight compensates by calling the
 /// provider's cancel endpoint — the placeholder bound from the submit
 /// response, exactly like the poll path.
@@ -594,7 +609,213 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
     );
 }
 
-/// Slice 52h-4 — the acceptance path for lifecycle replay.
+/// A protocol that changed under an in-flight intent.
+///
+/// The intent was created against one graph; the deployed declaration is
+/// now a different one. A live provider job exists that Corvid cannot
+/// un-create, so `on_protocol_change: refuse` means exactly that: the run
+/// refuses, the intent stays checkpointed, and the provider sees nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_protocol_change_refuses_to_resume_an_in_flight_intent_and_never_resubmits() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_MIGRATE_REFUSE";
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::env::set_var(TOKEN_ENV, "tok-migrate");
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+
+    // --- Run 1: submit lands, the first observation fails, and
+    // `circuit_breaker: 1` aborts the run with the intent IN FLIGHT.
+    {
+        let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 600, "refuse"));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-m","status":"queued"}"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-m"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect_err("the breaker aborts this run with the intent still in flight");
+    }
+
+    // Precondition for the test to mean anything: a submitted, non-terminal
+    // intent is on the job.
+    let last = queue
+        .list_checkpoints(&job.id)
+        .expect("checkpoints")
+        .pop()
+        .expect("an in-flight intent was recorded");
+    assert_eq!(
+        last.payload.get("submitted").and_then(|v| v.as_bool()),
+        Some(true),
+        "the provider job exists, so the intent must be marked submitted"
+    );
+    assert_eq!(
+        last.payload.get("state").and_then(|v| v.as_str()),
+        Some("queued"),
+        "the intent must still be mid-flight, not terminal"
+    );
+
+    // --- Run 2: the protocol GRAPH changed (deadline 600s -> 900s).
+    let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 900, "refuse"));
+    let server = MockServer::start().await;
+    // The provider must see NOTHING — no re-submit, no poll.
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-m"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("a changed protocol must not silently resume a live provider job");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err}");
+    assert!(
+        text.contains("changed while an intent was in flight"),
+        "the refusal must name what happened; got: {text}"
+    );
+    assert!(
+        text.contains("on_protocol_change: refuse"),
+        "the refusal must name the declaration that caused it; got: {text}"
+    );
+    // The honesty requirement: never imply the provider job went away.
+    assert!(
+        text.contains("still running"),
+        "the refusal must say the provider job is still running; got: {text}"
+    );
+}
+
+/// The other declared posture: `resume` continues an in-flight intent
+/// under the new declaration — without re-submitting — when the recorded
+/// state still exists in it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_declared_resume_continues_an_in_flight_intent_across_a_protocol_change() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_MIGRATE_RESUME";
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::env::set_var(TOKEN_ENV, "tok-migrate-2");
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+
+    {
+        let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 600, "resume"));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/shipments"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-n","status":"queued"}"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/shipments/prov-n"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+            .http_client(HttpClient::with_reqwest_client(loopback_client(
+                "api.example.com",
+                &server,
+            )))
+            .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+            .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+            .build()
+            .with_durable_job(queue.clone(), job.id.clone());
+        run_ir_with_runtime(&ir, None, vec![], &runtime)
+            .await
+            .expect_err("the breaker aborts this run with the intent still in flight");
+    }
+
+    // The protocol changed, and the declaration permits resuming.
+    let ir = compile(dir.path(), &source_migration(TOKEN_ENV, 900, "resume"));
+    let server = MockServer::start().await;
+    // Still exactly zero re-submits: resuming is not re-doing.
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-n"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-n","status":"completed"}"#),
+        )
+        .mount(&server)
+        .await;
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("a declared resume continues the in-flight intent");
+    std::env::remove_var(TOKEN_ENV);
+
+    match result {
+        Value::Struct(s) => assert_eq!(
+            s.get_field("status").unwrap(),
+            Value::String(Arc::from("completed")),
+            "the resumed intent must reach the terminal observation"
+        ),
+        other => panic!("expected the terminal Job struct; got {other:?}"),
+    }
+}
+
+/// The acceptance path for lifecycle replay.
 ///
 /// A protocol is not one call, it is a lifecycle: a submit plus a
 /// sequence of observations spread over real time. Replaying it must

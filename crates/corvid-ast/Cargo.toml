@@ -7,6 +7,7 @@ description = "AST types for the Corvid language."
 
 [dependencies]
 serde = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 serde_json = { workspace = true }

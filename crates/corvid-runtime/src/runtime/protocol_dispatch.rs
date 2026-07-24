@@ -1,4 +1,4 @@
-//! Durable verified-provider-protocol execution (slice 52h-2).
+//! Durable verified-provider-protocol execution.
 //!
 //! Drives the pure transition engine in [`crate::protocol`] against a
 //! real provider, with the durability that makes a long-running external
@@ -21,7 +21,7 @@
 //!    declared terminal state is reached, or when the declared deadline
 //!    forces the declared deadline target.
 //!
-//! 5. **The lifecycle is replayable** (slice 52h-4). Every provider
+//! 5. **The lifecycle is replayable**. Every provider
 //!    exchange — submit, each observation, and the compensation — goes
 //!    through [`Runtime::protocol_exchange`], which records it as a
 //!    substitutable trace event and, when replaying, serves it from the
@@ -41,7 +41,8 @@ use crate::tracing::now_ms;
 use corvid_trace_schema::TraceEvent;
 use crate::protocol::{
     bind_poll_path, bind_protocol_path, cancellation_disposition, intent_idempotency_key,
-    is_terminal, observe, poll_delay_ms, CancellationDisposition, ProtocolIntentState,
+    is_terminal, observe, poll_delay_ms, resume_verdict, CancellationDisposition,
+    ProtocolIntentState, ResumeVerdict,
 };
 use crate::queue::JobCheckpointKind;
 use corvid_ast::ProviderProtocolDecl;
@@ -94,7 +95,7 @@ impl Runtime {
         })?;
 
         let key = intent_idempotency_key(&spec.connector, &spec.operation, args);
-        let mut intent = self.load_protocol_intent(job, &key, protocol)?;
+        let mut intent = self.load_protocol_intent(job, &key, protocol, &spec.operation)?;
 
         // (1) Record the intent BEFORE any submit, so a crash here is
         // recoverable and a resume re-finds it instead of re-submitting.
@@ -113,16 +114,16 @@ impl Runtime {
         let started_ms = crate::tracing::now_ms();
         let deadline_ms = protocol.deadline_secs.saturating_mul(1000);
         // The provider's most recent `Retry-After`, if it asked us to
-        // back off (slice 52h-3).
+        // back off.
         let mut retry_after_hint: Option<u64> = None;
-        // Consecutive failed observations, for circuit-breaker admission
-        // (slice 52h-3). Reset by any successful poll.
+        // Consecutive failed observations, for circuit-breaker admission.
+        // Reset by any successful poll.
         let mut consecutive_poll_failures: u64 = 0;
         loop {
             if is_terminal(protocol, &intent.state) {
                 break;
             }
-            // Semantic cancellation (slice 52h-3). The durable job is the
+            // Semantic cancellation. The durable job is the
             // cancellation channel: if it was cancelled while we were
             // observing, act on it at the next boundary rather than
             // finishing work nobody wants. What "act on it" MEANS depends
@@ -150,7 +151,7 @@ impl Runtime {
                 });
             }
 
-            // Governed cadence (slice 52h-3): never poll faster than the
+            // Governed cadence: never poll faster than the
             // DECLARED interval, and never faster than the provider's own
             // `Retry-After`. Taking the max means a provider can slow us
             // down but never speed us up past what the source declared.
@@ -159,8 +160,8 @@ impl Runtime {
             // the declared request budget either.)
             let declared = poll_delay_ms(protocol, intent.polls);
             let delay = retry_after_hint.map_or(declared, |asked| declared.max(asked));
-            // A REPLAYED lifecycle does not re-live the wall clock (slice
-            // 52h-4). The recorded observation sequence already encodes
+            // A REPLAYED lifecycle does not re-live the wall clock. The
+            // recorded observation sequence already encodes
             // the cadence that actually happened; sleeping it again would
             // make replaying a day-long protocol take a day, and would
             // race the declared deadline against replay wall-time rather
@@ -171,7 +172,7 @@ impl Runtime {
 
             let poll_spec = self.poll_spec_for(spec, protocol, &intent, args)?;
             let poll_label = format!("{}.poll", spec.operation);
-            // Circuit-breaker admission (slice 52h-3). A long-running
+            // Circuit-breaker admission. A long-running
             // protocol must survive a provider's transient hiccup — a
             // single failed observation says nothing about the submitted
             // job, which is still out there. So a poll failure is
@@ -186,7 +187,7 @@ impl Runtime {
                 }
                 Err(err) => {
                     // A replay divergence is NOT a provider hiccup, so the
-                    // breaker must not absorb it (slice 52h-4). In replay
+                    // breaker must not absorb it. In replay
                     // there IS no provider to be transiently unwell — a
                     // divergence means the RECORDING does not cover this
                     // observation, which no amount of retrying can fix.
@@ -252,7 +253,7 @@ impl Runtime {
     }
 
     /// One provider exchange, through the same record/replay bracket
-    /// ordinary tool calls get (slice 52h-4).
+    /// ordinary tool calls get.
     ///
     /// `call_tool` consults the replay source BEFORE dispatching, which
     /// is what gives every other effect strict no-real-fallback. The
@@ -328,7 +329,7 @@ impl Runtime {
         Ok((payload, meta))
     }
 
-    /// Act on a cancelled durable job (slice 52h-3). The disposition is
+    /// Act on a cancelled durable job. The disposition is
     /// decided by the DECLARATION plus whether we already submitted — it
     /// is never an assumption about what the provider will tolerate.
     async fn apply_protocol_cancellation(
@@ -485,6 +486,7 @@ impl Runtime {
         job: &super::DurableJobContext,
         key: &str,
         protocol: &ProviderProtocolDecl,
+        protocol_operation: &str,
     ) -> Result<ProtocolIntentState, RuntimeError> {
         let checkpoints = job.queue.list_checkpoints(&job.job_id)?;
         let resumed = checkpoints
@@ -492,7 +494,69 @@ impl Runtime {
             .rev()
             .find(|c| c.label == key)
             .and_then(|c| serde_json::from_value::<ProtocolIntentState>(c.payload.clone()).ok());
-        Ok(resumed.unwrap_or_else(|| ProtocolIntentState::new(protocol)))
+        let Some(intent) = resumed else {
+            return Ok(ProtocolIntentState::new(protocol));
+        };
+
+        // The protocol may have changed under an intent that is already
+        // in flight. Resuming a live provider job against a graph it was
+        // never started under is a consequential decision, so the
+        // DECLARATION makes it — never this dispatcher.
+        let verdict = resume_verdict(protocol, &intent);
+
+        // Every outcome is recorded, including the uneventful one: an
+        // audit needs to see that a resume was CHECKED and matched, not
+        // infer it from the absence of a complaint. Declarations and
+        // state names only — no provider payload, no credential.
+        self.emit_host_event(
+            "protocol.resume_decision",
+            serde_json::json!({
+                "operation": protocol_operation,
+                "decision": verdict.decision(),
+                "state": intent.state,
+                "submitted": intent.submitted,
+                "recorded_protocol": intent
+                    .protocol_canonical
+                    .as_deref()
+                    .map(ProviderProtocolDecl::fingerprint_of),
+                "running_protocol": protocol.fingerprint(),
+                "changes": verdict.changes(),
+            }),
+        );
+
+        let still_running = if intent.submitted {
+            " and the provider job it created is still running"
+        } else {
+            ""
+        };
+        match verdict {
+            ResumeVerdict::Unchanged | ResumeVerdict::ResumedAcrossChange { .. } => Ok(intent),
+            ResumeVerdict::RefusedByPolicy { changes } => Err(RuntimeError::ToolFailed {
+                tool: protocol_operation.to_string(),
+                message: format!(
+                    "provider protocol `{protocol_operation}` changed while an intent was in \
+                     flight, and the declaration says `on_protocol_change: refuse`. The intent \
+                     stays checkpointed in state `{}` — nothing was re-submitted or \
+                     re-polled{still_running}. What changed: {}",
+                    intent.state,
+                    describe_changes(&changes)
+                ),
+            }),
+            ResumeVerdict::RefusedStateVanished { state, changes } => {
+                Err(RuntimeError::ToolFailed {
+                    tool: protocol_operation.to_string(),
+                    message: format!(
+                        "provider protocol `{protocol_operation}` declares \
+                         `on_protocol_change: resume`, but the in-flight intent's state `{state}` \
+                         no longer exists in the new declaration, so there is no sound point to \
+                         resume from. The intent stays checkpointed{still_running}. Re-add the \
+                         state, or move the protocol to `on_protocol_change: refuse` and \
+                         reconcile deliberately. What changed: {}",
+                        describe_changes(&changes)
+                    ),
+                })
+            }
+        }
     }
 
     /// Persist the intent as the job's newest checkpoint under this
@@ -520,6 +584,17 @@ impl Runtime {
 /// Connector dispatch wraps a success in `{"tag":"ok","ok":…}` when the
 /// operation returns a `Result`. Protocol binding and status extraction
 /// work on the provider's own payload, so unwrap that envelope first.
+/// Render the declaration differences for a diagnostic. An operator
+/// holding a live provider job needs to know WHAT changed — two hashes
+/// would tell them only that something did.
+fn describe_changes(changes: &[String]) -> String {
+    if changes.is_empty() {
+        "the declaration differs but no canonical key did (report this)".to_string()
+    } else {
+        changes.join("; ")
+    }
+}
+
 fn unwrap_ok_envelope(value: &serde_json::Value) -> serde_json::Value {
     if value.get("tag").and_then(|t| t.as_str()) == Some("ok") {
         if let Some(inner) = value.get("ok") {

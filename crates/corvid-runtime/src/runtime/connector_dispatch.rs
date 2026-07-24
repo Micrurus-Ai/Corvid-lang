@@ -1,4 +1,4 @@
-//! Real-mode connector HTTP dispatch on `Runtime` (slice 52g-3c-4).
+//! Real-mode connector HTTP dispatch on `Runtime`.
 //!
 //! Reached from the connector branch of [`Runtime::call_tool`] only in
 //! `real` mode (a replay source short-circuits earlier, so replay never
@@ -14,7 +14,7 @@ use crate::connectors::{build_connector_request, ConnectorHttpSpec};
 use crate::errors::RuntimeError;
 
 /// What the provider said ABOUT the exchange, alongside the decoded
-/// payload (slice 52h-3). The governed scheduler needs the provider's own
+/// payload. The governed scheduler needs the provider's own
 /// backoff request; ordinary connector calls ignore it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ConnectorResponseMeta {
@@ -59,7 +59,7 @@ impl Runtime {
         // unpermitted host, even though the base URL is fixed in source.
         self.http_policy.check(&request.url)?;
 
-        // Client-side rate limit (slice 52g-3c-5): a fixed-window counter
+        // Client-side rate limit: a fixed-window counter
         // per connector. An exceeded limit fails the call BEFORE the
         // request is sent, so a runaway loop cannot flood the provider.
         if let Some((limit, window_secs)) = spec.rate_limit {
@@ -72,7 +72,7 @@ impl Runtime {
             retry_after_ms: retry_after_ms(&response),
         };
 
-        // Typed status -> error mapping (slice 52g-3c-5). A status named
+        // Typed status -> error mapping. A status named
         // by an `on status <code> -> Variant` mapping becomes the typed
         // (nullary) error variant: the JSON envelope decodes to
         // `Err(Variant)` against the operation's `Result<_, Error>`
@@ -149,7 +149,7 @@ impl Runtime {
     }
 }
 
-/// Read `Retry-After` (slice 52h-3). Only the delta-seconds form is
+/// Read `Retry-After`. Only the delta-seconds form is
 /// honoured — an HTTP-date needs a trusted clock comparison, and guessing
 /// at it would be worse than ignoring it, so an unparseable value simply
 /// leaves the declared cadence in charge.

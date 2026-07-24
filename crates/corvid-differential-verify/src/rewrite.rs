@@ -1426,6 +1426,7 @@ connector video:
             idempotency: intent
             poll GET "/generations"
             every: adaptive
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on completed -> completed

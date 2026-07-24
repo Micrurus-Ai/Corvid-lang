@@ -3183,7 +3183,7 @@ replay \"t.jsonl\":
 
     #[test]
     fn replay_arm_without_as_keeps_capture_none() {
-        // Regression on the E-1 shape: no `as` tail → no capture.
+        // Regression on the E-1 shape: no `as` tail �?' no capture.
         let src = "\
 replay \"t.jsonl\":
     when llm(\"classify\") -> \"refund\"
@@ -3806,7 +3806,7 @@ fn parses_connector_with_config_and_operations() {
 #[test]
 fn parses_optional_protocol_cancel_endpoint() {
     // Slice 52h-3: `cancel` is optional, and its presence is what makes
-    // compensation possible (absent → a submitted intent can only
+    // compensation possible (absent �?' a submitted intent can only
     // detach). Unlike `poll` it may mutate, since cancelling is an action.
     let src = r#"connector video:
     base_url: "https://video.example.com"
@@ -3823,6 +3823,7 @@ fn parses_optional_protocol_cancel_endpoint() {
             poll GET "/generations/{id}"
             cancel POST "/generations/{id}/cancel"
             every: 2s
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on completed -> completed
@@ -3861,6 +3862,7 @@ fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
             idempotency: intent
             poll GET "/generations"
             every: 2s
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on completed -> completed
@@ -3898,6 +3900,7 @@ fn parses_verified_async_provider_protocol() {
             idempotency: intent
             poll GET "/generations"
             every: adaptive
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on processing -> processing
@@ -3919,6 +3922,159 @@ fn parses_verified_async_provider_protocol() {
     assert_eq!(protocol.initial.name, "queued");
     assert_eq!(protocol.deadline_secs, 600);
     assert_eq!(protocol.states.len(), 2);
+    assert_eq!(
+        protocol.on_protocol_change,
+        corvid_ast::ProtocolChangePolicy::Refuse
+    );
+}
+
+/// A protocol that changes under an in-flight intent leaves a real
+/// provider job running that Corvid cannot un-create, so the resume
+/// posture is a decision the source must make. Omitting it is a compile
+/// error that names the decision AND the values — never a default the
+/// author did not choose.
+#[test]
+fn a_protocol_without_a_resume_posture_is_a_compile_error() {
+    let src = r#"
+connector video:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("KEY"))
+    modes: [real]
+    operation generate(spec: String) -> String dangerous uses http_write:
+        POST "/generations" body spec
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#;
+    let (_, errors) = parse_file_errs(src);
+    let text = format!("{errors:?}");
+    assert!(
+        text.contains("on_protocol_change"),
+        "the error must name the missing decision; got: {text}"
+    );
+    assert!(
+        text.contains("refuse") && text.contains("resume"),
+        "the error must name the allowed values; got: {text}"
+    );
+}
+
+/// Cosmetic source edits must NOT read as protocol drift. Two files that
+/// differ only in comments, blank lines and key ORDER declare the same
+/// graph, and treating them as different would strand in-flight provider
+/// jobs for a reformat.
+#[test]
+fn a_cosmetically_edited_protocol_keeps_its_fingerprint() {
+    fn protocol_of(src: &str) -> corvid_ast::ProviderProtocolDecl {
+        let file = parse_file_src(src);
+        file.decls
+            .iter()
+            .find_map(|decl| match decl {
+                Decl::Connector(connector) => connector.operations[0].protocol.clone(),
+                _ => None,
+            })
+            .expect("protocol")
+    }
+    let original = protocol_of(
+        r#"
+connector video:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("KEY"))
+    modes: [real]
+    operation generate(spec: String) -> String dangerous uses http_write:
+        POST "/generations" body spec
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations/{id}"
+            every: 30s
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#,
+    );
+    // Same graph: reordered keys, reordered status/terminal lists,
+    // reordered transitions, an added comment, and extra blank lines.
+    let reformatted = protocol_of(
+        r#"
+connector video:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("KEY"))
+    modes: [real]
+
+    operation generate(spec: String) -> String dangerous uses http_write:
+        POST "/generations" body spec
+        async:
+            # the provider finishes this out of band
+            initial: queued
+            statuses: [failed, completed, queued]
+
+            terminal: [failed, completed]
+            idempotency: intent
+            deadline_target: failed
+            deadline: 600s
+            every: 30s
+            poll GET "/generations/{id}"
+            on_protocol_change: refuse
+            state queued:
+                on failed -> failed
+                on completed -> completed
+                on queued -> queued
+"#,
+    );
+    assert_eq!(
+        original.fingerprint(),
+        reformatted.fingerprint(),
+        "a reformat must not read as drift"
+    );
+}
+
+/// Only values the runtime can execute completely are accepted.
+#[test]
+fn an_unknown_resume_posture_is_rejected() {
+    let src = r#"
+connector video:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("KEY"))
+    modes: [real]
+    operation generate(spec: String) -> String dangerous uses http_write:
+        POST "/generations" body spec
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            on_protocol_change: migrate
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#;
+    let (_, errors) = parse_file_errs(src);
+    let text = format!("{errors:?}");
+    assert!(
+        text.contains("refuse") && text.contains("resume"),
+        "the error must name the values that ARE executable; got: {text}"
+    );
 }
 
 #[test]
@@ -4026,3 +4182,5 @@ fn parses_provisioning_claim_mapping_with_allowlist() {
         other => panic!("expected claim mapping, got {other:?}"),
     }
 }
+
+

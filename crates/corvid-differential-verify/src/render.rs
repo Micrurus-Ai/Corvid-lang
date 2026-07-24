@@ -871,6 +871,14 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
                 corvid_ast::ProtocolPollInterval::FixedSeconds(seconds) => out.push_str(&format!("every: {seconds}s\n")),
                 corvid_ast::ProtocolPollInterval::Adaptive => out.push_str("every: adaptive\n"),
             }
+            // The resume posture round-trips. It decides what
+            // happens to a real in-flight provider job, so dropping it
+            // would both fail to re-parse and silently change semantics.
+            push_indent(indent + 3, out);
+            out.push_str(&format!(
+                "on_protocol_change: {}\n",
+                protocol.on_protocol_change.as_str()
+            ));
             for state in &protocol.states {
                 push_indent(indent + 3, out);
                 out.push_str(&format!("state {}:\n", state.name.name));

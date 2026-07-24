@@ -7629,6 +7629,50 @@ If the recording does not cover an exchange, replay **refuses at that point** �
 it never quietly finishes the lifecycle by asking the live provider, and it
 never reports the gap as a provider timeout.
 
+### Editing a protocol that has jobs in flight is a decision you declare
+
+Change a protocol while intents are running and those intents were created
+against a graph that no longer exists. If any of them submitted, a real provider
+job is out there that Corvid cannot un-create. So the resume posture is declared,
+and leaving it out is a compile error:
+
+```corvid
+on_protocol_change: refuse   # or: resume
+```
+
+- **`refuse`** — do not resume across a change. The intent stays checkpointed,
+  nothing is re-submitted or re-polled, and the error says plainly that the
+  provider job is still running.
+- **`resume`** — continue under the new declaration, but only if the recorded
+  state still exists in it. A resume that cannot find its own state is not a
+  resume, so it refuses anyway.
+
+**You never bump a version number.** Corvid canonicalises the protocol graph and
+fingerprints it (`sha256:` over a versioned `corvid.protocol.canonical.v1`
+encoding), so a change is detected rather than remembered — there is no integer
+to forget. Three things deliberately do *not* count as a change, because each
+would strand live jobs for no reason:
+
+- **Source layout** — spans, indentation, comments, blank lines.
+- **Declaration order** — re-ordering statuses, terminals, states, or
+  transitions, which the checker already treats as the same graph.
+- **`on_protocol_change` itself** — deciding to be more permissive must not be
+  the thing that strands you.
+
+When a change *is* detected you are told what changed, not just that something
+did: the intent records the canonical encoding it was created under, so the
+diagnostic reads `deadline=600 -> 900` or `state complete: removed` rather than
+two opaque hashes. Every resume decision — matched, refused, or permitted — is
+recorded as a `protocol.resume_decision` event carrying declarations and state
+names only, never a provider payload or credential.
+
+The Application Contract publishes the fingerprint too, so a generated client can
+tell whether the protocol it was built against is the one the backend is running.
+
+**The boundary:** this protects each intent *when it resumes*. It does not stop a
+deployment that would strand intents already sitting in the queue — refusing the
+deploy itself is drift quarantine, and it lands with the live-conformance work.
+
 ### Approval queues must not invent identity
 
 An approval is a confused-deputy boundary: the requester and tenant

@@ -1659,6 +1659,7 @@ connector shipping:
             idempotency: intent
             poll GET \"/jobs/{id}\"
             every: 10s
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on done -> done
@@ -2243,6 +2244,7 @@ connector video:
             idempotency: intent
             poll GET "/generations"
             every: adaptive
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on processing -> processing

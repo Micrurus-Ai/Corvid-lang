@@ -16652,6 +16652,83 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-4 (part 2): the version number you never have to bump
+
+Editing a protocol that has intents in flight means those intents were
+created against a graph that no longer exists — and any that submitted
+correspond to a provider job Corvid cannot un-create. Consequential, more
+than one reasonable posture, so it gets declared:
+`on_protocol_change: refuse | resume`, and omitting it is a compile error
+that names the decision and both values.
+
+The interesting part was what I *didn't* build.
+
+The obvious design is `version: N` in the declaration, bumped when you
+change the protocol. I started there and stopped, because it fails in the
+one case it exists for. A hand-maintained integer is a guarantee that
+lapses silently the first time someone forgets, and the person most
+likely to forget is the person making a small casual edit — exactly the
+edit whose in-flight consequences nobody thought about.
+
+So the fingerprint is derived from the checked graph instead. There is no
+number to bump and no way to forget.
+
+Getting that right meant deciding what is NOT a change, because a
+fingerprint that is too sensitive strands live provider jobs for nothing:
+
+- Spans are excluded. Moving a declaration down a file is not drift.
+- Re-ordering statuses, terminals, states, or transitions is not drift —
+  the checker already treats those as the same graph, so the fingerprint
+  canonicalises ordering to agree with it.
+- `on_protocol_change` itself is excluded. Including it would mean that
+  switching from `refuse` to `resume` — deciding to be *more* permissive —
+  is itself the drift that strands you. That one would have been a nasty
+  surprise, and it only surfaced from asking what the fingerprint is FOR.
+
+Two postures ship, both fully executable. `refuse` strands the intent and
+says outright that the provider job is still running. `resume` continues
+under the new declaration — but only when the recorded state still exists
+in it. A resume that cannot find its own state is not a resume, so it
+refuses regardless of the policy. That floor matters more than the policy
+does: it is the case where an author has said "yes, resume" and is wrong.
+
+An unfingerprinted checkpoint, written before any of this existed, counts
+as changed once it has real work. "We cannot tell" is not "it is the
+same." A fresh unsubmitted intent has nothing to strand, so it resumes
+cleanly.
+
+The two integration tests assert the property rather than the mechanism:
+under `refuse`, a changed protocol makes the provider see ZERO requests;
+under `resume`, the intent runs to terminal with ZERO re-submits.
+
+Hardening the durable parts, because a fingerprint written into a
+checkpoint is read back by a later build: the encoding carries its own
+version and the fingerprint names its algorithm, so a value recovered
+from disk is self-describing and an encoding change stays
+distinguishable from a protocol change instead of being silently
+conflated with one. A golden test pins the digest, so an accidental
+encoding change fails in CI rather than reading, in production, as
+"every in-flight intent's protocol changed."
+
+The intent stores the full canonical encoding rather than just its hash.
+Two digests can only say that something changed; an operator holding a
+live provider job needs `deadline=600 -> 900` or
+`state complete: removed`. Every resume decision — matched, refused,
+permitted — emits a `protocol.resume_decision` event carrying
+declarations and state names only. The uneventful case is recorded too:
+an audit should see that a resume was CHECKED, not infer it from the
+absence of a complaint.
+
+The boundary, stated precisely: 52h-4 protects each intent when it
+resumes. 52i will prevent deployment when queued intents cannot safely
+resume. Runtime resume protection and deployment drift quarantine are
+separate concerns and stay that way.
+
+One thing to own: the "professional names in source" rule slipped
+across the whole 52g/52h run — code comments were carrying slice numbers
+like `(slice 52h-3)`, which belong in commits, ROADMAP and this log.
+Cleaned out of the protocol and connector sources and their tests.
+
 ## 2026-07-24 - 52h-4 (part 1): a protocol is a lifecycle, so replay has to be one too
 
 52h-2's file header said mock, replay, and real all share the engine —

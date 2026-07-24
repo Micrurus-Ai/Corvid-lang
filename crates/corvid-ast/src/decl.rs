@@ -588,8 +588,209 @@ pub struct ProviderProtocolDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel: Option<ProtocolCancel>,
     pub interval: ProtocolPollInterval,
+    /// What happens to an IN-FLIGHT intent when this declaration changes
+    /// under it. A submitted intent means a real provider
+    /// job exists that Corvid cannot un-create, so this is a consequential
+    /// decision the source must make: omitting it is a compile error, not
+    /// a default.
+    pub on_protocol_change: ProtocolChangePolicy,
     pub states: Vec<ProtocolStateDecl>,
     pub span: Span,
+}
+
+/// The declared resume posture for an intent whose protocol changed
+/// under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolChangePolicy {
+    /// Do not resume across a change. The intent stays checkpointed,
+    /// nothing is re-submitted or re-walked, and a human decides what the
+    /// provider job should become.
+    Refuse,
+    /// Resume under the new declaration — but only when the recorded state
+    /// still exists in it. A resume that cannot find its own state is not
+    /// a resume, so it refuses anyway rather than guessing a starting
+    /// point for a job that is already running.
+    Resume,
+}
+
+impl ProtocolChangePolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Refuse => "refuse",
+            Self::Resume => "resume",
+        }
+    }
+}
+
+/// The name and revision of the protocol canonical encoding.
+///
+/// It is versioned because the encoding is DURABLE: it is written into
+/// job checkpoints that outlive the process and are read back by a later
+/// build. If the encoding ever has to change, old checkpoints must be
+/// recognisable as "encoded differently" rather than silently mistaken
+/// for a changed protocol — the version line is what makes that
+/// distinguishable instead of ambiguous.
+pub const PROTOCOL_CANONICAL_ENCODING: &str = "corvid.protocol.canonical.v1";
+
+/// The hash used to condense a canonical encoding into a fingerprint.
+/// Named in the fingerprint itself (`sha256:<hex>`) so a stored value is
+/// self-describing rather than an anonymous hex blob.
+pub const PROTOCOL_FINGERPRINT_ALGORITHM: &str = "sha256";
+
+/// Which canonical keys differ between two encodings, as human-readable
+/// `key: before -> after` lines.
+///
+/// Two fingerprints can only say *that* something changed. Recovering an
+/// in-flight intent requires knowing *what* — whether a terminal state
+/// vanished or the deadline moved by a minute are very different
+/// situations for the operator holding a live provider job.
+pub fn protocol_canonical_differences(before: &str, after: &str) -> Vec<String> {
+    fn keyed(encoding: &str) -> Vec<(&str, &str)> {
+        encoding
+            .lines()
+            .filter_map(|line| match line.split_once('=') {
+                Some((k, v)) => Some((k, v)),
+                // `state X: ...` lines key on the state name.
+                None => line.split_once(':').map(|(k, v)| (k, v.trim_start())),
+            })
+            .collect()
+    }
+    let before_keys = keyed(before);
+    let after_keys = keyed(after);
+    let mut changes = Vec::new();
+    for (key, before_value) in &before_keys {
+        match after_keys.iter().find(|(k, _)| k == key) {
+            Some((_, after_value)) if after_value != before_value => {
+                changes.push(format!("{key}: {before_value} -> {after_value}"));
+            }
+            Some(_) => {}
+            None => changes.push(format!("{key}: removed")),
+        }
+    }
+    for (key, after_value) in &after_keys {
+        if !before_keys.iter().any(|(k, _)| k == key) {
+            changes.push(format!("{key}: added ({after_value})"));
+        }
+    }
+    changes
+}
+
+impl ProviderProtocolDecl {
+    /// The canonical encoding of the protocol GRAPH: the exact text whose
+    /// hash is the fingerprint, and the thing a later build diffs against
+    /// to explain what changed.
+    ///
+    /// Change detection is derived, never hand-maintained. A version
+    /// integer an author has to remember to bump is a guarantee that
+    /// silently lapses the first time someone forgets; an encoding of the
+    /// declaration cannot.
+    ///
+    /// **Included** — everything that changes what the protocol MEANS:
+    /// the status universe, the initial state, terminality, deadline
+    /// duration and its target, the idempotency strategy, the poll and
+    /// cancel bindings (their path templates are also the response-field
+    /// interpretation, since the placeholders name the response fields
+    /// the engine binds from), the cadence, and every state with its
+    /// transition table.
+    ///
+    /// **Excluded** — everything whose change would strand a live
+    /// provider job for no semantic reason:
+    ///
+    /// - **Spans and source layout.** Moving a declaration down a file,
+    ///   re-indenting it, or editing a comment is not drift.
+    /// - **Declaration order.** Re-ordering statuses, terminals, states,
+    ///   or transitions produces the same graph, and the checker already
+    ///   treats it that way, so the encoding sorts to agree.
+    /// - **`on_protocol_change` itself.** It is the policy ABOUT change,
+    ///   not part of the graph. Including it would make deciding to be
+    ///   MORE permissive the very act that strands you.
+    pub fn canonical_encoding(&self) -> String {
+        fn sorted(idents: &[Ident]) -> Vec<&str> {
+            let mut v: Vec<&str> = idents.iter().map(|i| i.name.as_str()).collect();
+            v.sort_unstable();
+            v
+        }
+        let mut canon = String::new();
+        canon.push_str("encoding=");
+        canon.push_str(PROTOCOL_CANONICAL_ENCODING);
+        canon.push('\n');
+        canon.push_str("statuses=");
+        canon.push_str(&sorted(&self.statuses).join(","));
+        canon.push_str("\ninitial=");
+        canon.push_str(&self.initial.name);
+        canon.push_str("\nterminal=");
+        canon.push_str(&sorted(&self.terminal).join(","));
+        canon.push_str("\ndeadline=");
+        canon.push_str(&self.deadline_secs.to_string());
+        canon.push_str("\ndeadline_target=");
+        canon.push_str(&self.deadline_target.name);
+        canon.push_str("\nidempotency=");
+        canon.push_str(match self.idempotency {
+            ProtocolIdempotency::Intent => "intent",
+        });
+        canon.push_str("\npoll=");
+        canon.push_str(self.poll.method.as_str());
+        canon.push(' ');
+        canon.push_str(&self.poll.path);
+        canon.push_str("\ncancel=");
+        match &self.cancel {
+            Some(c) => {
+                canon.push_str(c.method.as_str());
+                canon.push(' ');
+                canon.push_str(&c.path);
+            }
+            None => canon.push_str("<none>"),
+        }
+        canon.push_str("\nevery=");
+        match self.interval {
+            ProtocolPollInterval::FixedSeconds(s) => {
+                canon.push_str("fixed:");
+                canon.push_str(&s.to_string());
+            }
+            ProtocolPollInterval::Adaptive => canon.push_str("adaptive"),
+        }
+        let mut states: Vec<&ProtocolStateDecl> = self.states.iter().collect();
+        states.sort_unstable_by(|a, b| a.name.name.cmp(&b.name.name));
+        for state in states {
+            canon.push_str("\nstate ");
+            canon.push_str(&state.name.name);
+            canon.push(':');
+            let mut transitions: Vec<(&str, &str)> = state
+                .transitions
+                .iter()
+                .map(|t| (t.status.name.as_str(), t.target.name.as_str()))
+                .collect();
+            transitions.sort_unstable();
+            for (status, target) in transitions {
+                canon.push(' ');
+                canon.push_str(status);
+                canon.push_str("->");
+                canon.push_str(target);
+            }
+        }
+        canon
+    }
+
+    /// `sha256:<hex>` over the canonical encoding — self-describing, so a
+    /// value read back from a durable checkpoint names the algorithm that
+    /// produced it instead of being an anonymous hex blob.
+    ///
+    /// Deterministic across machines and clean rebuilds: the input is the
+    /// canonical encoding (sorted, span-free, layout-free) and the hash is
+    /// a fixed published algorithm — no `DefaultHasher`, no address, no
+    /// iteration order, no locale.
+    pub fn fingerprint(&self) -> String {
+        Self::fingerprint_of(&self.canonical_encoding())
+    }
+
+    /// The fingerprint of an encoding recovered from a checkpoint, which
+    /// may have been produced by an earlier build.
+    pub fn fingerprint_of(canonical_encoding: &str) -> String {
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(canonical_encoding.as_bytes());
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        format!("{PROTOCOL_FINGERPRINT_ALGORITHM}:{hex}")
+    }
 }
 
 /// The provider's cancellation endpoint (slice 52h-3). Unlike `poll`,

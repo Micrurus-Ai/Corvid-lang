@@ -374,6 +374,7 @@ impl<'a> Parser<'a> {
         let mut poll = None;
         let mut cancel = None;
         let mut interval = None;
+        let mut on_protocol_change = None;
         let mut states = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -456,10 +457,32 @@ impl<'a> Parser<'a> {
                         interval = Some(ProtocolPollInterval::FixedSeconds(seconds));
                     }
                 }
+                // The resume posture for an intent whose protocol changed
+                // under it. Only values the runtime can
+                // execute completely are offered.
+                "on_protocol_change" => {
+                    if self.peek_ident_is("refuse") {
+                        self.bump();
+                        on_protocol_change = Some(corvid_ast::ProtocolChangePolicy::Refuse);
+                    } else if self.peek_ident_is("resume") {
+                        self.bump();
+                        on_protocol_change = Some(corvid_ast::ProtocolChangePolicy::Resume);
+                    } else {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(self.peek()),
+                                expected: "`refuse` (strand the in-flight intent for a human) or \
+                                           `resume` (continue when the recorded state still exists)"
+                                    .into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                }
                 _ => return Err(ParseError {
                     kind: ParseErrorKind::UnexpectedToken {
                         got: format!("async protocol key `{key}`"),
-                        expected: "`statuses`, `initial`, `terminal`, `deadline`, `deadline_target`, `idempotency`, `poll`, `every`, or `state ...`".into(),
+                        expected: "`statuses`, `initial`, `terminal`, `deadline`, `deadline_target`, `idempotency`, `poll`, `every`, `on_protocol_change`, or `state ...`".into(),
                     },
                     span: key_span,
                 }),
@@ -468,6 +491,27 @@ impl<'a> Parser<'a> {
         }
         let end = self.peek_span();
         if matches!(self.peek(), TokKind::Dedent) { self.bump(); }
+        // The resume posture gets its own refusal, because a generic
+        // "you missed a field" would not tell an author what the decision
+        // IS. A submitted intent means a real provider job exists that
+        // Corvid cannot un-create, so this is never defaulted for them.
+        if on_protocol_change.is_none() {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "a verified provider protocol that does not declare \
+                          `on_protocol_change`"
+                        .into(),
+                    expected: "`on_protocol_change: refuse` (an intent whose protocol changed \
+                               under it stays checkpointed for a human) or \
+                               `on_protocol_change: resume` (continue when the recorded state \
+                               still exists in the new declaration) — a submitted intent means a \
+                               real provider job is already running, so Corvid will not choose \
+                               this for you"
+                        .into(),
+                },
+                span: start.merge(end),
+            });
+        }
         let missing = [
             statuses.is_none().then_some("statuses"),
             initial.is_none().then_some("initial"),
@@ -497,6 +541,7 @@ impl<'a> Parser<'a> {
             poll: poll.unwrap(),
             cancel,
             interval: interval.unwrap(),
+            on_protocol_change: on_protocol_change.unwrap(),
             states,
             span: start.merge(end),
         })

@@ -1,4 +1,4 @@
-//! Real-mode connector HTTP dispatch (slice 52g-3c-4).
+//! Real-mode connector HTTP dispatch.
 //!
 //! A connector `operation` declared in source lowers to a callable tool;
 //! in the deployment-selected `real` mode a call to it becomes an HTTP
@@ -72,23 +72,23 @@ pub struct ConnectorHttpSpec {
     pub body: Option<ConnectorBodySpec>,
     /// Credentials — secret NAMES only.
     pub auth: Option<ConnectorAuthSpec>,
-    /// `on status <code> -> Variant` mappings (slice 52g-3c-5): a mapped
+    /// `on status <code> -> Variant` mappings: a mapped
     /// HTTP status becomes the named (nullary) error variant.
     pub error_map: Vec<(u16, String)>,
     /// Whether the operation's return type is `Result<Success, Error>`
-    /// (slice 52g-3c-5). When true a 2xx body is wrapped as `Ok(..)` and
+    ///. When true a 2xx body is wrapped as `Ok(..)` and
     /// a mapped status becomes `Err(Variant)`; when false the body
     /// decodes directly and a non-2xx is a transport failure.
     pub returns_result: bool,
-    /// Retry attempts (slice 52g-3c reliability). `None` = no retry.
+    /// Retry attempts (reliability). `None` = no retry.
     pub retry: Option<u64>,
-    /// Client-side rate limit `(limit, window_secs)` (slice 52g-3c-5).
+    /// Client-side rate limit `(limit, window_secs)`.
     /// `None` = unlimited. Enforced per connector before a real request
     /// is sent; an exceeded limit fails the call rather than flooding
     /// the provider.
     pub rate_limit: Option<(u64, u64)>,
     /// Consecutive-failure threshold from the connector's
-    /// `circuit_breaker: N` (slice 52h-3). Governs the verified-protocol
+    /// `circuit_breaker: N`. Governs the verified-protocol
     /// poll loop: a transient poll failure is tolerated and retried on
     /// the next tick, but N consecutive failures trip the breaker and
     /// fail the protocol rather than polling a broken provider forever.
@@ -284,7 +284,7 @@ fn retry_policy(spec: &ConnectorHttpSpec) -> crate::http::HttpRetryPolicy {
 
 /// Fill `{placeholder}` segments in a path from a name→value map.
 /// Shared by the operation request builder and the provider-protocol
-/// poll request (slice 52h-2) so placeholder binding has ONE
+/// poll request so placeholder binding has ONE
 /// implementation.
 pub(crate) fn fill_path(
     path: &str,

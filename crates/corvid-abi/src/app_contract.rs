@@ -100,6 +100,12 @@ pub struct ContractProviderProtocol {
     pub poll_method: String,
     pub poll_path: String,
     pub interval: ContractProtocolInterval,
+    /// The declared resume posture across a protocol change.
+    pub on_protocol_change: String,
+    /// The fingerprint of this protocol GRAPH. A client holding a contract
+    /// can tell whether the protocol it was generated against is still the
+    /// one the backend is running.
+    pub fingerprint: String,
     pub states: Vec<ContractProtocolState>,
 }
 
@@ -573,6 +579,8 @@ fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> Co
         poll_method: protocol.poll.method.as_str().into(),
         poll_path: protocol.poll.path.clone(),
         interval,
+        on_protocol_change: protocol.on_protocol_change.as_str().into(),
+        fingerprint: protocol.fingerprint(),
         states: protocol.states.iter().map(|state| ContractProtocolState {
             name: state.name.name.clone(),
             transitions: state.transitions.iter().map(|transition| ContractProtocolTransition {
@@ -1089,6 +1097,7 @@ connector github:
             idempotency: intent
             poll GET "/generations"
             every: adaptive
+            on_protocol_change: refuse
             state queued:
                 on queued -> queued
                 on completed -> completed

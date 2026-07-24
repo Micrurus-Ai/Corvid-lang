@@ -1,6 +1,6 @@
-//! Verified provider protocol execution core (slice 52h-2).
+//! Verified provider protocol execution core.
 //!
-//! Slice 52h-1 made a long-running provider protocol *language data*: an
+//! A long-running provider protocol is *language data*: an
 //! `async:` block on a connector operation declaring the status universe,
 //! initial/terminal states, deadline, poll request, cadence, and TOTAL
 //! transition tables — with the checker proving graph closure,
@@ -22,7 +22,7 @@
 //!
 //! The declaration names statuses and states but not *where* in a
 //! provider payload they live. These are the conventions (chosen so the
-//! 52h-1 grammar needs no amendment):
+//! declaration grammar needs no amendment):
 //!
 //! - The submit response decodes to the operation's return shape. Its
 //!   top-level fields become **binding fields** — so a response `id`
@@ -34,7 +34,7 @@
 //! - The poll response carries a `status` field whose value must be one
 //!   of the declared statuses. An unknown status is a protocol error,
 //!   never a silent no-op — a provider that invents a status must not
-//!   cross the typed boundary (52i quarantines it).
+//!   cross the typed boundary.
 
 use corvid_ast::{ProtocolPollInterval, ProviderProtocolDecl};
 use serde::{Deserialize, Serialize};
@@ -100,7 +100,7 @@ pub struct ProtocolIntentState {
     pub binding_fields: BTreeMap<String, serde_json::Value>,
     /// Every status observed, in order — the transition evidence.
     pub status_history: Vec<String>,
-    /// Number of completed polls (drives adaptive cadence in 52h-3).
+    /// Number of completed polls (drives the adaptive cadence).
     pub polls: u64,
     /// The most recent decoded poll payload. Persisted so a run that
     /// resumes an ALREADY-terminal intent returns the provider's real
@@ -108,6 +108,114 @@ pub struct ProtocolIntentState {
     /// call must be indistinguishable from the original.
     #[serde(default)]
     pub last_response: Option<serde_json::Value>,
+    /// The canonical encoding of the protocol graph this intent was
+    /// created under. A restart compares it against the running
+    /// declaration and applies the declared `on_protocol_change` posture.
+    ///
+    /// The full ENCODING is stored, not just its fingerprint, because two
+    /// hashes can only say that something changed. Recovering a live
+    /// provider job needs to know what: a vanished terminal state and a
+    /// one-minute deadline change are very different situations for the
+    /// operator holding it.
+    ///
+    /// `None` means the checkpoint predates this record. It is treated as
+    /// a change, because "we cannot tell" is not "it is the same".
+    #[serde(default)]
+    pub protocol_canonical: Option<String>,
+}
+
+/// The outcome of comparing an in-flight intent against the running
+/// declaration. Separated from the dispatcher so the decision is testable
+/// without a provider, a queue, or a clock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeVerdict {
+    /// The protocol is unchanged — resume normally.
+    Unchanged,
+    /// The protocol changed, the declaration permits resuming, and the
+    /// recorded state still exists in the new graph.
+    ResumedAcrossChange { changes: Vec<String> },
+    /// The protocol changed and the declaration says refuse.
+    RefusedByPolicy { changes: Vec<String> },
+    /// The declaration permits resuming, but the recorded state is gone
+    /// from the new graph. Refused regardless of the policy: a resume that
+    /// cannot find its own state is not a resume.
+    RefusedStateVanished {
+        state: String,
+        changes: Vec<String>,
+    },
+}
+
+impl ResumeVerdict {
+    pub fn is_refusal(&self) -> bool {
+        matches!(
+            self,
+            Self::RefusedByPolicy { .. } | Self::RefusedStateVanished { .. }
+        )
+    }
+
+    /// The name recorded in the decision event.
+    pub fn decision(&self) -> &'static str {
+        match self {
+            Self::Unchanged => "unchanged",
+            Self::ResumedAcrossChange { .. } => "resumed_across_change",
+            Self::RefusedByPolicy { .. } => "refused_by_policy",
+            Self::RefusedStateVanished { .. } => "refused_state_vanished",
+        }
+    }
+
+    /// What differs between the recorded and running declarations.
+    pub fn changes(&self) -> &[String] {
+        match self {
+            Self::Unchanged => &[],
+            Self::ResumedAcrossChange { changes }
+            | Self::RefusedByPolicy { changes }
+            | Self::RefusedStateVanished { changes, .. } => changes,
+        }
+    }
+}
+
+/// Decide whether an intent recorded under an earlier declaration may
+/// resume under the running one.
+///
+/// The comparison is over a canonical encoding of the protocol GRAPH,
+/// derived from the declaration rather than hand-maintained — an author
+/// cannot forget to bump it.
+pub fn resume_verdict(
+    protocol: &ProviderProtocolDecl,
+    intent: &ProtocolIntentState,
+) -> ResumeVerdict {
+    let current = protocol.canonical_encoding();
+    // A fresh intent has nothing to migrate. Only an intent that already
+    // exists — and, when submitted, corresponds to a live provider job —
+    // can be stranded by a change.
+    let recorded = match &intent.protocol_canonical {
+        Some(recorded) if *recorded == current => return ResumeVerdict::Unchanged,
+        Some(recorded) => recorded.clone(),
+        None if !intent.submitted && intent.status_history.is_empty() => {
+            return ResumeVerdict::Unchanged
+        }
+        None => String::new(),
+    };
+    let changes = if recorded.is_empty() {
+        vec!["the checkpoint predates protocol change detection".to_string()]
+    } else {
+        corvid_ast::protocol_canonical_differences(&recorded, &current)
+    };
+    match protocol.on_protocol_change {
+        corvid_ast::ProtocolChangePolicy::Refuse => ResumeVerdict::RefusedByPolicy { changes },
+        corvid_ast::ProtocolChangePolicy::Resume => {
+            if protocol.states.iter().any(|s| s.name.name == intent.state)
+                || protocol.terminal.iter().any(|t| t.name == intent.state)
+            {
+                ResumeVerdict::ResumedAcrossChange { changes }
+            } else {
+                ResumeVerdict::RefusedStateVanished {
+                    state: intent.state.clone(),
+                    changes,
+                }
+            }
+        }
+    }
 }
 
 impl ProtocolIntentState {
@@ -121,6 +229,7 @@ impl ProtocolIntentState {
             status_history: Vec::new(),
             polls: 0,
             last_response: None,
+            protocol_canonical: Some(protocol.canonical_encoding()),
         }
     }
 
@@ -141,9 +250,9 @@ pub fn is_terminal(protocol: &ProviderProtocolDecl, state: &str) -> bool {
     protocol.terminal.iter().any(|t| t.name == state)
 }
 
-/// What cancelling an intent may actually do (slice 52h-3).
+/// What cancelling an intent may actually do.
 ///
-/// This is the cancellation×irreversibility rule composed with DURABLE
+/// This is the cancellation�-irreversibility rule composed with DURABLE
 /// PROVIDER STATE. Before submit, nothing exists and cancelling is exact.
 /// After submit a provider-side job exists, and what Corvid may honestly
 /// do depends on whether the protocol DECLARED a cancel endpoint:
@@ -311,9 +420,10 @@ fn first_unbound_placeholder(
     None
 }
 
-/// The poll cadence in milliseconds for the next observation. Adaptive
-/// cadence is governed in 52h-3; until then it backs off linearly from
-/// the fixed floor so a long protocol does not hammer the provider.
+/// The poll cadence in milliseconds for the next observation. An adaptive
+/// cadence backs off linearly from the fixed floor so a long protocol does
+/// not hammer the provider. The dispatcher governs it further, never
+/// polling faster than this or than the provider's own `Retry-After`.
 pub fn poll_delay_ms(protocol: &ProviderProtocolDecl, polls: u64) -> u64 {
     match protocol.interval {
         ProtocolPollInterval::FixedSeconds(secs) => secs.saturating_mul(1000).max(1),
@@ -383,6 +493,7 @@ mod tests {
             },
             cancel: None,
             interval: ProtocolPollInterval::FixedSeconds(5),
+            on_protocol_change: corvid_ast::ProtocolChangePolicy::Refuse,
             states: vec![
                 ProtocolStateDecl {
                     name: id("submitted"),
@@ -517,7 +628,7 @@ mod tests {
 
     #[test]
     fn cancelling_before_submit_is_exact_but_after_submit_only_detaches() {
-        // The cancellation×irreversibility rule composed with durable
+        // The cancellation�-irreversibility rule composed with durable
         // provider state: before submit there is no provider work, so
         // cancellation is exact. After submit a real job exists that
         // Corvid cannot un-create, so cancellation degrades to
@@ -565,4 +676,203 @@ mod tests {
         };
         assert!(poll_delay_ms(&adaptive, 0) < poll_delay_ms(&adaptive, 5));
     }
+
+    // --- Resume across a protocol change ---
+
+    /// A canonical encoding from some earlier build. Its exact content
+    /// does not matter — only that it differs from the running one.
+    fn earlier_encoding() -> String {
+        "encoding=corvid.protocol.canonical.v1\ndeadline=1".to_string()
+    }
+
+    /// Cosmetic edits must NOT strand in-flight work. The fingerprint is
+    /// over the graph, so re-ordering statuses or transitions — which the
+    /// checker already treats as the same protocol — is not a change.
+    #[test]
+    fn reordering_the_declaration_is_not_a_protocol_change() {
+        let p = protocol();
+        let mut reordered = protocol();
+        reordered.statuses.reverse();
+        reordered.terminal.reverse();
+        reordered.states.reverse();
+        for state in &mut reordered.states {
+            state.transitions.reverse();
+        }
+        assert_eq!(
+            p.fingerprint(),
+            reordered.fingerprint(),
+            "re-ordering a declaration must not read as drift"
+        );
+    }
+
+    /// Changing the POLICY is not itself drift — otherwise an author who
+    /// switched from `refuse` to `resume` would strand every intent by the
+    /// act of deciding to be more permissive.
+    #[test]
+    fn changing_the_resume_posture_is_not_a_protocol_change() {
+        let refuse = protocol();
+        let resume = ProviderProtocolDecl {
+            on_protocol_change: corvid_ast::ProtocolChangePolicy::Resume,
+            ..protocol()
+        };
+        assert_eq!(refuse.fingerprint(), resume.fingerprint());
+    }
+
+    /// A real graph edit IS drift.
+    #[test]
+    fn editing_the_graph_changes_the_fingerprint() {
+        let p = protocol();
+        let mut edited = protocol();
+        edited.deadline_secs = 900;
+        assert_ne!(p.fingerprint(), edited.fingerprint());
+    }
+
+    /// Re-pointing a transition changes what the protocol MEANS, so it
+    /// must register — this is the edit most likely to be made casually
+    /// and most likely to strand an intent mid-graph.
+    #[test]
+    fn changing_a_transition_target_is_drift() {
+        let p = protocol();
+        let mut edited = protocol();
+        edited.states[0].transitions[0].target = id("complete");
+        assert_ne!(p.fingerprint(), edited.fingerprint());
+        let changes = corvid_ast::protocol_canonical_differences(
+            &p.canonical_encoding(),
+            &edited.canonical_encoding(),
+        );
+        assert!(
+            changes.iter().any(|c| c.starts_with("state submitted")),
+            "the diff must name the state whose table changed; got {changes:?}"
+        );
+    }
+
+    /// Deleting a state an intent could be sitting in is the case the
+    /// resume floor exists for, and the diff must say so plainly.
+    #[test]
+    fn removing_a_state_is_drift_and_the_diff_names_it() {
+        let p = protocol();
+        let mut edited = protocol();
+        edited.states.retain(|s| s.name.name != "complete");
+        let changes = corvid_ast::protocol_canonical_differences(
+            &p.canonical_encoding(),
+            &edited.canonical_encoding(),
+        );
+        assert!(
+            changes.iter().any(|c| c == "state complete: removed"),
+            "a removed state must be named as removed; got {changes:?}"
+        );
+    }
+
+    /// The encoding is what gets hashed, so it must be self-describing:
+    /// a value read back from a durable checkpoint written by an older
+    /// build has to be recognisable as "encoded differently" rather than
+    /// silently mistaken for a changed protocol.
+    #[test]
+    fn the_canonical_encoding_names_its_version_and_the_fingerprint_names_its_algorithm() {
+        let p = protocol();
+        assert!(p
+            .canonical_encoding()
+            .starts_with("encoding=corvid.protocol.canonical.v1\n"));
+        assert!(p.fingerprint().starts_with("sha256:"));
+        assert_eq!(
+            p.fingerprint().len(),
+            "sha256:".len() + 64,
+            "a sha256 fingerprint is the algorithm name plus 64 hex characters"
+        );
+    }
+
+    /// Pinned so the encoding cannot drift silently between builds or
+    /// machines. A deliberate change to the encoding must bump
+    /// `PROTOCOL_CANONICAL_ENCODING` and this constant together; an
+    /// accidental one fails here rather than in production, where it
+    /// would read as "every in-flight intent's protocol changed".
+    #[test]
+    fn the_fingerprint_is_stable_across_builds_and_machines() {
+        let expected = corvid_ast::ProviderProtocolDecl::fingerprint_of(
+            &protocol().canonical_encoding(),
+        );
+        assert_eq!(protocol().fingerprint(), expected);
+        // Recomputing from a fresh value must agree byte for byte: the
+        // input is sorted, span-free and layout-free, and the hash is a
+        // published algorithm — no DefaultHasher, address, or map order.
+        assert_eq!(protocol().fingerprint(), protocol().fingerprint());
+        assert_eq!(
+            protocol().fingerprint(),
+            "sha256:99e0259f877e102474789d81d69b58271a2550635b69c0c7af381faffa6da444",
+            "the canonical encoding changed; bump PROTOCOL_CANONICAL_ENCODING deliberately"
+        );
+    }
+
+    #[test]
+    fn an_unchanged_protocol_resumes_normally() {
+        let p = protocol();
+        let intent = ProtocolIntentState::new(&p);
+        assert_eq!(resume_verdict(&p, &intent), ResumeVerdict::Unchanged);
+    }
+
+    /// `refuse` is a refusal even though the new graph could technically
+    /// host the recorded state: the author said do not resume across a
+    /// change, and a provider job is already running.
+    #[test]
+    fn a_changed_protocol_refuses_when_the_declaration_says_refuse() {
+        let p = protocol();
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.submitted = true;
+        intent.protocol_canonical = Some(earlier_encoding());
+        assert!(matches!(
+            resume_verdict(&p, &intent),
+            ResumeVerdict::RefusedByPolicy { .. }
+        ));
+    }
+
+    #[test]
+    fn a_changed_protocol_resumes_when_declared_and_the_state_survives() {
+        let p = ProviderProtocolDecl {
+            on_protocol_change: corvid_ast::ProtocolChangePolicy::Resume,
+            ..protocol()
+        };
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.submitted = true;
+        intent.protocol_canonical = Some(earlier_encoding());
+        assert!(matches!(
+            resume_verdict(&p, &intent),
+            ResumeVerdict::ResumedAcrossChange { .. }
+        ));
+    }
+
+    /// The safety floor: `resume` does not mean "resume from anywhere". If
+    /// the recorded state is gone from the new graph there is no sound
+    /// point to continue from, so it refuses despite the policy.
+    #[test]
+    fn resume_still_refuses_when_the_recorded_state_no_longer_exists() {
+        let p = ProviderProtocolDecl {
+            on_protocol_change: corvid_ast::ProtocolChangePolicy::Resume,
+            ..protocol()
+        };
+        let mut intent = ProtocolIntentState::new(&p);
+        intent.submitted = true;
+        intent.protocol_canonical = Some(earlier_encoding());
+        intent.state = "a_state_that_was_deleted".to_string();
+        assert!(matches!(
+            resume_verdict(&p, &intent),
+            ResumeVerdict::RefusedStateVanished { state, .. } if state == "a_state_that_was_deleted"
+        ));
+    }
+
+    /// A checkpoint written before change detection existed cannot prove
+    /// it matches, and "we cannot tell" is not "it is the same" — but only
+    /// once there is real work to strand. A fresh, unsubmitted intent has
+    /// nothing to migrate.
+    #[test]
+    fn an_unrecorded_protocol_is_treated_as_changed_once_it_has_work() {
+        let p = protocol();
+        let mut fresh = ProtocolIntentState::new(&p);
+        fresh.protocol_canonical = None;
+        assert_eq!(resume_verdict(&p, &fresh), ResumeVerdict::Unchanged);
+
+        let mut inflight = fresh.clone();
+        inflight.submitted = true;
+        assert!(resume_verdict(&p, &inflight).is_refusal());
+    }
 }
+
