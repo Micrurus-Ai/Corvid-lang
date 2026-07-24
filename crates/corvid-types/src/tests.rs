@@ -270,6 +270,8 @@ identity users:
     provisioning:
         first_login: open
         tenant: fixed("public")
+    roles:
+        reviewer: "approvals.decide"
 
 tool send_message(body: String) -> String dangerous
 
@@ -278,11 +280,110 @@ agent send(body: String) -> String:
     return send_message(body)
 
 server api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body String -> json String requires authenticated:
         return send(body)
 "#,
     );
     assert!(checked.errors.is_empty(), "errors: {:?}", checked.errors);
+}
+
+#[test]
+fn approval_route_rejects_an_undeclared_reviewer_role() {
+    let checked = check(
+        r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        operator: "approvals.decide"
+
+agent send(body: String) -> String:
+    approve SendMessage(body)
+    return body
+
+server api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
+    route POST "/send" body String -> json String requires authenticated:
+        return send(body)
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| {
+            error.guarantee_id == Some("approval.policy_clause_static_check")
+                && matches!(
+                    error.kind,
+                    TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+                        if message.contains("role `reviewer` is not declared")
+                )
+        }),
+        "expected undeclared-reviewer error, got {:?}",
+        checked.errors
+    );
+}
+
+#[test]
+fn approval_route_requires_a_declared_decision_permission() {
+    let checked = check(
+        r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        reviewer: "messages.send"
+
+agent send(body: String) -> String:
+    approve SendMessage(body)
+    return body
+
+server api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
+    route POST "/send" body String -> json String requires authenticated:
+        return send(body)
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+                if message.contains("approvals.decide")
+        )),
+        "expected missing decision-permission error, got {:?}",
+        checked.errors
+    );
+}
+
+#[test]
+fn ordinary_route_rejects_a_dead_approval_policy() {
+    let checked = check(
+        r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        reviewer: "approvals.decide"
+
+server api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
+    route POST "/echo" body String -> json String requires authenticated:
+        return body
+"#,
+    );
+    assert!(
+        checked.errors.iter().any(|error| matches!(
+            error.kind,
+            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+                if message.contains("reach an `approve` boundary")
+        )),
+        "expected dead-policy error, got {:?}",
+        checked.errors
+    );
 }
 
 #[test]
@@ -358,6 +459,8 @@ identity users:
     provisioning:
         first_login: open
         tenant: fixed("public")
+    roles:
+        reviewer: "approvals.decide"
 
 type Receipt:
     id: String
@@ -365,6 +468,7 @@ type Receipt:
 tool issue_refund(id: String) -> Receipt dangerous
 
 server refund_api:
+    @approval(role: "reviewer", risk: "financial", data: "private", expires_ms: 900000, max_cost_usd: $100.0, irreversible: true)
     route POST "/refunds/{id}" -> json Receipt requires authenticated:
         approve IssueRefund(path.id)
         return issue_refund(path.id)

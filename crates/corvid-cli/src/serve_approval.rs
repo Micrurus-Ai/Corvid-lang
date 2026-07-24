@@ -34,15 +34,11 @@
 //! where `serve_cmd::finish` differentiates it from
 //! `ApprovalDenied`.
 //!
-//! **Requester and tenant are request-bound; contract metadata is
-//! still synthesized.** The verified route actor supplies both
-//! `requested_by` and `tenant_id`; there is no process-global tenant
-//! or anonymous requester fallback. The `ApprovalCreate` envelope also
-//! expects richer contract metadata (`required_role`, `data_class`,
-//! `max_cost_usd`, …) that today's `server` block does not yet
-//! declare. Those fields remain a visible follow-up rather than being
-//! confused with identity or tenancy.
-
+//! **Identity and policy are both explicit.** The verified route actor
+//! supplies `requested_by` and `tenant_id`; the compiled route supplies
+//! reviewer role, risk, data class, expiry, cost ceiling, and
+//! reversibility. There is no process-global tenant, anonymous
+//! requester, fabricated reviewer role, or serve-owned policy default.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,6 +59,19 @@ pub struct ApprovalRequester {
     pub actor_id: String,
     pub tenant_id: String,
 }
+
+/// Compiled policy of the route currently executing. All fields come
+/// from its mandatory `@approval(...)` declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApprovalQueuePolicy {
+    pub route: String,
+    pub required_role: String,
+    pub risk_level: String,
+    pub data_class: String,
+    pub expires_in_ms: u64,
+    pub max_cost_usd: f64,
+    pub irreversible: bool,
+}
 /// Approver that turns every `approve` boundary into a pending queue
 /// entry and surfaces the queued state as a `RuntimeError::
 /// ApprovalQueued`. The wrapped `ApprovalQueueRuntime` is the same
@@ -71,6 +80,7 @@ pub struct ApprovalRequester {
 pub struct QueueApprover {
     queue: Arc<ApprovalQueueRuntime>,
     requester: ApprovalRequester,
+    policy: ApprovalQueuePolicy,
     /// Per-process monotonic counter, combined with the nanosecond
     /// wall clock to produce an approval id that's unique across
     /// every call in this serve process (a wall-clock collision
@@ -80,10 +90,15 @@ pub struct QueueApprover {
 }
 
 impl QueueApprover {
-    pub fn new(queue: Arc<ApprovalQueueRuntime>, requester: ApprovalRequester) -> Self {
+    pub fn new(
+        queue: Arc<ApprovalQueueRuntime>,
+        requester: ApprovalRequester,
+        policy: ApprovalQueuePolicy,
+    ) -> Self {
         Self {
             queue,
             requester,
+            policy,
             next: AtomicU64::new(0),
         }
     }
@@ -118,18 +133,18 @@ impl Approver for QueueApprover {
                     id: format!("serve:{label}"),
                     version: "v1".to_string(),
                     action: label.clone(),
-                    target_kind: "agent_call".to_string(),
-                    target_id: format!("{label}-call"),
+                    target_kind: "http_route".to_string(),
+                    target_id: self.policy.route.clone(),
                     tenant_id: self.requester.tenant_id.clone(),
-                    required_role: "operator".to_string(),
-                    max_cost_usd: 0.0,
-                    data_class: "private".to_string(),
-                    irreversible: true,
-                    expires_ms: now_ms.saturating_add(24 * 60 * 60 * 1000),
+                    required_role: self.policy.required_role.clone(),
+                    max_cost_usd: self.policy.max_cost_usd,
+                    data_class: self.policy.data_class.clone(),
+                    irreversible: self.policy.irreversible,
+                    expires_ms: now_ms.saturating_add(self.policy.expires_in_ms),
                     replay_key: format!("serve-replay-{approval_id}"),
                     created_ms: 0,
                 },
-                risk_level: "medium".to_string(),
+                risk_level: self.policy.risk_level.clone(),
                 trace_id: format!("serve-trace-{approval_id}"),
             };
             match self.queue.create(create) {
@@ -153,6 +168,18 @@ mod tests {
         )
     }
 
+    fn policy() -> ApprovalQueuePolicy {
+        ApprovalQueuePolicy {
+            route: "POST /messages".into(),
+            required_role: "reviewer".into(),
+            risk_level: "high".into(),
+            data_class: "customer_message".into(),
+            expires_in_ms: 60_000,
+            max_cost_usd: 2.5,
+            irreversible: true,
+        }
+    }
+
     #[tokio::test]
     async fn queue_approver_creates_pending_entry_and_returns_approval_queued() {
         let queue = fresh_queue();
@@ -162,6 +189,7 @@ mod tests {
                 actor_id: "requester-7".into(),
                 tenant_id: "tenant-blue".into(),
             },
+            policy(),
         );
 
         let req = ApprovalRequest {
@@ -181,6 +209,17 @@ mod tests {
                 assert_eq!(record.requester_actor_id, "requester-7");
                 assert_eq!(record.action, "SendExecutiveFollowUp");
                 assert_eq!(record.status, "pending");
+                assert_eq!(record.required_role, "reviewer");
+                assert_eq!(record.risk_level, "high");
+                assert_eq!(record.data_class, "customer_message");
+                assert_eq!(record.max_cost_usd, 2.5);
+                assert!(record.irreversible);
+                assert_eq!(record.target_id, "POST /messages");
+                let lifetime_ms = record.expires_ms.saturating_sub(record.created_ms);
+                assert!(
+                    (59_900..=60_000).contains(&lifetime_ms),
+                    "the compiled 60s policy must survive queue insertion latency: {lifetime_ms}ms"
+                );
             }
             other => panic!(
                 "expected RuntimeError::ApprovalQueued, got {other:?} — the queue approver \
@@ -203,6 +242,7 @@ mod tests {
                 actor_id: "requester-7".into(),
                 tenant_id: "tenant-blue".into(),
             },
+            policy(),
         );
 
         let mut ids = std::collections::HashSet::new();

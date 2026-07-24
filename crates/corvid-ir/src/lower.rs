@@ -518,6 +518,7 @@ impl<'a> Lowerer<'a> {
             body: self.lower_block(&r.body),
             handler_agent: synthetic_route_agent_name(r.method, &r.path),
             upload_policy: r.upload.clone(),
+            approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
             policy: r.policy.as_ref().map(|p| crate::types::IrRoutePolicy {
                 authenticated: p.authenticated,

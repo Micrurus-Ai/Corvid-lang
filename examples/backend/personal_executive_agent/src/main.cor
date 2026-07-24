@@ -702,6 +702,8 @@ identity executive_users:
     provisioning:
         first_login: open
         tenant: fixed("personal-executive")
+    roles:
+        reviewer: "approvals.decide"
 
 server personal_executive_agent_api:
     route GET "/schema" -> json ExecutiveSchemaManifest:
@@ -752,14 +754,19 @@ server personal_executive_agent_api:
     route GET "/approvals/surface" -> json ExecutiveApprovalSurface:
         auth = auth_status("user-1", "tenant-1", "trace-approval-surface")
         return approval_surface(auth, "trace-approval-surface")
+    @approval(role: "reviewer", risk: "external_message", data: "executive_private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/follow-up/send" body FollowUpSendRequest -> json FollowUpSendReceipt uses send_email requires authenticated:
         return execute_approved_follow_up(body)
+    @approval(role: "reviewer", risk: "calendar_write", data: "executive_private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/calendar/edit" body CalendarEditRequest -> json CalendarEditReceipt uses calendar_write requires authenticated:
         return execute_approved_calendar_edit(body)
+    @approval(role: "reviewer", risk: "task_write", data: "executive_private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/task/edit" body TaskEditRequest -> json TaskEditReceipt uses task_write requires authenticated:
         return execute_approved_task_edit(body)
+    @approval(role: "reviewer", risk: "external_message", data: "executive_private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/chat/send" body ChatSendRequest -> json ChatSendReceipt uses chat_write requires authenticated:
         return execute_approved_chat_send(body)
+    @approval(role: "reviewer", risk: "external_share", data: "executive_private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/calendar/share" body CalendarShareRequest -> json CalendarShareReceipt uses calendar_share requires authenticated:
         return execute_approved_calendar_share(body)
 

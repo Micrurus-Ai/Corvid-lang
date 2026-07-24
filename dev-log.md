@@ -4,6 +4,29 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-07-24 - 52f-4d closed: approval policy is compiled, not supplied by serve
+
+The last hardcoded approval metadata left the HTTP runtime. An
+approval-capable route now declares one complete `@approval(...)`
+annotation: reviewer role, risk, data class, expiry, cost ceiling, and
+reversibility. The parser requires all six fields; the checker rejects a
+missing policy, a dead policy, an undeclared role, or an identity with no
+`approvals.decide` authority. The rule promotes
+`approval.policy_clause_static_check` from out-of-scope to a static
+typecheck guarantee.
+
+The policy is preserved AST → IR → Application Contract → served route
+→ queue record. `QueueApprover` no longer owns defaults for role, risk,
+data, TTL, cost, or reversibility. The decision boundary now proves both
+exact role membership and permission authority, fixing the previous
+path where the queue's required role was copied into the reviewer
+context after checking only `approvals.decide`.
+
+Five reference backends now carry route-specific policies. Adversarial
+coverage includes an actor that has `approvals.decide` through an
+`auditor` role but lacks the source-declared `reviewer` role; the live
+server returns 403 and leaves the pending approval untouched.
+
 ## 2026-07-09 - 44a closed: book syntax/types chapters realigned to the shipped language + compile guard
 
 First slice of the Language completeness track (Phases 44-47, filed

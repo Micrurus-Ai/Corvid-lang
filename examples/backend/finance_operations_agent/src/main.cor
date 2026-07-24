@@ -538,6 +538,8 @@ identity finance_users:
     provisioning:
         first_login: open
         tenant: fixed("finance-operations")
+    roles:
+        reviewer: "approvals.decide"
 
 server finance_operations_agent_api:
     route GET "/config" -> json FinanceConfig:
@@ -548,14 +550,19 @@ server finance_operations_agent_api:
         return readonly_snapshot()
     route GET "/payments/intents/mock" -> json FinanceApprovalAuditSurface:
         return payment_approval_surface()
+    @approval(role: "reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $10000.0, irreversible: true)
     route POST "/payments/intents/submit" body PaymentIntentRequest -> json PaymentIntentReceipt uses payment_write requires authenticated:
         return execute_approved_payment_intent(body)
+    @approval(role: "reviewer", risk: "subscription_change", data: "financial", expires_ms: 900000, max_cost_usd: $1000.0, irreversible: true)
     route POST "/subscriptions/cancel" body CancelSubscriptionRequest -> json CancelSubscriptionReceipt uses subscription_write requires authenticated:
         return execute_approved_cancel_subscription(body)
+    @approval(role: "reviewer", risk: "financial_dispute", data: "financial", expires_ms: 600000, max_cost_usd: $10000.0, irreversible: true)
     route POST "/transactions/dispute" body DisputeTransactionRequest -> json DisputeTransactionReceipt uses dispute_write requires authenticated:
         return execute_approved_dispute_transaction(body)
+    @approval(role: "reviewer", risk: "bulk_export", data: "financial", expires_ms: 600000, max_cost_usd: $25.0, irreversible: true)
     route POST "/reports/export" body ExportFinancialReportRequest -> json ExportFinancialReportReceipt uses report_export requires authenticated:
         return execute_approved_export_financial_report(body)
+    @approval(role: "reviewer", risk: "recurring_payment", data: "financial", expires_ms: 600000, max_cost_usd: $10000.0, irreversible: true)
     route POST "/payments/recurring/schedule" body ScheduleRecurringPaymentRequest -> json ScheduleRecurringPaymentReceipt uses recurring_payment_write requires authenticated:
         return execute_approved_schedule_recurring_payment(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:

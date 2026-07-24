@@ -97,20 +97,65 @@ impl<'a> Parser<'a> {
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
             }
-            let upload = match self.peek_ahead(1) {
-                TokKind::Ident(name) if name == "upload" && matches!(self.peek(), TokKind::At) => {
-                    match self.parse_upload_spec() {
-                        Ok(spec) => Some(spec),
-                        Err(error) => {
-                            self.errors.push(error);
+            let mut upload = None;
+            let mut approval = None;
+            while matches!(self.peek(), TokKind::At) {
+                match self.peek_ahead(1) {
+                    TokKind::Ident(name) if name == "upload" => {
+                        if upload.is_some() {
+                            self.errors.push(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: "duplicate `@upload` route policy".into(),
+                                    expected: "at most one `@upload(...)`".into(),
+                                },
+                                span: self.peek_span(),
+                            });
                             self.sync_to_statement_boundary();
                             continue;
                         }
+                        match self.parse_upload_spec() {
+                            Ok(spec) => upload = Some(spec),
+                            Err(error) => {
+                                self.errors.push(error);
+                                self.sync_to_statement_boundary();
+                                continue;
+                            }
+                        }
+                    }
+                    TokKind::Ident(name) if name == "approval" => {
+                        if approval.is_some() {
+                            self.errors.push(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: "duplicate `@approval` route policy".into(),
+                                    expected: "at most one `@approval(...)`".into(),
+                                },
+                                span: self.peek_span(),
+                            });
+                            self.sync_to_statement_boundary();
+                            continue;
+                        }
+                        match self.parse_approval_spec() {
+                            Ok(spec) => approval = Some(spec),
+                            Err(error) => {
+                                self.errors.push(error);
+                                self.sync_to_statement_boundary();
+                                continue;
+                            }
+                        }
+                    }
+                    other => {
+                        self.errors.push(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: format!("route annotation `@{}`", describe_token(other)),
+                                expected: "`@upload(...)` or `@approval(...)`".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                        self.sync_to_statement_boundary();
                     }
                 }
-                _ => None,
-            };
-            match self.parse_http_route_decl(upload) {
+            }
+            match self.parse_http_route_decl(upload, approval) {
                 Ok(route) => routes.push(route),
                 Err(e) => {
                     self.errors.push(e);
@@ -134,6 +179,7 @@ impl<'a> Parser<'a> {
     fn parse_http_route_decl(
         &mut self,
         upload: Option<corvid_ast::UploadSpec>,
+        approval: Option<corvid_ast::ApprovalSpec>,
     ) -> Result<HttpRouteDecl, ParseError> {
         let start = self.peek_span();
         self.expect(TokKind::KwRoute, "`route` inside a server block")?;
@@ -212,12 +258,137 @@ impl<'a> Parser<'a> {
             query_ty,
             body_ty,
             upload,
+            approval,
             response,
             effect_row,
             policy,
             body,
             span: start.merge(end),
         })
+    }
+
+    /// A complete approval policy. Every key is mandatory because
+    /// reviewer authority and expiry are consequential deployment
+    /// policy and must never come from runtime defaults.
+    fn parse_approval_spec(&mut self) -> Result<corvid_ast::ApprovalSpec, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // @
+        self.bump(); // approval
+        self.expect(TokKind::LParen, "`(` after `@approval`")?;
+        let mut role = None;
+        let mut risk = None;
+        let mut data = None;
+        let mut expires_ms = None;
+        let mut max_cost_usd = None;
+        let mut irreversible = None;
+        let mut seen = std::collections::HashSet::new();
+        while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
+            let (key, key_span) = self.expect_ident()?;
+            if !seen.insert(key.clone()) {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: format!("duplicate `@approval` key `{key}`"),
+                        expected: "each approval-policy key exactly once".into(),
+                    },
+                    span: key_span,
+                });
+            }
+            self.expect(TokKind::Colon, "`:` after an `@approval` key")?;
+            match key.as_str() {
+                "role" => role = Some(self.parse_approval_string("role")?),
+                "risk" => risk = Some(self.parse_approval_string("risk")?),
+                "data" => data = Some(self.parse_approval_string("data")?),
+                "expires_ms" => {
+                    expires_ms = Some(self.expect_positive_int_literal("a positive expiry")?.0)
+                }
+                "max_cost_usd" => max_cost_usd = Some(self.parse_cost_literal()?),
+                "irreversible" => {
+                    irreversible = Some(match self.peek() {
+                        TokKind::KwTrue => {
+                            self.bump();
+                            true
+                        }
+                        TokKind::KwFalse => {
+                            self.bump();
+                            false
+                        }
+                        other => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: describe_token(other),
+                                    expected: "`true` or `false`".into(),
+                                },
+                                span: self.peek_span(),
+                            });
+                        }
+                    })
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`@approval` key `{key}`"),
+                            expected: "`role`, `risk`, `data`, `expires_ms`, `max_cost_usd`, or `irreversible`".into(),
+                        },
+                        span: key_span,
+                    });
+                }
+            }
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RParen, "`)` after `@approval`")?;
+        self.skip_newlines();
+        let missing = [
+            ("role", role.is_none()),
+            ("risk", risk.is_none()),
+            ("data", data.is_none()),
+            ("expires_ms", expires_ms.is_none()),
+            ("max_cost_usd", max_cost_usd.is_none()),
+            ("irreversible", irreversible.is_none()),
+        ]
+        .into_iter()
+        .filter_map(|(name, absent)| absent.then_some(name))
+        .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!(
+                        "incomplete `@approval` policy (missing {})",
+                        missing.join(", ")
+                    ),
+                    expected: "all six approval-policy keys".into(),
+                },
+                span: start.merge(self.prev_span()),
+            });
+        }
+        Ok(corvid_ast::ApprovalSpec {
+            role: role.unwrap(),
+            risk: risk.unwrap(),
+            data: data.unwrap(),
+            expires_ms: expires_ms.unwrap(),
+            max_cost_usd: max_cost_usd.unwrap(),
+            irreversible: irreversible.unwrap(),
+            span: start.merge(self.prev_span()),
+        })
+    }
+
+    fn parse_approval_string(&mut self, key: &str) -> Result<String, ParseError> {
+        match self.peek().clone() {
+            TokKind::StringLit(value) if !value.trim().is_empty() => {
+                self.bump();
+                Ok(value)
+            }
+            other => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: describe_token(&other),
+                    expected: format!("a non-empty string for `{key}`"),
+                },
+                span: self.peek_span(),
+            }),
+        }
     }
 
     /// `requires <item> [and <item>]*` where each item is

@@ -3313,6 +3313,70 @@ server imports:
     }
 
     #[test]
+    fn server_approval_route_parses_complete_policy() {
+        let src = r#"
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/payments" body String -> json Bool requires authenticated:
+        return true
+"#;
+        let tokens = lex(src).expect("lex failed");
+        let (file, errors) = parse_file(&tokens);
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        let route = file
+            .decls
+            .iter()
+            .find_map(|decl| match decl {
+                Decl::Server(server) => server.routes.first(),
+                _ => None,
+            })
+            .expect("approval route");
+        let approval = route.approval.as_ref().expect("approval policy");
+        assert_eq!(approval.role, "finance_reviewer");
+        assert_eq!(approval.risk, "financial_transfer");
+        assert_eq!(approval.data, "financial");
+        assert_eq!(approval.expires_ms, 600_000);
+        assert_eq!(approval.max_cost_usd, 2_500.0);
+        assert!(approval.irreversible);
+    }
+
+    #[test]
+    fn server_approval_route_rejects_an_incomplete_policy() {
+        let src = r#"
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer")
+    route POST "/payments" body String -> json Bool requires authenticated:
+        return true
+"#;
+        let tokens = lex(src).expect("lex failed");
+        let (_file, errors) = parse_file(&tokens);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains("incomplete `@approval` policy")),
+            "expected a complete-policy error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn server_approval_route_rejects_duplicate_policy_keys() {
+        let src = r#"
+server payments:
+    @approval(role: "reviewer", role: "operator", risk: "write", data: "private", expires_ms: 600000, max_cost_usd: $5.0, irreversible: true)
+    route POST "/payments" body String -> json Bool requires authenticated:
+        return true
+"#;
+        let tokens = lex(src).expect("lex failed");
+        let (_file, errors) = parse_file(&tokens);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains("duplicate `@approval` key `role`")),
+            "expected a duplicate-key error, got {errors:?}"
+        );
+    }
+
+    #[test]
     fn schedule_decl_parses_cron_manifest_surface() {
         let src = r#"
 effect send_email:

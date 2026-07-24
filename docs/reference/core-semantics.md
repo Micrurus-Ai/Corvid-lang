@@ -75,7 +75,7 @@ Per the no-shortcuts rule, every `out_of_scope` entry carries an explicit reason
 | `auth.oauth_pkce_required` | auth | runtime_checked | runtime |
 | `auth.csrf_double_submit` | auth | runtime_checked | runtime |
 | `tenant.cross_tenant_compile_error` | auth | out_of_scope | typecheck |
-| `approval.policy_clause_static_check` | auth | out_of_scope | typecheck |
+| `approval.policy_clause_static_check` | auth | static | typecheck |
 | `approval.batch_equivalence_typed` | auth | out_of_scope | typecheck |
 | `approval.batch_refuses_cross_data_class_drift` | auth | runtime_checked | runtime |
 | `approval.explain_sources_grounded` | auth | runtime_checked | runtime |
@@ -1014,12 +1014,21 @@ A function whose actor came from tenant A may not pass a record owned by tenant 
 > **Why out of scope:** Tenant tagging exists in runtime envelopes + the CLI (`corvid approvals` honours tenant scoping; the approval_bypass_rejects_tenant_crossing_actor test pins the runtime half). The parser-level `tenant Org { ... }` block + the typechecker reachability that would refuse a cross-tenant value at compile time does not exist yet. Filed as post-v1.0 `35V2-P39-I-post-v1.0-auth-syntax-sugar` — the runtime behaviour ships today, the syntactic promotion of this row tracks with the post-v1.0 parser surface slice.
 
 #### `approval.policy_clause_static_check`
-- **class**: out_of_scope
+- **class**: static
 - **phase**: typecheck
 
-An `approval Name:` block's `policy { ... }` clause type-checks at compile time so a malformed predicate (wrong field name, wrong type, undeclared role) cannot ship.
+Every served route that can reach an `approve` boundary declares a complete `@approval(...)` policy: reviewer role, risk, data class, expiry, cost ceiling, and reversibility. The reviewer role must exist and the identity must grant `approvals.decide`; dead policies are rejected.
 
-> **Why out of scope:** Approval store + queue API ship and are reachable via `corvid approvals queue/inspect/approve/deny`. The `approval Name:` parser-level block is post-v1.0 ergonomic surface — filed as `35V2-P39-I-post-v1.0-auth-syntax-sugar`. The runtime behaviour (typed approval contracts with required fields validated at issue time) ships today via the host API; the source-level `policy { ... }` clause is the sugar.
+**Positive tests:**
+
+- `crates/corvid-types/src/tests.rs::authenticated_approval_route_typechecks`
+- `crates/corvid-cli/tests/serve_smoke.rs::approval_decisions_reject_every_unauthorized_path`
+
+**Adversarial tests:**
+
+- `crates/corvid-types/src/tests.rs::approval_route_rejects_an_undeclared_reviewer_role`
+- `crates/corvid-types/src/tests.rs::approval_route_requires_a_declared_decision_permission`
+- `crates/corvid-types/src/tests.rs::ordinary_route_rejects_a_dead_approval_policy`
 
 #### `approval.batch_equivalence_typed`
 - **class**: out_of_scope

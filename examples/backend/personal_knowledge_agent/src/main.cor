@@ -563,6 +563,8 @@ identity knowledge_users:
     provisioning:
         first_login: open
         tenant: fixed("personal-knowledge")
+    roles:
+        reviewer: "approvals.decide"
 
 server personal_knowledge_agent_api:
     route GET "/config" -> json KnowledgeConfig:
@@ -591,14 +593,19 @@ server personal_knowledge_agent_api:
         return weekly_feedback_batch_job("tenant-1", "business_week")
     route GET "/jobs/daily-provenance-audit/mock" -> json KnowledgeJobRun uses files_read:
         return daily_provenance_audit_job("tenant-1", "2026-05-27")
+    @approval(role: "reviewer", risk: "external_share", data: "tenant_knowledge", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/share/chat" body ShareAnswerToChatRequest -> json ShareAnswerToChatReceipt uses chat_share requires authenticated:
         return execute_approved_share_answer_to_chat(body)
+    @approval(role: "reviewer", risk: "external_share", data: "tenant_knowledge", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/actions/share/email" body ShareAnswerViaEmailRequest -> json ShareAnswerViaEmailReceipt uses email_share requires authenticated:
         return execute_approved_share_answer_via_email(body)
+    @approval(role: "reviewer", risk: "authoritative_publish", data: "tenant_knowledge", expires_ms: 900000, max_cost_usd: $10.0, irreversible: true)
     route POST "/actions/publish/authoritative" body PublishAuthoritativeAnswerRequest -> json PublishAuthoritativeAnswerReceipt uses kb_publish requires authenticated:
         return execute_approved_publish_authoritative_answer(body)
+    @approval(role: "reviewer", risk: "bulk_export", data: "tenant_knowledge", expires_ms: 900000, max_cost_usd: $25.0, irreversible: true)
     route POST "/actions/export/corpus" body ExportTenantCorpusRequest -> json ExportTenantCorpusReceipt uses corpus_export requires authenticated:
         return execute_approved_export_tenant_corpus(body)
+    @approval(role: "reviewer", risk: "cross_tenant_share", data: "tenant_knowledge", expires_ms: 900000, max_cost_usd: $25.0, irreversible: true)
     route POST "/actions/share/cross-tenant" body CrossTenantIndexShareRequest -> json CrossTenantIndexShareReceipt uses cross_tenant_share requires authenticated:
         return execute_approved_cross_tenant_index_share(body)
 

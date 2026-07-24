@@ -160,6 +160,9 @@ pub struct IrRoute {
     /// `Upload<Format>` body. The checker guarantees this is present
     /// and carries a maximum size whenever `upload_format` is present.
     pub upload_policy: Option<corvid_ast::UploadSpec>,
+    /// Complete source-declared queue/reviewer policy for approval
+    /// boundaries reachable from this route.
+    pub approval_policy: Option<corvid_ast::ApprovalSpec>,
     /// The `Upload<Format>` format tag (`Csv`, `Pdf`, `Image`, …) when
     /// the route body is an upload (slice 52c-2). `corvid serve` uses
     /// it to enforce the accepted MIME set on the multipart part. The

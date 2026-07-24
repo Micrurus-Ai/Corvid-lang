@@ -266,6 +266,9 @@ pub struct ContractRoute {
     /// boundary; it is never supplied by a runtime constant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload: Option<ContractUpload>,
+    /// Complete queue/reviewer policy for approval-capable routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ContractApprovalPolicy>,
     pub response_type: String,
     /// Permissions the route requires (from its effect row's trust /
     /// dangerous surface). Empty = no approval-requiring effect.
@@ -289,6 +292,16 @@ pub struct ContractRoutePolicy {
     pub roles: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractApprovalPolicy {
+    pub role: String,
+    pub risk: String,
+    pub data: String,
+    pub expires_ms: u64,
+    pub max_cost_usd: f64,
+    pub irreversible: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -783,6 +796,14 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .body_ty
             .as_ref()
             .and_then(|ty| contract_upload(ty, r.upload.as_ref())),
+        approval: r.approval.as_ref().map(|policy| ContractApprovalPolicy {
+            role: policy.role.clone(),
+            risk: policy.risk.clone(),
+            data: policy.data.clone(),
+            expires_ms: policy.expires_ms,
+            max_cost_usd: policy.max_cost_usd,
+            irreversible: policy.irreversible,
+        }),
         response_type: type_ref_name(&r.response.ty),
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
@@ -1120,6 +1141,44 @@ public agent ingest(doc: DocSubmission) -> String:
         assert_eq!(upload.format, "Csv");
         assert_eq!(upload.accepted_mime, vec!["text/csv".to_string()]);
         assert_eq!(upload.max_bytes, Some(32));
+    }
+
+    #[test]
+    fn approval_route_surfaces_its_complete_runtime_policy() {
+        let contract = contract_for(
+            r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        finance_reviewer: "approvals.decide"
+
+agent submit_payment(body: String) -> String:
+    approve SubmitPayment(body)
+    return body
+
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/payments" body String -> json String requires authenticated:
+        return submit_payment(body)
+"#,
+        );
+        let policy = contract.routes[0]
+            .approval
+            .as_ref()
+            .expect("approval policy");
+        assert_eq!(policy.role, "finance_reviewer");
+        assert_eq!(policy.risk, "financial_transfer");
+        assert_eq!(policy.data, "financial");
+        assert_eq!(policy.expires_ms, 600_000);
+        assert_eq!(policy.max_cost_usd, 2_500.0);
+        assert!(policy.irreversible);
+        let json = serde_json::to_value(&contract).expect("serialize application contract");
+        assert_eq!(
+            json["routes"][0]["approval"]["role"],
+            serde_json::json!("finance_reviewer")
+        );
     }
 
     #[test]

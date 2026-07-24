@@ -471,6 +471,8 @@ identity maintenance_users:
     provisioning:
         first_login: open
         tenant: fixed("code-maintenance")
+    roles:
+        reviewer: "approvals.decide"
 
 server code_maintenance_agent_api:
     route GET "/config" -> json CodeConfig:
@@ -483,14 +485,19 @@ server code_maintenance_agent_api:
         return triage_issue_mock()
     route GET "/writes/plan/mock" -> json CodeWritePlan uses repo_read, ci_read, code_ai:
         return code_write_plan_mock()
+    @approval(role: "reviewer", risk: "repository_write", data: "source_code", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/comments/post" body ReviewCommentRequest -> json ReviewCommentReceipt uses code_write requires authenticated:
         return execute_approved_review_comment(body)
+    @approval(role: "reviewer", risk: "repository_write", data: "source_code", expires_ms: 900000, max_cost_usd: $10.0, irreversible: true)
     route POST "/patches/propose" body PatchProposalRequest -> json PatchProposalReceipt uses code_write requires authenticated:
         return execute_approved_patch_proposal(body)
+    @approval(role: "reviewer", risk: "pull_request_open", data: "source_code", expires_ms: 900000, max_cost_usd: $10.0, irreversible: true)
     route POST "/pull-requests/open" body OpenPullRequestRequest -> json OpenPullRequestReceipt uses pr_write requires authenticated:
         return execute_approved_open_pull_request(body)
+    @approval(role: "reviewer", risk: "merge", data: "source_code", expires_ms: 600000, max_cost_usd: $25.0, irreversible: true)
     route POST "/pull-requests/merge" body MergePullRequestRequest -> json MergePullRequestReceipt uses merge_write requires authenticated:
         return execute_approved_merge_pull_request(body)
+    @approval(role: "reviewer", risk: "release", data: "source_code", expires_ms: 600000, max_cost_usd: $25.0, irreversible: true)
     route POST "/releases/tag" body TagReleaseRequest -> json TagReleaseReceipt uses release_write requires authenticated:
         return execute_approved_tag_release(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:

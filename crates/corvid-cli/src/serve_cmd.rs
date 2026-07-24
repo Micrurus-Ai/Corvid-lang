@@ -62,7 +62,7 @@ use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 use libloading::{Library, Symbol};
 
-use crate::serve_approval::{ApprovalRequester, QueueApprover};
+use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
 
 /// What the serve loop remembers about each in-flight approval so the
 /// `/__approvals/:id/approve` handler can re-execute the original
@@ -367,6 +367,7 @@ pub(crate) fn cmd_serve(
                 method: route.method,
                 route_path: route.path.clone(),
                 policy: route.policy.clone(),
+                approval_policy: route.approval_policy.clone(),
             });
             let filter = method_filter(route.method);
             let mr = if route.upload_format.is_some() {
@@ -557,6 +558,8 @@ struct RouteMeta {
     /// The route's `requires` authorization policy (slice 52f). When
     /// present, it is enforced before the handler runs.
     policy: Option<corvid_ir::IrRoutePolicy>,
+    /// Mandatory compiled policy when the route can reach `approve`.
+    approval_policy: Option<corvid_ast::ApprovalSpec>,
 }
 
 struct RouteUploadPolicy {
@@ -856,11 +859,17 @@ fn enforce_approval_reviewer(
         return Err(deny_403("cross-tenant approval"));
     }
 
-    // 4. Declared `approvals.decide` permission (not a magic role).
+    // 4. The route's source-declared reviewer role AND the ordinary
+    // `approvals.decide` permission. The old implementation checked
+    // only the permission and later copied `record.required_role` into
+    // the transition context, effectively fabricating role membership.
     let roles = match ctx.auth.actor_roles(&actor.id) {
         Ok(roles) => roles,
         Err(_) => return Err(deny_403("authorization failed")),
     };
+    if !roles.iter().any(|role| role == &record.required_role) {
+        return Err(deny_403("reviewer lacks the approval's required role"));
+    }
     let requirement = RoutePolicyRequirement {
         authenticated: true,
         roles: Vec::new(),
@@ -1080,15 +1089,26 @@ async fn run_route(
         }
     }
 
-    let request_runtime = match &enforced_actor {
-        Some(enforced) => state.runtime.with_approver(Arc::new(QueueApprover::new(
-            state.approval_queue.clone(),
-            ApprovalRequester {
-                actor_id: enforced.actor.id.clone(),
-                tenant_id: enforced.actor.tenant_id.clone(),
-            },
-        ))),
-        None => state.runtime.clone(),
+    let request_runtime = match (&enforced_actor, &meta.approval_policy) {
+        (Some(enforced), Some(policy)) => {
+            state.runtime.with_approver(Arc::new(QueueApprover::new(
+                state.approval_queue.clone(),
+                ApprovalRequester {
+                    actor_id: enforced.actor.id.clone(),
+                    tenant_id: enforced.actor.tenant_id.clone(),
+                },
+                ApprovalQueuePolicy {
+                    route: format!("{} {}", meta.method.as_str(), meta.route_path),
+                    required_role: policy.role.clone(),
+                    risk_level: policy.risk.clone(),
+                    data_class: policy.data.clone(),
+                    expires_in_ms: policy.expires_ms,
+                    max_cost_usd: policy.max_cost_usd,
+                    irreversible: policy.irreversible,
+                },
+            )))
+        }
+        _ => state.runtime.clone(),
     };
     let outcome = run_ir_with_runtime(
         &state.ir,
@@ -1702,6 +1722,9 @@ fn reviewer_context(
     reviewer: &corvid_runtime::AuthActor,
     record: &corvid_runtime::approval_queue::ApprovalQueueRecord,
 ) -> ApprovalActorContext {
+    // `enforce_approval_reviewer` has just proved the actor actually
+    // holds this exact source-declared role. This is evidence carried
+    // into the queue transition, not a fabricated grant.
     ApprovalActorContext {
         actor_id: reviewer.id.clone(),
         tenant_id: reviewer.tenant_id.clone(),

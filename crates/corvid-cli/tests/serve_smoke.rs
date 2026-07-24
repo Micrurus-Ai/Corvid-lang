@@ -155,8 +155,8 @@ const TEST_CSRF_SECRET: &str = "corvid-test-csrf-secret-0123456789";
 
 /// An identity block declaring a `reviewer` role that grants
 /// `approvals.decide`, prepended to sources that exercise approval
-/// transitions. Its tenant matches the approval queue's default
-/// (`serve-default`), so a reviewer in that tenant may decide.
+/// transitions. Requests and decisions are scoped to this explicit
+/// tenant, so a reviewer cannot cross the tenant boundary.
 const IDENTITY_WITH_REVIEWER: &str = r#"identity users:
     provider google
     provisioning:
@@ -164,6 +164,7 @@ const IDENTITY_WITH_REVIEWER: &str = r#"identity users:
         tenant: fixed("serve-default")
     roles:
         reviewer: "approvals.decide"
+        auditor: "approvals.decide"
 
 "#;
 
@@ -374,6 +375,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return send_message(req)
 
 server test_serve_5_api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#;
@@ -519,7 +521,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     // from the E0-serve-5 test, returning a deterministic receipt
     // the test can observe end-to-end.
     let source = format!(
-        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external requires authenticated:\n        return execute_send(body)\n"
+        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    @approval(role: \"reviewer\", risk: \"external_message\", data: \"private\", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external requires authenticated:\n        return execute_send(body)\n"
     );
     std::fs::write(&src_path, source).unwrap();
 
@@ -773,6 +775,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q1b_api:
+    @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
@@ -930,6 +933,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q6_api:
+    @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
@@ -1082,6 +1086,7 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     return EchoReceipt(echoed)
 
 server test_serve_q1a_api:
+    @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_echo(body)
 "#;
@@ -1238,6 +1243,7 @@ agent execute_broken(req: BrokenReq) -> BrokenReceipt uses broken_external:
     return BrokenReceipt(out)
 
 server test_serve_q2_api:
+    @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/broken" body BrokenReq -> json BrokenReceipt uses broken_external requires authenticated:
         return execute_broken(body)
 "#;
@@ -1447,6 +1453,7 @@ agent execute_classify(req: EchoReq) -> EchoReceipt:
     return EchoReceipt(req.value)
 
 server test_serve_q9_api:
+    @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/reset" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
         return execute_reset(body)
     route POST "/classify" body EchoReq -> json EchoReceipt:
@@ -2173,6 +2180,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return send_message(req)
 
 server durable_api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#;
@@ -2405,6 +2413,11 @@ fn approval_decisions_reject_every_unauthorized_path() {
         // Authenticated but WITHOUT the approvals.decide permission.
         auth.upsert_actor(mk("peon", "serve-default")).unwrap();
         auth.create_session(sess("s-peon", "peon", "serve-default", "peon-token", "b-peon")).unwrap();
+        // Has the decision permission, but not the route's exact
+        // source-declared reviewer role.
+        auth.upsert_actor(mk("auditor", "serve-default")).unwrap();
+        auth.grant_actor_role("auditor", "auditor", 1).unwrap();
+        auth.create_session(sess("s-auditor", "auditor", "serve-default", "auditor-token", "b-auditor")).unwrap();
         // A reviewer in a DIFFERENT tenant.
         auth.upsert_actor(mk("outsider", "other-tenant")).unwrap();
         auth.grant_actor_role("outsider", "reviewer", 1).unwrap();
@@ -2435,6 +2448,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     return SendReceipt(true)
 
 server adversary_api:
+    @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
         return execute_send(body)
 "#);
@@ -2520,18 +2534,27 @@ server adversary_api:
         http_post_with_headers(port, &url, "", &headers("peon-token", "b-peon")).unwrap().0,
         403, "a reviewer without approvals.decide must be 403"
     );
-    // 6. Cross-tenant reviewer → 403.
+    // 6. The permission alone cannot substitute another role for the
+    //    route's exact source-declared reviewer role.
+    assert_eq!(
+        http_post_with_headers(port, &url, "", &headers("auditor-token", "b-auditor"),)
+            .unwrap()
+            .0,
+        403,
+        "approvals.decide alone must not fabricate the source-declared reviewer role"
+    );
+    // 7. Cross-tenant reviewer → 403.
     assert_eq!(
         http_post_with_headers(port, &url, "", &headers("out-token", "b-out")).unwrap().0,
         403, "a cross-tenant reviewer must be 403"
     );
-    // 7. Self-approval (the requester) → 403.
+    // 8. Self-approval (the requester) → 403.
     assert_eq!(
         http_post_with_headers(port, &url, "", &headers("self-token", "b-self")).unwrap().0,
         403, "the requester must not decide their own approval"
     );
 
-    // 8. Role revocation takes effect at once — revoke rev2's role, then
+    // 9. Role revocation takes effect at once — revoke rev2's role, then
     //    their decision is refused (the session is invalidated too).
     {
         let auth = SessionAuthRuntime::open(data_dir.join("auth.sqlite")).unwrap();
@@ -2549,7 +2572,7 @@ server adversary_api:
             .expect("GET /__approvals");
     assert!(list.contains(&id), "the approval must survive every refused decision");
 
-    // 9. A legitimate reviewer decides → 200, exactly once; a replay 409s.
+    // 10. A legitimate reviewer decides → 200, exactly once; a replay 409s.
     assert_eq!(
         http_post_with_headers(port, &url, "", &headers("rev-token", "b-rev")).unwrap().0,
         200, "a verified reviewer with approvals.decide must succeed"

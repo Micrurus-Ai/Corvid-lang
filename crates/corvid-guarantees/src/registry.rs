@@ -1558,25 +1558,25 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     Guarantee {
         id: "approval.policy_clause_static_check",
         kind: GuaranteeKind::Auth,
-        class: GuaranteeClass::OutOfScope,
+        class: GuaranteeClass::Static,
         phase: Phase::TypeCheck,
         description:
-            "An `approval Name:` block's `policy { ... }` clause \
-             type-checks at compile time so a malformed predicate \
-             (wrong field name, wrong type, undeclared role) cannot \
-             ship.",
-        out_of_scope_reason:
-            "Approval store + queue API ship and are reachable via \
-             `corvid approvals queue/inspect/approve/deny`. The \
-             `approval Name:` parser-level block is post-v1.0 \
-             ergonomic surface — filed as \
-             `35V2-P39-I-post-v1.0-auth-syntax-sugar`. The runtime \
-             behaviour (typed approval contracts with required \
-             fields validated at issue time) ships today via the \
-             host API; the source-level `policy { ... }` clause is \
-             the sugar.",
-        positive_test_refs: &[],
-        adversarial_test_refs: &[],
+            "Every served route that can reach an `approve` boundary \
+             declares a complete `@approval(...)` policy: reviewer \
+             role, risk, data class, expiry, cost ceiling, and \
+             reversibility. The reviewer role must exist and the \
+             identity must grant `approvals.decide`; dead policies \
+             are rejected.",
+        out_of_scope_reason: "",
+        positive_test_refs: &[
+            "crates/corvid-types/src/tests.rs::authenticated_approval_route_typechecks",
+            "crates/corvid-cli/tests/serve_smoke.rs::approval_decisions_reject_every_unauthorized_path",
+        ],
+        adversarial_test_refs: &[
+            "crates/corvid-types/src/tests.rs::approval_route_rejects_an_undeclared_reviewer_role",
+            "crates/corvid-types/src/tests.rs::approval_route_requires_a_declared_decision_permission",
+            "crates/corvid-types/src/tests.rs::ordinary_route_rejects_a_dead_approval_policy",
+        ],
     },
     Guarantee {
         id: "approval.batch_equivalence_typed",

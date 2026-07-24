@@ -118,7 +118,14 @@ Roadmap: [Phase 20 safety wave](./ROADMAP.md)
 Proof: [approval checker tests](./crates/corvid-types/src/lib.rs)
 Non-scope: Corvid proves the approval boundary exists; it does not decide whether approval is morally or legally correct.
 
-For served applications, an approval boundary also requires a verified requester. If a route can reach `approve`—directly or through called agents—but omits `requires authenticated`, the compiler rejects it. Pending records carry the authenticated actor and tenant; approval list/detail endpoints require declared review authority and never reveal another tenant's records.
+For served applications, an approval boundary also requires a verified requester and a complete route policy. If a route can reach `approve`—directly or through called agents—but omits `requires authenticated` or any `@approval(...)` field, the compiler rejects it. Reviewer role, risk, data class, expiry, cost ceiling, and reversibility come from source and travel through the Application Contract into the queue; `serve` invents none of them. At decision time Corvid verifies that the reviewer holds the exact declared role plus `approvals.decide`, in the same tenant, with valid CSRF, and is not the requester.
+
+```corvid
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/payments" body Payment -> json Receipt requires authenticated:
+        return submit_payment(body)
+```
 
 #### Dimensional Effects
 
@@ -927,7 +934,7 @@ Spec: [First Login Is An Explicit Compile-Time Decision](./docs/reference/invent
 Tour: `corvid tour --topic oauth-login`
 Roadmap: [Phase 52 identity runtime](./ROADMAP.md)
 Proof: [the login routes](./crates/corvid-cli/src/serve_auth/routes.rs) + [the provisioning executor](./crates/corvid-runtime/src/auth/provisioning.rs) + [the E5210 checker gate](./crates/corvid-types/src/checker/decl.rs)
-Non-scope: 52e mounts the login/session routes and provisions the actor; route-level enforcement of `requires authenticated|role|permission` policies and durable `approval_required` provisioning are later slices.
+Non-scope: The login/session and route-authorization runtime is complete; durable `approval_required` first-login provisioning remains a later slice.
 
 #### Protocol-Typed Connectors
 

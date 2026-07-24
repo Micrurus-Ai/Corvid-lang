@@ -162,6 +162,10 @@ pub enum TypeErrorKind {
     /// on the durable approval record.
     RouteApprovalRequiresAuthentication { path: String },
 
+    /// An approval-capable route omitted or contradicted its complete
+    /// source-declared queue/reviewer policy.
+    RouteApprovalPolicyInvalid { path: String, message: String },
+
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
@@ -615,6 +619,9 @@ impl TypeErrorKind {
                 format!(
                     "route `{path}` can request approval but does not require an authenticated caller"
                 )
+            }
+            Self::RouteApprovalPolicyInvalid { path, message } => {
+                format!("invalid approval policy on route `{path}`: {message}")
             }
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
@@ -1188,6 +1195,9 @@ impl TypeErrorKind {
             ),
             Self::RouteApprovalRequiresAuthentication { .. } => Some(
                 "add `requires authenticated` to the route; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
+            ),
+            Self::RouteApprovalPolicyInvalid { .. } => Some(
+                "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),

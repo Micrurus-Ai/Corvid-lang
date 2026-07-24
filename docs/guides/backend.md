@@ -55,10 +55,19 @@ agent approve_refund(req: RefundRequest) -> RefundResponse uses transfer_money:
 agent refund_status() -> RefundStatus:
     return RefundStatus("refund_api", "contract")
 
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+    roles:
+        finance_reviewer: "approvals.decide"
+
 server refund_api:
     route GET "/status" -> json RefundStatus:
         return refund_status()
-    route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money:
+    @approval(role: "finance_reviewer", risk: "financial_refund", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money requires authenticated:
         return approve_refund(body)
 ```
 
@@ -78,6 +87,8 @@ The typechecker enforces:
 
 - The declared `uses` row matches the body's actual effect
   composition (otherwise the route fails to compile).
+- A route that can reach `approve` is authenticated and declares its
+  complete reviewer/risk/data/expiry/cost/reversibility policy.
 - Dangerous tools called from the body have a matching `approve`
   in lexical scope (otherwise the route fails to compile under
   `approval.dangerous_call_requires_token`).

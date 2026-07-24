@@ -364,6 +364,32 @@ Remove the `approve` line and the program **will not compile**:
 
 This is the killer feature. Enforced at compile time, not runtime. Works in both `corvid run` (interpreter) and `corvid build --target=python`.
 
+For a served application, the route also declares the complete decision
+policy. Corvid deliberately has no default reviewer, expiry, risk class,
+data class, cost ceiling, or reversibility:
+
+```corvid
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+    roles:
+        finance_reviewer: "approvals.decide"
+
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/payments" body Payment -> json Receipt requires authenticated:
+        return submit_payment(body)
+```
+
+All six `@approval` fields are mandatory. The route must be
+authenticated, the named role must be declared, and some declared role
+must grant `approvals.decide`. At runtime the requester and tenant come
+from the verified session; the other six values come from this compiled
+policy. A reviewer must hold the exact named role and the permission,
+must be in the same tenant, and cannot approve their own request.
+
 ### Current compilation gap
 
 `corvid build --target=native` doesn't yet wire tool / prompt / approve calls into compiled code — native tool dispatch is provided by a proc-macro `#[tool]` registry. For now, AI-shaped programs run via:

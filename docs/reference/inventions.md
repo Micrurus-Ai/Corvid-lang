@@ -692,6 +692,34 @@ Why it is unique: everywhere else, first-login provisioning is a runtime setting
 you can leave on its permissive default. In Corvid it is a decision the program
 must state to compile at all.
 
+### Complete Approval Policies Are Source, Not Middleware {#complete-approval-policies}
+
+```corvid
+server payments:
+    @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
+    route POST "/payments" body Payment -> json Receipt requires authenticated:
+        return submit_payment(body)
+```
+
+When a served route can reach `approve`, Corvid requires the whole operational
+decision contract in source: reviewer role, risk, data class, expiry, cost
+ceiling, and reversibility. All six values lower through the Application
+Contract into the durable queue record. The server cannot substitute defaults.
+The compiler also proves that the reviewer role exists and that the identity
+model grants `approvals.decide`; a policy on a route with no reachable approval
+is rejected as dead configuration.
+
+At the decision boundary the runtime resolves roles fresh and requires the
+reviewer to hold both the exact source-declared role and the permission, in the
+same tenant, with valid CSRF, while enforcing separation of duties. An actor
+with `approvals.decide` through an unrelated role cannot be treated as the
+required reviewer.
+
+Why it is unique: frameworks usually split the approval call, reviewer
+middleware, queue schema, TTL, audit record, and UI metadata across unrelated
+files. Corvid compiles one policy into every layer and refuses any incomplete
+path.
+
 ### Protocol-Typed Connectors {#protocol-typed-connectors}
 
 ```corvid
@@ -779,4 +807,5 @@ program's static contract.
 | Reversibility-Guarded Parallel Cancellation | Shipped (52d) | `corvid tour --topic parallel-cancellation` | `crates/corvid-vm/src/tests/parallel.rs` (rule + replay-reproduction + adversarial) | [`core-semantics.md`](./core-semantics.md) (`parallel.cancellation_reversibility`) | A `parallel:` block fails fast, but a branch past a non-reversible effect boundary is never cancelled; live cancellation is recorded per arm and Substitute-mode replay reproduces it deterministically (cancelled arm stops at its recorded boundary, shielded arm reaches its terminal, non-cancelling blocks byte-identical). Cooperative at tool-dispatch boundaries, not preemptive. |
 | First-Login Provisioning Is A Compile-Time Decision | Shipped (52e) | `corvid tour --topic oauth-login` | `crates/corvid-cli/src/serve_auth/routes.rs` (`callback_tests`: open provisions+recognises, invited gate, reused-state / nonce-mismatch / tampered-token refused, userinfo) + `crates/corvid-cli/tests/serve_smoke.rs::serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider` + `crates/corvid-abi/src/app_contract.rs::identity_with_oauth_provider_but_no_provisioning_is_rejected` | [`inventions.md`](#first-login-is-an-explicit-compile-time-decision) | An `identity` block auto-mounts the login surface (PKCE + single-use state + nonce + JWKS/userinfo verify + safe cookie); omitting the first-login `provisioning:` policy is a compile error (E5210). Identity is keyed server-side on `(issuer, subject)` / `(provider, user_id)`, never email. Durable `approval_required` provisioning is a later slice. |
 | Protocol-Typed Connectors | Shipped (52g) | `corvid tour --topic connectors` | `crates/corvid-driver/tests/connector_modes.rs` (mock/real/replay, status→typed-error, rate-limit, secret-never-in-trace, real-without-credential) + `crates/corvid-runtime/src/connectors.rs` (request-builder: secret-only-in-header, unresolved-secret-named) + `crates/corvid-types/src/tests.rs` (`on_status_*` coherence) | [`inventions.md`](#protocol-typed-connectors) | Declared connectors run mock/real/replay from one file; credentials are `secret(...)` refs never in IR/trace, mode has no default (omission = compile error / startup refusal), `on status -> Variant` gives typed `Result` errors. Async provider state machines + provider-drift quarantine are later 52h/52i slices. |
-| Route Authorization Enforced Before The Handler | Shipped (52f) | `corvid tour --topic route-authorization` | `crates/corvid-runtime/tests/route_authz.rs` (forged cookie, expired/revoked session, cross-tenant, CSRF mismatch, authenticated-but-insufficient, permission-union, stale-role-after-revocation) + `crates/corvid-cli/tests/serve_smoke.rs::a_role_gated_route_allows_the_right_role_and_denies_others` (live: admin 200, plain 403, anonymous 401) + `::serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start` + `crates/corvid-runtime/src/auth/roles.rs` tests | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | A `requires authenticated\|role\|permission` route resolves the session to a verified typed `actor` and enforces tenant + role + permission (set membership + permission union) and CSRF double-submit on mutations BEFORE the handler or any effect runs — 401 unauthenticated, 403 under-privileged. The actor is only ever the authenticated one, never request-supplied. This closed the last Contract Closure gap. Route-path tenant scoping (an actor's tenant is the enforced tenant) and durable approval-endpoint reviewer auth are follow-ups. |
+| Route Authorization Enforced Before The Handler | Shipped (52f) | `corvid tour --topic route-authorization` | `crates/corvid-runtime/tests/route_authz.rs` (forged cookie, expired/revoked session, cross-tenant, CSRF mismatch, authenticated-but-insufficient, permission-union, stale-role-after-revocation) + `crates/corvid-cli/tests/serve_smoke.rs::a_role_gated_route_allows_the_right_role_and_denies_others` (live: admin 200, plain 403, anonymous 401) + `::serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start` + `crates/corvid-runtime/src/auth/roles.rs` tests | [`core-semantics.md`](./core-semantics.md) (`contract.runtime_closure`) | A `requires authenticated\|role\|permission` route resolves the session to a verified typed `actor` and enforces tenant + role + permission (set membership + permission union) and CSRF double-submit on mutations BEFORE the handler or any effect runs — 401 unauthenticated, 403 under-privileged. The actor is only ever the authenticated one, never request-supplied. This closed the last Contract Closure gap. |
+| Complete Source-Declared Approval Policy | Shipped (52f-4d) | `corvid check` an approval-capable served route | `corvid-syntax::server_approval_route_*` + `corvid-types::approval_route_*` + `corvid-abi::approval_route_surfaces_its_complete_runtime_policy` + `serve_smoke::approval_decisions_reject_every_unauthorized_path` | [`core-semantics.md`](./core-semantics.md) (`approval.policy_clause_static_check`) | All six policy fields are mandatory and compile into the queue. Runtime proves exact role + permission + tenant + CSRF + separation of duties; Corvid proves policy completeness and enforcement, not whether a human's decision is wise. |

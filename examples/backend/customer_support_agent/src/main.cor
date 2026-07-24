@@ -483,6 +483,8 @@ identity support_users:
     provisioning:
         first_login: open
         tenant: fixed("customer-support")
+    roles:
+        reviewer: "approvals.decide"
 
 server customer_support_agent_api:
     route GET "/config" -> json SupportConfig:
@@ -497,14 +499,19 @@ server customer_support_agent_api:
         return support_sla_job()
     route GET "/eval/dashboard/mock" -> json SupportEvalDashboard:
         return support_eval_dashboard()
+    @approval(role: "reviewer", risk: "external_message", data: "customer_support", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/replies/send" body SupportReplySendRequest -> json SupportReplySendReceipt uses support_write requires authenticated:
         return execute_approved_support_reply(body)
+    @approval(role: "reviewer", risk: "financial_refund", data: "customer_support", expires_ms: 600000, max_cost_usd: $1000.0, irreversible: true)
     route POST "/refunds/issue" body SupportRefundRequest -> json SupportRefundReceipt uses refund_write requires authenticated:
         return execute_approved_support_refund(body)
+    @approval(role: "reviewer", risk: "ticket_escalation", data: "customer_support", expires_ms: 900000, max_cost_usd: $10.0, irreversible: true)
     route POST "/tickets/escalate" body EscalateTicketRequest -> json EscalateTicketReceipt uses escalate_write requires authenticated:
         return execute_approved_escalate_ticket(body)
+    @approval(role: "reviewer", risk: "ticket_close", data: "customer_support", expires_ms: 900000, max_cost_usd: $10.0, irreversible: true)
     route POST "/tickets/close" body CloseTicketRequest -> json CloseTicketReceipt uses ticket_write requires authenticated:
         return execute_approved_close_ticket(body)
+    @approval(role: "reviewer", risk: "account_credit", data: "customer_support", expires_ms: 600000, max_cost_usd: $1000.0, irreversible: true)
     route POST "/credits/apply" body ApplyAccountCreditRequest -> json ApplyAccountCreditReceipt uses credit_write requires authenticated:
         return execute_approved_apply_account_credit(body)
     route POST "/auth/session/login" body LoginRequest -> json LoginResponse:

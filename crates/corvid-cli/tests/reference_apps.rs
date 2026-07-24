@@ -1305,7 +1305,8 @@ fn deploy_k8s_and_systemd_emit_operable_manifests() {
     );
     let service = fs::read_to_string(systemd_out.join("personal_executive_agent.service"))
         .expect("read systemd service");
-    assert!(service.contains("ExecStart=/usr/local/bin/corvid run"));
+    assert!(service
+        .contains("ExecStart=/usr/local/bin/corvid serve src/main.cor --listen 0.0.0.0:8000"));
     assert!(service.contains("Restart=on-failure"));
     assert!(systemd_out
         .join("personal_executive_agent.sysusers")

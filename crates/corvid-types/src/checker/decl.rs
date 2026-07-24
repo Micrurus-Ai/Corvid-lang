@@ -792,6 +792,50 @@ impl<'a> Checker<'a> {
                 route.span,
             ));
         }
+        match (reaches_approval, route.approval.as_ref()) {
+            (true, None) => self.errors.push(TypeError::with_guarantee(
+                TypeErrorKind::RouteApprovalPolicyInvalid {
+                    path: route.path.clone(),
+                    message: "an approval-capable route must declare a complete `@approval(...)` policy; serve never invents reviewer authority or expiry".into(),
+                },
+                route.span,
+                "approval.policy_clause_static_check",
+            )),
+            (false, Some(spec)) => self.errors.push(TypeError::with_guarantee(
+                TypeErrorKind::RouteApprovalPolicyInvalid {
+                    path: route.path.clone(),
+                    message: "`@approval(...)` is only valid when the route can reach an `approve` boundary".into(),
+                },
+                spec.span,
+                "approval.policy_clause_static_check",
+            )),
+            (true, Some(spec)) => {
+                if !self.identity_roles.contains(&spec.role) {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::RouteApprovalPolicyInvalid {
+                            path: route.path.clone(),
+                            message: format!(
+                                "reviewer role `{}` is not declared in the identity block",
+                                spec.role
+                            ),
+                        },
+                        spec.span,
+                        "approval.policy_clause_static_check",
+                    ));
+                }
+                if !self.identity_permissions.contains("approvals.decide") {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::RouteApprovalPolicyInvalid {
+                            path: route.path.clone(),
+                            message: "the identity roles grant no `approvals.decide` permission, so this approval could never be decided".into(),
+                        },
+                        spec.span,
+                        "approval.policy_clause_static_check",
+                    ));
+                }
+            }
+            (false, None) => {}
+        }
 
         let _ = server;
     }

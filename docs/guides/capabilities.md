@@ -85,7 +85,7 @@ parameters from the server's own JSON schemas and arguments built via
 the `std/json` builder (escaping is runtime-handled, never string
 concatenation):
 
-```corvid-fragment
+```corvid skip
 # GENERATED — regenerate with `corvid mcp regen github`.
 public agent search_issues(limit: Int, query: String) -> Result<String, String>:
     args = json_object_new()

@@ -222,6 +222,21 @@ pub struct UploadSpec {
     pub span: Span,
 }
 
+/// Complete policy for approvals raised while executing one HTTP
+/// route. Every field is source-declared: the runtime never invents
+/// reviewer authority, risk, data classification, expiry, cost, or
+/// reversibility.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalSpec {
+    pub role: String,
+    pub risk: String,
+    pub data: String,
+    pub expires_ms: u64,
+    pub max_cost_usd: f64,
+    pub irreversible: bool,
+    pub span: Span,
+}
+
 /// A field value refinement (slice 50j). Deliberately small in v1:
 /// integer ranges and string-length ranges cover the bulk of the
 /// "structurally valid, semantically nonsense" decode failures.

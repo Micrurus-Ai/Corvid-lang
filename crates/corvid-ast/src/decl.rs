@@ -389,6 +389,10 @@ pub struct HttpRouteDecl {
     /// policy; the runtime never invents a hidden size limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload: Option<UploadSpec>,
+    /// Complete source-declared policy for any `approve` boundary
+    /// reachable from this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<crate::ty::ApprovalSpec>,
     pub response: RouteResponse,
     #[serde(default)]
     pub effect_row: EffectRow,

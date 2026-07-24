@@ -257,6 +257,7 @@ mod tests {
             body: empty_block(),
             handler_agent: handler.to_string(),
             upload_policy: None,
+            approval_policy: None,
             upload_format: None,
             policy: None,
             span: span(),
