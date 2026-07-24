@@ -16652,6 +16652,62 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-5a: what could the provider do to you?
+
+52h-5 split into 52h-5a (developer surface) and 52h-5b (the headline
+demonstration), with 52i between them. The demonstration's central step
+is quarantine, which 52i builds. Shipping the demo first would have meant
+faking quarantine or holding back the whole simulator and SDK surface
+until enforcement landed. ROADMAP amended before any code, per the
+ordering rule.
+
+The checker proves a protocol is well-formed. Well-formed is not
+understood. A provider is not adversarial, but it is not yours either: it
+can stall forever, finish on the first answer, or flap. Each is a legal
+walk through a declaration the checker happily accepted, and each has a
+different consequence for cost, latency and which terminal your code has
+to handle.
+
+    [non_terminating] reporting `processing` forever holds the intent in
+      `processing`; after 600s (20 observations) the declared deadline
+      forces `failed`
+    [deadline_reachable] `failed` is reachable without the provider ever
+      failing — a slow provider is enough
+
+The simulator drives `protocol::observe`, the same transition function
+the dispatcher uses. Re-implementing the walk would simulate a protocol
+subtly different from the one that runs, which is worse than not
+simulating. Same argument moved `worst_case_poll_count` onto the
+declaration: the bound the simulator reports and the bound the budget
+charges now come from one definition.
+
+Then a test corrected me. I had the command fail CI on an unreachable
+terminal — and the test surfaced a COMPILER error instead, because
+52h-1's reachability proof already rejects those. The finding could never
+fire. So the design was wrong at the root: everything the simulator
+reports is LEGAL, and a command that invents a failure is lying about
+severity. It is informational by default now, with `--deny
+non_terminating` as the opt-in — which asserts something the checker
+genuinely cannot prove for you, since stalling is a legitimate thing for
+a declaration to permit.
+
+That is twice in two slices that a test disagreed with a design I was
+confident about. Both times the test was right, and both times the reason
+was the same: I predicted what a layer would do instead of asking it.
+
+For the client surface, the insight is that a long-running operation
+returns a lifecycle, not a value. Modelling it as a nullable result
+throws away the two facts that matter — which states are terminal, and
+that one terminal is reached by the provider merely being slow. The
+emitted union discriminates on `terminal`, so a switch that forgets the
+deadline outcome fails to compile.
+
+Lifecycle events carry the declaration's vocabulary and never a payload.
+`outcome` separates endings that look alike from outside and are not:
+`terminal`, `deadline`, `breaker_open`, `cancelled`, `compensated`,
+`detached`. An operator holding a live provider job needs to know which
+one happened.
+
 ## 2026-07-24 - 52h-4 (part 2): the version number you never have to bump
 
 Editing a protocol that has intents in flight means those intents were

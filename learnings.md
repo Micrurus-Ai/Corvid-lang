@@ -7610,6 +7610,69 @@ past what the source declared. Transient poll failures are tolerated (the
 submitted job is still out there); `circuit_breaker: N` consecutive failures give
 up on observing, while the intent stays checkpointed for a later resume.
 
+### See what a provider could do to you, before you deploy
+
+```
+corvid connectors simulate app.cor
+```
+
+The compiler proves your protocol is well-formed. This answers the other question
+— what its legal provider behaviours actually cost you:
+
+```
+protocol shipping.submit_shipment
+  deadline: 600s, at most 20 observation(s) before `failed` is forced
+  outcomes the provider can produce:
+    completed                    ends in `completed`
+    failed                       ends in `failed`
+  worth knowing:
+    [non_terminating] reporting `processing` forever holds the intent in
+      `processing`; after 600s (20 observations) the declared deadline forces `failed`
+    [deadline_reachable] `failed` is reachable without the provider ever failing —
+      a slow provider is enough
+```
+
+Everything it reports is **legal** — the checker has already rejected the
+malformed protocols — so it never fails your build on its own. When your team
+decides a particular legal behaviour is unacceptable, opt in:
+
+```
+corvid connectors simulate app.cor --deny non_terminating
+```
+
+That asserts this protocol cannot be held open by a provider that never fails —
+something the compiler can't decide for you, because stalling is a legitimate
+thing for a declaration to permit.
+
+The walk runs through the same transition engine the runtime uses, and the
+worst-case count is the same one `@budget` is charged for, so what it predicts is
+what happens.
+
+### Your frontend gets the state machine, not a nullable result
+
+`corvid contract ts-client` projects each protocol into TypeScript:
+
+```ts
+export type ShippingSubmitShipmentState =
+  | { state: "queued"; terminal: false }
+  | { state: "processing"; terminal: false }
+  | { state: "completed"; terminal: true }
+  | { state: "failed"; terminal: true };
+```
+
+Discriminated on `terminal`, so a `switch` that forgets an outcome fails to
+compile — including the one reached when the provider is just **slow**. The
+status union is closed (never widened to `string`), and the protocol fingerprint
+ships with it so a client can tell the backend changed the protocol underneath it.
+
+### A protocol's lifecycle is in the trace
+
+`protocol.submitted`, `protocol.transition`, and `protocol.settled` record the
+timeline in the declaration's own vocabulary — statuses, states, and a hashed
+intent key — never a provider payload or a credential. `outcome` distinguishes
+the endings that look alike from outside: `terminal`, `deadline`, `breaker_open`,
+`cancelled`, `compensated`, `detached`.
+
 ### Replaying a protocol replays the whole lifecycle
 
 `--mode replay` reproduces a protocol the way it reproduces any other effect:

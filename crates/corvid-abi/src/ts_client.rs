@@ -50,7 +50,127 @@ fn emit_types(contract: &ApplicationContract) -> String {
         out.push_str(&type_declaration(ty));
         out.push('\n');
     }
+    out.push_str(&emit_protocol_types(contract));
     out
+}
+
+/// Project every declared provider protocol into TypeScript.
+///
+/// A long-running operation does not return a value, it returns a
+/// *lifecycle*, and a client that models it as a nullable result loses
+/// the two facts that matter: which states are terminal, and that one of
+/// the terminal states is reached by the provider simply being slow. The
+/// emitted state union is discriminated on `terminal`, so a `switch` that
+/// forgets the deadline outcome fails to compile rather than falling
+/// through at runtime.
+///
+/// The protocol fingerprint is emitted alongside, so a client can tell
+/// whether the backend is still running the protocol these types were
+/// generated from.
+fn emit_protocol_types(contract: &ApplicationContract) -> String {
+    let mut out = String::new();
+    for connector in &contract.connectors {
+        for operation in &connector.operations {
+            let Some(protocol) = &operation.protocol else {
+                continue;
+            };
+            let base = format!(
+                "{}{}",
+                upper_first(&connector.name),
+                upper_camel(&operation.name)
+            );
+
+            out.push_str(&format!(
+                "/** Statuses `{}.{}` may report. Any other status is refused at the\n \
+                 * typed boundary rather than coerced. */\n",
+                connector.name, operation.name
+            ));
+            out.push_str(&format!(
+                "export type {base}Status =\n{};\n\n",
+                protocol
+                    .statuses
+                    .iter()
+                    .map(|s| format!("  | {}", quote(s)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+
+            out.push_str(&format!(
+                "/** States an in-flight `{}.{}` intent can be observed in.\n \
+                 * Discriminated on `terminal` so an exhaustive `switch` cannot\n \
+                 * silently omit an outcome — including `{}`, which is reached\n \
+                 * when the provider is merely slow. */\n",
+                connector.name, operation.name, protocol.deadline_target
+            ));
+            let terminal: std::collections::BTreeSet<&str> =
+                protocol.terminal.iter().map(|t| t.as_str()).collect();
+            let mut states: Vec<&str> = protocol.states.iter().map(|s| s.name.as_str()).collect();
+            for t in &protocol.terminal {
+                if !states.contains(&t.as_str()) {
+                    states.push(t.as_str());
+                }
+            }
+            out.push_str(&format!(
+                "export type {base}State =\n{};\n\n",
+                states
+                    .iter()
+                    .map(|state| format!(
+                        "  | {{ state: {}; terminal: {} }}",
+                        quote(state),
+                        terminal.contains(state)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+
+            out.push_str(&format!(
+                "/** The declared protocol, as the backend compiled it. */\n\
+                 export const {base}Protocol = {{\n  \
+                 fingerprint: {},\n  \
+                 initial: {},\n  \
+                 terminal: [{}] as const,\n  \
+                 deadlineSeconds: {},\n  \
+                 deadlineTarget: {},\n  \
+                 pollSeconds: {},\n  \
+                 onProtocolChange: {},\n\
+                 }} as const;\n\n",
+                quote(&protocol.fingerprint),
+                quote(&protocol.initial),
+                protocol
+                    .terminal
+                    .iter()
+                    .map(|t| quote(t))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                protocol.deadline_secs,
+                quote(&protocol.deadline_target),
+                protocol
+                    .interval
+                    .seconds
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "null".to_string()),
+                quote(&protocol.on_protocol_change),
+            ));
+        }
+    }
+    out
+}
+
+fn quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn upper_first(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// `submit_shipment` -> `SubmitShipment`.
+fn upper_camel(name: &str) -> String {
+    name.split('_').map(upper_first).collect()
 }
 
 fn type_declaration(ty: &ContractType) -> String {
@@ -372,5 +492,136 @@ public agent hello(n: String) -> String:
             .find(|f| f.filename == "api.ts")
             .unwrap()
             .contents
+    }
+}
+
+#[cfg(test)]
+mod protocol_ts_tests {
+    use super::*;
+
+    fn contract_for(src: &str) -> ApplicationContract {
+        use crate::app_contract::{effect_decls_of, emit_application_contract, ContractOptions};
+        use corvid_types::effects::EffectRegistry;
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        assert!(resolved.errors.is_empty(), "resolve: {:?}", resolved.errors);
+        let registry = EffectRegistry::from_decls(&effect_decls_of(&file));
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(checked.errors.is_empty(), "check: {:?}", checked.errors);
+        emit_application_contract(
+            &file,
+            &resolved,
+            &checked,
+            &registry,
+            &ContractOptions {
+                source_path: "app.cor",
+                compiler_version: "test",
+                generated_at: "now",
+            },
+        )
+    }
+
+    const SRC: &str = r#"
+effect http_write:
+    cost: 1.0
+
+type Job:
+    id: String
+    status: String
+
+connector shipping:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("SHIPPING_TOKEN"))
+    modes: [real]
+    operation submit_shipment(order: String) -> Job dangerous uses http_write:
+        POST "/shipments" body order
+        async:
+            statuses: [queued, processing, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/shipments/{id}"
+            every: 30s
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+            state processing:
+                on queued -> processing
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+
+agent main() -> Job uses http_write:
+    approve SubmitShipment("order-1")
+    return submit_shipment("order-1")
+"#;
+
+    /// A long-running operation returns a lifecycle, not a value. The
+    /// emitted state union is discriminated on `terminal`, so a client
+    /// switch that omits an outcome fails to compile instead of falling
+    /// through at runtime.
+    #[test]
+    fn a_protocol_becomes_a_discriminated_state_union() {
+        let types = emit_types(&contract_for(SRC));
+        assert!(
+            types.contains("export type ShippingSubmitShipmentState ="),
+            "the state union must be emitted; got:\n{types}"
+        );
+        assert!(types.contains(r#"{ state: "processing"; terminal: false }"#));
+        assert!(types.contains(r#"{ state: "completed"; terminal: true }"#));
+        assert!(
+            types.contains(r#"{ state: "failed"; terminal: true }"#),
+            "the deadline target must appear as a terminal state"
+        );
+    }
+
+    /// The status universe is closed: a provider status outside it is
+    /// refused at the boundary, so the client type must be a closed union
+    /// rather than `string`.
+    #[test]
+    fn the_status_universe_is_emitted_as_a_closed_union() {
+        let types = emit_types(&contract_for(SRC));
+        assert!(types.contains("export type ShippingSubmitShipmentStatus ="));
+        for status in ["queued", "processing", "completed", "failed"] {
+            assert!(
+                types.contains(&format!(r#"  | "{status}""#)),
+                "status `{status}` must be in the union"
+            );
+        }
+        assert!(
+            !types.contains("Status = string"),
+            "the status type must never widen to `string`"
+        );
+    }
+
+    /// The client is generated against a specific protocol graph. Shipping
+    /// the fingerprint lets it detect that the backend is now running a
+    /// different one.
+    #[test]
+    fn the_generated_client_carries_the_protocol_fingerprint() {
+        let types = emit_types(&contract_for(SRC));
+        assert!(types.contains("export const ShippingSubmitShipmentProtocol"));
+        assert!(
+            types.contains("fingerprint: \"sha256:"),
+            "the fingerprint must be emitted so a client can detect drift"
+        );
+        assert!(types.contains("deadlineTarget: \"failed\""));
+        assert!(types.contains("onProtocolChange: \"refuse\""));
+    }
+
+    /// No protocols, no protocol types — the generator must not emit
+    /// scaffolding for a surface the program does not have.
+    #[test]
+    fn a_contract_without_protocols_emits_no_protocol_types() {
+        let types = emit_types(&contract_for("agent main() -> String:\n    return \"hi\"\n"));
+        assert!(!types.contains("Protocol = {"));
+        assert!(!types.contains("State ="));
     }
 }

@@ -107,6 +107,19 @@ impl Runtime {
             let (response, _) = self.protocol_exchange(&spec.operation, spec, args).await?;
             intent.bind_submit_response(&unwrap_ok_envelope(&response));
             self.checkpoint_protocol_intent(job, &key, &intent)?;
+            // The lifecycle is evidence, not just control flow. `intent`
+            // is a SHA-256 of (connector, operation, args), so it
+            // correlates an operator's view of this work across restarts
+            // without carrying the arguments themselves.
+            self.emit_host_event(
+                "protocol.submitted",
+                serde_json::json!({
+                    "connector": spec.connector,
+                    "operation": spec.operation,
+                    "intent": key,
+                    "state": intent.state,
+                }),
+            );
         }
 
         // (3) Observe until a declared terminal state, or the deadline
@@ -141,6 +154,7 @@ impl Runtime {
                 // not an ad-hoc timeout error.
                 intent.state = protocol.deadline_target.name.clone();
                 self.checkpoint_protocol_intent(job, &key, &intent)?;
+                self.emit_protocol_settled(spec, &key, &intent, "deadline");
                 return Err(RuntimeError::ToolFailed {
                     tool: spec.operation.clone(),
                     message: format!(
@@ -200,6 +214,7 @@ impl Runtime {
                     consecutive_poll_failures += 1;
                     let threshold = spec.circuit_breaker.unwrap_or(u64::MAX);
                     if consecutive_poll_failures >= threshold {
+                        self.emit_protocol_settled(spec, &key, &intent, "breaker_open");
                         return Err(RuntimeError::ToolFailed {
                             tool: spec.operation.clone(),
                             message: format!(
@@ -222,6 +237,7 @@ impl Runtime {
             retry_after_hint = meta.retry_after_ms;
             let poll_response = unwrap_ok_envelope(&raw);
 
+            let from_state = intent.state.clone();
             observe(protocol, &spec.operation, &mut intent, &poll_response).map_err(|e| {
                 RuntimeError::ToolFailed {
                     tool: spec.operation.clone(),
@@ -229,8 +245,23 @@ impl Runtime {
                 }
             })?;
             self.checkpoint_protocol_intent(job, &key, &intent)?;
+            // The observed status and the transition it caused — the
+            // declaration's own vocabulary, never the provider's payload.
+            self.emit_host_event(
+                "protocol.transition",
+                serde_json::json!({
+                    "connector": spec.connector,
+                    "operation": spec.operation,
+                    "intent": key,
+                    "status": intent.status_history.last(),
+                    "from": from_state,
+                    "to": intent.state,
+                    "polls": intent.polls,
+                }),
+            );
 
             if is_terminal(protocol, &intent.state) {
+                self.emit_protocol_settled(spec, &key, &intent, "terminal");
                 return Ok(poll_response);
             }
         }
@@ -250,6 +281,34 @@ impl Runtime {
                     spec.operation, intent.state
                 ),
             })
+    }
+
+    /// Record how an intent stopped being in flight.
+    ///
+    /// `outcome` distinguishes the endings that look alike from outside
+    /// but are very different to the operator holding the provider job:
+    /// `terminal` (the provider finished), `deadline` (it never did),
+    /// `breaker_open` (we stopped observing, the job is still running),
+    /// `cancelled` / `compensated` / `detached`.
+    fn emit_protocol_settled(
+        &self,
+        spec: &ConnectorHttpSpec,
+        key: &str,
+        intent: &ProtocolIntentState,
+        outcome: &str,
+    ) {
+        self.emit_host_event(
+            "protocol.settled",
+            serde_json::json!({
+                "connector": spec.connector,
+                "operation": spec.operation,
+                "intent": key,
+                "outcome": outcome,
+                "state": intent.state,
+                "polls": intent.polls,
+                "submitted": intent.submitted,
+            }),
+        );
     }
 
     /// One provider exchange, through the same record/replay bracket
@@ -341,6 +400,11 @@ impl Runtime {
         key: &str,
         args: &[serde_json::Value],
     ) -> Result<serde_json::Value, RuntimeError> {
+        let outcome = match cancellation_disposition(protocol, intent) {
+            CancellationDisposition::Cancelled => "cancelled",
+            CancellationDisposition::Compensate => "compensated",
+            CancellationDisposition::Detached => "detached",
+        };
         let message = match cancellation_disposition(protocol, intent) {
             // Nothing was submitted: no provider work exists, so this
             // cancellation is exact.
@@ -403,8 +467,11 @@ impl Runtime {
             ),
         };
         // Whatever the disposition, the intent is recorded — the work is
-        // accounted for rather than silently dropped.
+        // accounted for rather than silently dropped. `compensated` is
+        // only emitted once the compensating call SUCCEEDED, since the
+        // failure path returns above.
         self.checkpoint_protocol_intent(job, key, intent)?;
+        self.emit_protocol_settled(spec, key, intent, outcome);
         Err(RuntimeError::ToolFailed {
             tool: spec.operation.clone(),
             message,

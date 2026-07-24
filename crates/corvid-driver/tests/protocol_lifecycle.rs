@@ -609,6 +609,100 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
     );
 }
 
+/// The lifecycle is evidence, not just control flow.
+///
+/// A protocol's history lives in job checkpoints, which an operator
+/// cannot read without the queue. The trace carries the same timeline as
+/// host events, so an audit can answer "what did this intent do, and how
+/// did it end" from the run's own record — and the events must carry the
+/// DECLARATION's vocabulary (statuses, states) rather than the provider's
+/// payload.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_protocol_lifecycle_is_recorded_as_evidence() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_EVIDENCE";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-evidence-secret");
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-e","status":"queued"}"#),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-e"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-e","status":"processing"}"#),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-e"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-e","status":"completed"}"#),
+        )
+        .mount(&server)
+        .await;
+
+    let trace_dir = tempfile::tempdir().expect("trace dir");
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .trace_to(trace_dir.path())
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("the protocol reaches a terminal state");
+    let trace_path = runtime.tracer().path().to_path_buf();
+    drop(runtime);
+    std::env::remove_var(TOKEN_ENV);
+
+    let raw = std::fs::read_to_string(&trace_path).expect("trace readable");
+
+    assert!(
+        raw.contains("protocol.submitted"),
+        "the submit boundary must be evidence"
+    );
+    assert!(
+        raw.contains("protocol.transition"),
+        "each declared transition must be evidence"
+    );
+    assert!(
+        raw.contains("protocol.settled"),
+        "how the intent ended must be evidence"
+    );
+    assert!(
+        raw.contains(r#""outcome":"terminal""#),
+        "a completed protocol must settle as `terminal`, distinguishable from a deadline or a \
+         detached cancellation"
+    );
+    // The declaration's vocabulary, and the provider's job id only where
+    // the poll path bound it — never the response body, never the token.
+    assert!(
+        raw.contains(r#""from":"queued""#) && raw.contains(r#""to":"processing""#),
+        "transitions must name the declared states"
+    );
+    assert!(
+        !raw.contains("tok-evidence-secret"),
+        "the credential must never reach the evidence record"
+    );
+}
+
 /// A protocol that changed under an in-flight intent.
 ///
 /// The intent was created against one graph; the deployed declaration is

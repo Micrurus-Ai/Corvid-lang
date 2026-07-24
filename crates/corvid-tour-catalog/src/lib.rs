@@ -874,6 +874,55 @@ agent fetch(owner: String, repo: String) -> Result<Repo, GithubError> uses http_
     return get_repo(owner, repo)
 "#,
     },
+    TourTopic {
+        name: "verified-provider-protocols",
+        title: "Verified Provider Protocols",
+        category: "Durable integrations",
+        pitch: "Some provider calls do not finish when the response arrives: you submit, and the work happens later. Everywhere else that means a hand-rolled poll loop whose timeout, retry, cancellation and crash behavior nobody checks. An `async:` block declares the temporal contract instead, and the compiler proves it: every status declared once, transition tables total, every state reaching a terminal, non-zero bounds, a non-mutating poll, and a mutating submit passing the `dangerous` approval boundary. The worst-case poll count multiplies the operation's cost, so a protocol cannot poll its way past a `@budget`. At runtime the intent is checkpointed BEFORE the submit leaves the process and the provider job id is bound only from the DECODED response, so a crash cannot lose the work and a restart cannot create a second provider job. The call returns only on a declared terminal state — the submit response is never mistaken for completion. Change the protocol while intents are in flight and `on_protocol_change` decides, because a submitted intent is a provider job Corvid cannot un-create.",
+        spec: "docs/reference/inventions.md",
+        roadmap: "Phase 52 verified provider protocols",
+        test: "crates/corvid-driver/tests/protocol_lifecycle.rs",
+        non_scope: "Does not validate that the provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are separate. Does not choose the deadline or cadence for you; both are declared and checked, never defaulted.",
+        source: r#"effect http_write:
+    cost: 1.0
+
+type Job:
+    id: String
+    status: String
+
+connector shipping:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("SHIPPING_TOKEN"))
+    modes: [real]
+    operation submit_shipment(order: String) -> Job dangerous uses http_write:
+        POST "/shipments" body order
+        async:
+            statuses: [queued, processing, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/shipments/{id}"
+            every: 30s
+            cancel POST "/shipments/{id}/cancel"
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+            state processing:
+                on queued -> processing
+                on processing -> processing
+                on completed -> completed
+                on failed -> failed
+
+agent ship(order: String) -> Job uses http_write:
+    approve SubmitShipment(order)
+    return submit_shipment(order)
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

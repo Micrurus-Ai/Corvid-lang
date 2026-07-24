@@ -962,7 +962,46 @@ Spec: [Protocol-Typed Connectors](./docs/reference/inventions.md#protocol-typed-
 Tour: `corvid tour --topic connectors`
 Roadmap: [Phase 52 connectors](./ROADMAP.md)
 Proof: [the connector modes](./crates/corvid-driver/tests/connector_modes.rs) + [the request builder](./crates/corvid-runtime/src/connectors.rs) + [status→error coherence](./crates/corvid-types/src/checker/decl.rs)
-Non-scope: The runtime enforces the Corvid-declared contract (modes, credentials, egress, typed errors, reliability), not provider honesty; async provider state machines + provider-drift quarantine are later 52h/52i slices.
+Non-scope: The runtime enforces the Corvid-declared contract (modes, credentials, egress, typed errors, reliability), not provider honesty; provider-drift quarantine is a later 52i slice.
+
+#### Verified Provider Protocols
+
+Some provider calls don't finish when the response arrives — you submit, and the work happens later. Everywhere else that's a hand-rolled poll loop, and the poll loop is where the bugs live: the timeout nobody tuned, the retry that submits a second job, the restart that loses the work. An `async:` block declares the **temporal contract** instead, and the compiler proves it: statuses declared once, transition tables total, every state reaching a terminal, non-zero bounds, a non-mutating poll, and a mutating submit passing `dangerous` approval. The worst-case observation count multiplies the operation's cost, so **a protocol cannot poll its way past a `@budget`**. At runtime the intent is checkpointed *before* the submit leaves the process and the provider job id binds only from the DECODED response — so a crash can't lose the work and **a restart can't create a second provider job**. The call returns only on a declared terminal state; a submit response is never mistaken for completion. Cancelling is honest: exact before submit, compensated through a declared `cancel` endpoint after it, and explicitly *detached* when none is declared. Editing a protocol with intents in flight requires `on_protocol_change` — and you never bump a version number, because Corvid fingerprints the protocol graph and tells you *what* changed.
+
+```corvid
+operation submit_shipment(order: String) -> Job dangerous uses http_write:
+    POST "/shipments" body order
+    async:
+        statuses: [queued, processing, completed, failed]
+        initial: queued
+        terminal: [completed, failed]
+        deadline: 600s                     # bounds the poll loop AND the budget
+        deadline_target: failed
+        idempotency: intent                # checkpointed before submit
+        poll GET "/shipments/{id}"         # {id} binds from the DECODED response
+        every: 30s
+        cancel POST "/shipments/{id}/cancel"
+        on_protocol_change: refuse         # omit → compile error; no default
+        state queued:
+            on processing -> processing
+            on completed -> completed
+            on failed -> failed
+```
+
+`corvid connectors simulate <file>` explores what a provider could do to you *before* you deploy — including the behaviours that never terminate on their own:
+
+```
+[non_terminating] reporting `processing` forever holds the intent in `processing`;
+  after 600s (20 observations) the declared deadline forces `failed`
+[deadline_reachable] `failed` is reachable without the provider ever failing —
+  a slow provider is enough
+```
+
+Spec: [Verified Provider Protocols](./docs/reference/inventions.md#verified-provider-protocols)
+Tour: `corvid tour --topic verified-provider-protocols`
+Roadmap: [Phase 52 verified provider protocols](./ROADMAP.md)
+Proof: [the durable lifecycle](./crates/corvid-driver/tests/protocol_lifecycle.rs) + [the transition engine](./crates/corvid-runtime/src/protocol.rs) + [the simulator](./crates/corvid-runtime/src/protocol_simulate.rs)
+Non-scope: Validating that a provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are a later 52i slice. The deadline and cadence are declared and checked, never defaulted.
 
 ## Architecture
 
