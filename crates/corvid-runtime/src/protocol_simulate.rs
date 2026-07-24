@@ -289,7 +289,12 @@ mod tests {
             terminal: vec![id("completed"), id("failed")],
             deadline_secs: 600,
             deadline_target: id("failed"),
-            idempotency: ProtocolIdempotency::Intent,
+            idempotency: ProtocolIdempotency {
+                strategy: corvid_ast::ProtocolIdempotencyStrategy::Intent,
+                transport: corvid_ast::ProtocolIdempotencyTransport::Header(
+                    "Idempotency-Key".to_string(),
+                ),
+            },
             poll: ProtocolPoll {
                 method: HttpMethod::Get,
                 path: "/jobs/{id}".to_string(),

@@ -3819,7 +3819,7 @@ fn parses_optional_protocol_cancel_endpoint() {
             terminal: [completed]
             deadline: 600s
             deadline_target: completed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations/{id}"
             cancel POST "/generations/{id}/cancel"
             every: 2s
@@ -3859,7 +3859,7 @@ fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
             terminal: [completed]
             deadline: 600s
             deadline_target: completed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: 2s
             on_protocol_change: refuse
@@ -3897,7 +3897,7 @@ fn parses_verified_async_provider_protocol() {
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: adaptive
             on_protocol_change: refuse
@@ -3948,7 +3948,7 @@ connector video:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: adaptive
             state queued:
@@ -3998,7 +3998,7 @@ connector video:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations/{id}"
             every: 30s
             on_protocol_change: refuse
@@ -4025,7 +4025,7 @@ connector video:
             statuses: [failed, completed, queued]
 
             terminal: [failed, completed]
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             deadline_target: failed
             deadline: 600s
             every: 30s
@@ -4041,6 +4041,47 @@ connector video:
         original.fingerprint(),
         reformatted.fingerprint(),
         "a reformat must not read as drift"
+    );
+}
+
+/// A durable intent key that never leaves the process cannot make a
+/// submit exactly-once: only the provider can recognise a repeat, and
+/// only if it was given something to recognise. Corvid cannot guess which
+/// header a provider honours, and guessing wrong fails SILENTLY, so the
+/// transport is declared and omitting it is a compile error.
+#[test]
+fn a_protocol_without_an_idempotency_transport_is_a_compile_error() {
+    let src = r#"
+connector video:
+    base_url: "https://api.example.com"
+    auth: bearer(secret("KEY"))
+    modes: [real]
+    operation generate(spec: String) -> String dangerous uses http_write:
+        POST "/generations" body spec
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent
+            poll GET "/generations"
+            every: adaptive
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#;
+    let (_, errors) = parse_file_errs(src);
+    let text = format!("{errors:?}");
+    assert!(
+        text.contains("via header"),
+        "the error must name the missing declaration; got: {text}"
+    );
+    assert!(
+        text.contains("duplicate the work"),
+        "the error must say WHY it is required; got: {text}"
     );
 }
 
@@ -4060,7 +4101,7 @@ connector video:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: adaptive
             on_protocol_change: migrate

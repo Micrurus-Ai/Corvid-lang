@@ -970,7 +970,7 @@ Some provider calls don't finish when the response arrives — you submit, and t
 
 Cancelling is honest: exact before submit, compensated through a declared `cancel` endpoint after it, and explicitly *detached* when none is declared. Editing a protocol with intents in flight requires `on_protocol_change` — and you never bump a version number, because Corvid fingerprints the protocol graph and tells you *what* changed.
 
-> **Not yet exactly-once, and not yet a hard deadline.** Two gaps are open and being closed: the intent key is not sent to the provider, so a crash in the window between the provider accepting a submit and Corvid checkpointing it can still duplicate; and the deadline is measured from process start rather than intent creation, so a repeatedly restarted protocol gets a fresh window. Both are tracked as 52h-6 in the [ROADMAP](./ROADMAP.md).
+Exactly-once needs the provider's help, so Corvid makes you declare how to ask for it: `idempotency: intent via header "Idempotency-Key"` sends the intent key on the submit, and omitting it is a compile error. Durability alone cannot cover the window where the provider accepted a submit but the process died before recording it — only the provider can recognise the repeat, and only if it was given something to recognise.
 
 ```corvid
 operation submit_shipment(order: String) -> Job dangerous uses http_write:

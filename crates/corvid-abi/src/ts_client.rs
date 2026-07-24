@@ -543,7 +543,7 @@ connector shipping:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/shipments/{id}"
             every: 30s
             on_protocol_change: refuse

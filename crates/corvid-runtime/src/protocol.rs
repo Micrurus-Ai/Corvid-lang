@@ -541,7 +541,12 @@ mod tests {
             terminal: vec![id("complete"), id("failed_out")],
             deadline_secs: 600,
             deadline_target: id("failed_out"),
-            idempotency: ProtocolIdempotency::Intent,
+            idempotency: ProtocolIdempotency {
+                strategy: corvid_ast::ProtocolIdempotencyStrategy::Intent,
+                transport: corvid_ast::ProtocolIdempotencyTransport::Header(
+                    "Idempotency-Key".to_string(),
+                ),
+            },
             poll: ProtocolPoll {
                 method: HttpMethod::Get,
                 path: "/jobs/{id}".to_string(),
@@ -815,7 +820,9 @@ mod tests {
     // --- Resume across a protocol change ---
 
     /// A canonical encoding from some earlier build. Its exact content
-    /// does not matter — only that it differs from the running one.
+    /// does not matter — only that it differs from the running one. The
+    /// `v1` here is deliberate and NOT stale: an intent checkpointed by an
+    /// older build is precisely the case this exercises.
     fn earlier_encoding() -> String {
         "encoding=corvid.protocol.canonical.v1\ndeadline=1".to_string()
     }
@@ -907,7 +914,7 @@ mod tests {
         let p = protocol();
         assert!(p
             .canonical_encoding()
-            .starts_with("encoding=corvid.protocol.canonical.v1\n"));
+            .starts_with("encoding=corvid.protocol.canonical.v2\n"));
         assert!(p.fingerprint().starts_with("sha256:"));
         assert_eq!(
             p.fingerprint().len(),
@@ -933,7 +940,7 @@ mod tests {
         assert_eq!(protocol().fingerprint(), protocol().fingerprint());
         assert_eq!(
             protocol().fingerprint(),
-            "sha256:99e0259f877e102474789d81d69b58271a2550635b69c0c7af381faffa6da444",
+            "sha256:234f750b0d6813223ea50d136c26bf1842f37e35c5861450f2c78a9f811f9597",
             "the canonical encoding changed; bump PROTOCOL_CANONICAL_ENCODING deliberately"
         );
     }

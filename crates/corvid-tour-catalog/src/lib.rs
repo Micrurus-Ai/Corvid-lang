@@ -878,11 +878,11 @@ agent fetch(owner: String, repo: String) -> Result<Repo, GithubError> uses http_
         name: "verified-provider-protocols",
         title: "Verified Provider Protocols",
         category: "Durable integrations",
-        pitch: "Some provider calls do not finish when the response arrives: you submit, and the work happens later. Everywhere else that means a hand-rolled poll loop whose timeout, retry, cancellation and crash behavior nobody checks. An `async:` block declares the temporal contract instead, and the compiler proves it: every status declared once, transition tables total, every state reaching a terminal, non-zero bounds, a non-mutating poll, and a mutating submit passing the `dangerous` approval boundary. The worst-case poll count multiplies the operation's cost, so a protocol cannot poll its way past a `@budget`. At runtime the intent is checkpointed BEFORE the submit leaves the process and the provider job id is bound only from the JSON-decoded response, so a crash cannot lose the work and a job that already recorded its submit is never re-submitted on resume. The call returns only on a declared terminal state — the submit response is never mistaken for completion. Change the protocol while intents are in flight and `on_protocol_change` decides, because a submitted intent is a provider job Corvid cannot un-create.",
+        pitch: "Some provider calls do not finish when the response arrives: you submit, and the work happens later. Everywhere else that means a hand-rolled poll loop whose timeout, retry, cancellation and crash behavior nobody checks. An `async:` block declares the temporal contract instead, and the compiler proves it: every status declared once, transition tables total, every state reaching a terminal, non-zero bounds, a non-mutating poll, and a mutating submit passing the `dangerous` approval boundary. The worst-case poll count multiplies the operation's cost, so a protocol cannot poll its way past a `@budget`. At runtime the intent is checkpointed BEFORE the submit leaves the process and the provider job id is bound only from the JSON-decoded response, so a crash cannot lose the work. Exactly-once needs the provider's help, so the source declares how to ask: idempotency: intent via header puts the intent key on the submit, and omitting it is a compile error — durability alone cannot cover the window where the provider accepted a request and the process died before recording it. The call returns only on a declared terminal state — the submit response is never mistaken for completion. Change the protocol while intents are in flight and `on_protocol_change` decides, because a submitted intent is a provider job Corvid cannot un-create.",
         spec: "docs/reference/inventions.md",
         roadmap: "Phase 52 verified provider protocols",
         test: "crates/corvid-driver/tests/protocol_lifecycle.rs",
-        non_scope: "Does not validate that the provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are separate. Does not choose the deadline or cadence for you; both are declared and checked, never defaulted. NOT YET exactly-once against the provider: the intent key is not transmitted, so a crash between the provider accepting a submit and Corvid checkpointing it can duplicate. The deadline is measured from process start, not intent creation, so a repeatedly restarted protocol gets a fresh window. Both are open work.",
+        non_scope: "Does not validate that the provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are separate. Does not choose the deadline or cadence for you; both are declared and checked, never defaulted. Does not validate the provider's payload SHAPE — only its declared status.",
         source: r#"effect http_write:
     cost: 1.0
 
@@ -902,7 +902,7 @@ connector shipping:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/shipments/{id}"
             every: 30s
             cancel POST "/shipments/{id}/cancel"

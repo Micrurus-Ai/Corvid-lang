@@ -123,9 +123,27 @@ impl Runtime {
         if !intent.submitted {
             self.checkpoint_protocol_intent(job, &key, &intent)?;
 
-            // (2) Submit, then bind the provider job id from the DECODED
-            // response — never before it is typed.
-            let (response, _) = self.protocol_exchange(&spec.operation, spec, args).await?;
+            // (2) Submit, carrying the intent key in the header the
+            // protocol declared. This is what makes the guarantee hold
+            // across the one window durability alone cannot cover: if the
+            // process dies after the provider accepted the submit but
+            // before the acknowledgement was checkpointed, the resumed run
+            // submits again — and the provider recognises the key and
+            // returns the ORIGINAL job instead of creating a second one.
+            let submit_spec = {
+                let corvid_ast::ProtocolIdempotencyTransport::Header(name) =
+                    &protocol.idempotency.transport;
+                let mut submit_spec = spec.clone();
+                submit_spec
+                    .extra_headers
+                    .push((name.clone(), key.clone()));
+                submit_spec
+            };
+            // Bind the provider job id from the DECODED response — never
+            // before it is typed.
+            let (response, _) = self
+                .protocol_exchange(&spec.operation, &submit_spec, args)
+                .await?;
             intent.bind_submit_response(&unwrap_ok_envelope(&response));
             self.checkpoint_protocol_intent(job, &key, &intent)?;
             // The lifecycle is evidence, not just control flow. `intent`
@@ -517,6 +535,7 @@ impl Runtime {
         path: String,
     ) -> ConnectorHttpSpec {
         ConnectorHttpSpec {
+            extra_headers: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),
@@ -556,6 +575,7 @@ impl Runtime {
             message: e.message(),
         })?;
         Ok(ConnectorHttpSpec {
+            extra_headers: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),

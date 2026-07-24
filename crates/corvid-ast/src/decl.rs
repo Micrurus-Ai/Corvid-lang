@@ -631,7 +631,12 @@ impl ProtocolChangePolicy {
 /// recognisable as "encoded differently" rather than silently mistaken
 /// for a changed protocol — the version line is what makes that
 /// distinguishable instead of ambiguous.
-pub const PROTOCOL_CANONICAL_ENCODING: &str = "corvid.protocol.canonical.v1";
+/// `v2` adds the idempotency TRANSPORT. Where the intent key travels
+/// changes what the provider will recognise, so it is part of the graph —
+/// and an intent checkpointed under `v1` cannot be compared field-for-
+/// field against a `v2` encoding, which is exactly what the version line
+/// makes visible instead of mysterious.
+pub const PROTOCOL_CANONICAL_ENCODING: &str = "corvid.protocol.canonical.v2";
 
 /// The hash used to condense a canonical encoding into a fingerprint.
 /// Named in the fingerprint itself (`sha256:<hex>`) so a stored value is
@@ -726,9 +731,14 @@ impl ProviderProtocolDecl {
         canon.push_str("\ndeadline_target=");
         canon.push_str(&self.deadline_target.name);
         canon.push_str("\nidempotency=");
-        canon.push_str(match self.idempotency {
-            ProtocolIdempotency::Intent => "intent",
+        canon.push_str(match self.idempotency.strategy {
+            ProtocolIdempotencyStrategy::Intent => "intent",
         });
+        // The transport is part of the graph: changing where the key
+        // travels changes what the provider will recognise, which is a
+        // real change to how a submit behaves.
+        canon.push(' ');
+        canon.push_str(&self.idempotency.transport.describe());
         canon.push_str("\npoll=");
         canon.push_str(self.poll.method.as_str());
         canon.push(' ');
@@ -823,9 +833,45 @@ pub struct ProtocolCancel {
     pub span: Span,
 }
 
+/// How a submitted intent is made recognisable TO THE PROVIDER.
+///
+/// A durable intent key that never leaves the process is only half an
+/// idempotency story: it stops Corvid from re-submitting work it knows it
+/// already submitted, but a crash between the provider accepting a submit
+/// and Corvid recording that fact leaves Corvid believing nothing was
+/// sent. Only the provider can break that tie, and only if it was given
+/// something to recognise.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolIdempotency {
+    pub strategy: ProtocolIdempotencyStrategy,
+    pub transport: ProtocolIdempotencyTransport,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProtocolIdempotency {
+pub enum ProtocolIdempotencyStrategy {
+    /// The durable pre-submit intent IS the identity.
     Intent,
+}
+
+/// Where the intent key travels on the submit request.
+///
+/// Only the header form ships: attaching a header is something the
+/// request builder can always do. Injecting a field into the body would
+/// require the body to be a JSON object, which the operation's declared
+/// body encoding does not guarantee — offering a value the runtime can
+/// only sometimes execute is exactly what the "no declared-but-degraded
+/// values" rule forbids.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtocolIdempotencyTransport {
+    Header(String),
+}
+
+impl ProtocolIdempotencyTransport {
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Header(name) => format!("header {name}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

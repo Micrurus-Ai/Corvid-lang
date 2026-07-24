@@ -430,7 +430,7 @@ connector video:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: 2s
             on_protocol_change: refuse

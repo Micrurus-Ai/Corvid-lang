@@ -93,6 +93,12 @@ pub struct ConnectorHttpSpec {
     /// the next tick, but N consecutive failures trip the breaker and
     /// fail the protocol rather than polling a broken provider forever.
     pub circuit_breaker: Option<u64>,
+    /// Extra headers attached to THIS request, on top of the connector's
+    /// declared auth. The verified-protocol dispatcher uses this to carry
+    /// the intent key on a submit (and only on a submit) via the header
+    /// the protocol declared, so the request builder stays the single
+    /// place a connector request is assembled.
+    pub extra_headers: Vec<(String, String)>,
 }
 
 /// A recoverable failure while building a connector request — surfaced
@@ -149,6 +155,7 @@ pub fn connector_calls_from_ir(
             specs.insert(
                 op.name.clone(),
                 ConnectorHttpSpec {
+                    extra_headers: Vec::new(),
                     connector: connector.name.clone(),
                     operation: op.name.clone(),
                     base_url: connector.base_url.clone(),
@@ -270,6 +277,14 @@ pub fn build_connector_request(
     if let Some(auth) = &spec.auth {
         let header = build_auth_header(auth, &spec.operation, resolve_secret)?;
         request = request.header(header.0, header.1);
+    }
+
+    // Request-specific headers (the protocol's idempotency key on a
+    // submit). Attached last, but they can never displace the credential:
+    // the auth header name is fixed by the declared auth scheme and these
+    // come from a declared idempotency transport.
+    for (name, value) in &spec.extra_headers {
+        request = request.header(name.clone(), value.clone());
     }
 
     Ok(request)
@@ -406,6 +421,7 @@ mod tests {
 
     fn spec() -> ConnectorHttpSpec {
         ConnectorHttpSpec {
+            extra_headers: Vec::new(),
             connector: "github".to_string(),
             operation: "get_repo".to_string(),
             base_url: "https://api.github.com".to_string(),

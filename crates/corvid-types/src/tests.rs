@@ -1656,7 +1656,7 @@ connector shipping:
             terminal: [done]
             deadline: 60s
             deadline_target: done
-            idempotency: intent
+            idempotency: intent via header \"Idempotency-Key\"
             poll GET \"/jobs/{id}\"
             every: 10s
             on_protocol_change: refuse
@@ -2241,7 +2241,7 @@ connector video:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: adaptive
             on_protocol_change: refuse

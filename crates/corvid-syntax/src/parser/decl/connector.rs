@@ -445,7 +445,46 @@ impl<'a> Parser<'a> {
                         });
                     }
                     self.bump();
-                    idempotency = Some(ProtocolIdempotency::Intent);
+                    // The key must reach the PROVIDER, or a crash between
+                    // the provider accepting a submit and Corvid recording
+                    // it duplicates the work. Corvid cannot guess the
+                    // header a given provider honours, and guessing wrong
+                    // fails silently — so the source declares it.
+                    if !self.peek_ident_is("via") {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(self.peek()),
+                                expected: "`via header \"<Name>\"` — the intent key has to reach \
+                                           the provider or a crash between its accepting a submit \
+                                           and Corvid recording that fact will duplicate the work. \
+                                           Corvid cannot guess which header your provider honours \
+                                           (e.g. `Idempotency-Key`), and guessing wrong fails \
+                                           silently, so it must be declared"
+                                    .into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                    self.bump();
+                    if !self.peek_ident_is("header") {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(self.peek()),
+                                expected: "`header` (the only transport that ships — a body-field \
+                                           transport would require the operation's body to be a \
+                                           JSON object, which its declared encoding does not \
+                                           guarantee)"
+                                    .into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                    self.bump();
+                    let name = self.expect_string_literal("idempotency header name")?.0;
+                    idempotency = Some(ProtocolIdempotency {
+                        strategy: corvid_ast::ProtocolIdempotencyStrategy::Intent,
+                        transport: corvid_ast::ProtocolIdempotencyTransport::Header(name),
+                    });
                 }
                 "every" => {
                     if self.peek_ident_is("adaptive") {

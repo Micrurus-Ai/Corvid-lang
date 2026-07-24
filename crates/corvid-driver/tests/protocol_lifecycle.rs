@@ -36,7 +36,7 @@ connector shipping:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/shipments/{{id}}"
             every: 1s
             on_protocol_change: refuse
@@ -607,6 +607,71 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
         text.contains("durable job"),
         "the refusal must name the durable-job requirement; got: {text}"
     );
+}
+
+/// The intent key must reach the PROVIDER, on the submit only.
+///
+/// A durable key that never leaves the process is half an idempotency
+/// story: it stops Corvid re-submitting work it knows it sent, but a
+/// crash between the provider accepting a submit and Corvid checkpointing
+/// that fact leaves Corvid believing nothing was sent. Only the provider
+/// can break that tie, and only if it was given something to recognise.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_intent_key_reaches_the_provider_on_the_submit() {
+    const TOKEN_ENV: &str = "CORVID_TEST_PROTO_IDEM";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile(dir.path(), &source(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-idem");
+
+    let server = MockServer::start().await;
+    // The submit must carry the declared header. If it does not, this
+    // mock never matches and the run fails.
+    Mock::given(method("POST"))
+        .and(path("/shipments"))
+        .and(wiremock::matchers::header_exists("idempotency-key"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-i","status":"queued"}"#),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // A POLL must NOT carry it: the key identifies the submission, and
+    // sending it on a read would invite a provider to treat observations
+    // as retried writes.
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-i"))
+        .and(wiremock::matchers::header_exists("idempotency-key"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/shipments/prov-i"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"{"id":"prov-i","status":"completed"}"#),
+        )
+        .mount(&server)
+        .await;
+
+    let queue = Arc::new(DurableQueueRuntime::open_in_memory().expect("queue"));
+    let job = queue
+        .enqueue("main", serde_json::json!([]), 0, 0.0, None, None)
+        .expect("enqueue");
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build()
+        .with_durable_job(queue.clone(), job.id.clone());
+    run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("the submit carries the declared idempotency header");
+    std::env::remove_var(TOKEN_ENV);
 }
 
 /// The declared deadline bounds the PROTOCOL, not a process.

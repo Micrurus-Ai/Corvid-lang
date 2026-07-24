@@ -575,7 +575,13 @@ fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> Co
         terminal: protocol.terminal.iter().map(|s| s.name.clone()).collect(),
         deadline_secs: protocol.deadline_secs,
         deadline_target: protocol.deadline_target.name.clone(),
-        idempotency: "intent".into(),
+        // The transport is part of the advertised surface: a client
+        // driving this operation needs to know the submit carries an
+        // idempotency key, and which header it travels in.
+        idempotency: format!(
+            "intent via {}",
+            protocol.idempotency.transport.describe()
+        ),
         poll_method: protocol.poll.method.as_str().into(),
         poll_path: protocol.poll.path.clone(),
         interval,
@@ -1094,7 +1100,7 @@ connector github:
             terminal: [completed, failed]
             deadline: 600s
             deadline_target: failed
-            idempotency: intent
+            idempotency: intent via header "Idempotency-Key"
             poll GET "/generations"
             every: adaptive
             on_protocol_change: refuse

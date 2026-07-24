@@ -852,7 +852,14 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             push_indent(indent + 3, out);
             out.push_str(&format!("deadline_target: {}\n", protocol.deadline_target.name));
             push_indent(indent + 3, out);
-            out.push_str("idempotency: intent\n");
+            // The transport round-trips: without it the rendered source
+            // no longer parses, since the declaration is required.
+            match &protocol.idempotency.transport {
+                corvid_ast::ProtocolIdempotencyTransport::Header(name) => out.push_str(&format!(
+                    "idempotency: intent via header {}\n",
+                    render_string_literal(name)
+                )),
+            }
             push_indent(indent + 3, out);
             out.push_str(&format!("poll {} {}\n", protocol.poll.method.as_str(), render_string_literal(&protocol.poll.path)));
             // Slice 52h-3: the optional cancel endpoint round-trips too —

@@ -7595,7 +7595,31 @@ for `@budget`, so a protocol cannot poll its way past a declared ceiling.
 restart, so it refuses to run anywhere else rather than silently degrading to a
 poll loop that a crash would lose. The intent is checkpointed *before* the submit
 leaves the process, and every observed transition is checkpointed after — so a
-restart resumes at the last observation and **never submits twice**.
+restart resumes at the last observation instead of starting over.
+
+**Exactly-once needs the provider, so you declare how to ask.** Durability alone
+can't cover one window: the provider accepted your request and the process died
+before recording it. Corvid then believes nothing was sent. Only the provider can
+break that tie:
+
+```corvid
+idempotency: intent via header "Idempotency-Key"
+```
+
+Omitting it is a compile error — Corvid can't guess which header your provider
+honours, and guessing wrong fails *silently* (the duplicate gets created and
+nothing complains). The key rides the **submit only**; a poll is a read, and
+sending an idempotency key on a read invites a provider to treat observations as
+retried writes.
+
+**Two identical calls are two calls.** The key identifies the *invocation* —
+where the call is written and which execution of it this is — not just its
+arguments. "Ship order-1" written twice, or written once in a loop that runs
+twice, stays two intents. (Keying on arguments alone silently merged them, so the
+second call returned the first's result and its provider job was never created.)
+
+**The deadline is measured from when the intent began**, not from process start,
+so restarting doesn't hand a protocol a fresh window.
 
 Cancelling the job does what the declaration supports, and says which:
 
@@ -7711,7 +7735,7 @@ on_protocol_change: refuse   # or: resume
   resume, so it refuses anyway.
 
 **You never bump a version number.** Corvid canonicalises the protocol graph and
-fingerprints it (`sha256:` over a versioned `corvid.protocol.canonical.v1`
+fingerprints it (`sha256:` over a versioned `corvid.protocol.canonical.v2`
 encoding), so a change is detected rather than remembered — there is no integer
 to forget. Three things deliberately do *not* count as a change, because each
 would strand live jobs for no reason:
