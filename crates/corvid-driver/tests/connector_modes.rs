@@ -402,6 +402,78 @@ async fn a_2xx_decodes_to_ok_for_a_result_returning_operation() {
 
 /// Reliability: a client-side rate limit refuses the second call within
 /// the window BEFORE it reaches the provider (slice 52g-3c-5).
+/// A retrying operation whose retries send more requests than the rate
+/// limit permits. `retry: 3` + `rate_limit: 2 per window` against a 5xx
+/// provider means the first call's own attempts (1 + 3 = 4) exceed the
+/// window of 2, so the limiter must refuse a retry attempt rather than
+/// letting one logical call quietly emit four network requests.
+fn source_retry_over_rate_limit(token_env: &str) -> String {
+    format!(
+        r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: "http://api.example.com"
+    auth: bearer(secret("{token_env}"))
+    retry: 3
+    rate_limit: 2 per 3600s
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{{owner}}/{{repo}}"
+        mock: Repo("mock-repo")
+
+agent main() -> String:
+    a = get_repo("micrurus", "corvid")
+    return a.name
+"#
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retries_are_admitted_by_the_rate_limiter_one_attempt_at_a_time() {
+    const TOKEN_ENV: &str = "CORVID_TEST_GH_TOKEN_RETRY_RL";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile_source(dir.path(), &source_retry_over_rate_limit(TOKEN_ENV));
+    std::env::set_var(TOKEN_ENV, "tok-retry-rl");
+
+    let server = MockServer::start().await;
+    // Always 5xx, so the operation keeps retrying. `expect(2)` is the
+    // load-bearing assertion: the provider receives exactly the two
+    // requests the rate limit permits, NOT the four the retry policy
+    // would send if it ran beneath the limiter.
+    Mock::given(method("GET"))
+        .and(path("/repos/micrurus/corvid"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let runtime = Runtime::builder()
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_client(loopback_client(
+            "api.example.com",
+            &server,
+        )))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .build();
+
+    let err = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect_err("a third attempt must be refused by the rate limit");
+    std::env::remove_var(TOKEN_ENV);
+
+    let text = format!("{err:?}").to_lowercase();
+    assert!(
+        text.contains("rate limit"),
+        "the failure must be the rate limit, not the 5xx; got: {err:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_client_side_rate_limit_refuses_the_second_call_in_the_window() {
     const TOKEN_ENV: &str = "CORVID_TEST_GH_TOKEN_RL";

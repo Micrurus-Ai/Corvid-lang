@@ -1631,6 +1631,49 @@ agent bad(owner: String) -> Repo:
 }
 
 #[test]
+fn declared_retries_multiply_an_operations_cost_for_budgets() {
+    // A `retry: N` connector can send N+1 requests for one call, so the
+    // budget must cover N+1. This was absent from the cost calculation
+    // entirely — the same class of hole as the dropped connector cost
+    // node, in the same analysis. $0.30 x (1 + 3 retries) = $1.20, which
+    // must not fit a $1.00 budget.
+    let src = "\
+effect http_write:
+    cost: $0.30
+
+type Repo:
+    name: String
+
+connector github:
+    base_url: \"https://api.github.com\"
+    retry: 3
+    modes: [real]
+    operation push_repo(owner: String) -> Repo dangerous uses http_write:
+        POST \"/push\" body owner
+
+@budget($1.00)
+agent bad(owner: String) -> Repo:
+    approve PushRepo(owner)
+    return push_repo(owner)
+";
+    let c = check(src);
+    assert!(
+        has_effect_violation(&c, "cost"),
+        "declared retries must count toward @budget; got: {:?}",
+        c.errors
+    );
+
+    // The SAME operation without retries fits, so the bound is the
+    // retries and not merely a rejection of everything.
+    let ok = check(&src.replace("    retry: 3\n", ""));
+    assert!(
+        !has_effect_violation(&ok, "cost"),
+        "one attempt at $0.30 must fit a $1.00 budget; got: {:?}",
+        ok.errors
+    );
+}
+
+#[test]
 fn a_protocols_worst_case_polls_multiply_its_cost_for_budgets() {
     // Slice 52h-3: a verified protocol does not make ONE request — it
     // submits and then polls until a terminal state or the declared

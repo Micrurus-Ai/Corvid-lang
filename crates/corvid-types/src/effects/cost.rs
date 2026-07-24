@@ -11,7 +11,9 @@
 //! Extracted from `effects.rs` as part of Phase 20i responsibility
 //! decomposition.
 
-use super::analyze::{find_agent, find_connector_operation, find_prompt, find_tool};
+use super::analyze::{
+    find_agent, find_connector_of_operation, find_connector_operation, find_prompt, find_tool,
+};
 use super::{
     ComposedProfile, CostEstimate, CostNodeKind, CostTreeNode, CostWarning, CostWarningKind,
     EffectRegistry,
@@ -697,19 +699,34 @@ impl<'a> CostAnalyzer<'a> {
                     self.registry,
                     span,
                 );
-                // A verified provider protocol does not make ONE request
-                // — it submits and then polls until a terminal state or
-                // the declared deadline. The worst case is knowable
-                // statically from the declaration, so the budget bounds
-                // polling at COMPILE time (slice 52h-3): scale by
-                // 1 submit + the worst-case poll count, reusing the same
-                // `scale_tree` a bounded loop uses.
-                match &op.protocol {
-                    Some(protocol) => {
-                        let requests = 1 + worst_case_poll_count(protocol);
-                        Some(scale_tree(node, requests, span))
-                    }
-                    None => Some(node),
+                // What the budget must cover is the number of REQUESTS the
+                // worst case actually sends, which is two independent
+                // multipliers.
+                //
+                // A verified provider protocol does not make one request:
+                // it submits and then polls until a terminal state or the
+                // declared deadline, and that worst case is knowable
+                // statically from the declaration.
+                //
+                // Every one of those requests can also be retried. `retry:
+                // N` was previously absent from this calculation entirely,
+                // so a connector declaring `retry: 3` was charged a
+                // quarter of what it could spend — the same class of hole
+                // as the dropped connector cost node, in the same
+                // analysis.
+                let polls = match &op.protocol {
+                    Some(protocol) => 1 + worst_case_poll_count(protocol),
+                    None => 1,
+                };
+                let attempts = find_connector_of_operation(self.file, &entry.name)
+                    .and_then(|c| c.retry)
+                    .unwrap_or(0)
+                    + 1;
+                let requests = polls.saturating_mul(attempts);
+                if requests > 1 {
+                    Some(scale_tree(node, requests, span))
+                } else {
+                    Some(node)
                 }
             }
             corvid_resolve::DeclKind::Prompt => {

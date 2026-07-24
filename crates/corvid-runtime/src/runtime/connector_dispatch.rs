@@ -51,7 +51,7 @@ impl Runtime {
         let resolve = |name: &str| -> Option<String> {
             self.secrets.read_env(name).ok().and_then(|read| read.value)
         };
-        let request =
+        let mut request =
             build_connector_request(spec, args, &resolve).map_err(|e| e.into_runtime_error())?;
 
         // Outbound egress gate: the always-on SSRF block plus the
@@ -59,14 +59,54 @@ impl Runtime {
         // unpermitted host, even though the base URL is fixed in source.
         self.http_policy.check(&request.url)?;
 
-        // Client-side rate limit: a fixed-window counter
-        // per connector. An exceeded limit fails the call BEFORE the
-        // request is sent, so a runaway loop cannot flood the provider.
-        if let Some((limit, window_secs)) = spec.rate_limit {
-            self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;
-        }
+        // Retries are driven HERE, above the rate limiter, not inside the
+        // HTTP client beneath it.
+        //
+        // A `rate_limit` is a promise about how many requests the provider
+        // receives. With the retry policy handed to the client, one
+        // admitted logical call could emit `1 + retry` NETWORK requests —
+        // so a connector declaring `retry: 3` and `rate_limit: 10 per 60s`
+        // could legally send 40. The limiter has to admit each attempt, or
+        // it is not a rate limit on the thing the provider actually sees.
+        let attempts = spec.retry.unwrap_or(0).saturating_add(1);
+        request.retry = crate::http::HttpRetryPolicy {
+            max_retries: 0,
+            retry_on_5xx: false,
+        };
 
-        let response = self.http.send(&request).await?;
+        let mut last_err = None;
+        let mut response = None;
+        for attempt in 0..attempts {
+            // Every attempt is admitted separately. An exceeded limit
+            // fails BEFORE the request is sent, so neither a runaway loop
+            // nor a retry storm can flood the provider.
+            if let Some((limit, window_secs)) = spec.rate_limit {
+                self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;
+            }
+            match self.http.send(&request).await {
+                Ok(got) => {
+                    // Retry only what the previous policy retried: a 5xx.
+                    // A 4xx is the provider's answer, not a hiccup, and
+                    // re-sending it burns the declared budget for nothing.
+                    if got.status >= 500 && attempt + 1 < attempts {
+                        response = Some(got);
+                        continue;
+                    }
+                    response = Some(got);
+                    break;
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                    if attempt + 1 >= attempts {
+                        break;
+                    }
+                }
+            }
+        }
+        let response = match response {
+            Some(response) => response,
+            None => return Err(last_err.expect("a failed attempt records its error")),
+        };
         let meta = ConnectorResponseMeta {
             status: response.status,
             retry_after_ms: retry_after_ms(&response),

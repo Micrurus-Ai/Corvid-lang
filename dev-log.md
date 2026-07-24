@@ -16652,6 +16652,69 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-6: making the protocol guarantees true
+
+An external audit of the phase read the committed code against the
+claims and found the claims ahead of the code. The finding was right, and
+three of the specific ones were sentences I had written: "exactly once",
+"the deadline is a bound", "typed response". I had also filled in the
+proof-matrix row that is supposed to stop exactly this — from the same
+belief that produced the code, which is why it did not stop it. A proof
+matrix authored by the implementer is not independent evidence.
+
+Step 0 was to narrow the live claims, before any fix. Then four parts.
+
+**The deadline bounded a process, not a protocol.** One missing
+timestamp: `started_ms = now` at loop entry, nothing persisted, so every
+restart handed a fresh window. It also silently falsified the budget
+bound, which assumes one window. Persist `created_ms`, measure from it.
+
+**The idempotency key was not an identity.** It was
+`hash(connector, operation, args)`, which conflates two intentional calls
+that share arguments — the second returned the first's result and its
+provider job was never created, a silent LOST WRITE. Added the execution
+ordinal.
+
+Then part 2: the key still never left the process. Durability cannot
+cover the window where the provider accepted a submit and the process
+died before recording it — only the provider can break that tie, and only
+if given something to recognise. `idempotency: intent via header` sends
+it; omission is a compile error, because guessing the header wrong fails
+SILENTLY.
+
+Part 3 was going to be a small addition — fingerprint the provider so an
+intent cannot resume against a different endpoint — and its integration
+test caught a real bug in part 1. My invocation ordinal used the call's
+BYTE OFFSET, and the test changed a URL from `api` to `other`, shifting
+every later offset. The run did not refuse; it silently started a fresh
+intent.
+
+That is the same mistake I had guarded against one slice earlier. I
+excluded spans from the protocol fingerprint because "moving a
+declaration down a file is not drift" — and then used a span as durable
+identity. Worse consequence: a stranded fingerprint refuses, a stranded
+identity DUPLICATES. Fixed to a layout-independent ordinal.
+
+Twice now in this corrective work a test has overturned a design I was
+confident in, and both times the cause was the same as the audit's whole
+thesis: I trusted a belief where I should have checked. The provider
+fingerprint itself is the good version of the pattern — the refusal is
+NOT overridable by `on_protocol_change`, because a decision about the
+graph cannot authorise talking to a different provider.
+
+Part 4 closed two accounting holes, both the same shape as the connector
+cost node 52h-3 part 3 fixed: `retry: N` was absent from the budget
+(charged a quarter of what a `retry: 3` connector could spend), and
+retries ran BENEATH the rate limiter, so one admitted call could emit
+`1 + retry` requests past the declared limit. Cost now scales by
+`polls x attempts`; the retry loop admits each attempt through the
+limiter. The integration test's `.expect(2)` proves the provider receives
+the permitted count, not the burst.
+
+Exactly-once is claimed truthfully now. One caveat left standing on
+purpose: "typed response" still means JSON-decoded, not schema-validated,
+which is 52i.
+
 ## 2026-07-24 - 52h-5a: what could the provider do to you?
 
 52h-5 split into 52h-5a (developer surface) and 52h-5b (the headline

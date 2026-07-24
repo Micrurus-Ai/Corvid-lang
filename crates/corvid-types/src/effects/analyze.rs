@@ -407,6 +407,21 @@ pub(super) fn find_connector_operation<'a>(
     })
 }
 
+/// The connector an operation belongs to. Reliability (`retry:`) is
+/// declared on the CONNECTOR but multiplies the cost of each operation
+/// call, so the budget analysis needs both.
+pub(super) fn find_connector_of_operation<'a>(
+    file: &'a corvid_ast::File,
+    name: &str,
+) -> Option<&'a corvid_ast::ConnectorDecl> {
+    file.decls.iter().find_map(|d| match d {
+        corvid_ast::Decl::Connector(c) if c.operations.iter().any(|op| op.name.name == name) => {
+            Some(c)
+        }
+        _ => None,
+    })
+}
+
 pub(super) fn find_prompt<'a>(
     file: &'a corvid_ast::File,
     name: &str,

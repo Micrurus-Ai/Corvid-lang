@@ -7621,6 +7621,22 @@ second call returned the first's result and its provider job was never created.)
 **The deadline is measured from when the intent began**, not from process start,
 so restarting doesn't hand a protocol a fresh window.
 
+**A `retry:` connector is charged for its retries.** `@budget` covers the
+worst-case number of requests actually sent — `polls × attempts` — so a
+`retry: 3` operation is charged for four attempts, not one. And retries are
+admitted through the rate limiter one attempt at a time: `retry: 3` with
+`rate_limit: 2 per 60s` sends the provider two requests and then refuses, never
+the four the retry alone would emit. A rate limit counts what the provider
+actually receives.
+
+**A protocol won't resume against a different provider.** The intent remembers
+which provider it was submitted to — connector, base URL, and the secret *name*
+behind the credential. Point the connector somewhere else and an in-flight intent
+refuses rather than polling a stranger about a job it never issued. This refusal
+is not softened by `on_protocol_change`: choosing to resume across a graph edit is
+not the same as agreeing to talk to a different provider. Rotating a secret's
+value is fine — only its name is identity.
+
 Cancelling the job does what the declaration supports, and says which:
 
 - before submit — cancelled exactly, no provider work exists;
