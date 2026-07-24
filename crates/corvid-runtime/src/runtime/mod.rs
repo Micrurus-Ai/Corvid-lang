@@ -42,6 +42,7 @@ pub use builder::RuntimeBuilder;
 mod builder;
 mod connector_dispatch;
 mod io;
+mod protocol_dispatch;
 mod jobs;
 mod llm_dispatch;
 mod model_catalog;
@@ -130,6 +131,22 @@ pub struct Runtime {
     /// exceeded limit fails the call rather than flooding the provider.
     connector_rate_state:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (u64, u64)>>>,
+    /// Slice 52h-2: the durable job this run is executing under, when
+    /// any. A verified provider protocol is only executable inside a
+    /// durable job, because its intent must survive a restart — the
+    /// job's checkpoints are where each protocol transition is recorded
+    /// and resumed from. `None` for ordinary (non-durable) runs, which
+    /// is what makes "a protocol operation requires a durable job"
+    /// enforceable rather than advisory.
+    durable_job: Option<DurableJobContext>,
+}
+
+/// The durable job a run is executing under (slice 52h-2): the SQLite
+/// queue handle plus this run's job id. Cloned cheaply with `Runtime`.
+#[derive(Clone)]
+pub struct DurableJobContext {
+    pub queue: std::sync::Arc<crate::queue::DurableQueueRuntime>,
+    pub job_id: String,
 }
 
 #[derive(Clone)]
@@ -194,6 +211,28 @@ impl Runtime {
 
     pub fn tools(&self) -> &ToolRegistry {
         &self.tools
+    }
+
+    /// Slice 52h-2: a clone of this runtime bound to a durable job, so
+    /// verified provider protocols invoked during the run record their
+    /// intent + transitions as that job's checkpoints. The job executor
+    /// installs this before running an agent body.
+    pub fn with_durable_job(
+        &self,
+        queue: std::sync::Arc<crate::queue::DurableQueueRuntime>,
+        job_id: impl Into<String>,
+    ) -> Self {
+        let mut clone = self.clone();
+        clone.durable_job = Some(DurableJobContext {
+            queue,
+            job_id: job_id.into(),
+        });
+        clone
+    }
+
+    /// The durable job this run executes under, if any (slice 52h-2).
+    pub fn durable_job(&self) -> Option<&DurableJobContext> {
+        self.durable_job.as_ref()
     }
 
     /// The deployment-selected connector execution mode (slice 52g-3c),

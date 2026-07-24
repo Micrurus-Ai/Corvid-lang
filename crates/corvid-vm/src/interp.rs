@@ -286,13 +286,38 @@ impl<'ir> Interpreter<'ir> {
             // ToolResult, credential-free) happens inside `call_tool`, so
             // a real run is directly replayable.
             ConnectorMode::Real | ConnectorMode::Replay => {
-                self.dispatch_connector_via_runtime(
-                    callee_name,
-                    json_args,
-                    result_decode_ty,
-                    span,
-                )
-                .await
+                // Slice 52h-2: an operation carrying a verified provider
+                // protocol runs the DURABLE lifecycle (intent before
+                // submit, provider job id bound only from a typed
+                // response, every transition checkpointed) instead of a
+                // one-shot request. It never treats the submit response
+                // as completion.
+                if let Some(protocol) = &op.protocol {
+                    match self
+                        .runtime
+                        .call_protocol_operation(callee_name, protocol, json_args.to_vec())
+                        .await
+                    {
+                        Ok(result) => json_to_value(result, result_decode_ty, &self.types_by_id)
+                            .map_err(|e| {
+                                InterpError::new(
+                                    InterpErrorKind::Marshal(format!(
+                                        "connector `{callee_name}`: {e}"
+                                    )),
+                                    span,
+                                )
+                            }),
+                        Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
+                    }
+                } else {
+                    self.dispatch_connector_via_runtime(
+                        callee_name,
+                        json_args,
+                        result_decode_ty,
+                        span,
+                    )
+                    .await
+                }
             }
         };
 
@@ -341,7 +366,18 @@ impl<'ir> Interpreter<'ir> {
         let mut sub = Interpreter::new(self.ir, self.runtime);
         sub.bind_ir_params(callee_name, &tool.params, arg_values, span)?;
         match sub.eval_expr(mock_expr).await?.into_value() {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                // Slice 52h-2: a protocol-bearing operation's mock is
+                // validated through the SAME transition engine the real
+                // provider is judged by — its `status` must be a declared
+                // status that transitions the initial state to a TERMINAL
+                // one. A mock that could never terminate is a lie about
+                // the protocol, so it fails here rather than at 3am.
+                if let Some(protocol) = &op.protocol {
+                    self.validate_protocol_mock(protocol, connector, op, &value, span)?;
+                }
+                Ok(value)
+            }
             Err(_propagated) => Err(InterpError::new(
                 InterpErrorKind::Other(format!(
                     "connector `{}` operation `{}` mock payload propagated an error instead of \
@@ -351,6 +387,53 @@ impl<'ir> Interpreter<'ir> {
                 span,
             )),
         }
+    }
+
+    /// Slice 52h-2: judge a protocol operation's `mock:` payload with the
+    /// same engine the real provider faces. The mock stands in for the
+    /// provider's terminal observation, so its `status` must be declared
+    /// and must transition the initial state to a terminal state.
+    fn validate_protocol_mock(
+        &self,
+        protocol: &corvid_ast::ProviderProtocolDecl,
+        connector: &'ir IrConnector,
+        op: &'ir IrOperation,
+        value: &Value,
+        span: Span,
+    ) -> Result<(), InterpError> {
+        use corvid_runtime::protocol::{is_terminal, observe, ProtocolIntentState};
+        let json = value_to_json(value);
+        let payload = if json.get("tag").and_then(|t| t.as_str()) == Some("ok") {
+            json.get("ok").cloned().unwrap_or(json.clone())
+        } else {
+            json.clone()
+        };
+        let mut intent = ProtocolIntentState::new(protocol);
+        observe(protocol, &op.name, &mut intent, &payload).map_err(|e| {
+            InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector `{}`: {}",
+                    connector.name,
+                    e.message()
+                )),
+                span,
+            )
+        })?;
+        if !is_terminal(protocol, &intent.state) {
+            return Err(InterpError::new(
+                InterpErrorKind::DispatchFailed(format!(
+                    "connector `{}` operation `{}`: the `mock:` payload's status `{}` leaves the \
+                     protocol in non-terminal state `{}` — a mock stands in for the provider's \
+                     FINAL observation, so it must reach a terminal state",
+                    connector.name,
+                    op.name,
+                    intent.status_history.last().cloned().unwrap_or_default(),
+                    intent.state
+                )),
+                span,
+            ));
+        }
+        Ok(())
     }
 
     /// Real/replay dispatch: route the operation through the runtime's

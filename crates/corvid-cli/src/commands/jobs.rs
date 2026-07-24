@@ -145,8 +145,12 @@ pub(crate) fn cmd_jobs_run(
 
     let queue = Arc::new(DurableQueueRuntime::open(state)?);
     let runtime_handle = Arc::new(Runtime::builder().build());
-    let executor: Arc<dyn JobRuntimeExecutor> =
-        Arc::new(DefaultJobRuntimeExecutor::new(Arc::new(ir)));
+    // Slice 52h-2: hand the executor the durable queue so a verified
+    // provider protocol invoked inside a job persists its intent (and
+    // every transition) as that job's checkpoints.
+    let executor: Arc<dyn JobRuntimeExecutor> = Arc::new(
+        DefaultJobRuntimeExecutor::new(Arc::new(ir)).with_durable_queue(queue.clone()),
+    );
     let job_executor = into_pool_executor(executor, runtime_handle);
 
     let pool = WorkerPool::new(queue.clone(), workers)

@@ -275,7 +275,11 @@ fn retry_policy(spec: &ConnectorHttpSpec) -> crate::http::HttpRetryPolicy {
     }
 }
 
-fn fill_path(
+/// Fill `{placeholder}` segments in a path from a name→value map.
+/// Shared by the operation request builder and the provider-protocol
+/// poll request (slice 52h-2) so placeholder binding has ONE
+/// implementation.
+pub(crate) fn fill_path(
     path: &str,
     by_name: &BTreeMap<&str, &serde_json::Value>,
     operation: &str,

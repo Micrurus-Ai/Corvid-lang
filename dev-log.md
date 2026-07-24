@@ -16652,6 +16652,82 @@ its fixed ports are not parallel-safe); requester/tenant queue unit
 tests; adversarial anonymous, insufficient-authority, cross-tenant,
 self-approval, and valid-reviewer live paths.
 
+## 2026-07-24 - 52h-2: the durable intent runtime — a protocol submits once, and a restart proves it
+
+52h-1 made the temporal contract language data and honestly refused to
+execute it. This slice executes it, durably. The load-bearing property is
+not "polling works" — it is that **a real provider job is created exactly
+once**, across lost responses, retries, and process restarts.
+
+### Reuse, not a parallel subsystem
+
+The durable queue already had everything the intent needs: an
+`idempotency_key` with a partial UNIQUE index, leases whose expiry IS the
+crash-recovery window, per-job checkpoints with arbitrary JSON payloads,
+and `next_run_ms` scheduling. So a protocol intent is modelled on that
+substrate rather than a new one — the durable job the protocol runs
+inside owns the intent, and each transition is one of its checkpoints.
+
+### The order of operations is the guarantee
+
+1. The intent is checkpointed **before** the submit request leaves the
+   process. A crash in the gap is recoverable because the intent already
+   exists.
+2. The provider job id is bound **only from the decoded submit
+   response** — never guessed, never taken from the request. Until a
+   typed response arrives there is nothing to poll with, and a test
+   asserts exactly that (the poll path is unbindable pre-response).
+3. Every observation is applied through the declared transition table and
+   checkpointed, so a resume continues from the last observation instead
+   of re-walking the graph.
+4. The call returns **only** on a declared terminal state — it never
+   treats the submit response as completion — or moves to the declared
+   `deadline_target`, which is a checked transition rather than an ad-hoc
+   timeout.
+
+### The pure engine is separate on purpose
+
+`corvid-runtime::protocol` holds the transition engine and the binding
+conventions with no I/O at all, because this is the layer that decides
+whether a provider job is submitted once, twice, or never. Its eight unit
+tests pin the semantics — including the two that matter most: an
+undeclared status is refused **without advancing the intent**, and the
+provider's own id wins over a caller-supplied argument of the same name.
+
+The conventions (chosen so 52h-1's grammar needed no amendment): the
+submit response's top-level fields bind the poll path (that is how the
+job id travels), and the poll response's `status` field is matched
+against the declared universe.
+
+### Durability is a precondition, not a hope
+
+A protocol refuses to run outside a durable job. Degrading to a
+non-durable poll loop would produce an intent that a restart loses, so
+the refusal is the honest behaviour — and the test proves the refusal
+makes **zero** provider requests. The job executor installs the context
+(`Runtime::with_durable_job`), and `corvid jobs run` wires the queue in.
+
+Mock is judged by the same engine: a `mock:` payload must carry a
+declared status that reaches a terminal state, so a mock that could never
+terminate fails at the call, not at 3am.
+
+Contract Closure's blanket protocol refusal is removed — the executable
+path now exists. The 52h-1 test that asserted the refusal now asserts the
+opposite; that inversion is the slice landing.
+
+Tests: 8 engine units + 3 wiremock integration — submit-once with the id
+bound from the response and polls walking `queued → processing →
+completed` returning the TERMINAL observation; **resume: re-running the
+same durable job submits nothing and polls nothing, returning the
+recorded terminal value**; and the outside-a-durable-job refusal. Gate:
+corvid-runtime/vm/driver libs green, connector_modes (7) still green,
+workspace check clean, corpus verify exits 1 on exactly the two fixtures.
+
+Not in this slice (52h-3): governed cadence/admission, `Retry-After`,
+semantic cancellation and compensation.
+
+---
+
 ## 2026-07-24 - 52h-1: verified provider protocols become language data
 
 Phase 52h was expanded from ordinary async polling into Verified

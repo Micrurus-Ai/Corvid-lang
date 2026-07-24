@@ -73,6 +73,13 @@ pub trait JobRuntimeExecutor: Send + Sync {
 pub struct DefaultJobRuntimeExecutor {
     ir: Arc<IrFile>,
     trace_dir: PathBuf,
+    /// Slice 52h-2: the durable queue this executor runs against. When
+    /// present, each agent run is bound to its job via
+    /// `Runtime::with_durable_job`, so a verified provider protocol
+    /// invoked inside the run can persist its intent and resume after a
+    /// restart. `None` keeps the pre-52h behaviour (protocol operations
+    /// then refuse at their call site, which is the honest failure).
+    queue: Option<Arc<corvid_runtime::DurableQueueRuntime>>,
 }
 
 impl DefaultJobRuntimeExecutor {
@@ -80,7 +87,18 @@ impl DefaultJobRuntimeExecutor {
         Self {
             ir,
             trace_dir: PathBuf::from("target/trace/jobs"),
+            queue: None,
         }
+    }
+
+    /// Bind the durable queue so protocol intents recorded during a job
+    /// run land on that job's checkpoints (slice 52h-2).
+    pub fn with_durable_queue(
+        mut self,
+        queue: Arc<corvid_runtime::DurableQueueRuntime>,
+    ) -> Self {
+        self.queue = Some(queue);
+        self
     }
 
     /// Override the directory where `@replayable` jobs persist their
@@ -182,6 +200,15 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
             runtime.with_tracer(tracer)
         } else {
             runtime.clone()
+        };
+
+        // Slice 52h-2: bind this run to its durable job so a verified
+        // provider protocol invoked inside the agent records its intent
+        // and every transition as THIS job's checkpoints — which is what
+        // lets a restart resume the protocol instead of re-submitting.
+        let job_runtime = match &self.queue {
+            Some(queue) => job_runtime.with_durable_job(queue.clone(), job.id.clone()),
+            None => job_runtime,
         };
 
         // Drive the async interpreter from a sync executor closure. The

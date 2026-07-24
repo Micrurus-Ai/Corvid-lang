@@ -46,6 +46,7 @@ pub mod catalog_c_api;
 pub mod citation;
 pub mod connectors;
 pub mod db;
+pub mod protocol;
 pub mod effect_filter;
 pub mod ensemble;
 pub mod env;

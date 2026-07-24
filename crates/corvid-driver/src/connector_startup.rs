@@ -214,19 +214,15 @@ pub fn check_connector_startup(
             continue;
         }
 
-        // Advertising a temporal contract without executing it would
-        // violate Contract Closure. Refuse until the durable lifecycle
-        // engine is installed.
-        for op in &connector.operations {
-            if op.protocol.is_some() {
-                errors.push(ConnectorStartupError::OperationNotServeable {
-                    connector: connector.name.clone(),
-                    operation: op.name.clone(),
-                    mode,
-                    reason: "declares a verified async provider protocol, but this runtime tier does not execute protocol lifecycles yet".to_string(),
-                });
-            }
-        }
+        // Slice 52h-2: verified provider protocols now HAVE an executable
+        // path — the durable intent lifecycle (intent persisted before
+        // submit, provider job id bound only from a typed response, every
+        // transition checkpointed, resumed after a restart). Contract
+        // Closure therefore no longer refuses a protocol-bearing
+        // operation. The remaining requirement — that a protocol runs
+        // inside a durable job so its intent can survive a restart — is
+        // a property of the CALL SITE, not the startup surface, so the
+        // runtime enforces it when the operation is invoked.
 
         // (3) + (4) Every operation must have an executable path in the
         // selected mode.
@@ -421,7 +417,7 @@ connector github:
     }
 
     #[test]
-    fn a_verified_protocol_refuses_until_the_lifecycle_runtime_exists() {
+    fn a_verified_protocol_is_startup_clean_now_that_the_lifecycle_runtime_exists() {
         let source = r#"
 connector video:
     base_url: "https://video.example.com"
@@ -445,10 +441,22 @@ connector video:
         let ir = ir(source);
         let present = |_: &str| true;
         let errors = check_connector_startup(&ir, &ctx(Some(ConnectorMode::Real), true, false, &present));
-        assert!(errors.iter().any(|error| matches!(
-            error,
-            ConnectorStartupError::OperationNotServeable { reason, .. }
-                if reason.contains("does not execute protocol lifecycles yet")
-        )));
+        // Slice 52h-2 landed the durable intent lifecycle, so a
+        // protocol-bearing operation now HAS an executable path and
+        // Contract Closure no longer refuses it. (Until 52h-2 this
+        // asserted the opposite — the refusal was the honest state while
+        // the runtime could not execute a temporal contract.) The
+        // remaining durability requirement — running inside a durable job
+        // — is a call-site property the runtime enforces at invocation,
+        // not something startup can decide.
+        assert!(
+            !errors.iter().any(|error| matches!(
+                error,
+                ConnectorStartupError::OperationNotServeable { reason, .. }
+                    if reason.contains("protocol")
+            )),
+            "a protocol-bearing operation must be startup-clean now that the durable \
+             lifecycle executes it; got: {errors:?}"
+        );
     }
 }

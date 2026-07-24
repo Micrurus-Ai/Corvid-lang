@@ -489,6 +489,11 @@ impl RuntimeBuilder {
             connector_rate_state: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            // Slice 52h-2: bound by the job executor via
+            // `Runtime::with_durable_job`, never at build time — an
+            // ordinary run has no durable job, which is exactly what
+            // makes protocol execution refuse outside one.
+            durable_job: None,
         }
     }
 }
