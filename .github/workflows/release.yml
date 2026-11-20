@@ -48,7 +48,7 @@ jobs:
       # Compute the release tag + channel + prerelease flag from
       # the workflow trigger. Three cases:
       #   - push to a `v*.*.*` tag → stable channel; tag = the
-      #     pushed tag; prerelease = false; "latest" pointer
+      #     pushed tag; beta is a prerelease; for stable the "latest" pointer
       #     advances.
       #   - push to `main` → nightly channel; tag =
       #     `nightly-YYYY-MM-DD-<short-sha>`; prerelease = true;
@@ -67,8 +67,18 @@ jobs:
           date_utc="$(date -u +%Y-%m-%d)"
           if [[ "$ref" == refs/tags/v* ]]; then
             release_tag="${ref#refs/tags/}"
-            channel="stable"
-            prerelease="false"
+            number='(0|[1-9][0-9]*)'
+            core="v${number}[.]${number}[.]${number}"
+            if [[ "$release_tag" =~ ^${core}$ ]]; then
+              channel="stable"
+              prerelease="false"
+            elif [[ "$release_tag" =~ ^${core}-beta[.]${number}$ ]]; then
+              channel="beta"
+              prerelease="true"
+            else
+              echo "Expected a version tag such as v1.0.0 or v1.0.0-beta.1." >&2
+              exit 1
+            fi
           else
             release_tag="nightly-${date_utc}-${short_sha}"
             channel="nightly"
@@ -84,6 +94,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Check version tag against CLI package version
+        if: steps.tag.outputs.channel != 'nightly'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
+        run: |
+          set -eu
+          package_id="$(cargo pkgid --locked -p corvid-cli)"
+          version="${package_id##*#}"
+          version="${version##*@}"
+          if [ "$RELEASE_TAG" != "v$version" ]; then
+            echo "Release tag $RELEASE_TAG disagrees with corvid-cli version $version." >&2
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
