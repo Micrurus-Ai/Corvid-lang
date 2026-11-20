@@ -46,6 +46,14 @@ async def test_tool_call_dispatches_to_registered_impl():
     assert result == "hello"
 
 
+async def test_tool_call_accepts_sync_implementations():
+    @tool("double")
+    def double(value):
+        return value * 2
+
+    assert await tool_call("double", [3]) == 6
+
+
 async def test_tool_call_raises_when_impl_missing():
     register_tools({"nope": {"effect": "safe", "arity": 0}})
     with pytest.raises(UnknownTool):

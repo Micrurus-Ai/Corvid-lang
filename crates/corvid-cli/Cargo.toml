@@ -15,7 +15,7 @@ corvid-abi-verify = { workspace = true }
 corvid-ast = { workspace = true }
 corvid-bind = { workspace = true }
 corvid-connector-runtime = { workspace = true }
-corvid-driver = { workspace = true }
+corvid-driver = { workspace = true, features = ["python"] }
 corvid-guarantees = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }

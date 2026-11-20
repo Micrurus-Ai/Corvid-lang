@@ -144,6 +144,15 @@ fn find_bundled_corvid_runtime() -> Option<std::path::PathBuf> {
         }
     }
 
+    // Cargo can place debug binaries outside the checkout via CARGO_TARGET_DIR.
+    #[cfg(debug_assertions)]
+    if let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2) {
+        let candidate = root.join("runtime/python");
+        if candidate.join("corvid_runtime").is_dir() {
+            return Some(candidate);
+        }
+    }
+
     None
 }
 
@@ -255,7 +264,7 @@ pub fn install_python_tools(
 /// 1. Acquire the GIL.
 /// 2. Convert `Vec<serde_json::Value>` args to a Python tuple via
 ///    [`crate::python_ffi::json_to_py`].
-/// 3. Call the function (returns a coroutine).
+/// 3. Create the registry coroutine for a sync or async implementation.
 /// 4. Run the coroutine to completion via `asyncio.run(coro)`.
 /// 5. Convert the result back to `serde_json::Value`.
 ///
@@ -311,14 +320,8 @@ fn dispatch_python_tool(
             .collect::<PyResult<Vec<_>>>()?;
         let tuple = PyTuple::new_bound(py, py_args);
 
-        // Bind the callable to the current GIL scope and invoke it.
-        // A user's `async def echo(message)` returns a coroutine
-        // object here, not the awaited result.
-        let coro = callable.bind(py).call1(tuple)?;
-
-        // Drive the coroutine to completion synchronously via
-        // `asyncio.run(coro)`. This blocks the GIL-holding thread
-        // until the coroutine yields its final result.
+        let registry = py.import_bound("corvid_runtime.registry")?;
+        let coro = registry.call_method1("invoke_tool", (callable.bind(py), tuple))?;
         let asyncio = py.import_bound("asyncio")?;
         let result = asyncio.call_method1("run", (coro,))?;
         crate::python_ffi::py_to_json(&result)

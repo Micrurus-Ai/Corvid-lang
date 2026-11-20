@@ -63,7 +63,7 @@ impl fmt::Display for RunError {
             ),
             Self::NeedsArgs { agent, expected } => write!(
                 f,
-                "agent `{agent}` expects {expected} argument(s); `corvid run` cannot supply them yet — use a runner binary that calls `run_with_runtime` with arguments"
+                "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }
@@ -339,6 +339,11 @@ fn run_via_interpreter_tier(
     let mut builder = Runtime::builder()
         .approver(std::sync::Arc::new(StdinApprover::new()))
         .tracer(tracer);
+    #[cfg(feature = "python")]
+    if !ir.tools.is_empty() {
+        let tools = corvid_runtime::python_tools::install_python_tools(path)?;
+        builder = builder.tool_registry(tools);
+    }
 
     // Slice 33S1b: install the [io] root policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing

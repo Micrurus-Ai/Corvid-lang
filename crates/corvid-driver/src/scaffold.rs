@@ -37,7 +37,7 @@ async def echo(message: str) -> str:
     std::fs::write(
         root.join("src").join("python_tools_example.cor"),
         r#"# Example: a tool implemented in Python (tools.py).
-# Run with: corvid run src/python_tools_example.cor
+# Run with: corvid run src/python_tools_example.cor "Hello"
 
 tool echo(message: String) -> String
 

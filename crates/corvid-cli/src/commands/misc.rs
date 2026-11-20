@@ -60,11 +60,8 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
     println!("  corvid run");
     println!();
     if with_python_tools {
-        println!("Python tool template included: implement tools in `tools.py`");
-        println!("(the bundled `corvid_runtime` package makes `from");
-        println!("corvid_runtime import tool` work without any pip install)");
-        println!("and see `src/python_tools_example.cor` for the declaration");
-        println!("side.");
+        println!("Try the Python tool defined in `tools.py`:");
+        println!("  corvid run src/python_tools_example.cor \"Hello\"");
     } else {
         println!("The starter agent is pure Corvid — it reads the clock");
         println!("through an executing, replay-traced stdlib tool. Need a");

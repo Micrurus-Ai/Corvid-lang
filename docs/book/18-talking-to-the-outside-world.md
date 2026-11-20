@@ -252,3 +252,7 @@ the proof."
   references.
 - `corvid tour --topic file-io | http-client | sqlite | json` —
   the runnable demos for each surface in isolation.
+
+## Calling your own Python tool
+
+Run `corvid new --with-python-tools notes`, then `cd notes`. The project includes an `echo` tool declared in Corvid and implemented by an async Python function in `tools.py`. Run it with `corvid run src/python_tools_example.cor "Hello"`. The interpreter loads the decorated function and returns `"Hello"`. Edit the function and rerun the same command to try your own implementation.

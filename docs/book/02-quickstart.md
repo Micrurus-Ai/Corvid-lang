@@ -24,9 +24,9 @@ hello-corvid/
 ├── corvid.toml         # project manifest + [io]/[http] security boundaries
 ├── .gitignore
 ├── src/
-│   ├── main.cor        # entry point (a minimal echo tool)
+│   ├── main.cor        # entry point (greets the caller)
 │   └── std/            # vendored stdlib modules (io, http, db, json, …)
-└── tools.py            # optional Python host tools for the starter echo
+└── tools.py            # generated with --with-python-tools
 ```
 
 The scaffolded `corvid.toml` declares the executing-I/O security
