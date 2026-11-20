@@ -41,6 +41,8 @@ match the target selected by PowerShell.
 
 ## Upgrade or roll back
 
+The installer lifecycle and tagged source fallback passed with fixture packages on native x64 and ARM64 runners for Linux, macOS and Windows. See the [native installer run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44812107983).
+
 Set `CORVID_VERSION` to the release tag you want and rerun the same installer.
 Use an earlier tag to roll back. Both the download and the source fallback
 for a pinned version use the requested tag. Run `corvid --version` afterward.
