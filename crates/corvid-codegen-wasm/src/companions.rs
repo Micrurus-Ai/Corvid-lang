@@ -302,6 +302,17 @@ fn emit_js_loader(
     }
     out.push_str("  };\n");
     out.push_str("}\n");
+    if module_name == "events" {
+        for (name, ty) in [("intStateHandlers", Type::Int), ("textStateHandlers", Type::String)] {
+            let names: Vec<_> = agents.iter()
+                .filter(|agent| agent.params.len() == 1 && agent.params[0].ty == ty && agent.return_ty == ty)
+                .map(|agent| agent.name.as_str())
+                .collect();
+            let names = serde_json::to_string(&names).expect("serialize handler names");
+            out.push_str(&format!("const {name} = new Set({names});\n"));
+        }
+        out.push_str(include_str!("browser_controls.js"));
+    }
     Ok(out)
 }
 

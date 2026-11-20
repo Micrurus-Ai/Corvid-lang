@@ -2,6 +2,7 @@
 
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
+- [x] Used the Windows x64 installer with a local debug CLI and standard-library archive, built an interactive app twice with identical output, and served the extracted copy from a new directory. Edge exercised pointer, keyboard and text handlers while the backend served JSON. A failed handler rebuild preserved the last archive. Production archive checks are tracked separately.
 - [x] A fresh project served an HTML page built with imported view helpers and a JSON API from one server on Windows x64. The HTTP bodies, media types, application contract and OpenAPI schemas matched the declarations. The checker rejected an integer return from the HTML route.
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
 - [x] Verified the roadmap branch's eight static view helpers in a fresh project. The documented example rendered a page in Edge. Pointer and keyboard disclosure, current-page GET submission, a link, and a targeted GET form with an encoded ampersand passed. The CLI rejected a string child where a View was required.

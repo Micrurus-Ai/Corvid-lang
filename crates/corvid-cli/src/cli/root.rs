@@ -102,7 +102,7 @@ pub enum Command {
     Build {
         /// Source file. Defaults to `src/main.cor` when run from a Corvid project directory.
         file: Option<PathBuf>,
-        /// Output target. `python` (default), `native`, `server`, `wasm`, `cdylib`, or `staticlib`.
+        /// Output target. `python` (default), `native`, `server`, `web`, `wasm`, `cdylib`, or `staticlib`.
         #[arg(long, default_value = "python")]
         target: String,
         /// Path to a compiled `#[tool]` staticlib. When provided,

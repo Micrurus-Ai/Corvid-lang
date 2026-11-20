@@ -41,3 +41,98 @@ test preserves_child_order:
         "{bad:?}"
     );
 }
+
+#[test]
+fn web_bundle_without_event_handlers_contains_only_application_inputs() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::create_dir(root.join("migrations")).unwrap();
+    fs::write(
+        root.join("migrations/001.sql"),
+        "create table notes(id integer);",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/main.cor"),
+        "server app:\n    route GET \"/\" -> html:\n        return \"Hello\"\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/session.log"), "runtime data").unwrap();
+    let build = || {
+        Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .current_dir(root)
+            .args(["build", "src/main.cor", "--target", "web"])
+            .output()
+            .unwrap()
+    };
+    let result = build();
+    assert!(result.status.success(), "{result:?}");
+    let output = root.join("target/web.tar");
+    let original = fs::read(&output).unwrap();
+    let mut archive = tar::Archive::new(original.as_slice());
+    let files: Vec<_> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| entry.unwrap().path().unwrap().into_owned())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            std::path::PathBuf::from("migrations/001.sql"),
+            std::path::PathBuf::from("src/main.cor")
+        ]
+    );
+    fs::write(
+        root.join("src/main.cor"),
+        "agent main() -> Int:\n    return 3\n",
+    )
+    .unwrap();
+    assert!(!build().status.success());
+    assert_eq!(fs::read(output).unwrap(), original);
+}
+
+#[test]
+fn web_bundle_compiles_events_and_preserves_the_previous_build_on_handler_errors() {
+    let project = tempfile::tempdir().unwrap();
+    let src = project.path().join("src");
+    fs::create_dir(&src).unwrap();
+    fs::write(
+        src.join("main.cor"),
+        "server app:\n    route GET \"/\" -> html:\n        return \"Counter\"\n",
+    )
+    .unwrap();
+    let handler = "agent increment(current: Int) -> Int:\n    return current + 1\n";
+    let events = src.join("events.cor");
+    fs::write(&events, handler).unwrap();
+    let build = || {
+        Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .current_dir(project.path())
+            .args(["build", "src/main.cor", "--target", "web"])
+            .output()
+            .unwrap()
+    };
+    let valid = build();
+    assert!(valid.status.success(), "{valid:?}");
+    let output = project.path().join("target/web.tar");
+    let original = fs::read(&output).unwrap();
+    let extracted = tempfile::tempdir().unwrap();
+    tar::Archive::new(original.as_slice())
+        .unpack(extracted.path())
+        .unwrap();
+    let assets = extracted.path().join("target/wasm");
+    assert!(fs::read(assets.join("events.wasm"))
+        .unwrap()
+        .starts_with(b"\0asm"));
+    let loader = fs::read_to_string(assets.join("events.js")).unwrap();
+    assert!(loader.contains("export async function instantiate("));
+    assert_eq!(
+        fs::read_to_string(extracted.path().join("src/events.cor")).unwrap(),
+        handler
+    );
+    fs::write(events, handler.replace("current + 1", "\"wrong\"")).unwrap();
+    let invalid = build();
+    assert!(!invalid.status.success(), "{invalid:?}");
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("return type mismatch"));
+    assert_eq!(fs::read(output).unwrap(), original);
+}

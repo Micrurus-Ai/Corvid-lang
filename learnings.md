@@ -7827,3 +7827,7 @@ Use `ui.page` to render a list of typed views. The [static view reference](docs/
 ### HTML route responses
 
 Write `route GET "/" -> html:` inside a server and return a `String`. To render typed views, return `ui.page(title, children)`. The HTTP response uses `text/html`. You can declare `-> json Type` on other routes in the same server. The [browser views chapter](docs/book/19-browser-views.md#serve-a-page-and-an-api) includes a complete two-route application.
+
+### Package browser handlers with the server
+
+Build a scaffolded application's `src/main.cor` with `--target web`. Corvid packages server sources and compiles optional `src/events.cor` handlers to WebAssembly. The [interactive page example](docs/book/19-browser-views.md#package-an-interactive-page) documents `ui.action`, `ui.int_state`, `ui.text_state`, `ui.interactive_page`, and how to run the extracted archive.

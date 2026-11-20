@@ -58,3 +58,41 @@ server notes:
 ```
 
 From the project directory, run `corvid serve src/main.cor --listen 127.0.0.1:8080`. Open `http://127.0.0.1:8080/` to see the page. Request `/api/status` to read the JSON string `"ready"`. An `html` handler returns a `String` and the server sends it as HTML. Use view helpers to escape text inserted into the page.
+
+## Package an interactive page
+
+Run `corvid new counter`. In the new project, put the server in `src/main.cor`.
+
+```corvid-fragment
+import "./std/ui" as ui
+
+server counter:
+    route GET "/" -> html:
+        count = ui.int_state("Count", 0, [ui.action("Add one", "increment")])
+        echo = ui.text_state("Message", "", "echo")
+        return ui.interactive_page("Counter", [count, echo])
+
+    route GET "/api/status" -> json String:
+        return "ready"
+```
+
+Define the browser handlers in `src/events.cor`.
+
+```corvid-fragment
+agent increment(current: Int) -> Int:
+    return current + 1
+
+agent echo(message: String) -> String:
+    return message
+```
+
+Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an empty directory. From that directory, run `corvid serve src/main.cor --listen 127.0.0.1:8080` and open `http://127.0.0.1:8080/`. Click **Add one** or focus it and press Enter. Type into **Message** to see the text handler's result. Both handlers run in the browser. The server handles `/api/status`.
+
+| Function | Behavior |
+| --- | --- |
+| `action(label: String, handler: String) -> View` | Creates a button bound by name to an `(Int) -> Int` handler in `src/events.cor`. |
+| `int_state(label: String, initial: Int, controls: List<View>) -> View` | Groups controls around one integer. Each action receives its current value and returns the next one. |
+| `text_state(label: String, initial: String, handler: String) -> View` | Calls a `(String) -> String` handler on initial load and on each input event. |
+| `interactive_page(title: String, content: List<View>) -> String` | Renders the page and loads its compiled browser handlers. |
+
+The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.

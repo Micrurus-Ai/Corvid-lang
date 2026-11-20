@@ -520,7 +520,7 @@ pub(super) fn server_output_dir_for(source_path: &Path) -> PathBuf {
 }
 
 
-pub(super) fn wasm_output_dir_for(source_path: &Path) -> PathBuf {
+pub fn wasm_output_dir_for(source_path: &Path) -> PathBuf {
     let mut ancestor: Option<&Path> = source_path.parent();
     while let Some(dir) = ancestor {
         if dir.file_name().map(|n| n == "src").unwrap_or(false) {

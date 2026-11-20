@@ -376,6 +376,26 @@ pub(crate) fn cmd_serve(
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
+    // Serve only the compiled browser entrypoint and its companion Wasm.
+    // Read both once so running requests see a consistent build.
+    let asset_dir = corvid_driver::wasm_output_dir_for(file);
+    let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
+    if has_events {
+        for (name, mime) in [("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")] {
+            let path = asset_dir.join(name);
+            let bytes = Bytes::from(std::fs::read(&path)
+                .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
+            let route = format!("/target/wasm/{name}");
+            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+                anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
+            }
+            app = app.route(&route, on(MethodFilter::GET, move || {
+                let bytes = bytes.clone();
+                async move { ([(axum::http::header::CONTENT_TYPE, mime)], bytes) }
+            }));
+        }
+    }
+
     // Slice 52a: register EVERY declared route and execute its body via
     // the synthetic per-route handler agent — any shape (path params,
     // query struct, typed body). No more `501 not_implemented` for

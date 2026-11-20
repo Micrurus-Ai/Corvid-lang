@@ -29,6 +29,20 @@ public fn disclosure(label: String, content: List<View>) -> View:
 public fn page(title: String, content: List<View>) -> String:
     return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title></head><body><main>" + children(content) + "</main></body></html>"
 
+public fn action(label: String, handler: String) -> View:
+    return View("<button type=\"button\" data-corvid-action=\"" + escaped(handler) + "\" disabled>" + escaped(label) + "</button>")
+
+public fn int_state(label: String, initial: Int, controls: List<View>) -> View:
+    return View("<fieldset data-corvid-state><legend>" + escaped(label) + "</legend><output>" + initial.to_string() + "</output>" + children(controls) + "<span role=\"alert\"></span></fieldset>")
+
+public fn interactive_page(title: String, content: List<View>) -> String:
+    loader = View("<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script>")
+    return page(title, content + [loader])
+
+public fn text_state(label: String, initial: String, handler: String) -> View:
+    field = "<label>" + escaped(label) + "<input type=\"text\" value=\"" + escaped(initial) + "\" data-corvid-input=\"" + escaped(handler) + "\" disabled></label>"
+    return View("<fieldset data-corvid-state>" + field + "<output></output><span role=\"alert\"></span></fieldset>")
+
 # Submit named controls to an application-relative GET route.
 public fn query_form(path: String, controls: List<View>) -> View:
     return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
