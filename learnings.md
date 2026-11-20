@@ -6,6 +6,11 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 ---
 
+## Reading the ends of a list
+
+`items.first()` and `items.last()` return `Option<T>`. Use `Some(value)` and `None` to handle an empty list. A selected heap string remains usable after the list goes out of scope. For a list of options, an empty list gives `None` and an existing empty element gives `Some(None)`. The interpreter and native targets support these examples. [List methods and example](docs/book/05-types.md)
+
+
 ## Quick start
 
 ```bash
