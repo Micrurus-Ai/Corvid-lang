@@ -14,6 +14,8 @@ Each platform archive carries the project `LICENSE` and a target-specific Rust d
 
 The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow extracts the resulting archive in a fresh Debian 12 container and uses its CLI to create, check and run a starter.
 
+For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
+
 ## Channels
 
 ### Nightly
