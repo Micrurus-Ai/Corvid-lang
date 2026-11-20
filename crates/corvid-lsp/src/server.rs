@@ -36,13 +36,24 @@ impl LanguageServerState {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let id = request.get("id").cloned();
+        if self.shutdown_requested {
+            return match id {
+                Some(id) => vec![ServerMessage::Error {
+                    id: Some(id),
+                    code: -32600,
+                    message: "language server has shut down".into(),
+                }],
+                None => Vec::new(),
+            };
+        }
         match method {
             "initialize" => self.initialize(id),
             "initialized" => Vec::new(),
             "shutdown" => {
+                let Some(id) = id else { return Vec::new() };
                 self.shutdown_requested = true;
                 vec![ServerMessage::Response {
-                    id: id.unwrap_or(Value::Null),
+                    id,
                     result: Value::Null,
                 }]
             }

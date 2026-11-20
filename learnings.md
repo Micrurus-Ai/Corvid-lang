@@ -7803,3 +7803,5 @@ For hosted archives, the tag `v1.0.0-beta.2` selects a beta prerelease and `v1.0
 When a release CLI generates a Dockerfile with `corvid deploy package`, the Dockerfile selects that same release. A package created by the `v1.0.0-beta.2` CLI therefore uses `ARG CORVID_VERSION=v1.0.0-beta.2`.
 
 The server integration fixture builds its shared library in its own target directory, including when the workspace uses an external `CARGO_TARGET_DIR`. Run `cargo test --locked -p corvid-cli --test serve_smoke` to exercise the installed tool bridge through the CLI server.
+
+An editor client stops `corvid-lsp` by sending a `shutdown` request, waiting for its response, then sending an `exit` notification. The server exits successfully even while the input pipe is open. Sending `exit` before an acknowledged shutdown gives exit status 1.

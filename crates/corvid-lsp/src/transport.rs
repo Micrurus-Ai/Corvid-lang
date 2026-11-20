@@ -8,6 +8,7 @@ pub enum LspTransportError {
     Io(io::Error),
     Json(serde_json::Error),
     MissingContentLength,
+    ExitBeforeShutdown,
     InvalidHeader(String),
 }
 
@@ -17,6 +18,7 @@ impl fmt::Display for LspTransportError {
             LspTransportError::Io(error) => write!(f, "LSP I/O error: {error}"),
             LspTransportError::Json(error) => write!(f, "LSP JSON error: {error}"),
             LspTransportError::MissingContentLength => write!(f, "missing Content-Length header"),
+            LspTransportError::ExitBeforeShutdown => write!(f, "client sent exit before shutdown"),
             LspTransportError::InvalidHeader(header) => write!(f, "invalid LSP header `{header}`"),
         }
     }
@@ -50,12 +52,17 @@ where
     let mut reader = BufReader::new(reader);
     let mut state = LanguageServerState::new();
     while let Some(message) = read_message(&mut reader)? {
-        let should_exit = message.get("method").and_then(Value::as_str) == Some("exit");
+        if message.get("method").and_then(Value::as_str) == Some("exit")
+            && message.get("id").is_none()
+        {
+            return if state.shutdown_requested() {
+                Ok(())
+            } else {
+                Err(LspTransportError::ExitBeforeShutdown)
+            };
+        }
         for response in state.handle(message) {
             write_message(&mut writer, response)?;
-        }
-        if should_exit && state.shutdown_requested() {
-            break;
         }
     }
     Ok(())
@@ -110,6 +117,21 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn exit_requires_a_shutdown_request() {
+        let mut input = Vec::new();
+        for method in ["shutdown", "exit"] {
+            let body = json!({"jsonrpc": "2.0", "method": method}).to_string();
+            write!(input, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+        }
+        let mut output = Vec::new();
+        assert!(matches!(
+            run_server(input.as_slice(), &mut output),
+            Err(LspTransportError::ExitBeforeShutdown)
+        ));
+        assert!(output.is_empty());
+    }
 
     #[test]
     fn framed_initialize_request_produces_framed_response() {

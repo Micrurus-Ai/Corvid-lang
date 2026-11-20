@@ -3,6 +3,7 @@
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
+- [x] Verified the language server's shutdown handshake with the input pipe left open. The Windows x64 executable returned status 1 on premature exit, rejected requests after shutdown and returned status 0 after an acknowledged shutdown. The branch language-server test suite passed.
 - [x] Hosted CLI builds pin generated Dockerfiles to the release that produced them. Verified beta and stable tags through the package command and tested the source-build nightly fallback.
 - [x] Fixed the native tool fixture path in the server integration suite. With Cargo outputs redirected to a separate directory, the original Linux run failed two tests before starting the server. All 26 server tests passed after the fixture build used its own target directory.
 
