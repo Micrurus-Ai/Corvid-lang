@@ -198,7 +198,8 @@ try {
     }
     if ($installed) {
         Step "Extracting to $Root"
-        Expand-Archive -LiteralPath $zip -DestinationPath $archive -Force
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip, $archive)
 
         $extracted = Join-Path $archive "corvid-$target"
         $payload = if (Test-Path $extracted) { $extracted } else { $archive }

@@ -7809,3 +7809,5 @@ An editor client stops `corvid-lsp` by sending a `shutdown` request, waiting for
 If the Windows installer falls back to building from source and neither Cargo nor winget is available, it selects the Rust bootstrap executable for the detected Windows architecture.
 
 Set `CORVID_VERSION` to a release tag and rerun the installer to upgrade or roll back. The installer starts the staged CLI before replacing package files. Run the matching installer with `--uninstall` on Unix or `-Uninstall` on Windows to remove the package and preserve files outside its package directories.
+
+The Windows installer extracts downloaded archives into a fresh staging directory using the two-argument .NET ZIP API supported by Windows PowerShell 5.1.
