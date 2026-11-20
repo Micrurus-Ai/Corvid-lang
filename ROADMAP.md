@@ -58,6 +58,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] The [six native candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720) passed the installer-to-application check. The install guide records their tested Python runtimes.
   - [ ] The Windows x64 archive from be524e1f matched its workflow checksum. On this host Defender event 1121 blocked the staged executable at its version check (rule C1DB55AB-C21A-4637-BB3F-A12568109D35, executable SHA-256 `53264307be045efffae7d945470887b83c5ef218bbb068462dda2f02e6e7bb33`). Administrator review and successful installation under that policy remain pending.
 - [ ] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
+  - [x] The integrated Linux checkout passed the locked workspace library and integration suite in a clean build directory (194 test groups, 3,225 passed, zero failed, seven ignored). This run covers the integrated source snapshot, including the imported-function purity regression.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
 ## Verified task results
