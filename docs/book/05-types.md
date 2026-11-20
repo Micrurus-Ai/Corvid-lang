@@ -257,6 +257,21 @@ lists) with structural key equality and insertion-order iteration.
 `Map<String, V>` round-trips with JSON objects. Values with
 non-comparable types work as keys too (structural equality).
 
+For `Map<String, String>`, `length()` counts distinct keys.
+`contains_key(key)` also finds keys whose value is the empty string.
+`keys()` and `values()` produce new lists in first-insertion order.
+Replacing a value preserves its position. A snapshot keeps the strings it
+contained when you took it, even if another variable updates the same map.
+
+```corvid
+agent snapshot() -> String:
+    labels = {"first": "original"}
+    saved = labels.values()
+    alias = labels
+    alias["first"] = "updated"
+    return saved[0]
+```
+
 ## Option
 
 Construct with `Some(x)` / `None`; consume with postfix `?`, which

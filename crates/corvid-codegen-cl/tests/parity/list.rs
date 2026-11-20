@@ -117,3 +117,8 @@ agent main() -> Int:
         98,
     );
 }
+
+#[test]
+fn ordered_map_snapshots_survive_growth_and_replacement() {
+    super::assert_parity_bool_without_tools(include_str!("string_map_iteration.cor"), true);
+}

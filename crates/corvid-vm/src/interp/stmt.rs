@@ -747,6 +747,7 @@ impl<'ir> Interpreter<'ir> {
                 op,
                 value,
                 span,
+                ..
             } => {
                 let mut idx_values: Vec<Option<Value>> = Vec::with_capacity(path.len());
                 for seg in path {

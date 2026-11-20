@@ -105,6 +105,7 @@ fn is_refcounted_type(ty: &Type) -> bool {
         | Type::Result(_, _)
         | Type::Partial(_)
         | Type::ResumeToken(_) => true,
+        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
         Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type(inner),
         _ => false,
     }
@@ -112,7 +113,7 @@ fn is_refcounted_type(ty: &Type) -> bool {
 
 fn is_native_value_type(ty: &Type) -> bool {
     match ty {
-        Type::Map(_, _) => false,
+        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),
@@ -200,6 +201,10 @@ fn scan_block(block: &IrBlock, current_return_ty: &Type) -> Result<(), NotNative
 }
 
 fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeReason> {
+    if let Some((_, key, value)) = corvid_codegen_cl::string_map_assignment(stmt) {
+        scan_expr(key, current_return_ty)?;
+        return scan_expr(value, current_return_ty);
+    }
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty),
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
@@ -256,6 +261,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
     match &expr.kind {
         // Map is interpreter-only in 45g; a MapLiteral anywhere routes
         // the program to the interpreter tier.
+        IrExprKind::MapLiteral { keys, values } if corvid_codegen_cl::native_string_map(&expr.ty) => {
+            keys.iter().chain(values).try_for_each(|item| scan_expr(item, current_return_ty))
+        }
         IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::Match { scrutinee, arms }
             if (is_native_option_type(&scrutinee.ty) || is_native_result_type(&scrutinee.ty))
@@ -282,6 +290,16 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             receiver,
             ..
         } if is_native_option_type(&expr.ty) => scan_expr(receiver, current_return_ty),
+        IrExprKind::BuiltinMethod {
+            kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
+        } => scan_expr(receiver, current_return_ty),
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if corvid_codegen_cl::native_string_map(&receiver.ty) && matches!(kind,
+                corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues |
+                corvid_types::BuiltinMethodKind::MapLength | corvid_types::BuiltinMethodKind::MapContainsKey) => {
+            scan_expr(receiver, current_return_ty)?;
+            args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty))
+        }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

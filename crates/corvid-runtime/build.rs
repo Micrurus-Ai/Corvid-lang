@@ -24,6 +24,7 @@ fn main() {
         .file(runtime_dir.join("alloc.c"))
         .file(runtime_dir.join("strings.c"))
         .file(runtime_dir.join("lists.c"))
+        .file(runtime_dir.join("ordered_map.c"))
         .file(runtime_dir.join("entry.c"))
         .file(runtime_dir.join("shim.c"))
         .file(runtime_dir.join("weak.c"))
@@ -71,6 +72,7 @@ fn main() {
     println!("cargo:rerun-if-changed=runtime/alloc.c");
     println!("cargo:rerun-if-changed=runtime/strings.c");
     println!("cargo:rerun-if-changed=runtime/lists.c");
+    println!("cargo:rerun-if-changed=runtime/ordered_map.c");
     println!("cargo:rerun-if-changed=runtime/entry.c");
     println!("cargo:rerun-if-changed=runtime/shim.c");
     println!("cargo:rerun-if-changed=runtime/weak.c");

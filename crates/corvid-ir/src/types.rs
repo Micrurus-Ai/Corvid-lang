@@ -770,6 +770,7 @@ pub enum IrStmt {
     /// the path evaluate exactly once.
     Assign {
         local_id: LocalId,
+        root_ty: Type,
         name: String,
         path: Vec<IrPathSeg>,
         op: Option<BinaryOp>,

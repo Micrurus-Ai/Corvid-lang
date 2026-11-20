@@ -94,7 +94,7 @@ pub fn analyze_agent(agent: &IrAgent) -> (Cfg, OwnershipPlan) {
 /// ```
 pub fn analyze_agent_full(agent: &IrAgent) -> (Cfg, Liveness, OwnershipPlan) {
     let built = build_cfg(agent);
-    let cfg = built.cfg;
+    let mut cfg = built.cfg;
     let ir_paths = built.ir_paths;
     let if_cfg_coords = built.if_cfg_coords;
 
@@ -109,7 +109,18 @@ pub fn analyze_agent_full(agent: &IrAgent) -> (Cfg, Liveness, OwnershipPlan) {
         }
     }
 
-    let liveness = compute_liveness(&cfg, &param_locals);
+    let mut liveness = compute_liveness(&cfg, &param_locals);
+    if !built.loop_exits.is_empty() {
+        // Keep outer references needed by possible future iterations alive
+        // through the common loop exit. Empty loops and break take that exit
+        // without executing the last source-level use in the loop body.
+        for (head, exit) in built.loop_exits {
+            let CfgStmt::Other { reads } = &mut cfg.blocks[exit].stmts[0] else { unreachable!() };
+            reads.extend(liveness.live_in_at_block(head).iter().map(|&local_id|
+                LocalRead { local_id, kind: ReadKind::Borrowed }));
+        }
+        liveness = compute_liveness(&cfg, &param_locals);
+    }
     let mut plan = build_plan(&cfg, &liveness, &param_locals);
     plan.ir_paths = ir_paths;
     plan.branch_drops = build_branch_drops(&cfg, &liveness, &if_cfg_coords, &param_locals);

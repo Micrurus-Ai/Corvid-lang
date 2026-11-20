@@ -111,8 +111,10 @@ impl<'a> Checker<'a> {
                 span,
             } => self.check_struct_literal(name, fields, spread.as_deref(), *rest, *span),
             Expr::MapLiteral { entries, span } => {
-                let mut key_ty = Type::Unknown;
-                let mut val_ty = Type::Unknown;
+                let (mut key_ty, mut val_ty) = match (entries.is_empty(), expected) {
+                    (true, Some(Type::Map(key, value))) => ((**key).clone(), (**value).clone()),
+                    _ => (Type::Unknown, Type::Unknown),
+                };
                 for (i, (k, v)) in entries.iter().enumerate() {
                     let kt = self.check_expr(k);
                     let vt = self.check_expr(v);

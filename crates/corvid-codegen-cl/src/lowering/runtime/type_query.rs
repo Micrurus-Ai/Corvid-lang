@@ -509,6 +509,7 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
         | Type::Result(_, _)
         | Type::Partial(_)
         | Type::ResumeToken(_) => true,
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type(inner),
         Type::Grounded(inner) => is_refcounted_type(inner),
         Type::Tainted(inner) => is_refcounted_type(inner),
@@ -518,7 +519,7 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
 
 pub fn is_native_value_type(ty: &Type) -> bool {
     match ty {
-        Type::Map(_, _) => false,
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),

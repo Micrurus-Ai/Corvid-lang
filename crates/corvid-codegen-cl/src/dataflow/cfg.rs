@@ -96,6 +96,7 @@ pub enum ReadKind {
 
 pub(super) struct BuiltCfg {
     pub cfg: Cfg,
+    pub loop_exits: Vec<(BlockId, BlockId)>,
     pub ir_paths: BTreeMap<ProgramPoint, IrPath>,
     pub if_cfg_coords: BTreeMap<IrPath, IfCfgCoords>,
 }
@@ -110,6 +111,7 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
             entry,
         },
         ir_paths: builder.ir_paths,
+        loop_exits: builder.loop_exits,
         if_cfg_coords: builder.if_cfg_coords,
     }
 }
@@ -118,6 +120,8 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
 // ---------------------------------------------------------------------------
 
 struct CfgBuilder {
+    loop_targets: Vec<(BlockId, BlockId)>,
+    loop_exits: Vec<(BlockId, BlockId)>,
     blocks: Vec<CfgBlock>,
     /// Maps each CFG `ProgramPoint` to the IR-tree path that produced
     /// it. Populated as `lower_block` walks; consumed by
@@ -147,6 +151,8 @@ pub(super) struct IfCfgCoords {
 impl CfgBuilder {
     fn new() -> Self {
         Self {
+            loop_targets: Vec::new(),
+            loop_exits: Vec::new(),
             blocks: Vec::new(),
             ir_paths: BTreeMap::new(),
             if_cfg_coords: BTreeMap::new(),
@@ -198,6 +204,13 @@ impl CfgBuilder {
                 // rejects it at lowering. For dataflow purposes it reads
                 // the path's index expressions and the value (all
                 // non-consuming: the root local stays live).
+                IrStmt::Assign { .. } if crate::string_map_assignment(stmt).is_some() => {
+                    let (id, key, value) = crate::string_map_assignment(stmt).unwrap();
+                    let mut reads = collect_reads(key, true);
+                    reads.extend(collect_reads(value, true));
+                    reads.push(LocalRead { local_id: id, kind: ReadKind::Borrowed });
+                    self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                }
                 IrStmt::Assign { path, value, .. } => {
                     let mut reads = Vec::new();
                     for seg in path {
@@ -304,6 +317,9 @@ impl CfgBuilder {
                     // body -> head (backedge), head -> after. The
                     // condition's reads are non-consuming (the head
                     // re-reads them every iteration).
+                    let head = self.alloc_block();
+                    self.add_succ(cur, head);
+                    cur = head;
                     let cond_reads = collect_reads(cond, false);
                     self.push_stmt(cur, CfgStmt::Branch { reads: cond_reads }, my_path.clone());
                     let body_id = self.alloc_block();
@@ -312,10 +328,14 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::WhileBody);
+                    self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
+                    self.loop_targets.pop();
                     if let Some(ab) = after_body {
                         self.add_succ(ab, cur);
                     }
+                    self.loop_exits.push((cur, after_loop));
+                    self.push_stmt(after_loop, CfgStmt::Other { reads: Vec::new() }, my_path);
                     cur = after_loop;
                     continue;
                 }
@@ -326,27 +346,20 @@ impl CfgBuilder {
                     body,
                     ..
                 } => {
-                    // For-loop iter is BORROWED when it's a bare Local
-                    // (the codegen peephole `lower_container_maybe_borrowed`
-                    // reads the Variable without retaining; the iter's
-                    // +1 stays with the Local, not the loop). Classify
-                    // as Borrowed so the pass schedules a Drop after
-                    // last-use (i.e., after the loop) rather than
-                    // assuming consumption.
-                    //
-                    // For a non-bare iter (list literal, call result),
-                    // codegen's for-loop epilogue releases the temp
-                    // unconditionally — the pass doesn't need to track
-                    // it. Classifying as Borrowed here still yields
-                    // correct behavior because the classification only
-                    // affects Local reads.
+                    // Native iteration borrows a named iterable and owns a temporary.
                     let iter_reads = collect_reads(iter, false);
+                    // Evaluate the iterable once. The back edge returns to
+                    // the loop head, not to preceding local initializers.
+                    self.push_stmt(cur, CfgStmt::Expr { reads: iter_reads }, my_path.clone());
+                    let head = self.alloc_block();
+                    self.add_succ(cur, head);
+                    cur = head;
                     self.push_stmt(
                         cur,
                         CfgStmt::LoopHead {
                             var: *var_local,
                             var_ty: iter_element_type(iter),
-                            reads: iter_reads,
+                            reads: Vec::new(),
                         },
                         my_path.clone(),
                     );
@@ -358,10 +371,14 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::ForBody);
+                    self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
+                    self.loop_targets.pop();
                     if let Some(ab) = after_body {
                         self.add_succ(ab, cur);
                     }
+                    self.loop_exits.push((cur, after_loop));
+                    self.push_stmt(after_loop, CfgStmt::Other { reads: Vec::new() }, my_path);
                     cur = after_loop;
                 }
                 IrStmt::Approve { args, .. } => {
@@ -371,7 +388,14 @@ impl CfgBuilder {
                     }
                     self.push_stmt(cur, CfgStmt::Other { reads }, my_path);
                 }
-                IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => {
+                IrStmt::Break { .. } | IrStmt::Continue { .. } => {
+                    if let Some(&(head, exit)) = self.loop_targets.last() {
+                        self.push_stmt(cur, CfgStmt::Other { reads: Vec::new() }, my_path);
+                        self.add_succ(cur, if matches!(stmt, IrStmt::Break { .. }) { exit } else { head });
+                        return None;
+                    }
+                }
+                IrStmt::Pass { .. } => {
                     self.push_stmt(cur, CfgStmt::Other { reads: Vec::new() }, my_path);
                 }
                 // Dup/Drop should not appear in input IR for .6a — the
@@ -431,8 +455,9 @@ fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
 fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
     match &expr.kind {
         IrExprKind::MapLiteral { keys, values } => {
-            for e in keys.iter().chain(values) {
-                out.extend(collect_reads(e, false));
+            for (key, value) in keys.iter().zip(values) {
+                walk_expr(key, true, out);
+                walk_expr(value, true, out);
             }
         }
         IrExprKind::Match { scrutinee, arms } => {

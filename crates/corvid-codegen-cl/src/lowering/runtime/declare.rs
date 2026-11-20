@@ -26,6 +26,17 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare string_concat: {e}"), Span::new(0, 0))
         })?;
 
+    let mut declare = |name: &str, params: usize, returns_value: bool| {
+        let mut sig = module.make_signature();
+        sig.params.resize(params, AbiParam::new(I64));
+        if returns_value { sig.returns.push(AbiParam::new(I64)); }
+        module.declare_function(name, Linkage::Import, &sig)
+            .map_err(|error| CodegenError::cranelift(format!("declare {name}: {error}"), Span::new(0, 0)))
+    };
+    let map_new = declare("corvid_ordered_map_new", 1, true)?;
+    let map_set = declare("corvid_ordered_map_set", 3, false)?;
+    let map_find = declare("corvid_ordered_map_find", 2, true)?;
+    let map_snapshot = declare("corvid_ordered_map_snapshot", 3, true)?;
     let mut eq_sig = module.make_signature();
     eq_sig.params.push(AbiParam::new(I64));
     eq_sig.params.push(AbiParam::new(I64));
@@ -1151,6 +1162,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
+        map_new, map_set, map_find, map_snapshot,
         string_concat: concat_id,
         string_eq: eq_id,
         string_cmp: cmp_id,

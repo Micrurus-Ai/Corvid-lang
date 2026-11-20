@@ -575,6 +575,7 @@ fn transform_agent(
 /// forthcoming 17b-3 / 17b-5 escape + reuse analyses).
 pub(crate) fn is_refcounted(ty: &Type) -> bool {
     match ty {
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::String | Type::Struct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }
@@ -608,6 +609,7 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
 #[allow(dead_code)]
 pub(crate) fn is_strong_refcounted(ty: &Type) -> bool {
     match ty {
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::String | Type::Struct(_) | Type::List(_) | Type::Result(_, _) => true,
         // Weak is never a strong edge — it carries a weak slot.
         Type::Weak(_, _) => false,

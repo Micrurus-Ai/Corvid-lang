@@ -50,6 +50,49 @@ pub(super) fn lower_expr(
             "Page<Item> responses are interpreter-only in 52c-2 (served via corvid serve)",
             expr.span,
         )),
+        IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
+            let capacity = builder.ins().iconst(I64, keys.len() as i64);
+            let new = module.declare_func_in_func(runtime.map_new, builder.func);
+            let call = builder.ins().call(new, &[capacity]);
+            let map = builder.inst_results(call)[0];
+            let set = module.declare_func_in_func(runtime.map_set, builder.func);
+            for (key, value) in keys.iter().zip(values) {
+                let key = lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                let value = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                builder.ins().call(set, &[map, key, value]);
+            }
+            Ok(map)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_map(&receiver.ty) => {
+            use corvid_types::BuiltinMethodKind::*;
+            let (map, borrowed) = lower_container_maybe_borrowed(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let value = match kind {
+                MapLength => {
+                    let entries = builder.ins().load(I64, MemFlags::trusted(), map, 0);
+                    builder.ins().load(I64, MemFlags::trusted(), entries, 0)
+                }
+                MapContainsKey => {
+                    let (key, borrowed_key) = lower_container_maybe_borrowed(builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                    let find = module.declare_func_in_func(runtime.map_find, builder.func);
+                    let call = builder.ins().call(find, &[map, key]);
+                    let slot = builder.inst_results(call)[0];
+                    if !borrowed_key { emit_release(builder, module, runtime, key); }
+                    builder.ins().icmp_imm(IntCC::NotEqual, slot, 0)
+                }
+                MapKeys | MapValues => {
+                    let info = runtime.list_typeinfos.get(&Type::String).ok_or_else(|| CodegenError::cranelift("missing string list typeinfo", expr.span))?;
+                    let global = module.declare_data_in_func(*info, builder.func);
+                    let addr = builder.ins().symbol_value(I64, global);
+                    let values = builder.ins().iconst(I64, i64::from(*kind == MapValues));
+                    let snapshot = module.declare_func_in_func(runtime.map_snapshot, builder.func);
+                    let call = builder.ins().call(snapshot, &[map, values, addr]);
+                    builder.inst_results(call)[0]
+                }
+                _ => return Err(CodegenError::not_supported("map method requires the interpreter", expr.span)),
+            };
+            if !borrowed { emit_release(builder, module, runtime, map); }
+            Ok(value)
+        }
         IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
             "Map<K, V> is interpreter-only in 45g",
             expr.span,
@@ -96,6 +139,18 @@ pub(super) fn lower_expr(
                 emit_release(builder, module, runtime, list);
             }
             Ok(output)
+        }
+        IrExprKind::BuiltinMethod {
+            kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
+        } => {
+            let (list, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
+            if !borrowed {
+                emit_release(builder, module, runtime, list);
+            }
+            Ok(length)
         }
         IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
             "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",

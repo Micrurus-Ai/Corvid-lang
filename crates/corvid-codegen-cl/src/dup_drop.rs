@@ -196,27 +196,8 @@ pub fn apply_plan(agent: &IrAgent, plan: &OwnershipPlan) -> IrAgent {
         });
     }
 
-    for (parent, inserts) in group {
-        let target = navigate_mut(&mut out.body, &parent);
-        for (idx, stmt, side) in inserts {
-            let insert_at = match side {
-                InsertionSide::Before => idx,
-                InsertionSide::After => idx + 1,
-            };
-            // Bound-check: if idx is out of range (shouldn't happen
-            // for a well-formed plan), skip rather than panic.
-            if insert_at <= target.stmts.len() {
-                target.stmts.insert(insert_at, stmt);
-            }
-        }
-    }
-
-    // Apply hoists AFTER the plain insertions. Hoists must run last
-    // because they depend on the Return statement's index being
-    // stable; if another drop_after widened the same block between
-    // group-sort and hoist-apply, the Return's index would shift.
-    // We sort hoists largest-idx-first so earlier hoists don't
-    // invalidate later ones in the same block.
+    // Return hoists and branch-tail edits use original statement coordinates.
+    // Apply them before inserting siblings that would shift those coordinates.
     hoists.sort_by(|a, b| b.return_idx.cmp(&a.return_idx));
     for hoist in hoists {
         apply_hoist(&mut out.body, &hoist);
@@ -234,6 +215,23 @@ pub fn apply_plan(agent: &IrAgent, plan: &OwnershipPlan) -> IrAgent {
     branch_drops.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
     for (if_path, drops) in branch_drops {
         apply_branch_drops(&mut out.body, if_path, drops);
+    }
+
+    // A parent path is a prefix of each child path. Visit children first
+    // so inserting statements in a parent never invalidates a child index.
+    for (parent, inserts) in group.into_iter().rev() {
+        let target = navigate_mut(&mut out.body, &parent);
+        for (idx, stmt, side) in inserts {
+            let insert_at = match side {
+                InsertionSide::Before => idx,
+                InsertionSide::After => idx + 1,
+            };
+            // Bound-check: if idx is out of range (shouldn't happen
+            // for a well-formed plan), skip rather than panic.
+            if insert_at <= target.stmts.len() {
+                target.stmts.insert(insert_at, stmt);
+            }
+        }
     }
 
     // Block-exit drops: only handle the entry block (block 0 in the

@@ -85,6 +85,15 @@ fn lower_stmt(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) -> Result<BlockOutcome, CodegenError> {
+    if let Some((id, key, value)) = crate::string_map_assignment(stmt) {
+        let (var, _) = env.get(&id).ok_or_else(|| CodegenError::cranelift("unbound map", value.span))?;
+        let key = lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+        let value = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+        let set = module.declare_func_in_func(runtime.map_set, builder.func);
+        let map = builder.use_var(*var);
+        builder.ins().call(set, &[map, key, value]);
+        return Ok(BlockOutcome::Normal);
+    }
     match stmt {
         IrStmt::Yield { span, .. } => Err(CodegenError::not_supported(
             "Stream lowering not yet implemented",
@@ -462,7 +471,8 @@ fn lower_for(
     runtime: &RuntimeFuncs,
 ) -> Result<BlockOutcome, CodegenError> {
     let string_iter = matches!(&iter.ty, Type::String);
-    let string_iter_needs_manual_cleanup = string_iter && !block_mentions_local(body, var_local);
+    let uses_item = block_mentions_local(body, var_local);
+    let string_iter_needs_manual_cleanup = string_iter && !uses_item;
     let elem_ty = match &iter.ty {
         Type::List(elem) => (**elem).clone(),
         Type::String => Type::String,
@@ -568,7 +578,15 @@ fn lower_for(
             emit_retain(builder, module, runtime, elem_val);
         }
     }
-    builder.def_var(loop_var, elem_val);
+    // A loop binding consumes its own reference. The list still owns the slot.
+    if runtime.dup_drop_enabled && elem_refcounted && !string_iter {
+        if uses_item {
+            emit_retain(builder, module, runtime, elem_val);
+            builder.def_var(loop_var, elem_val);
+        }
+    } else {
+        builder.def_var(loop_var, elem_val);
+    }
 
     scope_stack.push(Vec::new());
     if string_iter {

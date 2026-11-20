@@ -382,6 +382,7 @@ fn emit_grounded_handle_store(
 /// `CodegenError::NotSupported` with a descriptive feature boundary.
 pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> {
     match ty {
+        Type::Map(_, _) if crate::native_string_map(ty) => Ok(I64),
         Type::Map(_, _) => Err(CodegenError::not_supported(
             "Map<K, V> is interpreter-only in 45g",
             Span::new(0, 0),

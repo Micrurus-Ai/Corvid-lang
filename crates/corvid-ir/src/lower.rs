@@ -1267,6 +1267,7 @@ impl<'a> Lowerer<'a> {
                 path_rev.reverse();
                 IrStmt::Assign {
                     local_id,
+                    root_ty: self.remap_struct_type(self.types.get(&root.span()).cloned().unwrap_or(Type::Unknown)),
                     name,
                     path: path_rev,
                     op: *op,
@@ -2207,6 +2208,10 @@ impl<'a> Lowerer<'a> {
                     .unwrap_or(Type::Unknown),
             },
             TypeRef::Generic { name, args, .. } => match name.name.as_str() {
+                "Map" if args.len() == 2 => Type::Map(
+                    Box::new(self.type_ref_to_type(&args[0])),
+                    Box::new(self.type_ref_to_type(&args[1])),
+                ),
                 "List" if args.len() == 1 => Type::List(Box::new(self.type_ref_to_type(&args[0]))),
                 "Stream" if args.len() == 1 => {
                     Type::Stream(Box::new(self.type_ref_to_type(&args[0])))
