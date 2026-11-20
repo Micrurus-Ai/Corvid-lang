@@ -4,6 +4,7 @@ After verifying each completed roadmap task, commit its implementation, tests an
 
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
 - [x] Hosted CLI builds pin generated Dockerfiles to the release that produced them. Verified beta and stable tags through the package command and tested the source-build nightly fallback.
+- [x] Fixed the native tool fixture path in the server integration suite. With Cargo outputs redirected to a separate directory, the original Linux run failed two tests before starting the server. All 26 server tests passed after the fixture build used its own target directory.
 
 > Phase-by-phase plan from v0.1 (complete) to v1.0 (public launch).
 > For feature definitions see [`FEATURES.md`](./FEATURES.md).

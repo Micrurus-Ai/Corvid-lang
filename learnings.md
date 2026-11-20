@@ -7801,3 +7801,5 @@ When preparing a local candidate with `corvid release build`, use a version that
 For hosted archives, the tag `v1.0.0-beta.2` selects a beta prerelease and `v1.0.0` selects a stable release. In both cases the version following `v` must match the CLI package version.
 
 When a release CLI generates a Dockerfile with `corvid deploy package`, the Dockerfile selects that same release. A package created by the `v1.0.0-beta.2` CLI therefore uses `ARG CORVID_VERSION=v1.0.0-beta.2`.
+
+The server integration fixture builds its shared library in its own target directory, including when the workspace uses an external `CARGO_TARGET_DIR`. Run `cargo test --locked -p corvid-cli --test serve_smoke` to exercise the installed tool bridge through the CLI server.

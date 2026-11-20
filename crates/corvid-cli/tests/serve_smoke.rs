@@ -698,7 +698,9 @@ fn build_serve_tools_fixture() -> PathBuf {
     );
 
     let status = Command::new(env!("CARGO"))
-        .args(["build", "--release", "--manifest-path"])
+        .args(["build", "--release", "--target-dir"])
+        .arg(fixture_dir.join("target"))
+        .arg("--manifest-path")
         .arg(&manifest)
         .status()
         .expect("spawn cargo build for serve_tools_fixture");
