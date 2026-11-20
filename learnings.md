@@ -7819,3 +7819,5 @@ To try a Python-backed tool from the terminal, use `corvid new --with-python-too
 `corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
 
 A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error. See the [module guide](docs/book/06-modules.md#reusing-a-named-function).
+
+The C runtime calls type-info destructors and trace markers synchronously. Tests can keep callback counters and recorded pointers thread-local so concurrent tests do not reset each other's observations.
