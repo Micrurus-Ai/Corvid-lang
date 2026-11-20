@@ -272,6 +272,23 @@ agent snapshot() -> String:
     return saved[0]
 ```
 
+Use `table[key]` or `table.get(key)` for a typed lookup. Both return
+`Option<V>` for a `Map<String, V>`. The native target supports integer,
+string and local record values, as well as lists and options of those
+values. A snapshot from `values()` keeps the same element type.
+
+```corvid
+agent count(totals: Map<String, Int>, key: String) -> Int:
+    return match totals[key]:
+        Some(amount) -> amount
+        None -> -1
+```
+
+For a `Map<String, Option<Int>>`, a missing key gives `None`. A key
+mapped to `None` gives `Some(None)`. On integer maps, `totals[key] += 1`
+updates an existing entry. Initialize a new counter with `totals[key] = 0`
+before incrementing it.
+
 ## Option
 
 Construct with `Some(x)` / `None`; consume with postfix `?`, which

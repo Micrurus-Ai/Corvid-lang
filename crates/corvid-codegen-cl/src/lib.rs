@@ -29,16 +29,8 @@ pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
 
-pub fn native_string_map(ty: &corvid_types::Type) -> bool {
-    use corvid_types::Type;
-    matches!(ty, Type::Map(key, value) if **key == Type::String && **value == Type::String)
-}
-
-pub fn string_map_assignment(stmt: &corvid_ir::IrStmt) -> Option<(corvid_resolve::LocalId, &corvid_ir::IrExpr, &corvid_ir::IrExpr)> {
-    let corvid_ir::IrStmt::Assign { local_id, root_ty, path, op: None, value, .. } = stmt else { return None };
-    let [corvid_ir::IrPathSeg::Index(key)] = path.as_slice() else { return None };
-    native_string_map(root_ty).then_some((*local_id, key, value))
-}
+mod map_support;
+pub use map_support::{native_string_map, native_string_map_lookup, string_map_assignment, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
 pub mod staticlib_discovery;
 pub mod target;

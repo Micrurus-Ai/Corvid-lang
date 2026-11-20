@@ -15,6 +15,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_eq: FuncId,
     pub map_new: FuncId,
     pub map_set: FuncId,
+    pub map_require_int: FuncId,
     pub map_find: FuncId,
     pub map_snapshot: FuncId,
     pub string_cmp: FuncId,
@@ -37,6 +38,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// Runtime-provided `corvid_typeinfo_String` data
     /// symbol. Imported so codegen can relocate its address into
     /// static string literals and List<String>'s elem_typeinfo slot.
+    pub map_typeinfo: cranelift_module::DataId,
     pub string_typeinfo: cranelift_module::DataId,
     pub weak_box_typeinfo: cranelift_module::DataId,
     // Entry helpers used by the codegen-emitted `main`.

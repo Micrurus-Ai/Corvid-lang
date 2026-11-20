@@ -31,7 +31,14 @@ impl<'a> Checker<'a> {
                 Literal::Bool(_) => Type::Bool,
                 Literal::Nothing => Type::Nothing,
             },
-            Expr::Ident { name, .. } => self.type_of_ident(name),
+            Expr::Ident { name, .. } => {
+                let ty = self.type_of_ident(name);
+                match (&ty, expected) {
+                    (Type::Option(inner), Some(expected @ Type::Option(_)))
+                        if **inner == Type::Unknown && matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::None))) => expected.clone(),
+                    _ => ty,
+                }
+            }
             Expr::Call { callee, args, span } => self.check_call(callee, args, *span, expected),
             Expr::FieldAccess {
                 target,
@@ -58,33 +65,34 @@ impl<'a> Checker<'a> {
                             index.span(),
                         ));
                     }
-                    return Type::Option(val_ty.clone());
-                }
-                let index_ty = self.check_expr(index);
-                // Index must be Int.
-                if !matches!(index_ty, Type::Int | Type::Unknown) {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::TypeMismatch {
-                            expected: "Int".into(),
-                            got: index_ty.display_name(),
-                            context: "list index".into(),
-                        },
-                        index.span(),
-                    ));
-                }
-                match target_ty {
-                    Type::List(elem) => (*elem).clone(),
-                    Type::Unknown => Type::Unknown,
-                    other => {
+                    Type::Option(val_ty.clone())
+                } else {
+                    let index_ty = self.check_expr(index);
+                    // Index must be Int.
+                    if !matches!(index_ty, Type::Int | Type::Unknown) {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::TypeMismatch {
-                                expected: "List".into(),
-                                got: other.display_name(),
-                                context: "indexed value".into(),
+                                expected: "Int".into(),
+                                got: index_ty.display_name(),
+                                context: "list index".into(),
                             },
-                            *span,
+                            index.span(),
                         ));
-                        Type::Unknown
+                    }
+                    match target_ty {
+                        Type::List(elem) => (*elem).clone(),
+                        Type::Unknown => Type::Unknown,
+                        other => {
+                            self.errors.push(TypeError::new(
+                                TypeErrorKind::TypeMismatch {
+                                    expected: "List".into(),
+                                    got: other.display_name(),
+                                    context: "indexed value".into(),
+                                },
+                                *span,
+                            ));
+                            Type::Unknown
+                        }
                     }
                 }
             }
@@ -117,7 +125,12 @@ impl<'a> Checker<'a> {
                 };
                 for (i, (k, v)) in entries.iter().enumerate() {
                     let kt = self.check_expr(k);
-                    let vt = self.check_expr(v);
+                    let expected_value = match expected {
+                        Some(Type::Map(_, value)) => Some(value.as_ref()),
+                        _ if i > 0 => Some(&val_ty),
+                        _ => None,
+                    };
+                    let vt = self.check_expr_as(v, expected_value);
                     if i == 0 {
                         key_ty = kt;
                         val_ty = vt;
@@ -160,9 +173,17 @@ impl<'a> Checker<'a> {
             Expr::List { items, span } => {
                 // Infer element type from the first item; every other
                 // item must be assignable to it.
-                let mut elem_ty = Type::Unknown;
+                let mut elem_ty = match (items.is_empty(), expected) {
+                    (true, Some(Type::List(elem))) => elem.as_ref().clone(),
+                    _ => Type::Unknown,
+                };
                 for (i, item) in items.iter().enumerate() {
-                    let item_ty = self.check_expr(item);
+                    let expected_item = match expected {
+                        Some(Type::List(element)) => Some(element.as_ref()),
+                        _ if i > 0 => Some(&elem_ty),
+                        _ => None,
+                    };
+                    let item_ty = self.check_expr_as(item, expected_item);
                     if i == 0 {
                         elem_ty = item_ty;
                     } else if !item_ty.is_assignable_to(&elem_ty)

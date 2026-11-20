@@ -34,6 +34,35 @@ pub(super) fn lower_expr(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
+    if let Some((receiver, index)) = crate::native_string_map_lookup(expr) {
+        let (map, map_borrowed) = lower_container_maybe_borrowed(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+        let (key, key_borrowed) = lower_container_maybe_borrowed(builder, index, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+        let find = module.declare_func_in_func(runtime.map_find, builder.func);
+        let call = builder.ins().call(find, &[map, key]);
+        let slot = builder.inst_results(call)[0];
+        let result = if let Type::Option(element) = &expr.ty {
+            let found = builder.create_block();
+            let done = builder.create_block();
+            let result = builder.append_block_param(done, I64);
+            builder.ins().brif(slot, found, &[], done, &[slot.into()]);
+            builder.switch_to_block(found);
+            builder.seal_block(found);
+            let item = builder.ins().load(I64, MemFlags::trusted(), slot, 0);
+            if is_refcounted_type(element) { emit_retain(builder, module, runtime, item); }
+            let some = if option_uses_wrapper(&expr.ty) {
+                emit_option_wrapper_value(builder, module, runtime, &expr.ty, item, element, expr.span)?
+            } else { item };
+            builder.ins().jump(done, &[some.into()]);
+            builder.switch_to_block(done);
+            builder.seal_block(done);
+            result
+        } else {
+            builder.ins().icmp_imm(IntCC::NotEqual, slot, 0)
+        };
+        if !key_borrowed { emit_release(builder, module, runtime, key); }
+        if !map_borrowed { emit_release(builder, module, runtime, map); }
+        return Ok(result);
+    }
     match &expr.kind {
         IrExprKind::Match { scrutinee, arms } => match_value::lower_match(
             builder, expr, scrutinee, arms, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
@@ -53,7 +82,9 @@ pub(super) fn lower_expr(
         IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
             let capacity = builder.ins().iconst(I64, keys.len() as i64);
             let new = module.declare_func_in_func(runtime.map_new, builder.func);
-            let call = builder.ins().call(new, &[capacity]);
+            let Type::Map(_, element) = &expr.ty else { unreachable!() };
+            let owns_values = builder.ins().iconst(I64, i64::from(is_refcounted_type(element)));
+            let call = builder.ins().call(new, &[capacity, owns_values]);
             let map = builder.inst_results(call)[0];
             let set = module.declare_func_in_func(runtime.map_set, builder.func);
             for (key, value) in keys.iter().zip(values) {
@@ -63,7 +94,7 @@ pub(super) fn lower_expr(
             }
             Ok(map)
         }
-        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_map(&receiver.ty) => {
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_string_map(&receiver.ty) => {
             use corvid_types::BuiltinMethodKind::*;
             let (map, borrowed) = lower_container_maybe_borrowed(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let value = match kind {
@@ -71,16 +102,9 @@ pub(super) fn lower_expr(
                     let entries = builder.ins().load(I64, MemFlags::trusted(), map, 0);
                     builder.ins().load(I64, MemFlags::trusted(), entries, 0)
                 }
-                MapContainsKey => {
-                    let (key, borrowed_key) = lower_container_maybe_borrowed(builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
-                    let find = module.declare_func_in_func(runtime.map_find, builder.func);
-                    let call = builder.ins().call(find, &[map, key]);
-                    let slot = builder.inst_results(call)[0];
-                    if !borrowed_key { emit_release(builder, module, runtime, key); }
-                    builder.ins().icmp_imm(IntCC::NotEqual, slot, 0)
-                }
                 MapKeys | MapValues => {
-                    let info = runtime.list_typeinfos.get(&Type::String).ok_or_else(|| CodegenError::cranelift("missing string list typeinfo", expr.span))?;
+                    let Type::List(element) = &expr.ty else { unreachable!() };
+                    let info = runtime.list_typeinfos.get(element.as_ref()).ok_or_else(|| CodegenError::cranelift("missing map snapshot list typeinfo", expr.span))?;
                     let global = module.declare_data_in_func(*info, builder.func);
                     let addr = builder.ins().symbol_value(I64, global);
                     let values = builder.ins().iconst(I64, i64::from(*kind == MapValues));
@@ -94,7 +118,7 @@ pub(super) fn lower_expr(
             Ok(value)
         }
         IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
-            "Map<K, V> is interpreter-only in 45g",
+            crate::NATIVE_MAP_REQUIREMENTS,
             expr.span,
         )),
         IrExprKind::BuiltinMethod { kind: kind @ (corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast), receiver, .. } => {

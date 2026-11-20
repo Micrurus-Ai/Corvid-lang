@@ -274,13 +274,14 @@ pub fn typeinfo_data_for_refcounted_payload(
     runtime: &RuntimeFuncs,
 ) -> Option<cranelift_module::DataId> {
     match ty {
+        Type::Map(_, _) if crate::native_string_map(ty) => Some(runtime.map_typeinfo),
         Type::String => Some(runtime.string_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),
         Type::Result(_, _) => runtime.result_typeinfos.get(ty).copied(),
         Type::Weak(_, _) => Some(runtime.weak_box_typeinfo),
         Type::Option(inner) => {
-            if is_native_wide_option_type(ty) {
+            if option_uses_wrapper(ty) {
                 runtime.option_typeinfos.get(ty).copied()
             } else {
                 typeinfo_data_for_refcounted_payload(inner, runtime)

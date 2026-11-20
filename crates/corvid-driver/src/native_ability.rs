@@ -50,6 +50,7 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
+    UnsupportedMap,
     UnsupportedMatch,
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
@@ -87,6 +88,7 @@ impl std::fmt::Display for NotNativeReason {
             Self::BuiltinMethodNotNative => {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
+            Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
@@ -185,6 +187,10 @@ pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
         }
     }
     for agent in &ir.agents {
+        if agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty))
+            .any(|ty| matches!(ty, Type::Map(_, _)) && !corvid_codegen_cl::native_string_map(ty)) {
+            return Err(NotNativeReason::UnsupportedMap);
+        }
         if matches!(agent.return_ty, Type::Stream(_)) {
             return Err(NotNativeReason::StreamLoweringNotImplemented);
         }
@@ -255,6 +261,13 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeReason> {
+    if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
+        scan_expr(receiver, current_return_ty)?;
+        return scan_expr(key, current_return_ty);
+    }
+    if matches!(expr.ty, Type::Map(_, _)) && !corvid_codegen_cl::native_string_map(&expr.ty) {
+        return Err(NotNativeReason::UnsupportedMap);
+    }
     if matches!(expr.ty, Type::Stream(_)) {
         return Err(NotNativeReason::StreamLoweringNotImplemented);
     }

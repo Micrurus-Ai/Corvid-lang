@@ -33,8 +33,9 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         module.declare_function(name, Linkage::Import, &sig)
             .map_err(|error| CodegenError::cranelift(format!("declare {name}: {error}"), Span::new(0, 0)))
     };
-    let map_new = declare("corvid_ordered_map_new", 1, true)?;
+    let map_new = declare("corvid_ordered_map_new_typed", 2, true)?;
     let map_set = declare("corvid_ordered_map_set", 3, false)?;
+    let map_require_int = declare("corvid_ordered_map_require_int", 2, true)?;
     let map_find = declare("corvid_ordered_map_find", 2, true)?;
     let map_snapshot = declare("corvid_ordered_map_snapshot", 3, true)?;
     let mut eq_sig = module.make_signature();
@@ -137,6 +138,9 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare String typeinfo: {e}"), Span::new(0, 0))
         })?;
+    let map_typeinfo = module
+        .declare_data("corvid_typeinfo_OrderedMap", Linkage::Import, false, false)
+        .map_err(|e| CodegenError::cranelift(format!("declare Map typeinfo: {e}"), Span::new(0, 0)))?;
     let weak_box_typeinfo_id = module
         .declare_data(WEAK_BOX_TYPEINFO_SYMBOL, Linkage::Import, false, false)
         .map_err(|e| {
@@ -1162,7 +1166,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
-        map_new, map_set, map_find, map_snapshot,
+        map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,
         string_eq: eq_id,
         string_cmp: cmp_id,
@@ -1175,6 +1179,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         weak_upgrade: weak_upgrade_id,
         weak_clear_self: weak_clear_self_id,
         string_typeinfo: string_typeinfo_id,
+        map_typeinfo,
         weak_box_typeinfo: weak_box_typeinfo_id,
         entry_init: entry_init_id,
         entry_arity_mismatch: arity_id,

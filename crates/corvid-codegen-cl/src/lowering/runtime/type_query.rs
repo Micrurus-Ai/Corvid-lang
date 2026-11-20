@@ -119,6 +119,7 @@ pub fn collect_list_element_types(ir: &IrFile) -> Vec<Type> {
 
     fn visit(ty: &Type, seen: &mut BTreeSet<Type>, order: &mut Vec<Type>) {
         match ty {
+            Type::Map(_, element) if crate::native_string_map(ty) => visit(element, seen, order),
             Type::List(inner) => {
                 // Recurse first so inner list types get their
                 // typeinfo emitted BEFORE the outer list references
@@ -241,6 +242,7 @@ pub fn collect_option_types(ir: &IrFile) -> Vec<Type> {
 
     fn visit(ty: &Type, seen: &mut BTreeSet<Type>, order: &mut Vec<Type>) {
         match ty {
+            Type::Map(_, element) if crate::native_string_map(ty) => visit(element, seen, order),
             Type::Option(inner) => {
                 visit(inner, seen, order);
                 if option_uses_wrapper(ty) && seen.insert(ty.clone()) {

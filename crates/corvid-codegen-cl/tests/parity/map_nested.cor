@@ -1,0 +1,36 @@
+agent buckets() -> Map<String, List<Int>>:
+    return {"active": [], "other": [7]}
+
+agent empty_items() -> List<Int>:
+    return []
+
+agent get_items(table: Map<String, List<Int>>) -> List<Int>:
+    return match table["active"]:
+        Some(items) -> items
+        None -> empty_items()
+
+agent read(item: Option<Int>) -> Int:
+    return match item:
+        Some(value) -> value
+        None -> -1
+
+agent read_key(table: Map<String, Option<Int>>, key: String) -> Int:
+    return match table[key]:
+        Some(item) -> read(item)
+        None -> -2
+
+agent main() -> Bool:
+    table = buckets()
+    alias = get_items(table)
+    table["active"] = [9]
+    retrieved = get_items(table)
+    original = table.values()
+    table["active"] = []
+    shared = alias.length() == 0 and retrieved[0] == 9 and original[0][0] == 9
+    options: Map<String, Option<Int>> = {"unset": None, "zero": Some(0)}
+    snapshot = options.values()
+    options["zero"] = None
+    absent = read_key(options, "other") == -2
+    present = read_key(options, "unset") == -1 and read_key(options, "zero") == -1
+    saved = read(snapshot[0]) == -1 and read(snapshot[1]) == 0
+    return shared and absent and present and saved

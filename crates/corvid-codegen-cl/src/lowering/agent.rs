@@ -384,7 +384,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
     match ty {
         Type::Map(_, _) if crate::native_string_map(ty) => Ok(I64),
         Type::Map(_, _) => Err(CodegenError::not_supported(
-            "Map<K, V> is interpreter-only in 45g",
+            crate::NATIVE_MAP_REQUIREMENTS,
             Span::new(0, 0),
         )),
         Type::Int => Ok(I64),

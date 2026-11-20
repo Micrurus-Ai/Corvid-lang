@@ -10,6 +10,12 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 Use `labels.contains_key(key)` to test membership and `labels.length()` to count distinct keys. Assigning through an alias updates the same map. Capture `labels.keys()` or `labels.values()` to keep an insertion-ordered snapshot across later writes. [Map examples](docs/book/05-types.md#maps)
 
+A lookup with `table[key]` or `table.get(key)` returns `Option<V>`. Use
+`Some(value)` to read a stored zero or an empty string and `None` for a
+missing key. Native maps accept string keys and integer, string, local
+record, list and option values. Integer entries support compound updates
+such as `counts["files"] += 1` after the first insertion.
+
 ## Reading the ends of a list
 
 `items.first()` and `items.last()` return `Option<T>`. Use `Some(value)` and `None` to handle an empty list. A selected heap string remains usable after the list goes out of scope. For a list of options, an empty list gives `None` and an existing empty element gives `Some(None)`. The interpreter and native targets support these examples. [List methods and example](docs/book/05-types.md)

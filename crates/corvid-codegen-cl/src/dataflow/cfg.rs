@@ -518,7 +518,7 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
         IrExprKind::UnwrapGrounded { value } => walk_expr(value, true, out),
         IrExprKind::Index { target, index } => {
             walk_expr(target, false, out);
-            walk_expr(index, true, out);
+            walk_expr(index, !crate::native_string_map(&target.ty), out);
         }
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
             // String concat consumes both operands (releases at

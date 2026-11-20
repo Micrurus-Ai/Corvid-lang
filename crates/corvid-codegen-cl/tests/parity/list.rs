@@ -122,3 +122,28 @@ agent main() -> Int:
 fn ordered_map_snapshots_survive_growth_and_replacement() {
     super::assert_parity_bool_without_tools(include_str!("string_map_iteration.cor"), true);
 }
+
+#[test]
+fn typed_string_map() {
+    super::assert_parity_bool_without_tools(include_str!("string_map.cor"), true);
+}
+
+#[test]
+fn typed_map_records() {
+    super::assert_parity_bool_without_tools(include_str!("map_records.cor"), true);
+}
+
+#[test]
+fn typed_map_nested() {
+    super::assert_parity_bool_without_tools(include_str!("map_nested.cor"), true);
+}
+
+#[test]
+fn typed_map_counters() {
+    super::assert_parity_bool_without_tools(include_str!("map_counters.cor"), true);
+}
+
+#[test]
+fn typed_map_reference_values() {
+    super::assert_parity_bool_without_tools(include_str!("map_reference_values.cor"), true);
+}

@@ -89,8 +89,15 @@ fn lower_stmt(
         let (var, _) = env.get(&id).ok_or_else(|| CodegenError::cranelift("unbound map", value.span))?;
         let key = lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
         let value = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
-        let set = module.declare_func_in_func(runtime.map_set, builder.func);
         let map = builder.use_var(*var);
+        let value = if let IrStmt::Assign { op: Some(op), span, .. } = stmt {
+            // Resolve the slot after the operands: either can mutate the map.
+            let require = module.declare_func_in_func(runtime.map_require_int, builder.func);
+            let call = builder.ins().call(require, &[map, key]);
+            let old = builder.inst_results(call)[0];
+            lower_binop_strict(builder, *op, old, value, *span, module, runtime)?
+        } else { value };
+        let set = module.declare_func_in_func(runtime.map_set, builder.func);
         builder.ins().call(set, &[map, key, value]);
         return Ok(BlockOutcome::Normal);
     }

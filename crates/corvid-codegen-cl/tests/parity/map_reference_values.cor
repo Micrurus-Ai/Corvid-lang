@@ -1,0 +1,31 @@
+type User:
+    name: String
+
+agent fallback() -> User:
+    return User("missing")
+
+agent user_name(item: Option<User>) -> String:
+    user = match item:
+        Some(person) -> person
+        None -> fallback()
+    return user.name
+
+agent main() -> Bool:
+    names: Map<String, List<String>> = {"a": ["old" + " name"]}
+    people: Map<String, List<User>> = {"a": [User("A" + "da")]}
+    optional: Map<String, Option<User>> = {"a": Some(User("Grace")), "b": None}
+    labels: Map<String, Option<String>> = {"a": Some("orig" + "inal"), "b": None}
+    directories = [names]
+    saved_names = directories[0].values()
+    saved_people = people.values()
+    saved_optional = optional.values()
+    saved_labels = labels.values()
+    names["a"] = ["new"]
+    people["a"] = []
+    optional["a"] = None
+    labels["a"] = None
+    original = match saved_labels[0]:
+        Some(label) -> label
+        None -> ""
+    previous = saved_people[0][0]
+    return saved_names[0][0] == "old name" and previous.name == "Ada" and user_name(saved_optional[0]) == "Grace" and user_name(saved_optional[1]) == "missing" and original == "original"

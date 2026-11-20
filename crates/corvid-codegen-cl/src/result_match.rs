@@ -17,6 +17,10 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
             operand_supported(operand)
         }
+        IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. }
+            if left.ty == Type::Int && right.ty == Type::Int => {
+                operand_supported(left) && operand_supported(right)
+            }
         IrExprKind::Call {
             kind: corvid_ir::IrCallKind::Agent { .. },
             args,

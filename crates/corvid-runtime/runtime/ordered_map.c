@@ -1,6 +1,7 @@
 /* Ordered string maps own a flat buffer of key/value pairs. The descriptor
  * stays at one address as the buffer grows, so aliases observe each update. */
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,6 +27,7 @@ typedef struct {
 typedef struct {
     map_slots* entries;
     int64_t capacity;
+    int64_t owns_values;
 } ordered_map;
 
 static void destroy_entries(void* payload) {
@@ -36,6 +38,16 @@ static void destroy_entries(void* payload) {
 static void trace_entries(void* payload, void (*mark)(void*, void*), void* ctx) {
     map_slots* entries = payload;
     for (int64_t i = 0; i < entries->count * 2; ++i) mark(entries->slots[i], ctx);
+}
+
+static void destroy_keys(void* payload) {
+    map_slots* entries = payload;
+    for (int64_t i = 0; i < entries->count; ++i) corvid_release(entries->slots[2 * i]);
+}
+
+static void trace_keys(void* payload, void (*mark)(void*, void*), void* ctx) {
+    map_slots* entries = payload;
+    for (int64_t i = 0; i < entries->count; ++i) mark(entries->slots[2 * i], ctx);
 }
 
 static void destroy_map(void* payload) {
@@ -49,25 +61,34 @@ static void trace_map(void* payload, void (*mark)(void*, void*), void* ctx) {
 static const struct corvid_typeinfo entries_info = {
     0, 0, destroy_entries, trace_entries, NULL, NULL, "Map entries"
 };
-static const struct corvid_typeinfo map_info = {
+static const struct corvid_typeinfo scalar_entries_info = {
+    0, 0, destroy_keys, trace_keys, NULL, NULL, "Map scalar entries"
+};
+const struct corvid_typeinfo corvid_typeinfo_OrderedMap = {
     sizeof(ordered_map), 0, destroy_map, trace_map, NULL, NULL, "Map"
 };
 
-static map_slots* allocate_entries(int64_t capacity) {
+static map_slots* allocate_entries(int64_t capacity, int64_t owns_values) {
     if (capacity < 0 || capacity > (INT64_MAX - 8) / 16) abort();
-    map_slots* entries = corvid_alloc_typed(8 + capacity * 16, &entries_info);
+    map_slots* entries = corvid_alloc_typed(8 + capacity * 16, owns_values ? &entries_info : &scalar_entries_info);
     entries->count = 0;
     return entries;
 }
 
-ordered_map* corvid_ordered_map_new(int64_t capacity) {
-    ordered_map* map = corvid_alloc_typed(sizeof(ordered_map), &map_info);
-    map->entries = allocate_entries(capacity);
+ordered_map* corvid_ordered_map_new_typed(int64_t capacity, int64_t owns_values) {
+    ordered_map* map = corvid_alloc_typed(sizeof(ordered_map), &corvid_typeinfo_OrderedMap);
+    map->entries = allocate_entries(capacity, owns_values);
+    map->owns_values = owns_values;
     map->capacity = capacity;
     return map;
 }
 
-/* A missing key returns NULL. Stored values use the owned Some representation. */
+/* Existing native objects use the original string-value constructor. */
+ordered_map* corvid_ordered_map_new(int64_t capacity) {
+    return corvid_ordered_map_new_typed(capacity, 1);
+}
+
+/* Return the slot address so absence is distinct from a zero-valued slot. */
 void* corvid_ordered_map_find(ordered_map* map, void* key) {
     map_slots* entries = map->entries;
     for (int64_t i = 0; i < entries->count; ++i) {
@@ -76,20 +97,30 @@ void* corvid_ordered_map_find(ordered_map* map, void* key) {
     return NULL;
 }
 
-/* Both arguments transfer one owned reference to this function. */
+int64_t corvid_ordered_map_require_int(ordered_map* map, void* key) {
+    void** slot = corvid_ordered_map_find(map, key);
+    if (slot) return (intptr_t)*slot;
+    const intptr_t* text = key;
+    fputs("corvid: compound assignment requires an existing map key: missing key `", stderr);
+    if (text[1] > 0) fwrite((const void*)text[0], 1, (size_t)text[1], stderr);
+    fputs("`\n", stderr);
+    exit(1);
+}
+
+/* Keys and heap values transfer an owned reference. Integer slots are unboxed. */
 void corvid_ordered_map_set(ordered_map* map, void* key, void* value) {
     void** slot = corvid_ordered_map_find(map, key);
     if (slot) {
         void* old = *slot;
         *slot = value;
-        corvid_release(old);
+        if (map->owns_values) corvid_release(old);
         corvid_release(key);
         return;
     }
     map_slots* entries = map->entries;
     if (entries->count == map->capacity) {
         int64_t capacity = map->capacity ? map->capacity * 2 : 4;
-        map_slots* grown = allocate_entries(capacity);
+        map_slots* grown = allocate_entries(capacity, map->owns_values);
         memcpy(grown->slots, entries->slots, entries->count * 16);
         grown->count = entries->count;
         entries->count = 0; /* transfer the stored references */
@@ -103,14 +134,14 @@ void corvid_ordered_map_set(ordered_map* map, void* key, void* value) {
     entries->slots[i + 1] = value;
 }
 
-/* Snapshot strings into the normal native List<String> layout. */
+/* Snapshot into the normal native List<T> layout, retaining heap elements. */
 void* corvid_ordered_map_snapshot(ordered_map* map, int64_t values, const struct corvid_typeinfo* list_info) {
     map_slots* entries = map->entries;
     map_slots* list = corvid_alloc_typed(8 + entries->count * 8, list_info);
     list->count = entries->count;
     for (int64_t i = 0; i < entries->count; ++i) {
         void* item = entries->slots[2 * i + values];
-        corvid_retain(item);
+        if (!values || map->owns_values) corvid_retain(item);
         list->slots[i] = item;
     }
     return list;
