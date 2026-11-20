@@ -1,17 +1,15 @@
 # Install
 
-## Supported platforms
-
-Corvid runs first-class on macOS, Linux, and Windows. The CI matrix
-(`platform-parity`) runs the installer, `corvid doctor`, and the WASM
-parity harness on all three on every push.
+The installer targets Windows, macOS and Linux. The available architectures depend on the selected release.
 
 ## Install scripts
+
+For manual downloads from a release that includes `SHA256SUMS.txt`, compare your archive's SHA-256 with the line for its exact filename. On Linux use `sha256sum ARCHIVE`, on macOS use `shasum -a 256 ARCHIVE`, and in PowerShell use `Get-FileHash -Algorithm SHA256 -LiteralPath ARCHIVE`. Replace `ARCHIVE` with the downloaded filename.
 
 Unix (macOS + Linux):
 
 ```sh
-curl -fsSL https://corvid-lang.org/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.sh | sh
 ```
 
 The official archive includes the matching Corvid editor extension and
@@ -22,24 +20,50 @@ highlighted immediately. Set `CORVID_SKIP_EDITOR_EXTENSION=1` to opt out.
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://corvid-lang.org/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/Micrurus-Ai/Corvid-lang/main/install/install.ps1 | iex
 ```
 
-The script downloads the platform-appropriate signed release, installs
-`corvid` into `~/.corvid/bin`, and adds it to `PATH`. The release tarball
-is signed (ed25519); the installer verifies the signature before
-extracting.
+The installer downloads the platform archive over HTTPS and adds the
+installation's `bin` directory to `PATH`. The default root is `~/.corvid`.
+If the archive is unavailable, the installer builds the CLI, language server
+and native runtime from the selected release tag. It places the tools in
+`bin`, the native library in `lib`, the standard library in `std` and the
+Python runtime in `runtime-py`. The default `latest` selection resolves to
+the latest stable release tag for source builds too.
 
-## From source via cargo
+To build for the host deliberately, set `CORVID_VERSION` to the tag you need
+and run `sh install/install.sh --from-source` or
+`.\install\install.ps1 -FromSource` from this checkout. This is useful on Linux
+when the published binary needs a newer glibc. A source build uses the Rust
+and native build tools required by that tag.
+On Windows, the installer's direct Rust download selects x64 or ARM64 to
+match the target selected by PowerShell.
 
-If you have Rust 1.78+ installed:
+## Upgrade or roll back
+
+Set `CORVID_VERSION` to the release tag you want and rerun the same installer.
+Use an earlier tag to roll back. Both the download and the source fallback
+for a pinned version use the requested tag. Run `corvid --version` afterward.
+
+The installer stages a candidate under `CORVID_HOME` and runs its version
+command before replacing package files. A failed download and source build
+leave the existing installation usable. Keep your own files outside the
+package directories such as `bin`, `lib`, `src` and `std`.
+
+For an isolated installation, set `CORVID_HOME` to a dedicated directory,
+`CORVID_NO_MODIFY_PROFILE=1` to skip persistent shell or Windows user
+environment changes, and `CORVID_SKIP_EDITOR_EXTENSION=1` to skip editor
+integration. Run the executable directly from that directory's `bin` folder.
+
+## From a source checkout
+
+From the repository root, build the CLI with the workspace lockfile and
+run the resulting binary through Cargo.
 
 ```sh
-cargo install corvid-cli
+cargo build --locked --release -p corvid-cli
+cargo run --locked --release -p corvid-cli -- --version
 ```
-
-This pulls from crates.io and builds locally. Slower than the install
-script, but useful if you are auditing the supply chain.
 
 ## Verify the install
 
@@ -74,9 +98,28 @@ approval, and grounding violation as you type.
 
 ## Uninstall
 
+Run the matching installer with its uninstall switch. From a Corvid checkout,
+use one of the following commands. Set `CORVID_HOME` first if you selected
+a custom installation directory.
+
 ```sh
-corvid self uninstall
+sh install/install.sh --uninstall
 ```
 
-Removes the binary, removes the PATH entry, and prompts before deleting
-any project-local replay caches.
+```powershell
+.\install\install.ps1 -Uninstall
+```
+
+The installer records the package directories it placed in the install root.
+Uninstall removes those directories and keeps other top-level files. Keep
+personal files and edits outside package directories. On Unix, uninstall
+removes the shell-profile block that still matches this installation. On
+Windows, it removes the user PATH entry the installer added and restores
+the previous user-level `CORVID_HOME` when this installation is still selected.
+Open a new terminal to pick up the changes. Editor extensions can be removed
+from the editor's Extensions panel.
+
+Older installations can lack the package receipt. The uninstaller reports
+this before changing any files. For those installations, remove the known
+Corvid package files from the dedicated installation directory and remove its
+PATH and `CORVID_HOME` settings manually.

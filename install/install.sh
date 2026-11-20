@@ -30,6 +30,51 @@ warn()  { printf '\033[33m    %s\033[0m\n' "$*"; }
 die()   { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 have()  { command -v "$1" >/dev/null 2>&1; }
 
+package_entries="bin lib std runtime-py extensions src LICENSE LICENSE-MIT LICENSE-APACHE README.md"
+receipt=.corvid-package-files
+
+uninstall() {
+    [ -d "$ROOT" ] || return 0
+    ROOT="$(cd "$ROOT" && pwd -P)"
+    [ -f "$ROOT/$receipt" ] || die "no installer receipt at $ROOT"
+    lock="$ROOT/.corvid-installing"
+    mkdir "$lock" || die "another installer is active at $ROOT"
+    trap 'rm -f "$lock/profile"; rmdir "$lock"' EXIT
+    trap 'exit 1' INT TERM
+    # Edit only the exact three lines added for this installation.
+    for rc in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc" ] || continue
+        [ -f "$ROOT/.corvid-profile-${rc##*/}" ] || continue
+        CORVID_REMOVE_LINE="$(cat "$ROOT/.corvid-profile-${rc##*/}")" awk '
+            { lines[NR]=$0 }
+            END {
+                for (i=1; i<=NR; i++) {
+                    if (lines[i]=="# corvid" &&
+                        lines[i+1]==ENVIRON["CORVID_REMOVE_LINE"] &&
+                        lines[i+2]=="export PATH=\"$CORVID_HOME/bin:$PATH\"") { i+=2; continue }
+                    print lines[i]
+                }
+            }' "$rc" > "$lock/profile"
+        if ! cmp -s "$rc" "$lock/profile"; then cat "$lock/profile" > "$rc"; fi
+        rm -f "$lock/profile" "$ROOT/.corvid-profile-${rc##*/}"
+    done
+    for entry in $package_entries; do
+        if grep -Fxq "$entry" "$ROOT/$receipt"; then rm -rf "${ROOT:?}/$entry"; fi
+    done
+    rm -f "$ROOT/$receipt"
+    rmdir "$lock"
+    trap - EXIT INT TERM
+    rmdir "$ROOT" 2>/dev/null || :
+    ok "Uninstalled Corvid from $ROOT"
+}
+
+case "${1-}" in
+    --uninstall) uninstall; exit 0 ;;
+    --from-source) from_source=1 ;;
+    '') from_source=0 ;;
+    *) die "unknown installer argument: $1" ;;
+esac
+
 install_editor_support() {
     if [ "${CORVID_SKIP_EDITOR_EXTENSION:-0}" = "1" ]; then
         warn "Skipping editor support (CORVID_SKIP_EDITOR_EXTENSION=1)"
@@ -138,35 +183,52 @@ case "$VERSION" in
         ;;
 esac
 
-# --- prepare install root -------------------------------------------------
-if [ -d "$ROOT" ]; then
-    step "Removing previous install at $ROOT"
-    rm -rf "$ROOT"
-fi
+# Stage on the destination filesystem. Exclusive creation also serializes installers.
 mkdir -p "$ROOT"
+ROOT="$(cd "$ROOT" && pwd -P)"
+tmp="$ROOT/.corvid-installing"
+mkdir "$tmp" || die "installation already in progress or interrupted at $tmp"
+stage="$tmp/new"
+mkdir "$stage" "$tmp/previous" "$tmp/activated" "$tmp/archive"
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+cleanup() {
+    result=$?
+    trap - EXIT INT TERM
+    if [ -f "$tmp/switching" ]; then
+        for marker in "$tmp/activated"/*; do
+            [ -d "$marker" ] || continue
+            entry=${marker##*/}
+            if [ -e "$ROOT/$entry" ]; then
+                mv "$ROOT/$entry" "$stage/" || exit 1
+            fi
+        done
+        for old in "$tmp/previous"/*; do
+            [ -e "$old" ] || [ -L "$old" ] || continue
+            mv "$old" "$ROOT/" || exit 1
+        done
+    fi
+    rm -rf "$tmp"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
 
 installed=0
 
 # --- fast path: prebuilt archive -----------------------------------------
-step "Downloading $asset"
-if dl "$url" "$tmp/$asset" 2>"$tmp/dl.log"; then
+if [ "$from_source" -eq 1 ]; then
+    step "Building from the selected source release"
+elif dl "$url" "$tmp/$asset" 2>"$tmp/dl.log"; then
     step "Extracting to $ROOT"
-    tar -xzf "$tmp/$asset" -C "$tmp"
-    payload="$tmp/corvid-${target}"
-    [ -d "$payload" ] || payload="$tmp"
-    # Move every entry except the archive itself
+    tar -xzf "$tmp/$asset" -C "$tmp/archive"
+    payload="$tmp/archive/corvid-${target}"
+    [ -d "$payload" ] || payload="$tmp/archive"
     for entry in "$payload"/*; do
         [ -e "$entry" ] || continue
-        case "$entry" in
-            "$tmp/$asset") continue ;;
-        esac
-        mv "$entry" "$ROOT/"
+        mv "$entry" "$stage/"
     done
     installed=1
-    ok "Installed prebuilt binary"
+    ok "Staged prebuilt binary"
 else
     warn "Prebuilt archive unavailable for $target"
     warn "Falling back to cargo source build (this can take 5-15 minutes)..."
@@ -183,29 +245,56 @@ if [ "$installed" -eq 0 ]; then
     fi
     have git || die "git is required for the source build fallback. Install git and re-run."
 
-    src="$ROOT/src"
+    src="$stage/src"
     step "Cloning $REPO to $src"
-    git clone --depth 1 "https://github.com/${REPO}.git" "$src"
+    case "$VERSION" in
+        latest)
+            dl "https://api.github.com/repos/${REPO}/releases/latest" "$tmp/release.json" ||
+                die "cannot resolve the latest stable release; set CORVID_VERSION to a release tag"
+            source_tag="$(sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$tmp/release.json" | head -n 1)"
+            [ -n "$source_tag" ] || die "latest stable release is missing its tag"
+            ;;
+        nightly) source_tag="$nightly_tag" ;;
+        *) source_tag="$VERSION" ;;
+    esac
+    git clone --depth 1 --branch "$source_tag" "https://github.com/${REPO}.git" "$src"
 
-    step "Building corvid (slow first build; downloads many crates)"
-    ( cd "$src" && cargo install --path crates/corvid-cli --locked --root "$ROOT" )
+    step "Building Corvid, the language server and the native runtime"
+    (
+        cd "$src"
+        build_dir="${CARGO_TARGET_DIR:-$tmp/build}"
+        artifacts="$build_dir/$target/release"
+        mkdir -p "$stage/bin" "$stage/lib"
+        cargo build --locked --release --target "$target" --target-dir "$build_dir" -p corvid-runtime
+        cp "$artifacts/libcorvid_runtime.a" "$stage/lib/"
+        cargo build --locked --release --target "$target" --target-dir "$build_dir" -p corvid-cli -p corvid-lsp
+        cp "$artifacts/corvid" "$artifacts/corvid-lsp" "$stage/bin/"
+    )
+    if [ -d "$src/runtime/python" ]; then
+        cp -R "$src/runtime/python" "$stage/runtime-py"
+    fi
+    for notice in LICENSE LICENSE-MIT LICENSE-APACHE; do
+        if [ -f "$src/$notice" ]; then cp "$src/$notice" "$stage/"; fi
+    done
 
     if [ -d "$src/std" ]; then
-        rm -rf "$ROOT/std"
-        cp -R "$src/std" "$ROOT/std"
+        rm -rf "$stage/std"
+        cp -R "$src/std" "$stage/std"
     fi
 
     # Source-fallback installs do not have the release archive's bundled
     # VSIX. Package the exact checked-out extension when Node is available
     # so editor highlighting remains automatic on this path too.
     extension_src="$src/extensions/vscode-corvid"
-    if [ -d "$extension_src" ] && have npm && have npx; then
+    if [ "${CORVID_SKIP_EDITOR_EXTENSION:-0}" = 1 ]; then
+        ok "Skipped packaging the editor extension"
+    elif [ -d "$extension_src" ] && have npm && have npx; then
         step "Packaging Corvid editor support"
-        mkdir -p "$ROOT/extensions"
+        mkdir -p "$stage/extensions"
         if npm ci --prefix "$extension_src" \
             && (cd "$extension_src" \
                 && npx --yes @vscode/vsce@3.6.2 package \
-                    --out "$ROOT/extensions/corvid.vsix"); then
+                    --out "$stage/extensions/corvid.vsix"); then
             ok "Packaged Corvid editor extension"
         else
             warn "Could not package editor support from source"
@@ -216,30 +305,71 @@ if [ "$installed" -eq 0 ]; then
     ok "Built from source"
 fi
 
+# Switch only package-owned paths. Other project and user data stays in place.
+if "$stage/bin/corvid" --version 2>"$tmp/version.err"; then
+    cat "$tmp/version.err" >&2
+else
+    cat "$tmp/version.err" >&2
+    if [ "$os_kernel" = linux ] && grep -Fq 'libpython3.11.so.1.0: cannot open shared object file' "$tmp/version.err"; then
+        die "Corvid requires the Python 3.11 shared runtime. On Debian 12, run 'apt-get install libpython3.11' as root, then rerun the installer."
+    fi
+    die "staged corvid failed its version check"
+fi
+if [ ! -f "$ROOT/bin/corvid" ]; then
+    for entry in $package_entries; do
+        if [ -e "$ROOT/$entry" ] || [ -L "$ROOT/$entry" ]; then
+            die "existing files at $ROOT overlap the install. Choose a dedicated CORVID_HOME."
+        fi
+    done
+fi
+touch "$tmp/switching"
+for entry in $package_entries; do
+    if [ -e "$ROOT/$entry" ] || [ -L "$ROOT/$entry" ]; then
+        if [ -f "$ROOT/$receipt" ] && ! grep -Fxq "$entry" "$ROOT/$receipt"; then
+            [ ! -e "$stage/$entry" ] || die "package would overwrite an unmanaged path: $ROOT/$entry"
+            continue
+        fi
+        mv "$ROOT/$entry" "$tmp/previous/"
+    fi
+    if [ -e "$stage/$entry" ]; then
+        mkdir "$tmp/activated/$entry"
+        mv "$stage/$entry" "$ROOT/"
+    fi
+done
+for entry in $package_entries; do
+    if [ -d "$tmp/activated/$entry" ]; then printf '%s\n' "$entry"; fi
+done > "$tmp/receipt"
+mv "$tmp/receipt" "$ROOT/$receipt"
+rm "$tmp/switching"
+
 # --- PATH wiring ----------------------------------------------------------
 bin="$ROOT/bin"
-case ":${PATH-}:" in
-    *":$bin:"*) ok "$bin already on PATH" ;;
+quoted_root="$(printf '%s' "$ROOT" | sed "s/'/'\\\\''/g")"
+home_line="export CORVID_HOME='$quoted_root'"
+path_ready=0
+case "${CORVID_NO_MODIFY_PROFILE:-0}:${PATH-}:" in
+    *":$bin:"*) path_ready=1; ok "$bin already on PATH" ;;
+    1:*) : ;;
     *)
         step "Adding $bin to PATH in shell rc files"
-        added=0
         for rc in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
             [ -f "$rc" ] || continue
-            if ! grep -q 'CORVID_HOME' "$rc" 2>/dev/null; then
+            if [ -f "$ROOT/.corvid-profile-${rc##*/}" ] &&
+                grep -Fxq "$home_line" "$rc" &&
+                grep -Fxq 'export PATH="$CORVID_HOME/bin:$PATH"' "$rc"; then
+                path_ready=1
+            elif ! grep -v '^[[:space:]]*#' "$rc" | grep -q 'CORVID_HOME'; then
                 {
-                    printf '\n# corvid\n'
-                    printf 'export CORVID_HOME="%s"\n' "$ROOT"
+                    if [ -s "$rc" ] && [ -n "$(tail -c 1 "$rc")" ]; then printf '\n'; fi
+                    printf '# corvid\n'
+                    printf '%s\n' "$home_line"
                     printf 'export PATH="$CORVID_HOME/bin:$PATH"\n'
                 } >> "$rc"
+                printf '%s\n' "$home_line" > "$ROOT/.corvid-profile-${rc##*/}"
                 ok "  updated $rc"
-                added=1
+                path_ready=1
             fi
         done
-        if [ "$added" -eq 0 ]; then
-            warn "No shell rc file found; add this to your shell profile:"
-            warn "  export CORVID_HOME=\"$ROOT\""
-            warn "  export PATH=\"\$CORVID_HOME/bin:\$PATH\""
-        fi
         ;;
 esac
 
@@ -274,6 +404,14 @@ else
 fi
 
 printf '\n\033[32mCorvid installed at %s\033[0m\n' "$ROOT"
-printf 'Restart your shell (or `source` your rc), then try:\n'
-printf '  corvid tour --list\n'
-printf '  corvid check examples/refund_bot_demo/refund.cor\n'
+if [ "$path_ready" -eq 1 ]; then
+    printf 'Open a shell with the updated PATH, then try:\n'
+else
+    printf 'To use Corvid in your current shell, run:\n'
+    printf '  %s\n' "$home_line" 'export PATH="$CORVID_HOME/bin:$PATH"'
+    printf 'Then try:\n'
+fi
+printf '  corvid new hello-corvid\n'
+printf '  cd hello-corvid\n'
+printf '  corvid check src/main.cor\n'
+printf '  corvid run src/main.cor\n'

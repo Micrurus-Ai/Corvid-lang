@@ -7807,3 +7807,5 @@ The server integration fixture builds its shared library in its own target direc
 An editor client stops `corvid-lsp` by sending a `shutdown` request, waiting for its response, then sending an `exit` notification. The server exits successfully even while the input pipe is open. Sending `exit` before an acknowledged shutdown gives exit status 1.
 
 If the Windows installer falls back to building from source and neither Cargo nor winget is available, it selects the Rust bootstrap executable for the detected Windows architecture.
+
+Set `CORVID_VERSION` to a release tag and rerun the installer to upgrade or roll back. The installer starts the staged CLI before replacing package files. Run the matching installer with `--uninstall` on Unix or `-Uninstall` on Windows to remove the package and preserve files outside its package directories.
