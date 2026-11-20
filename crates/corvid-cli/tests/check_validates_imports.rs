@@ -79,3 +79,28 @@ fn check_rejects_missing_import() {
         "expected import-not-found diagnostic, got:\n{combined}"
     );
 }
+
+#[test]
+fn imported_functions_keep_their_signatures_and_run_across_module_boundaries() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("math.cor"), "public fn twice(n: Int) -> Int:\n    return n + n\npublic agent number() -> Int:\n    return 7\n").unwrap();
+    let main = dir.path().join("main.cor");
+    let invoke = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .current_dir(dir.path()).args(args).output().unwrap();
+    for (import, name) in [
+        ("import \"./math\" as math", "math.twice"),
+        ("import \"./math\" use twice as double", "double"),
+    ] {
+        let program = format!("{import}\nfn answer() -> Int:\n    return {name}(21)\nagent main() -> Int:\n    return answer()\n");
+        std::fs::write(&main, &program).unwrap();
+        let result = invoke(&["run", "main.cor", "--target", "interp"]);
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        assert_eq!(String::from_utf8_lossy(&result.stdout).trim(), "42");
+        std::fs::write(&main, program.replace("(21)", "(\"bad\")")).unwrap();
+        assert!(!invoke(&["check", "main.cor"]).status.success());
+    }
+    std::fs::write(&main, "import \"./math\" as math\nfn answer() -> Int:\n    return math.number()\n").unwrap();
+    let result = invoke(&["check", "main.cor"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("must be effect-free"));
+}

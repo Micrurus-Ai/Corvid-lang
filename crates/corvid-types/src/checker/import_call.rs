@@ -303,7 +303,7 @@ impl<'a> Checker<'a> {
             DeclKind::Type => ImportedCallKind::Type,
             DeclKind::Tool => ImportedCallKind::Tool,
             DeclKind::Prompt => ImportedCallKind::Prompt,
-            DeclKind::Agent => ImportedCallKind::Agent,
+            DeclKind::Agent | DeclKind::Fn => ImportedCallKind::Agent,
             _ => {
                 for arg in args {
                     let _ = self.check_expr(arg);
@@ -373,7 +373,7 @@ impl<'a> Checker<'a> {
                         DeclKind::Type => ImportedCallKind::Type,
                         DeclKind::Tool => ImportedCallKind::Tool,
                         DeclKind::Prompt => ImportedCallKind::Prompt,
-                        DeclKind::Agent => ImportedCallKind::Agent,
+                        DeclKind::Agent | DeclKind::Fn => ImportedCallKind::Agent,
                         _ => {
                             for arg in args {
                                 let _ = self.check_expr(arg);
@@ -523,6 +523,13 @@ impl<'a> Checker<'a> {
                 self.bump_effect(WeakEffect::Llm);
                 self.imported_type_ref_to_type(&prompt.return_ty, module)
             }
+            DeclKind::Fn => {
+                let Some(Decl::Fn(function)) = imported_decl(module, def_id) else {
+                    return Type::Unknown;
+                };
+                self.check_args_against_imported_params(name, &function.params, args, module);
+                self.imported_type_ref_to_type(&function.return_ty, module)
+            }
             DeclKind::Agent => {
                 let Some(Decl::Agent(agent)) = imported_decl(module, def_id) else {
                     for arg in args {
@@ -635,6 +642,7 @@ fn imported_decl<'a>(module: &'a ResolvedModule, def_id: DefId) -> Option<&'a De
             Decl::Tool(decl) => &decl.name.name,
             Decl::Prompt(decl) => &decl.name.name,
             Decl::Agent(decl) => &decl.name.name,
+            Decl::Fn(decl) => &decl.name.name,
             _ => return false,
         };
         module

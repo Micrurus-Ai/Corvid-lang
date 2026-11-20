@@ -37,6 +37,28 @@ effect refund_effect:
 public tool refund(amount: Float, id: String) -> String dangerous uses refund_effect
 ```
 
+## Reusing a named function
+
+A module can export a pure function with `public fn`. Both CLI targets can call it by its qualified name or by a name introduced with `use`.
+
+```corvid-fragment
+# math.cor
+public fn double(n: Int) -> Int:
+    return n * 2
+```
+
+```corvid-fragment
+# main.cor
+import "./math" as math
+
+agent main() -> Int:
+    return math.double(4)
+```
+
+This returns `8`. You can also write `import "./math" use double as twice` and call `twice(4)`.
+
+A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error.
+
 ## Importing local modules
 
 ```corvid-fragment

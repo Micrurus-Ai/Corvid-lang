@@ -120,12 +120,9 @@ impl<'a> Checker<'a> {
                                     &format!("a call to fixture `{}`", name.name),
                                     *span,
                                 ),
-                                // Imported callables cross a module
-                                // boundary the purity walk cannot see
-                                // through; only imported FNs would be
-                                // pure, and cross-module fn calls are
-                                // not in the v1 surface.
-                                DeclKind::ImportedUse => self.fn_purity_violation(
+                                DeclKind::ImportedUse if !self.module_resolution
+                                    .and_then(|modules| modules.lookup_imported_use(&name.name))
+                                    .is_some_and(|target| matches!(target.export.kind, DeclKind::Fn | DeclKind::Type)) => self.fn_purity_violation(
                                     fn_name,
                                     &format!("a call to imported `{}`", name.name),
                                     *span,
@@ -143,6 +140,19 @@ impl<'a> Checker<'a> {
                         _ => {}
                     }
                 } else {
+                    if let Expr::FieldAccess { target, field, .. } = callee.as_ref() {
+                        if let Expr::Ident { name, .. } = target.as_ref() {
+                            let module_alias = matches!(self.bindings.get(&name.span),
+                                Some(Binding::Decl(id)) if self.symbols.get(*id).kind == DeclKind::Import);
+                            let member = self.module_resolution.map(|modules| modules.lookup_member(&name.name, &field.name));
+                            if module_alias && matches!(member,
+                                Some(corvid_resolve::ModuleLookup::Found { export, .. })
+                                    if matches!(export.kind, DeclKind::Agent | DeclKind::Tool | DeclKind::Prompt | DeclKind::Fixture))
+                            {
+                                self.fn_purity_violation(fn_name, &format!("a call to imported `{}.{}`", name.name, field.name), *span);
+                            }
+                        }
+                    }
                     self.walk_fn_purity_expr(fn_name, callee);
                 }
                 for a in args {
