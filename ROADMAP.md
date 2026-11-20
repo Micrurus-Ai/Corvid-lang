@@ -3,7 +3,7 @@
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
-- [x] Switched Windows archive extraction to the two-argument .NET ZIP API after the native runner's Expand-Archive failed. The Windows x64 offline installer lifecycle passed locally.
+- [x] Switched Windows archive extraction to the two-argument .NET ZIP API after the native runner's Expand-Archive failed. The Windows x64 offline installer lifecycle passed locally. The staged-file diagnostic also uses the .NET SHA-256 API so it works when Get-FileHash is unavailable. The installer test matched the reported digest against Python's hashlib.
 - [x] Windows x64 and Linux x64 passed offline install, upgrade, rollback, failed replacement, uninstall and tagged source fallback. The Linux x64 installer also served a relocated application from the real candidate archive.
 - [ ] Run the native architecture installer matrix using the test-installers workflow's recovery_only input.
 - [x] Verified the Windows source installer's direct Rust bootstrap URL for x64 and ARM64 in isolated PowerShell runs with intercepted downloads. Native ARM64 installation remains pending.

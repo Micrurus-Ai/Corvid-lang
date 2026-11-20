@@ -309,7 +309,13 @@ try {
         & $candidate --version
     } catch {
         $launchError = $_.Exception.Message
-        $digest = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try {
+            $stream = [IO.File]::OpenRead($candidate)
+            try {
+                $digest = [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '')
+            } finally { $stream.Dispose() }
+        } finally { $hash.Dispose() }
         throw "Windows could not start the staged Corvid CLI. SHA-256: $digest. $launchError"
     }
     if ($LASTEXITCODE -eq -1073741515) {
