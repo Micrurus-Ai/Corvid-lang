@@ -2,6 +2,65 @@
 
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
+## Active task queue
+
+This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.
+
+Work through the first open item in order. Inspect its behavior, implement or reconcile the code, exercise the normal CLI or application entry point, and update the learning guide, grammar or function reference. Commit and push each verified task.
+
+**1. General language foundations**
+
+- [ ] G01. Support List.first() and List.last() on both execution targets. Cover empty lists, trailing zero, and owned strings that outlive the list.
+  - The interpreter returned true for the empty, zero and owned-string cases. Forced native execution refused the same program on this branch.
+- [ ] G02. Support string-map membership, distinct-key length and insertion-ordered key/value snapshots on both targets. Exercise duplicate keys, empty maps and updates through an alias.
+- [ ] G03. Support string maps with integer, string and local record values, including lists and options of those types. Check typed lookups, snapshots, updates and diagnostics for unsupported native key types.
+- [ ] G04. Complete everyday control flow and assignment. Exercise nested loops, early returns, short-circuiting, record field updates and compound assignments with side effects evaluated once.
+- [ ] G05. Finish expression composition. Exercise calls in arithmetic, collection operations and match arms, guards and nested patterns, and propagate typed errors across function boundaries.
+- [ ] G06. Make functions and data types reusable. Verify functions as values, closures, user-defined sum types, records, type inference and built-in generic collection helpers across two modules.
+- [ ] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
+- [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
+
+**2. Developer workflow**
+
+- [ ] D01. Create, run, check, format and test a multi-file project from a clean checkout. Invalid input must identify the source location and a fix.
+- [ ] D02. Make editor navigation work across local Corvid modules. Check diagnostics, hover, completion, go-to-definition and rename on real Corvid source.
+- [ ] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
+- [ ] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.
+
+**3. Application services**
+
+- [ ] S01. Implement or verify typed request and response handling, routing, validation, configuration and errors in a running HTTP service.
+- [ ] S02. Persist typed records across restart. Exercise migrations, transactions, rollback and concurrent requests through the standard library.
+- [ ] S03. Support outbound HTTP with structured data, timeouts and cancellation. Verify concurrency, streams, backpressure and resource cleanup when the caller disconnects.
+- [ ] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.
+
+**4. AI-native application code**
+
+- [ ] A01. Call a model using Corvid types. Cover provider configuration, a local test provider, text and structured results, malformed output and provider substitution.
+- [ ] A02. Stream model output to a consumer. Verify incremental chunks, cancellation, timeouts, retries and usage accounting.
+- [ ] A03. Use ordinary typed functions as tools. Exercise argument checking, multi-step agent execution, tool errors, bounded execution and resumable state.
+- [ ] A04. Build retrieval with document ingestion, embeddings, indexing, queries and source references using the standard library.
+- [ ] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
+- [ ] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
+
+**5. Browser applications**
+
+- [x] F01. Render reusable views with state, events, forms and accessible controls. Exercise them in a browser through keyboard and pointer input.
+  - The packaged page and its compiled handlers passed pointer, keyboard and text-input checks in Edge.
+- [ ] F02. Link frontend actions to typed backend handlers. Changing a shared record must identify affected callers at compile time.
+- [ ] F03. Deliver streamed AI results in the UI with loading, cancellation, error and reconnect behavior. Verify navigation, asset builds and a production frontend bundle.
+
+**6. Interoperability, performance and distribution**
+
+- [ ] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
+- [ ] P01. Profile CLI startup, checking, native compilation, list slicing, local HTTP requests and model streams. Record repeatable baselines and validate measured improvements against unchanged results.
+- [ ] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.
+  - The six native candidate packages passed the installer-to-application workflow. See the platform results below.
+- [ ] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
+- [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
+
+## Verified task results
+
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
 - [x] Both hosted Bookworm archives matched SHA256SUMS and depend on libpython3.11.so.1.0. Both native architectures installed and served the relocated application, ran the Python host tool and uninstalled successfully in the [native archive run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720).
 - [x] Added an installer-to-application check before retaining each native candidate archive. A local Windows x64 debug package passed installation, version and language-server checks, Python host-tool execution, project scaffolding, relocated HTML and JSON routes, compiled browser asset checks, and uninstall with a user file preserved. Hosted production results are tracked separately.
