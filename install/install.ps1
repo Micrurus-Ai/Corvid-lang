@@ -99,7 +99,7 @@ switch ($Version) {
         }
         $nightlyRel = $apiObj | Where-Object { $_.tag_name -like 'nightly-*' } | Select-Object -First 1
         if (-not $nightlyRel) {
-            throw "No nightly release found at $apiUrl — release.yml may not have produced one yet."
+            throw "No nightly release found at $apiUrl - release.yml may not have produced one yet."
         }
         Ok "Resolved nightly tag: $($nightlyRel.tag_name)"
         $url = "https://github.com/$Repo/releases/download/$($nightlyRel.tag_name)/$assetName"
@@ -153,7 +153,7 @@ if (-not $installed) {
             winget install --id Rustlang.Rustup --silent --accept-source-agreements --accept-package-agreements
         } else {
             $rustupInit = Join-Path $tmp 'rustup-init.exe'
-            Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile $rustupInit -UseBasicParsing
+            Invoke-WebRequest -Uri "https://win.rustup.rs/$arch" -OutFile $rustupInit -UseBasicParsing
             & $rustupInit -y --default-toolchain stable --profile minimal
         }
         if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
