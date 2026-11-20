@@ -7839,3 +7839,5 @@ A manual **release** workflow run defaults to building candidate packages. Downl
 The installation carries the project license at `LICENSE`. Open `lib/corvid-rust-notices.txt` to see which Rust dependency versions and upstream notices were included for your platform.
 
 For Linux x64 and ARM64 candidate builds, the runtime baseline is Debian 12 with `libpython3.11`. The hosted build checks the extracted CLI in that environment.
+
+To verify a locally built candidate, run `python install/test_release_archive.py ARCHIVE VERSION` on its target operating system and architecture. Pass the CLI package version without a leading `v`. The probe installs into a temporary directory, builds and serves an application, then checks uninstall.

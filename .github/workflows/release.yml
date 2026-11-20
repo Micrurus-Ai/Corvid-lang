@@ -260,21 +260,28 @@ jobs:
           $name = "corvid-${{ matrix.target }}"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip" -Force
 
-      - name: Run the Linux archive on the supported Debian baseline
-        if: runner.os == 'Linux'
+      - name: Build and serve an app from the candidate archive
+        shell: bash
         env:
-          RELEASE_TARGET: ${{ matrix.target }}
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.archive }}
         run: |
-          docker run --rm -v "$PWD/dist:/archives:ro" -w /tmp -e RELEASE_TARGET debian:bookworm-slim sh -ec '
-            apt-get update -qq && apt-get install -y -qq libpython3.11
-            tar -xzf "/archives/corvid-$RELEASE_TARGET.tar.gz"
-            cli="/tmp/corvid-$RELEASE_TARGET/bin/corvid"
-            "$cli" --version
-            "$cli" new notes
-            cd notes
-            "$cli" check
-            "$cli" run --target interp src/main.cor
-          '
+          set -eu
+          id="$(cargo pkgid --locked -p corvid-cli)"
+          version="${id##*#}"
+          version="${version##*@}"
+          archive="dist/corvid-$TARGET.$EXTENSION"
+          if [ "$RUNNER_OS" = Linux ]; then
+            docker run --rm -v "$PWD:/checkout:ro" -w /tmp debian:bookworm-slim \
+              sh -ec 'apt-get update -qq && apt-get install -y -qq python3 libpython3.11 &&
+                python3 /checkout/install/test_release_archive.py "$1" "$2"' sh "/checkout/$archive" "$version"
+          else
+            python install/test_release_archive.py "$archive" "$version"
+          fi
+
+      - name: Check native macOS installer upgrade, rollback and uninstall
+        if: runner.os == 'macOS'
+        run: python3 install/test_upgrade.py
 
       - name: Retain candidate archive
         uses: actions/upload-artifact@v4

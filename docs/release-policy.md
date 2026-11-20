@@ -12,7 +12,7 @@ Run the **release** workflow on the desired branch and leave **Publish all candi
 
 Each platform archive carries the project `LICENSE` and a target-specific Rust dependency inventory at `lib/corvid-rust-notices.txt`. It lists the locked package versions, their declared licenses, and the notice files available for those versions. The redistribution terms for the TeX extensions in the generated PDF glyph table still require review before publication.
 
-The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow extracts the resulting archive in a fresh Debian 12 container and uses its CLI to create, check and run a starter.
+The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow tests Linux packages in a fresh Debian 12 container. On each of the six platforms it passes the archive through the production installer, checks the language server, invokes a Python host tool and runs a starter. It then builds and extracts a web app, renames the source project, and requests the HTML, JSON and WebAssembly assets from the relocated server. Uninstall must preserve a user-created file.
 
 For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
 
