@@ -98,6 +98,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select the documented macOS Python framework
+        if: runner.os == 'macOS'
+        env:
+          FRAMEWORK_VERSION: ${{ matrix.target == 'aarch64-apple-darwin' && '3.15' || '3.14' }}
+        run: |
+          framework="/Library/Frameworks/Python.framework/Versions/$FRAMEWORK_VERSION"
+          python="$framework/bin/python$FRAMEWORK_VERSION"
+          "$python" --version
+          echo "PYO3_PYTHON=$python" >> "$GITHUB_ENV"
+          echo "CORVID_PYTHON_FRAMEWORK=$framework/Python" >> "$GITHUB_ENV"
+
       - name: Select Windows Python for the release architecture
         if: runner.os == 'Windows'
         uses: actions/setup-python@v5
@@ -246,6 +257,15 @@ jobs:
           [ -f LICENSE-MIT ]    && cp    LICENSE-MIT    "$stage/LICENSE-MIT"    || true
           [ -f LICENSE-APACHE ] && cp    LICENSE-APACHE "$stage/LICENSE-APACHE" || true
           [ -f README.md ]      && cp    README.md      "$stage/README.md"      || true
+
+      - name: Verify the packaged macOS Python dependency
+        if: runner.os == 'macOS'
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          for cli in corvid corvid-lsp; do
+            otool -L "dist/corvid-$RELEASE_TARGET/bin/$cli" | awk '{print $1}' | grep -Fx "$CORVID_PYTHON_FRAMEWORK"
+          done
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'

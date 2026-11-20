@@ -2,9 +2,13 @@
 
 The installer targets Windows, macOS and Linux. The available architectures depend on the selected release.
 
-## Linux candidate prerequisites
+## Candidate runtime prerequisites
 
 The Linux x64 and ARM64 archives use the Python 3.11 shared runtime at CLI startup. On Debian 12, install the `libpython3.11` package before running the installer. Both native architectures have passed the installer, language-server, Python host-tool and relocated web-application checks.
+
+The macOS candidate uses the Python framework at `/Library/Frameworks/Python.framework/Versions/<version>/Python`. Both `corvid` and `corvid-lsp` load it at startup. Use a framework installation of CPython 3.14 on Intel Macs or CPython 3.15 on Apple Silicon. A virtual environment alone does not supply that system path.
+
+The Windows x64 and ARM64 candidates passed with matching-architecture CPython 3.14. Put the Python installation directory containing `python3.dll` on `PATH` before starting Corvid. If Windows denies permission to start the staged CLI, the installer reports its SHA-256 for administrator review.
 
 Run `corvid doctor` to check the installation and configuration. With a prebuilt CLI, missing Rust tools are informational. Source builds and native server wrappers use Cargo and rustc. Invalid configuration values cause the command to fail.
 

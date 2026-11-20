@@ -55,7 +55,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [ ] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
 - [ ] P01. Profile CLI startup, checking, native compilation, list slicing, local HTTP requests and model streams. Record repeatable baselines and validate measured improvements against unchanged results.
 - [ ] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.
-  - The six native candidate packages passed the installer-to-application workflow. See the platform results below.
+  - [x] The [six native candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720) passed the installer-to-application check. The install guide records their tested Python runtimes.
+  - [ ] The Windows x64 archive from be524e1f matched its workflow checksum. On this host Defender event 1121 blocked the staged executable at its version check (rule C1DB55AB-C21A-4637-BB3F-A12568109D35, executable SHA-256 `53264307be045efffae7d945470887b83c5ef218bbb068462dda2f02e6e7bb33`). Administrator review and successful installation under that policy remain pending.
 - [ ] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 

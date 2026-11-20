@@ -7843,3 +7843,5 @@ For Linux x64 and ARM64 candidate builds, the runtime baseline is Debian 12 with
 To verify a locally built candidate, run `python install/test_release_archive.py ARCHIVE VERSION` on its target operating system and architecture. Pass the CLI package version without a leading `v`. The probe installs into a temporary directory, builds and serves an application, then checks uninstall.
 
 A prebuilt installation can pass `corvid doctor` without Cargo or rustc. The doctor distinguishes those optional build tools from invalid configuration values and reports whether a Python command is available to run generated Python files.
+
+The macOS Intel CLI and language server load the CPython 3.14 framework. The Apple Silicon binaries load CPython 3.15. Both use the framework in /Library/Frameworks. Windows x64 and ARM64 passed with matching-architecture CPython 3.14. The Debian 12 packages use libpython3.11.
