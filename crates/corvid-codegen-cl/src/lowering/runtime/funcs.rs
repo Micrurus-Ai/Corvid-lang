@@ -149,6 +149,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// (pass is active); set to false to fall back to pre-17b-1b.6c
     /// behavior for A/B debugging.
     pub dup_drop_enabled: bool,
+    pub in_match_operand: std::cell::Cell<bool>,
+    pub next_variable: std::cell::Cell<u32>,
     /// When true (library targets: cdylib/staticlib), a tool call is
     /// dispatched through the runtime registry
     /// (`corvid_invoke_tool_<type>`) so the binary links without the
@@ -253,6 +255,13 @@ pub(in crate::lowering) struct RuntimeFuncs {
 }
 
 impl RuntimeFuncs {
+    pub fn declare_variable(&self, builder: &mut FunctionBuilder, ty: clir::Type) -> Variable {
+        let index = self.next_variable.get();
+        self.next_variable.set(index + 1);
+        let variable = Variable::from_u32(index);
+        builder.declare_var(variable, ty);
+        variable
+    }
     /// Allocate the next unique literal symbol number.
     pub(in crate::lowering) fn next_literal_id(&self) -> u64 {
         let n = self.literal_counter.get();

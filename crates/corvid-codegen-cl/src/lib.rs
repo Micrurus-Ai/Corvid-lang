@@ -27,6 +27,7 @@ pub mod lowering;
 pub mod module;
 pub mod ownership;
 pub mod pair_elim;
+pub mod result_match;
 pub mod scope_reduce;
 pub mod staticlib_discovery;
 pub mod target;

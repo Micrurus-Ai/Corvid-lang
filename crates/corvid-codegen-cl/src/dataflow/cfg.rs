@@ -438,10 +438,16 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
         IrExprKind::Match { scrutinee, arms } => {
             out.extend(collect_reads(scrutinee, false));
             for arm in arms {
-                if let Some(g) = &arm.guard {
-                    out.extend(collect_reads(g, false));
+                for operand in arm.guard.iter().chain(std::iter::once(&arm.body)) {
+                    let mut reads = collect_reads(operand, false);
+                    reads.retain(|read| !crate::result_match::pattern_binds(&arm.pattern, read.local_id));
+                    // Each executed arm retains its own consuming reads. Outer locals
+                    // stay live across the choice, and untaken arms consume nothing.
+                    for read in &mut reads {
+                        read.kind = ReadKind::Borrowed;
+                    }
+                    out.extend(reads);
                 }
-                out.extend(collect_reads(&arm.body, false));
             }
         }
         IrExprKind::Lambda { body, .. } => {

@@ -1256,6 +1256,8 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // scattered-emit codegen for A/B comparison. That fallback
         // path will be removed once the unified pass has fully
         // stabilized in production.
+        in_match_operand: Default::default(),
+        next_variable: Default::default(),
         dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
             .map(|v| v != "0" && v != "false")
             .unwrap_or(true),

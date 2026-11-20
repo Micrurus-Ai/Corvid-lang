@@ -49,7 +49,6 @@ pub(super) fn lower_block(
     block: &IrBlock,
     current_return_ty: &Type,
     env: &mut HashMap<LocalId, (Variable, clir::Type)>,
-    var_idx: &mut usize,
     scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
     loop_stack: &mut Vec<LoopCtx>,
     func_ids_by_def: &HashMap<DefId, FuncId>,
@@ -62,7 +61,6 @@ pub(super) fn lower_block(
             stmt,
             current_return_ty,
             env,
-            var_idx,
             scope_stack,
             loop_stack,
             func_ids_by_def,
@@ -81,7 +79,6 @@ fn lower_stmt(
     stmt: &IrStmt,
     current_return_ty: &Type,
     env: &mut HashMap<LocalId, (Variable, clir::Type)>,
-    var_idx: &mut usize,
     scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
     loop_stack: &mut Vec<LoopCtx>,
     func_ids_by_def: &HashMap<DefId, FuncId>,
@@ -189,9 +186,7 @@ fn lower_stmt(
                     (existing_var, true)
                 }
                 None => {
-                    let new_var = Variable::from_u32(*var_idx as u32);
-                    *var_idx += 1;
-                    builder.declare_var(new_var, cl_ty);
+                    let new_var = runtime.declare_variable(builder, cl_ty);
                     env.insert(*local_id, (new_var, cl_ty));
                     (new_var, false)
                 }
@@ -253,7 +248,6 @@ fn lower_stmt(
             else_block.as_ref(),
             current_return_ty,
             env,
-            var_idx,
             scope_stack,
             loop_stack,
             func_ids_by_def,
@@ -274,7 +268,6 @@ fn lower_stmt(
             *span,
             current_return_ty,
             env,
-            var_idx,
             scope_stack,
             loop_stack,
             func_ids_by_def,
@@ -296,7 +289,6 @@ fn lower_stmt(
             *span,
             current_return_ty,
             env,
-            var_idx,
             scope_stack,
             loop_stack,
             func_ids_by_def,
@@ -463,7 +455,6 @@ fn lower_for(
     span: Span,
     current_return_ty: &Type,
     env: &mut HashMap<LocalId, (Variable, clir::Type)>,
-    var_idx: &mut usize,
     scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
     loop_stack: &mut Vec<LoopCtx>,
     func_ids_by_def: &HashMap<DefId, FuncId>,
@@ -512,9 +503,7 @@ fn lower_for(
         _ => unreachable!("validated above"),
     };
 
-    let loop_var = Variable::from_u32(*var_idx as u32);
-    *var_idx += 1;
-    builder.declare_var(loop_var, elem_cl_ty);
+    let loop_var = runtime.declare_variable(builder, elem_cl_ty);
     let zero_elem = builder.ins().iconst(elem_cl_ty, 0);
     builder.def_var(loop_var, zero_elem);
     env.insert(var_local, (loop_var, elem_cl_ty));
@@ -524,9 +513,7 @@ fn lower_for(
         }
     }
 
-    let i_var = Variable::from_u32(*var_idx as u32);
-    *var_idx += 1;
-    builder.declare_var(i_var, I64);
+    let i_var = runtime.declare_variable(builder, I64);
     let zero_i = builder.ins().iconst(I64, 0);
     builder.def_var(i_var, zero_i);
 
@@ -594,7 +581,6 @@ fn lower_for(
         body,
         current_return_ty,
         env,
-        var_idx,
         scope_stack,
         loop_stack,
         func_ids_by_def,
@@ -649,7 +635,6 @@ fn lower_while(
     _span: Span,
     current_return_ty: &Type,
     env: &mut HashMap<LocalId, (Variable, clir::Type)>,
-    var_idx: &mut usize,
     scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
     loop_stack: &mut Vec<LoopCtx>,
     func_ids_by_def: &HashMap<DefId, FuncId>,
@@ -696,7 +681,6 @@ fn lower_while(
         body,
         current_return_ty,
         env,
-        var_idx,
         scope_stack,
         loop_stack,
         func_ids_by_def,
@@ -917,7 +901,6 @@ fn lower_if(
     else_block_ir: Option<&IrBlock>,
     current_return_ty: &Type,
     env: &mut HashMap<LocalId, (Variable, clir::Type)>,
-    var_idx: &mut usize,
     scope_stack: &mut Vec<Vec<(LocalId, Variable)>>,
     loop_stack: &mut Vec<LoopCtx>,
     func_ids_by_def: &HashMap<DefId, FuncId>,
@@ -960,7 +943,6 @@ fn lower_if(
         then_block_ir,
         current_return_ty,
         env,
-        var_idx,
         scope_stack,
         loop_stack,
         func_ids_by_def,
@@ -997,7 +979,6 @@ fn lower_if(
             else_body,
             current_return_ty,
             env,
-            var_idx,
             scope_stack,
             loop_stack,
             func_ids_by_def,

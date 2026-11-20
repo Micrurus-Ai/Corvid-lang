@@ -2,6 +2,7 @@ use super::*;
 
 mod binop;
 mod constructors;
+mod match_value;
 mod operand;
 mod overflow;
 mod try_propagate;
@@ -34,10 +35,9 @@ pub(super) fn lower_expr(
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
     match &expr.kind {
-        IrExprKind::Match { .. } => Err(CodegenError::not_supported(
-            "match is interpreter-only in 45i",
-            expr.span,
-        )),
+        IrExprKind::Match { scrutinee, arms } => match_value::lower_match(
+            builder, expr, scrutinee, arms, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+        ),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
             "lambdas are interpreter-only in 45j",
             expr.span,
@@ -54,6 +54,49 @@ pub(super) fn lower_expr(
             "Map<K, V> is interpreter-only in 45g",
             expr.span,
         )),
+        IrExprKind::BuiltinMethod { kind: kind @ (corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast), receiver, .. } => {
+            let Type::Option(element) = &expr.ty else { unreachable!() };
+            if !is_native_option_type(&expr.ty) {
+                return Err(CodegenError::not_supported("first or last with this element type", expr.span));
+            }
+            let (list, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
+            let present = builder.create_block();
+            let join = builder.create_block();
+            let output = builder.append_block_param(join, I64);
+            let none = builder.ins().iconst(I64, 0);
+            builder.ins().brif(length, present, &[], join, &[none.into()]);
+            builder.switch_to_block(present);
+            builder.seal_block(present);
+            // The native list stores eight-byte slots immediately after its length.
+            let slots = builder.ins().iadd_imm(list, 8);
+            let ty = cl_type_for(element, expr.span)?;
+            let slot = if *kind == corvid_types::BuiltinMethodKind::ListLast {
+                let index = builder.ins().iadd_imm(length, -1);
+                let offset = builder.ins().imul_imm(index, 8);
+                builder.ins().iadd(slots, offset)
+            } else {
+                slots
+            };
+            let item = builder.ins().load(ty, MemFlags::trusted(), slot, 0);
+            if is_refcounted_type(element) {
+                emit_retain(builder, module, runtime, item);
+            }
+            let some = if option_uses_wrapper(&expr.ty) {
+                emit_option_wrapper_value(builder, module, runtime, &expr.ty, item, element, expr.span)?
+            } else {
+                item
+            };
+            builder.ins().jump(join, &[some.into()]);
+            builder.switch_to_block(join);
+            builder.seal_block(join);
+            if !borrowed {
+                emit_release(builder, module, runtime, list);
+            }
+            Ok(output)
+        }
         IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
             "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
             expr.span,
@@ -87,7 +130,7 @@ pub(super) fn lower_expr(
             // insertion at non-last consuming uses instead of
             // retaining on every read ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the last use of a local
             // consumes the existing +1 directly.
-            if !runtime.dup_drop_enabled && is_refcounted_type(&expr.ty) {
+            if (!runtime.dup_drop_enabled || runtime.in_match_operand.get()) && is_refcounted_type(&expr.ty) {
                 emit_retain(builder, module, runtime, v);
             }
             Ok(v)

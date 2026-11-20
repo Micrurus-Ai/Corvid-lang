@@ -188,6 +188,18 @@ agent list_demo() -> Int:
 
 ```
 
+Use `first()` or `last()` when the list may be empty. Both return
+`Option<T>`. An empty list gives `None`, and a list ending in zero
+gives `Some(0)`. A selected string remains usable after the list goes
+out of scope.
+
+```corvid
+agent last_number(items: List<Int>) -> Int:
+    return match items.last():
+        Some(number) -> number
+        None -> -1
+```
+
 `append`, `sort`, and `reverse` mutate the shared list in place and
 return `Nothing` (reference semantics — see the callout above).
 `sort` is only offered on `Int`/`Float`/`String` element types.

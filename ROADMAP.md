@@ -10,8 +10,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 **1. General language foundations**
 
-- [ ] G01. Support List.first() and List.last() on both execution targets. Cover empty lists, trailing zero, and owned strings that outlive the list.
-  - The interpreter returned true for the empty, zero and owned-string cases. Forced native execution refused the same program on this branch.
+- [x] G01. Support List.first() and List.last() on both execution targets. Cover empty lists, trailing zero, and owned strings that outlive the list.
+  - Forced native and interpreter CLI runs passed for empty lists, trailing zero, heap strings escaping a temporary list, and nested options. All three parity tests passed with native leak checks.
 - [ ] G02. Support string-map membership, distinct-key length and insertion-ordered key/value snapshots on both targets. Exercise duplicate keys, empty maps and updates through an alias.
 - [ ] G03. Support string maps with integer, string and local record values, including lists and options of those types. Check typed lookups, snapshots, updates and diagnostics for unsupported native key types.
 - [ ] G04. Complete everyday control flow and assignment. Exercise nested loops, early returns, short-circuiting, record field updates and compound assignments with side effects evaluated once.

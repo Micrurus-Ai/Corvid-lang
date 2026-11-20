@@ -50,6 +50,7 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
+    UnsupportedMatch,
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
     BuiltinMethodNotNative,
@@ -86,6 +87,7 @@ impl std::fmt::Display for NotNativeReason {
             Self::BuiltinMethodNotNative => {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
+            Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
             }
@@ -255,14 +257,31 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         // Map is interpreter-only in 45g; a MapLiteral anywhere routes
         // the program to the interpreter tier.
         IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
-        // match is interpreter-only in 45i.
-        IrExprKind::Match { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::Match { scrutinee, arms }
+            if (is_native_option_type(&scrutinee.ty) || is_native_result_type(&scrutinee.ty))
+                && corvid_codegen_cl::result_match::supports_match(&scrutinee.ty, arms) =>
+        {
+            scan_expr(scrutinee, current_return_ty)?;
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    scan_expr(guard, current_return_ty)?;
+                }
+                scan_expr(&arm.body, current_return_ty)?;
+            }
+            Ok(())
+        }
+        IrExprKind::Match { .. } => Err(NotNativeReason::UnsupportedMatch),
         // Lambdas are interpreter-only in 45j.
         IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // Named struct literals are interpreter-only in 45n.
         IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `Page<Item>` responses are interpreter-only in 52c-2.
         IrExprKind::PageNew { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::BuiltinMethod {
+            kind: corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast,
+            receiver,
+            ..
+        } if is_native_option_type(&expr.ty) => scan_expr(receiver, current_return_ty),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
