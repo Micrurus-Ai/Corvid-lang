@@ -3,6 +3,7 @@
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
+- [x] Verified the roadmap branch's eight static view helpers in a fresh project. The documented example rendered a page in Edge. Pointer and keyboard disclosure, current-page GET submission, a link, and a targeted GET form with an encoded ampersand passed. The CLI rejected a string child where a View was required.
 - [x] The destructor and list-tracing tests now keep their observations on the executing test thread. On Linux, all six tests passed 100 consecutive times with eight test threads.
 - [x] The roadmap branch's native and interpreter targets ran public function calls via a module alias and a renamed selective import. The checker rejected wrong arguments, private members and a qualified call to an imported agent from a pure function. A page assembled with imported view helpers rendered through the interpreter.
 - [x] Ran a relocated Windows x64 CLI with absent, partial and complete standard-library installations. Each generated starter checked and ran, contained every expected module, and retained additional installed modules when present.

@@ -24,6 +24,7 @@ pass; come back to specific chapters as reference later.
 16. [Testing](15-testing.md) — `test`, `eval`, `fixture`, `mock`.
 17. [Building and targets](16-building.md) — native, wasm, server, cdylib.
 18. [Replay](17-replay.md) — deterministic re-execution.
+19. [Browser views](19-browser-views.md)
 
 ## After the book
 

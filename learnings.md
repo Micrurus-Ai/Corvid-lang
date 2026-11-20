@@ -7821,3 +7821,5 @@ To try a Python-backed tool from the terminal, use `corvid new --with-python-too
 A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error. See the [module guide](docs/book/06-modules.md#reusing-a-named-function).
 
 The C runtime calls type-info destructors and trace markers synchronously. Tests can keep callback counters and recorded pointers thread-local so concurrent tests do not reset each other's observations.
+
+Use `ui.page` to render a list of typed views. The [static view reference](docs/book/19-browser-views.md#static-view-functions) records the signatures for text, labeled fields, submit buttons, both GET form helpers, disclosures, links and pages.

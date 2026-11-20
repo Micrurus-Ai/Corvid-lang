@@ -1,0 +1,38 @@
+# Browser views compose through ordinary functions and lists.
+public type View:
+    html: String
+
+fn escaped(value: String) -> String:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+fn children(views: List<View>) -> String:
+    parts: List<String> = []
+    for item in views:
+        parts.append(item.html)
+    return parts.join("")
+
+public fn text(value: String) -> View:
+    return View("<p>" + escaped(value) + "</p>")
+
+public fn text_field(label: String, name: String, initial: String) -> View:
+    return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
+
+public fn submit(label: String) -> View:
+    return View("<button type=\"submit\">" + escaped(label) + "</button>")
+
+public fn search_form(controls: List<View>) -> View:
+    return View("<form method=\"get\">" + children(controls) + "</form>")
+
+public fn disclosure(label: String, content: List<View>) -> View:
+    return View("<details><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
+
+public fn page(title: String, content: List<View>) -> String:
+    return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title></head><body><main>" + children(content) + "</main></body></html>"
+
+# Submit named controls to an application-relative GET route.
+public fn query_form(path: String, controls: List<View>) -> View:
+    return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
+
+# Navigate to an application route. Supply a trusted path from the application.
+public fn link(label: String, path: String) -> View:
+    return View("<a href=\"" + escaped(path) + "\">" + escaped(label) + "</a>")
