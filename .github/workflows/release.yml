@@ -1,20 +1,7 @@
-# Builds prebuilt `corvid` binaries on every v*.*.* tag AND on every
-# push to `main` (nightly channel, slice
-# `35V2-P33-release-nightly-channel`) and uploads archives to GitHub
-# Releases. The install/ scripts download these archives via the
-# `releases/latest/download/...` URL (stable channel, the `v*.*.*`
-# tags) or `releases/tags/nightly-YYYY-MM-DD-<sha>/...` (nightly
-# channel, the main-branch pushes). Without this workflow the
-# installer falls back to a slow `cargo install`.
-#
-# Release-channel naming follows `docs/release-policy.md` — stable
-# releases are `v<semver>` (e.g. `v0.0.1`) and nightly releases are
-# `nightly-YYYY-MM-DD-<short-sha>` (e.g. `nightly-2026-06-04-d23d381`).
-# Nightly releases are marked as pre-releases so GitHub's "latest"
-# pointer keeps pointing at the most recent stable tag — the install
-# script's fast path `releases/latest/download/...` continues to mean
-# "the most recent stable release," not "the most recent push to
-# main."
+# Build downloadable Corvid archives for stable and beta version tags and nightly
+# builds from main. Beta and nightly releases are marked as prereleases so the
+# default installer downloads the latest stable version. Manual runs retain the
+# candidate archives unless publication is explicitly selected.
 
 name: release
 
@@ -23,33 +10,30 @@ on:
     branches: [main]
     tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish all candidate archives to GitHub Releases
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  archive: tar.gz }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
-          - { os: macos-latest,     target: x86_64-apple-darwin,       archive: tar.gz }
-          - { os: macos-latest,     target: aarch64-apple-darwin,      archive: tar.gz }
-          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    archive: zip    }
-          - { os: windows-11-arm,   target: aarch64-pc-windows-msvc,   archive: zip    }
-
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.tag.outputs.release_tag }}
+      channel: ${{ steps.tag.outputs.channel }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      short_sha: ${{ steps.tag.outputs.short_sha }}
+      commit_date: ${{ steps.tag.outputs.commit_date }}
     steps:
       - uses: actions/checkout@v4
-
       # Compute the release tag + channel + prerelease flag from
       # the workflow trigger. Three cases:
-      #   - push to a `v*.*.*` tag → stable channel; tag = the
-      #     pushed tag; beta is a prerelease; for stable the "latest" pointer
-      #     advances.
+      #   - version tag → stable for vX.Y.Z or beta for vX.Y.Z-beta.N.
+      #     Only stable tags are eligible for the latest stable download.
       #   - push to `main` → nightly channel; tag =
       #     `nightly-YYYY-MM-DD-<short-sha>`; prerelease = true;
       #     "latest" pointer does NOT advance so the install
@@ -84,22 +68,52 @@ jobs:
             channel="nightly"
             prerelease="true"
           fi
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "channel=$channel"         >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease"   >> "$GITHUB_OUTPUT"
-          echo "short_sha=$short_sha"     >> "$GITHUB_OUTPUT"
-          echo "commit_date=$date_utc"    >> "$GITHUB_OUTPUT"
+          {
+            echo "release_tag=$release_tag"
+            echo "channel=$channel"
+            echo "prerelease=$prerelease"
+            echo "short_sha=$short_sha"
+            echo "commit_date=$date_utc"
+          } >> "$GITHUB_OUTPUT"
           echo "Computed: tag=$release_tag channel=$channel prerelease=$prerelease commit_date=$date_utc"
+
+  build:
+    needs: prepare
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # Match CI and the tested Windows build when the runner supplies newer CPython.
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  archive: tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       archive: tar.gz }
+          - { os: macos-15,         target: aarch64-apple-darwin,      archive: tar.gz }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    archive: zip    }
+          - { os: windows-11-arm,   target: aarch64-pc-windows-msvc,   archive: zip    }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Windows Python for the release architecture
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          architecture: ${{ matrix.target == 'aarch64-pc-windows-msvc' && 'arm64' || 'x64' }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Check version tag against CLI package version
-        if: steps.tag.outputs.channel != 'nightly'
+        if: needs.prepare.outputs.channel != 'nightly'
         shell: bash
         env:
-          RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -eu
           package_id="$(cargo pkgid --locked -p corvid-cli)"
@@ -118,7 +132,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}-${{ steps.tag.outputs.channel }}
+          key: ${{ matrix.target }}-${{ needs.prepare.outputs.channel }}
 
       # Build corvid-runtime FIRST so cargo emits the `staticlib`
       # crate-type output that the cdylib link + native-tier
@@ -140,9 +154,9 @@ jobs:
       # depending on how the runner cloned).
       - name: Build
         env:
-          CORVID_BUILD_SHA: ${{ steps.tag.outputs.short_sha }}
-          CORVID_BUILD_DATE: ${{ steps.tag.outputs.commit_date }}
-          CORVID_RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
+          CORVID_BUILD_SHA: ${{ needs.prepare.outputs.short_sha }}
+          CORVID_BUILD_DATE: ${{ needs.prepare.outputs.commit_date }}
+          CORVID_RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli -p corvid-lsp
 
       # Bundle the editor grammar with the compiler release rather than
@@ -152,6 +166,7 @@ jobs:
       - name: Package Corvid editor extension
         shell: bash
         run: |
+          mkdir -p dist
           npm ci --prefix extensions/vscode-corvid
           (
             cd extensions/vscode-corvid
@@ -219,22 +234,76 @@ jobs:
           $name = "corvid-${{ matrix.target }}"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip" -Force
 
-      # Stable runs (push to `v*.*.*`) upload to the existing
-      # release for that tag and advance the "latest" pointer.
-      # Nightly runs (push to `main` or workflow_dispatch from
-      # main) create / upload to a release named
-      # `nightly-YYYY-MM-DD-<sha>`, marked as a pre-release so
-      # GitHub's "latest" pointer stays on the most recent
-      # stable. The install script's fast path
-      # `releases/latest/download/...` keeps meaning "latest
-      # stable"; the nightly channel is opt-in via
-      # `CORVID_VERSION=nightly` (slice
-      # `35V2-P33-install-script-nightly`) which resolves to
-      # `releases/tags/nightly-<date>-<sha>/download/...`.
-      - name: Upload to release
+      - name: Retain candidate archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: corvid-package-${{ matrix.target }}
+          path: dist/corvid-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+          compression-level: 0
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: corvid-package-*
+          path: dist
+          merge-multiple: true
+      - name: Hash the Linux, macOS and Windows archives
+        working-directory: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          archives=()
+          for target in {aarch64,x86_64}-{apple-darwin,unknown-linux-gnu}; do
+            archives+=("corvid-$target.tar.gz")
+          done
+          for target in {aarch64,x86_64}-pc-windows-msvc; do
+            archives+=("corvid-$target.zip")
+          done
+          shopt -s nullglob
+          actual=(corvid-*)
+          if (( ${#actual[@]} != ${#archives[@]} )); then
+            echo "Expected exactly six native archives, found ${#actual[@]}." >&2
+            exit 1
+          fi
+          sha256sum -- "${archives[@]}" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corvid-archive-checksums
+          path: dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, checksums]
+    if: github.event_name == 'push' || inputs.publish_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: corvid-package-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: corvid-archive-checksums
+          path: dist
+      - name: Verify downloaded archives against the candidate checksums
+        working-directory: dist
+        run: sha256sum --check --strict SHA256SUMS.txt
+      - name: Upload candidate archives to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          prerelease: ${{ steps.tag.outputs.prerelease }}
-          name: ${{ steps.tag.outputs.release_tag }}
-          files: dist/corvid-${{ matrix.target }}.${{ matrix.archive }}
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
+          name: ${{ needs.prepare.outputs.release_tag }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/corvid-*
+            dist/SHA256SUMS.txt

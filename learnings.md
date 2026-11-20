@@ -7831,3 +7831,7 @@ Write `route GET "/" -> html:` inside a server and return a `String`. To render 
 ### Package browser handlers with the server
 
 Build a scaffolded application's `src/main.cor` with `--target web`. Corvid packages server sources and compiles optional `src/events.cor` handlers to WebAssembly. The [interactive page example](docs/book/19-browser-views.md#package-an-interactive-page) documents `ui.action`, `ui.int_state`, `ui.text_state`, `ui.interactive_page`, and how to run the extracted archive.
+
+### Download a candidate build
+
+A manual **release** workflow run defaults to building candidate packages. Download the six package artifacts and the checksum artifact from the same run. The [release policy](docs/release-policy.md#build-a-candidate-on-github) explains how to verify them.

@@ -6,6 +6,10 @@ This policy defines how Corvid ships nightly, beta, and stable releases. It is a
 
 **Position.** The policy is intentionally narrow on what is promised and broad on what is enforced. Every rule below is paired with a CI gate, a CLI command, or a signed artifact field that catches violations before the release publishes — the [How this is enforced](#how-this-is-enforced) section at the end names each one.
 
+## Build a candidate on GitHub
+
+Run the **release** workflow on the desired branch and leave **Publish all candidate archives to GitHub Releases** unchecked. After all six builds succeed, download the platform packages and `corvid-archive-checksums` from the workflow run. Extract the artifacts into one directory and run `sha256sum --check --strict SHA256SUMS.txt` there. These hashes check the downloaded bytes. Installation and application tests establish whether a candidate works on its target platform.
+
 ## Channels
 
 ### Nightly
