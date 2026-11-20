@@ -12,6 +12,8 @@ Run the **release** workflow on the desired branch and leave **Publish all candi
 
 Each platform archive carries the project `LICENSE` and a target-specific Rust dependency inventory at `lib/corvid-rust-notices.txt`. It lists the locked package versions, their declared licenses, and the notice files available for those versions. The redistribution terms for the TeX extensions in the generated PDF glyph table still require review before publication.
 
+The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow extracts the resulting archive in a fresh Debian 12 container and uses its CLI to create, check and run a starter.
+
 ## Channels
 
 ### Nightly

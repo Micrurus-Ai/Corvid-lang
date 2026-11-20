@@ -7837,3 +7837,5 @@ Build a scaffolded application's `src/main.cor` with `--target web`. Corvid pack
 A manual **release** workflow run defaults to building candidate packages. Download the six package artifacts and the checksum artifact from the same run. The [release policy](docs/release-policy.md#build-a-candidate-on-github) explains how to verify them.
 
 The installation carries the project license at `LICENSE`. Open `lib/corvid-rust-notices.txt` to see which Rust dependency versions and upstream notices were included for your platform.
+
+For Linux x64 and ARM64 candidate builds, the runtime baseline is Debian 12 with `libpython3.11`. The hosted build checks the extracted CLI in that environment.

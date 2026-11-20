@@ -143,6 +143,7 @@ jobs:
       # at `0fc9d89`. Without this step, `libcorvid_runtime.a`
       # never lands and the install script can't ship it.
       - name: Build corvid-runtime (must precede CLI build so staticlib lands)
+        if: runner.os != 'Linux'
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-runtime
 
       # `CORVID_BUILD_SHA` + `CORVID_BUILD_DATE` are env-var
@@ -153,11 +154,34 @@ jobs:
       # otherwise pick up the checkout-action's SHA strategy
       # depending on how the runner cloned).
       - name: Build
+        if: runner.os != 'Linux'
         env:
           CORVID_BUILD_SHA: ${{ needs.prepare.outputs.short_sha }}
           CORVID_BUILD_DATE: ${{ needs.prepare.outputs.commit_date }}
           CORVID_RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli -p corvid-lsp
+
+      # The generated container runs on Debian 12. Link its release binary
+      # against the same glibc and Python ABI on both Linux architectures.
+      - name: Build Linux distribution on Bookworm
+        if: runner.os == 'Linux'
+        env:
+          CORVID_BUILD_SHA: ${{ needs.prepare.outputs.short_sha }}
+          CORVID_BUILD_DATE: ${{ needs.prepare.outputs.commit_date }}
+          CORVID_RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e CORVID_BUILD_SHA -e CORVID_BUILD_DATE -e CORVID_RELEASE_TAG -e RELEASE_TARGET rust:1.88-bookworm sh -ec '
+              apt-get update -qq && apt-get install -y -qq python3-dev
+              cargo build --release --locked --target "$RELEASE_TARGET" -p corvid-runtime
+              cargo build --release --locked --target "$RELEASE_TARGET" -p corvid-cli -p corvid-lsp
+              python3 install/rust_notices.py "$RELEASE_TARGET" target/corvid-rust-notices.txt
+            '
+
+      - name: Collect Rust dependency notices
+        if: runner.os != 'Linux'
+        run: python install/rust_notices.py ${{ matrix.target }} target/corvid-rust-notices.txt
 
       # Bundle the editor grammar with the compiler release rather than
       # requiring a separately published Marketplace version. The
@@ -173,9 +197,6 @@ jobs:
             npx --yes @vscode/vsce@3.6.2 package \
               --out "$GITHUB_WORKSPACE/dist/corvid.vsix"
           )
-
-      - name: Collect Rust dependency notices
-        run: python install/rust_notices.py ${{ matrix.target }} target/corvid-rust-notices.txt
 
       - name: Stage artifact
         shell: bash
@@ -238,6 +259,22 @@ jobs:
         run: |
           $name = "corvid-${{ matrix.target }}"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip" -Force
+
+      - name: Run the Linux archive on the supported Debian baseline
+        if: runner.os == 'Linux'
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          docker run --rm -v "$PWD/dist:/archives:ro" -w /tmp -e RELEASE_TARGET debian:bookworm-slim sh -ec '
+            apt-get update -qq && apt-get install -y -qq libpython3.11
+            tar -xzf "/archives/corvid-$RELEASE_TARGET.tar.gz"
+            cli="/tmp/corvid-$RELEASE_TARGET/bin/corvid"
+            "$cli" --version
+            "$cli" new notes
+            cd notes
+            "$cli" check
+            "$cli" run --target interp src/main.cor
+          '
 
       - name: Retain candidate archive
         uses: actions/upload-artifact@v4
