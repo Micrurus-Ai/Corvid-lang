@@ -3,6 +3,7 @@
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 - [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
+- [x] Hosted CLI builds pin generated Dockerfiles to the release that produced them. Verified beta and stable tags through the package command and tested the source-build nightly fallback.
 
 > Phase-by-phase plan from v0.1 (complete) to v1.0 (public launch).
 > For feature definitions see [`FEATURES.md`](./FEATURES.md).

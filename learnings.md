@@ -7799,3 +7799,5 @@ are later Phase 52 slices (52h/52i). See [dev-log.md](dev-log.md) (2026-07-23,
 When preparing a local candidate with `corvid release build`, use a version that matches its channel. Examples are `1.0.0-nightly.local`, `1.0.0-beta.2`, and `1.0.0`. Corvid checks the version before creating the release files. See the [release policy](docs/release-policy.md).
 
 For hosted archives, the tag `v1.0.0-beta.2` selects a beta prerelease and `v1.0.0` selects a stable release. In both cases the version following `v` must match the CLI package version.
+
+When a release CLI generates a Dockerfile with `corvid deploy package`, the Dockerfile selects that same release. A package created by the `v1.0.0-beta.2` CLI therefore uses `ARG CORVID_VERSION=v1.0.0-beta.2`.

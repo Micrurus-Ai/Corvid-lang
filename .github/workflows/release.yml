@@ -142,6 +142,7 @@ jobs:
         env:
           CORVID_BUILD_SHA: ${{ steps.tag.outputs.short_sha }}
           CORVID_BUILD_DATE: ${{ steps.tag.outputs.commit_date }}
+          CORVID_RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p corvid-cli -p corvid-lsp
 
       # Bundle the editor grammar with the compiler release rather than

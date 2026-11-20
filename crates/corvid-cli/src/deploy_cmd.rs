@@ -714,26 +714,12 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     // future deploy variant needs in-container codegen, the release
     // archive must ship the staticlib alongside the binary.
     //
-    // Slice 33Q5 (anonymous-2026-06-04 round-2 P3.b): the rendered
-    // Dockerfile's `ARG CORVID_VERSION=...` default is pinned to the
-    // nightly-channel tag that matches the rendering binary's SHA +
-    // date — `nightly-{CORVID_BUILD_DATE}-{CORVID_BUILD_SHA}` — so
-    // the built image's `corvid --version` reproduces the binary
-    // the package was generated against, AND the image's CMD
-    // subcommand (`serve`) is guaranteed to exist (the prior
-    // default `latest` resolved to v0.1.0 stable which lacked
-    // `serve` — the reviewer's literal report). When either env
-    // var is the documented "unknown" fallback (corvid was built
-    // outside a git checkout — see `crates/corvid-cli/build.rs`),
-    // the default falls back to the literal string `nightly` and
-    // the Dockerfile's URL-resolver block queries the GitHub API
-    // for the latest nightly tag (same logic install.sh uses).
-    // Operators can always override via
-    // `--build-arg CORVID_VERSION=<tag>` (e.g. `v0.1.0` or
-    // `nightly-2026-06-04-d23d381`).
+    // Hosted builds carry their release tag. Source builds use their nightly metadata.
     let build_sha = env!("CORVID_BUILD_SHA");
     let build_date = env!("CORVID_BUILD_DATE");
-    let default_corvid_version = if build_sha == "unknown" || build_date == "unknown" {
+    let default_corvid_version = if let Some(tag) = option_env!("CORVID_RELEASE_TAG") {
+        tag.to_owned()
+    } else if build_sha == "unknown" || build_date == "unknown" {
         "nightly".to_string()
     } else {
         format!("nightly-{build_date}-{build_sha}")
@@ -777,15 +763,8 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     format!(
         r#"# syntax=docker/dockerfile:1
 #
-# CORVID_VERSION default: pinned to the rendering binary's nightly
-# tag (`nightly-<commit-date>-<short-sha>`) for reproducibility AND
-# CLI-surface stability. Override with `--build-arg
-# CORVID_VERSION=<tag>` to use a specific release (e.g. `v0.1.0`,
-# `nightly-2026-06-04-d23d381`), the literal string `latest` for
-# the latest stable, or `nightly` for the latest nightly via the
-# GitHub Releases API. See slice 33Q5 in
-# `crates/corvid-cli/src/deploy_cmd.rs::render_dockerfile` for the
-# rationale.
+# Hosted builds use the release that produced this CLI. Source builds use a nightly.
+# Override with `--build-arg CORVID_VERSION=<tag>` to select another release.
 ARG CORVID_VERSION={default_corvid_version}
 ARG CORVID_REPO=Micrurus-Ai/Corvid-lang
 
@@ -1626,24 +1605,7 @@ mod tests {
         }
     }
 
-    /// 33Q5 acceptance — anonymous-2026-06-04 round-2 P3.b: the
-    /// rendered Dockerfile's `ARG CORVID_VERSION` default must be
-    /// the rendering binary's nightly-tag form
-    /// (`nightly-<commit-date>-<short-sha>`) so the built image's
-    /// `corvid --version` reproduces the binary the package was
-    /// generated against AND the image's `CMD` subcommand (`serve`)
-    /// is guaranteed present. Pre-33Q5 the default was `latest`,
-    /// which resolved to the latest stable (v0.1.0 today) — and
-    /// v0.1.0 lacked the `serve` subcommand, so the rendered image's
-    /// entrypoint was a command its own binary didn't have.
-    ///
-    /// The test reads the same compile-time env vars the renderer
-    /// reads (`CORVID_BUILD_SHA` + `CORVID_BUILD_DATE`, set by
-    /// `crates/corvid-cli/build.rs`) and asserts the constructed
-    /// default matches what `render_dockerfile` emits. If either
-    /// env is `unknown`, the expected default falls back to
-    /// `nightly` (the always-works literal that the URL-resolver's
-    /// API-query branch handles).
+    /// Pin hosted packages to their release and retain the source-build nightly fallback.
     #[test]
     fn deploy_dockerfile_pins_corvid_version_to_rendering_binary_sha() {
         let app_root = tempdir_with_all_optional_paths();
@@ -1652,7 +1614,9 @@ mod tests {
 
         let build_sha = env!("CORVID_BUILD_SHA");
         let build_date = env!("CORVID_BUILD_DATE");
-        let expected_default = if build_sha == "unknown" || build_date == "unknown" {
+        let expected_default = if let Some(tag) = option_env!("CORVID_RELEASE_TAG") {
+            tag.to_owned()
+        } else if build_sha == "unknown" || build_date == "unknown" {
             "nightly".to_string()
         } else {
             format!("nightly-{build_date}-{build_sha}")
@@ -1660,12 +1624,8 @@ mod tests {
         let expected_arg_line = format!("ARG CORVID_VERSION={expected_default}");
 
         assert!(
-            dockerfile.contains(&expected_arg_line),
-            "Dockerfile MUST default ARG CORVID_VERSION to the rendering \
-             binary's nightly tag (`{expected_default}`) so the built \
-             image reproduces the SHA + has the same CLI surface. \
-             Pre-33Q5 the default was `latest` which resolved to v0.1.0 \
-             stable (lacks `serve`). got Dockerfile:\n{dockerfile}"
+            dockerfile.lines().any(|line| line == expected_arg_line),
+            "Missing expected Dockerfile argument: {expected_arg_line}"
         );
 
         // The URL-resolver block MUST handle all three CORVID_VERSION
