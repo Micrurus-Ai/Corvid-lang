@@ -7795,3 +7795,5 @@ mock/real/replay, typed status→error mapping, and retry/rate-limit/circuit-bre
 all run end-to-end. Async provider state machines and provider-drift quarantine
 are later Phase 52 slices (52h/52i). See [dev-log.md](dev-log.md) (2026-07-23,
 52g-3a … 52g-3c).
+
+When preparing a local candidate with `corvid release build`, use a version that matches its channel. Examples are `1.0.0-nightly.local`, `1.0.0-beta.2`, and `1.0.0`. Corvid checks the version before creating the release files. See the [release policy](docs/release-policy.md).
