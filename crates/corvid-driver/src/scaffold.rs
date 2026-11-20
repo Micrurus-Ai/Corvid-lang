@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+const BUNDLED_STD: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled_std.rs"));
+
 /// Scaffold a new Corvid project at `<name>/` under the current directory.
 pub fn scaffold_new(name: &str) -> anyhow::Result<PathBuf> {
     scaffold_new_in(&std::env::current_dir()?, name)
@@ -125,8 +127,7 @@ agent main() -> String:
 /// 2. `<exe-dir>/../std` — the layout produced by the install bootstrap
 ///    (`~/.corvid/bin/corvid` → `~/.corvid/std`).
 ///
-/// Returns `None` when neither candidate resolves to a directory, in
-/// which case [`vendor_std`] becomes a no-op.
+/// Returns `None` when neither candidate resolves to a directory.
 pub fn find_std_source() -> Option<PathBuf> {
     if let Ok(home) = std::env::var("CORVID_HOME") {
         let candidate = PathBuf::from(home).join("std");
@@ -140,10 +141,9 @@ pub fn find_std_source() -> Option<PathBuf> {
 }
 
 /// Copy the system stdlib into a fresh project so `import "./std/foo"`
-/// works without users having to clone the language repository. Returns
-/// the source path that was vendored from, or `None` if nothing was done
-/// (no source found, or the destination already exists). Errors propagate
-/// as filesystem failures during the copy.
+/// works without users having to clone the language repository. When
+/// installed modules are missing, use the compiler's bundled versions
+/// together and preserve any additional modules from the installation.
 ///
 /// **Vendored location.** `std/` is dropped into `<project>/src/std/`,
 /// not `<project>/std/`. The reason is Corvid's import resolver is
@@ -165,15 +165,17 @@ pub fn vendor_std(project_root: &Path) -> anyhow::Result<VendorOutcome> {
     if dst.exists() {
         return Ok(VendorOutcome::AlreadyPresent);
     }
-    let Some(src) = find_std_source() else {
-        // Slice 47b: this used to be a SILENT no-op — the scaffold
-        // printed nothing and the starter project's stdlib import
-        // failed on first run with no hint why. The caller now
-        // prints a loud warning with the remediation.
-        return Ok(VendorOutcome::NoSourceFound);
-    };
-    vendor_std_from(&src, &dst)?;
-    Ok(VendorOutcome::Vendored(src))
+    if let Some(src) = find_std_source() {
+        vendor_std_from(&src, &dst)?;
+        if BUNDLED_STD.iter().all(|(name, _)| src.join(name).is_file()) {
+            return Ok(VendorOutcome::Vendored(src));
+        }
+    }
+    std::fs::create_dir_all(&dst)?;
+    for &(name, bytes) in BUNDLED_STD {
+        std::fs::write(dst.join(name), bytes)?;
+    }
+    Ok(VendorOutcome::Bundled)
 }
 
 /// What [`vendor_std`] did (slice 47b — the silent no-op became a
@@ -184,10 +186,8 @@ pub enum VendorOutcome {
     Vendored(PathBuf),
     /// `src/std/` already exists — nothing to do.
     AlreadyPresent,
-    /// NO stdlib source was found (no `$CORVID_HOME/std`, no
-    /// `<exe>/../std`). The project's stdlib imports will not
-    /// compile until the install is fixed.
-    NoSourceFound,
+    /// Installed modules were missing. Copied the compiler's own standard library.
+    Bundled,
 }
 
 /// Slice 47b: refresh a project's vendored `src/std/` from the

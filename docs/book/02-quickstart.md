@@ -29,6 +29,8 @@ hello-corvid/
 └── tools.py            # generated with --with-python-tools
 ```
 
+`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
+
 The scaffolded `corvid.toml` declares the executing-I/O security
 boundaries from day one: `[io] root = "."` confines file access to the
 project directory, and `[http] allow = []` fails HTTP egress closed

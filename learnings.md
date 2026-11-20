@@ -7815,3 +7815,5 @@ The Windows installer extracts downloaded archives into a fresh staging director
 Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.
 
 To try a Python-backed tool from the terminal, use `corvid new --with-python-tools notes`, change into `notes`, and run `corvid run src/python_tools_example.cor "Hello"`. See [Calling your own Python tool](docs/book/18-talking-to-the-outside-world.md#calling-your-own-python-tool).
+
+`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.

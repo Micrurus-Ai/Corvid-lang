@@ -36,15 +36,8 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
             println!("vendored stdlib from `{}`", src.display());
         }
         Ok(corvid_driver::VendorOutcome::AlreadyPresent) => {}
-        Ok(corvid_driver::VendorOutcome::NoSourceFound) => {
-            eprintln!(
-                "warning: NO stdlib source found — the starter project imports \
-                 `./std/time` and will not compile until it is vendored.\n  \
-                 Fix: set CORVID_HOME to your Corvid install directory (the one \
-                 containing `std/`), then run `corvid upgrade refresh-std {name}`."
-            );
-        }
-        Err(err) => eprintln!("warning: failed to vendor stdlib: {err:#}"),
+        Ok(corvid_driver::VendorOutcome::Bundled) => println!("vendored the compiler's bundled standard library"),
+        Err(err) => return Err(err.context("copy standard library into the new project")),
     }
     // Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): the
     // prior "Next steps" output told reviewers `pip install
