@@ -147,3 +147,18 @@ fn typed_map_counters() {
 fn typed_map_reference_values() {
     super::assert_parity_bool_without_tools(include_str!("map_reference_values.cor"), true);
 }
+
+#[test]
+fn list_updates_preserve_aliases_and_evaluate_operands_once() {
+    super::assert_parity_bool_without_tools(include_str!("list_updates.cor"), true);
+}
+
+#[test]
+fn record_updates_preserve_aliases_and_evaluate_operands_once() {
+    super::assert_parity_bool_without_tools(include_str!("record_updates.cor"), true);
+}
+
+#[test]
+fn nested_loops_and_short_circuit_preserve_control_flow() {
+    super::assert_parity_bool_without_tools(include_str!("control_flow_updates.cor"), true);
+}

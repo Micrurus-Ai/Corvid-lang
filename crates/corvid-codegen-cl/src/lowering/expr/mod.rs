@@ -24,6 +24,60 @@ pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_r
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
 
+fn allocate_slots(
+    builder: &mut FunctionBuilder, module: &mut ObjectModule, runtime: &RuntimeFuncs,
+    element: &Type, capacity: ClValue, span: Span,
+) -> Result<ClValue, CodegenError> {
+    let info = runtime.list_typeinfos.get(element).ok_or_else(|| {
+        CodegenError::cranelift(format!("missing list element typeinfo for {}", element.display_name()), span)
+    })?;
+    let data = module.declare_data_in_func(*info, builder.func);
+    let addr = builder.ins().symbol_value(I64, data);
+    let alloc = module.declare_func_in_func(runtime.list_new, builder.func);
+    let call = builder.ins().call(alloc, &[capacity, addr]);
+    Ok(builder.inst_results(call)[0])
+}
+
+pub(super) fn checked_list_slot(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    list: ClValue,
+    index: ClValue,
+) -> ClValue {
+    let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
+    // Negative signed indices also exceed the length as unsigned integers.
+    let valid = builder.ins().icmp(IntCC::UnsignedLessThan, index, length);
+    let trap = builder.create_block();
+    let next = builder.create_block();
+    builder.ins().brif(valid, next, &[], trap, &[]);
+    builder.switch_to_block(trap);
+    builder.seal_block(trap);
+    let report = module.declare_func_in_func(runtime.list_bounds_error, builder.func);
+    builder.ins().call(report, &[index, length]);
+    builder.ins().trap(clir::TrapCode::unwrap_user(1));
+    builder.switch_to_block(next);
+    builder.seal_block(next);
+    let offset = builder.ins().imul_imm(index, 8);
+    let buffer = builder.ins().load(I64, MemFlags::trusted(), list, 8);
+    builder.ins().iadd(buffer, offset)
+}
+
+pub(super) fn record_field<'a>(runtime: &'a RuntimeFuncs, ty: &Type, name: &str, span: Span)
+    -> Result<(i32, &'a corvid_ir::IrField), CodegenError>
+{
+    let id = match ty {
+        Type::Struct(id) => *id,
+        Type::ImportedStruct(imported) => imported.def_id,
+        _ => return Err(CodegenError::cranelift("field access requires a record", span)),
+    };
+    let field = runtime.ir_types.get(&id).and_then(|record| {
+        record.fields.iter().enumerate().find(|(_, field)| field.name == name)
+    });
+    field.map(|(i, field)| (i as i32 * STRUCT_FIELD_SLOT_BYTES, field))
+        .ok_or_else(|| CodegenError::cranelift(format!("missing native layout for field `{name}`"), span))
+}
+
 pub(super) fn lower_expr(
     builder: &mut FunctionBuilder,
     expr: &IrExpr,
@@ -137,8 +191,8 @@ pub(super) fn lower_expr(
             builder.ins().brif(length, present, &[], join, &[none.into()]);
             builder.switch_to_block(present);
             builder.seal_block(present);
-            // The native list stores eight-byte slots immediately after its length.
-            let slots = builder.ins().iadd_imm(list, 8);
+            // The descriptor owns a growable buffer of eight-byte slots.
+            let slots = builder.ins().load(I64, MemFlags::trusted(), list, 8);
             let ty = cl_type_for(element, expr.span)?;
             let slot = if *kind == corvid_types::BuiltinMethodKind::ListLast {
                 let index = builder.ins().iadd_imm(length, -1);
@@ -175,6 +229,30 @@ pub(super) fn lower_expr(
                 emit_release(builder, module, runtime, list);
             }
             Ok(length)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListAppend, receiver, args } => {
+            let item = &args[0];
+            if !crate::native_list_append(&receiver.ty, &item.ty) {
+                return Err(CodegenError::not_supported("append with this element type", expr.span));
+            }
+            let (list, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let mut slot = lower_expr(builder, item, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            if matches!(&receiver.ty, Type::List(t) if **t == Type::Float) && item.ty == Type::Int {
+                slot = builder.ins().fcvt_from_sint(F64, slot);
+            }
+            slot = match builder.func.dfg.value_type(slot) {
+                I8 => builder.ins().uextend(I64, slot),
+                F64 => builder.ins().bitcast(I64, MemFlags::new(), slot),
+                _ => slot,
+            };
+            let append = module.declare_func_in_func(runtime.list_append, builder.func);
+            builder.ins().call(append, &[list, slot]);
+            if !borrowed {
+                emit_release(builder, module, runtime, list);
+            }
+            Ok(builder.ins().iconst(I64, 0))
         }
         IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
             "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
@@ -904,40 +982,7 @@ pub(super) fn lower_expr(
             )),
         },
         IrExprKind::FieldAccess { target, field } => {
-            let def_id = match &target.ty {
-                Type::Struct(id) => *id,
-                // Imported structs key the same `ir_types` layout table;
-                // the type carries the cross-module-remapped DefId (set in
-                // corvid-ir lowering, slices G0-1 + the lower_expr remap),
-                // so the same field-offset machinery applies.
-                Type::ImportedStruct(imported) => imported.def_id,
-                other => {
-                    return Err(CodegenError::cranelift(
-                        format!(
-                            "field access target has non-struct type `{other:?}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"
-                        ),
-                        expr.span,
-                    ));
-                }
-            };
-            let ir_type = runtime.ir_types.get(&def_id).cloned().ok_or_else(|| {
-                CodegenError::cranelift(
-                    format!("struct metadata missing for field access to `{field}`"),
-                    expr.span,
-                )
-            })?;
-            let (i, field_meta) = ir_type
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, f)| &f.name == field)
-                .ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!("field `{field}` not found on struct `{}`", ir_type.name),
-                        expr.span,
-                    )
-                })?;
-            let offset = (i as i32) * STRUCT_FIELD_SLOT_BYTES;
+            let (offset, field_meta) = record_field(runtime, &target.ty, field, expr.span)?;
             let field_cl_ty = cl_type_for(&field_meta.ty, field_meta.span)?;
 
             // Borrow-at-use-site peephole: if the target is a bare
@@ -1004,39 +1049,7 @@ pub(super) fn lower_expr(
                 runtime,
             )?;
 
-            // Bounds check: trap if `idx_val >= length` or `idx_val < 0`.
-            let length = builder.ins().load(
-                I64,
-                cranelift_codegen::ir::MemFlags::trusted(),
-                list_ptr,
-                0,
-            );
-            let in_range_hi =
-                builder.ins().icmp(IntCC::SignedLessThan, idx_val, length);
-            let zero = builder.ins().iconst(I64, 0);
-            let in_range_lo =
-                builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx_val, zero);
-            let in_range = builder.ins().band(in_range_hi, in_range_lo);
-            let trap_block = builder.create_block();
-            let cont_block = builder.create_block();
-            builder
-                .ins()
-                .brif(in_range, cont_block, &[], trap_block, &[]);
-            builder.switch_to_block(trap_block);
-            builder.seal_block(trap_block);
-            let callee_ref =
-                module.declare_func_in_func(runtime.overflow, builder.func);
-            builder.ins().call(callee_ref, &[]);
-            builder
-                .ins()
-                .trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
-            builder.switch_to_block(cont_block);
-            builder.seal_block(cont_block);
-
-            // Element address = list_ptr + 8 + idx * 8.
-            let offset = builder.ins().imul_imm(idx_val, 8);
-            let base = builder.ins().iadd_imm(list_ptr, 8);
-            let elem_addr = builder.ins().iadd(base, offset);
+            let elem_addr = checked_list_slot(builder, module, runtime, list_ptr, idx_val);
             let elem_val = builder.ins().load(
                 elem_cl_ty,
                 cranelift_codegen::ir::MemFlags::trusted(),
@@ -1061,55 +1074,12 @@ pub(super) fn lower_expr(
             Ok(elem_val)
         }
         IrExprKind::List { items } => {
-            // Element type taken from the List's annotated type.
-            let elem_ty = match &expr.ty {
-                Type::List(elem) => (**elem).clone(),
-                other => {
-                    return Err(CodegenError::cranelift(
-                        format!(
-                            "list literal has non-list type `{other:?}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"
-                        ),
-                        expr.span,
-                    ));
-                }
+            let Type::List(elem_ty) = &expr.ty else {
+                return Err(CodegenError::not_supported("list literal with this element type", expr.span));
             };
-            let _elem_refcounted = is_refcounted_type(&elem_ty);
-            // Allocation size: 8 (length) + 8 * N (elements).
-            let total_bytes = 8 + 8 * items.len() as i64;
-            let size_val = builder.ins().iconst(I64, total_bytes);
-            // Single typed allocator. The typeinfo block
-            // (pre-emitted in lower_file) carries destroy_fn
-            // (corvid_destroy_list for refcounted elements, NULL
-            // otherwise) and trace_fn (corvid_trace_list always).
-            let list_ti_id = runtime
-                .list_typeinfos
-                .get(&elem_ty)
-                .copied()
-                .ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!(
-                            "no typeinfo pre-emitted for List<{}> ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â collect_list_element_types missed this site",
-                            mangle_type_name(&elem_ty)
-                        ),
-                        expr.span,
-                    )
-                })?;
-            let list_ti_gv = module.declare_data_in_func(list_ti_id, builder.func);
-            let ti_addr = builder.ins().symbol_value(I64, list_ti_gv);
-            let alloc_ref =
-                module.declare_func_in_func(runtime.alloc_typed, builder.func);
-            let call = builder.ins().call(alloc_ref, &[size_val, ti_addr]);
-            let list_ptr = builder.inst_results(call)[0];
-            // Store length at offset 0.
-            let length_val = builder.ins().iconst(I64, items.len() as i64);
-            builder.ins().store(
-                cranelift_codegen::ir::MemFlags::trusted(),
-                length_val,
-                list_ptr,
-                0,
-            );
-            // Store each element at offset 8 + i * 8. The element's
-            // Owned +1 transfers into the list.
+            let count = builder.ins().iconst(I64, items.len() as i64);
+            let list_ptr = allocate_slots(builder, module, runtime, elem_ty, count, expr.span)?;
+            let slots = builder.ins().load(I64, MemFlags::trusted(), list_ptr, 8);
             for (i, item) in items.iter().enumerate() {
                 let item_val = lower_expr(
                     builder,
@@ -1121,13 +1091,15 @@ pub(super) fn lower_expr(
                     module,
                     runtime,
                 )?;
-                let offset = 8 + (i as i32) * 8;
+                let offset = (i as i32) * 8;
                 builder.ins().store(
                     cranelift_codegen::ir::MemFlags::trusted(),
                     item_val,
-                    list_ptr,
+                    slots,
                     offset,
                 );
+                let initialized = builder.ins().iconst(I64, (i + 1) as i64);
+                builder.ins().store(MemFlags::trusted(), initialized, list_ptr, 0);
             }
             Ok(list_ptr)
         }

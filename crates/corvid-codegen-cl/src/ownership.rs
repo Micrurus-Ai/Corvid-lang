@@ -255,6 +255,14 @@ fn param_is_consumed(
                     consumed = true;
                 }
             }
+            IrStmt::Assign { value, .. } => {
+                if crate::native_record_assignment(stmt) || crate::native_local_compound(stmt) {
+                    consumed |= expr_references(value, target);
+                }
+                if let Some((_, keys, value, _)) = crate::native_indexed_assignment(stmt) {
+                    consumed |= keys.iter().any(|key| expr_references(key, target)) || expr_references(value, target);
+                }
+            }
             IrStmt::Expr { expr, .. } => {
                 if expr_consumes_target(expr, target, sigs) {
                     consumed = true;

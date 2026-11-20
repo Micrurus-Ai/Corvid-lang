@@ -33,29 +33,3 @@ pub fn native_string_map_lookup(
     };
     native_string_map(&receiver.ty).then_some((receiver, key))
 }
-
-pub fn string_map_assignment(
-    stmt: &corvid_ir::IrStmt,
-) -> Option<(
-    corvid_resolve::LocalId,
-    &corvid_ir::IrExpr,
-    &corvid_ir::IrExpr,
-)> {
-    let corvid_ir::IrStmt::Assign {
-        local_id,
-        root_ty,
-        path,
-        op,
-        value,
-        ..
-    } = stmt
-    else {
-        return None;
-    };
-    let [corvid_ir::IrPathSeg::Index(key)] = path.as_slice() else {
-        return None;
-    };
-    let supported_op = op.is_none()
-        || matches!(root_ty, corvid_types::Type::Map(_, elem) if **elem == corvid_types::Type::Int);
-    (native_string_map(root_ty) && supported_op).then_some((*local_id, key, value))
-}

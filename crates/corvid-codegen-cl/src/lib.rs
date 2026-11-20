@@ -29,8 +29,10 @@ pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
 
+mod assignment;
+pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
 mod map_support;
-pub use map_support::{native_string_map, native_string_map_lookup, string_map_assignment, NATIVE_MAP_REQUIREMENTS};
+pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
 pub mod staticlib_discovery;
 pub mod target;

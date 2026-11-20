@@ -1,0 +1,36 @@
+type Counter:
+    value: Int
+    label: String
+
+type State:
+    counter: Counter
+
+agent replace(state: State, calls: List<Int>) -> Int:
+    state.counter = Counter(10, "new")
+    calls.append(1)
+    return 3
+
+agent mark(calls: List<Int>) -> Bool:
+    calls.append(2)
+    return true
+
+agent visit(state: State, calls: List<Int>) -> Int:
+    for row in [1, 2]:
+        for column in [1, 2, 3]:
+            if column == 2 and mark(calls):
+                return state.counter.value
+            state.counter.value += row
+    return -1
+
+agent main() -> Bool:
+    old = Counter(0, "be" + "fore")
+    state = State(old)
+    alias = state
+    saved = old.label
+    old.label = "after"
+    calls: List<Int> = []
+    state.counter.value += replace(alias, calls)
+    result = visit(state, calls)
+    count = calls.length() == 2 and calls[0] == 1 and calls[1] == 2
+    original = saved == "before" and old.label == "after" and old.value == 0
+    return original and count and result == 14 and alias.counter.value == 14

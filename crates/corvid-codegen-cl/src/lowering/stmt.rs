@@ -13,13 +13,15 @@ pub(super) fn emit_function_return(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) {
+    for &value in runtime.return_temporaries.borrow().iter().rev() {
+        emit_release(builder, module, runtime, value);
+    }
     if !runtime.dup_drop_enabled {
         for scope in scope_stack.iter().rev() {
             for (_, var) in scope.iter().rev() {
                 let v_local = builder.use_var(*var);
-                if v_local == value {
-                    continue;
-                }
+                // A returned expression owns its own reference, even when the
+                // local and the return value share the same descriptor.
                 emit_release(builder, module, runtime, v_local);
             }
         }
@@ -33,6 +35,9 @@ pub(super) fn emit_function_return_void(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) {
+    for &value in runtime.return_temporaries.borrow().iter().rev() {
+        emit_release(builder, module, runtime, value);
+    }
     if !runtime.dup_drop_enabled {
         for scope in scope_stack.iter().rev() {
             for (_, var) in scope.iter().rev() {
@@ -85,20 +90,47 @@ fn lower_stmt(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) -> Result<BlockOutcome, CodegenError> {
-    if let Some((id, key, value)) = crate::string_map_assignment(stmt) {
-        let (var, _) = env.get(&id).ok_or_else(|| CodegenError::cranelift("unbound map", value.span))?;
-        let key = lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
-        let value = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
-        let map = builder.use_var(*var);
-        let value = if let IrStmt::Assign { op: Some(op), span, .. } = stmt {
-            // Resolve the slot after the operands: either can mutate the map.
-            let require = module.declare_func_in_func(runtime.map_require_int, builder.func);
-            let call = builder.ins().call(require, &[map, key]);
-            let old = builder.inst_results(call)[0];
-            lower_binop_strict(builder, *op, old, value, *span, module, runtime)?
-        } else { value };
-        let set = module.declare_func_in_func(runtime.map_set, builder.func);
-        builder.ins().call(set, &[map, key, value]);
+    if let Some((id, keys, value, element)) = crate::native_indexed_assignment(stmt) {
+        let IrStmt::Assign { root_ty, op, span, .. } = stmt else { unreachable!() };
+        let (var, _) = env.get(&id).copied().ok_or_else(|| CodegenError::cranelift("unbound indexed assignment target", *span))?;
+        let mut indices = Vec::with_capacity(keys.len());
+        for key in keys {
+            indices.push(lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?);
+        }
+        let index = indices.pop().expect("indexed assignment has at least one index");
+        let mut item = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+        let mut container = builder.use_var(var);
+        for outer_index in indices {
+            let slot = super::expr::checked_list_slot(builder, module, runtime, container, outer_index);
+            container = builder.ins().load(I64, MemFlags::trusted(), slot, 0);
+        }
+        if matches!(root_ty, Type::List(_)) {
+            // Either operand can grow the list. Resolve the buffer only after both calls.
+            let slot = super::expr::checked_list_slot(builder, module, runtime, container, index);
+            if let Some(op) = op {
+                let layout = cl_type_for(element, *span)?;
+                let old = builder.ins().load(layout, MemFlags::trusted(), slot, 0);
+                item = lower_binop_strict(builder, *op, old, item, *span, module, runtime)?;
+            } else if *element == Type::Float && value.ty == Type::Int {
+                item = builder.ins().fcvt_from_sint(F64, item);
+            }
+            if is_refcounted_type(element) {
+                let previous = builder.ins().load(I64, MemFlags::trusted(), slot, 0);
+                builder.ins().store(MemFlags::trusted(), item, slot, 0);
+                emit_release(builder, module, runtime, previous);
+            } else {
+                builder.ins().store(MemFlags::trusted(), item, slot, 0);
+            }
+        } else {
+            if let Some(op) = op {
+                let require = module.declare_func_in_func(runtime.map_require_int, builder.func);
+                let call = builder.ins().call(require, &[container, index]);
+                let old = builder.inst_results(call)[0];
+                item = lower_binop_strict(builder, *op, old, item, *span, module, runtime)?;
+            }
+            let set = module.declare_func_in_func(runtime.map_set, builder.func);
+            builder.ins().call(set, &[container, index, item]);
+        }
         return Ok(BlockOutcome::Normal);
     }
     match stmt {
@@ -106,6 +138,47 @@ fn lower_stmt(
             "Stream lowering not yet implemented",
             *span,
         )),
+        IrStmt::Assign { local_id, op: Some(op), value, span, .. }
+            if crate::native_local_compound(stmt) => {
+                let rhs = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                let (var, _) = env.get(local_id).ok_or_else(|| CodegenError::cranelift("unbound local assignment target", *span))?;
+                let old = builder.use_var(*var);
+                let result = lower_binop_strict(builder, *op, old, rhs, *span, module, runtime)?;
+                builder.def_var(*var, result);
+                Ok(BlockOutcome::Normal)
+            }
+        IrStmt::Assign { local_id, root_ty, path, op, value, span, .. }
+            if crate::native_record_assignment(stmt) => {
+                // The RHS can replace a nested record, so resolve the path afterwards.
+                let mut rhs = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                let (var, _) = env.get(local_id).ok_or_else(|| CodegenError::cranelift("unbound record", *span))?;
+                let mut record = builder.use_var(*var);
+                let mut ty = root_ty;
+                for (index, part) in path.iter().enumerate() {
+                    let corvid_ir::IrPathSeg::Field(name) = part else { unreachable!() };
+                    let (offset, field) = super::expr::record_field(runtime, ty, name, *span)?;
+                    if index + 1 < path.len() {
+                        record = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+                        ty = &field.ty;
+                        continue;
+                    }
+                    let layout = cl_type_for(&field.ty, *span)?;
+                    if let Some(op) = op {
+                        let old = builder.ins().load(layout, MemFlags::trusted(), record, offset);
+                        rhs = lower_binop_strict(builder, *op, old, rhs, *span, module, runtime)?;
+                    } else if field.ty == Type::Float && value.ty == Type::Int {
+                        rhs = builder.ins().fcvt_from_sint(F64, rhs);
+                    }
+                    if is_refcounted_type(&field.ty) {
+                        let old = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+                        builder.ins().store(MemFlags::trusted(), rhs, record, offset);
+                        emit_release(builder, module, runtime, old);
+                    } else {
+                        builder.ins().store(MemFlags::trusted(), rhs, record, offset);
+                    }
+                }
+                Ok(BlockOutcome::Normal)
+            }
         IrStmt::Assign { span, .. } => Err(CodegenError::not_supported(
             "place assignment (x.field = v / xs[i] = v / compound ops) is interpreter-only in 45b",
             *span,
@@ -495,7 +568,7 @@ fn lower_for(
     let elem_cl_ty = cl_type_for(&elem_ty, span)?;
     let elem_refcounted = is_refcounted_type(&elem_ty);
 
-    let (iter_ptr, iter_borrowed) = lower_container_maybe_borrowed(
+    let iter_ptr = lower_expr(
         builder,
         iter,
         current_return_ty,
@@ -506,6 +579,23 @@ fn lower_for(
         runtime,
     )?;
 
+    // Literals and map snapshots are already private to this iteration.
+    let fresh_list = matches!(&iter.kind, IrExprKind::List { .. } | IrExprKind::BuiltinMethod {
+        kind: corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues, ..
+    });
+    let iter_ptr = if matches!(iter.ty, Type::List(_)) && !fresh_list {
+        let info = runtime.list_typeinfos.get(&elem_ty)
+            .ok_or_else(|| CodegenError::cranelift("missing iterator list typeinfo", span))?;
+        let data = module.declare_data_in_func(*info, builder.func);
+        let addr = builder.ins().symbol_value(I64, data);
+        let snapshot = module.declare_func_in_func(runtime.list_snapshot, builder.func);
+        let call = builder.ins().call(snapshot, &[iter_ptr, addr]);
+        let copy = builder.inst_results(call)[0];
+        emit_release(builder, module, runtime, iter_ptr);
+        copy
+    } else {
+        iter_ptr
+    };
     let length = match &iter.ty {
         Type::List(_) => {
             builder
@@ -521,7 +611,11 @@ fn lower_for(
     };
 
     let loop_var = runtime.declare_variable(builder, elem_cl_ty);
-    let zero_elem = builder.ins().iconst(elem_cl_ty, 0);
+    let zero_elem = if elem_cl_ty == F64 {
+        builder.ins().f64const(0.0)
+    } else {
+        builder.ins().iconst(elem_cl_ty, 0)
+    };
     builder.def_var(loop_var, zero_elem);
     env.insert(var_local, (loop_var, elem_cl_ty));
     if elem_refcounted && !string_iter {
@@ -559,7 +653,7 @@ fn lower_for(
     let elem_val = match &iter.ty {
         Type::List(_) => {
             let offset = builder.ins().imul_imm(i_now, 8);
-            let base = builder.ins().iadd_imm(iter_ptr, 8);
+            let base = builder.ins().load(I64, MemFlags::trusted(), iter_ptr, 8);
             let elem_addr = builder.ins().iadd(base, offset);
             builder.ins().load(
                 elem_cl_ty,
@@ -601,6 +695,11 @@ fn lower_for(
             scope.push((var_local, loop_var));
         }
     }
+    let outer_temporaries = runtime.return_temporaries.borrow().len();
+    runtime.return_temporaries.borrow_mut().push(iter_ptr);
+    if runtime.dup_drop_enabled && string_iter_needs_manual_cleanup {
+        runtime.return_temporaries.borrow_mut().push(elem_val);
+    }
     let body_outcome = lower_block(
         builder,
         body,
@@ -611,8 +710,9 @@ fn lower_for(
         func_ids_by_def,
         module,
         runtime,
-    )?;
-    match body_outcome {
+    );
+    runtime.return_temporaries.borrow_mut().truncate(outer_temporaries);
+    match body_outcome? {
         BlockOutcome::Normal => {
             let body_scope = scope_stack.pop().unwrap_or_default();
             if !runtime.dup_drop_enabled {
@@ -643,9 +743,7 @@ fn lower_for(
     builder.seal_block(exit_b);
     loop_stack.pop();
 
-    if is_refcounted_type(&iter.ty) && !iter_borrowed {
-        emit_release(builder, module, runtime, iter_ptr);
-    }
+    emit_release(builder, module, runtime, iter_ptr);
     Ok(BlockOutcome::Normal)
 }
 

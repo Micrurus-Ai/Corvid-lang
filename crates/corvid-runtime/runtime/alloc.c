@@ -39,6 +39,7 @@
  * Non-atomic refcount: Corvid is single-threaded today.
  */
 
+#include "list_layout.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -297,6 +298,9 @@ void* corvid_alloc_typed(long long payload_bytes, const corvid_typeinfo* typeinf
 }
 
 void corvid_free_block(corvid_header* h) {
+    if (h->typeinfo && (h->typeinfo->flags & CORVID_TI_GROWABLE_LIST)) {
+        corvid_list_free_storage((char*)h + CORVID_HEADER_BYTES);
+    }
     corvid_tracking_node* node =
         (corvid_tracking_node*)((char*)h - CORVID_TRACKING_BYTES);
     if (node->prev != NULL) {

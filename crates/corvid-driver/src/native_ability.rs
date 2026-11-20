@@ -207,12 +207,13 @@ fn scan_block(block: &IrBlock, current_return_ty: &Type) -> Result<(), NotNative
 }
 
 fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeReason> {
-    if let Some((_, key, value)) = corvid_codegen_cl::string_map_assignment(stmt) {
-        scan_expr(key, current_return_ty)?;
+    if let Some((_, keys, value, _)) = corvid_codegen_cl::native_indexed_assignment(stmt) {
+        for key in keys { scan_expr(key, current_return_ty)?; }
         return scan_expr(value, current_return_ty);
     }
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty),
+        IrStmt::Assign { value, .. } if corvid_codegen_cl::native_record_assignment(stmt) || corvid_codegen_cl::native_local_compound(stmt) => scan_expr(value, current_return_ty),
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
         IrStmt::Return { value: Some(v), .. } => scan_expr(v, current_return_ty),
@@ -312,6 +313,11 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 corvid_types::BuiltinMethodKind::MapLength | corvid_types::BuiltinMethodKind::MapContainsKey) => {
             scan_expr(receiver, current_return_ty)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty))
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListAppend, receiver, args }
+            if args.len() == 1 && corvid_codegen_cl::native_list_append(&receiver.ty, &args[0].ty) => {
+            scan_expr(receiver, current_return_ty)?;
+            scan_expr(&args[0], current_return_ty)
         }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),

@@ -6,6 +6,16 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 ---
 
+## Updating lists and records
+
+Write `scores[i] += 2`, `rows[i][j] = value`, or `state.counter.value += 1`
+on either execution target. Each index expression runs once. The right-hand
+side runs before Corvid reads the slot's current value. If that expression
+grows a list or replaces a nested record, the update follows the resulting
+container. Other variables referring to the list or record see the change.
+A `for` loop visits the entries present when it starts, including when the body
+changes an upcoming slot. [Lists and records](docs/book/05-types.md)
+
 ## Working with ordered string maps
 
 Use `labels.contains_key(key)` to test membership and `labels.length()` to count distinct keys. Assigning through an alias updates the same map. Capture `labels.keys()` or `labels.values()` to keep an insertion-ordered snapshot across later writes. [Map examples](docs/book/05-types.md#maps)

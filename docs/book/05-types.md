@@ -229,6 +229,22 @@ agent transform(xs: List<Int>) -> Int:
     return add_base(ys.length() + zs.length())
 ```
 
+A `for` loop visits a snapshot of the list entries taken at loop entry.
+Appending or replacing a slot during the loop affects the original list.
+The remaining iterations still visit the original entries. A snapshot
+of records shares the records themselves.
+
+List indices in a write are evaluated once, from left to right. Corvid
+then evaluates the right-hand side and updates the current list at those
+indices. If a function replaces a row, a nested write updates the new row.
+Negative indices and indices at or beyond the list length raise an error.
+
+```corvid
+agent update(rows: List<List<Int>>) -> Int:
+    rows[0][0] += 4
+    return rows[0][0]
+```
+
 ## Maps
 
 Maps are Python-style literals with typed reads that can never

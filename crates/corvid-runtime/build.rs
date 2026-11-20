@@ -71,6 +71,7 @@ fn main() {
     // Cargo rebuilds when any C source changes.
     println!("cargo:rerun-if-changed=runtime/alloc.c");
     println!("cargo:rerun-if-changed=runtime/strings.c");
+    println!("cargo:rerun-if-changed=runtime/list_layout.h");
     println!("cargo:rerun-if-changed=runtime/lists.c");
     println!("cargo:rerun-if-changed=runtime/ordered_map.c");
     println!("cargo:rerun-if-changed=runtime/entry.c");

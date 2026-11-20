@@ -1,5 +1,6 @@
 /* Ordered string maps own a flat buffer of key/value pairs. The descriptor
  * stays at one address as the buffer grows, so aliases observe each update. */
+#include "list_layout.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,12 +138,26 @@ void corvid_ordered_map_set(ordered_map* map, void* key, void* value) {
 /* Snapshot into the normal native List<T> layout, retaining heap elements. */
 void* corvid_ordered_map_snapshot(ordered_map* map, int64_t values, const struct corvid_typeinfo* list_info) {
     map_slots* entries = map->entries;
-    map_slots* list = corvid_alloc_typed(8 + entries->count * 8, list_info);
-    list->count = entries->count;
+    // The caller supplies the result typeinfo. Older native objects use inline slots.
+    map_slots* list;
+    void** slots;
+    if (list_info->flags & CORVID_TI_GROWABLE_LIST) {
+        corvid_list* descriptor = corvid_list_new(entries->count, list_info);
+        for (int64_t i = 0; i < entries->count; ++i) {
+            void* item = entries->slots[2 * i + values];
+            if (!values || map->owns_values) corvid_retain(item);
+            corvid_list_append(descriptor, (intptr_t)item);
+        }
+        return descriptor;
+    }
+    list = corvid_alloc_typed(8 + entries->count * 8, list_info);
+    slots = list->slots;
+    list->count = 0;
     for (int64_t i = 0; i < entries->count; ++i) {
         void* item = entries->slots[2 * i + values];
         if (!values || map->owns_values) corvid_retain(item);
-        list->slots[i] = item;
+        slots[i] = item;
+        list->count++;
     }
     return list;
 }

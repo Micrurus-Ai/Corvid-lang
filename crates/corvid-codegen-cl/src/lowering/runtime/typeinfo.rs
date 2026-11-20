@@ -45,6 +45,7 @@ const TYPEINFO_OFF_NAME: u32 = 40;
 const TYPEINFO_FLAG_CYCLIC_CAPABLE: u32 = 0x01;
 #[allow(dead_code)]
 const TYPEINFO_FLAG_HAS_WEAK_REFS: u32 = 0x02;
+const TYPEINFO_FLAG_GROWABLE_LIST: u32 = 0x40;
 const TYPEINFO_FLAG_IS_LIST: u32 = 0x04;
 #[allow(dead_code)]
 const TYPEINFO_FLAG_LINEAR_CAPABLE: u32 = 0x08;
@@ -231,7 +232,7 @@ pub fn emit_list_typeinfo(
 
     // size: 0 (variable-length)
     // flags: IS_LIST
-    let flags: u32 = TYPEINFO_FLAG_IS_LIST | TYPEINFO_FLAG_HAS_WEAK_REFS;
+    let flags: u32 = TYPEINFO_FLAG_IS_LIST | TYPEINFO_FLAG_HAS_WEAK_REFS | TYPEINFO_FLAG_GROWABLE_LIST;
     bytes[TYPEINFO_OFF_FLAGS as usize..(TYPEINFO_OFF_FLAGS + 4) as usize]
         .copy_from_slice(&flags.to_le_bytes());
 

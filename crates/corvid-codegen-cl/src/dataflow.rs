@@ -61,6 +61,7 @@ mod liveness;
 mod ownership_plan;
 
 use cfg::build_cfg;
+pub(crate) use cfg::collect_reads;
 pub use cfg::{BlockId, Cfg, CfgBlock, CfgStmt, LocalRead, ProgramPoint, ReadKind, StmtPos};
 use liveness::compute_liveness;
 pub use liveness::Liveness;

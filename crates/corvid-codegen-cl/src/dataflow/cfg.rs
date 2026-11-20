@@ -200,19 +200,20 @@ impl CfgBuilder {
             let mut my_path = parent_path.clone();
             my_path.push(IrNavStep::Stmt(ir_idx));
             match stmt {
-                // Place assignment (45b) — interpreter-only; codegen-cl
-                // rejects it at lowering. For dataflow purposes it reads
-                // the path's index expressions and the value (all
-                // non-consuming: the root local stays live).
-                IrStmt::Assign { .. } if crate::string_map_assignment(stmt).is_some() => {
-                    let (id, key, value) = crate::string_map_assignment(stmt).unwrap();
-                    let mut reads = collect_reads(key, true);
-                    reads.extend(collect_reads(value, true));
-                    reads.push(LocalRead { local_id: id, kind: ReadKind::Borrowed });
+                IrStmt::Assign { local_id, value, .. } if crate::native_record_assignment(stmt) => {
+                    let mut reads = collect_reads(value, true);
+                    reads.push(LocalRead { local_id: *local_id, kind: ReadKind::Borrowed });
                     self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
                 }
                 IrStmt::Assign { path, value, .. } => {
                     let mut reads = Vec::new();
+                    if let Some((id, keys, value, _)) = crate::native_indexed_assignment(stmt) {
+                        for key in keys { walk_expr(key, true, &mut reads); }
+                        walk_expr(value, true, &mut reads);
+                        reads.push(LocalRead { local_id: id, kind: ReadKind::Borrowed });
+                        self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                        continue;
+                    }
                     for seg in path {
                         if let corvid_ir::IrPathSeg::Index(idx) = seg {
                             reads.extend(collect_reads(idx, false));
@@ -346,8 +347,8 @@ impl CfgBuilder {
                     body,
                     ..
                 } => {
-                    // Native iteration borrows a named iterable and owns a temporary.
-                    let iter_reads = collect_reads(iter, false);
+                    // Evaluate and own the iterable once, before the first iteration.
+                    let iter_reads = collect_reads(iter, true);
                     // Evaluate the iterable once. The back edge returns to
                     // the loop head, not to preceding local initializers.
                     self.push_stmt(cur, CfgStmt::Expr { reads: iter_reads }, my_path.clone());
@@ -446,7 +447,7 @@ fn iter_element_type(e: &IrExpr) -> Type {
 ///     unless the composite is itself in a Borrowed context. We model
 ///     the conservative case: composite operands are Owned when their
 ///     outer context consumes the result.
-fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
+pub(crate) fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
     let mut out = Vec::new();
     walk_expr(expr, consumed, &mut out);
     out
@@ -490,10 +491,10 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             out.extend(collect_reads(items, false));
             out.extend(collect_reads(next_cursor, false));
         }
-        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+        IrExprKind::BuiltinMethod { kind, receiver, args } => {
             out.extend(collect_reads(receiver, false));
             for a in args {
-                out.extend(collect_reads(a, false));
+                out.extend(collect_reads(a, *kind == corvid_types::BuiltinMethodKind::ListAppend));
             }
         }
         IrExprKind::Local { local_id, .. } => {

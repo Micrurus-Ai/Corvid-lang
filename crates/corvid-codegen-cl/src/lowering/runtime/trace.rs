@@ -466,7 +466,7 @@ fn emit_json_append_list(
     builder.switch_to_block(elem_block);
     builder.seal_block(elem_block);
     let offset = builder.ins().imul_imm(counter, 8);
-    let base = builder.ins().iadd_imm(value, 8);
+    let base = builder.ins().load(I64, MemFlags::trusted(), value, 8);
     let elem_addr = builder.ins().iadd(base, offset);
     let elem_val = builder
         .ins()

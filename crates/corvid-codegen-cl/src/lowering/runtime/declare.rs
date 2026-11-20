@@ -33,6 +33,10 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         module.declare_function(name, Linkage::Import, &sig)
             .map_err(|error| CodegenError::cranelift(format!("declare {name}: {error}"), Span::new(0, 0)))
     };
+    let list_snapshot = declare("corvid_list_snapshot", 2, true)?;
+    let list_new = declare("corvid_list_new", 2, true)?;
+    let list_bounds_error = declare("corvid_list_bounds_error", 2, false)?;
+    let list_append = declare("corvid_list_append", 2, false)?;
     let map_new = declare("corvid_ordered_map_new_typed", 2, true)?;
     let map_set = declare("corvid_ordered_map_set", 3, false)?;
     let map_require_int = declare("corvid_ordered_map_require_int", 2, true)?;
@@ -1166,6 +1170,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
+        list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,
         string_eq: eq_id,

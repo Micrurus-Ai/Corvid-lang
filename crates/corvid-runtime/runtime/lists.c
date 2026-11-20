@@ -1,36 +1,13 @@
-/* Corvid native runtime: List destroy + trace (typeinfo-driven).
- *
- * Layout of a Corvid list (single allocation):
- *
- *   [ corvid_header (16) ]
- *   [ length (8) | element_0 (8) | element_1 (8) | ... ]
- *                 ^-- list value points here (descriptor)
- *
- * The descriptor's offset 0 = length; offsets 8, 16, 24, ... = elements.
- * Each element is a single I64 (either a scalar value or a refcounted
- * pointer, depending on the element type).
- *
- * Typed headers: one destroy and one trace function serve
- * every refcounted-element list type. Both recover the list's typeinfo
- * from the header (walking back 16 bytes), read `elem_typeinfo` from
- * it, and decide whether to follow elements:
- *
- *   - elem_typeinfo == NULL  → primitive elements (List<Int>, etc.).
- *     destroy_fn is NEVER installed for these (codegen leaves it NULL
- *     so `corvid_release` skips destruction). trace_fn is installed
- *     but is a no-op walk.
- *   - elem_typeinfo != NULL  → refcounted elements (List<String>,
- *     List<Struct>, List<List<T>>). destroy releases each; trace
- *     invokes the marker on each.
- *
- * This replaces the pre-typed-header shared destructor, which relied
- * on the header's single `reserved` slot as a destructor pointer and
- * therefore could not distinguish primitive-element lists at the
- * trace level — only at the destroy level.
+/* Lists have a stable identity across append. Growable descriptors hold the
+ * length, data pointer and capacity, followed by inline storage for literals.
+ * Older inline-only descriptors are still understood by trace and destroy.
  */
-
+#include "list_layout.h"
 #include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
 
 #define CORVID_HEADER_BYTES 16
 
@@ -50,6 +27,72 @@ typedef struct {
 } corvid_header;
 
 extern void corvid_release(void* payload);
+extern void corvid_retain(void* payload);
+extern void* corvid_alloc_typed(long long bytes, const struct corvid_typeinfo* info);
+
+static const struct corvid_typeinfo* list_info(const void* list) {
+    return ((const corvid_header*)list - 1)->typeinfo;
+}
+
+static int64_t* list_slots(void* payload) {
+    if (list_info(payload)->flags & CORVID_TI_GROWABLE_LIST)
+        return ((corvid_list*)payload)->data;
+    return (int64_t*)payload + 1;
+}
+
+void corvid_list_bounds_error(int64_t index, int64_t length) {
+    fprintf(stderr, "corvid: list index %lld out of bounds for length %lld\n",
+            (long long)index, (long long)length);
+    exit(1);
+}
+
+corvid_list* corvid_list_new(int64_t capacity, const struct corvid_typeinfo* info) {
+    if (capacity < 0 || capacity > (INT64_MAX - (int64_t)sizeof(corvid_list)) / 8) abort();
+    corvid_list* list = corvid_alloc_typed(sizeof(corvid_list) + capacity * 8, info);
+    list->length = 0;
+    list->capacity = capacity;
+    list->data = (int64_t*)(list + 1);
+    return list;
+}
+
+/* Iteration visits the entries present at loop entry, even if the body
+ * mutates the source. Heap entries stay shared at the element level. */
+corvid_list* corvid_list_snapshot(corvid_list* source, const struct corvid_typeinfo* info) {
+    const int64_t count = source->length;
+    corvid_list* result = corvid_list_new(count, info);
+    memcpy(result->data, list_slots(source), (size_t)count * sizeof(int64_t));
+    if (info->elem_typeinfo) {
+        for (int64_t i = 0; i < count; i++) corvid_retain((void*)(intptr_t)result->data[i]);
+    }
+    result->length = count;
+    return result;
+}
+
+/* Called for both reference-count destruction and cycle collection. */
+void corvid_list_free_storage(void* payload) {
+    corvid_list* list = payload;
+    if (list->data != (int64_t*)(list + 1)) free(list->data);
+}
+
+/* The incoming slot transfers one owned reference, if applicable. */
+void corvid_list_append(corvid_list* list, int64_t slot) {
+    if (list->length == list->capacity) {
+        if (list->capacity > INT64_MAX / 16) abort();
+        int64_t capacity = list->capacity ? list->capacity * 2 : 4;
+        int64_t* data;
+        if (list->data == (int64_t*)(list + 1)) {
+            data = malloc((size_t)capacity * 8);
+            if (!data) abort();
+            memcpy(data, list->data, (size_t)list->length * 8);
+        } else {
+            data = realloc(list->data, (size_t)capacity * 8);
+            if (!data) abort();
+        }
+        list->data = data;
+        list->capacity = capacity;
+    }
+    list->data[list->length++] = slot;
+}
 
 /* Shared destroy — installed on every refcounted-element list's typeinfo.
  * Walks the length prefix and releases each element. corvid_release
@@ -58,8 +101,9 @@ extern void corvid_release(void* payload);
 void corvid_destroy_list(void* payload) {
     long long* p = (long long*)payload;
     long long length = p[0];
+    int64_t* slots = list_slots(payload);
     for (long long i = 0; i < length; i++) {
-        void* elem = (void*)(intptr_t)p[1 + i];
+        void* elem = (void*)(intptr_t)slots[i];
         if (elem != NULL) {
             corvid_release(elem);
         }
@@ -82,8 +126,9 @@ void corvid_trace_list(void* payload,
     }
     long long* p = (long long*)payload;
     long long length = p[0];
+    int64_t* slots = list_slots(payload);
     for (long long i = 0; i < length; i++) {
-        void* elem = (void*)(intptr_t)p[1 + i];
+        void* elem = (void*)(intptr_t)slots[i];
         if (elem != NULL) {
             marker(elem, ctx);
         }
