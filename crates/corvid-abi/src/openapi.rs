@@ -93,7 +93,7 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             json!({
                 "description": "Success",
                 "content": {
-                    "application/json": { "schema": schema_for_type_name(&route.response_type) }
+                    (route.response_media_type.as_deref().unwrap_or("application/json")): { "schema": schema_for_type_name(&route.response_type) }
                 }
             }),
         );
@@ -479,6 +479,7 @@ mod tests {
                 upload: None,
                 approval: None,
                 response_type: "Answer".into(),
+                response_media_type: None,
                 requires: vec!["issue_refund".into()],
                 pagination: None,
                 policy: None,
@@ -586,6 +587,7 @@ mod tests {
             upload: None,
             approval: None,
             response_type: "Answer".into(),
+            response_media_type: None,
             requires: vec![],
             pagination: None,
             policy: None,
@@ -619,6 +621,7 @@ mod tests {
             }),
             approval: None,
             response_type: "Answer".into(),
+            response_media_type: None,
             requires: vec![],
             pagination: None,
             policy: None,
@@ -659,6 +662,7 @@ mod tests {
             upload: None,
             approval: None,
             response_type: "Page<Item>".into(),
+            response_media_type: None,
             requires: vec![],
             pagination: Some(Pagination {
                 style: PaginationStyle::Cursor,
@@ -732,6 +736,7 @@ mod tests {
             upload: None,
             approval: None,
             response_type: "Answer".into(),
+            response_media_type: None,
             requires: vec![],
             pagination: None,
             policy: Some(ContractRoutePolicy {

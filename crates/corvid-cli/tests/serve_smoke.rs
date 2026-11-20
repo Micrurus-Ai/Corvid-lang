@@ -2767,3 +2767,99 @@ fn the_reference_application_serves_its_connector_route() {
         "the connector route must return the compiled mock payload; got: {body}"
     );
 }
+
+#[test]
+fn serve_page_and_json_api_from_one_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = Command::new(corvid_bin())
+        .current_dir(dir.path())
+        .args(["new", "notes"])
+        .output()
+        .unwrap();
+    assert!(new.status.success(), "{new:?}");
+    let project = dir.path().join("notes");
+    let main = project.join("src/main.cor");
+    let source = r#"import "./std/ui" as ui
+
+server notes:
+    route GET "/" -> html:
+        return ui.page("Notes", [ui.text("Ready & listening")])
+
+    route GET "/api/status" -> json String:
+        return "ready"
+"#;
+    std::fs::write(
+        &main,
+        source.replace("ui.page(\"Notes\", [ui.text(\"Ready & listening\")])", "42"),
+    )
+    .unwrap();
+    let invalid = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(["check", "src/main.cor"])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success(), "{invalid:?}");
+    let diagnostic = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        diagnostic.contains("E0207") && diagnostic.contains("String"),
+        "{diagnostic}"
+    );
+    std::fs::write(main, source).unwrap();
+
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    for (path, mime, expected) in [
+        ("/", "text/html", "<p>Ready &amp; listening</p>"),
+        ("/api/status", "application/json", "\"ready\""),
+    ] {
+        let raw = http_get_raw(port, path).unwrap();
+        let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200"), "{headers}");
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains(&format!("content-type: {mime}")),
+            "{headers}"
+        );
+        if path == "/" {
+            assert!(
+                body.starts_with("<!doctype html>") && body.contains(expected),
+                "{body}"
+            );
+        } else {
+            assert_eq!(body, expected);
+        }
+    }
+
+    let json = |path| {
+        let (status, body) = http_get(port, path).unwrap();
+        assert_eq!(status, 200);
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()
+    };
+    let contract = json("/.well-known/corvid");
+    let routes = contract["routes"].as_array().unwrap();
+    let home = routes.iter().find(|r| r["path"] == "/").unwrap();
+    assert_eq!(home["response_media_type"], "text/html");
+    assert_eq!(home["response_type"], "String");
+    let spec = json("/openapi.json");
+    for (path, mime) in [("/", "text/html"), ("/api/status", "application/json")] {
+        let content = &spec["paths"][path]["get"]["responses"]["200"]["content"];
+        assert_eq!(content[mime]["schema"]["type"], "string");
+        assert_eq!(content.as_object().unwrap().len(), 1);
+    }
+}

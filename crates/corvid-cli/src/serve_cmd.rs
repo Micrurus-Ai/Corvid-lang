@@ -46,7 +46,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{on, MethodFilter};
 use axum::{Json, Router};
-use corvid_ast::HttpMethod;
+use corvid_ast::{HttpMethod, RouteResponseKind};
 use corvid_driver::{
     compile_to_application_contract_with_config, compile_to_ir_with_config_at_path,
     load_corvid_config_for, render_all_pretty,
@@ -392,6 +392,7 @@ pub(crate) fn cmd_serve(
                 .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default();
             let meta = Arc::new(RouteMeta {
+                response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
                 path_params: route
                     .path_params
@@ -493,7 +494,9 @@ pub(crate) fn cmd_serve(
     let state_for_banner = state.clone();
     let app = app.with_state(state);
 
+    // HTTP workers evaluate the same nested Corvid calls as the CLI thread.
     let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(crate::CLI_STACK_BYTES)
         .enable_all()
         .build()
         .context("build tokio runtime")?;
@@ -580,6 +583,7 @@ fn declared_identity(source: &str) -> Option<corvid_ast::IdentityDecl> {
 /// Per-route metadata captured for the general request handler
 /// (slice 52a).
 struct RouteMeta {
+    response_kind: RouteResponseKind,
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
     /// Declared path params: `(name, type)` in path order.
@@ -1165,7 +1169,7 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome)
+    finish(outcome, meta.response_kind)
 }
 
 enum RouteRequestBody {
@@ -1373,12 +1377,12 @@ fn capture_pending_invocation_if_queued(
     );
 }
 
-/// Map a handler outcome to an HTTP response: 200 + JSON on success,
+/// Map a handler outcome to an HTTP response: 200 with HTML, JSON or SSE on success,
 /// 202 + `{"approval_id":"..."}` when an `approve` boundary queued
 /// (slice `E0-serve-5`), 403 when an `approve` boundary denied (kept
 /// for the case where a non-queue approver is wired in — defensive),
 /// 500 otherwise.
-fn finish(outcome: Result<Value, RunError>) -> Response {
+fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind) -> Response {
     match outcome {
         // A Stream-returning handler responds as Server-Sent Events:
         // each chunk flushes to the client the moment it arrives
@@ -1412,6 +1416,9 @@ fn finish(outcome: Result<Value, RunError>) -> Response {
                 }
             };
             axum::response::Sse::new(sse).into_response()
+        }
+        Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
+            axum::response::Html(html.to_string()).into_response()
         }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
         Err(RunError::Interp(e)) => {

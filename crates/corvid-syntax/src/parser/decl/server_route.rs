@@ -237,10 +237,28 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokKind::Arrow, "`->` before route response")?;
-        let response_start = self.expect_contextual_ident("json")?;
-        let response_ty = self.parse_type_ref()?;
+        let (format, response_start) = self.expect_ident()?;
+        let (kind, response_ty) = match format.as_str() {
+            "json" => (RouteResponseKind::Json, self.parse_type_ref()?),
+            "html" => (
+                RouteResponseKind::Html,
+                TypeRef::Named {
+                    name: Ident::new("String", response_start),
+                    span: response_start,
+                },
+            ),
+            _ => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: format,
+                        expected: "`json Type` or `html` after `->`".into(),
+                    },
+                    span: response_start,
+                });
+            }
+        };
         let response = RouteResponse {
-            kind: RouteResponseKind::Json,
+            kind,
             span: response_start.merge(response_ty.span()),
             ty: response_ty,
         };

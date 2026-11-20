@@ -41,3 +41,20 @@ Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fra
 | `disclosure(label: String, content: List<View>) -> View` | Expandable content with a summary. |
 | `link(label: String, path: String) -> View` | A link to the supplied application path. |
 | `page(title: String, content: List<View>) -> String` | An HTML document that renders the views in order. |
+
+## Serve a page and an API
+
+In a project created by `corvid new notes`, use this as `src/main.cor`.
+
+```corvid-fragment
+import "./std/ui" as ui
+
+server notes:
+    route GET "/" -> html:
+        return ui.page("Notes", [ui.text("Ready & listening")])
+
+    route GET "/api/status" -> json String:
+        return "ready"
+```
+
+From the project directory, run `corvid serve src/main.cor --listen 127.0.0.1:8080`. Open `http://127.0.0.1:8080/` to see the page. Request `/api/status` to read the JSON string `"ready"`. An `html` handler returns a `String` and the server sends it as HTML. Use view helpers to escape text inserted into the page.

@@ -955,6 +955,7 @@ pub struct RouteResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RouteResponseKind {
     Json,
+    Html,
 }
 
 /// Visibility modifier on a method declared inside an `extend` block.

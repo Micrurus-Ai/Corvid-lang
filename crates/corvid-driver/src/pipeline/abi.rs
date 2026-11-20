@@ -96,7 +96,14 @@ pub fn compile_to_application_contract_with_config(
     diagnostics.extend(parse_errs.into_iter().map(Diagnostic::from));
     let resolved = resolve(&file);
     diagnostics.extend(resolved.errors.iter().cloned().map(Diagnostic::from));
-    let checked = typecheck_with_config(&file, &resolved, config);
+    let outcome = super::typecheck_driver_file(
+        &file,
+        &resolved,
+        std::path::Path::new(source_path_for_contract),
+        config,
+    );
+    diagnostics.extend(outcome.diagnostics);
+    let checked = outcome.result.checked;
     diagnostics.extend(checked.errors.iter().cloned().map(Diagnostic::from));
     if !diagnostics.is_empty() {
         return Err(diagnostics);

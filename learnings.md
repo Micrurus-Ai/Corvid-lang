@@ -7823,3 +7823,7 @@ A pure function can call another module's public function through either import 
 The C runtime calls type-info destructors and trace markers synchronously. Tests can keep callback counters and recorded pointers thread-local so concurrent tests do not reset each other's observations.
 
 Use `ui.page` to render a list of typed views. The [static view reference](docs/book/19-browser-views.md#static-view-functions) records the signatures for text, labeled fields, submit buttons, both GET form helpers, disclosures, links and pages.
+
+### HTML route responses
+
+Write `route GET "/" -> html:` inside a server and return a `String`. To render typed views, return `ui.page(title, children)`. The HTTP response uses `text/html`. You can declare `-> json Type` on other routes in the same server. The [browser views chapter](docs/book/19-browser-views.md#serve-a-page-and-an-api) includes a complete two-route application.

@@ -311,6 +311,9 @@ pub struct ContractRoute {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ContractApprovalPolicy>,
     pub response_type: String,
+    /// Explicit response format for routes declared with a media type such as HTML.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_media_type: Option<String>,
     /// Permissions the route requires (from its effect row's trust /
     /// dangerous surface). Empty = no approval-requiring effect.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -886,6 +889,10 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             irreversible: policy.irreversible,
         }),
         response_type: type_ref_name(&r.response.ty),
+        response_media_type: match r.response.kind {
+            corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
+            corvid_ast::RouteResponseKind::Json => None,
+        },
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
         // names that require approval.

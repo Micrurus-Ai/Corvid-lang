@@ -264,7 +264,7 @@ extend_method     ::= visibility? (agent_decl | prompt_decl | tool_decl)
 ## Server and schedule declarations
 
 Routes carry an HTTP method, an optional typed query/body contract,
-a typed `json` response, and a handler body block. The `zone` clause
+a `json Type` response or an `html` response whose handler returns a `String`, and a handler body block. The `zone` clause
 on schedules is mandatory.
 
 ```ebnf
@@ -272,7 +272,7 @@ server_decl       ::= 'server' IDENT ':' INDENT route_decl+ DEDENT
 
 route_decl        ::= 'route' http_method STRING_LITERAL
                       ('query' type_ref)? ('body' type_ref)?
-                      '->' 'json' type_ref uses_clause? ':' INDENT block DEDENT
+                      '->' ('json' type_ref | 'html') uses_clause? ':' INDENT block DEDENT
 
 http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
