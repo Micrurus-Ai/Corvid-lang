@@ -266,6 +266,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    pub(super) fn imported_fn_value(&mut self, module: &ResolvedModule, id: DefId, span: Span) -> Option<Type> {
+        let Decl::Fn(f) = imported_decl(module, id)? else { return None };
+        self.imported_calls.insert(span, ImportedCallTarget {
+            module_path: module.path.to_string_lossy().into_owned(),
+            def_id: id,
+            name: f.name.name.clone(),
+            kind: ImportedCallKind::Agent,
+        });
+        Some(Type::Function {
+            params: f.params.iter().map(|p| self.imported_type_ref_to_type(&p.ty, module)).collect(),
+            ret: Box::new(self.imported_type_ref_to_type(&f.return_ty, module)),
+            effect: Effect::Safe,
+        })
+    }
+
     pub(super) fn check_imported_use_call(
         &mut self,
         def_id: DefId,

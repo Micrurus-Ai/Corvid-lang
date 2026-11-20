@@ -20,6 +20,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - Both CLI targets verified nested record and list writes with side effects, growable lists, skipped calls, loop snapshots, break, continue and early return. Native allocation checks passed on the successful paths in both ownership modes. Negative and past-the-end writes reported their index and length.
 - [x] G05. Finish expression composition. Exercise calls in arithmetic, collection operations and match arms, guards and nested patterns, and propagate typed errors across function boundaries.
 - [ ] G06. Make functions and data types reusable. Verify functions as values, closures, user-defined sum types, records, type inference and built-in generic collection helpers across two modules.
+  - [x] Interpreter: pass local, qualified and renamed pure functions as callbacks across modules. The CLI checks incompatible callback signatures.
 - [ ] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
 

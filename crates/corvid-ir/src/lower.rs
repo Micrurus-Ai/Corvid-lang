@@ -1312,6 +1312,15 @@ impl<'a> Lowerer<'a> {
         let ty = self.remap_struct_type(
             self.types.get(&e.span()).cloned().unwrap_or(Type::Unknown),
         );
+        if matches!(ty, Type::Function { .. }) && matches!(e, Expr::Ident { .. } | Expr::FieldAccess { .. }) {
+            if let Some(target) = self.imported_calls.get(&e.span()) {
+                return IrExpr {
+                    kind: IrExprKind::Decl { def_id: self.remap_imported_target(target), name: target.name.clone() },
+                    ty,
+                    span: e.span(),
+                };
+            }
+        }
         let kind = match e {
             Expr::Literal { value, .. } => IrExprKind::Literal(match value {
                 Literal::Int(n) => IrLiteral::Int(*n),

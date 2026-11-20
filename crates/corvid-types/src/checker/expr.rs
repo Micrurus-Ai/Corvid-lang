@@ -347,10 +347,17 @@ impl<'a> Checker<'a> {
                 }
                 Type::Unknown
             }
+            DeclKind::Fn => {
+                let function = self.fns_by_id[&id];
+                Type::Function {
+                    params: function.params.iter().map(|p| self.type_ref_to_type(&p.ty)).collect(),
+                    ret: Box::new(self.type_ref_to_type(&function.return_ty)),
+                    effect: corvid_ast::Effect::Safe,
+                }
+            }
             DeclKind::Tool
             | DeclKind::Prompt
             | DeclKind::Agent
-            | DeclKind::Fn
             | DeclKind::Fixture => {
                 // Referencing without a call is currently an error.
                 // (Callers that need the function signature look it up by id.)
@@ -371,8 +378,17 @@ impl<'a> Checker<'a> {
                 ));
                 Type::Unknown
             }
+            DeclKind::ImportedUse => {
+                if let Some(modules) = self.module_resolution {
+                    if let Some(target) = modules.lookup_imported_use(&ident.name) {
+                        if let Some(module) = modules.lookup_by_path(&target.module_path) {
+                            return self.imported_fn_value(module, target.export.def_id, ident.span).unwrap_or(Type::Unknown);
+                        }
+                    }
+                }
+                Type::Unknown
+            }
             DeclKind::Import
-            | DeclKind::ImportedUse
             | DeclKind::Store
             | DeclKind::Eval
             | DeclKind::Test
@@ -385,6 +401,30 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_field(&mut self, target: &Expr, field: &Ident, span: Span) -> Type {
+        if let (Expr::Ident { name, .. }, Some(modules)) = (target, self.module_resolution) {
+            if matches!(self.bindings.get(&name.span), Some(Binding::Decl(id)) if self.symbols.get(*id).kind == DeclKind::Import) {
+                match modules.lookup_member(&name.name, &field.name) {
+                    corvid_resolve::ModuleLookup::Found { module, export } => {
+                        if let Some(ty) = self.imported_fn_value(module, export.def_id, span) {
+                            return ty;
+                        }
+                    }
+                    corvid_resolve::ModuleLookup::Private => {
+                        self.errors.push(TypeError::new(TypeErrorKind::ImportedDeclIsPrivate {
+                            alias: name.name.clone(), name: field.name.clone(),
+                        }, span));
+                        return Type::Unknown;
+                    }
+                    corvid_resolve::ModuleLookup::UnknownMember => {
+                        self.errors.push(TypeError::new(TypeErrorKind::UnknownImportMember {
+                            alias: name.name.clone(), name: field.name.clone(),
+                        }, span));
+                        return Type::Unknown;
+                    }
+                    corvid_resolve::ModuleLookup::UnknownAlias => {}
+                }
+            }
+        }
         let target_ty = self.check_expr(target);
         match &target_ty {
             Type::Struct(def_id) => {

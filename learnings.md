@@ -7876,3 +7876,7 @@ The macOS Intel CLI and language server load the CPython 3.14 framework. The App
 A guard runs after its pattern matches. If the guard returns false, Corvid tries the next arm. Only the selected arm evaluates its body. Calls in that body evaluate their arguments from left to right.
 
 A parameter such as `Result<Float, String>` supplies both payload types when you pass `Ok(7)` directly. Inside an agent returning a compatible Result, `value = read()?` extracts the success value or immediately returns the error.
+
+### Passing a named function from another module
+
+Given a module `math.cor` exporting `public fn double(n: Int) -> Int`, import it with `import "./math" as m`. Use `m.double(3)` to call it immediately or `transform = m.double` to keep the function for later. The interpreter accepts `[1, 2].map(transform)` and produces `[2, 4]`. A renamed import such as `import "./math" use double as twice` keeps the same `(Int) -> Int` signature.

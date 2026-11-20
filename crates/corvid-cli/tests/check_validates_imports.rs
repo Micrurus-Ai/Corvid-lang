@@ -104,3 +104,44 @@ fn imported_functions_keep_their_signatures_and_run_across_module_boundaries() {
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("must be effect-free"));
 }
+
+#[test]
+fn imported_function_values_preserve_identity_and_signature() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(dir.path().join("math.cor"), r#"
+public fn double(n: Int) -> Int:
+    return n * 2
+
+public agent apply(value: Int, transform: (Int) -> Int) -> Int:
+    return transform(value)
+"#).unwrap();
+    std::fs::write(&main, r#"
+import "./math" as m
+import "./math" use double as twice
+
+fn increment(n: Int) -> Int:
+    return twice(n) + 1
+
+agent main() -> Bool:
+    chosen = m.double
+    mapped = [1, 2].map(twice)
+    return m.apply(3, chosen) == 6 and m.apply(4, increment) == 9 and mapped[1] == 4
+"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_corvid")).args(["run", "--target", "interp"])
+        .arg(&main).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
+
+    std::fs::write(&main, r#"
+import "./math" as m
+
+agent main() -> Int:
+    callback: (String) -> Int = m.double
+    return callback("x")
+"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_corvid")).arg("check").arg(&main).output().unwrap();
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("(String) -> Int"), "{diagnostic}");
+}

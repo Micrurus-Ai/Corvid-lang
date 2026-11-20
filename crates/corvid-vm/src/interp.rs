@@ -619,6 +619,27 @@ impl<'ir> Interpreter<'ir> {
                     InterpError::new(InterpErrorKind::UndefinedLocal(*local_id), expr.span)
                 }),
 
+            IrExprKind::Decl { def_id, .. } if self.agents_by_id.get(def_id).is_some_and(|f| f.pure_fn) => {
+                let f = self.agents_by_id[def_id];
+                // A declaration has no lexical captures. Forward through the
+                // ordinary call path so returns and typed errors keep their semantics.
+                let args = f.params.iter().map(|p| IrExpr {
+                    kind: IrExprKind::Local { local_id: p.local_id, name: p.name.clone() },
+                    ty: p.ty.clone(),
+                    span: p.span,
+                }).collect();
+                let call = IrExpr {
+                    kind: IrExprKind::Call {
+                        kind: IrCallKind::Agent { def_id: *def_id },
+                        callee_name: f.name.clone(),
+                        args,
+                    },
+                    ty: f.return_ty.clone(),
+                    span: expr.span,
+                };
+                let params = f.params.iter().map(|p| (p.local_id, p.name.clone())).collect();
+                Ok(ExprFlow::Value(Value::Closure(ClosureValue::new(params, call, Vec::new()))))
+            },
             IrExprKind::Decl { .. } => Err(InterpError::new(
                 InterpErrorKind::NotImplemented(
                     "bare top-level declaration reference (imports/functions)".into(),
