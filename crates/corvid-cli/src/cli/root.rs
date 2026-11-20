@@ -83,8 +83,8 @@ pub enum Command {
         #[arg(long)]
         with_python_tools: bool,
     },
-    /// Type-check a Corvid source file.
-    Check { file: PathBuf },
+    /// Type-check a source file or the current project's src/main.cor.
+    Check { file: Option<PathBuf> },
     /// Add a capability to this project: a skill (an effect-audited
     /// vendored package), an MCP server, or a connector.
     #[command(subcommand)]

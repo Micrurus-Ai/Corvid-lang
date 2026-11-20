@@ -86,6 +86,15 @@ corvid doctor
 If `corvid doctor` reports anything red, fix it before going further.
 Every check has a one-line "how to fix" hint inline.
 
+Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.
+
+```sh
+corvid new hello-corvid
+cd hello-corvid
+corvid check
+corvid run
+```
+
 ## Editor setup
 
 The Corvid LSP ships in the same binary. Pick your editor:

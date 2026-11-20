@@ -7811,3 +7811,5 @@ If the Windows installer falls back to building from source and neither Cargo no
 Set `CORVID_VERSION` to a release tag and rerun the installer to upgrade or roll back. The installer starts the staged CLI before replacing package files. Run the matching installer with `--uninstall` on Unix or `-Uninstall` on Windows to remove the package and preserve files outside its package directories.
 
 The Windows installer extracts downloaded archives into a fresh staging directory using the two-argument .NET ZIP API supported by Windows PowerShell 5.1. If Windows refuses to start the staged executable, the installer uses .NET to compute its SHA-256 and includes the digest in the launch error.
+
+Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.

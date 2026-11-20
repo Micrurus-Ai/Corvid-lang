@@ -443,5 +443,5 @@ if ($env:CORVID_NO_MODIFY_PROFILE -eq '1') {
 }
 Write-Host "  corvid new hello-corvid"
 Write-Host "  cd hello-corvid"
-Write-Host "  corvid check src/main.cor"
-Write-Host "  corvid run src/main.cor"
+Write-Host "  corvid check"
+Write-Host "  corvid run"

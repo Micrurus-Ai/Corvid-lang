@@ -413,5 +413,5 @@ else
 fi
 printf '  corvid new hello-corvid\n'
 printf '  cd hello-corvid\n'
-printf '  corvid check src/main.cor\n'
-printf '  corvid run src/main.cor\n'
+printf '  corvid check\n'
+printf '  corvid run\n'

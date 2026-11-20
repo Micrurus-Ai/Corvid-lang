@@ -76,7 +76,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             name,
             with_python_tools,
         }) => cmd_new(&name, with_python_tools),
-        Some(Command::Check { file }) => cmd_check(&file),
+        Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
         Some(Command::Add(kind)) => match kind {
             crate::cli::root::AddCommand::Skill {
                 source,

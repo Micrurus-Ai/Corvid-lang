@@ -56,7 +56,8 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
     // auto-detects it at autoload time. No manual install needed.
     println!("\nNext steps:");
     println!("  cd {name}");
-    println!("  corvid run src/main.cor   # OR `corvid serve src/main.cor` for the HTTP path");
+    println!("  corvid check");
+    println!("  corvid run");
     println!();
     if with_python_tools {
         println!("Python tool template included: implement tools in `tools.py`");
