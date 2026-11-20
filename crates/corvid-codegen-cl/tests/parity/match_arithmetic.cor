@@ -1,0 +1,14 @@
+agent note(trace: List<Int>, n: Int) -> Int:
+    trace.append(n)
+    return n
+
+agent score(value: Option<Int>, trace: List<Int>) -> Int:
+    return match value:
+        Some(n) -> note(trace, n) + note(trace, n + 1) * 2
+        None -> -note(trace, 3)
+
+agent main() -> Bool:
+    trace: List<Int> = []
+    good = score(Some(4), trace)
+    absent = score(None, trace)
+    return good == 14 and absent == -3 and trace.length() == 3 and trace[0] == 4 and trace[1] == 5 and trace[2] == 3

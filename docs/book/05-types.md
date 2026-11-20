@@ -556,3 +556,14 @@ with the rest of the surface.
 Function signatures, record fields, and effect rows always require
 explicit types — they're the boundaries where inference would be
 ambiguous and where you want a checker-readable contract.
+
+### Calling an agent from a match arm
+
+```corvid
+agent choose(index: Option<Int>, items: List<Int>) -> Int:
+    return match index:
+        Some(n) if n >= 0 -> items[n]
+        _ -> -1
+```
+
+Here the caller must supply an index below the list length. To check both bounds before indexing, use a guard that calls an agent returning Bool. A failed guard continues to the next arm. The selected arm can call other agents and pass values bound by the pattern.

@@ -7870,3 +7870,9 @@ To verify a locally built candidate, run `python install/test_release_archive.py
 A prebuilt installation can pass `corvid doctor` without Cargo or rustc. The doctor distinguishes those optional build tools from invalid configuration values and reports whether a Python command is available to run generated Python files.
 
 The macOS Intel CLI and language server load the CPython 3.14 framework. The Apple Silicon binaries load CPython 3.15. Both use the framework in /Library/Frameworks. Windows x64 and ARM64 passed with matching-architecture CPython 3.14. The Debian 12 packages use libpython3.11.
+
+## Calling agents in match expressions
+
+A guard runs after its pattern matches. If the guard returns false, Corvid tries the next arm. Only the selected arm evaluates its body. Calls in that body evaluate their arguments from left to right.
+
+A parameter such as `Result<Float, String>` supplies both payload types when you pass `Ok(7)` directly. Inside an agent returning a compatible Result, `value = read()?` extracts the success value or immediately returns the error.

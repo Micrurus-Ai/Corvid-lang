@@ -1,0 +1,17 @@
+agent offset(trace: List<Int>, n: Int) -> Int:
+    trace.append(n)
+    return n
+
+agent lookup(index: Option<Int>, items: List<Int>, trace: List<Int>) -> Int:
+    return match index:
+        Some(n) if offset(trace, n) < items.length() -> items[offset(trace, n)]
+        Some(_) -> -1
+        None -> -2
+
+agent main() -> Bool:
+    trace: List<Int> = []
+    items = [10, 20]
+    found = lookup(Some(1), items, trace)
+    past = lookup(Some(2), items, trace)
+    absent = lookup(None, items, trace)
+    return found == 20 and past == -1 and absent == -2 and trace.length() == 3 and trace[0] == 1 and trace[1] == 1 and trace[2] == 2

@@ -399,7 +399,7 @@ impl<'a> Checker<'a> {
         expected: Option<&Type>,
     ) -> Type {
         match builtin {
-            BuiltIn::Ok => {
+            BuiltIn::Ok | BuiltIn::Err => {
                 if args.len() != 1 {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::ArityMismatch {
@@ -414,34 +414,35 @@ impl<'a> Checker<'a> {
                     }
                     return Type::Result(Box::new(Type::Unknown), Box::new(Type::Unknown));
                 }
-                let ok_ty = self.check_expr(&args[0]);
-                let err_ty = match &self.current_return {
-                    Some(Type::Result(_, err)) => (**err).clone(),
-                    _ => Type::Unknown,
-                };
-                Type::Result(Box::new(ok_ty), Box::new(err_ty))
-            }
-            BuiltIn::Err => {
-                if args.len() != 1 {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::ArityMismatch {
-                            callee: name.name.clone(),
-                            expected: 1,
-                            got: args.len(),
-                        },
-                        name.span,
-                    ));
-                    for arg in args {
-                        let _ = self.check_expr(arg);
+                let is_ok = builtin == BuiltIn::Ok;
+                let (payload_hint, other) = match expected {
+                    Some(Type::Result(ok, err)) if is_ok => (Some(ok.as_ref()), err.as_ref().clone()),
+                    Some(Type::Result(ok, err)) => (Some(err.as_ref()), ok.as_ref().clone()),
+                    _ => {
+                        // Keep the enclosing return type as the legacy hint for
+                        // an unannotated constructor with no local Result context.
+                        let other = match &self.current_return {
+                            Some(Type::Result(_, err)) if is_ok => err.as_ref().clone(),
+                            Some(Type::Result(ok, _)) => ok.as_ref().clone(),
+                            _ => Type::Unknown,
+                        };
+                        (None, other)
                     }
-                    return Type::Result(Box::new(Type::Unknown), Box::new(Type::Unknown));
-                }
-                let err_ty = self.check_expr(&args[0]);
-                let ok_ty = match &self.current_return {
-                    Some(Type::Result(ok, _)) => (**ok).clone(),
-                    _ => Type::Unknown,
                 };
-                Type::Result(Box::new(ok_ty), Box::new(err_ty))
+                let actual = self.check_expr_as(&args[0], payload_hint);
+                let payload = match (payload_hint, &actual) {
+                    (Some(Type::Float), Type::Int) => Type::Float,
+                    (Some(expected), Type::Grounded(_)) if actual.is_assignable_to(expected) => {
+                        self.record_if_grounded_coercion(&actual, expected, args[0].span());
+                        expected.clone()
+                    }
+                    _ => actual,
+                };
+                if is_ok {
+                    Type::Result(Box::new(payload), Box::new(other))
+                } else {
+                    Type::Result(Box::new(other), Box::new(payload))
+                }
             }
             BuiltIn::Some => {
                 if args.len() != 1 {

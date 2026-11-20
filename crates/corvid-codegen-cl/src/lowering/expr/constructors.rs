@@ -184,6 +184,11 @@ pub fn lower_result_constructor(
         module,
         runtime,
     )?;
+    let payload = if *payload_ty == Type::Float && inner.ty == Type::Int {
+        builder.ins().fcvt_from_sint(F64, payload)
+    } else {
+        payload
+    };
     emit_result_wrapper_value(
         builder, module, runtime, &expr.ty, payload, payload_ty, tag, expr.span,
     )

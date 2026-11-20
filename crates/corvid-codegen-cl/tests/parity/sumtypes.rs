@@ -378,3 +378,28 @@ agent main() -> Bool:
     return empty_list == -1 and empty_item == 0 and present_item == 7
 "#, true);
 }
+
+#[test]
+fn composed_match_arithmetic() {
+    assert_parity_bool_without_tools(include_str!("match_arithmetic.cor"), true);
+}
+
+#[test]
+fn composed_guarded_patterns() {
+    assert_parity_bool_without_tools(include_str!("guarded_patterns.cor"), true);
+}
+
+#[test]
+fn composed_nested_match_calls() {
+    assert_parity_bool_without_tools(include_str!("nested_match_calls.cor"), true);
+}
+
+#[test]
+fn composed_collection_guard_and_index() {
+    assert_parity_bool_without_tools(include_str!("collection_match.cor"), true);
+}
+
+#[test]
+fn composed_contextual_float() {
+    assert_parity_bool_without_tools(include_str!("contextual_float.cor"), true);
+}

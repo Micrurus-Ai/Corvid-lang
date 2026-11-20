@@ -1,0 +1,7 @@
+agent unwrap(result: Result<Float, String>) -> Float:
+    return match result:
+        Ok(n) -> n
+        Err(_) -> -1.0
+
+agent main() -> Bool:
+    return unwrap(Ok(7)) == 7.0

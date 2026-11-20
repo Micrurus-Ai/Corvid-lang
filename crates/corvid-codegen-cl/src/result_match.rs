@@ -21,6 +21,13 @@ fn operand_supported(expr: &IrExpr) -> bool {
             if left.ty == Type::Int && right.ty == Type::Int => {
                 operand_supported(left) && operand_supported(right)
             }
+        IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),
+        IrExprKind::BuiltinMethod { receiver, args, kind } => {
+            use corvid_types::BuiltinMethodKind::*;
+            matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength)
+                && operand_supported(receiver)
+                && args.iter().all(operand_supported)
+        }
         IrExprKind::Call {
             kind: corvid_ir::IrCallKind::Agent { .. },
             args,
