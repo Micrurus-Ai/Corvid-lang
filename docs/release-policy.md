@@ -10,6 +10,8 @@ This policy defines how Corvid ships nightly, beta, and stable releases. It is a
 
 Run the **release** workflow on the desired branch and leave **Publish all candidate archives to GitHub Releases** unchecked. After all six builds succeed, download the platform packages and `corvid-archive-checksums` from the workflow run. Extract the artifacts into one directory and run `sha256sum --check --strict SHA256SUMS.txt` there. These hashes check the downloaded bytes. Installation and application tests establish whether a candidate works on its target platform.
 
+Each platform archive carries the project `LICENSE` and a target-specific Rust dependency inventory at `lib/corvid-rust-notices.txt`. It lists the locked package versions, their declared licenses, and the notice files available for those versions. The redistribution terms for the TeX extensions in the generated PDF glyph table still require review before publication.
+
 ## Channels
 
 ### Nightly

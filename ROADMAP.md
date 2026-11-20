@@ -2,6 +2,7 @@
 
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
+- [x] Generated dependency notices for the roadmap branch on all six target triples (370?379 locked packages each). Exercised the workflow staging commands for Linux, macOS and Windows with fixture binaries, read the notices and project license back from the archives, and verified a missing inventory fails staging. TeX glyph-table terms remain open for review.
 - [x] Manual candidate builds default to read-only package and checksum jobs. The publication job requires the full six-archive set. Validated the workflow with actionlint and ran its checksum commands against complete, missing, modified, extra and substituted files.
 - [x] Used the Windows x64 installer with a local debug CLI and standard-library archive, built an interactive app twice with identical output, and served the extracted copy from a new directory. Edge exercised pointer, keyboard and text handlers while the backend served JSON. A failed handler rebuild preserved the last archive. Production archive checks are tracked separately.
 - [x] A fresh project served an HTML page built with imported view helpers and a JSON API from one server on Windows x64. The HTTP bodies, media types, application contract and OpenAPI schemas matched the declarations. The checker rejected an integer return from the HTML route.

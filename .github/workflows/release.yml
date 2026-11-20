@@ -174,6 +174,9 @@ jobs:
               --out "$GITHUB_WORKSPACE/dist/corvid.vsix"
           )
 
+      - name: Collect Rust dependency notices
+        run: python install/rust_notices.py ${{ matrix.target }} target/corvid-rust-notices.txt
+
       - name: Stage artifact
         shell: bash
         run: |
@@ -190,6 +193,8 @@ jobs:
               cp "target/${{ matrix.target }}/release/corvid-lsp" "$stage/bin/"
               ;;
           esac
+          cp target/corvid-rust-notices.txt "$stage/lib/"
+          cp LICENSE "$stage/"
           cp "dist/corvid.vsix" "$stage/extensions/"
           # Stage the runtime staticlib alongside the bin under
           # `$stage/lib/` so post-install discovery via
@@ -204,7 +209,7 @@ jobs:
             *windows-msvc*) cp "target/${{ matrix.target }}/release/corvid_runtime.lib" "$stage/lib/" ;;
             *)              cp "target/${{ matrix.target }}/release/libcorvid_runtime.a" "$stage/lib/" ;;
           esac
-          [ -d std ]            && cp -R std            "$stage/std"            || true
+          cp -R std "$stage/std"
           # Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): ship the
           # `corvid_runtime` Python package alongside the binary so the
           # `corvid serve` tools.py autoloader (33Q1b) finds it without
@@ -216,7 +221,7 @@ jobs:
           # `pip install corvid-runtime`, but the package isn't on PyPI;
           # every release-installed reviewer's first attempt at Surface 3
           # of the trial died with `ModuleNotFoundError`.
-          [ -d runtime/python ] && cp -R runtime/python "$stage/runtime-py" || true
+          cp -R runtime/python "$stage/runtime-py"
           [ -f LICENSE-MIT ]    && cp    LICENSE-MIT    "$stage/LICENSE-MIT"    || true
           [ -f LICENSE-APACHE ] && cp    LICENSE-APACHE "$stage/LICENSE-APACHE" || true
           [ -f README.md ]      && cp    README.md      "$stage/README.md"      || true

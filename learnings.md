@@ -7835,3 +7835,5 @@ Build a scaffolded application's `src/main.cor` with `--target web`. Corvid pack
 ### Download a candidate build
 
 A manual **release** workflow run defaults to building candidate packages. Download the six package artifacts and the checksum artifact from the same run. The [release policy](docs/release-policy.md#build-a-candidate-on-github) explains how to verify them.
+
+The installation carries the project license at `LICENSE`. Open `lib/corvid-rust-notices.txt` to see which Rust dependency versions and upstream notices were included for your platform.
