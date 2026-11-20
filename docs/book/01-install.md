@@ -6,6 +6,8 @@ The installer targets Windows, macOS and Linux. The available architectures depe
 
 The Linux x64 and ARM64 archives use the Python 3.11 shared runtime at CLI startup. On Debian 12, install the `libpython3.11` package before running the installer. Both native architectures have passed the installer, language-server, Python host-tool and relocated web-application checks.
 
+Run `corvid doctor` to check the installation and configuration. With a prebuilt CLI, missing Rust tools are informational. Source builds and native server wrappers use Cargo and rustc. Invalid configuration values cause the command to fail.
+
 ## Install scripts
 
 For manual downloads from a release that includes `SHA256SUMS.txt`, compare your archive's SHA-256 with the line for its exact filename. On Linux use `sha256sum ARCHIVE`, on macOS use `shasum -a 256 ARCHIVE`, and in PowerShell use `Get-FileHash -Algorithm SHA256 -LiteralPath ARCHIVE`. Replace `ARCHIVE` with the downloaded filename.

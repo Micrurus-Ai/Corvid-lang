@@ -7841,3 +7841,5 @@ The installation carries the project license at `LICENSE`. Open `lib/corvid-rust
 For Linux x64 and ARM64 candidate builds, the runtime baseline is Debian 12 with `libpython3.11`. The hosted build checks the extracted CLI in that environment.
 
 To verify a locally built candidate, run `python install/test_release_archive.py ARCHIVE VERSION` on its target operating system and architecture. Pass the CLI package version without a leading `v`. The probe installs into a temporary directory, builds and serves an application, then checks uninstall.
+
+A prebuilt installation can pass `corvid doctor` without Cargo or rustc. The doctor distinguishes those optional build tools from invalid configuration values and reports whether a Python command is available to run generated Python files.

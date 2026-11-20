@@ -122,6 +122,7 @@ def exercise_installation(root, expected_version, work):
     def run(*args, cwd=work):
         return subprocess.check_output([cli, *args], cwd=cwd, env=env, text=True).strip()
 
+    run("doctor")
     version = run("--version")
     if version.split()[:2] != ["corvid", expected_version]:
         raise RuntimeError(f"Expected {expected_version}, got {version}")
