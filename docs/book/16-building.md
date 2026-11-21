@@ -19,7 +19,7 @@ entry points have their own argument and result limits. A forced native run
 reports unsupported code. Browser handlers and exported library functions have
 separate type and host-call boundaries.
 
-Native runs store compiled executables under `target/cache/native`. Repeating an unchanged run can reuse its executable. Changes to imported Corvid source, a linked tools library, or the C runtime sources and headers built into the CLI select a new cache entry. Rebuilding Corvid after changing its Rust native backend also selects a new entry, even when the compiler's package version stays the same.
+Native runs store compiled executables under `target/cache/native`. Repeating an unchanged run can reuse its executable. Changes to imported Corvid source, a linked tools library, or the C runtime sources and headers built into the CLI select a new cache entry. Rebuilding Corvid after changing its Rust native backend also selects a new entry, even when the compiler's package version stays the same. The backend fingerprint depends on its source and target. Moving identical sources and Cargo output to different directories preserves that fingerprint.
 
 ## Building an artifact
 

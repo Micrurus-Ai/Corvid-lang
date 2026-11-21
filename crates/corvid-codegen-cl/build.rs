@@ -39,9 +39,9 @@ fn main() -> std::io::Result<()> {
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
     }
-    println!(
-        "cargo:rustc-env=CORVID_NATIVE_BACKEND_ID={:x}",
-        hash.finalize()
-    );
-    Ok(())
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"));
+    std::fs::write(
+        out_dir.join("native-backend-id.txt"),
+        format!("{:x}", hash.finalize()),
+    )
 }
