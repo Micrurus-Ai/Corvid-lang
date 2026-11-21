@@ -45,32 +45,21 @@ The durable runner (`corvid jobs run --source <path>.cor --workers=N`) scales to
 workers per process. Past a few thousand jobs/second per host, scale
 horizontally — multiple runner processes against one queue.
 
-## Profiling an application
+### Windows x64 release baseline
 
-Build a release CLI and its matching runtime static library, then run the local benchmark from the repository root with Python 3.11 or later.
+The [candidate run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) measured the same release binary twice on one runner. Each column gives the median in milliseconds from 15 samples after three warmups. The HTTP workloads use a loopback provider and average 16 sequential requests per sample.
 
-```sh
-cargo build --release --locked -p corvid-runtime
-cargo build --release --locked -p corvid-cli
-python benches/analysis/application.py target/release/corvid --output baseline.json
-```
+| Workload | First run (ms) | Repeat (ms) |
+|---|---:|---:|
+| CLI startup | 17.482 | 16.465 |
+| Check 100 functions | 19.795 | 18.217 |
+| Native build of 100 functions | 462.281 | 457.090 |
+| Interpreter list slices | 25.713 | 25.502 |
+| HTTP ping | 13.860 | 13.784 |
+| Direct provider stream | 3.636 | 3.806 |
+| Corvid stream | 10.248 | 12.005 |
 
-On Windows use `target/release/corvid.exe`. The harness records the CLI hash, host, raw samples and medians. It checks the native executable's result, the list checksum, the HTTP response and the streamed output. Model measurements use a loopback provider with 16 chunks. Use `--baseline baseline.json` for a comparison on the same host and build profile.
-
-The manual candidate-build workflow can run the same benchmark twice on its Windows x64 runner. Select `verify_performance` to include the linked Rust tool check and retain `baseline.json` and `repeat.json` in the `application-profile-windows-x64` artifact.
-
-### Short list slices
-
-On Windows x64 a development-profile CLI took 918.326 ms (median) to run a program that takes 1,024 four-item slices from a 16,384-item list. Copying just the selected elements reduced the median to 59.005 ms. Both runs returned 523776. These are whole-process timings with two warmups and seven measured trials. The JSON files in `benches/results/list-slice-windows-dev/` contain the samples and binary hashes.
-
-## Profiling
-
-```sh
-corvid run src/main.cor --profile
-```
-
-Emits a flamegraph for the run. Useful for finding hot paths in
-agent composition (rare) or in custom Rust FFI calls.
+The paired median overhead for a 16-chunk stream was 6.533 ms and 8.199 ms. The [first report](../../benches/results/application-windows-release/baseline.json) and [repeat report](../../benches/results/application-windows-release/repeat.json) include the raw samples and CLI hash.
 
 ## Reproducible benchmarks
 
