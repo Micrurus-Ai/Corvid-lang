@@ -216,6 +216,9 @@ impl<'ir> Interpreter<'ir> {
         })
     }
 
+    // Box prompt dispatch and stream resumption so their provider state does
+    // not inflate the evaluator frame for unrelated nested expressions.
+    #[async_recursion::async_recursion]
     pub(in crate::interp) async fn dispatch_prompt_expr(
         &mut self,
         def_id: DefId,
@@ -251,6 +254,7 @@ impl<'ir> Interpreter<'ir> {
             .await
     }
 
+    #[async_recursion::async_recursion]
     pub(in crate::interp) async fn resume_prompt_stream(
         &mut self,
         prompt_def_id: DefId,

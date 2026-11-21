@@ -853,45 +853,8 @@ impl<'ir> Interpreter<'ir> {
             }
 
             IrExprKind::BinOp { op, left, right } => {
-                // Short-circuit `and` / `or`: evaluate the right operand
-                // only when the left doesn't determine the result. This
-                // matches the Cranelift lowering's merge-block pattern
-                // and lets idioms like `true or (1 / 0 == 0)` return
-                // `true` instead of raising.
-                match op {
-                    BinaryOp::And => {
-                        let l = match self.eval_expr(left).await?.into_value() {
-                            Ok(v) => v,
-                            Err(v) => return Ok(ExprFlow::Propagate(v)),
-                        };
-                        let lb = require_bool(&l, left.span, "left operand of `and`")?;
-                        if !lb {
-                            return Ok(ExprFlow::Value(Value::Bool(false)));
-                        }
-                        let r = match self.eval_expr(right).await?.into_value() {
-                            Ok(v) => v,
-                            Err(v) => return Ok(ExprFlow::Propagate(v)),
-                        };
-                        let rb = require_bool(&r, right.span, "right operand of `and`")?;
-                        return Ok(ExprFlow::Value(Value::Bool(rb)));
-                    }
-                    BinaryOp::Or => {
-                        let l = match self.eval_expr(left).await?.into_value() {
-                            Ok(v) => v,
-                            Err(v) => return Ok(ExprFlow::Propagate(v)),
-                        };
-                        let lb = require_bool(&l, left.span, "left operand of `or`")?;
-                        if lb {
-                            return Ok(ExprFlow::Value(Value::Bool(true)));
-                        }
-                        let r = match self.eval_expr(right).await?.into_value() {
-                            Ok(v) => v,
-                            Err(v) => return Ok(ExprFlow::Propagate(v)),
-                        };
-                        let rb = require_bool(&r, right.span, "right operand of `or`")?;
-                        return Ok(ExprFlow::Value(Value::Bool(rb)));
-                    }
-                    _ => {}
+                if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                    return self.eval_boolean_chain(*op, left, right).await;
                 }
                 let l = match self.eval_expr(left).await?.into_value() {
                     Ok(v) => v,
@@ -1483,9 +1446,44 @@ impl<'ir> Interpreter<'ir> {
         }
     }
 
+    async fn eval_boolean_chain(
+        &mut self,
+        op: BinaryOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Result<ExprFlow, InterpError> {
+        let (stop_value, left_context, right_context) = match op {
+            BinaryOp::And => (false, "left operand of `and`", "right operand of `and`"),
+            BinaryOp::Or => (true, "left operand of `or`", "right operand of `or`"),
+            _ => unreachable!("expected a short-circuit operator"),
+        };
+        // Visit leaves left to right. The parser's left-associated chains can
+        // contain many operands even in a single flat source expression.
+        let mut pending = vec![(right, right_context), (left, left_context)];
+        while let Some((operand, context)) = pending.pop() {
+            if let IrExprKind::BinOp { op: nested, left, right } = &operand.kind {
+                if *nested == op {
+                    pending.push((right, right_context));
+                    pending.push((left, left_context));
+                    continue;
+                }
+            }
+            let value = match self.eval_expr(operand).await?.into_value() {
+                Ok(value) => value,
+                Err(value) => return Ok(ExprFlow::Propagate(value)),
+            };
+            if require_bool(&value, operand.span, context)? == stop_value {
+                return Ok(ExprFlow::Value(Value::Bool(stop_value)));
+            }
+        }
+        Ok(ExprFlow::Value(Value::Bool(!stop_value)))
+    }
+
     /// Dispatch a call expression. Routes Tool / Prompt / Agent through
     /// the right runtime path; an `Unknown` kind is a hard error
     /// (typecheck should have caught it).
+    // Keep the tool-dispatch future out of each nested expression evaluator.
+    #[async_recursion]
     async fn eval_call(
         &mut self,
         kind: &IrCallKind,

@@ -204,6 +204,11 @@ conventional (`+ - * / %`, checked). Boolean ops are `and`, `or`,
 `not`. Postfix `?` on a `Result<T,E>` or `Option<T>` propagates the
 error/none to the caller.
 
+Corvid evaluates a chain of `and` or `or` operands from left to right.
+An `and` chain stops at the first false value. An `or` chain stops at the
+first true value. Calls and `?` expressions in the skipped operands do
+not run.
+
 Double-quoted strings support `\n` for newline, `\r` for carriage return,
 `\t` for tab, `\\` for a backslash, `\"` for a double quote and `\0` for
 a null character. In `"A\07B"`, the null character is followed by the

@@ -97,6 +97,8 @@ agent main() -> Result<Int, String>:
     return ingest_user("http://api.example.com/users/1", ":memory:")
 ```
 
+For a local test, point `main` at an HTTP server that returns `{"id":7,"email":"alice@example.com"}` and add that server's hostname to `[http] allow`. The in-memory database lasts for this run.
+
 ## Step 3 — Notice what's NOT in the project
 
 ```text
