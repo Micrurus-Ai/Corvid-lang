@@ -228,6 +228,7 @@ jobs:
           if ((& ./main.exe) -ne '42') { throw 'Linked tool returned an unexpected value' }
 
       - name: Measure application release workloads twice
+        id: profile
         if: inputs.verify_performance && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
@@ -236,10 +237,10 @@ jobs:
           $cli = Join-Path $build 'corvid.exe'
           python benches/analysis/application.py $cli --output baseline.json
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python benches/analysis/application.py $cli --output repeat.json
+          python benches/analysis/application.py $cli --output repeat.json --baseline baseline.json
 
       - name: Retain release workload samples
-        if: inputs.verify_performance && matrix.target == 'x86_64-pc-windows-msvc'
+        if: ${{ !cancelled() && (steps.profile.outcome == 'success' || steps.profile.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: application-profile-windows-x64
