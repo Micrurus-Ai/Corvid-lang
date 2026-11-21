@@ -135,6 +135,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Rebuilt the parity suite's runtime and mock tool archive for 6bc5be89. On Windows x64, all 160 enabled native/interpreter parity tests passed on 2 MiB threads. One native grounded string ownership case remains explicitly ignored. See the [contributor test commands](CONTRIBUTING.md#run-the-test-suite).
   - [x] Prevented native grounded string concatenation from producing a crashing executable. With a native tool library present, both operand orders ran through automatic interpreter selection, forced native execution and building reported the limitation, and an explicit unwrap still ran natively. See the [grounded value guide](docs/book/09-grounded.md).
   - [x] Verified that `corvid contract regen-doc` reproduced the committed 102,530-byte core semantics reference exactly. Fixed the registry test for Windows CRLF checkouts. All 28 guarantee tests passed.
+  - [x] The clean Linux [workspace job on 6bc5be89](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44892471166/job/136811062885) passed, including the previously failing guarded-pattern case. Its log reported 3,219 passes, zero failures and seven ignored across 194 test summaries.
   - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
@@ -171,6 +172,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Verified the Windows x64 executable from [candidate 6ff347a4](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44890637390) against the baseline and repeat workload reports and its CycloneDX file entry. The downloaded ZIP and inventory matched their respective checksum manifests. All six package jobs and the checksum job passed. Publication was skipped.
 
   - [x] Installed the bundled Python runtime from the Windows x64 6ff347a4 archive into a virtual environment. All 11 runtime tests passed against the installed package. The source wheel passed the same tests, and Python CI now runs them with isolated imports.
+
+  - [x] Downloaded all six [e42da8ea candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44894062420). Both executables in each archive matched the declared CPU, and 32 source files per archive matched the revision after line-ending normalization. Verified both checksum manifests, regenerated all six inventories byte-for-byte (240 file entries), and matched the packaged Windows x64 CLI to both performance reports. Publication was skipped.
 
 ## Verified task results
 
