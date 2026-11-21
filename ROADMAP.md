@@ -89,12 +89,12 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 **6. Interoperability, performance and distribution**
 
-- [ ] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
+- [x] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
   - [x] Served an extracted web archive with a synchronous Python standard-library tool. Verified record conversion, a mismatched return field, a Python exception and a subsequent successful request.
   - [x] Loaded a separate Rust tool DLL beside an extracted Windows app. A Unicode value round-tripped, a missing DLL failed startup, and a missing symbol failed one request while subsequent valid calls succeeded. The approval-and-resume integration passed.
   - [x] Typed synchronous Python imports work through module aliases in the interpreter. Verified argument and result checking, host errors, copy semantics, effect and approval checks, and replay after the Python module was removed. Native, Wasm and Python builds diagnose the interpreter-only boundary.
   - [x] A separate C program linked against the generated import library and header, loaded the relocated Windows DLL, checked integer and UTF-8 string results, released strings and observations, and verified catalog errors. A separate Node.js consumer loaded the relocated Wasm package and checked i64 values, missing imports and host exceptions.
-  - [ ] Linked a Rust integer tool into a standalone Windows executable. Defender event 1121 blocked execution under rule C1DB55AB-C21A-4637-BB3F-A12568109D35 before the application started. The standalone execution check remains open.
+  - [x] The [Windows x64 candidate](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) linked a Rust integer tool and ran the relocated executable by itself. It returned 42. The managed-device installation check remains tracked under R01.
 - [ ] P01. Profile CLI startup, checking, native compilation, list slicing, local HTTP requests and model streams. Record repeatable baselines and validate measured improvements against unchanged results.
   - [x] Profiled short slices through the interpreter CLI, removed a full-list copy and checked independence and bounds. Windows x64 development-build median fell from 918.326 ms to 59.005 ms with identical results. Release measurements are tracked separately.
 - [ ] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.

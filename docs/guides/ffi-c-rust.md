@@ -114,6 +114,17 @@ Treat the cdylib as a normal `extern "C"` library. The
 `corvid-abi` crate ships `CorvidString` + the helper types so a
 Rust embedder doesn't need to redeclare them by hand.
 
+## Linking an integer tool into a native executable
+
+For a Corvid tool declared as `tool double(n: Int) -> Int uses arithmetic`, export the C symbol `__corvid_tool_double` from the Rust archive. Its argument and result are signed 64-bit integers passed by value.
+
+```rust
+#[no_mangle]
+pub extern "C" fn __corvid_tool_double(n: i64) -> i64 { n * 2 }
+```
+
+On Windows x64, build the archive for the same MSVC target as Corvid, then run `corvid build main.cor --target native --with-tools-lib double.lib`. The executable in `target/bin/` contains the tool. The [candidate check](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) builds the Rust example with edition 2021, copies only the executable to a fresh directory and runs it there.
+
 ## Using a Rust tool in a packaged service
 
 Ship the platform's tool library alongside the extracted Corvid application. For a Windows library named `host.dll`, run `corvid serve src/main.cor --with-tools-cdylib host.dll` from the extraction directory. A declared tool named `echo_string` uses the exported symbol `__corvid_tool_echo_string`. A missing library fails at startup. A missing symbol leaves that tool without a handler and a call to it fails the request.
