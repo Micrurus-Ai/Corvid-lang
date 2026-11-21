@@ -76,6 +76,8 @@ When choosing the Python target, exercise the generated agent from a Python host
 
 ## Libraries and host calls
 
+The native allocator uses a shared heap and non-atomic reference counts. A multithreaded host must serialize calls that access the same native runtime heap, including releases.
+
 A library needs an exported entry point. Save this example as `src/api.cor`
 and use either library command in the table.
 

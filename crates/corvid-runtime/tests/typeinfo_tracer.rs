@@ -87,6 +87,10 @@ fn string_typeinfo_has_expected_shape() {
     }
 }
 
+// The native allocator shares its live-object list and free pools across
+// this test process. Corvid executes native heap operations on one thread.
+static HEAP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // The C runtime invokes these callbacks synchronously on the calling test thread.
 thread_local! {
     static DESTROYED_COUNT: Cell<usize> = const { Cell::new(0) };
@@ -117,6 +121,7 @@ static TEST_TI_WITH_DESTROY: CorvidTypeinfo = CorvidTypeinfo {
 /// (2) alloc + release dispatches destroy_fn.
 #[test]
 fn alloc_typed_then_release_runs_destructor() {
+    let _heap = HEAP.lock().unwrap();
     DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
@@ -133,6 +138,7 @@ fn alloc_typed_then_release_runs_destructor() {
 /// (6) rc>1 does NOT dispatch destructor until final release.
 #[test]
 fn retain_defers_destruction_until_final_release() {
+    let _heap = HEAP.lock().unwrap();
     DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
@@ -194,6 +200,7 @@ unsafe extern "C" fn corvid_trace_list_raw(
 
 #[test]
 fn trace_list_primitive_elements_no_ops() {
+    let _heap = HEAP.lock().unwrap();
     MARKED_POINTERS.with_borrow_mut(Vec::clear);
     unsafe {
         // length=3, three garbage i64s that would be Ints.
@@ -217,6 +224,7 @@ fn trace_list_primitive_elements_no_ops() {
 
 #[test]
 fn trace_list_refcounted_elements_invokes_marker() {
+    let _heap = HEAP.lock().unwrap();
     MARKED_POINTERS.with_borrow_mut(Vec::clear);
     unsafe {
         // length=2; pretend pointers (we're not releasing them, just
@@ -252,6 +260,7 @@ fn trace_list_refcounted_elements_invokes_marker() {
 /// code did a retain or release.
 #[test]
 fn retain_release_preserves_high_bits() {
+    let _heap = HEAP.lock().unwrap();
     DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
