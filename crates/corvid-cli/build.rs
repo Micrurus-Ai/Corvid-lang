@@ -38,12 +38,14 @@
 use std::process::Command;
 
 fn main() {
-    // Rerun if HEAD moves so a fresh build picks up the new SHA.
-    // Without this, cargo's incremental rebuild would happily reuse
-    // the build.rs output across commits and the SHA in the binary
-    // would lag the source.
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    // The build script is also an input when building outside a Git checkout.
+    println!("cargo:rerun-if-changed=build.rs");
+    watch_git_path("HEAD");
+    if let Some(branch) = git_output(&["symbolic-ref", "-q", "HEAD"]) {
+        if !watch_git_path(&branch) {
+            watch_git_path("packed-refs");
+        }
+    }
     println!("cargo:rerun-if-env-changed=CORVID_BUILD_SHA");
     println!("cargo:rerun-if-env-changed=CORVID_BUILD_DATE");
 
@@ -64,6 +66,19 @@ fn main() {
 
     println!("cargo:rustc-env=CORVID_BUILD_SHA={sha}");
     println!("cargo:rustc-env=CORVID_BUILD_DATE={date}");
+}
+
+// Git resolves per-worktree HEAD and shared branch refs to different directories.
+// Packed refs can become loose after a commit. Watch the nearest existing
+// directory for a missing path, since a missing Cargo input is always dirty.
+fn watch_git_path(name: &str) -> bool {
+    if let Some(path) = git_output(&["rev-parse", "--path-format=absolute", "--git-path", name]) {
+        if let Some(existing) = std::path::Path::new(&path).ancestors().find(|p| p.exists()) {
+            println!("cargo:rerun-if-changed={}", existing.display());
+            return existing == std::path::Path::new(&path);
+        }
+    }
+    false
 }
 
 /// Run `git <args>` and return trimmed stdout if the command

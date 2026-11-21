@@ -82,6 +82,8 @@ cargo build --locked --release -p corvid-cli
 cargo run --locked --release -p corvid-cli -- --version
 ```
 
+When building from a Git checkout, `corvid --version` includes the short commit ID and commit date. Moving to another commit updates the version on the next build. Cargo can reuse the CLI on an unchanged checkout, including a linked worktree.
+
 ## Verify the install
 
 ```sh
