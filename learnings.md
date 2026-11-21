@@ -8094,3 +8094,5 @@ Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C
 ### Slicing a list
 
 `items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.
+
+The named-state component prototype gives a mounted view its own integer, lets multiple buttons update it, and displays the result. The browser exercise covers two instances, pointer and keyboard activation, and reload. [Grammar, working example and build instructions](docs/book/19-browser-views.md#a-component-with-named-state-prototype)

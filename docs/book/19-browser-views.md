@@ -264,3 +264,34 @@ agent increment(current: Int) -> Int:
 Run `corvid build src/main.cor --target web` from the project root. The build checks the staged application, compiles the browser handler, and writes `target/web.tar`. Extract the archive into an empty directory. From that directory, set the model configuration and run `corvid serve src/main.cor` with the matching Corvid CLI. Open the root page and follow **Open workspace** to use the counter and the streamed answer.
 
 The archive includes Corvid and Python source files under `src/`, the project manifest and lockfile when present, root `tools.py` when present, SQL files under `migrations/`, and the compiled JavaScript and WebAssembly pair when `src/events.cor` exists. The CLI supplies the streaming module. Supply external providers, runtime credentials, host dependencies and application data in the destination environment.
+
+## A component with named state (prototype)
+
+Each copy of a component owns its state. In this example both buttons update the same count. Mounting a second counter gives it its own count. Reloading starts each counter at zero.
+
+```text
+component ReadingCounter:
+    state pages_read: Int = 0
+
+    text("Pages read this session: {pages_read}")
+
+    button("Read one page"):
+        on click:
+            pages_read = pages_read + 1
+
+    button("Read two pages"):
+        on click:
+            pages_read = pages_read + 2
+```
+
+Read the declaration as a name, a type, and a starting value. The braces in the text display the current value. Each assignment runs when its button is activated, including by keyboard. To change how much a button adds, edit the number on its assignment line.
+
+The prototype supports one nonnegative integer initializer, one labeled output ending in the state reference, and one or more buttons that add a nonnegative integer literal. It generates an ordinary Corvid view and typed browser handlers, then uses Corvid's web packager. The generated host composes two instances using ordinary function calls. The click handlers run locally. AI action exposure is a separate design decision.
+
+From the repository root, use a new output directory and the path to your built CLI (shown here for Windows).
+
+```shell
+python scripts/prototype_named_state.py examples/named_state/reading_counter.view counter-app --cli target/debug/corvid.exe
+```
+
+The package is written to `counter-app/target/web.tar`. With Python Playwright and Edge installed, run `python scripts/verify_named_state.py target/debug/corvid.exe` to exercise the packaged page. [Editable example](../../examples/named_state/reading_counter.view)
