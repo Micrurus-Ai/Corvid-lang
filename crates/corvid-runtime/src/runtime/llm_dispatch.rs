@@ -1022,7 +1022,7 @@ impl Runtime {
         use crate::llm::LlmStreamChunk;
         use futures::StreamExt;
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         if self.replay_source()?.is_some() {
             // Replay: substitute the whole recorded response, then
@@ -1149,7 +1149,7 @@ impl Runtime {
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
     pub async fn call_llm(&self, mut req: LlmRequest) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         self.call_llm_ref(req.as_ref()).await
     }
@@ -1163,7 +1163,7 @@ impl Runtime {
         cacheable: bool,
     ) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         self.call_llm_ref_impl(req.as_ref(), None, cacheable).await
     }
@@ -1190,7 +1190,7 @@ impl Runtime {
         cacheable: bool,
     ) -> Result<LlmResponse, RuntimeError> {
         let req = if req.model.is_empty() {
-            req.with_model(&self.default_model)
+            req.with_model(self.default_model())
         } else {
             req
         };

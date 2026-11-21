@@ -41,8 +41,12 @@ impl<'ir> Interpreter<'ir> {
         let agent = agent.clone();
         let env = self.env.clone();
         let local_names = self.local_names.clone();
+        let mocks_enabled = !self.mock_tools.is_empty();
         stream.spawn_producer(async move {
-            let mut sub = Interpreter::new(&ir, &runtime).with_mocks();
+            let mut sub = Interpreter::new(&ir, &runtime);
+            if mocks_enabled {
+                sub = sub.with_mocks();
+            }
             sub.env = env;
             sub.local_names = local_names;
             sub.stream_sender = Some(sender);

@@ -188,7 +188,9 @@ impl<'ir> Interpreter<'ir> {
     }
 
     fn with_mocks(mut self) -> Self {
-        self.mock_tools = self.ir.mocks.iter().map(|m| (m.target_id, m)).collect();
+        if !self.runtime.has_replay_source() {
+            self.mock_tools = self.ir.mocks.iter().map(|m| (m.target_id, m)).collect();
+        }
         self
     }
 
@@ -210,6 +212,20 @@ impl<'ir> Interpreter<'ir> {
             self.stream_locals.remove(&p.local_id);
         }
         Ok(())
+    }
+
+    async fn eval_mock_body(
+        &self, mock: &'ir IrMock, name: &str, args: Vec<Value>, span: Span,
+    ) -> Result<Value, InterpError> {
+        let mut sub = Interpreter::new(self.ir, self.runtime);
+        sub.mock_tools = self.mock_tools.clone();
+        sub.bind_ir_params(name, &mock.params, args, span)?;
+        match sub.eval_block(&mock.body).await? {
+            Flow::Return(value) => Ok(value),
+            Flow::Normal => Ok(Value::Nothing),
+            Flow::Break | Flow::Continue => Err(InterpError::new(
+                InterpErrorKind::Other("loop control flow escaped mock body".into()), mock.span)),
+        }
     }
 
     fn bind_ir_params(
@@ -1705,20 +1721,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                     .await?
                 } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
-                    let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
-                    sub.bind_ir_params(callee_name, &mock.params, arg_values, span)?;
-                    sub.eval_block(&mock.body)
-                        .await
-                        .and_then(|flow| match flow {
-                            Flow::Return(value) => Ok(value),
-                            Flow::Normal => Ok(Value::Nothing),
-                            Flow::Break | Flow::Continue => Err(InterpError::new(
-                                InterpErrorKind::Other(
-                                    "loop control flow escaped mock body".into(),
-                                ),
-                                mock.span,
-                            )),
-                        })?
+                    self.eval_mock_body(mock, callee_name, arg_values, span).await?
                 } else if is_stdlib_db_tool(callee_name) {
                     // Phase 33S3b — typed-Value dispatch for the
                     // executing SQLite stdlib tools. `db_open`
@@ -1929,7 +1932,8 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                 })?;
-                let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
+                let mut sub = Interpreter::new(self.ir, self.runtime);
+                sub.mock_tools = self.mock_tools.clone();
                 sub.bind_ir_params(callee_name, &fixture.params, arg_values, span)?;
                 sub.eval_block(&fixture.body)
                     .await

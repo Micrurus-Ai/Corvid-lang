@@ -328,6 +328,11 @@ impl Runtime {
     }
 
     pub fn default_model(&self) -> &str {
+        if self.default_model.is_empty() {
+            if let RuntimeMode::Replay(source) = &self.mode {
+                return source.next_model().unwrap_or("");
+            }
+        }
         &self.default_model
     }
 

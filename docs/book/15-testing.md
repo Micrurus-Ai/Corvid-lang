@@ -125,17 +125,60 @@ The snapshot file is committed; subsequent runs diff against it.
 
 ## Mocks
 
-A mock names the tool or prompt it replaces and provides a body with
-the same signature:
+Use a mock to give a prompt a predictable result in an ordinary application
+test. The checker verifies the mock against the prompt's signature.
 
-```corvid-fragment
-mock summarize(text: String) -> String:
-    return "mocked summary"
+```corvid
+type Decision:
+    label: String
+
+prompt classify(text: String) -> Decision:
+    "Classify {text}."
+
+mock classify(text: String) -> Decision:
+    return Decision("review " + text)
+
+agent label(text: String) -> String:
+    decision = classify(text)
+    return decision.label
+
+agent main() -> String:
+    return label("ticket")
+
+test classify_ticket:
+    assert label("ticket") == "review ticket"
 ```
 
-A mock's target may be a tool or a prompt; the checker verifies
-the mock's signature matches the target's declaration (fixed in
-slice 45q — prompt targets used to be rejected with E0203).
+Run `corvid test main.cor` with no provider credentials. The agent executes
+its own code, and its call to `classify` executes the mock body.
+
+### Test a recorded provider conversation
+
+A test declared with `from_trace` reads a JSONL fixture relative to the
+source file. Its setup and assertions consume the recorded provider
+responses, including multi-turn function calls. The recording takes
+precedence over source mocks in that test. Each repetition of a statistical
+assertion starts with a fresh replay cursor.
+
+To record without credentials, set `CORVID_MODEL=offline` and
+`CORVID_TEST_MOCK_LLM=1` for the recording process. Set
+`CORVID_TEST_MOCK_LLM_REPLIES` to a JSON object keyed by prompt name.
+For example, `{"classify":[{"label":"urgent"}]}` supplies one structured
+reply. An array of replies for the same prompt is consumed in order.
+Run `corvid run --target interp main.cor`. Copy the resulting JSONL
+file from `target/trace` next to the test source as `recording.jsonl`.
+For the example above, add this test:
+
+```corvid-fragment
+test recorded_ticket from_trace "recording.jsonl":
+    result = label("ticket")
+    assert result == "urgent"
+    assert called classify
+```
+
+Run `corvid test main.cor` in a fresh process
+without the recording environment. A missing fixture or changed model
+input fails the test.
 
 ## CI integration
 

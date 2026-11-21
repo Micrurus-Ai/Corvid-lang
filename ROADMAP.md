@@ -74,7 +74,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
   - A new project sent a confined PNG to two local provider protocols and received a typed caption. Invalid input and a path outside the root failed before model dispatch.
   - A headless browser clicked, read the new text, captured the page for a prompt, closed and reopened with fresh state. Direct navigation and an HTTP redirect to a second origin failed without contacting the destination.
-- [ ] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
+- [x] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
+  - Recorded a provider mock calling a Corvid function, checked the structured tool result and replayed the conversation with credentials removed. Source and trace-based tests passed in two fresh processes. Changing the prompt input failed the recorded test.
 
 **5. Browser applications**
 

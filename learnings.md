@@ -8058,3 +8058,7 @@ Import `rag_ingest`, `rag_search` and `RagChunkEnvelope` from `"./std/rag"`. Cal
 ### Working with images and browser sessions
 
 Use `io_read_image(path)?` from `./std/io` to get a `PromptImage`. Pass it as a typed prompt argument. In a local CLI program, `browser_open_scoped(width, height)` opens the host-selected start page. Use `browser_click(button_name)`, `browser_read_text(selector)` and `browser_capture()` to interact with it. Finish with `browser_close()`. The image prompt and browser examples in `docs/book/11-prompts.md` show the imports, host setup and return values.
+
+### Testing a prompt offline
+
+Declare a `mock` with the prompt's name, parameters and return type to give ordinary `test` declarations a predictable answer. For a recorded interaction, use `test uses_recording from_trace "recording.jsonl":` and call the application in the test body. Corvid reads the recording relative to the source file. A recorded function call includes the chosen function, its arguments and the result returned to the model. Each repetition of an assertion starts with its own replay cursor. The testing chapter shows how to record and run both kinds of tests without credentials.

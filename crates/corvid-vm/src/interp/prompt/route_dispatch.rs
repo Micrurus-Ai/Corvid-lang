@@ -224,11 +224,16 @@ impl<'ir> Interpreter<'ir> {
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
         let prompt = self.prompt_by_id(def_id, callee_name, span)?;
+        if let Some(mock) = self.mock_tools.get(&def_id).copied() {
+            let value = self.eval_mock_body(mock, callee_name, arg_values.to_vec(), span).await?;
+            let value = super::super::grounding::maybe_ground_prompt_result(prompt, callee_name, value);
+            return Ok(ExprFlow::Value(value));
+        }
         // Real provider streaming (slice 46d): plain-path
         // Stream<String> prompts stream incrementally. Everything
         // else (dispatch clauses, mocks, structured outputs) keeps
         // the whole-call-then-singleton behavior.
-        if Self::prompt_streams_live(prompt) && !self.mock_tools.contains_key(&def_id) {
+        if Self::prompt_streams_live(prompt) {
             return self
                 .dispatch_streaming_prompt(prompt, callee_name, arg_values, span)
                 .await;
