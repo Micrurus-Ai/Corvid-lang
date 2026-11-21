@@ -164,6 +164,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Checked generated MCP parameters for overlapping Corvid names. The local tool received distinct values under `item-id`, `item_id` and `item_id_2` after regenerating the wrapper and running its caller.
 
+  - [x] Verified the Windows x64 executable from [candidate 6ff347a4](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44890637390) against the baseline and repeat workload reports and its CycloneDX file entry. The downloaded ZIP and inventory matched their respective checksum manifests. All six package jobs and the checksum job passed. Publication was skipped.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
