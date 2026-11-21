@@ -346,7 +346,7 @@ Every slice passes three CI gates on every push:
 - **`corvid test spec`** — every ```corvid fenced block in this section (and every other spec section) compiles as claimed.
 - **`corvid test spec --meta`** — every historical counter-example in [counterexamples/composition/](./counterexamples/composition/) still distinguishes its correct composition rule from the attacker's wrong rule.
 
-Plus `cargo test --workspace` across the full suite. The verifier corpus at [tests/corpus/](../../tests/corpus/) cross-verifies every fixture across four execution tiers; deliberate-fail fixtures (`should_fail/tier_disagree.cor`, `should_fail/native_drops_effect.cor`) prove the harness catches divergences rather than waving them through.
+The workspace suite also runs the [verifier corpus](../../../tests/corpus/). The tiers agree on the final prompt in `effect_after_list_loop.cor`. The deliberate `should_fail/tier_disagree.cor` fixture checks that the verifier reports disagreements.
 
 ## 13.12 Shipping trail
 
