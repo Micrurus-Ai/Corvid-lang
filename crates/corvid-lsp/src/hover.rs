@@ -29,9 +29,15 @@ fn checked_file(source: &str) -> Option<(File, Checked)> {
     Some((file, checked))
 }
 
-fn declaration_hover(source: &str, file: &File, offset: usize) -> Option<Hover> {
+pub(crate) fn declaration_hover(source: &str, file: &File, offset: usize) -> Option<Hover> {
     for decl in &file.decls {
         match decl {
+            Decl::Fn(f) if contains(f.name.span, offset) => {
+                return Some(markdown_hover(source, f.name.span, format!(
+                    "```corvid\nfn {}({}) -> {}\n```", f.name.name,
+                    format_params(&f.params), type_ref_name(&f.return_ty)
+                )));
+            }
             Decl::Agent(agent) if contains(agent.name.span, offset) => {
                 return Some(markdown_hover(
                     source,

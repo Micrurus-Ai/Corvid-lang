@@ -22,7 +22,7 @@ use corvid_types::{
 use corvid_ir::{lower, lower_with_modules, IrFile};
 
 use crate::diagnostic::Diagnostic;
-use crate::modules::{build_module_resolution, ModuleLoadError};
+use crate::modules::{resolve_module_graph, ModuleLoadError};
 
 mod abi;
 mod compile;
@@ -30,7 +30,7 @@ mod ir;
 
 pub use abi::{compile_to_abi_with_config, compile_to_application_contract_with_config};
 pub use compile::{
-    analyze_with_config_at_path, compile, compile_with_config, compile_with_config_at_path,
+    analyze_with_config_at_path, analyze_with_open_sources, compile, compile_with_config, compile_with_config_at_path,
     CompileResult,
 };
 pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config_at_path};
@@ -53,15 +53,25 @@ pub(crate) fn typecheck_driver_file(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> DriverTypecheckOutcome {
+    typecheck_with_sources(file, resolved, source_path, config, &|_| None)
+}
+
+fn typecheck_with_sources(
+    file: &File,
+    resolved: &Resolved,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> DriverTypecheckOutcome {
     if has_corvid_imports(file) {
-        let (modules, load_errors, digest) = crate::modules::resolve_module_graph(file, source_path);
+        let (modules, load_errors, digest) = resolve_module_graph(file, source_path, open_source);
         let diagnostics = load_errors
             .into_iter()
             .flat_map(module_load_error_diagnostics)
             .collect::<Vec<_>>();
         let checked = typecheck_with_config_and_modules(file, resolved, config, &modules);
         let (module_checked, module_diagnostics) =
-            typecheck_imported_modules(&modules, config);
+            typecheck_imported_modules(&modules, config, open_source);
         let mut diagnostics = diagnostics;
         diagnostics.extend(module_diagnostics);
         DriverTypecheckOutcome {
@@ -108,6 +118,7 @@ pub(crate) fn lower_driver_file(
 fn typecheck_imported_modules(
     modules: &ModuleResolution,
     config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
 ) -> (HashMap<PathBuf, Checked>, Vec<Diagnostic>) {
     let mut checked_by_path = HashMap::new();
     let mut diagnostics = Vec::new();
@@ -119,8 +130,8 @@ fn typecheck_imported_modules(
             origin: Some((module.path.clone(), module.source.clone())),
             ..Diagnostic::from(err)
         }));
-        let (module_resolution, load_errors) =
-            build_module_resolution(&module.file, &module.path);
+        let (module_resolution, load_errors, _) =
+            resolve_module_graph(&module.file, &module.path, open_source);
         diagnostics.extend(
             load_errors
                 .into_iter()

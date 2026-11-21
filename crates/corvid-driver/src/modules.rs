@@ -274,7 +274,7 @@ pub fn build_module_resolution(
     root_file: &File,
     root_path: &Path,
 ) -> (ModuleResolution, Vec<ModuleLoadError>) {
-    let (modules, errors, _) = resolve_module_graph(root_file, root_path);
+    let (modules, errors, _) = resolve_module_graph(root_file, root_path, &|_| None);
     (modules, errors)
 }
 
@@ -285,7 +285,7 @@ struct LoadedModule {
     digest: [u8; 32],
 }
 
-pub(crate) fn resolve_module_graph(root_file: &File, root_path: &Path)
+pub(crate) fn resolve_module_graph(root_file: &File, root_path: &Path, open_source: &dyn Fn(&Path) -> Option<Vec<u8>>)
     -> (ModuleResolution, Vec<ModuleLoadError>, [u8; 32])
 {
     let mut fingerprint = Sha256::new();
@@ -318,6 +318,7 @@ pub(crate) fn resolve_module_graph(root_file: &File, root_path: &Path)
                 child.content_hash.as_ref(),
                 package_lock.as_ref(),
                 &mut loaded,
+                open_source,
                 &mut fingerprint,
                 &mut in_progress,
                 &mut errors,
@@ -744,6 +745,7 @@ fn dfs_collect(
     expected_hash: Option<&ImportContentHash>,
     package_lock: Option<&PackageLockFile>,
     loaded: &mut HashMap<PathBuf, LoadedModule>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
     fingerprint: &mut Sha256,
     in_progress: &mut Vec<PathBuf>,
     errors: &mut Vec<ModuleLoadError>,
@@ -792,7 +794,13 @@ fn dfs_collect(
     // Load and verify the module source. Hash verification runs on
     // the exact bytes before parsing, so a pinned import cannot drift
     // into the compiler under a stale trust boundary.
-    let bytes = match load_target_bytes(importing_target, &target, requested_module, expected_hash) {
+    let buffer = match &target {
+        ImportTarget::Local(path) => open_source(path),
+        _ => None,
+    };
+    let bytes = match buffer.map(Ok).unwrap_or_else(|| {
+        load_target_bytes(importing_target, &target, requested_module, expected_hash)
+    }) {
         Ok(bytes) => bytes,
         Err(error) => {
             errors.push(error);
@@ -890,6 +898,7 @@ fn dfs_collect(
                 child.content_hash.as_ref(),
                 package_lock,
                 loaded,
+                open_source,
                 fingerprint,
                 in_progress,
                 errors,

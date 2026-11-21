@@ -1,16 +1,16 @@
 use crate::{
-    analyze_document, completion_at, definition_range_at, hover_at, references_at,
-    rename_ranges_at, workspace_symbols_for_document, DocumentSnapshot,
+    completion_at, definition_range_at, hover_at, references_at,
+    workspace_symbols_for_document, DocumentSnapshot,
 };
 use lsp_types::{
     CompletionOptions, CompletionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     GotoDefinitionParams, GotoDefinitionResponse, HoverParams, InitializeResult, Location,
     OneOf, PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMessage {
@@ -22,7 +22,9 @@ pub enum ServerMessage {
 #[derive(Debug, Default)]
 pub struct LanguageServerState {
     documents: HashMap<Url, String>,
+    published: BTreeSet<Url>,
     shutdown_requested: bool,
+    workspace_roots: Vec<std::path::PathBuf>,
 }
 
 impl LanguageServerState {
@@ -47,7 +49,17 @@ impl LanguageServerState {
             };
         }
         match method {
-            "initialize" => self.initialize(id),
+            "initialize" => {
+                let params = &request["params"];
+                self.workspace_roots = params["workspaceFolders"].as_array().into_iter().flatten()
+                    .map(|folder| &folder["uri"])
+                    .chain(std::iter::once(&params["rootUri"]))
+                    .filter_map(|u| Url::parse(u.as_str()?).ok()?.to_file_path().ok())
+                    .filter(|path| path.is_dir()).collect();
+                self.workspace_roots.sort();
+                self.workspace_roots.dedup();
+                self.initialize(id)
+            }
             "initialized" => Vec::new(),
             "shutdown" => {
                 let Some(id) = id else { return Vec::new() };
@@ -59,6 +71,12 @@ impl LanguageServerState {
             }
             "exit" => Vec::new(),
             "textDocument/didOpen" => self.did_open(request.get("params").cloned()),
+            "textDocument/didClose" => {
+                let Ok(params) = parse_params::<lsp_types::DidCloseTextDocumentParams>(request.get("params").cloned()) else { return Vec::new() };
+                let uri = params.text_document.uri;
+                self.documents.remove(&uri);
+                self.publish_diagnostics()
+            }
             "textDocument/didChange" => self.did_change(request.get("params").cloned()),
             "textDocument/didSave" => self.did_save(request.get("params").cloned()),
             "textDocument/hover" => self.hover(id, request.get("params").cloned()),
@@ -124,7 +142,7 @@ impl LanguageServerState {
         let uri = params.text_document.uri;
         self.documents
             .insert(uri.clone(), params.text_document.text);
-        self.publish_diagnostics(uri)
+        self.publish_diagnostics()
     }
 
     fn did_change(&mut self, params: Option<Value>) -> Vec<ServerMessage> {
@@ -137,7 +155,7 @@ impl LanguageServerState {
         };
         let uri = params.text_document.uri;
         self.documents.insert(uri.clone(), change.text);
-        self.publish_diagnostics(uri)
+        self.publish_diagnostics()
     }
 
     fn did_save(&mut self, params: Option<Value>) -> Vec<ServerMessage> {
@@ -145,7 +163,7 @@ impl LanguageServerState {
             Some(params) => params,
             None => return Vec::new(),
         };
-        let Some(uri) = params
+        let Some(_) = params
             .get("textDocument")
             .and_then(|doc| doc.get("uri"))
             .and_then(Value::as_str)
@@ -153,7 +171,7 @@ impl LanguageServerState {
         else {
             return Vec::new();
         };
-        self.publish_diagnostics(uri)
+        self.publish_diagnostics()
     }
 
     fn hover(&self, id: Option<Value>, params: Option<Value>) -> Vec<ServerMessage> {
@@ -166,7 +184,8 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .and_then(|text| hover_at(text, position))
+            .and_then(|text| crate::navigation::imported_symbol_at(&self.documents, &uri, text, position)
+                .and_then(|symbol| symbol.hover).or_else(|| hover_at(text, position)))
             .map(serde_json::to_value)
             .transpose()
             .expect("hover serializes")
@@ -187,7 +206,8 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .map(|text| completion_at(text, position))
+            .map(|text| crate::completion::imported_members_at(&self.documents, &uri, text, position)
+                .unwrap_or_else(|| completion_at(text, position)))
             .map(serde_json::to_value)
             .transpose()
             .expect("completion serializes")
@@ -208,8 +228,10 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .and_then(|text| definition_range_at(text, position))
-            .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range }))
+            .and_then(|text| crate::navigation::imported_symbol_at(&self.documents, &uri, text, position)
+                .map(|symbol| symbol.location)
+                .or_else(|| definition_range_at(text, position).map(|range| Location { uri, range })))
+            .map(GotoDefinitionResponse::Scalar)
             .map(serde_json::to_value)
             .transpose()
             .expect("definition serializes")
@@ -256,25 +278,9 @@ impl LanguageServerState {
         };
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let result = self
-            .documents
-            .get(&uri)
-            .and_then(|text| rename_ranges_at(text, position, &params.new_name))
-            .map(|ranges| {
-                let edits = ranges
-                    .into_iter()
-                    .map(|range| TextEdit {
-                        range,
-                        new_text: params.new_name.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                let mut changes = HashMap::new();
-                changes.insert(uri, edits);
-                WorkspaceEdit {
-                    changes: Some(changes),
-                    ..WorkspaceEdit::default()
-                }
-            })
+        let result = crate::navigation::workspace_rename(
+            &self.documents, &uri, position, &params.new_name, &self.workspace_roots,
+        )
             .map(serde_json::to_value)
             .transpose()
             .expect("rename edit serializes")
@@ -305,23 +311,42 @@ impl LanguageServerState {
         }]
     }
 
-    fn publish_diagnostics(&self, uri: Url) -> Vec<ServerMessage> {
-        let Some(text) = self.documents.get(&uri) else {
-            return Vec::new();
+    fn publish_diagnostics(&mut self) -> Vec<ServerMessage> {
+        let mut by_uri = BTreeMap::<Url, Vec<lsp_types::Diagnostic>>::new();
+        let buffers: HashMap<_, _> = self.documents.iter().filter_map(|(uri, text)| {
+            let path = uri.to_file_path().ok()?;
+            Some((path.canonicalize().unwrap_or(path), text))
+        }).collect();
+        let open_source = |path: &std::path::Path| {
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+            buffers.get(&canonical).map(|text| text.as_bytes().to_vec())
         };
-        let analysis = analyze_document(&DocumentSnapshot {
-            uri: uri.clone(),
-            text: text.clone(),
-        });
-        let params = PublishDiagnosticsParams {
-            uri,
-            diagnostics: analysis.diagnostics,
-            version: None,
-        };
-        vec![ServerMessage::Notification {
-            method: "textDocument/publishDiagnostics".to_string(),
-            params: serde_json::to_value(params).expect("diagnostics params serialize"),
-        }]
+        for (uri, text) in &self.documents {
+            let result = crate::analysis::analyze_buffers(&DocumentSnapshot { uri: uri.clone(), text: text.clone() }, &open_source);
+            by_uri.insert(uri.clone(), result.diagnostics);
+            for (origin, diagnostics) in result.imported {
+                // The open buffer supplies diagnostics for its own document.
+                if self.documents.contains_key(&origin) {
+                    continue;
+                }
+                let entries = by_uri.entry(origin).or_default();
+                for diagnostic in diagnostics {
+                    if !entries.contains(&diagnostic) {
+                        entries.push(diagnostic);
+                    }
+                }
+            }
+        }
+        let current = by_uri.keys().cloned().collect();
+        for uri in self.published.difference(&current) {
+            by_uri.insert(uri.clone(), Vec::new());
+        }
+        self.published = current;
+        by_uri.into_iter().map(|(uri, diagnostics)| ServerMessage::Notification {
+            method: "textDocument/publishDiagnostics".into(),
+            params: serde_json::to_value(PublishDiagnosticsParams { uri, diagnostics, version: None })
+                .expect("diagnostics params serialize"),
+        }).collect()
     }
 }
 
@@ -396,6 +421,31 @@ mod tests {
         assert_eq!(json["result"]["capabilities"]["definitionProvider"], true);
         assert_eq!(json["result"]["capabilities"]["referencesProvider"], true);
         assert_eq!(json["result"]["capabilities"]["workspaceSymbolProvider"], true);
+    }
+
+    #[test]
+    fn unsaved_module_changes_refresh_the_callers_diagnostics() {
+        let root = std::env::temp_dir().join("corvid-lsp-buffer-only-project");
+        let main = Url::from_file_path(root.join("main.cor")).unwrap();
+        let helper = Url::from_file_path(root.join("helper.cor")).unwrap();
+        let mut server = LanguageServerState::new();
+        let function = "public fn measure(x: Int) -> Int:\n    return 1\n";
+        server.handle(did_open(helper.as_str(), function));
+        let caller = "import \"./helper\" use measure\nagent main() -> Int:\n    return measure(4)\n";
+        let reports = server.handle(did_open(main.as_str(), caller));
+        assert!(reports.into_iter().all(|message| message.into_json()["params"]["diagnostics"] == json!([])));
+        let reports = server.handle(json!({
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": {"uri": helper, "version": 2},
+                "contentChanges": [{"text": function.replace("x: Int", "x: String")}]
+            }
+        }));
+        let at_main = reports.into_iter().map(ServerMessage::into_json)
+            .find(|message| message["params"]["uri"] == json!(main)).unwrap();
+        let error = &at_main["params"]["diagnostics"][0];
+        assert_eq!(error["range"]["start"]["line"], 2);
+        assert!(error["message"].as_str().unwrap().contains("String"));
     }
 
     #[test]

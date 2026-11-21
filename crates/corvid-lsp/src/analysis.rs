@@ -1,5 +1,5 @@
 use crate::position::byte_span_to_lsp_range;
-use corvid_driver::{compile_with_config_at_path, load_corvid_config_for};
+use corvid_driver::{analyze_with_open_sources, load_corvid_config_for};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Url,
 };
@@ -14,9 +14,14 @@ pub struct DocumentSnapshot {
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
     pub diagnostics: Vec<Diagnostic>,
+    pub imported: std::collections::BTreeMap<Url, Vec<Diagnostic>>,
 }
 
 pub fn analyze_document(snapshot: &DocumentSnapshot) -> AnalysisResult {
+    analyze_buffers(snapshot, &|_| None)
+}
+
+pub(crate) fn analyze_buffers(snapshot: &DocumentSnapshot, open_source: &dyn Fn(&Path) -> Option<Vec<u8>>) -> AnalysisResult {
     let path = snapshot
         .uri
         .to_file_path()
@@ -26,13 +31,19 @@ pub fn analyze_document(snapshot: &DocumentSnapshot) -> AnalysisResult {
     } else {
         load_corvid_config_for(&path)
     };
-    let compiled = compile_with_config_at_path(&snapshot.text, &path, config.as_ref());
-    let diagnostics = compiled
-        .diagnostics
-        .iter()
-        .map(|diagnostic| to_lsp_diagnostic(&snapshot.text, diagnostic))
-        .collect();
-    AnalysisResult { diagnostics }
+    let compiled = analyze_with_open_sources(&snapshot.text, &path, config.as_ref(), open_source);
+    let mut diagnostics = Vec::new();
+    let mut imported = std::collections::BTreeMap::<Url, Vec<Diagnostic>>::new();
+    for diagnostic in &compiled.diagnostics {
+        if let Some((origin, source)) = &diagnostic.origin {
+            if let Ok(uri) = Url::from_file_path(origin) {
+                imported.entry(uri).or_default().push(to_lsp_diagnostic(source, diagnostic));
+                continue;
+            }
+        }
+        diagnostics.push(to_lsp_diagnostic(&snapshot.text, diagnostic));
+    }
+    AnalysisResult { diagnostics, imported }
 }
 
 fn to_lsp_diagnostic(source: &str, diagnostic: &corvid_driver::Diagnostic) -> Diagnostic {

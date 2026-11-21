@@ -16,7 +16,7 @@ use corvid_types::{typecheck_with_config, CorvidConfig};
 
 use crate::diagnostic::Diagnostic;
 
-use super::{lower_driver_file, typecheck_driver_file};
+use super::{lower_driver_file, typecheck_with_sources};
 
 /// Outcome of a compile. Always contains the Python source (even
 /// partial) when possible, and any diagnostics found.
@@ -153,7 +153,17 @@ pub fn analyze_with_config_at_path(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
-    compile_front_at_path(source, source_path, config).0
+    analyze_with_open_sources(source, source_path, config, &|_| None)
+}
+
+/// Analyze a document with editor buffers overriding local imports before disk lookup.
+pub fn analyze_with_open_sources(
+    source: &str,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> CompileResult {
+    compile_front_at_path(source, source_path, config, open_source).0
 }
 
 /// Transpile pipeline (`corvid build --target=python`): the shared
@@ -163,7 +173,7 @@ pub fn compile_with_config_at_path(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
-    let (mut result, ir) = compile_front_at_path(source, source_path, config);
+    let (mut result, ir) = compile_front_at_path(source, source_path, config, &|_| None);
     let Some(ir) = ir else {
         return result;
     };
@@ -183,6 +193,7 @@ fn compile_front_at_path(
     source: &str,
     source_path: &Path,
     config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
 ) -> (CompileResult, Option<corvid_ir::IrFile>) {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let tokens = match lex(source) {
@@ -204,7 +215,7 @@ fn compile_front_at_path(
     let resolved = resolve(&file);
     diagnostics.extend(resolved.errors.iter().cloned().map(Diagnostic::from));
 
-    let typechecked = typecheck_driver_file(&file, &resolved, source_path, config);
+    let typechecked = typecheck_with_sources(&file, &resolved, source_path, config, open_source);
     diagnostics.extend(typechecked.diagnostics);
     diagnostics.extend(
         typechecked

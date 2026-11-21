@@ -7982,3 +7982,7 @@ After cloning a project, run `corvid check` to check the entry point and its imp
 Run `corvid check` from the project root. When an imported function declares `-> Int` and returns a string, the error points to the return statement in that module and names both types. Change the return expression to produce an integer, or change the declaration and its callers if the intended result is text.
 
 When you edit an imported module, run `corvid run --target native` again. Corvid checks direct and nested imports before reusing a compiled executable. You can leave the project cache in place between edits.
+
+### Working with imports in an editor
+
+With `corvid-lsp`, type a module alias followed by a dot to complete its public members. Hover over an imported function to read its signature, or use Go to Definition to open its declaration. Renaming a public function updates its declaration and references in local workspace files, including closed files. An explicit local alias keeps its spelling. Editing a parameter type updates diagnostics in open callers before you save.
