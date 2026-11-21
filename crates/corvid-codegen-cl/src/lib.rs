@@ -326,3 +326,8 @@ pub fn native_integer_list_transform(
         && matches!(&callback.ty, Type::Function { params, ret, .. }
             if params.len() == arity && **ret == result)
 }
+
+pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)
+}

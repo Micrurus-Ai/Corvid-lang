@@ -46,11 +46,17 @@ pub fn lower_binop_strict(
             })
         }
         (BinaryOp::Div, ArithDomain::Int) => {
-            trap_on_zero(builder, r, module, runtime);
+            let zero = builder.ins().icmp_imm(IntCC::Equal, r, 0);
+            let min = builder.ins().icmp_imm(IntCC::Equal, l, i64::MIN);
+            let minus_one = builder.ins().icmp_imm(IntCC::Equal, r, -1);
+            let overflow = builder.ins().band(min, minus_one);
+            let invalid = builder.ins().bor(zero, overflow);
+            trap_if(builder, invalid, module, runtime);
             Ok(builder.ins().sdiv(l, r))
         }
         (BinaryOp::Mod, ArithDomain::Int) => {
-            trap_on_zero(builder, r, module, runtime);
+            let zero = builder.ins().icmp_imm(IntCC::Equal, r, 0);
+            trap_if(builder, zero, module, runtime);
             Ok(builder.ins().srem(l, r))
         }
 

@@ -154,7 +154,7 @@ fn int_arith(
                     span,
                 ))
             } else {
-                Ok(a.wrapping_div(b))
+                a.checked_div(b).ok_or_else(|| overflow(span))
             }
         }
         Mod => {
@@ -530,21 +530,7 @@ pub(super) fn eval_builtin_method(
             )),
         },
         IntToFloat => Ok(Value::Float(want_int(&recv, span)? as f64)),
-        FloatToIntTruncated => {
-            let f = want_float(&recv, span)?;
-            // Always-checked rule: NaN and out-of-range trap rather
-            // than silently wrapping.
-            if f.is_nan() || f < (i64::MIN as f64) || f >= (i64::MAX as f64) {
-                return Err(InterpError::new(
-                    InterpErrorKind::TypeMismatch {
-                        expected: "a Float within Int range for `to_int_truncated`".into(),
-                        got: format!("`{}`", render_float(f)),
-                    },
-                    span,
-                ));
-            }
-            Ok(Value::Int(f.trunc() as i64))
-        }
+        FloatToIntTruncated => float_to_int_checked(want_float(&recv, span)?.trunc(), "to_int_truncated", span),
         StringParseInt => {
             let s = want_string_recv(&recv, span)?;
             match s.trim().parse::<i64>() {

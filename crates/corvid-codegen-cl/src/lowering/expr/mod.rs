@@ -20,7 +20,7 @@ pub(super) use operand::{
     lower_container_maybe_borrowed, lower_string_binop_with_ownership,
     lower_string_operand_maybe_borrowed,
 };
-pub(super) use overflow::{trap_on_zero, with_overflow_trap};
+pub(super) use overflow::{trap_if, with_overflow_trap};
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
@@ -150,6 +150,10 @@ pub(super) fn lower_expr(
                 builder.ins().call(set, &[map, key, value]);
             }
             Ok(map)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            overflow::convert_number(builder, module, *kind, input, expr.span)
         }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if crate::native_integer_list_transform(*kind, &receiver.ty, args) => {

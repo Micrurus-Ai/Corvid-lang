@@ -125,13 +125,9 @@ under replay, and rejected inside `@deterministic` agents. See the
 [`std.time`](../reference/stdlib/time.md) and
 [`std.random`](../reference/stdlib/random.md) references.
 
-Integer overflow, division by zero, and modulo by zero are **checked
-in every build mode** and trap with a typed runtime error. There is
-deliberately no saturating or wrapping mode: silent saturation
-corrupts values that feed LLM calls, and a single arithmetic
-semantics keeps deterministic replay byte-identical across the
-interpreter and compiled tiers. `to_int_truncated()` follows the
-same rule: NaN or out-of-range Floats trap rather than wrapping.
+Integer arithmetic is checked by default. The smallest `Int` divided by `-1` overflows. Its remainder modulo `-1` is zero. A zero divisor is an error for both operators. In an `@wrapping` agent, integer addition, subtraction, multiplication and negation wrap at 64 bits.
+
+`to_int_truncated()` rounds a float toward zero. `floor()` rounds down, `ceil()` rounds up, and `round()` rounds to the nearest integer with ties away from zero. For example, `(-2.5).round()` returns `-3`. Each conversion requires a finite result from -2^63 inclusive to 2^63 exclusive. `to_float()` converts an integer to a binary64 float, which can lose precision when the integer magnitude exceeds 2^53.
 
 ## Lists
 

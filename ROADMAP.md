@@ -28,6 +28,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
   - [x] Compare records, lists, string maps, options, results and sum variants by their contents on both CLI targets. Include aliases, mutations, independent recursive records and owned payloads.
+  - [x] Both CLI targets checked Float rounding and conversion limits, including halfway cases, loss of integer precision, NaN, infinity, and signed division overflow at the minimum Int.
 
 **2. Developer workflow**
 

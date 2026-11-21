@@ -7944,3 +7944,9 @@ changed = first != second
 ```
 
 Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.
+
+### Numeric conversions and overflow
+
+Integer arithmetic is checked by default. The smallest `Int` divided by `-1` overflows. Its remainder modulo `-1` is zero. A zero divisor is an error for both operators. In an `@wrapping` agent, integer addition, subtraction, multiplication and negation wrap at 64 bits.
+
+`to_int_truncated()` rounds a float toward zero. `floor()` rounds down, `ceil()` rounds up, and `round()` rounds to the nearest integer with ties away from zero. For example, `(-2.5).round()` returns `-3`. Each conversion requires a finite result from -2^63 inclusive to 2^63 exclusive. `to_float()` converts an integer to a binary64 float, which can lose precision when the integer magnitude exceeds 2^53.

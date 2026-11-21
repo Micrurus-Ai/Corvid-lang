@@ -424,3 +424,60 @@ agent main() -> Bool:
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
+
+#[test]
+fn conversions_agree_at_rounding_and_integer_boundaries() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent main() -> Bool:
+    lower = (-9223372036854775808.0).to_int_truncated()
+    upper = 9223372036854774784.0.to_int_truncated()
+    bounds = lower == -9223372036854775807 - 1 and upper == 9223372036854774784
+    signed = (-3.7).to_int_truncated() == -3 and (-3.7).floor() == -4 and (-3.7).ceil() == -3
+    ties = (-2.5).round() == -3 and 2.5.round() == 3 and 0.49999999999999994.round() == 0
+    precise = 9007199254740993.to_float().to_int_truncated() == 9007199254740992
+    input: Option<Float> = Some(-0.5)
+    negative_half = match input:
+        Some(n) if n.ceil() == 0 -> n.round() == -1
+        _ -> false
+    return bounds and signed and ties and precise and negative_half
+"#).unwrap();
+    for target in ["interp", "native"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .args(["run", "--target", target]).arg(&main).output().unwrap();
+        assert!(out.status.success(), "{target}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "true");
+    }
+    for expression in ["9223372036854775808.0.to_int_truncated()", "(-9223372036854777856.0).ceil()", "(huge - huge).round()", "huge.floor()"] {
+        let program = format!("agent main() -> Int:\n    huge = 9223372036854775808.0\n    for i in [1, 2, 3, 4, 5]:\n        huge = huge * huge\n    return {expression}\n");
+        std::fs::write(&main, program).unwrap();
+        for target in ["interp", "native"] {
+            let out = Command::new(env!("CARGO_BIN_EXE_corvid"))
+                .args(["run", "--target", target]).arg(&main).output().unwrap();
+            let message = String::from_utf8_lossy(&out.stderr);
+            assert!(!out.status.success() && message.contains("within Int range"), "{target} {expression}: {message}");
+        }
+    }
+}
+
+#[test]
+fn minimum_integer_division_and_remainder() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    for (operator, expected) in [("/", None), ("%", Some("0"))] {
+        let program = format!("agent main() -> Int:\n    minimum = -9223372036854775807 - 1\n    return minimum {operator} -1\n");
+        std::fs::write(&main, program).unwrap();
+        for target in ["interp", "native"] {
+            let out = Command::new(env!("CARGO_BIN_EXE_corvid")).args(["run", "--target", target])
+                .arg(&main).output().unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if let Some(value) = expected {
+                assert!(out.status.success(), "{target}: {stderr}");
+                assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), value);
+            } else {
+                assert!(!out.status.success() && stderr.contains("overflow"), "{target}: {stderr}");
+            }
+        }
+    }
+}
