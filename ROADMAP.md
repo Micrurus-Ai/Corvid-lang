@@ -85,7 +85,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 ### Building agents in Corvid
 
-Build on A01–A06 so a developer can grow a small terminal agent into a background service and an interactive application with the same agent logic.
+Build on A01–A06 to support developers starting at the scale their application needs. A team can begin with a large, multi-module agent or full-stack AI application. A developer who prefers a small terminal agent can grow it into a service or interactive application using the same language and toolchain. The first-agent exercise tests ease of learning. Teams can go directly to the large-project trial.
+
+- [ ] A12. **Start a large project directly.** From a fresh workspace and the public guide, have a team create an application of its own design with separately owned modules for domain types, model-driven work, tools and persistence. Use a worker entry point for a headless agent or add a server and UI for a full-stack product. Build, test and package the chosen architecture directly. Have a second contributor change a shared type, locate affected callers and run the integrated workflow from a clean checkout.
 
 - [ ] A07. **Write a first agent.** Starting from the public guide, give an agent a task, typed tools and a stopping condition. Ask a new reader to identify what the model decides, what the program enforces and what happens if a tool fails. Document every new public function or grammar rule with a runnable example.
 - [ ] A08. **Reuse the agent across entry points.** Run the same agent from a CLI, a durable worker and a Corvid UI. Expose one existing application action to the agent. Verify the UI and agent share its handler, validation and permissions, and that changing the input type updates its tool description and identifies incompatible callers.

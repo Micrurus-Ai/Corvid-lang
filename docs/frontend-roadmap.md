@@ -16,6 +16,8 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ### Grow a simple app in the same codebase
 
+Developers choose their starting architecture. The growth trial below checks one path. A team building a large product can start the independent full-stack trial directly with its intended modules, UI, server, storage and AI workflows. For a headless agent, use the [large-project agent trial](../ROADMAP.md#building-agents-in-corvid). The delivery order describes how the Corvid team verifies the language.
+
 Judge language and grammar proposals by two questions. How much must a newcomer learn to ship the first useful version? Can that developer build a more ambitious version by extending the code they already understand?
 
 | Commitment | What the developer should experience |
