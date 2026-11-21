@@ -66,6 +66,8 @@ print(run_sync(twice, 21))
 
 Run `python call_agent.py` with Python 3.11 or later. It prints `42`. In an existing async function, import `run` from `corvid_runtime` and use `await run(twice, 21)`.
 
+When choosing the Python target, exercise the generated agent from a Python host. Some Corvid expressions raise `NotImplementedError` when execution reaches them. For example, an agent returning `Ok(42)` passes `corvid check` and builds an importable Python module, but calling that agent raises the error. Use `corvid run src/main.cor --target interp` to execute agents that construct `Result` values.
+
 ## Libraries and host calls
 
 A library needs an exported entry point. Save this example as `src/api.cor`
