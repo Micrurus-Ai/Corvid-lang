@@ -138,4 +138,26 @@ Start testing accessibility, performance and browser behavior with the first pro
 | Performance | On a named midrange phone, compare equivalent production builds for transferred bytes, input latency, layout shifts and memory after repeated navigation. Report model time separately from UI work. Once field traffic is sufficient, track LCP, INP and CLS at the 75th percentile by mobile and desktop. [Core Web Vitals](https://web.dev/articles/vitals) |
 | Stable release | Complete the independent full-stack trial. Use the storefront, offline editor and streaming workspace to cover capabilities the chosen app does not exercise. Publish compatibility and upgrade commitments for components, browser bindings and packages. |
 
-**First task:** take the smallest editable record through the first working application above using today's documented syntax. Keep an existing `std/ui` page working through the same CLI. Use the first point of friction to guide the component prototype.
+### AI features to exercise across the whole application
+
+The main roadmap records runtime work on streams, durable jobs, budgets, provenance and replay. Track the remaining user-facing behaviors during the independent app trials.
+
+- [ ] Close a view-owned search and verify cancellation. Close a view observing a saved job, reopen it after a worker restart, and recover progress under the same user account.
+- [ ] Follow a model-extracted field from its visible value to the source revision. Correct the field manually and check that the UI distinguishes the correction from the original extraction.
+- [ ] Give parallel work and retries one operation budget. Show completed and skipped work, the reason it stopped, and whether cost is estimated or provider-reported.
+- [ ] Turn a reported UI interaction into a sanitized regression test. Reproduce the visible outcome using recorded model data with external writes disabled.
+
+### Will developers choose Corvid again?
+
+Use the independent app trial and the existing friends-and-family round to learn where developers reach for another stack. Record these outcomes separately from release engineering checks. Choosing an existing package through supported interop is a successful outcome when the developer keeps building their application in Corvid.
+
+| Question | What to observe |
+| --- | --- |
+| Can a newcomer start without help? | From a clean install, let them build a feature they chose using public learning materials. Record time to the first useful result, first blocker and any maintainer intervention. Include people building ordinary apps as well as AI apps. |
+| Can a team live with the app? | A teammate clones it, debugs a reported problem, changes a shared type, upgrades the toolchain and deploys the change. Record missing packages, migration surprises, debug time and any step requiring private instructions. |
+| Do they choose it again? | At an opt-in follow-up after 30 days, ask what they actually used for their next feature or project and why. Separate continued use, switching stacks, no new work and no response. |
+| Does a recommendation lead to use? | Record voluntary referrals separately from invited trial participants. With consent, follow whether a referred developer installed Corvid and built something independently. |
+
+Report counts alongside the number invited and the follow-up window. Small trials identify friction and cannot establish a market-wide retention rate. Turn recurring blockers into named implementation or documentation tasks, then ask fresh developers to repeat the affected journey.
+
+**First task:** take the smallest editable record through the first working application above using today's documented syntax. Keep an existing `std/ui` page running through the same CLI. Use the first point of friction to guide the component prototype.
