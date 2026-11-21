@@ -13,19 +13,20 @@
 
 use anyhow::Result;
 use corvid_differential_verify::{
-    render_corpus_grid, render_report, shrink_program, verify_corpus,
+    render_corpus_grid, render_report, scan_corpus, shrink_program,
 };
 use std::path::Path;
 
 pub(crate) fn cmd_verify(corpus: Option<&Path>, shrink: Option<&Path>, json: bool) -> Result<u8> {
     match (corpus, shrink) {
         (Some(dir), None) => {
-            let reports = verify_corpus(dir)?;
+            let result = scan_corpus(dir)?;
+            let reports = &result.reports;
             let divergent: Vec<_> = reports
                 .iter()
                 .filter(|report| !report.divergences.is_empty())
                 .collect();
-            println!("{}", render_corpus_grid(&reports));
+            println!("{}", render_corpus_grid(reports));
             if !divergent.is_empty() {
                 println!();
                 for (index, report) in divergent.iter().enumerate() {
@@ -35,8 +36,17 @@ pub(crate) fn cmd_verify(corpus: Option<&Path>, shrink: Option<&Path>, json: boo
                     println!("{}", render_report(report));
                 }
             }
+            if !result.incomplete.is_empty() {
+                for failure in &result.incomplete {
+                    println!("INCOMPLETE {}: {}", failure.program.display(), failure.error);
+                }
+                if json {
+                    eprintln!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                return Ok(2);
+            }
             if json {
-                eprintln!("{}", serde_json::to_string_pretty(&reports)?);
+                eprintln!("{}", serde_json::to_string_pretty(reports)?);
             }
             Ok(if divergent.is_empty() { 0 } else { 1 })
         }

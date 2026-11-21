@@ -140,13 +140,40 @@ pub fn verify_program(path: &Path) -> Result<DivergenceReport> {
     })
 }
 
-pub fn verify_corpus(dir: &Path) -> Result<Vec<DivergenceReport>> {
+#[derive(Serialize)]
+pub struct IncompleteVerification {
+    pub program: PathBuf,
+    pub error: String,
+}
+
+#[derive(Default, Serialize)]
+pub struct CorpusVerification {
+    pub reports: Vec<DivergenceReport>,
+    pub incomplete: Vec<IncompleteVerification>,
+}
+
+pub fn scan_corpus(dir: &Path) -> Result<CorpusVerification> {
     let mut files = collect_programs(dir)?;
     files.sort();
-    files
-        .into_iter()
-        .map(|path| verify_program(&path))
-        .collect()
+    let mut result = CorpusVerification::default();
+    for path in files {
+        match verify_program(&path) {
+            Ok(report) => result.reports.push(report),
+            Err(error) => result.incomplete.push(IncompleteVerification {
+                program: path,
+                error: format!("{error:#}"),
+            }),
+        }
+    }
+    Ok(result)
+}
+
+pub fn verify_corpus(dir: &Path) -> Result<Vec<DivergenceReport>> {
+    let result = scan_corpus(dir)?;
+    if let Some(failure) = result.incomplete.first() {
+        bail!("verification incomplete for `{}`: {}", failure.program.display(), failure.error);
+    }
+    Ok(result.reports)
 }
 
 impl Frontend {
@@ -674,6 +701,19 @@ mod tests {
             "expected native trust drop to classify as static-too-loose: {:?}",
             divergences
         );
+    }
+
+    #[test]
+    fn corpus_scan_reports_later_programs_after_an_incomplete_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let invalid = dir.path().join("a.cor");
+        std::fs::write(&invalid, "agent broken(").unwrap();
+        std::fs::copy(repo_root().join("tests/corpus/cost_string.cor"), dir.path().join("b.cor")).unwrap();
+        let result = scan_corpus(dir.path()).unwrap();
+        assert_eq!(result.incomplete.len(), 1);
+        assert_eq!(result.incomplete[0].program, invalid);
+        assert_eq!(result.reports.len(), 1);
+        assert!(result.reports[0].divergences.is_empty());
     }
 
     #[test]

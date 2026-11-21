@@ -40,6 +40,10 @@ application with its compiled browser handlers. The server build target wraps
 a native entry agent in an HTTP server and uses Cargo to build the wrapper.
 The wrapper forwards application requests to the compiled entry agent. A file can also declare HTTP routes. The compiler checks those routes before building the entry agent. Cargo can use a shared compilation cache through `CARGO_TARGET_DIR`. Corvid copies the finished wrapper into the application's `target/server/` directory. Use `corvid serve` to dispatch requests to declared routes.
 
+## Comparing execution tiers
+
+Run `corvid verify --corpus PATH` to compare the checker, interpreter, native execution and replay for each program in a directory. Exit code 0 means all reports agree. Exit code 1 means the comparisons finished and at least one diverged. If a program cannot be verified, the command lists its path and reason, continues checking the other programs, and exits with code 2. With `--json`, a complete run writes the report array to stderr. An incomplete run writes an object containing `reports` and `incomplete`.
+
 ## Calling a compiled agent from Python
 
 Save this agent in `src/main.cor` and run `corvid build src/main.cor --target python` from the project root.
