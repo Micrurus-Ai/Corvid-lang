@@ -26,7 +26,7 @@ Start at step 1. This table orders the team's remaining implementation and evalu
 
 **Step 1 complete.** The [reading-list trial](docs/book/19-browser-views.md#package-and-restart-a-reading-list) passed clean scaffold, web packaging, typed form submission and restart readback without provider configuration. The verified keyboard workflow and local HTTP and browser timings are recorded in the [first-version trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase).
 
-**Step 2 in progress.** The packaged reading list passed the loopback HTTP trial for typed preview, apply through the original save handler, malformed-output recovery, bounded shelf lookup and cancellation through to the provider. Edge verified the visible suggestion workflow. The A07 new-reader explanation remains open. [Exercise and stopping condition](docs/book/10-agents.md#your-first-agent-in-the-reading-list)
+**Step 2 in progress.** The packaged reading list passed the loopback HTTP trial for typed preview, apply through the original save handler, malformed-output recovery, bounded shelf lookup and cancellation through to the provider. Edge verified the visible suggestion workflow. The A07 new-reader explanation remains open. Independent engineering continues at step 3. Use the runner?s `--review-pending` option once feedback is available. [Exercise and stopping condition](docs/book/10-agents.md#your-first-agent-in-the-reading-list)
 
 Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
 

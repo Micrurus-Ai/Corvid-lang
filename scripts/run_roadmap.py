@@ -1,5 +1,6 @@
 """Run the numbered roadmap serially in its dedicated Git checkout."""
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import time
 
 BRANCH = "corvid/roadmap-tasks"
 FIELDS = {
-    "status": {"type": "string", "enum": ["complete", "continue", "blocked"]},
+    "status": {"type": "string", "enum": ["complete", "continue", "awaiting_feedback", "blocked"]},
     "summary": {"type": "string"},
     "verification": {"type": "string"},
     "files": {"type": "array", "items": {"type": "string"}},
@@ -22,7 +23,7 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
-def run():
+def run(review_pending=False):
     if git("branch", "--show-current") != BRANCH:
         raise SystemExit(f"Run in the dedicated {BRANCH} checkout.")
     state = Path(git("rev-parse", "--absolute-git-dir")) / "corvid-roadmap"
@@ -47,8 +48,10 @@ def run():
     # Also finishes a previously interrupted push. Never force-push.
     git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
     trailers = git("log", "--format=%(trailers:key=Corvid-Roadmap-Step,valueonly)").splitlines()
+    pending = set(git("log", "--format=%(trailers:key=Corvid-Roadmap-Feedback,valueonly)").split())
+    pending.difference_update(trailers)
     for number, task, acceptance in steps:
-        if number in trailers:
+        if number in trailers or (number in pending and not review_pending):
             continue
         note = state / f"step-{number}.json"
         while True:
@@ -66,6 +69,13 @@ list exactly the project-relative files to stage, including deletions. Return
 continue with concrete progress if more development fits a later pass. Return
 blocked for external dependencies and state precisely what is missing. Do not
 invent user studies, authorizations, benchmarks or independent results.
+Earlier steps awaiting external feedback: {sorted(pending)}. Proceed with independent
+engineering work. Keep design choices provisional where feedback is pending.
+If all feasible engineering and tests for this step are verified and only
+independent reader or adoption feedback remains, update ROADMAP.md with the
+specific pending check and return awaiting_feedback. This is a checkpoint,
+not a completed step. Use blocked for a genuine technical dependency or required
+approval. Never publish or claim release readiness with unresolved prerequisites.
 Previous pass: {previous}"""
             with tempfile.TemporaryDirectory() as temp:
                 result = Path(temp) / "response.json"
@@ -89,15 +99,28 @@ Previous pass: {previous}"""
                 continue
             if not report["verification"].strip() or not report["files"]:
                 raise SystemExit("Missing verification or deliverables.")
+            feedback = report["status"] == "awaiting_feedback"
+            if feedback and "ROADMAP.md" not in report["files"]:
+                raise SystemExit("Record outstanding feedback in ROADMAP.md.")
             git("--literal-pathspecs", "add", "--", *report["files"])
             git("diff", "--cached", "--check")
-            git("commit", "-m", f"Complete roadmap step {number}: {task.rstrip('.')}",
-                "-m", report["verification"], "-m", f"Corvid-Roadmap-Step: {number}")
+            marker = "Corvid-Roadmap-Feedback" if feedback else "Corvid-Roadmap-Step"
+            verb = "Checkpoint" if feedback else "Complete"
+            git("commit", "-m", f"{verb} roadmap step {number}: {task.rstrip('.')}",
+                "-m", report["verification"], "-m", f"{marker}: {number}")
             git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
             if git("ls-remote", "origin", f"refs/heads/{BRANCH}").split()[0] != git("rev-parse", "HEAD"):
                 raise SystemExit("Remote commit verification failed.")
+            if feedback:
+                pending.add(number)
+            else:
+                pending.discard(number)
             break
+    if pending:
+        print("External feedback outstanding for steps:", ", ".join(sorted(pending, key=int)))
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--review-pending", action="store_true", help="revisit feedback checkpoints when results are available")
+    run(parser.parse_args().review_pending)
