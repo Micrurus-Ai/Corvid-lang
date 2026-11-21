@@ -133,3 +133,9 @@ public agent add_offset(offset: Int) -> (Int) -> Int:
 ```
 
 With this function in a module imported as `ops`, write `add_three = ops.add_offset(3)`. Calling `add_three(4)` returns `7` on both CLI targets. Integer captures keep their value at creation. A captured `List<Int>` stays alive and reflects updates made through another reference to the same list.
+
+### Imports in nested directories
+
+Import paths are relative to the file containing the import. If `main.cor` imports `"./lib/ops"` and `lib/ops.cor` imports `"../math"`, Corvid loads `math.cor` next to `main.cor`. Mark functions used across this boundary with `public fn`. The caller must supply the declared argument types.
+
+When an imported name conflicts with a local declaration, use a qualified call such as `ops.answer(21)` or give the import a distinct name with `use answer as compute`. Imports must form an acyclic graph. Run `corvid check main.cor` to locate a visibility error, argument mismatch, duplicate declaration, or import cycle before running the program.

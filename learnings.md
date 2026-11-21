@@ -7924,3 +7924,9 @@ public agent entry(reading: Reading) -> Entry:
 ```
 
 Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard sees both payload fields. A caller in another module can use the returned record and read its fields after the match finishes.
+
+### Imports in nested directories
+
+Import paths are relative to the file containing the import. If `main.cor` imports `"./lib/ops"` and `lib/ops.cor` imports `"../math"`, Corvid loads `math.cor` next to `main.cor`. Mark functions used across this boundary with `public fn`. The caller must supply the declared argument types.
+
+When an imported name conflicts with a local declaration, use a qualified call such as `ops.answer(21)` or give the import a distinct name with `use answer as compute`. Imports must form an acyclic graph. Run `corvid check main.cor` to locate a visibility error, argument mismatch, duplicate declaration, or import cycle before running the program.

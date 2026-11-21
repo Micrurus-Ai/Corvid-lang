@@ -25,7 +25,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] In both targets, imported functions returning integer and string lists infer the corresponding option payload through the same last() method.
   - [x] Native integer list callbacks for map, filter, fold, any and all passed the cross-module CLI test, including empty inputs, ordered evaluation and short-circuiting.
   - [x] Both CLI targets constructed and matched imported sum values with record payloads. A guarded arm returned the original record, and native allocations balanced in both ownership modes.
-- [ ] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
+- [x] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
 
 **2. Developer workflow**

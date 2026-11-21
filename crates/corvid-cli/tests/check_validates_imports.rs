@@ -286,3 +286,34 @@ agent main() -> Bool:
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
+
+#[test]
+fn nested_relative_imports_resolve_and_report_boundary_errors() {
+    let dir = tempdir().unwrap();
+    let lib = dir.path().join("lib");
+    std::fs::create_dir(&lib).unwrap();
+    std::fs::write(dir.path().join("math.cor"), "public fn double(n: Int) -> Int:\n    return n * 2\n").unwrap();
+    let ops = lib.join("ops.cor");
+    std::fs::write(&ops, "import \"../math\" use double\npublic fn answer(n: Int) -> Int:\n    return double(n)\nfn hidden() -> Int:\n    return 0\n").unwrap();
+    let main = dir.path().join("main.cor");
+    let source = "import \"./lib/ops\" as ops\nagent main() -> Int:\n    return ops.answer(21)\n";
+    let invoke = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .args(args).arg(&main).output().unwrap();
+    std::fs::write(&main, source).unwrap();
+    for target in ["interp", "native"] {
+        let output = invoke(&["run", "--target", target]);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "42");
+    }
+    let reject = |program: &str, message: &str| {
+        std::fs::write(&main, program).unwrap();
+        let output = invoke(&["check"]);
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && error.contains(message), "{error}");
+    };
+    reject(&source.replace("ops.answer(21)", "ops.hidden()"), "is private");
+    reject(&source.replace("21", "\"bad\""), "type mismatch in argument 1");
+    reject("import \"./lib/ops\" use answer\nfn answer() -> Int:\n    return 0\n", "duplicate declaration");
+    std::fs::write(&ops, "import \"../main\" as root\npublic fn answer(n: Int) -> Int:\n    return n\n").unwrap();
+    reject(source, "cyclic Corvid import graph");
+}
