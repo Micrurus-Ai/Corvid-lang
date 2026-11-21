@@ -233,3 +233,7 @@ The shipped examples are:
 - [examples/failing_adversarial](../examples/failing_adversarial/verify.sh): four guard cases, including deterministic offline audit behavior under a hostile question
 
 The GitHub Actions launch gate runs the happy bundle script, every failing-case script, and the focused `bundle_*` test binaries on Linux.
+
+## Checking a bindings directory mismatch
+
+The Rust bindings digest covers the files in the generated crate, including its Cargo manifest. A metadata edit can change the digest even when the Rust source is identical. Compare the directory with its trusted source revision when diagnosing a mismatch.
