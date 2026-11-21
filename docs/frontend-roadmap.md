@@ -14,6 +14,17 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## What to build first
 
+**Design goal for shared actions.** Define an operation once in Corvid. From its typed inputs, outcomes and explicit exposure, the toolchain should derive browser bindings, server boundary validation and the assistant's action schema. The developer owns the handler and its authorization rules. An exposed input or result can be narrower than an internal database record. The editor should let the developer follow a UI event or assistant binding back to the handler that can change application state.
+
+Use a change to a real action as an acceptance test for the component and action prototype. For example, replace a required integer `quantity` with a record containing `amount` and `unit`. Use equivalent types in the independent developer's chosen application.
+
+| Check | Expected outcome |
+| --- | --- |
+| Rebuild the app | The compiler identifies incompatible Corvid call sites at their source lines. Generated schemas reflect the new public input. A field private to the server stays out of browser payloads and assistant schemas. |
+| Deploy while an old tab is open | Compare the public contract to the previously released version and flag the breaking change. Exercise the author's chosen transition: an explicit version adapter or a structured incompatibility response that leaves stored data intact. |
+| Receive a malformed model suggestion | Validate it before presenting it as actionable. Show a recoverable error. A valid suggestion can be previewed; applying it goes through the same authorized handler as a human edit. |
+| Retry a committed write after a lost response | For actions that support retry, reuse the caller's operation key. The same logical request returns its recorded outcome and applies the change once. Reusing the key with different input returns a conflict. Independent user edits get distinct keys. |
+
 Use one small application to integrate the stack early. The [main roadmap](../ROADMAP.md) already records typed HTTP routes and SQLite persistence (S01–S02), scoped sessions (S04), typed model results and streaming (A01–A02), and browser forms and packaged handlers (F01–F03). Those checks used specific runtimes and providers. Reuse those paths and test them together through the public tooling.
 
 | Order | Deliverable | Decision it enables |
