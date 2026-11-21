@@ -8,7 +8,7 @@ The Linux x64 and ARM64 archives use the Python 3.11 shared runtime at CLI start
 
 The macOS candidate uses the Python framework at `/Library/Frameworks/Python.framework/Versions/<version>/Python`. Both `corvid` and `corvid-lsp` load it at startup. Use a framework installation of CPython 3.14 on Intel Macs or CPython 3.15 on Apple Silicon. A virtual environment alone does not supply that system path.
 
-The Windows x64 and ARM64 candidates passed with matching-architecture CPython 3.14. The embedded Python bridge uses CPython's stable ABI. Put the Python installation directory containing `python3.dll` on `PATH` before starting Corvid. If Windows denies permission to start the staged CLI, the installer reports its SHA-256 for administrator review.
+The Windows x64 and ARM64 candidates passed with matching-architecture CPython 3.14. The embedded Python bridge uses CPython's stable ABI. Put the Python installation directory containing `python3.dll` on `PATH` before starting Corvid. The ddaeaddc candidate also installed, served a relocated application and uninstalled on the managed Windows x64 test device. If Windows denies permission to start the staged CLI, the installer reports its SHA-256 for administrator review.
 
 Run `corvid doctor` to check the installation and configuration. With a prebuilt CLI, missing Rust tools are informational. Source builds and native server wrappers use Cargo and rustc. Invalid configuration values cause the command to fail.
 
