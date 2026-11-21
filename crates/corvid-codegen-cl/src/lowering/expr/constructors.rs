@@ -62,7 +62,9 @@ pub fn lower_struct_constructor(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
-    ty: &corvid_ir::IrType,
+    fields: &[corvid_ir::IrField],
+    typeinfo: cranelift_module::DataId,
+    tag: Option<u32>,
     args: &[IrExpr],
     current_return_ty: &Type,
     env: &HashMap<LocalId, (Variable, clir::Type)>,
@@ -70,61 +72,42 @@ pub fn lower_struct_constructor(
     func_ids_by_def: &HashMap<DefId, FuncId>,
     span: Span,
 ) -> Result<ClValue, CodegenError> {
-    if args.len() != ty.fields.len() {
-        return Err(CodegenError::cranelift(
-            format!(
-                "struct `{}` expects {} field(s), got {}",
-                ty.name,
-                ty.fields.len(),
-                args.len()
-            ),
-            span,
-        ));
+    if args.len() != fields.len() {
+        return Err(CodegenError::cranelift("constructor arity differs from its layout", span));
     }
-    let size = builder
-        .ins()
-        .iconst(I64, struct_payload_bytes(ty.fields.len()));
-    // Structs with refcounted fields use the typeinfo-
-    // driven allocator. Structs with no refcounted fields currently
-    // skip typeinfo entirely (lower_file bypasses emission for them)
-    // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â they allocate with NULL destroy_fn via a runtime-owned
-    // empty typeinfo? For 17a we keep the pre-typed behavior for
-    // these: only emit typed allocation when the struct actually
-    // has refcounted fields requiring dispatch. Non-refcounted
-    // structs remain on the old path *only temporarily* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â future
-    // 17a's follow-up will uniformize this once 17d needs every
-    // heap object traceable. Tracked as a TODO in ROADMAP.
-    let struct_ptr = if let Some(&ti_id) = runtime.struct_typeinfos.get(&ty.id) {
-        let ti_gv = module.declare_data_in_func(ti_id, builder.func);
-        let ti_addr = builder.ins().symbol_value(I64, ti_gv);
-        let alloc_ref = module.declare_func_in_func(runtime.alloc_typed, builder.func);
-        let call = builder.ins().call(alloc_ref, &[size, ti_addr]);
-        builder.inst_results(call)[0]
-    } else {
-        return Err(CodegenError::cranelift(
-            format!(
-                "struct `{}` has no typeinfo emitted ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â 17a should cover every refcounted struct; is this a non-refcounted struct that still hits this path?",
-                ty.name
-            ),
-            span,
-        ));
-    };
-
-    // Store each field at offset i * STRUCT_FIELD_SLOT_BYTES. Each
-    // field arg is lowered as an Owned temp; the store transfers that
-    // +1 ownership into the struct ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â no extra retain, no release.
-    for (i, arg) in args.iter().enumerate() {
+    // A later argument may propagate an error before construction is complete.
+    let outer_temporaries = runtime.return_temporaries.borrow().len();
+    let mut values = Vec::with_capacity(args.len());
+    for (arg, field) in args.iter().zip(fields) {
         let value = lower_expr(
-            builder,
-            arg,
-            current_return_ty,
-            env,
-            scope_stack,
-            func_ids_by_def,
-            module,
-            runtime,
+            builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
         )?;
-        let offset = (i as i32) * STRUCT_FIELD_SLOT_BYTES;
+        let value = if field.ty == Type::Float && arg.ty == Type::Int {
+            builder.ins().fcvt_from_sint(F64, value)
+        } else {
+            value
+        };
+        if is_refcounted_type(&field.ty) {
+            builder.declare_value_needs_stack_map(value);
+            runtime.return_temporaries.borrow_mut().push(value);
+        }
+        values.push(value);
+    }
+    runtime.return_temporaries.borrow_mut().truncate(outer_temporaries);
+    let header_slots = usize::from(tag.is_some());
+    let size = builder.ins().iconst(I64, struct_payload_bytes(header_slots + fields.len()));
+    let data = module.declare_data_in_func(typeinfo, builder.func);
+    let info = builder.ins().symbol_value(I64, data);
+    let alloc = module.declare_func_in_func(runtime.alloc_typed, builder.func);
+    let call = builder.ins().call(alloc, &[size, info]);
+    let struct_ptr = builder.inst_results(call)[0];
+    builder.declare_value_needs_stack_map(struct_ptr);
+    if let Some(tag) = tag {
+        let tag = builder.ins().iconst(I64, i64::from(tag));
+        builder.ins().store(MemFlags::trusted(), tag, struct_ptr, 0);
+    }
+    for (i, value) in values.into_iter().enumerate() {
+        let offset = ((header_slots + i) as i32) * STRUCT_FIELD_SLOT_BYTES;
         builder.ins().store(
             cranelift_codegen::ir::MemFlags::trusted(),
             value,

@@ -248,3 +248,41 @@ agent main() -> Bool:
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
+
+#[test]
+fn imported_sum_types_preserve_variant_payloads() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(dir.path().join("readings.cor"), r#"
+public type Entry:
+    value: Int
+    label: String
+
+public type Reading:
+    | Empty
+    | Found(item: Entry, weight: Int)
+
+public agent lookup(n: Int) -> Reading:
+    if n < 0:
+        return Empty
+    return Found(Entry(n, "fo" + "und"), n + 1)
+
+public agent entry(reading: Reading) -> Entry:
+    return match reading:
+        Found(item, weight) if weight > 1 -> item
+        Found(_, _) -> Entry(0, "zero")
+        Empty -> Entry(-1, "empty")
+"#).unwrap();
+    std::fs::write(&main, r#"
+import "./readings" as r
+
+agent main() -> Bool:
+    reading = r.lookup(7)
+    good = r.entry(reading)
+    zero = r.entry(r.lookup(0))
+    missing = r.entry(r.lookup(-1))
+    present = good.value == 7 and good.label == "found"
+    return present and zero.label == "zero" and missing.value == -1 and missing.label == "empty"
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}

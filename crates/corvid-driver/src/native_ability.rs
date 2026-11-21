@@ -282,7 +282,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         }
         IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrExprKind::Match { scrutinee, arms }
-            if (is_native_option_type(&scrutinee.ty) || is_native_result_type(&scrutinee.ty))
+            if (is_native_option_type(&scrutinee.ty) || is_native_result_type(&scrutinee.ty) || matches!(scrutinee.ty, Type::Struct(_) | Type::ImportedStruct(_)))
                 && corvid_codegen_cl::result_match::supports_match(&scrutinee.ty, arms) =>
         {
             scan_expr(scrutinee, current_return_ty)?;
@@ -336,10 +336,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             args,
         } => {
             match kind {
-                // Sum-type construction is interpreter-only in 45h.
-                IrCallKind::EnumConstructor { .. } => {
-                    return Err(NotNativeReason::PlaceAssignmentNotNative)
-                }
+                IrCallKind::EnumConstructor { .. } => {}
                 IrCallKind::ClosureLocal { signature, .. } if corvid_codegen_cl::native_callback_type(signature) => {}
                 IrCallKind::ClosureLocal { .. } => {
                     return Err(NotNativeReason::CallbackNotNative)

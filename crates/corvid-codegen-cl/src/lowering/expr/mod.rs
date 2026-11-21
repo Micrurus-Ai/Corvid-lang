@@ -448,12 +448,6 @@ pub(super) fn lower_expr(
                     expr.span,
                 ));
             }
-            IrCallKind::EnumConstructor { .. } => {
-                return Err(CodegenError::not_supported(
-                    "sum-type variants are interpreter-only in 45h",
-                    expr.span,
-                ));
-            }
             IrCallKind::Agent { def_id } => {
                 let callee_id = func_ids_by_def.get(def_id).ok_or_else(|| {
                     CodegenError::cranelift(
@@ -1003,18 +997,19 @@ pub(super) fn lower_expr(
                     expr.span,
                 )
             }
-            IrCallKind::StructConstructor { def_id } => {
-                let ir_type = runtime.ir_types.get(def_id).cloned().ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!("struct type `{callee_name}` metadata missing from ir_types"),
-                        expr.span,
-                    )
-                })?;
+            IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
+                let ty = runtime.ir_types.get(def_id).ok_or_else(||
+                    CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
+                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                    let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
+                        CodegenError::cranelift("unknown constructor tag", expr.span))?;
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                } else {
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                };
+                let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder,
-                    module,
-                    runtime,
-                    &ir_type,
+                    builder, module, runtime, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,

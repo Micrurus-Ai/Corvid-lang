@@ -6,6 +6,7 @@ fn pattern_supported(p: &IrPattern) -> bool {
     match p {
         IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::None_ => true,
         IrPattern::Some_(p) | IrPattern::Ok_(p) | IrPattern::Err_(p) => pattern_supported(p),
+        IrPattern::Variant { args, .. } => args.iter().all(pattern_supported),
         _ => false,
     }
 }
@@ -29,7 +30,7 @@ fn operand_supported(expr: &IrExpr) -> bool {
                 && args.iter().all(operand_supported)
         }
         IrExprKind::Call {
-            kind: corvid_ir::IrCallKind::Agent { .. },
+            kind: corvid_ir::IrCallKind::Agent { .. } | corvid_ir::IrCallKind::StructConstructor { .. } | corvid_ir::IrCallKind::EnumConstructor { .. },
             args,
             ..
         } => args.iter().all(operand_supported),
@@ -38,7 +39,7 @@ fn operand_supported(expr: &IrExpr) -> bool {
 }
 
 pub fn supports_match(ty: &Type, arms: &[IrMatchArm]) -> bool {
-    matches!(ty, Type::Option(_) | Type::Result(_, _))
+    matches!(ty, Type::Option(_) | Type::Result(_, _) | Type::Struct(_) | Type::ImportedStruct(_))
         && !arms.is_empty()
         && arms.iter().all(|arm| {
             pattern_supported(&arm.pattern)
@@ -49,6 +50,7 @@ pub fn supports_match(ty: &Type, arms: &[IrMatchArm]) -> bool {
 
 pub(crate) fn pattern_binds(p: &IrPattern, id: corvid_resolve::LocalId) -> bool {
     match p {
+        IrPattern::Variant { args, .. } => args.iter().any(|arg| pattern_binds(arg, id)),
         IrPattern::Bind { local_id, .. } => id == *local_id,
         IrPattern::Some_(p) | IrPattern::Ok_(p) | IrPattern::Err_(p) => pattern_binds(p, id),
         _ => false,

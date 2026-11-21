@@ -7904,3 +7904,23 @@ has_four = values.any(fn (n) -> n == 4)
 ```
 
 Here `doubled` is `[6, 2, 8]`, `large` is `[3, 4]`, and `total` is `8`. Both predicates return true. Callbacks visit elements in order. An empty list yields an empty map or filter result and the initial fold value. `any` stops at the first true result and returns false on an empty list. `all` stops at the first false result and returns true on an empty list.
+
+### Returning a record from a sum type
+
+```corvid
+public type Entry:
+    value: Int
+    label: String
+
+public type Reading:
+    | Empty
+    | Found(item: Entry, weight: Int)
+
+public agent entry(reading: Reading) -> Entry:
+    return match reading:
+        Found(item, weight) if weight > 1 -> item
+        Found(_, _) -> Entry(0, "zero")
+        Empty -> Entry(-1, "empty")
+```
+
+Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard sees both payload fields. A caller in another module can use the returned record and read its fields after the match finishes.

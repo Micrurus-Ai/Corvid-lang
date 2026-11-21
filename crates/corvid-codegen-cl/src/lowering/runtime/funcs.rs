@@ -190,6 +190,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// Per-struct-type typeinfo data symbols. Every
     /// refcounted struct allocation references its block via
     /// `corvid_alloc_typed(size, &typeinfo)`.
+    pub variant_typeinfos: HashMap<(DefId, u32), cranelift_module::DataId>,
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
     /// Per-struct-type JSON-decoder functions. Emitted lazily on
     /// first reference (a prompt with `Type::Struct(def_id)` return)

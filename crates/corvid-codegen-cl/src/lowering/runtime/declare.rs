@@ -1298,6 +1298,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         struct_destructors: HashMap::new(),
         struct_traces: HashMap::new(),
         callback_typeinfo: emit_callback_typeinfo(module)?,
+        variant_typeinfos: HashMap::new(),
         struct_typeinfos: HashMap::new(),
         struct_decoders: std::cell::RefCell::new(HashMap::new()),
         struct_to_json: std::cell::RefCell::new(HashMap::new()),

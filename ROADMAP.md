@@ -19,11 +19,12 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] G04. Complete everyday control flow and assignment. Exercise nested loops, early returns, short-circuiting, record field updates and compound assignments with side effects evaluated once.
   - Both CLI targets verified nested record and list writes with side effects, growable lists, skipped calls, loop snapshots, break, continue and early return. Native allocation checks passed on the successful paths in both ownership modes. Negative and past-the-end writes reported their index and length.
 - [x] G05. Finish expression composition. Exercise calls in arithmetic, collection operations and match arms, guards and nested patterns, and propagate typed errors across function boundaries.
-- [ ] G06. Make functions and data types reusable. Verify functions as values, closures, user-defined sum types, records, type inference and built-in generic collection helpers across two modules.
+- [x] G06. Make functions and data types reusable. Verify functions as values, closures, user-defined sum types, records, type inference and built-in generic collection helpers across two modules.
   - [x] Interpreter: pass local, qualified and renamed pure functions as callbacks across modules. The CLI checks incompatible callback signatures.
   - [x] Native and interpreter CLI targets: pass a named integer function through an import, call a returned closure, capture scalars before rebinding, and keep shared and temporary integer lists alive.
   - [x] In both targets, imported functions returning integer and string lists infer the corresponding option payload through the same last() method.
   - [x] Native integer list callbacks for map, filter, fold, any and all passed the cross-module CLI test, including empty inputs, ordered evaluation and short-circuiting.
+  - [x] Both CLI targets constructed and matched imported sum values with record payloads. A guarded arm returned the original record, and native allocations balanced in both ownership modes.
 - [ ] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
 

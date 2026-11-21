@@ -21,6 +21,24 @@ fn match_pattern(
             env.insert(*local_id, (var, layout));
             return Ok(false);
         }
+        (IrPattern::Variant { owner, variant_index, args, .. }, _) => {
+            let variant = runtime.ir_types.get(owner).and_then(|t| t.variants.get(*variant_index as usize))
+                .filter(|v| v.fields.len() == args.len())
+                .ok_or_else(|| CodegenError::cranelift("invalid variant pattern layout", span))?;
+            let tag = builder.ins().load(I64, MemFlags::trusted(), value, 0);
+            let condition = builder.ins().icmp_imm(IntCC::Equal, tag, i64::from(*variant_index));
+            let matched = builder.create_block();
+            builder.ins().brif(condition, matched, &[], miss, &[]);
+            builder.switch_to_block(matched);
+            builder.seal_block(matched);
+            for (index, (arg, field)) in args.iter().zip(&variant.fields).enumerate() {
+                if matches!(arg, IrPattern::Wildcard) { continue; }
+                let offset = (index as i32 + 1) * STRUCT_FIELD_SLOT_BYTES;
+                let payload = builder.ins().load(cl_type_for(&field.ty, span)?, MemFlags::trusted(), value, offset);
+                match_pattern(builder, runtime, arg, &field.ty, payload, miss, env, span)?;
+            }
+            return Ok(true);
+        }
         (IrPattern::None_, Type::Option(_)) => {
             (builder.ins().icmp_imm(IntCC::Equal, value, 0), None)
         }
@@ -86,7 +104,7 @@ pub(super) fn lower_match(
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
     if !crate::result_match::supports_match(&scrutinee.ty, arms)
-        || !(is_native_result_type(&scrutinee.ty) || is_native_option_type(&scrutinee.ty))
+        || !(is_native_result_type(&scrutinee.ty) || is_native_option_type(&scrutinee.ty) || matches!(scrutinee.ty, Type::Struct(_) | Type::ImportedStruct(_)))
     {
         return Err(CodegenError::not_supported(
             "this match requires the interpreter",
