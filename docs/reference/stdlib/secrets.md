@@ -9,11 +9,9 @@
 ```corvid
 import "./std/secrets" use secret_read
 
-agent main() -> Result<String, String>:
-    key = secret_read("ANTHROPIC_API_KEY")?
-    if not key.present:
-        return Err("set ANTHROPIC_API_KEY")
-    return Ok(key.value)
+agent main() -> Result<Bool, String>:
+    key = secret_read("EXAMPLE_SERVICE_KEY")?
+    return Ok(key.present)
 ```
 
 ### `secret_read(name: String) -> Result<SecretReadEnvelope, String> uses secrets_read`
@@ -21,6 +19,10 @@ agent main() -> Result<String, String>:
 Reads the environment variable `name`. A MISSING secret is `Ok` with
 `present: false` — absence is a modeled state, not an error. Err is
 reserved for recoverable failures (empty name, unreadable variable).
+
+### Constructing example values
+
+`secret_present(name: String, value: String)` and `secret_missing(name: String)` both return a `SecretReadEnvelope` without reading the environment. The first keeps the supplied value and sets `present` to true. The second sets `present` to false and uses an empty string for `value`. Use `present` to distinguish a missing value from a present empty string.
 
 ## The trace contract (the invention)
 
