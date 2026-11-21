@@ -213,15 +213,12 @@ pub(crate) fn cmd_add_mcp(
     config_text.push_str(&section_header);
     config_text.push('\n');
     if !cmd.is_empty() {
-        let rendered = cmd
-            .iter()
-            .map(|part| format!("\"{part}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        config_text.push_str(&format!("command = [{rendered}]\n"));
+        let command = toml::Value::try_from(cmd)?;
+        config_text.push_str(&format!("command = {command}\n"));
     }
     if let Some(url) = url {
-        config_text.push_str(&format!("url = \"{url}\"\n"));
+        let url = toml::Value::String(url.to_owned());
+        config_text.push_str(&format!("url = {url}\n"));
     }
     if trusted {
         config_text.push_str("trust = \"autonomous\"\n");

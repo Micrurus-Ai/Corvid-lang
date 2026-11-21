@@ -80,6 +80,8 @@ corvid add mcp github --cmd npx --cmd my-github-mcp
 corvid add mcp search --url https://mcp.example.com --trusted
 ```
 
+Pass each command argument with its own `--cmd`. On Windows, quote a script path containing spaces in the shell, for example `--cmd python --cmd 'C:\My Tools\server.py'`. Corvid saves the full path as one argument for subsequent calls and regeneration.
+
 Discovery runs first (`tools/list`); the config entry only lands for
 a server that was actually reached. The generated
 `src/mcp/<name>.cor` has one **typed public agent per tool**, with

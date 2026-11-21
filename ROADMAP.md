@@ -160,6 +160,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Fixed the generated MCP wrapper for a tool with an integer field called `args`. A fresh project discovered the tool, checked the module and received both original field values from a local echo server.
 
+  - [x] Verified MCP registration and regeneration with an absolute Windows script path containing spaces. The saved TOML preserved both arguments, and the regenerated wrapper called the local tool successfully.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
