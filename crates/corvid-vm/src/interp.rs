@@ -196,6 +196,19 @@ impl<'ir> Interpreter<'ir> {
         self
     }
 
+    fn check_grounded_argument(param: &IrParam, value: &Value) -> Result<(), InterpError> {
+        if matches!(param.ty, Type::Grounded(_)) && !matches!(value, Value::Grounded(_)) {
+            return Err(InterpError::new(
+                InterpErrorKind::TypeMismatch {
+                    expected: param.ty.display_name(),
+                    got: value.type_name(),
+                },
+                param.span,
+            ));
+        }
+        Ok(())
+    }
+
     fn bind_params(&mut self, agent: &'ir IrAgent, args: Vec<Value>) -> Result<(), InterpError> {
         if agent.params.len() != args.len() {
             return Err(InterpError::new(
@@ -209,6 +222,7 @@ impl<'ir> Interpreter<'ir> {
             ));
         }
         for (p, v) in agent.params.iter().zip(args) {
+            Self::check_grounded_argument(p, &v)?;
             self.env.bind(p.local_id, v.clone());
             self.local_names.insert(p.local_id, p.name.clone());
             self.stream_locals.remove(&p.local_id);

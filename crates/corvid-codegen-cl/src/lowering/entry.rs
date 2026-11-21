@@ -459,6 +459,10 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
                 span,
             ))
         }
+        Type::Grounded(_) if role == "parameter" => Err(CodegenError::not_supported(
+            "native command-line arguments carry no source information for a grounded parameter; call this helper from Corvid with a retrieval-backed value",
+            span,
+        )),
         Type::Grounded(inner) => check_entry_boundary_type(inner, span, role),
         Type::TraceId => Err(CodegenError::not_supported(
             format!(
@@ -553,6 +557,15 @@ mod tests {
     use corvid_resolve::DefId;
     use corvid_types::types::ImportedStructType;
     use corvid_types::Type;
+
+    #[test]
+    fn command_line_can_print_grounded_text_but_cannot_supply_its_provenance() {
+        let ty = Type::Grounded(Box::new(Type::String));
+        let span = Span::new(0, 0);
+        let error = check_entry_boundary_type(&ty, span, "parameter").unwrap_err();
+        assert!(error.to_string().contains("source information"));
+        check_entry_boundary_type(&ty, span, "return").unwrap();
+    }
 
     /// The native entry boundary REFUSES `ImportedStruct` loudly with
     /// the file-local-alias workaround in the message — never a

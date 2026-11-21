@@ -20,6 +20,20 @@ fn numeric_equality_crosses_int_and_float() {
 // -------------------------- Literal & arithmetic ------------------------
 
 #[tokio::test]
+async fn grounded_agent_parameter_rejects_plain_host_text() {
+    let ir = ir_of("agent read(value: Grounded<String>) -> String:\n    return value.unwrap_discarding_sources()\n");
+    let rt = empty_runtime();
+    let source = crate::ProvenanceChain::with_retrieval("catalog", 1);
+    let attested = Value::Grounded(crate::value::GroundedValue::new(Value::String("entry".into()), source));
+    let actual = run_agent(&ir, "read", vec![attested], &rt).await.unwrap();
+    assert_eq!(actual, Value::String("entry".into()));
+    let err = run_agent(&ir, "read", vec![Value::String("plain".into())], &rt)
+        .await.unwrap_err();
+    assert!(matches!(err.kind, InterpErrorKind::TypeMismatch { expected, got }
+        if expected == "Grounded<String>" && got == "String"));
+}
+
+#[tokio::test]
 async fn returns_integer_literal() {
     let ir = ir_of("agent answer() -> Int:\n    return 42\n");
     let rt = empty_runtime();
