@@ -284,6 +284,14 @@ pub fn run_apply(root: &Path, json: bool) -> Result<u8> {
     ))
 }
 
+#[derive(Default, Deserialize)]
+struct JsonMetadata<'a> {
+    #[serde(borrow)]
+    schema: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow)]
+    manifest_version: Option<&'a serde_json::value::RawValue>,
+}
+
 fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
     use corvid_syntax::TokKind;
     use std::io::Write;
@@ -314,9 +322,36 @@ fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
                 }
             }
         }
+        // Borrow the original JSON values so replacing a version never
+        // reserializes a payload or changes whitespace elsewhere in the file.
+        let metadata: JsonMetadata<'_> =
+            if !is_source && original.trim_start().starts_with('{') {
+                serde_json::from_str(&original)
+                    .with_context(|| format!("read JSON metadata in `{}`", path.display()))?
+            } else {
+                JsonMetadata::default()
+            };
         for rule in RULES {
             let source_rule = matches!(rule.kind, "syntax" | "stdlib");
             if is_source != source_rule {
+                continue;
+            }
+            if !source_rule {
+                // JSON rules describe one canonical key/value pair for reports.
+                let (key, from) = rule.from.split_once(':').expect("JSON version rule");
+                let raw = match key.trim_matches('"') {
+                    "schema" => metadata.schema,
+                    "manifest_version" => metadata.manifest_version,
+                    _ => unreachable!("unknown JSON version field"),
+                };
+                let Some(raw) = raw else { continue };
+                let Ok(value) = serde_json::from_str::<String>(raw.get()) else { continue };
+                if value == from.trim_matches('"') {
+                    let (_, to) = rule.to.expect("JSON version replacement").split_once(':').expect("JSON field");
+                    let start = raw.get().as_ptr() as usize - original.as_ptr() as usize;
+                    edits.push((start..start + raw.get().len(), to));
+                    findings.push(finding_for(&path, rule, 1));
+                }
                 continue;
             }
             let mut occurrences = 0;
@@ -328,7 +363,7 @@ fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
             }
             for spelling in spellings {
                 for (offset, _) in original.match_indices(spelling) {
-                    if is_source && starts.binary_search(&offset).is_err() {
+                    if starts.binary_search(&offset).is_err() {
                         continue;
                     }
                     occurrences += 1;

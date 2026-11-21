@@ -1153,7 +1153,8 @@ fn upgrade_command_migrates_schema_trace_and_connector_json() {
     let connector = temp.path().join("connector.json");
     fs::write(&schema, "{\"schema\":\"corvid.migration_state.v0\"}\n")
         .expect("write schema json");
-    fs::write(&trace, "{\"schema\":\"corvid.trace.v0\"}\n").expect("write trace json");
+    let original_trace = "{\r\n  \"schema\" : \"corvid.trace.v0\",\r\n  \"payload\":{\"schema\":\"corvid.trace.v0\"}\r\n}\r\n";
+    fs::write(&trace, original_trace).expect("write trace json");
     fs::write(&connector, "{\"manifest_version\":\"0.1\"}\n")
         .expect("write connector json");
 
@@ -1201,9 +1202,10 @@ fn upgrade_command_migrates_schema_trace_and_connector_json() {
     assert!(fs::read_to_string(schema)
         .expect("read schema")
         .contains("corvid.migration_state.v1"));
-    assert!(fs::read_to_string(trace)
-        .expect("read trace")
-        .contains("corvid.trace.v1"));
+    assert_eq!(
+        fs::read_to_string(trace).expect("read trace"),
+        original_trace.replacen("corvid.trace.v0", "corvid.trace.v1", 1)
+    );
     assert!(fs::read_to_string(connector)
         .expect("read connector")
         .contains("\"manifest_version\":\"1.0\""));
