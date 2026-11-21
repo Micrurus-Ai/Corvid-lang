@@ -511,12 +511,23 @@ impl<'ir> Interpreter<'ir> {
             .is_some_and(|s| s.should_yield_on_boundary())
     }
 
-    #[async_recursion]
     // NOTE: `expr` is NOT tied to the `'ir` file lifetime — closure
     // bodies (slice 45j) live inside `Value::Closure` cells and are
     // evaluated through this same entry point.
-    async fn eval_expr(&mut self, expr: &IrExpr) -> Result<ExprFlow, InterpError> {
-        match &expr.kind {
+    fn eval_expr<'a>(
+        &'a mut self,
+        expr: &'a IrExpr,
+    ) -> futures::future::BoxFuture<'a, Result<ExprFlow, InterpError>> {
+        // Poll only the selected expression's future at each recursion level.
+        // One async match reserves stack space for unrelated variants as well.
+        macro_rules! dispatch {
+            ($($pattern:pat $(if $guard:expr)? => $body:expr),+ $(,)?) => {
+                match &expr.kind {
+                    $($pattern $(if $guard)? => Box::pin(async move { $body }),)+
+                }
+            };
+        }
+        dispatch! {
             // Builtin methods (slice 45c) — one arm per
             // `BuiltinMethodKind`; the shared corvid_types table
             // guarantees the checker only let matching receivers
@@ -561,7 +572,7 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(eval_builtin_method(
                     *kind, recv, arg_vals, expr.span, &self.types_by_id,
                 )?))
-            }
+            },
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
 
             // Named struct literal (slice 45n): build the cell from
@@ -614,7 +625,7 @@ impl<'ir> Interpreter<'ir> {
                     type_name.clone(),
                     out,
                 )))
-            }
+            },
             // Lambda (slice 45j): evaluate to a closure that
             // snapshots the visible environment BY VALUE. Values
             // clone; heap cells share.
@@ -627,7 +638,7 @@ impl<'ir> Interpreter<'ir> {
                     (**body).clone(),
                     self.env.entries_snapshot(),
                 ))))
-            }
+            },
 
             IrExprKind::Local { local_id, .. } => self
                 .env
@@ -672,7 +683,7 @@ impl<'ir> Interpreter<'ir> {
             } => {
                 self.eval_call(kind, callee_name, args, &expr.ty, expr.span)
                     .await
-            }
+            },
 
             IrExprKind::Ask { prompt, target_ty } => {
                 let prompt = match self.eval_expr(prompt).await?.into_value() {
@@ -702,7 +713,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 Ok(ExprFlow::Value(value))
-            }
+            },
 
             IrExprKind::Choose { options } => {
                 let options_value = match self.eval_expr(options).await?.into_value() {
@@ -734,7 +745,7 @@ impl<'ir> Interpreter<'ir> {
                     ));
                 };
                 Ok(ExprFlow::Value(value))
-            }
+            },
 
             IrExprKind::FieldAccess { target, field } => {
                 let t = match self.eval_expr(target).await?.into_value() {
@@ -768,7 +779,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::UnwrapGrounded { value } => {
                 let value = match self.eval_expr(value).await?.into_value() {
@@ -811,7 +822,7 @@ impl<'ir> Interpreter<'ir> {
                     // than a panic.
                     other => Ok(ExprFlow::Value(other)),
                 }
-            }
+            },
 
             IrExprKind::Index { target, index } => {
                 let t = match self.eval_expr(target).await?.into_value() {
@@ -850,7 +861,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::BinOp { op, left, right } => {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -865,7 +876,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_binop(*op, l, r, expr.span, false)?))
-            }
+            },
 
             IrExprKind::WrappingBinOp { op, left, right } => {
                 let l = match self.eval_expr(left).await?.into_value() {
@@ -877,7 +888,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_binop(*op, l, r, expr.span, true)?))
-            }
+            },
 
             IrExprKind::UnOp { op, operand } => {
                 let v = match self.eval_expr(operand).await?.into_value() {
@@ -885,7 +896,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, false)?))
-            }
+            },
 
             IrExprKind::WrappingUnOp { op, operand } => {
                 let v = match self.eval_expr(operand).await?.into_value() {
@@ -893,7 +904,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, true)?))
-            }
+            },
 
             // `match` (45i): evaluate the scrutinee once, then try
             // each arm in order. Pattern bindings write into the flat
@@ -943,7 +954,7 @@ impl<'ir> Interpreter<'ir> {
                     ),
                     expr.span,
                 ))
-            }
+            },
             IrExprKind::MapLiteral { keys, values } => {
                 let mut entries = Vec::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values) {
@@ -961,7 +972,7 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Map(crate::value::MapValue::new(
                     entries,
                 ))))
-            }
+            },
             IrExprKind::List { items } => {
                 let mut out = Vec::with_capacity(items.len());
                 for it in items {
@@ -971,7 +982,7 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
                 Ok(ExprFlow::Value(Value::List(ListValue::new(out))))
-            }
+            },
 
             IrExprKind::WeakNew { strong } => {
                 let strong = match self.eval_expr(strong).await?.into_value() {
@@ -988,7 +999,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 Ok(ExprFlow::Value(Value::Weak(weak)))
-            }
+            },
 
             IrExprKind::WeakUpgrade { weak } => {
                 let weak = match self.eval_expr(weak).await?.into_value() {
@@ -1010,7 +1021,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::StreamSplitBy { stream, key } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1020,7 +1031,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::split_by(stream, key, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamMerge { groups, policy } => {
                 let groups = match self.eval_expr(groups).await?.into_value() {
@@ -1030,7 +1041,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::merge(groups, *policy, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamOrderedBy { stream, policy } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1040,7 +1051,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::ordered_by(stream, *policy, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamResumeToken { stream } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1065,7 +1076,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::ResumeStream {
                 prompt_def_id,
@@ -1089,7 +1100,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::ResultOk { inner } => {
                 let v = match self.eval_expr(inner).await?.into_value() {
@@ -1097,7 +1108,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(Value::ResultOk(BoxedValue::new(v))))
-            }
+            },
 
             IrExprKind::ResultErr { inner } => {
                 let v = match self.eval_expr(inner).await?.into_value() {
@@ -1105,7 +1116,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(Value::ResultErr(BoxedValue::new(v))))
-            }
+            },
 
             IrExprKind::OptionSome { inner } => {
                 let v = match self.eval_expr(inner).await?.into_value() {
@@ -1113,7 +1124,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(Value::OptionSome(BoxedValue::new(v))))
-            }
+            },
 
             IrExprKind::OptionNone => Ok(ExprFlow::Value(Value::OptionNone)),
 
@@ -1146,7 +1157,7 @@ impl<'ir> Interpreter<'ir> {
                     ],
                 );
                 Ok(ExprFlow::Value(Value::Struct(page)))
-            }
+            },
 
             IrExprKind::TryPropagate { inner } => {
                 let inner = match self.eval_expr(inner).await? {
@@ -1166,7 +1177,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             // trusted(expr) is a compile-time assertion; at runtime
             // it is the identity.
@@ -1254,7 +1265,7 @@ impl<'ir> Interpreter<'ir> {
                 } else {
                     Ok(ExprFlow::Value(Value::Nothing))
                 }
-            }
+            },
 
             IrExprKind::Replay {
                 trace,
@@ -1263,7 +1274,7 @@ impl<'ir> Interpreter<'ir> {
             } => {
                 self.eval_replay_expr(trace, arms, else_body, expr.span)
                     .await
-            }
+            },
         }
     }
 
