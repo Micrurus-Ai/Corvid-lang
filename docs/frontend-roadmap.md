@@ -27,6 +27,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 
 ### 1. Settle the component and execution model
 
+- [ ] Specify how an ordinary handler becomes a typed action, where it executes, and how its author exposes selected inputs, results and context. Review a browser-local example alongside a server-owned one before choosing syntax.
+
 - [x] Draft cart and search behavior with two candidate view styles for developer review. [Read the examples](frontend-component-design.md)
 - [ ] Reuse ordinary functions, records, lists, variants and imports. Specify typed inputs, children, callbacks, component identity and cleanup. Give every proposed keyword a motivating example. Ask developers unfamiliar with the design to predict each program's behavior from its source.
 - [ ] Prototype one interactive component through the normal web build. Compare DOM updates compiled to JavaScript with Corvid's existing WebAssembly handler path on initial bytes, startup, event latency and diagnostic quality. Record the default target and how compute-heavy modules interoperate. Keep existing forms and pages running during migration.
@@ -34,6 +36,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 **Exit:** approve a small language specification, two readable source examples and an execution-target decision backed by the prototype.
 
 ### 2. Render, style and compose real components
+
+- [ ] Bind a developer-defined action to a native control. Check that a keyboard user can invoke it and that changing the control's label, layout or styling preserves the action identity.
 
 - [ ] Implement typed elements, attributes, text, children, conditionals and keyed lists. Preserve focus, selection and element identity when a list changes. Escape data by default and make trusted markup explicit.
 - [ ] Support semantic HTML, SVG, native forms, accessible names, keyboard navigation, and component-scoped or global styles in Corvid projects. Preserve the CSS cascade, media and container queries, custom properties and the ability to import a stylesheet.
@@ -43,6 +47,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 
 ### 3. Make state, events and asynchronous work general
 
+- [ ] Route UI and assistant invocations through the same handler. Check authority at execution, capture the intended target across selection changes, and return typed failures for stale requests. Exercise retry of a server mutation after a lost response and verify that it applies once.
+
 - [ ] Support local and shared typed state, derived values, batched updates and predictable scheduling. Bind typed input, pointer, keyboard and composition events. Define event propagation, default actions and subscription cleanup.
 - [ ] Provide typed requests, streams, loading and error states, cancellation, retry and cleanup on navigation. Carry the same types across a Corvid client/server route. Diagnose browser imports of server-only code or secrets.
 - [ ] Integrate URL parameters, browser history, nested routes and deep links with loading and focus restoration.
@@ -51,6 +57,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 
 ### 4. Open the browser platform and ecosystem
 
+- [ ] Generate discoverable schemas from explicitly exposed action types. Test discovery and invocation with a compatible browser assistant. Verify the same UI works with the adapter absent and that direct requests for an unexposed action are refused.
+
 - [ ] Design typed bindings for DOM and browser APIs using Web IDL where applicable. Cover promises, callbacks, events, nullable values, typed arrays, exceptions and object lifetime. Offer an explicit interop declaration for platform extensions. [Web IDL](https://webidl.spec.whatwg.org/)
 - [ ] Import JavaScript modules and custom elements, and export a Corvid component for another app to embed. Specify package resolution, versions, browser/server compatibility and source locations for interop errors.
 - [ ] Exercise files and clipboard with permissions, IndexedDB storage, workers and transferable data, canvas graphics, audio/media and capability detection. Add offline caching and version updates. Document a fallback when a capability is unavailable.
@@ -58,6 +66,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 **Exit:** build an offline drawing editor in Corvid that handles pointer input, moves work off the UI thread, persists a drawing and restores it after reload. Separately, consume a third-party custom element and embed a Corvid component in a JavaScript host.
 
 ### 5. Make the daily development loop and deployment dependable
+
+- [ ] Show developers which actions a build exposes, their types, and where they run. When a handler's input changes, point to incompatible bindings in the Corvid source. Teach exposure and debugging through a runnable learning example.
 
 - [ ] Provide a web project template, local dev server, fast rebuilds, state-preserving updates where safe, editor completions, component navigation and browser stack traces mapped to Corvid source.
 - [ ] Package assets, fonts and scoped styles with deterministic URLs, production caching and deployable static and server builds. Exercise upgrades with an old browser tab still open.
@@ -74,9 +84,10 @@ Start testing accessibility, performance and browser behavior with the first pro
 | Decision | Acceptance criteria |
 | --- | --- |
 | Developer preview | The component model and cart/search workflows work end to end. Publish the supported browser versions, known gaps, install instructions, migration path from existing UI helpers and a runnable non-AI example. |
+| Shared-action preview | An independent developer adds a new action in a fresh project. A keyboard user and a compatible assistant invoke it through one handler. A second action stays private to the human interface. Record the tested browser and assistant versions. |
 | Browser compatibility | Run core journeys in Chromium, Firefox and WebKit, plus real mobile checks for touch and text input. Track optional capabilities individually. Use Baseline and relevant Web Platform Tests to inform the support matrix. [Baseline](https://web.dev/baseline) · [Web Platform Tests](https://web-platform-tests.org/) |
 | Accessibility | Check keyboard interaction, focus order, screen-reader announcements, zoom, reduced motion and native control semantics in representative applications. Track applicable WCAG 2.2 AA criteria. [WCAG 2.2](https://www.w3.org/TR/WCAG22/) |
 | Performance | Set budgets from representative workloads on a named midrange mobile device. Track shipped bytes, time to first usable interaction, input latency during large-list edits and memory after repeated navigation. Compare equivalent production builds and publish the workload and raw measurements. |
 | Stable release | A responsive storefront, an offline editor and a streaming AI workspace pass their documented journeys outside the language team. Publish compatibility and upgrade commitments for components, browser bindings and packages. |
 
-**First deliverable:** open the component design for review with the cart and cancellable search sources, the proposed type rules, and one old `std/ui` page that must continue to work. Use those programs to settle the grammar before expanding the widget catalog.
+**First deliverable:** review the cart and cancellable search drafts alongside the proposed action binding. Ask a developer to identify which handler runs, where it runs and what the assistant may invoke. Use their feedback and the prototype to settle the grammar. Keep one existing `std/ui` page running through the same CLI.
