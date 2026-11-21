@@ -23,4 +23,4 @@ corvid-types = { workspace = true }
 corvid-vm = { workspace = true }
 tokio = { workspace = true }
 wasmparser = "0.244.0"
-wasmtime = "18.0.4"
+wasmtime = { version = "36.0.19", default-features = false, features = ["cranelift", "runtime", "std"] }

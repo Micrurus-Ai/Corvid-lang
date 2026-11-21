@@ -137,14 +137,27 @@ impl ProvenanceChain {
         }
     }
 
+    /// Visit entries in order, descending into each derived operand from left to right.
+    pub fn walk(&self) -> impl Iterator<Item = &ProvenanceEntry> {
+        let mut pending = vec![self.entries.iter()];
+        std::iter::from_fn(move || loop {
+            let entries = pending.last_mut()?;
+            if let Some(entry) = entries.next() {
+                if let ProvenanceKind::Derived { inputs, .. } = &entry.kind {
+                    pending.extend(inputs.iter().rev().map(|chain| chain.entries.iter()));
+                }
+                return Some(entry);
+            }
+            pending.pop();
+        })
+    }
+
     pub fn has_retrieval(&self) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.kind == ProvenanceKind::Retrieval)
+        self.walk().any(|entry| entry.kind == ProvenanceKind::Retrieval)
     }
 
     pub fn has_source(&self, name: &str) -> bool {
-        self.entries.iter().any(|entry| entry.name == name)
+        self.walk().any(|entry| entry.name == name)
     }
 }
 

@@ -96,6 +96,7 @@ pub enum ReadKind {
 
 pub(super) struct BuiltCfg {
     pub cfg: Cfg,
+    pub loop_exits: Vec<(BlockId, BlockId)>,
     pub ir_paths: BTreeMap<ProgramPoint, IrPath>,
     pub if_cfg_coords: BTreeMap<IrPath, IfCfgCoords>,
 }
@@ -110,6 +111,7 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
             entry,
         },
         ir_paths: builder.ir_paths,
+        loop_exits: builder.loop_exits,
         if_cfg_coords: builder.if_cfg_coords,
     }
 }
@@ -118,6 +120,8 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
 // ---------------------------------------------------------------------------
 
 struct CfgBuilder {
+    loop_targets: Vec<(BlockId, BlockId)>,
+    loop_exits: Vec<(BlockId, BlockId)>,
     blocks: Vec<CfgBlock>,
     /// Maps each CFG `ProgramPoint` to the IR-tree path that produced
     /// it. Populated as `lower_block` walks; consumed by
@@ -147,6 +151,8 @@ pub(super) struct IfCfgCoords {
 impl CfgBuilder {
     fn new() -> Self {
         Self {
+            loop_targets: Vec::new(),
+            loop_exits: Vec::new(),
             blocks: Vec::new(),
             ir_paths: BTreeMap::new(),
             if_cfg_coords: BTreeMap::new(),
@@ -194,12 +200,20 @@ impl CfgBuilder {
             let mut my_path = parent_path.clone();
             my_path.push(IrNavStep::Stmt(ir_idx));
             match stmt {
-                // Place assignment (45b) — interpreter-only; codegen-cl
-                // rejects it at lowering. For dataflow purposes it reads
-                // the path's index expressions and the value (all
-                // non-consuming: the root local stays live).
+                IrStmt::Assign { local_id, value, .. } if crate::native_record_assignment(stmt) => {
+                    let mut reads = collect_reads(value, true);
+                    reads.push(LocalRead { local_id: *local_id, kind: ReadKind::Borrowed });
+                    self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                }
                 IrStmt::Assign { path, value, .. } => {
                     let mut reads = Vec::new();
+                    if let Some((id, keys, value, _)) = crate::native_indexed_assignment(stmt) {
+                        for key in keys { walk_expr(key, true, &mut reads); }
+                        walk_expr(value, true, &mut reads);
+                        reads.push(LocalRead { local_id: id, kind: ReadKind::Borrowed });
+                        self.push_stmt(cur, CfgStmt::Expr { reads }, my_path);
+                        continue;
+                    }
                     for seg in path {
                         if let corvid_ir::IrPathSeg::Index(idx) = seg {
                             reads.extend(collect_reads(idx, false));
@@ -304,6 +318,9 @@ impl CfgBuilder {
                     // body -> head (backedge), head -> after. The
                     // condition's reads are non-consuming (the head
                     // re-reads them every iteration).
+                    let head = self.alloc_block();
+                    self.add_succ(cur, head);
+                    cur = head;
                     let cond_reads = collect_reads(cond, false);
                     self.push_stmt(cur, CfgStmt::Branch { reads: cond_reads }, my_path.clone());
                     let body_id = self.alloc_block();
@@ -312,10 +329,14 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::WhileBody);
+                    self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
+                    self.loop_targets.pop();
                     if let Some(ab) = after_body {
                         self.add_succ(ab, cur);
                     }
+                    self.loop_exits.push((cur, after_loop));
+                    self.push_stmt(after_loop, CfgStmt::Other { reads: Vec::new() }, my_path);
                     cur = after_loop;
                     continue;
                 }
@@ -326,27 +347,20 @@ impl CfgBuilder {
                     body,
                     ..
                 } => {
-                    // For-loop iter is BORROWED when it's a bare Local
-                    // (the codegen peephole `lower_container_maybe_borrowed`
-                    // reads the Variable without retaining; the iter's
-                    // +1 stays with the Local, not the loop). Classify
-                    // as Borrowed so the pass schedules a Drop after
-                    // last-use (i.e., after the loop) rather than
-                    // assuming consumption.
-                    //
-                    // For a non-bare iter (list literal, call result),
-                    // codegen's for-loop epilogue releases the temp
-                    // unconditionally — the pass doesn't need to track
-                    // it. Classifying as Borrowed here still yields
-                    // correct behavior because the classification only
-                    // affects Local reads.
-                    let iter_reads = collect_reads(iter, false);
+                    // Evaluate and own the iterable once, before the first iteration.
+                    let iter_reads = collect_reads(iter, true);
+                    // Evaluate the iterable once. The back edge returns to
+                    // the loop head, not to preceding local initializers.
+                    self.push_stmt(cur, CfgStmt::Expr { reads: iter_reads }, my_path.clone());
+                    let head = self.alloc_block();
+                    self.add_succ(cur, head);
+                    cur = head;
                     self.push_stmt(
                         cur,
                         CfgStmt::LoopHead {
                             var: *var_local,
                             var_ty: iter_element_type(iter),
-                            reads: iter_reads,
+                            reads: Vec::new(),
                         },
                         my_path.clone(),
                     );
@@ -358,10 +372,14 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::ForBody);
+                    self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
+                    self.loop_targets.pop();
                     if let Some(ab) = after_body {
                         self.add_succ(ab, cur);
                     }
+                    self.loop_exits.push((cur, after_loop));
+                    self.push_stmt(after_loop, CfgStmt::Other { reads: Vec::new() }, my_path);
                     cur = after_loop;
                 }
                 IrStmt::Approve { args, .. } => {
@@ -371,7 +389,14 @@ impl CfgBuilder {
                     }
                     self.push_stmt(cur, CfgStmt::Other { reads }, my_path);
                 }
-                IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => {
+                IrStmt::Break { .. } | IrStmt::Continue { .. } => {
+                    if let Some(&(head, exit)) = self.loop_targets.last() {
+                        self.push_stmt(cur, CfgStmt::Other { reads: Vec::new() }, my_path);
+                        self.add_succ(cur, if matches!(stmt, IrStmt::Break { .. }) { exit } else { head });
+                        return None;
+                    }
+                }
+                IrStmt::Pass { .. } => {
                     self.push_stmt(cur, CfgStmt::Other { reads: Vec::new() }, my_path);
                 }
                 // Dup/Drop should not appear in input IR for .6a — the
@@ -422,7 +447,7 @@ fn iter_element_type(e: &IrExpr) -> Type {
 ///     unless the composite is itself in a Borrowed context. We model
 ///     the conservative case: composite operands are Owned when their
 ///     outer context consumes the result.
-fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
+pub(crate) fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
     let mut out = Vec::new();
     walk_expr(expr, consumed, &mut out);
     out
@@ -431,17 +456,24 @@ fn collect_reads(expr: &IrExpr, consumed: bool) -> Vec<LocalRead> {
 fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
     match &expr.kind {
         IrExprKind::MapLiteral { keys, values } => {
-            for e in keys.iter().chain(values) {
-                out.extend(collect_reads(e, false));
+            for (key, value) in keys.iter().zip(values) {
+                walk_expr(key, true, out);
+                walk_expr(value, true, out);
             }
         }
         IrExprKind::Match { scrutinee, arms } => {
             out.extend(collect_reads(scrutinee, false));
             for arm in arms {
-                if let Some(g) = &arm.guard {
-                    out.extend(collect_reads(g, false));
+                for operand in arm.guard.iter().chain(std::iter::once(&arm.body)) {
+                    let mut reads = collect_reads(operand, false);
+                    reads.retain(|read| !crate::result_match::pattern_binds(&arm.pattern, read.local_id));
+                    // Each executed arm retains its own consuming reads. Outer locals
+                    // stay live across the choice, and untaken arms consume nothing.
+                    for read in &mut reads {
+                        read.kind = ReadKind::Borrowed;
+                    }
+                    out.extend(reads);
                 }
-                out.extend(collect_reads(&arm.body, false));
             }
         }
         IrExprKind::Lambda { body, .. } => {
@@ -459,10 +491,10 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             out.extend(collect_reads(items, false));
             out.extend(collect_reads(next_cursor, false));
         }
-        IrExprKind::BuiltinMethod { receiver, args, .. } => {
+        IrExprKind::BuiltinMethod { kind, receiver, args } => {
             out.extend(collect_reads(receiver, false));
             for a in args {
-                out.extend(collect_reads(a, false));
+                out.extend(collect_reads(a, *kind == corvid_types::BuiltinMethodKind::ListAppend));
             }
         }
         IrExprKind::Local { local_id, .. } => {
@@ -487,7 +519,12 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
         IrExprKind::UnwrapGrounded { value } => walk_expr(value, true, out),
         IrExprKind::Index { target, index } => {
             walk_expr(target, false, out);
-            walk_expr(index, true, out);
+            walk_expr(index, !crate::native_string_map(&target.ty), out);
+        }
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::lowering::uses_structural_equality(*op, &left.ty) => {
+            walk_expr(left, false, out);
+            walk_expr(right, false, out);
         }
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
             // String concat consumes both operands (releases at
@@ -522,6 +559,9 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             //   - Unknown: treat conservatively — Borrowed avoids
             //     scheduling a consumption-style Drop on an arg we
             //     can't prove is actually consumed.
+            if let corvid_ir::IrCallKind::ClosureLocal { local_id, .. } = kind {
+                out.push(LocalRead { local_id: *local_id, kind: ReadKind::Borrowed });
+            }
             let args_consumed = match kind {
                 corvid_ir::IrCallKind::Tool { .. }
                 | corvid_ir::IrCallKind::Prompt { .. }

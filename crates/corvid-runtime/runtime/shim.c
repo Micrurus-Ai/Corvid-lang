@@ -30,6 +30,11 @@ void corvid_runtime_overflow(void) {
     exit(1);
 }
 
+void corvid_float_out_of_int_range(void) {
+    fprintf(stderr, "corvid: runtime error: expected a finite Float within Int range\n");
+    exit(1);
+}
+
 void corvid_sleep_ms(long long ms) {
     if (ms <= 0) {
         return;

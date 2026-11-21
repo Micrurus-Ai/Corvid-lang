@@ -167,6 +167,15 @@ fn parse_parallel_outcomes(payload: &serde_json::Value) -> RecordedParallelOutco
 }
 
 impl ReplaySource {
+    /// Recover an unpinned prompt's model from the next recorded model exchange.
+    pub(crate) fn next_model(&self) -> Option<&str> {
+        let next = self.cursor.lock().unwrap().current_step();
+        self.events.get(next..)?.iter().find_map(|event| match event {
+            TraceEvent::LlmCall { model: Some(name), .. } => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
     pub fn from_path(path: impl Into<PathBuf>) -> Result<Self, RuntimeError> {
         Self::from_path_for_writer(path, WRITER_INTERPRETER)
     }

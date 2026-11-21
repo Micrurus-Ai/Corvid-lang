@@ -63,6 +63,7 @@ pub mod ffi_bridge;
 pub mod grounded_handles;
 pub mod human;
 pub mod http;
+pub mod browser;
 pub mod io;
 pub mod json;
 pub mod jwt_verify;
@@ -110,6 +111,7 @@ pub mod replay_dispatch;
 pub mod review_queue;
 pub mod runtime;
 pub mod secrets;
+pub mod string;
 pub mod store;
 pub mod test_from_traces;
 pub mod tools;
@@ -153,24 +155,9 @@ pub use serde_json;
 /// match the cache's existing documented escape hatch (`cargo
 /// clean` or `rm -rf target/cache/native/`).
 pub mod c_runtime {
-    /// Concatenable byte slices, one per C source file
-    /// `corvid-runtime`'s build.rs compiles into the
-    /// `corvid_c_runtime` staticlib. Order matches the build
-    /// script's `build.file(...)` order, so any reordering of
-    /// the build inputs also invalidates the cache.
-    pub const SOURCE_FILE_BYTES: &[&[u8]] = &[
-        include_bytes!("../runtime/alloc.c"),
-        include_bytes!("../runtime/strings.c"),
-        include_bytes!("../runtime/lists.c"),
-        include_bytes!("../runtime/entry.c"),
-        include_bytes!("../runtime/shim.c"),
-        include_bytes!("../runtime/weak.c"),
-        include_bytes!("../runtime/stack_maps.c"),
-        include_bytes!("../runtime/stack_maps_fallback.c"),
-        include_bytes!("../runtime/collector.c"),
-        include_bytes!("../runtime/verify.c"),
-        include_bytes!("../runtime/json.c"),
-    ];
+    /// Source and header contents in build-input order, without host paths.
+    pub const SOURCE_FILE_BYTES: &[&[u8]] =
+        include!(concat!(env!("OUT_DIR"), "/native_runtime_inputs.rs"));
 }
 
 pub use adversarial::{contradiction_flag, trace_text};

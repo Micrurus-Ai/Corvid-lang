@@ -39,7 +39,7 @@ pub type IrPath = Vec<IrNavStep>;
 /// `Dup`/`Drop` the IR rewriter should insert.
 ///
 /// Shape:
-///   - `dups[(block, pos)]` — set of locals to Dup immediately BEFORE
+///   - `dups[(block, pos)]` — sequence of locals to Dup immediately BEFORE
 ///     statement at that position.
 ///   - `drops_after[(block, pos)]` — set of locals to Drop immediately
 ///     AFTER statement at that position.
@@ -53,12 +53,14 @@ pub type IrPath = Vec<IrNavStep>;
 ///     `agent.body`. Populated by `analyze_agent`. The IR rewriter
 ///     consumes this to insert `IrStmt::Dup`/`IrStmt::Drop`.
 ///
-/// Determinism: BTreeMap/BTreeSet throughout. Pass output is stable
+/// Determinism: ordered maps and sets, with Dups recorded in read order. Pass output is stable
 /// across runs and across compiler versions — the trigger-log and
 /// record/replay story rely on it.
 #[derive(Debug, Clone, Default)]
 pub struct OwnershipPlan {
-    pub dups: BTreeMap<ProgramPoint, BTreeSet<LocalId>>,
+    /// One entry per consuming use that needs a retain. A statement
+    /// can pass the same live local to more than one call.
+    pub dups: BTreeMap<ProgramPoint, Vec<LocalId>>,
     pub drops_after: BTreeMap<ProgramPoint, BTreeSet<LocalId>>,
     pub drops_at_block_exit: BTreeMap<BlockId, BTreeSet<LocalId>>,
     pub ir_paths: BTreeMap<ProgramPoint, IrPath>,
@@ -92,7 +94,7 @@ pub struct BranchDrops {
 
 impl OwnershipPlan {
     pub fn dup_at(&mut self, p: ProgramPoint, l: LocalId) {
-        self.dups.entry(p).or_default().insert(l);
+        self.dups.entry(p).or_default().push(l);
     }
     pub fn drop_after(&mut self, p: ProgramPoint, l: LocalId) {
         self.drops_after.entry(p).or_default().insert(l);

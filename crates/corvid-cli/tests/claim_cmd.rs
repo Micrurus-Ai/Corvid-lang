@@ -124,6 +124,25 @@ fn claim_explain_reports_verified_signature_source_and_guarantees() {
         "{stdout}"
     );
 
+    let mut json_args = verified_args.clone();
+    json_args.push("--json".into());
+    let manifest = run_corvid(&json_args, dir.path());
+    assert!(manifest.status.success(), "{:?}", manifest.stderr);
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&manifest.stdout).unwrap();
+    assert!(rows.iter().any(|row| row["id"] == "abi_attestation.envelope_signature"));
+    std::fs::write(dir.path().join("current.json"), &manifest.stdout).unwrap();
+    std::fs::write(dir.path().join("target.json"), &manifest.stdout).unwrap();
+    let compare = ["upgrade", "check", "clean.cor", "--claims-current", "current.json",
+        "--claims-target", "target.json", "--json"].map(String::from);
+    // Limit the scan to a clean source file so the exit code reflects the claim comparison.
+    std::fs::write(dir.path().join("clean.cor"), "agent main() -> Int:\n    return 1\n").unwrap();
+    assert!(run_corvid(&compare, dir.path()).status.success());
+    std::fs::write(dir.path().join("target.json"), "[]").unwrap();
+    let removal = run_corvid(&compare, dir.path());
+    assert_eq!(removal.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&removal.stdout).unwrap();
+    assert_eq!(report["claim_regressions"][0]["kind"], "removed");
+
     let unverified_args = vec![
         "claim".to_string(),
         "--explain".to_string(),

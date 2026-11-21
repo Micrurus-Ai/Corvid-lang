@@ -382,8 +382,9 @@ fn emit_grounded_handle_store(
 /// `CodegenError::NotSupported` with a descriptive feature boundary.
 pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> {
     match ty {
+        Type::Map(_, _) if crate::native_string_map(ty) => Ok(I64),
         Type::Map(_, _) => Err(CodegenError::not_supported(
-            "Map<K, V> is interpreter-only in 45g",
+            crate::NATIVE_MAP_REQUIREMENTS,
             Span::new(0, 0),
         )),
         Type::Int => Ok(I64),
@@ -403,8 +404,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
         Type::List(_) => Ok(I64),
         Type::Weak(_, _) => Ok(I64),
         Type::Result(_, _) if is_native_result_type(ty) => Ok(I64),
-        Type::Option(inner) if is_refcounted_type(inner) => Ok(I64),
-        Type::Option(_) if is_native_wide_option_type(ty) => Ok(I64),
+        Type::Option(_) if is_native_option_expr_type(ty) => Ok(I64),
         Type::Grounded(inner) => cl_type_for(inner, span),
         Type::Partial(_) => Err(CodegenError::not_supported(
             "`Partial<T>` - progressive structured lowering is interpreter-only until native tagged field-state layout lands",
@@ -422,6 +422,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Nothing` — use a bare `return` instead",
             span,
         )),
+        Type::Function { .. } if crate::native_callback_type(ty) => Ok(I64),
         Type::Function { .. } => Err(CodegenError::not_supported(
             "function types as values — first-class callables are not implemented in native codegen yet",
             span,
@@ -495,16 +496,14 @@ pub(super) fn define_agent(
         builder.seal_block(entry);
 
         let mut env: HashMap<LocalId, (Variable, clir::Type)> = HashMap::new();
-        let mut var_idx: usize = 0;
+        runtime.next_variable.set(0);
         let mut scope_stack: Vec<Vec<(LocalId, Variable)>> = vec![Vec::new()];
         let mut loop_stack: Vec<LoopCtx> = Vec::new();
 
         for (i, p) in agent.params.iter().enumerate() {
             let block_arg = builder.block_params(entry)[i];
-            let var = Variable::from_u32(var_idx as u32);
-            var_idx += 1;
             let ty = cl_type_for(&p.ty, p.span)?;
-            builder.declare_var(var, ty);
+            let var = runtime.declare_variable(&mut builder, ty);
             if is_refcounted_type(&p.ty) {
                 builder.declare_value_needs_stack_map(block_arg);
             }
@@ -531,7 +530,6 @@ pub(super) fn define_agent(
             &agent.body,
             &agent.return_ty,
             &mut env,
-            &mut var_idx,
             &mut scope_stack,
             &mut loop_stack,
             func_ids_by_def,

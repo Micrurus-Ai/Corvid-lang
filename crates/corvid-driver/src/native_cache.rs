@@ -12,7 +12,7 @@
 //! behaviour:
 //!
 //!   - source bytes (the `.cor` file text)
-//!   - the `corvid-codegen-cl` package version (changes on codegen edits)
+//!   - the package version, native backend source fingerprint, and compilation target
 //!   - the native support library payload used at link time
 //!   - the benchmark tools library payload when one is linked in
 //!
@@ -78,6 +78,8 @@ pub fn cache_key(source: &str) -> String {
     feed_bytes(source.as_bytes(), &mut h);
     feed_bytes(b"|cl=", &mut h);
     feed_bytes(env!("CARGO_PKG_VERSION").as_bytes(), &mut h);
+    feed_bytes(b"|backend=", &mut h);
+    feed_bytes(corvid_codegen_cl::NATIVE_BACKEND_ID.as_bytes(), &mut h);
     // Fold the native support sources into the key so edits to
     // entry.c, alloc.c, verify.c, and the other native support
     // files invalidate cached binaries. The previous formulation

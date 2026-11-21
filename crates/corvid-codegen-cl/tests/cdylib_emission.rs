@@ -35,10 +35,11 @@ effect retrieval:
     data: grounded
 
 tool grounded_echo(name: String) -> Grounded<String> uses retrieval
+tool lookup_suffix(name: String) -> Grounded<String> uses retrieval
 
 pub extern "c"
 agent grounded_lookup(name: String) -> Grounded<String>:
-    return grounded_echo(name)
+    return grounded_echo(name) + lookup_suffix("!")
 "#;
 
 struct FrontendBundle {
@@ -427,6 +428,9 @@ fn cdylib_grounded_string_return_exposes_attestation_handle() {
             std::ptr::null_mut(),
         );
 
+        let suffix_tool = CString::new("lookup_suffix").unwrap();
+        register_tool(suffix_tool.as_ptr(), Some(echo_first_string_arg), std::ptr::null_mut());
+
         let input = CString::new("lookup-me").unwrap();
         let mut handle = 0u64;
         let mut observation = 0u64;
@@ -438,11 +442,12 @@ fn cdylib_grounded_string_return_exposes_attestation_handle() {
         assert_ne!(handle, 0);
         assert_ne!(observation, 0);
         let output = CStr::from_ptr(output_ptr).to_str().unwrap().to_owned();
-        assert_eq!(output, "lookup-me");
+        assert_eq!(output, "lookup-me!");
 
         let mut source_ptrs = [std::ptr::null(); 4];
         let count = grounded_sources(handle, source_ptrs.as_mut_ptr(), source_ptrs.len());
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
+        assert_eq!(CStr::from_ptr(source_ptrs[1]).to_bytes(), b"lookup_suffix");
         let source = CStr::from_ptr(source_ptrs[0]).to_str().unwrap().to_owned();
         assert_eq!(source, "grounded_echo");
         let confidence = grounded_confidence(handle);

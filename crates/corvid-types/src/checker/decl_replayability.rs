@@ -196,6 +196,15 @@ impl<'a> Checker<'a> {
             None => return,
         };
 
+        if crate::effects::python_call_target(callee, self.file, self.symbols, self.bindings).is_some() {
+            self.errors.push(TypeError::with_guarantee(
+                TypeErrorKind::NonDeterministicCall {
+                    agent: agent.into(), call: name, call_kind: "Python host function".into(),
+                }, span, "replay.deterministic_pure_path",
+            ));
+            return;
+        }
+
         // Catalog-registered nondeterminism (clocks, PRNGs, etc.)
         // fails `@deterministic` for the same reason it fails
         // `@replayable` Ã¢â‚¬â€ but the error message is stricter.

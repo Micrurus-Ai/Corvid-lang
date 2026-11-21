@@ -23,7 +23,7 @@ if (!manifest.contributes?.languages?.some(
 if (!manifest.files?.includes("node_modules/**")) {
   throw new Error("VSIX package must include production language-client dependencies");
 }
-if (manifest.overrides?.["brace-expansion"] !== "2.1.2") {
+if (manifest.overrides?.["brace-expansion"] !== "2.1.4") {
   throw new Error("VSIX must retain the audited brace-expansion override");
 }
 

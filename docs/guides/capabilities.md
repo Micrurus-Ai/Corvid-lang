@@ -19,6 +19,8 @@ corvid add skill github:acme/skills/summarize-repo@v1.2
 corvid add skill git:https://example.com/skills.git#main//summarize
 ```
 
+To install a subdirectory from a local Git repository on Unix, use a file URL such as `git:file:///tmp/skill%20repo#main//skills/greeter`. Here `%20` encodes a space in the repository path, `main` selects the branch and `skills/greeter` selects the directory containing `skill.toml`.
+
 The label is **computed from the source, never self-reported** —
 capability groups by scanning for stdlib tool usage, trust/cost/data
 from the skill's own `effect` declarations. What you consent to at
@@ -78,6 +80,8 @@ corvid add mcp github --cmd npx --cmd my-github-mcp
 corvid add mcp search --url https://mcp.example.com --trusted
 ```
 
+Pass each command argument with its own `--cmd`. On Windows, quote a script path containing spaces in the shell, for example `--cmd python --cmd 'C:\My Tools\server.py'`. Corvid saves the full path as one argument for subsequent calls and regeneration.
+
 Discovery runs first (`tools/list`); the config entry only lands for
 a server that was actually reached. The generated
 `src/mcp/<name>.cor` has one **typed public agent per tool**, with
@@ -85,14 +89,21 @@ parameters from the server's own JSON schemas and arguments built via
 the `std/json` builder (escaping is runtime-handled, never string
 concatenation):
 
-```corvid skip
+```corvid
 # GENERATED — regenerate with `corvid mcp regen github`.
+import "../std/mcp" use mcp_call
+import "../std/json" use json_object_new, json_object_set_string, json_object_set_int, json_object_finish
+
 public agent search_issues(limit: Int, query: String) -> Result<String, String>:
     args = json_object_new()
     args = json_object_set_int(args, "limit", limit)
     args = json_object_set_string(args, "query", query)
     return mcp_call("github", "search-issues", json_object_finish(args))
 ```
+
+Run `corvid check src/mcp/github.cor` from the project root to check the generated module against the bundled standard library.
+
+A tool can declare a field named `args`. Pass it as an ordinary typed parameter. The wrapper sends the value under the original JSON field name. If multiple fields map to the same Corvid parameter name, later parameters receive numbered suffixes. For example, `item-id` and `item_id` become `item_id` and `item_id__2`. The tool receives both original JSON keys.
 
 Servers are **untrusted by default** — every call through the
 generated wrappers stays approval-gated until you add

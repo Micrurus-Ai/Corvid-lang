@@ -50,6 +50,7 @@ pub struct DbHandleInner {
     /// (e.g. "no recorded db_query event for handle opened at
     /// `./data/app.sqlite`").
     pub path: String,
+    registry: std::sync::Weak<DbHandleRegistryInner>,
 }
 
 impl DbHandleInner {
@@ -63,6 +64,17 @@ impl DbHandleInner {
         Self {
             handle_id,
             path: path.into(),
+            registry: std::sync::Weak::new(),
+        }
+    }
+}
+
+impl Drop for DbHandleInner {
+    fn drop(&mut self) {
+        if let Some(registry) = self.registry.upgrade() {
+            let connection = registry.slots.write().unwrap_or_else(|err| err.into_inner())
+                .remove(&self.handle_id);
+            drop(connection);
         }
     }
 }
@@ -116,14 +128,8 @@ pub const GUARANTEE_ID_IO_SOURCE_SQLITE_READ_PASSTHROUGH_ON_REPLAY: &str =
 // is the authority that translates the handle's `handle_id` back
 // to a usable connection for `query` / `execute`.
 //
-// Lifetime: the registry holds `Arc<Mutex<Connection>>` per slot.
-// Multiple Corvid handles to the same connection (clones of one
-// `Value::DbHandle`) share the same Arc. When the last Corvid
-// reference drops, the `Arc<DbHandleInner>` is dropped — 33S3c
-// will wire a runtime-callback closer that releases the registry
-// slot at that moment (completing the "refcounted" half of the
-// brief's promise). 33S3b's slot release is bounded by the
-// `DbHandleRegistry`'s own drop (runtime drop).
+// Dropping the last Corvid handle releases its registry slot and closes
+// the connection. SQLite rolls back any open transaction on close.
 //
 // Replay quarantine: `quarantine_writes` is the same shape as
 // `IoRuntime::quarantine_writes` and `StoreManager::quarantine_writes`
@@ -194,7 +200,11 @@ impl DbHandleRegistry {
                 RuntimeError::Other(format!("std.db registry poisoned: {err}"))
             })?
             .insert(id, std::sync::Arc::new(Mutex::new(conn)));
-        Ok(std::sync::Arc::new(DbHandleInner::new(id, path)))
+        Ok(std::sync::Arc::new(DbHandleInner {
+            handle_id: id,
+            path: path.into(),
+            registry: std::sync::Arc::downgrade(&self.inner),
+        }))
     }
 
     /// Run a parameterised SELECT against the connection at the
@@ -216,6 +226,9 @@ impl DbHandleRegistry {
         })?;
         let sql_params = params.iter().map(db_value_to_sql_value).collect::<Vec<_>>();
         let mut stmt = conn.prepare(sql).map_err(redacted_sql_error)?;
+        if !stmt.readonly() {
+            return Err(RuntimeError::Other("std.db query requires a read-only statement".into()));
+        }
         let column_names = stmt
             .column_names()
             .into_iter()
@@ -749,6 +762,25 @@ mod tests {
     }
 
     // -------- Phase 33S3b — DbHandleRegistry plumbing tests --------
+
+    #[test]
+    fn final_handle_drop_rolls_back_and_releases_the_write_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("notes.db");
+        let registry = DbHandleRegistry::new();
+        let writer = registry.open(path.to_str().unwrap()).unwrap();
+        let reader = registry.open(path.to_str().unwrap()).unwrap();
+        let id = writer.handle_id;
+        registry.execute(id, "CREATE TABLE notes(id INTEGER PRIMARY KEY)", &[]).unwrap();
+        registry.execute(id, "BEGIN IMMEDIATE", &[]).unwrap();
+        let alias = writer.clone();
+        drop(writer);
+        registry.execute(alias.handle_id, "INSERT INTO notes VALUES (1)", &[]).unwrap();
+        drop(alias);
+        assert!(registry.query(id, "SELECT 1", &[]).is_err());
+        registry.execute(reader.handle_id, "INSERT INTO notes VALUES (1)", &[]).unwrap();
+        assert_eq!(registry.query(reader.handle_id, "SELECT id FROM notes", &[]).unwrap().row_count, 1);
+    }
 
     /// 33S3b — the registry round-trips a :memory: connection
     /// end-to-end: open, create, parameterized insert, query.

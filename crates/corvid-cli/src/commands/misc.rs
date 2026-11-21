@@ -36,15 +36,8 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
             println!("vendored stdlib from `{}`", src.display());
         }
         Ok(corvid_driver::VendorOutcome::AlreadyPresent) => {}
-        Ok(corvid_driver::VendorOutcome::NoSourceFound) => {
-            eprintln!(
-                "warning: NO stdlib source found — the starter project imports \
-                 `./std/time` and will not compile until it is vendored.\n  \
-                 Fix: set CORVID_HOME to your Corvid install directory (the one \
-                 containing `std/`), then run `corvid upgrade refresh-std {name}`."
-            );
-        }
-        Err(err) => eprintln!("warning: failed to vendor stdlib: {err:#}"),
+        Ok(corvid_driver::VendorOutcome::Bundled) => println!("vendored the compiler's bundled standard library"),
+        Err(err) => return Err(err.context("copy standard library into the new project")),
     }
     // Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): the
     // prior "Next steps" output told reviewers `pip install
@@ -56,14 +49,12 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
     // auto-detects it at autoload time. No manual install needed.
     println!("\nNext steps:");
     println!("  cd {name}");
-    println!("  corvid run src/main.cor   # OR `corvid serve src/main.cor` for the HTTP path");
+    println!("  corvid check");
+    println!("  corvid run");
     println!();
     if with_python_tools {
-        println!("Python tool template included: implement tools in `tools.py`");
-        println!("(the bundled `corvid_runtime` package makes `from");
-        println!("corvid_runtime import tool` work without any pip install)");
-        println!("and see `src/python_tools_example.cor` for the declaration");
-        println!("side.");
+        println!("Try the Python tool defined in `tools.py`:");
+        println!("  corvid run src/python_tools_example.cor \"Hello\"");
     } else {
         println!("The starter agent is pure Corvid — it reads the clock");
         println!("through an executing, replay-traced stdlib tool. Need a");

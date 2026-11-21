@@ -45,6 +45,7 @@ const TYPEINFO_OFF_NAME: u32 = 40;
 const TYPEINFO_FLAG_CYCLIC_CAPABLE: u32 = 0x01;
 #[allow(dead_code)]
 const TYPEINFO_FLAG_HAS_WEAK_REFS: u32 = 0x02;
+const TYPEINFO_FLAG_GROWABLE_LIST: u32 = 0x40;
 const TYPEINFO_FLAG_IS_LIST: u32 = 0x04;
 #[allow(dead_code)]
 const TYPEINFO_FLAG_LINEAR_CAPABLE: u32 = 0x08;
@@ -231,7 +232,7 @@ pub fn emit_list_typeinfo(
 
     // size: 0 (variable-length)
     // flags: IS_LIST
-    let flags: u32 = TYPEINFO_FLAG_IS_LIST | TYPEINFO_FLAG_HAS_WEAK_REFS;
+    let flags: u32 = TYPEINFO_FLAG_IS_LIST | TYPEINFO_FLAG_HAS_WEAK_REFS | TYPEINFO_FLAG_GROWABLE_LIST;
     bytes[TYPEINFO_OFF_FLAGS as usize..(TYPEINFO_OFF_FLAGS + 4) as usize]
         .copy_from_slice(&flags.to_le_bytes());
 
@@ -274,13 +275,15 @@ pub fn typeinfo_data_for_refcounted_payload(
     runtime: &RuntimeFuncs,
 ) -> Option<cranelift_module::DataId> {
     match ty {
+        Type::Map(_, _) if crate::native_string_map(ty) => Some(runtime.map_typeinfo),
         Type::String => Some(runtime.string_typeinfo),
+        Type::Function { .. } if crate::native_callback_type(ty) => Some(runtime.callback_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),
         Type::Result(_, _) => runtime.result_typeinfos.get(ty).copied(),
         Type::Weak(_, _) => Some(runtime.weak_box_typeinfo),
         Type::Option(inner) => {
-            if is_native_wide_option_type(ty) {
+            if option_uses_wrapper(ty) {
                 runtime.option_typeinfos.get(ty).copied()
             } else {
                 typeinfo_data_for_refcounted_payload(inner, runtime)
@@ -288,4 +291,16 @@ pub fn typeinfo_data_for_refcounted_payload(
         }
         _ => None,
     }
+}
+
+/// Integer-only environments have no outgoing heap references.
+pub fn emit_callback_typeinfo(module: &mut ObjectModule) -> Result<cranelift_module::DataId, CodegenError> {
+    let span = Span::new(0, 0);
+    let id = module.declare_anonymous_data(false, false)
+        .map_err(|e| CodegenError::cranelift(e.to_string(), span))?;
+    let mut data = DataDescription::new();
+    data.set_align(8);
+    data.define_zeroinit(TYPEINFO_BYTES);
+    module.define_data(id, &data).map_err(|e| CodegenError::cranelift(e.to_string(), span))?;
+    Ok(id)
 }

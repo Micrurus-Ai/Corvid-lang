@@ -44,6 +44,7 @@ use crate::abi::CorvidString;
 use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
+mod equality;
 mod approval_exports;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.
 // The actual extern "C" entry points land in 33S1 (io), 33S2

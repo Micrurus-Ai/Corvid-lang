@@ -31,6 +31,7 @@ pub enum TypeErrorKind {
 
     /// Calling something that isn't callable (e.g. a primitive value).
     NotCallable { got: String },
+    InvalidQualifiedApproval,
 
     /// Field access on a non-struct value.
     NotAStruct { got: String },
@@ -76,6 +77,8 @@ pub enum TypeErrorKind {
 
     /// The return type declared doesn't match what the body returns.
     ReturnTypeMismatch { expected: String, got: String },
+
+    DirectPythonCallUnsupported { module: String, member: String },
 
     /// `alias.TypeName` type reference encountered, but the Corvid
     /// `.cor` import-resolver is not yet wired up. The grammar parses
@@ -169,6 +172,7 @@ pub enum TypeErrorKind {
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
+    InvalidForm { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
     /// 52g): a non-absolute `base_url`, a malformed reliability value, a
@@ -501,6 +505,7 @@ impl TypeErrorKind {
             Self::UnknownField { struct_name, field } => {
                 format!("no field named `{field}` on type `{struct_name}`")
             }
+            Self::InvalidQualifiedApproval => "a qualified approval must name a declared Python import function".into(),
             Self::NotCallable { got } => {
                 format!("cannot call a value of type `{got}`")
             }
@@ -550,6 +555,9 @@ impl TypeErrorKind {
             }
             Self::ReturnTypeMismatch { expected, got } => {
                 format!("return type mismatch: declared `{expected}`, but the body returns `{got}`")
+            }
+            Self::DirectPythonCallUnsupported { module, member } => {
+                format!("Python function `{module}.{member}` has no declared signature")
             }
             Self::CorvidImportNotYetResolved { alias, name } => {
                 format!(
@@ -623,6 +631,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { path, message } => {
                 format!("invalid approval policy on route `{path}`: {message}")
             }
+            Self::InvalidForm { message } => format!("invalid form: {message}"),
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
             }
@@ -910,6 +919,7 @@ impl TypeErrorKind {
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),
+            Self::InvalidQualifiedApproval => Some("use `approve alias.member(args)` with the same import alias and function as the call".into()),
             Self::NotCallable { .. } => Some(
                 "only tools, agents, prompts, and imported functions can be called".into(),
             ),
@@ -951,6 +961,9 @@ impl TypeErrorKind {
             Self::ReturnTypeMismatch { expected, .. } => Some(format!(
                 "change the final `return` to produce a `{expected}`, or update the declared return type"
             )),
+            Self::DirectPythonCallUnsupported { .. } => Some(
+                "declare a bodyless `fn` signature in the indented Python import block".into(),
+            ),
             Self::CorvidImportNotYetResolved { .. } => Some(
                 "for now, use an unqualified local type or wait for cross-file Corvid import resolution to land"
                     .into(),
@@ -1057,8 +1070,7 @@ impl TypeErrorKind {
                 "use `with confidence P over N runs` with 0.0 <= P <= 1.0 and N > 0".into(),
             ),
             Self::UngroundedReturn { .. } => Some(
-                "call a tool declared `uses retrieval` (or any effect with `data: grounded`) \
-                 and pass its result to the return value, directly or through a prompt"
+                "derive each return value from a grounded parameter or a tool or prompt with a grounded effect such as `uses retrieval`"
                     .into(),
             ),
             Self::PromptCitationUnknownParam { .. } => Some(
@@ -1199,6 +1211,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { .. } => Some(
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
+            Self::InvalidForm { .. } => None,
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),

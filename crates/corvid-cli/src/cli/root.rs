@@ -83,8 +83,15 @@ pub enum Command {
         #[arg(long)]
         with_python_tools: bool,
     },
-    /// Type-check a Corvid source file.
-    Check { file: PathBuf },
+    /// Type-check a source file or the current project's src/main.cor.
+    Check { file: Option<PathBuf> },
+    /// Format Corvid source files. Defaults to project sources and tests.
+    Fmt {
+        /// Report files that need formatting and leave them untouched.
+        #[arg(long)]
+        check: bool,
+        files: Vec<PathBuf>,
+    },
     /// Add a capability to this project: a skill (an effect-audited
     /// vendored package), an MCP server, or a connector.
     #[command(subcommand)]
@@ -102,7 +109,7 @@ pub enum Command {
     Build {
         /// Source file. Defaults to `src/main.cor` when run from a Corvid project directory.
         file: Option<PathBuf>,
-        /// Output target. `python` (default), `native`, `server`, `wasm`, `cdylib`, or `staticlib`.
+        /// Output target. `python` (default), `native`, `server`, `web`, `wasm`, `cdylib`, or `staticlib`.
         #[arg(long, default_value = "python")]
         target: String,
         /// Path to a compiled `#[tool]` staticlib. When provided,
@@ -176,6 +183,9 @@ pub enum Command {
     /// handler is a direct agent call with literal arguments are
     /// served; other shapes return 501 until later serve slices.
     Serve {
+        /// Write one JSON access record per request to stderr.
+        #[arg(long)]
+        access_log: bool,
         /// Source file. Defaults to `src/main.cor` in a Corvid project.
         file: Option<PathBuf>,
         /// Address to bind, `host:port`. Honors `CORVID_HOST`/`CORVID_PORT`
@@ -735,6 +745,9 @@ pub enum Command {
         /// command transcripts read as `corvid claim --explain <cdylib>`.
         #[arg(long)]
         explain: bool,
+        /// Emit the binary's guarantee rows for use with `upgrade check`.
+        #[arg(long, requires = "explain")]
+        json: bool,
         /// Path to the cdylib `.so` / `.dll` / `.dylib`.
         cdylib: Option<PathBuf>,
         /// Optional ed25519 verifying key. When supplied, the claim

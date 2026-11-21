@@ -17,7 +17,7 @@ from . import tracing
 from .approvals import approve_gate as approve_gate  # re-export
 from .errors import DangerousCallWithoutApprove
 from .llm import llm_call as llm_call  # re-export
-from .registry import get_tool_impl, get_tool_meta
+from .registry import get_tool_impl, get_tool_meta, invoke_tool
 
 
 async def tool_call(name: str, args: list[Any]) -> Any:
@@ -33,7 +33,7 @@ async def tool_call(name: str, args: list[Any]) -> Any:
     tracing.record("tool.call", name=name, effect=effect, args=args)
     impl = get_tool_impl(name)
     try:
-        result = await impl(*args)
+        result = await invoke_tool(impl, args)
     except Exception as exc:
         tracing.record("tool.error", name=name, message=repr(exc))
         raise

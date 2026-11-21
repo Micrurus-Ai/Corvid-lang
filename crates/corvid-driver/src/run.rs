@@ -11,12 +11,12 @@
 use super::native_cache;
 use super::{
     compile_to_ir_with_config_at_path, load_corvid_config_for, load_corvid_config_with_path_for,
-    native_ability, render_all_pretty, run_ir_with_runtime, Diagnostic, NotNativeReason,
+    render_all_pretty, run_ir_with_runtime, Diagnostic,
 };
 use corvid_ir::IrFile;
 use corvid_runtime::{
     load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, HttpEgressPolicy, IoToolPolicy,
-    OllamaAdapter, OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
+    OllamaAdapter, OpenAiAdapter, OpenAiCompatibleAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
 };
 use corvid_vm::{InterpError, Value};
 use std::fmt;
@@ -63,7 +63,7 @@ impl fmt::Display for RunError {
             ),
             Self::NeedsArgs { agent, expected } => write!(
                 f,
-                "agent `{agent}` expects {expected} argument(s); `corvid run` cannot supply them yet — use a runner binary that calls `run_with_runtime` with arguments"
+                "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }
@@ -157,23 +157,11 @@ pub fn run_with_target(
         }
     };
 
-    // Tool calls are native-able only when the caller supplied a
-    // tools staticlib. The `native_ability` scan reports ToolCall
-    // unconditionally (it doesn't know about the lib); the dispatcher
-    // here decides whether to treat that reason as a blocker. Other
-    // reasons (python imports, prompt calls) still block until their
-    // respective feature gaps.
-    let scan = native_ability(&ir);
-    let tools_satisfy = |r: &NotNativeReason| -> bool {
-        matches!(r, NotNativeReason::ToolCall { .. }) && tools_lib.is_some()
-    };
+    let scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
 
     match target {
         RunTarget::Native => match &scan {
             Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args),
-            Err(reason) if tools_satisfy(reason) => {
-                run_via_native_tier(path, &source, &ir, tools_lib, args)
-            }
             Err(reason) => {
                 eprintln!(
                     "error: `--target=native` refused: {reason}. Run without `--target` to fall back to the interpreter."
@@ -184,9 +172,6 @@ pub fn run_with_target(
         RunTarget::Interpreter => run_via_interpreter_tier(path, &ir, args, connector_mode),
         RunTarget::Auto => match &scan {
             Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode),
-            Err(reason) if tools_satisfy(reason) => {
-                try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode)
-            }
             Err(reason) => {
                 eprintln!("↻ running via interpreter: {reason}");
                 run_via_interpreter_tier(path, &ir, args, connector_mode)
@@ -339,6 +324,11 @@ fn run_via_interpreter_tier(
     let mut builder = Runtime::builder()
         .approver(std::sync::Arc::new(StdinApprover::new()))
         .tracer(tracer);
+    #[cfg(feature = "python")]
+    if !ir.tools.is_empty() {
+        let tools = corvid_runtime::python_tools::install_python_tools(path)?;
+        builder = builder.tool_registry(tools);
+    }
 
     // Slice 33S1b: install the [io] root policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing
@@ -347,6 +337,7 @@ fn run_via_interpreter_tier(
     // env override takes precedence over the corvid.toml value —
     // matches the existing env-override pattern for CORVID_MODEL.
     builder = builder.io_policy(load_io_tool_policy(path));
+    builder = corvid_runtime::browser::with_browser_tools(builder);
 
     // Slice 33S2b: install the [http] allow policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing
@@ -533,16 +524,15 @@ pub fn build_or_get_cached_native(
     tools_lib: Option<&Path>,
 ) -> anyhow::Result<CachedNativeBinary> {
     let cache_dir = native_cache::cache_dir_for(path);
-    // Tools-lib path participates in the cache key: if the user
-    // swaps between `--with-tools-lib A` and `--with-tools-lib B`,
-    // they get distinct cached binaries. Re-linking against the same
-    // lib re-uses. Users who modify A in place and keep the same
-    // path get stale cache — a `cargo clean` fixes it; a future
-    // future polish work could hash the lib contents.
+    // Both the path and contents of a tools library distinguish cached executables.
     let tools_lib_str = tools_lib
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let key = native_cache::cache_key_with_tools(source, &tools_lib_str);
+    let base = native_cache::cache_key_with_tools(source, &tools_lib_str);
+    let key = match ir.import_fingerprint {
+        Some(digest) => format!("{base}-{}", hex::encode(digest)),
+        None => base,
+    };
     let cached = native_cache::cached_binary_path(&cache_dir, &key);
     if cached.exists() {
         return Ok(CachedNativeBinary {
@@ -552,16 +542,15 @@ pub fn build_or_get_cached_native(
     }
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| anyhow::anyhow!("create cache dir `{}`: {e}", cache_dir.display()))?;
-    // `build_native_to_disk` takes the final bin_path and derives parent
-    // + stem from it — passing `<cache_dir>/<key>` produces
-    // `<cache_dir>/<key>[.exe]` which is exactly where we want it.
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("program")
         .to_string();
     let module_name = format!("corvid_native_{key}");
-    let target_bin = cache_dir.join(&key);
+    // A concurrent runner must see either a complete executable or a miss.
+    let staging = tempfile::Builder::new().prefix(".build-").tempdir_in(&cache_dir)?;
+    let target_bin = staging.path().join(&key);
     // Forward the tools lib (if any) to the linker so
     // `__corvid_tool_<name>` symbols resolve against the user's
     // compiled `#[tool]` implementations.
@@ -573,10 +562,12 @@ pub fn build_or_get_cached_native(
         &extra_libs_owned,
     )
     .map_err(|e| anyhow::anyhow!("native codegen failed for `{stem}`: {e}"))?;
-    Ok(CachedNativeBinary {
-        path: produced,
-        from_cache: false,
-    })
+    let from_cache = match std::fs::rename(&produced, &cached) {
+        Ok(()) => false,
+        Err(_) if cached.is_file() => true,
+        Err(error) => return Err(error.into()),
+    };
+    Ok(CachedNativeBinary { path: cached, from_cache })
 }
 
 /// Pick a trace directory next to the source file's project root.
@@ -1216,5 +1207,7 @@ pub fn apply_env_llm_wiring(
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
         builder = builder.llm(std::sync::Arc::new(OpenAiAdapter::new(key)));
     }
-    builder.llm(std::sync::Arc::new(OllamaAdapter::new()))
+    let compat_key = std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default();
+    builder.llm(std::sync::Arc::new(OpenAiCompatibleAdapter::new(compat_key)))
+        .llm(std::sync::Arc::new(OllamaAdapter::new()))
 }

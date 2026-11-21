@@ -46,7 +46,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{on, MethodFilter};
 use axum::{Json, Router};
-use corvid_ast::HttpMethod;
+use corvid_ast::{HttpMethod, RouteResponseKind};
 use corvid_driver::{
     compile_to_application_contract_with_config, compile_to_ir_with_config_at_path,
     load_corvid_config_for, render_all_pretty,
@@ -95,6 +95,9 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    io_policy: corvid_runtime::io::IoToolPolicy,
+    rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
+    http_policy: corvid_runtime::http::HttpEgressPolicy,
     ir: IrFile,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
@@ -131,6 +134,7 @@ pub(crate) fn cmd_serve(
     listen: &str,
     tools_cdylib: Option<&Path>,
     mode: Option<&str>,
+    access_log: bool,
 ) -> Result<u8> {
     let connector_mode = crate::run_cmd::parse_connector_mode(mode)?;
     let source =
@@ -250,8 +254,17 @@ pub(crate) fn cmd_serve(
         host_tools.extend(register_cdylib_tool_handlers(&ir, cdylib_path)?);
     }
 
+    let http_policy = corvid_driver::load_http_egress_policy(file);
+    let io_policy = corvid_driver::load_io_tool_policy(file);
+    let rag_embedder = corvid_driver::load_rag_embedder(file);
+    let mut builder = Runtime::builder();
+    if let Some(embedder) = rag_embedder.clone() {
+        builder = builder.rag_embedder(embedder);
+    }
     let runtime = corvid_driver::apply_env_llm_wiring(
-        Runtime::builder()
+        builder
+            .http_policy(http_policy.clone())
+            .io_policy(io_policy.clone())
             // The process-wide runtime has no requester identity. Every
             // authenticated HTTP request installs its own contextual
             // QueueApprover below; any accidental non-request path fails
@@ -331,6 +344,9 @@ pub(crate) fn cmd_serve(
         .context("serialize live Corvid OpenAPI contract")?;
 
     let state = Arc::new(ServeState {
+        io_policy,
+        rag_embedder,
+        http_policy,
         ir,
         runtime,
         approval_queue,
@@ -374,7 +390,31 @@ pub(crate) fn cmd_serve(
         // (slice 51r): the Application Contract at the well-known path
         // and a standard OpenAPI 3.1 document.
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route("/.well-known/corvid/stream.js", on(MethodFilter::GET, || async {
+            ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                include_str!("serve_cmd/stream.js"))
+        }))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
+
+    // Serve only the compiled browser entrypoint and its companion Wasm.
+    // Read both once so running requests see a consistent build.
+    let asset_dir = corvid_driver::wasm_output_dir_for(file);
+    let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
+    if has_events {
+        for (name, mime) in [("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")] {
+            let path = asset_dir.join(name);
+            let bytes = Bytes::from(std::fs::read(&path)
+                .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
+            let route = format!("/target/wasm/{name}");
+            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+                anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
+            }
+            app = app.route(&route, on(MethodFilter::GET, move || {
+                let bytes = bytes.clone();
+                async move { ([(axum::http::header::CONTENT_TYPE, mime)], bytes) }
+            }));
+        }
+    }
 
     // Slice 52a: register EVERY declared route and execute its body via
     // the synthetic per-route handler agent — any shape (path params,
@@ -391,7 +431,12 @@ pub(crate) fn cmd_serve(
                 .find(|a| a.name == route.handler_agent)
                 .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default();
+            if route.method == HttpMethod::Get && route.path == "/.well-known/corvid/stream.js" {
+                anyhow::bail!("route path `{}` is reserved for the browser streaming module", route.path);
+            }
             let meta = Arc::new(RouteMeta {
+                form_encoded: route.form_encoded,
+                response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
                 path_params: route
                     .path_params
@@ -491,9 +536,14 @@ pub(crate) fn cmd_serve(
     // banner below can still see the IR for the 33Q9 approval-label
     // check.
     let state_for_banner = state.clone();
+    if access_log {
+        app = app.layer(axum::middleware::from_fn(log_request));
+    }
     let app = app.with_state(state);
 
+    // HTTP workers evaluate the same nested Corvid calls as the CLI thread.
     let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(crate::CLI_STACK_BYTES)
         .enable_all()
         .build()
         .context("build tokio runtime")?;
@@ -540,9 +590,65 @@ pub(crate) fn cmd_serve(
             println!("  POST   /auth/logout                -> revoke the session + clear the cookie");
             println!("  GET    /auth/session               -> the current authenticated actor");
         }
-        axum::serve(listener, app).await.context("serve").map(|_| ())
+        let (shutdown, requested) = tokio::sync::oneshot::channel();
+        let server = std::future::IntoFuture::into_future(
+            axum::serve(listener, app).with_graceful_shutdown(async { let _ = requested.await; })
+        );
+        tokio::pin!(server);
+        tokio::select! {
+            outcome = &mut server => return outcome.context("serve"),
+            signal = shutdown_signal() => signal.context("listen for shutdown signal")?,
+        }
+        let _ = shutdown.send(());
+        eprintln!("corvid serve: draining active requests");
+        match tokio::time::timeout(std::time::Duration::from_secs(30), server).await {
+            Ok(outcome) => outcome.context("drain server"),
+            Err(_) => {
+                eprintln!("corvid serve: 30-second drain deadline expired");
+                Ok(())
+            }
+        }
     })?;
     Ok(0)
+}
+
+async fn log_request(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use std::io::Write;
+    let started = std::time::Instant::now();
+    let method = req.method().clone();
+    let route = req.extensions().get::<axum::extract::MatchedPath>().cloned();
+    let response = next.run(req).await;
+    let record = serde_json::json!({
+        "event": "http_request",
+        "method": method.as_str(),
+        "route": route.as_ref().map(|path| path.as_str()),
+        "status": response.status().as_u16(),
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+    });
+    let _ = writeln!(std::io::stderr().lock(), "{record}");
+    response
+}
+
+/// Handle interactive interruption and the termination signal sent by service managers.
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut interrupt = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = interrupt.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    tokio::signal::ctrl_c().await
 }
 
 /// Resolve the durable serve data directory from `CORVID_SERVE_DATA_DIR`
@@ -580,6 +686,8 @@ fn declared_identity(source: &str) -> Option<corvid_ast::IdentityDecl> {
 /// Per-route metadata captured for the general request handler
 /// (slice 52a).
 struct RouteMeta {
+    form_encoded: bool,
+    response_kind: RouteResponseKind,
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
     /// Declared path params: `(name, type)` in path order.
@@ -1064,7 +1172,7 @@ async fn run_route(
 
     // Query string → the declared query struct value.
     let query_value = match &meta.query_ty {
-        Some(ty) => match query_string_to_value(&raw_query, ty, &types_by_id) {
+        Some(ty) => match urlencoded_record(&raw_query, ty, &types_by_id, "query") {
             Ok(v) => Some(v),
             Err(e) => return bad_request("invalid_query", &e),
         },
@@ -1075,6 +1183,27 @@ async fn run_route(
     // is parsed from the multipart request (slice 52c-2); every other
     // body type is typed JSON.
     let body_value = match &meta.body_ty {
+        Some(ty) if meta.form_encoded => {
+            let media_type = headers.get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split(';').next())
+                .unwrap_or("").trim();
+            if !media_type.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+                return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(serde_json::json!({
+                    "error": "unsupported_media_type", "detail": "expected application/x-www-form-urlencoded"
+                }))).into_response();
+            }
+            let RouteRequestBody::Buffered(bytes) = body else {
+                return internal_error("request_body_mode_mismatch", "form requires a buffered body");
+            };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                return bad_request("invalid_form", "form body must be UTF-8");
+            };
+            match urlencoded_record(text, ty, &types_by_id, "form") {
+                Ok(value) => Some(value),
+                Err(err) => return bad_request("invalid_form", &err),
+            }
+        }
         Some(Type::Upload(_)) => {
             let Some(policy) = &meta.upload_policy else {
                 return internal_error(
@@ -1165,7 +1294,7 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome)
+    finish(outcome, meta.response_kind)
 }
 
 enum RouteRequestBody {
@@ -1286,36 +1415,36 @@ async fn parse_multipart_upload(
 
 /// Parse a URL query string (`a=1&b=x`) into the declared query struct
 /// value, coercing each field from its string form (slice 52a).
-fn query_string_to_value(
-    query: &str,
+fn urlencoded_record(
+    encoded: &str,
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
+    source: &str,
 ) -> Result<Value, String> {
-    let Type::Struct(def_id) = ty else {
-        return Err("query type must be a struct".to_string());
+    let def_id = match ty {
+        Type::Struct(id) => id,
+        Type::ImportedStruct(record) => &record.def_id,
+        _ => return Err(format!("{source} type must be a struct")),
     };
     let ir_type = types_by_id
         .get(def_id)
         .copied()
-        .ok_or_else(|| "unknown query struct type".to_string())?;
-    let pairs: HashMap<String, String> = query
-        .split('&')
-        .filter(|s| !s.is_empty())
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            Some((
-                urldecode(k),
-                urldecode(v),
-            ))
-        })
-        .collect();
+        .ok_or_else(|| format!("unknown {source} struct type"))?;
+    let mut pairs = HashMap::new();
+    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        pairs.insert(urldecode(key)?, urldecode(value)?);
+    }
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
         let raw = pairs
             .get(&field.name)
             .cloned()
-            .ok_or_else(|| format!("missing query param `{}`", field.name))?;
-        fields.push((field.name.clone(), coerce_str_to_value(&raw, &field.ty)?));
+            .ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
+        let value = coerce_str_to_value(&raw, &field.ty)?;
+        corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
+            .map_err(|err| err.to_string())?;
+        fields.push((field.name.clone(), value));
     }
     Ok(Value::Struct(corvid_driver::StructValue::new(
         ir_type.id,
@@ -1324,26 +1453,22 @@ fn query_string_to_value(
     )))
 }
 
-/// Minimal percent-decoding for query keys/values (slice 52a).
-fn urldecode(s: &str) -> String {
-    let bytes = s.replace('+', " ");
-    let mut out = String::with_capacity(bytes.len());
-    let mut chars = bytes.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hi = chars.next();
-            let lo = chars.next();
-            if let (Some(hi), Some(lo)) = (hi, lo) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
+/// Decode form-encoded query text as UTF-8 after expanding percent escapes.
+fn urldecode(s: &str) -> Result<String, String> {
+    let mut decoded = Vec::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'+' => decoded.push(b' '),
+            b'%' => {
+                let mut digit = || bytes.next().and_then(|b| char::from(b).to_digit(16))
+                    .ok_or_else(|| "invalid percent escape in query".to_string());
+                decoded.push((digit()? * 16 + digit()?) as u8);
             }
-        } else {
-            out.push(c);
+            other => decoded.push(other),
         }
     }
-    out
+    String::from_utf8(decoded).map_err(|_| "query parameter must be UTF-8".into())
 }
 
 /// If the dispatch outcome surfaced an `ApprovalQueued` from the
@@ -1373,12 +1498,12 @@ fn capture_pending_invocation_if_queued(
     );
 }
 
-/// Map a handler outcome to an HTTP response: 200 + JSON on success,
+/// Map a handler outcome to an HTTP response: 200 with HTML, JSON or SSE on success,
 /// 202 + `{"approval_id":"..."}` when an `approve` boundary queued
 /// (slice `E0-serve-5`), 403 when an `approve` boundary denied (kept
 /// for the case where a non-queue approver is wired in — defensive),
 /// 500 otherwise.
-fn finish(outcome: Result<Value, RunError>) -> Response {
+fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind) -> Response {
     match outcome {
         // A Stream-returning handler responds as Server-Sent Events:
         // each chunk flushes to the client the moment it arrives
@@ -1413,7 +1538,15 @@ fn finish(outcome: Result<Value, RunError>) -> Response {
             };
             axum::response::Sse::new(sse).into_response()
         }
+        Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
+            axum::response::Html(html.to_string()).into_response()
+        }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
+        Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {
+            (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
+                "error": "handler_timeout", "detail": e.kind.to_string()
+            }))).into_response()
+        }
         Err(RunError::Interp(e)) => {
             if let Some(approval_id) = approval_queued_id(&e.kind) {
                 let approval_id = approval_id.to_string();
@@ -1615,7 +1748,13 @@ async fn approve_approval(
     // same `--with-tools-cdylib` / `tools.py` handlers as the
     // original request. Pre-33Q1a this was an empty default
     // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
-    let bypass_runtime = Runtime::builder()
+    let mut builder = Runtime::builder();
+    if let Some(embedder) = state.rag_embedder.clone() {
+        builder = builder.rag_embedder(embedder);
+    }
+    let bypass_runtime = builder
+        .io_policy(state.io_policy.clone())
+        .http_policy(state.http_policy.clone())
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .tool_registry(state.host_tools.clone())
         .build();
@@ -2244,8 +2383,8 @@ mod tests {
 
     #[test]
     fn urldecode_handles_percent_and_plus() {
-        assert_eq!(urldecode("a%20b+c"), "a b c");
-        assert_eq!(urldecode("plain"), "plain");
+        assert_eq!(urldecode("a%20b+c").unwrap(), "a b c");
+        assert_eq!(urldecode("plain").unwrap(), "plain");
     }
 
     #[test]
@@ -2273,7 +2412,7 @@ mod tests {
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
         let value =
-            query_string_to_value("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id)
+            urlencoded_record("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id, "query")
                 .expect("coerces");
         let Value::Struct(s) = value else {
             panic!("expected struct")
@@ -2298,6 +2437,6 @@ mod tests {
         };
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
-        assert!(query_string_to_value("", &Type::Struct(DefId(9)), &types_by_id).is_err());
+        assert!(urlencoded_record("", &Type::Struct(DefId(9)), &types_by_id, "query").is_err());
     }
 }

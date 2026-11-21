@@ -1,0 +1,37 @@
+agent positive(trace: List<Int>, n: Int) -> Bool:
+    trace.append(n)
+    return n > 0
+
+agent classify(v: Option<Option<Int>>, trace: List<Int>) -> Int:
+    return match v:
+        Some(Some(n)) if positive(trace, n) -> n
+        Some(Some(n)) if positive(trace, -n) -> -1
+        Some(Some(_)) -> 0
+        Some(None) -> -2
+        None -> -3
+        _ -> -4
+
+agent read(flag: Bool) -> Result<Option<String>, String>:
+    if flag:
+        return Ok(Some("fo" + "und"))
+    return Err("mis" + "sing")
+
+agent forward(flag: Bool) -> Result<Option<String>, String>:
+    value = read(flag)?
+    return Ok(value)
+
+agent label(flag: Bool) -> String:
+    return match forward(flag):
+        Ok(Some(text)) -> text
+        Err(reason) -> reason
+        _ -> "empty"
+
+agent main() -> Bool:
+    trace: List<Int> = []
+    a = classify(Some(Some(4)), trace)
+    b = classify(Some(Some(-5)), trace)
+    c = classify(Some(None), trace)
+    d = classify(None, trace)
+    ordered = trace.length() == 3 and trace[0] == 4 and trace[1] == -5 and trace[2] == 5
+    values = a == 4 and b == -1 and c == -2 and d == -3
+    return ordered and values and label(true) == "found" and label(false) == "missing"

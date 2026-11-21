@@ -41,19 +41,30 @@ pub enum BuiltIn {
     Weak,
     Partial,
     ResumeToken,
+    /// Call: `Ok(value: T) -> Result<T, E>`.
     Ok,
+    /// Call: `Err(error: E) -> Result<T, E>`.
     Err,
+    /// Call: `Some(value: T) -> Option<T>`.
     Some,
     None,
     Grounded,
+    /// Call: `Weak::new(value: T) -> Weak<T>`.
     WeakNew,
     /// `range(start, end) -> List<Int>` (slice 45f).
     Range,
+    FormFor,
+    /// Call: `Weak::upgrade(reference: Weak<T>) -> Option<T>`.
     WeakUpgrade,
+    /// Call: `merge(streams: List<Stream<T>>) -> Stream<T>`.
     StreamMerge,
+    /// Call: `resume(streaming_prompt, token: ResumeToken<T>) -> Stream<T>`.
     Resume,
+    /// Call: `resume_token(stream: Stream<T>) -> ResumeToken<T>`.
     StreamResumeToken,
+    /// Call: `ask(question: String, T) -> T`.
     Ask,
+    /// Call: `choose(options: List<T>) -> T`.
     Choose,
     /// Phase 33S3a — `DbHandle` is an opaque, refcounted primitive
     /// type produced ONLY by the executing `db_open` stdlib tool
@@ -91,6 +102,7 @@ pub enum BuiltIn {
     Upload,
     /// Slice 51f — `Page<Item>`, the cursor-pagination envelope. Its
     /// `Item` argument is an ordinary type and resolves normally.
+    /// Call: `Page(items: List<T>, next_cursor: Option<String>) -> Page<T>`.
     Page,
 }
 
@@ -169,6 +181,7 @@ impl SymbolTable {
         self.builtins.insert("None".into(), BuiltIn::None);
         self.builtins.insert("Weak::new".into(), BuiltIn::WeakNew);
         self.builtins.insert("range".into(), BuiltIn::Range);
+        self.builtins.insert("form_for".into(), BuiltIn::FormFor);
         self.builtins
             .insert("Weak::upgrade".into(), BuiltIn::WeakUpgrade);
         self.builtins.insert("merge".into(), BuiltIn::StreamMerge);

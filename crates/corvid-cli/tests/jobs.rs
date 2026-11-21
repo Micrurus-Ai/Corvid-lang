@@ -1278,3 +1278,87 @@ fn jobs_run_without_source_errors_with_helpful_message() {
         "error message must point at the smoke-test affordance: {combined}"
     );
 }
+
+#[test]
+fn resumed_checkpoint_preserves_step_and_tool_allowances() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("jobs.sqlite");
+    let run = |args: &[&str], success: bool| {
+        let output = Command::new(corvid_bin())
+            .arg("jobs")
+            .args(args)
+            .arg("--state")
+            .arg(&state)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), success, "{args:?}: {output:?}");
+        String::from_utf8(if success {
+            output.stdout
+        } else {
+            output.stderr
+        })
+        .unwrap()
+    };
+    run(&["enqueue", "--task", "sum", "--payload", "{}"], true);
+    run(
+        &[
+            "loop",
+            "limits",
+            "--job",
+            "job_1",
+            "--max-steps",
+            "2",
+            "--max-tool-calls",
+            "1",
+        ],
+        true,
+    );
+    let resume = || run(&["checkpoint", "resume", "--job", "job_1"], true);
+    let record_command = |kind: &str, sequence: &str| {
+        let mut cmd = Command::new(corvid_bin());
+        cmd.args(["jobs", "checkpoint", "add", "--job", "job_1", "--label", "sum",
+            "--kind", kind, "--payload", r#"{"total":2}"#, "--step-sequence", sequence,
+            "--state"]).arg(&state);
+        cmd
+    };
+    let record = |kind, sequence, success| {
+        let out = record_command(kind, sequence).output().unwrap();
+        assert_eq!(out.status.success(), success, "{out:?}");
+        String::from_utf8(if success {out.stdout} else {out.stderr}).unwrap()
+    };
+    assert!(resume().contains("remaining_steps: 2"));
+    let start = || {
+        record_command("tool-result", "1").stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap()
+    };
+    let results = [start(), start()].map(|child| child.wait_with_output().unwrap());
+    assert_eq!(results.iter().filter(|out| out.status.success()).count(), 1, "{results:?}");
+    let rejected = results.iter().find(|out| !out.status.success()).unwrap();
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("next sequence is 2"), "{rejected:?}");
+    assert!(record("tool-result", "1", false).contains("next sequence is 2"));
+    assert!(record("tool-result", "2", false).contains("max_tool_calls"));
+    let restored = resume();
+    for expected in [
+        "next_sequence: 2",
+        "remaining_steps: 1",
+        "remaining_tool_calls: 0",
+        "last_kind: tool_result",
+    ] {
+        assert!(restored.contains(expected), "{restored}");
+    }
+    let snapshot = run(&["checkpoint", "resume", "--job", "job_1", "--json"], true);
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(
+        snapshot["checkpoints"][0]["payload"],
+        serde_json::json!({"total":2})
+    );
+    assert_eq!(snapshot["remaining_steps"], 1);
+    assert_eq!(snapshot["remaining_tool_calls"], 0);
+    record("agent-step", "2", true);
+    assert!(record("agent-step", "3", false).contains("max_steps"));
+    let restored = resume();
+    assert!(
+        restored.contains("remaining_steps: 0") && restored.contains("next_sequence: 3"),
+        "{restored}"
+    );
+}

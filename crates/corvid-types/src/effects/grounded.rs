@@ -13,6 +13,8 @@
 use super::analyze::{find_agent, find_prompt, find_tool};
 use super::EffectRegistry;
 use corvid_ast::DimensionValue;
+use corvid_resolve::{Binding, LocalId};
+use std::collections::HashSet;
 
 // ---- Provenance analyzer for Grounded<T> ----
 
@@ -41,27 +43,31 @@ pub fn check_grounded_returns(
         };
 
         // Check if the return type is Grounded<T>.
-        let return_type_name = format_type_ref(&agent.return_ty);
-        if !return_type_name.starts_with("Grounded") {
+        if !is_grounded_type_ref(&agent.return_ty) {
             continue;
         }
 
-        // Analyze provenance: which locals are grounded?
-        let grounded_locals = analyze_agent_provenance(agent, file, resolved, registry);
-
-        // Check if any return statement returns a grounded value.
-        let return_is_grounded =
-            check_return_grounded(&agent.body, &grounded_locals, file, resolved, registry);
-
-        if !return_is_grounded {
+        let mut proof = ReturnProof {
+            file,
+            resolved,
+            registry,
+            saw_return: false,
+        };
+        let mut parameters = HashSet::new();
+        for param in &agent.params {
+            if is_grounded_type_ref(&param.ty) {
+                proof.assign(&mut parameters, param.name.span, true);
+            }
+        }
+        let result = proof.block(&agent.body, parameters, &mut LoopPaths::default());
+        if result.is_err() || !proof.saw_return {
             violations.push(ProvenanceViolation {
                 agent_name: agent.name.name.clone(),
-                span: agent.return_ty.span(),
+                span: result.err().unwrap_or_else(|| agent.return_ty.span()),
                 message: format!(
-                    "agent `{}` returns `{}` but no provenance path from a `data: grounded` \
-                     source feeds into the return value. Call a tool with `uses retrieval` \
-                     and pass its result (directly or through a prompt) to the return.",
-                    agent.name.name, return_type_name,
+                    "agent `{}` returns `{}` and requires a proven source on every return path",
+                    agent.name.name,
+                    format_type_ref(&agent.return_ty),
                 ),
             });
         }
@@ -78,57 +84,129 @@ pub struct ProvenanceViolation {
     pub message: String,
 }
 
-/// Analyze which local variables in an agent body are "grounded" —
-/// i.e., their value chain includes at least one `data: grounded` tool.
-fn analyze_agent_provenance(
-    agent: &corvid_ast::AgentDecl,
-    file: &corvid_ast::File,
-    resolved: &corvid_resolve::Resolved,
-    registry: &EffectRegistry,
-) -> std::collections::HashSet<String> {
-    let mut grounded: std::collections::HashSet<String> = std::collections::HashSet::new();
+type Sources = HashSet<LocalId>;
 
-    for stmt in &agent.body.stmts {
-        analyze_stmt_provenance(stmt, file, resolved, registry, &mut grounded);
+// None denotes an unreachable path. A local has a source at a join only
+// if all paths reaching the join have one.
+fn join(paths: &mut Option<Sources>, incoming: Option<Sources>) {
+    if let Some(incoming) = incoming {
+        if let Some(existing) = paths {
+            existing.retain(|id| incoming.contains(id));
+        } else {
+            *paths = Some(incoming);
+        }
     }
-
-    grounded
 }
 
-fn analyze_stmt_provenance(
-    stmt: &corvid_ast::Stmt,
-    file: &corvid_ast::File,
-    resolved: &corvid_resolve::Resolved,
-    registry: &EffectRegistry,
-    grounded: &mut std::collections::HashSet<String>,
-) {
-    match stmt {
-        corvid_ast::Stmt::Let { name, value, .. } => {
-            if expr_is_grounded(value, file, resolved, registry, grounded) {
-                grounded.insert(name.name.clone());
+#[derive(Default)]
+struct LoopPaths {
+    breaks: Option<Sources>,
+    continues: Option<Sources>,
+}
+
+struct ReturnProof<'a> {
+    file: &'a corvid_ast::File,
+    resolved: &'a corvid_resolve::Resolved,
+    registry: &'a EffectRegistry,
+    saw_return: bool,
+}
+
+impl ReturnProof<'_> {
+    fn sourced(&self, expr: &corvid_ast::Expr, sources: &Sources) -> bool {
+        expr_is_grounded(expr, self.file, self.resolved, self.registry, sources)
+    }
+
+    fn assign(&self, sources: &mut Sources, span: corvid_ast::Span, sourced: bool) {
+        if let Some(Binding::Local(id)) = self.resolved.bindings.get(&span) {
+            if sourced {
+                sources.insert(*id);
+            } else {
+                sources.remove(id);
             }
         }
-        corvid_ast::Stmt::Yield { .. } => {}
-        corvid_ast::Stmt::If {
-            then_block,
-            else_block,
-            ..
-        } => {
-            for s in &then_block.stmts {
-                analyze_stmt_provenance(s, file, resolved, registry, grounded);
-            }
-            if let Some(eb) = else_block {
-                for s in &eb.stmts {
-                    analyze_stmt_provenance(s, file, resolved, registry, grounded);
+    }
+
+    fn block(
+        &mut self,
+        block: &corvid_ast::Block,
+        mut sources: Sources,
+        exits: &mut LoopPaths,
+    ) -> Result<Option<Sources>, corvid_ast::Span> {
+        use corvid_ast::Stmt;
+        for stmt in &block.stmts {
+            match stmt {
+                Stmt::Let { name, value, .. } => {
+                    let sourced = self.sourced(value, &sources);
+                    self.assign(&mut sources, name.span, sourced);
                 }
+                Stmt::Assign {
+                    target: corvid_ast::Expr::Ident { span, .. },
+                    op,
+                    value,
+                    ..
+                } => {
+                    let previously_sourced = matches!(self.resolved.bindings.get(span),
+                        Some(Binding::Local(id)) if sources.contains(id));
+                    let sourced =
+                        self.sourced(value, &sources) || (op.is_some() && previously_sourced);
+                    self.assign(&mut sources, *span, sourced);
+                }
+                Stmt::Return { value, span } => {
+                    self.saw_return = true;
+                    if !value
+                        .as_ref()
+                        .is_some_and(|value| self.sourced(value, &sources))
+                    {
+                        return Err(value.as_ref().map_or(*span, |expr| expr.span()));
+                    }
+                    return Ok(None);
+                }
+                Stmt::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    let mut next = self.block(then_block, sources.clone(), exits)?;
+                    let otherwise = match else_block {
+                        Some(block) => self.block(block, sources, exits)?,
+                        None => Some(sources),
+                    };
+                    join(&mut next, otherwise);
+                    let Some(next) = next else { return Ok(None) };
+                    sources = next;
+                }
+                Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                    // Include zero iterations. Recheck the body when a later
+                    // iteration may start with fewer proven sources.
+                    loop {
+                        let mut loop_paths = LoopPaths::default();
+                        let mut next = self.block(body, sources.clone(), &mut loop_paths)?;
+                        join(&mut next, loop_paths.continues);
+                        let mut header = sources.clone();
+                        if let Some(back_edge) = next {
+                            header.retain(|id| back_edge.contains(id));
+                        }
+                        if header == sources {
+                            if let Some(early_exit) = loop_paths.breaks {
+                                sources.retain(|id| early_exit.contains(id));
+                            }
+                            break;
+                        }
+                        sources = header;
+                    }
+                }
+                Stmt::Break { .. } => {
+                    join(&mut exits.breaks, Some(sources));
+                    return Ok(None);
+                }
+                Stmt::Continue { .. } => {
+                    join(&mut exits.continues, Some(sources));
+                    return Ok(None);
+                }
+                _ => {}
             }
         }
-        corvid_ast::Stmt::For { body, .. } => {
-            for s in &body.stmts {
-                analyze_stmt_provenance(s, file, resolved, registry, grounded);
-            }
-        }
-        _ => {}
+        Ok(Some(sources))
     }
 }
 
@@ -138,7 +216,7 @@ fn expr_is_grounded(
     file: &corvid_ast::File,
     resolved: &corvid_resolve::Resolved,
     registry: &EffectRegistry,
-    grounded: &std::collections::HashSet<String>,
+    grounded: &HashSet<LocalId>,
 ) -> bool {
     match expr {
         corvid_ast::Expr::Call { callee, args, .. } => {
@@ -176,9 +254,15 @@ fn expr_is_grounded(
                         corvid_resolve::DeclKind::Agent => {
                             // Check if the called agent returns Grounded<T>.
                             if let Some(agent) = find_agent(file, &entry.name) {
-                                let ret_name = format_type_ref(&agent.return_ty);
-                                if ret_name.starts_with("Grounded") {
-                                    return true;
+                                if is_grounded_type_ref(&agent.return_ty) {
+                                    // A callee may return its grounded parameter directly.
+                                    // Its contract only applies to arguments with a source.
+                                    return agent.params.iter().zip(args).all(|(param, arg)| {
+                                        !is_grounded_type_ref(&param.ty)
+                                            || expr_is_grounded(
+                                                arg, file, resolved, registry, grounded,
+                                            )
+                                    });
                                 }
                                 // Also check if the agent has grounded effects.
                                 for eff in &agent.effect_row.effects {
@@ -198,15 +282,16 @@ fn expr_is_grounded(
             }
             false
         }
-        corvid_ast::Expr::Ident { name, .. } => {
-            // A local variable is grounded if it was previously assigned a grounded value.
-            grounded.contains(&name.name)
+        corvid_ast::Expr::Ident { span, .. } => {
+            matches!(resolved.bindings.get(span), Some(Binding::Local(id)) if grounded.contains(id))
         }
         corvid_ast::Expr::FieldAccess { target, .. } => {
             // Field access on a grounded struct is grounded.
             expr_is_grounded(target, file, resolved, registry, grounded)
         }
-        corvid_ast::Expr::BinOp { op, left, right, .. } => {
+        corvid_ast::Expr::BinOp {
+            op, left, right, ..
+        } => {
             // Provenance Propagation contagion law (D1): an operator
             // expression is grounded if either operand is grounded —
             // the reachability-analysis half of the law that
@@ -214,10 +299,7 @@ fn expr_is_grounded(
             // are scoped out of the contagion law (they short-circuit),
             // so they do not propagate grounding, matching the
             // type-level rule.
-            if matches!(
-                op,
-                corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or
-            ) {
+            if matches!(op, corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or) {
                 false
             } else {
                 expr_is_grounded(left, file, resolved, registry, grounded)
@@ -251,8 +333,7 @@ pub fn effect_row_is_grounded(
             || registry
                 .get(&eff.name.name)
                 .map(|profile| {
-                    profile.dimensions.get("data")
-                        == Some(&DimensionValue::Name("grounded".into()))
+                    profile.dimensions.get("data") == Some(&DimensionValue::Name("grounded".into()))
                 })
                 .unwrap_or(false)
     })
@@ -262,46 +343,9 @@ fn tool_is_grounded(tool: &corvid_ast::ToolDecl, registry: &EffectRegistry) -> b
     effect_row_is_grounded(&tool.effect_row, registry)
 }
 
-fn check_return_grounded(
-    block: &corvid_ast::Block,
-    grounded: &std::collections::HashSet<String>,
-    file: &corvid_ast::File,
-    resolved: &corvid_resolve::Resolved,
-    registry: &EffectRegistry,
-) -> bool {
-    for stmt in &block.stmts {
-        match stmt {
-            corvid_ast::Stmt::Return {
-                value: Some(expr), ..
-            } => {
-                if expr_is_grounded(expr, file, resolved, registry, grounded) {
-                    return true;
-                }
-            }
-            corvid_ast::Stmt::Yield { .. } => {}
-            corvid_ast::Stmt::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                let then_grounded =
-                    check_return_grounded(then_block, grounded, file, resolved, registry);
-                let else_grounded = else_block.as_ref().map_or(false, |eb| {
-                    check_return_grounded(eb, grounded, file, resolved, registry)
-                });
-                if then_grounded || else_grounded {
-                    return true;
-                }
-            }
-            corvid_ast::Stmt::For { body, .. } => {
-                if check_return_grounded(body, grounded, file, resolved, registry) {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
+fn is_grounded_type_ref(ty: &corvid_ast::TypeRef) -> bool {
+    matches!(ty, corvid_ast::TypeRef::Generic { name, args, .. }
+        if name.name == "Grounded" && args.len() == 1)
 }
 
 fn format_type_ref(ty: &corvid_ast::TypeRef) -> String {
@@ -333,8 +377,7 @@ pub fn effect_row_is_untrusted(
         registry
             .get(&eff.name.name)
             .map(|profile| {
-                profile.dimensions.get("data")
-                    == Some(&DimensionValue::Name("untrusted".into()))
+                profile.dimensions.get("data") == Some(&DimensionValue::Name("untrusted".into()))
             })
             .unwrap_or(false)
     })

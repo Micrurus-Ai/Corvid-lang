@@ -178,6 +178,16 @@ pub unsafe extern "C" fn corvid_grounded_attest_bool(
     value
 }
 
+extern "C" {
+    fn corvid_init_grounded_string_cleanup(forget: extern "C" fn(*mut std::ffi::c_void));
+    fn corvid_string_concat(left: CorvidString, right: CorvidString) -> CorvidString;
+    fn corvid_track_grounded_string(value: CorvidString);
+}
+
+extern "C" fn forget_grounded_pointer(payload: *mut std::ffi::c_void) {
+    grounded_handles::forget_pointer_attestation(payload as usize);
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn corvid_grounded_attest_string(
     value: CorvidString,
@@ -187,10 +197,43 @@ pub unsafe extern "C" fn corvid_grounded_attest_string(
     let source = read_corvid_string(source_name);
     let chain =
         crate::provenance::ProvenanceChain::with_retrieval(&source, crate::tracing::now_ms());
-    grounded_handles::attach_pointer_attestation(
-        value.descriptor_key(),
-        grounded_handles::make_attestation(chain, confidence),
-    );
+    attach_string_attestation(value, grounded_handles::make_attestation(chain, confidence));
+    value
+}
+
+unsafe fn attach_string_attestation(
+    value: CorvidString,
+    attestation: std::sync::Arc<grounded_handles::GroundedAttestation>,
+) {
+    static INIT_CLEANUP: std::sync::Once = std::sync::Once::new();
+    INIT_CLEANUP.call_once(|| corvid_init_grounded_string_cleanup(forget_grounded_pointer));
+    corvid_track_grounded_string(value);
+    grounded_handles::attach_pointer_attestation(value.descriptor_key(), attestation);
+}
+
+/// Join two borrowed strings. Bit 0 identifies a grounded left operand and
+/// bit 1 a grounded right operand. Success returns an owned descriptor.
+/// Invalid flags or a missing required attestation return a null descriptor.
+///
+/// # Safety
+/// Both arguments must be live native string descriptors.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_grounded_string_concat(
+    left: CorvidString,
+    right: CorvidString,
+    grounded_mask: u8,
+) -> CorvidString {
+    if !(1..=3).contains(&grounded_mask) {
+        return CorvidString::null();
+    }
+    let Some(attestation) = grounded_handles::derive_string_add(
+        (grounded_mask & 1 != 0).then_some(left.descriptor_key()),
+        (grounded_mask & 2 != 0).then_some(right.descriptor_key()),
+    ) else {
+        return CorvidString::null();
+    };
+    let value = corvid_string_concat(left, right);
+    attach_string_attestation(value, attestation);
     value
 }
 
@@ -245,4 +288,42 @@ pub unsafe extern "C" fn corvid_grounded_capture_string_handle(value: CorvidStri
 #[no_mangle]
 pub extern "C" fn corvid_grounded_capture_struct_handle(value: i64) -> u64 {
     grounded_handles::register_handle_for_pointer(value as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grounded_handles::{
+        make_attestation, register_handle_for_last_scalar, release_handle,
+        set_last_scalar_attestation,
+    };
+    use crate::provenance::ProvenanceChain;
+
+    #[test]
+    fn derived_handle_reports_nested_retrievals_in_operand_order() {
+        let first = ProvenanceChain::with_retrieval("catalog", 1);
+        let mut second = ProvenanceChain::with_retrieval("inventory", 2);
+        second.add_prompt_transform("summarize", 3);
+        let nested = ProvenanceChain::derived("add", vec![first.clone(), second], 0);
+        let chain = ProvenanceChain::derived("add", vec![ProvenanceChain::new(), nested, first], 0);
+        assert!(chain.has_retrieval());
+        assert!(chain.has_source("inventory"));
+        assert!(!chain.has_source("absent"));
+        set_last_scalar_attestation(make_attestation(chain, 0.75));
+        let handle = register_handle_for_last_scalar();
+        let mut names = [std::ptr::null(); 2];
+        // SAFETY: the output array has room for both pointers, which the bridge
+        // keeps valid until the next transient-string call on this thread.
+        unsafe {
+            assert_eq!(
+                corvid_grounded_sources(handle, names.as_mut_ptr(), names.len()),
+                2
+            );
+            assert_eq!(
+                names.map(|name| CStr::from_ptr(name).to_bytes()),
+                [b"catalog".as_slice(), b"inventory"]
+            );
+        }
+        assert!(release_handle(handle));
+    }
 }

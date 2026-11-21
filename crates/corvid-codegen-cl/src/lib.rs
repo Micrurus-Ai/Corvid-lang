@@ -27,6 +27,12 @@ pub mod lowering;
 pub mod module;
 pub mod ownership;
 pub mod pair_elim;
+pub mod result_match;
+
+mod assignment;
+pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
+mod map_support;
+pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
 pub mod staticlib_discovery;
 pub mod target;
@@ -53,6 +59,9 @@ pub fn compile_to_object(
     // host's tools. False for native binaries (linked tool wrappers).
     tools_via_registry: bool,
 ) -> Result<(), CodegenError> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Err(CodegenError::not_supported("typed Python imports (use the interpreter)", tool.span));
+    }
     // Run the ownership analysis pass before codegen.
     // Output is a transformed IrFile with borrow_sig populated on
     // every agent. Codegen downstream consults borrow_sig at call
@@ -247,6 +256,101 @@ fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
     ))
 }
 
+/// Build-time fingerprint of this native backend's source and target triple.
+pub const NATIVE_BACKEND_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/native-backend-id.txt"));
+
 fn span_zero() -> corvid_ast::Span {
     corvid_ast::Span::new(0, 0)
+}
+
+/// Concatenating a grounded string needs ownership and provenance for the new value.
+pub fn requires_grounded_string_concat(
+    op: corvid_ast::BinaryOp,
+    left: &corvid_types::Type,
+    right: &corvid_types::Type,
+) -> bool {
+    use corvid_types::Type;
+    op == corvid_ast::BinaryOp::Add
+        && [left, right].iter().any(|ty| matches!(ty, Type::Grounded(inner) if **inner == Type::String))
+}
+
+/// Integer callbacks share one native ABI: environment handle followed by arguments.
+pub fn native_callback_type(ty: &corvid_types::Type) -> bool {
+    use corvid_types::Type;
+    matches!(ty, Type::Function { params, ret, .. } if matches!(**ret, Type::Int | Type::Bool) && params.iter().all(|p| *p == Type::Int))
+}
+
+/// Collect each local needed by an integer callback, with its storage type.
+pub fn native_lambda_locals(body: &corvid_ir::IrExpr) -> Option<Vec<(corvid_resolve::LocalId, corvid_types::Type)>> {
+    use corvid_ir::{IrExpr, IrExprKind};
+    use corvid_resolve::LocalId;
+    use corvid_types::{BuiltinMethodKind, Type};
+
+    fn local(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        let IrExprKind::Local { local_id, .. } = &expr.kind else { return None };
+        if !locals.iter().any(|(id, _)| id == local_id) {
+            locals.push((*local_id, expr.ty.clone()));
+        }
+        Some(())
+    }
+
+    fn list(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(&expr.ty, Type::List(element) if **element == Type::Int) { return None; }
+        local(expr, locals)
+    }
+
+    fn collect(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(expr.ty, Type::Int | Type::Bool) { return None; }
+        match &expr.kind {
+            IrExprKind::Literal(corvid_ir::IrLiteral::Int(_) | corvid_ir::IrLiteral::Bool(_)) => {}
+            IrExprKind::Local { .. } => local(expr, locals)?,
+            IrExprKind::Index { target, index } => {
+                list(target, locals)?;
+                collect(index, locals)?;
+            }
+            IrExprKind::BuiltinMethod { kind: BuiltinMethodKind::ListLength, receiver, .. } => {
+                list(receiver, locals)?;
+            }
+            IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
+                collect(left, locals)?;
+                collect(right, locals)?;
+            }
+            IrExprKind::Call { kind: corvid_ir::IrCallKind::Agent { .. }, args, .. } => {
+                for arg in args { collect(arg, locals)?; }
+            }
+            IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => collect(operand, locals)?,
+            _ => return None,
+        }
+        Some(())
+    }
+    let mut locals = Vec::new();
+    collect(body, &mut locals)?;
+    Some(locals)
+}
+
+pub fn native_integer_list_transform(
+    method: corvid_types::BuiltinMethodKind, receiver: &corvid_types::Type, args: &[corvid_ir::IrExpr],
+) -> bool {
+    use corvid_types::{BuiltinMethodKind, Type};
+    let (callback, arity, result) = match (method, args) {
+        (BuiltinMethodKind::ListMap, [f]) => (f, 1, Type::Int),
+        (BuiltinMethodKind::ListFilter | BuiltinMethodKind::ListAny | BuiltinMethodKind::ListAll, [f]) => (f, 1, Type::Bool),
+        (BuiltinMethodKind::ListFold, [init, f]) if init.ty == Type::Int => (f, 2, Type::Int),
+        _ => return false,
+    };
+    matches!(receiver, Type::List(element) if **element == Type::Int)
+        && native_callback_type(&callback.ty)
+        && matches!(&callback.ty, Type::Function { params, ret, .. }
+            if params.len() == arity && **ret == result)
+}
+
+pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, StringLength | StringSubstring | StringToUpper | StringToLower | StringTrim
+        | StringContains | StringStartsWith | StringEndsWith | StringSplit | StringReplace)
+}
+
+pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)
 }

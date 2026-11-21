@@ -16,7 +16,7 @@ corvid build <file> --target=wasm       # WASM target
 corvid build <file> --target=server     # rendered axum binary
 corvid build <file> --sign              # sign the cdylib + receipts
 corvid run <file>                       # build and run an agent
-corvid check <file>                     # typecheck only, no codegen
+corvid check [file]                     # typecheck file or project src/main.cor
 corvid test                             # run tests in tests/
 corvid bench <file>                     # run a benchmark
 ```

@@ -55,7 +55,13 @@ impl DurableQueueRuntime {
     }
 
     pub fn loop_limits(&self, job_id: &str) -> Result<Option<JobLoopLimits>, RuntimeError> {
-        let conn = self.conn.lock().unwrap();
+        Self::read_loop_limits(&self.conn.lock().unwrap(), job_id)
+    }
+
+    pub(super) fn read_loop_limits(
+        conn: &Connection,
+        job_id: &str,
+    ) -> Result<Option<JobLoopLimits>, RuntimeError> {
         let mut stmt = conn
             .prepare(
                 "select job_id, max_steps, max_wall_ms, max_spend_usd, max_tool_calls, updated_ms
@@ -80,7 +86,13 @@ impl DurableQueueRuntime {
     }
 
     pub fn loop_usage(&self, job_id: &str) -> Result<Option<JobLoopUsage>, RuntimeError> {
-        let conn = self.conn.lock().unwrap();
+        Self::read_loop_usage(&self.conn.lock().unwrap(), job_id)
+    }
+
+    pub(super) fn read_loop_usage(
+        conn: &Connection,
+        job_id: &str,
+    ) -> Result<Option<JobLoopUsage>, RuntimeError> {
         let mut stmt = conn
             .prepare(
                 "select job_id, steps, wall_ms, spend_usd, tool_calls, updated_ms
@@ -149,6 +161,31 @@ impl DurableQueueRuntime {
         let tx = conn.transaction().map_err(|err| {
             RuntimeError::Other(format!("failed to start loop usage transaction: {err}"))
         })?;
+        let report = Self::apply_loop_usage(
+            &tx,
+            job_id,
+            step_delta,
+            wall_ms_delta,
+            spend_usd_delta,
+            tool_call_delta,
+            &actor,
+            now,
+        )?;
+        tx.commit()
+            .map_err(|err| RuntimeError::Other(format!("failed to commit loop usage: {err}")))?;
+        Ok(report)
+    }
+
+    pub(super) fn apply_loop_usage(
+        tx: &rusqlite::Transaction<'_>,
+        job_id: &str,
+        step_delta: u64,
+        wall_ms_delta: u64,
+        spend_usd_delta: f64,
+        tool_call_delta: u64,
+        actor: &str,
+        now: u64,
+    ) -> Result<JobLoopUsageReport, RuntimeError> {
         let status_before = tx
             .query_row(
                 "select status from queue_jobs where id = ?1",
@@ -167,6 +204,7 @@ impl DurableQueueRuntime {
                 | QueueJobStatus::Canceled
                 | QueueJobStatus::ApprovalDenied
                 | QueueJobStatus::ApprovalExpired
+                | QueueJobStatus::LoopStallTerminated
                 | QueueJobStatus::LoopBudgetExceeded
         ) {
             return Err(RuntimeError::Other(format!(
@@ -234,10 +272,10 @@ impl DurableQueueRuntime {
             )
             .map_err(|err| RuntimeError::Other(format!("failed to stop loop-bound job: {err}")))?;
             insert_job_audit_event(
-                &tx,
+                tx,
                 job_id,
                 "loop_bound_exceeded",
-                &actor,
+                actor,
                 None,
                 &status_before,
                 QueueJobStatus::LoopBudgetExceeded.as_str(),
@@ -245,8 +283,6 @@ impl DurableQueueRuntime {
                 now,
             )?;
         }
-        tx.commit()
-            .map_err(|err| RuntimeError::Other(format!("failed to commit loop usage: {err}")))?;
         Ok(JobLoopUsageReport {
             usage,
             violated_bounds,

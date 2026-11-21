@@ -32,18 +32,21 @@ impl RagSqliteIndex {
     }
 
     pub fn insert_document(&self, document: &RagDocument) -> Result<(), RuntimeError> {
-        self.conn
-            .execute(
-                "insert or replace into rag_documents (id, source, media_type, text)
+        Self::write_document(&self.conn, document)
+    }
+
+    fn write_document(conn: &Connection, document: &RagDocument) -> Result<(), RuntimeError> {
+        conn.execute(
+            "insert or replace into rag_documents (id, source, media_type, text)
                  values (?1, ?2, ?3, ?4)",
-                params![
-                    document.id,
-                    document.source,
-                    document.media_type,
-                    document.text
-                ],
-            )
-            .map_err(|err| RuntimeError::Other(format!("failed to insert RAG document: {err}")))?;
+            params![
+                document.id,
+                document.source,
+                document.media_type,
+                document.text
+            ],
+        )
+        .map_err(|err| RuntimeError::Other(format!("failed to insert RAG document: {err}")))?;
         Ok(())
     }
 
@@ -51,8 +54,15 @@ impl RagSqliteIndex {
         let tx = self.conn.transaction().map_err(|err| {
             RuntimeError::Other(format!("failed to start RAG chunk insert: {err}"))
         })?;
+        Self::write_chunks(&tx, chunks)?;
+        tx.commit()
+            .map_err(|err| RuntimeError::Other(format!("failed to commit RAG chunks: {err}")))?;
+        Ok(())
+    }
+
+    fn write_chunks(conn: &Connection, chunks: &[RagChunk]) -> Result<(), RuntimeError> {
         for chunk in chunks {
-            tx.execute(
+            conn.execute(
                 "insert or replace into rag_chunks
                  (chunk_id, doc_id, source, text, start_char, end_char, provenance_key)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -68,26 +78,75 @@ impl RagSqliteIndex {
             )
             .map_err(|err| RuntimeError::Other(format!("failed to insert RAG chunk: {err}")))?;
         }
-        tx.commit()
-            .map_err(|err| RuntimeError::Other(format!("failed to commit RAG chunks: {err}")))?;
         Ok(())
     }
 
+    pub(crate) fn replace_document(
+        &mut self,
+        document: &RagDocument,
+        chunks: &[RagChunk],
+        embeddings: &[RagEmbeddingRecord],
+    ) -> Result<(), RuntimeError> {
+        let failure = |err| RuntimeError::Other(format!("failed to replace RAG document: {err}"));
+        let tx = self.conn.transaction().map_err(failure)?;
+        tx.execute(
+            "delete from rag_chunk_embeddings where chunk_id in
+            (select chunk_id from rag_chunks where doc_id = ?1)",
+            [&document.id],
+        )
+        .map_err(failure)?;
+        tx.execute("delete from rag_chunks where doc_id = ?1", [&document.id])
+            .map_err(failure)?;
+        Self::write_document(&tx, document)?;
+        Self::write_chunks(&tx, chunks)?;
+        Self::write_embeddings(&tx, embeddings)?;
+        tx.commit().map_err(failure)
+    }
+
     pub fn search_text(&self, query: &str, limit: usize) -> Result<Vec<RagChunk>, RuntimeError> {
-        let escaped = query.replace('%', "\\%").replace('_', "\\_");
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let like = format!("%{escaped}%");
+        self.lexical_query(
+            "select chunk_id, doc_id, source, text, start_char, end_char, provenance_key
+             from rag_chunks where text like ?1 escape '\\' order by chunk_id limit ?2",
+            &like,
+            limit,
+        )
+    }
+
+    pub(crate) fn search_terms(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<RagChunk>, RuntimeError> {
+        let terms: Vec<_> = query
+            .split_whitespace()
+            .filter(|term| term.chars().count() >= 2)
+            .collect();
+        let terms = serde_json::json!(terms).to_string();
+        self.lexical_query(
+            "select c.chunk_id, c.doc_id, c.source, c.text, c.start_char, c.end_char, c.provenance_key
+             from rag_chunks c join json_each(?1) t on instr(lower(c.text), lower(t.value)) > 0
+             group by c.chunk_id order by count(*) desc, c.chunk_id limit ?2",
+            &terms, limit,
+        )
+    }
+
+    fn lexical_query(
+        &self,
+        sql: &str,
+        pattern: &str,
+        limit: usize,
+    ) -> Result<Vec<RagChunk>, RuntimeError> {
         let mut stmt = self
             .conn
-            .prepare(
-                "select chunk_id, doc_id, source, text, start_char, end_char, provenance_key
-                 from rag_chunks
-                 where text like ?1 escape '\\'
-                 order by chunk_id
-                 limit ?2",
-            )
+            .prepare(sql)
             .map_err(|err| RuntimeError::Other(format!("failed to prepare RAG search: {err}")))?;
         let rows = stmt
-            .query_map(params![like, limit as i64], |row| {
+            .query_map(params![pattern, limit as i64], |row| {
                 Ok(RagChunk {
                     chunk_id: row.get(0)?,
                     doc_id: row.get(1)?,
@@ -128,11 +187,22 @@ impl RagSqliteIndex {
         let tx = self.conn.transaction().map_err(|err| {
             RuntimeError::Other(format!("failed to start RAG embedding insert: {err}"))
         })?;
+        Self::write_embeddings(&tx, embeddings)?;
+        tx.commit().map_err(|err| {
+            RuntimeError::Other(format!("failed to commit RAG embeddings: {err}"))
+        })?;
+        Ok(())
+    }
+
+    fn write_embeddings(
+        conn: &Connection,
+        embeddings: &[RagEmbeddingRecord],
+    ) -> Result<(), RuntimeError> {
         for embedding in embeddings {
             let payload = serde_json::to_string(&embedding.values).map_err(|err| {
                 RuntimeError::Other(format!("failed to encode RAG embedding vector: {err}"))
             })?;
-            tx.execute(
+            conn.execute(
                 "insert or replace into rag_chunk_embeddings
                  (chunk_id, dimension, values_json)
                  values (?1, ?2, ?3)",
@@ -140,9 +210,6 @@ impl RagSqliteIndex {
             )
             .map_err(|err| RuntimeError::Other(format!("failed to insert RAG embedding: {err}")))?;
         }
-        tx.commit().map_err(|err| {
-            RuntimeError::Other(format!("failed to commit RAG embeddings: {err}"))
-        })?;
         Ok(())
     }
 
@@ -196,6 +263,7 @@ impl RagSqliteIndex {
                 .score
                 .partial_cmp(&left.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.chunk.chunk_id.cmp(&right.chunk.chunk_id))
         });
         if hits.len() > limit {
             hits.truncate(limit);
@@ -259,10 +327,11 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     if left.len() != right.len() || left.is_empty() {
         return 0.0;
     }
-    let mut dot = 0.0f32;
-    let mut left_norm = 0.0f32;
-    let mut right_norm = 0.0f32;
+    let mut dot = 0.0f64;
+    let mut left_norm = 0.0f64;
+    let mut right_norm = 0.0f64;
     for (lhs, rhs) in left.iter().zip(right.iter()) {
+        let (lhs, rhs) = (f64::from(*lhs), f64::from(*rhs));
         dot += lhs * rhs;
         left_norm += lhs * lhs;
         right_norm += rhs * rhs;
@@ -270,6 +339,6 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     if left_norm == 0.0 || right_norm == 0.0 {
         0.0
     } else {
-        dot / (left_norm.sqrt() * right_norm.sqrt())
+        (dot / (left_norm.sqrt() * right_norm.sqrt())) as f32
     }
 }

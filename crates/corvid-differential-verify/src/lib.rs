@@ -140,13 +140,40 @@ pub fn verify_program(path: &Path) -> Result<DivergenceReport> {
     })
 }
 
-pub fn verify_corpus(dir: &Path) -> Result<Vec<DivergenceReport>> {
+#[derive(Serialize)]
+pub struct IncompleteVerification {
+    pub program: PathBuf,
+    pub error: String,
+}
+
+#[derive(Default, Serialize)]
+pub struct CorpusVerification {
+    pub reports: Vec<DivergenceReport>,
+    pub incomplete: Vec<IncompleteVerification>,
+}
+
+pub fn scan_corpus(dir: &Path) -> Result<CorpusVerification> {
     let mut files = collect_programs(dir)?;
     files.sort();
-    files
-        .into_iter()
-        .map(|path| verify_program(&path))
-        .collect()
+    let mut result = CorpusVerification::default();
+    for path in files {
+        match verify_program(&path) {
+            Ok(report) => result.reports.push(report),
+            Err(error) => result.incomplete.push(IncompleteVerification {
+                program: path,
+                error: format!("{error:#}"),
+            }),
+        }
+    }
+    Ok(result)
+}
+
+pub fn verify_corpus(dir: &Path) -> Result<Vec<DivergenceReport>> {
+    let result = scan_corpus(dir)?;
+    if let Some(failure) = result.incomplete.first() {
+        bail!("verification incomplete for `{}`: {}", failure.program.display(), failure.error);
+    }
+    Ok(result.reports)
 }
 
 impl Frontend {
@@ -518,24 +545,29 @@ fn collect_programs(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn ensure_native_runtime_staticlib() -> Result<()> {
+    let filename = if cfg!(target_env = "msvc") {
+        "corvid_runtime.lib"
+    } else {
+        "libcorvid_runtime.a"
+    };
+    if corvid_codegen_cl::staticlib_discovery::discover_staticlib(filename)
+        .is_some_and(|location| location.path.is_file())
+    {
+        return Ok(());
+    }
     static READY: OnceLock<Result<(), String>> = OnceLock::new();
     READY
         .get_or_init(|| {
             let output = Command::new("cargo")
-                .arg("rustc")
-                .arg("-p")
-                .arg("corvid-runtime")
-                .arg("--")
-                .arg("--crate-type")
-                .arg("staticlib")
+                .args(["build", "--locked", "-p", "corvid-runtime"])
                 .current_dir(workspace_root())
                 .output()
-                .map_err(|err| format!("failed to spawn cargo rustc for corvid-runtime: {err}"))?;
+                .map_err(|err| format!("failed to spawn cargo build for corvid-runtime: {err}"))?;
             if output.status.success() {
                 Ok(())
             } else {
                 Err(format!(
-                    "cargo rustc -p corvid-runtime -- --crate-type staticlib failed: stdout=`{}` stderr=`{}`",
+                    "cargo build --locked -p corvid-runtime failed: stdout=`{}` stderr=`{}`",
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
                 ))
@@ -648,18 +680,40 @@ mod tests {
     }
 
     #[test]
-    fn native_drop_fixture_is_classified_as_too_loose() {
-        let report =
-            verify_program(&repo_root().join("tests/corpus/should_fail/native_drops_effect.cor"))
-                .expect("verify native drop fixture");
+    fn effect_after_list_loop_agrees_and_a_missing_trust_requirement_is_detected() {
+        let report = verify_program(&repo_root().join("tests/corpus/effect_after_list_loop.cor"))
+            .expect("verify effect after list loop");
+        assert!(report.divergences.is_empty(), "{:?}", report.divergences);
+        let mut reports = report.reports;
+        for tier in &reports {
+            assert_eq!(tier.profile.trust, TrustLevel::HumanRequired);
+            assert!(tier.effect_names.iter().any(|name| name == "late_effect"));
+        }
+        // Exercise the classifier independently of whether a backend has a bug.
+        let native = reports.iter_mut().find(|r| r.tier == Tier::Native).unwrap();
+        native.profile.trust = TrustLevel::Autonomous;
+        let divergences = diff_reports(&reports).expect("compare weakened native profile");
         assert!(
-            report.divergences.iter().any(|divergence| {
+            divergences.iter().any(|divergence| {
                 divergence.dimension == "trust"
                     && divergence.classification == DivergenceClass::StaticTooLoose
             }),
             "expected native trust drop to classify as static-too-loose: {:?}",
-            report.divergences
+            divergences
         );
+    }
+
+    #[test]
+    fn corpus_scan_reports_later_programs_after_an_incomplete_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let invalid = dir.path().join("a.cor");
+        std::fs::write(&invalid, "agent broken(").unwrap();
+        std::fs::copy(repo_root().join("tests/corpus/cost_string.cor"), dir.path().join("b.cor")).unwrap();
+        let result = scan_corpus(dir.path()).unwrap();
+        assert_eq!(result.incomplete.len(), 1);
+        assert_eq!(result.incomplete[0].program, invalid);
+        assert_eq!(result.reports.len(), 1);
+        assert!(result.reports[0].divergences.is_empty());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -9,12 +10,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # macOS runners started shipping Python 3.14, which is newer than
-  # PyO3 0.22's maximum supported version; the stable-ABI forward
-  # compatibility flag builds against the stable ABI instead of
-  # failing the build. Jobs that need an exact interpreter still pin
-  # python-version explicitly.
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
 jobs:
   workspace-tests:
@@ -26,8 +21,7 @@ jobs:
       # GitHub-hosted ubuntu-latest runners ship with ~14 GB free on
       # the root partition. `cargo test --workspace --lib --tests`
       # builds ~80 debug test binaries; each links ~250 rlibs plus
-      # the corvid-runtime staticlib. Combined with the cache restore
-      # below, this has repeatedly exhausted the disk during link,
+      # the corvid-runtime staticlib. These builds have repeatedly exhausted the disk during link,
       # surfacing as `rust-lld` SIGBUS (signal 7, Bus error) inside
       # LLVM's own mmap-backed write path. The pre-installed Android
       # SDK, .NET, GHC/Haskell, and CodeQL tooling are not used by
@@ -56,18 +50,20 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo registry + target
+      - name: Cache downloaded Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-workspace-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-workspace-deps-
+
+      - name: Build the runtime archive for native integration tests
+        run: cargo build --locked -p corvid-runtime
 
       - name: cargo check --workspace
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       # Enable coredumps + post-mortem backtrace capture for the
       # workspace test step. The `cdylib_catalog_demo_filter_host_narrows_catalog`
@@ -93,7 +89,7 @@ jobs:
         run: |
           ulimit -c unlimited
           set +e
-          cargo test --workspace --lib --tests 2>&1
+          cargo test --locked --workspace --lib --tests --no-fail-fast 2>&1
           EXIT=$?
           if [ $EXIT -ne 0 ]; then
             echo ""
@@ -271,6 +267,9 @@ jobs:
 
       - name: Signed build claim-coverage refusal
         run: cargo test -p corvid-driver signed_claim_coverage -- --nocapture
+
+      - name: Check the learner function reference
+        run: python3 scripts/update_function_reference.py --check
 
       - name: Core semantics registry + doc drift gate
         run: |
@@ -542,6 +541,11 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-py-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-py-
+
+      - name: Test the installed Python runtime package
+        run: |
+          python -m pip install './runtime/python[dev]'
+          python -I -m pytest --import-mode=importlib -q runtime/python/tests
 
       # Phase 30-J slice gate: feature-gated Python integration tests
       # exercise scalar/list/dict round-trip, exception marshaling

@@ -20,6 +20,20 @@ fn numeric_equality_crosses_int_and_float() {
 // -------------------------- Literal & arithmetic ------------------------
 
 #[tokio::test]
+async fn grounded_agent_parameter_rejects_plain_host_text() {
+    let ir = ir_of("agent read(value: Grounded<String>) -> String:\n    return value.unwrap_discarding_sources()\n");
+    let rt = empty_runtime();
+    let source = crate::ProvenanceChain::with_retrieval("catalog", 1);
+    let attested = Value::Grounded(crate::value::GroundedValue::new(Value::String("entry".into()), source));
+    let actual = run_agent(&ir, "read", vec![attested], &rt).await.unwrap();
+    assert_eq!(actual, Value::String("entry".into()));
+    let err = run_agent(&ir, "read", vec![Value::String("plain".into())], &rt)
+        .await.unwrap_err();
+    assert!(matches!(err.kind, InterpErrorKind::TypeMismatch { expected, got }
+        if expected == "Grounded<String>" && got == "String"));
+}
+
+#[tokio::test]
 async fn returns_integer_literal() {
     let ir = ir_of("agent answer() -> Int:\n    return 42\n");
     let rt = empty_runtime();
@@ -205,6 +219,7 @@ async fn if_non_bool_condition_is_defensive_runtime_error() {
         borrow_sig: None,
     };
     let ir = IrFile {
+        import_fingerprint: None,
         imports: vec![],
         types: vec![],
         tools: vec![],
@@ -363,6 +378,34 @@ async fn logical_ops_short_circuit_semantics() {
 }
 
 #[tokio::test]
+async fn boolean_chains_call_each_operand_in_order_until_the_result_is_known() {
+    for (operator, stop) in [("and", false), ("or", true)] {
+        let mut terms: Vec<_> = (0..24)
+            .map(|index| format!("mark(trace, {index}, {})", !stop))
+            .collect();
+        terms.push(format!("mark(trace, 24, {stop})"));
+        terms.push("(1 / 0 == 0)".to_owned());
+        let chain = terms.join(&format!(" {operator} "));
+        let source = format!(
+            "agent mark(trace: List<Int>, index: Int, flag: Bool) -> Bool:
+    trace.append(index)
+    return flag
+
+agent main() -> List<Int>:
+    trace: List<Int> = []
+    result = {chain}
+    if result == {stop}:
+        return trace
+    return []
+"
+        );
+        let ir = ir_of(&source);
+        let value = run_agent(&ir, "main", vec![], &empty_runtime()).await.unwrap();
+        assert_eq!(value_to_json(&value), json!((0..25).collect::<Vec<_>>()));
+    }
+}
+
+#[tokio::test]
 async fn not_negates_bool() {
     let src = "agent nope(b: Bool) -> Bool:\n    return not b\n";
     let ir = ir_of(src);
@@ -371,4 +414,18 @@ async fn not_negates_bool() {
         run_agent(&ir, "nope", vec![Value::Bool(true)], &rt).await.expect("run"),
         Value::Bool(false)
     );
+}
+
+#[tokio::test]
+async fn slice_clamps_bounds_and_keeps_an_independent_list() {
+    let ir = ir_of(r#"
+agent main() -> List<Int>:
+    source = [4, 5, 6]
+    copy = source.slice(-100, 100)
+    source[0] = 7
+    copy[2] = 9
+    return copy + source.slice(2, 1) + source.slice(99, 100) + source.slice(2, 3)
+"#);
+    let value = run_agent(&ir, "main", vec![], &empty_runtime()).await.unwrap();
+    assert_eq!(value_to_json(&value), json!([4, 5, 9, 6]));
 }

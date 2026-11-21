@@ -1,0 +1,42 @@
+import "./std/db" use db_open, db_execute, db_query_rows, db_param_text
+import "./std/json" use json_get_string
+
+public type Note:
+    name: String
+    text: String
+
+agent save(note: Note) -> Result<Note, String>:
+    db = db_open("notes.sqlite")?
+    db_execute(db, "BEGIN IMMEDIATE", [])?
+    db_execute(db, "INSERT INTO writes(name) VALUES (?)", [db_param_text(note.name)])?
+    db_execute(db, "INSERT INTO notes(name, text) VALUES (?, ?)", [db_param_text(note.name), db_param_text(note.text)])?
+    db_execute(db, "COMMIT", [])?
+    return Ok(note)
+
+agent load(name: String) -> Result<Note, String>:
+    db = db_open("notes.sqlite")?
+    rows = db_query_rows(db, "SELECT name, text FROM notes WHERE name = ?", [db_param_text(name)])?
+    if rows.length() == 0:
+        return Err("missing note")
+    name_read = json_get_string(rows[0], "name")?
+    text_read = json_get_string(rows[0], "text")?
+    return Ok(Note(name_read, text_read))
+
+agent locked_events(db: DbHandle) -> Stream<String>:
+    started = db_execute(db, "BEGIN IMMEDIATE", [])
+    if started.is_ok():
+        while true:
+            yield "tick"
+
+agent failed_events(reason: String) -> Stream<String>:
+    yield reason
+
+server notes_api:
+    route GET "/events" -> json Stream<String>:
+        return match db_open("notes.sqlite"):
+            Ok(handle) -> locked_events(handle)
+            Err(reason) -> failed_events(reason)
+    route POST "/notes" body Note -> json Result<Note, String>:
+        return save(body)
+    route GET "/notes/{name}" -> json Result<Note, String>:
+        return load(path.name)

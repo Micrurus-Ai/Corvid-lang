@@ -121,6 +121,7 @@ pub fn run_claim_audit(inventory: &Path, json: bool, explain_failures: bool) -> 
 pub fn run_claim_explain(
     cdylib: &Path,
     explain: bool,
+    json: bool,
     key_path: Option<&Path>,
     source_path: Option<&Path>,
 ) -> Result<u8> {
@@ -152,6 +153,17 @@ pub fn run_claim_explain(
     if signature.failed_requested_verification() || source_agreement.failed_requested_verification()
     {
         exit_code = 1;
+    }
+
+    if json {
+        if exit_code != 0 {
+            for line in signature.lines().into_iter().chain(source_agreement.lines()) {
+                eprintln!("{line}");
+            }
+            return Ok(exit_code);
+        }
+        println!("{}", serde_json::to_string_pretty(&descriptor.claim_guarantees)?);
+        return Ok(0);
     }
 
     println!("Corvid cdylib claim explanation");

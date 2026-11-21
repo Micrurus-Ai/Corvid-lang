@@ -3,6 +3,8 @@
 Sequential learning material. Read top to bottom on your first
 pass; come back to specific chapters as reference later.
 
+Look up argument and return types in the [function reference](../reference/functions.md).
+
 ## Table of contents
 
 1. [Why Corvid](00-why-corvid.md) — the moat in three minutes.
@@ -24,6 +26,7 @@ pass; come back to specific chapters as reference later.
 16. [Testing](15-testing.md) — `test`, `eval`, `fixture`, `mock`.
 17. [Building and targets](16-building.md) — native, wasm, server, cdylib.
 18. [Replay](17-replay.md) — deterministic re-execution.
+19. [Browser views](19-browser-views.md)
 
 ## After the book
 

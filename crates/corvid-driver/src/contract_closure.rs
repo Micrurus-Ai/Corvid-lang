@@ -251,6 +251,7 @@ mod tests {
             path_params: vec![],
             query_ty: None,
             body_ty,
+            form_encoded: false,
             response_kind: RouteResponseKind::Json,
             response_ty,
             effect_names: vec![],
@@ -266,6 +267,7 @@ mod tests {
 
     fn ir_with(route: IrRoute, agents: Vec<IrAgent>) -> IrFile {
         IrFile {
+            import_fingerprint: None,
             imports: vec![],
             types: vec![],
             tools: vec![],

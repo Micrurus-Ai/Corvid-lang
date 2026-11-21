@@ -166,6 +166,26 @@ agent nop(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
+    fn emits_nul_without_consuming_the_following_digit() {
+        let py = src_to_py(
+            r#"agent main() -> String:
+    return "A\07B"
+"#,
+        );
+        assert!(py.contains(r#"return "A\x007B""#));
+    }
+
+    #[test]
+    fn emits_ordered_map_entries_with_computed_keys() {
+        let py = src_to_py(
+            r#"agent count(key: String) -> Map<String, Int>:
+    return {"first": 1, key: 2, "first": 3}
+"#,
+        );
+        assert!(py.contains(r#"return {"first": 1, key: 2, "first": 3}"#));
+    }
+
+    #[test]
     fn emits_import_passthrough() {
         let src = r#"import python "anthropic" as ant effects: network"#;
         let py = src_to_py(src);
@@ -208,14 +228,34 @@ agent flags() -> Bool:
     }
 
     #[test]
-    fn emits_binop_with_parens() {
+    fn emits_checked_integer_arithmetic() {
         let src = "\
 agent calc() -> Int:
     return 1 + 2
+
+agent divide(x: Int, y: Int) -> Int:
+    return x / y
+
+agent remainder(x: Int, y: Int) -> Int:
+    return x % y
+
+agent negate(x: Int) -> Int:
+    return -x
 ";
         let py = src_to_py(src);
-        // Outer parens on the BinOp ensure correct precedence.
-        assert!(py.contains("return (1 + 2)"));
+        assert!(py.contains("return __corvid_checked_i64(1 + 2)"));
+        assert!(py.contains("return __corvid_div_i64(x, y)"));
+        assert!(py.contains("return __corvid_rem_i64(x, y)"));
+        assert!(py.contains("return __corvid_checked_i64(-x)"));
+    }
+
+    #[test]
+    fn emits_float_division_and_remainder() {
+        let py = src_to_py(
+            "agent divide(x: Float, y: Float) -> Float:\n    return x / y\n\nagent remainder(x: Float, y: Float) -> Float:\n    return x % y\n",
+        );
+        assert!(py.contains("return __corvid_div_f64(x, y)"));
+        assert!(py.contains("return __corvid_rem_f64(x, y)"));
     }
 
     #[test]

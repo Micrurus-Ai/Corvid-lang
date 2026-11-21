@@ -345,7 +345,61 @@ fn native_result_retry_then_try_propagates_into_different_ok_type() {
     );
 }
 
+#[test]
+fn list_last_matches_owned_and_scalar_values() {
+    assert_parity_bool_without_tools(include_str!("list_last.cor"), true);
+}
 
+#[test]
+fn list_first_matches_owned_strings() {
+    assert_parity_bool_without_tools(include_str!("first_label.cor"), true);
+}
 
+#[test]
+fn list_first_distinguishes_missing_item_from_missing_inner_value() {
+    assert_parity_bool_without_tools(r#"
+agent value_or_zero(item: Option<Int>) -> Int:
+    return match item:
+        Some(n) -> n
+        None -> 0
 
+agent read(items: List<Option<Int>>) -> Int:
+    return match items.first():
+        None -> -1
+        Some(item) -> value_or_zero(item)
 
+agent main() -> Bool:
+    item: Option<Int> = None
+    missing: List<Option<Int>> = [item]
+    found: List<Option<Int>> = [Some(7)]
+    empty_list = read([])
+    empty_item = read(missing)
+    present_item = read(found)
+    return empty_list == -1 and empty_item == 0 and present_item == 7
+"#, true);
+}
+
+#[test]
+fn composed_match_arithmetic() {
+    assert_parity_bool_without_tools(include_str!("match_arithmetic.cor"), true);
+}
+
+#[test]
+fn composed_guarded_patterns() {
+    assert_parity_bool_without_tools(include_str!("guarded_patterns.cor"), true);
+}
+
+#[test]
+fn composed_nested_match_calls() {
+    assert_parity_bool_without_tools(include_str!("nested_match_calls.cor"), true);
+}
+
+#[test]
+fn composed_collection_guard_and_index() {
+    assert_parity_bool_without_tools(include_str!("collection_match.cor"), true);
+}
+
+#[test]
+fn composed_contextual_float() {
+    assert_parity_bool_without_tools(include_str!("contextual_float.cor"), true);
+}

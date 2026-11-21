@@ -94,18 +94,42 @@ what `corvid upgrade --check --claims-current <...> --claims-target
 
 ## Calling from C
 
-The `--header` flag generates a C header with the bare `(ptr, len)`
-struct + every `pub extern "c"` symbol. See
-[`docs/internals/effect-spec/abi.md`](../internals/effect-spec/abi.md)
-for the canonical ABI shape; the per-target memory-ownership
-contract is documented at
-[`docs/internals/wasm-abi.md`](../internals/wasm-abi.md).
+Build with `corvid build calc.cor --target cdylib --header`. On Windows, copy the DLL, its import library and its matching generated header to the consumer. Include `lib_calc.h` and link the host against `calc.lib`. An exported integer crosses the ABI by value. A string input is a borrowed UTF-8 string valid for the call. The generated signature specifies where the observation handle is returned.
+
+```c
+uint64_t observation = 0;
+const char *value = echo("hello", &observation);
+if (value) {
+    puts(value);
+    corvid_free_string(value);
+}
+corvid_observation_release(observation);
+```
+
+When using the dynamic catalog, check the status from `corvid_call_agent` before reading its output. An unknown agent returns `CORVID_CALL_AGENT_NOT_FOUND`; invalid JSON arguments return `CORVID_CALL_BAD_ARGS`.
 
 ## Calling from Rust
 
 Treat the cdylib as a normal `extern "C"` library. The
 `corvid-abi` crate ships `CorvidString` + the helper types so a
 Rust embedder doesn't need to redeclare them by hand.
+
+## Linking an integer tool into a native executable
+
+For a Corvid tool declared as `tool double(n: Int) -> Int uses arithmetic`, export the C symbol `__corvid_tool_double` from the Rust archive. Its argument and result are signed 64-bit integers passed by value.
+
+```rust
+#[no_mangle]
+pub extern "C" fn __corvid_tool_double(n: i64) -> i64 { n * 2 }
+```
+
+On Windows x64, build the archive for the same MSVC target as Corvid, then run `corvid build main.cor --target native --with-tools-lib double.lib`. The executable in `target/bin/` contains the tool. The [candidate check](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) builds the Rust example with edition 2021, copies only the executable to a fresh directory and runs it there.
+
+## Using a Rust tool in a packaged service
+
+Ship the platform's tool library alongside the extracted Corvid application. For a Windows library named `host.dll`, run `corvid serve src/main.cor --with-tools-cdylib host.dll` from the extraction directory. A declared tool named `echo_string` uses the exported symbol `__corvid_tool_echo_string`. A missing library fails at startup. A missing symbol leaves that tool without a handler and a call to it fails the request.
+
+The callback receives a borrowed UTF-8 JSON array of arguments and its byte length. Return one JSON value in a NUL-terminated string allocated with Rust's `CString::into_raw` and a compatible allocator. The runtime takes ownership using `CString::from_raw`. Returning a null pointer reports failure. The service keeps the loaded library alive for the process lifetime.
 
 ## Pointers to the registry contracts
 

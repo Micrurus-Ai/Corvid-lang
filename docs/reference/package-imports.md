@@ -15,7 +15,7 @@ locked in `Corvid.lock`:
 uri = "corvid://@anthropic/safety-baseline/v2.3"
 url = "file:///srv/corvid-registry/@anthropic/safety-baseline/v2.3/policy.cor"
 sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-registry = "./registry/index.toml"
+registry = "./registry/index.json"
 signature = "ed25519:..."
 ```
 
@@ -23,17 +23,27 @@ The current compiler behavior is intentionally fail-closed:
 
 - Missing `Corvid.lock` rejects every `corvid://...` package import.
 - Missing lock entries reject the specific package URI.
-- The locked URL is fetched as remote Corvid source.
+- The loader reads the cached source or retrieves the artifact from its locked URL.
 - The locked SHA-256 is verified over exact response bytes before lexing,
   parsing, resolving, typechecking, or lowering.
 - Inline `hash:sha256:...` is rejected on package imports; package hashes live
   in the lockfile so source code stays semantic and the lockfile stays the
   reproducibility authority.
 
-This is the package-resolution foundation. Registry index resolution,
-semantic-version selection, and signed publish verification are separate
-follow-up slices; they should extend the lockfile contract rather than bypass
-it.
+## Building offline
+
+Installing a package caches its verified source in
+`target/cache/packages/<sha256>.cor` inside the project. Set `CORVID_OFFLINE=1`
+before running `corvid check`, `corvid build` or `corvid run` to disable
+HTTP module fetches. A locked package can be rebuilt from that cache after
+its registry disappears. A local registry can also supply source using a
+`file://` URL or a path relative to its index. The installer records the
+resolved file URL in the lockfile.
+
+The loader checks the digest on each use. If a cached file has changed,
+remove that file and restore the original package from its locked source.
+An offline build with a missing cache entry requires an accessible local
+source for that package.
 
 ## Adding Packages
 
@@ -41,19 +51,27 @@ it.
 writes both the project manifest dependency and the concrete lock entry:
 
 ```text
-corvid add @anthropic/safety-baseline@2.3 --registry ./registry/index.toml
+corvid add package @anthropic/safety-baseline@2.3 --registry ./registry/index.json
 ```
 
-The registry index is TOML:
+A local registry can keep its index and Corvid source files together. In this
+example, replace the digest with the SHA-256 of the exact bytes in `policy.cor`.
 
-```toml
-[[package]]
-name = "@anthropic/safety-baseline"
-version = "2.3.4"
-uri = "corvid://@anthropic/safety-baseline/v2.3.4"
-url = "file:///srv/corvid-registry/@anthropic/safety-baseline/v2.3.4/policy.cor"
-sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-signature = "ed25519:..."
+```json
+{
+  "packages": {
+    "@anthropic/safety-baseline": {
+      "versions": {
+        "2.3.4": {
+          "name": "@anthropic/safety-baseline",
+          "version": "2.3.4",
+          "url": "policy.cor",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        }
+      }
+    }
+  }
+}
 ```
 
 Resolution is semantic-version aware. A request for `@scope/name@2.3` selects
@@ -84,7 +102,7 @@ is reproducible:
 ```toml
 [dependencies."@anthropic/safety-baseline"]
 version = "2.3"
-registry = "./registry/index.toml"
+registry = "./registry/index.json"
 ```
 
 ## Removing and Updating Packages
@@ -95,7 +113,7 @@ matching `corvid://@scope/name/...` entry from `Corvid.lock`.
 `corvid update @scope/name` reads the existing `[dependencies]` version
 requirement and registry, resolves the newest matching package, re-verifies the
 source hash/signature/semantic policy, and rewrites the lock entry. Passing a
-full spec such as `corvid update @scope/name@^2.0.0 --registry ./index.toml`
+full spec such as `corvid update @scope/name@^2.0.0 --registry ./index.json`
 also updates the manifest requirement.
 
 ## Lockfile Conflict Verification
@@ -148,8 +166,7 @@ The signature covers:
 - SHA-256 digest
 - exported semantic summary
 
-`corvid add` verifies any `ed25519:<key-id>:<public-key>:<signature>` entry it
-finds in the index. If `require-package-signatures = true`, unsigned entries are
+`corvid add` verifies a version's detached Ed25519 signature against the registry's root signing key when both are present. If `require-package-signatures = true`, unsigned entries are
 rejected before the lockfile changes.
 
 ## Registry Contract Verification
@@ -158,8 +175,8 @@ rejected before the lockfile changes.
 content-addressed source registry, not a trusted server:
 
 ```text
-corvid package verify-registry ./registry/index.toml
-corvid package verify-registry ./registry/index.toml --json
+corvid package verify-registry ./registry/index.json
+corvid package verify-registry ./registry/index.json --json
 ```
 
 The verifier checks each index entry for:

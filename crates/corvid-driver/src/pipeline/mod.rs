@@ -22,15 +22,16 @@ use corvid_types::{
 use corvid_ir::{lower, lower_with_modules, IrFile};
 
 use crate::diagnostic::Diagnostic;
-use crate::modules::{build_module_resolution, ModuleLoadError};
+use crate::modules::{resolve_module_graph, ModuleLoadError};
 
 mod abi;
+mod contract_types;
 mod compile;
 mod ir;
 
 pub use abi::{compile_to_abi_with_config, compile_to_application_contract_with_config};
 pub use compile::{
-    analyze_with_config_at_path, compile, compile_with_config, compile_with_config_at_path,
+    analyze_with_config_at_path, analyze_with_open_sources, compile, compile_with_config, compile_with_config_at_path,
     CompileResult,
 };
 pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config_at_path};
@@ -38,6 +39,8 @@ pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config
 pub(crate) struct DriverTypecheck {
     pub(crate) checked: Checked,
     pub(crate) modules: Option<ModuleResolution>,
+    schema_imports: HashMap<PathBuf, contract_types::Imports>,
+    import_fingerprint: Option<[u8; 32]>,
     pub(crate) module_checked: HashMap<PathBuf, Checked>,
 }
 
@@ -52,22 +55,34 @@ pub(crate) fn typecheck_driver_file(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> DriverTypecheckOutcome {
+    typecheck_with_sources(file, resolved, source_path, config, &|_| None)
+}
+
+fn typecheck_with_sources(
+    file: &File,
+    resolved: &Resolved,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> DriverTypecheckOutcome {
     if has_corvid_imports(file) {
-        let (modules, load_errors) = build_module_resolution(file, source_path);
+        let (modules, load_errors, digest) = resolve_module_graph(file, source_path, open_source);
         let diagnostics = load_errors
             .into_iter()
             .flat_map(module_load_error_diagnostics)
             .collect::<Vec<_>>();
         let checked = typecheck_with_config_and_modules(file, resolved, config, &modules);
-        let (module_checked, module_diagnostics) =
-            typecheck_imported_modules(&modules, config);
+        let (module_checked, schema_imports, module_diagnostics) =
+            typecheck_imported_modules(&modules, config, open_source);
         let mut diagnostics = diagnostics;
         diagnostics.extend(module_diagnostics);
         DriverTypecheckOutcome {
             result: DriverTypecheck {
                 checked,
                 modules: Some(modules),
+                import_fingerprint: Some(digest),
                 module_checked,
+                schema_imports,
             },
             diagnostics,
         }
@@ -76,6 +91,8 @@ pub(crate) fn typecheck_driver_file(
             result: DriverTypecheck {
                 checked: typecheck_with_config(file, resolved, config),
                 modules: None,
+                schema_imports: HashMap::new(),
+                import_fingerprint: None,
                 module_checked: HashMap::new(),
             },
             diagnostics: Vec::new(),
@@ -88,7 +105,7 @@ pub(crate) fn lower_driver_file(
     resolved: &Resolved,
     typechecked: &DriverTypecheck,
 ) -> IrFile {
-    match &typechecked.modules {
+    let mut ir = match &typechecked.modules {
         Some(modules) => lower_with_modules(
             file,
             resolved,
@@ -97,27 +114,36 @@ pub(crate) fn lower_driver_file(
             &typechecked.module_checked,
         ),
         None => lower(file, resolved, &typechecked.checked),
-    }
+    };
+    ir.import_fingerprint = typechecked.import_fingerprint;
+    ir
 }
 
 fn typecheck_imported_modules(
     modules: &ModuleResolution,
     config: Option<&CorvidConfig>,
-) -> (HashMap<PathBuf, Checked>, Vec<Diagnostic>) {
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> (HashMap<PathBuf, Checked>, HashMap<PathBuf, contract_types::Imports>, Vec<Diagnostic>) {
+    let mut schema_imports = HashMap::new();
     let mut checked_by_path = HashMap::new();
     let mut diagnostics = Vec::new();
     let mut loaded = modules.all_modules.values().collect::<Vec<_>>();
     loaded.sort_by(|a, b| a.path.cmp(&b.path));
 
     for module in loaded {
-        let (module_resolution, load_errors) =
-            build_module_resolution(&module.file, &module.path);
+        diagnostics.extend(module.resolved.errors.iter().cloned().map(|err| Diagnostic {
+            origin: Some((module.path.clone(), module.source.clone())),
+            ..Diagnostic::from(err)
+        }));
+        let (module_resolution, load_errors, _) =
+            resolve_module_graph(&module.file, &module.path, open_source);
         diagnostics.extend(
             load_errors
                 .into_iter()
                 .flat_map(module_load_error_diagnostics),
         );
         let checked = if has_corvid_imports(&module.file) {
+            schema_imports.insert(module.path.clone(), contract_types::Imports::from(&module_resolution));
             typecheck_with_config_and_modules(
                 &module.file,
                 &module.resolved,
@@ -129,17 +155,13 @@ fn typecheck_imported_modules(
         };
         diagnostics.extend(checked.errors.iter().cloned().map(|err| {
             let mut diagnostic = Diagnostic::from(err);
-            diagnostic.message = format!(
-                "in imported module `{}`: {}",
-                module.path.display(),
-                diagnostic.message
-            );
+            diagnostic.origin = Some((module.path.clone(), module.source.clone()));
             diagnostic
         }));
         checked_by_path.insert(module.path.clone(), checked);
     }
 
-    (checked_by_path, diagnostics)
+    (checked_by_path, schema_imports, diagnostics)
 }
 
 fn has_corvid_imports(file: &File) -> bool {
@@ -163,6 +185,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             resolved,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "import `{requested}` from `{}` could not be found at `{}`",
@@ -172,32 +195,23 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             hint: Some("check the import path relative to the importing `.cor` file".into()),
         }],
         ModuleLoadError::ReadError { path, message } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!("failed to read imported module `{}`: {message}", path.display()),
             hint: None,
         }],
-        ModuleLoadError::LexError { path, errors } => errors
+        ModuleLoadError::LexError { path, source, errors } => errors
             .into_iter()
             .map(|err| Diagnostic {
-                span: top,
-                message: format!(
-                    "imported module `{}` failed to lex: {}",
-                    path.display(),
-                    err.kind
-                ),
-                hint: None,
+                origin: Some((path.clone(), source.clone())),
+                ..Diagnostic::from(err)
             })
             .collect(),
-        ModuleLoadError::ParseErrors { path, errors } => errors
+        ModuleLoadError::ParseErrors { path, source, errors } => errors
             .into_iter()
             .map(|err| Diagnostic {
-                span: top,
-                message: format!(
-                    "imported module `{}` failed to parse: {}",
-                    path.display(),
-                    err.kind
-                ),
-                hint: None,
+                origin: Some((path.clone(), source.clone())),
+                ..Diagnostic::from(err)
             })
             .collect(),
         ModuleLoadError::HashMismatch {
@@ -207,6 +221,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             expected,
             actual,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "import `{requested}` from `{}` failed content-hash verification at `{}`",
@@ -222,6 +237,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             url,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "remote import `{requested}` from `{}` is missing a content hash",
@@ -237,6 +253,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             url,
             message,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "failed to fetch remote import `{requested}` from `{}`",
@@ -248,6 +265,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             importing_file,
             requested,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "package import `{requested}` from `{}` is not locked",
@@ -263,6 +281,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             message,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "failed to read package lock `{requested}` for `{}`",
@@ -275,6 +294,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             lockfile,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "package import `{requested}` from `{}` is missing from the lockfile",
@@ -294,6 +314,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 .collect::<Vec<_>>()
                 .join(" -> ");
             vec![Diagnostic {
+                origin: None,
                 span: top,
                 message: format!("cyclic Corvid import graph: {path}"),
                 hint: Some(

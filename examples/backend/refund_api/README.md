@@ -5,7 +5,8 @@ Corvid source shape for an approval-gated refund service:
 
 - typed request and response records
 - a dangerous money-transfer tool with an effect row
-- a route-local approval path through `approve_refund`
+- authenticated refund requests, with decisions assigned to the reviewer role
+- a ten-minute approval window and a $0.05 tool cost limit
 - generated health, readiness, metrics, request IDs, JSON errors, traces, and
   backend env validation from the server target
 

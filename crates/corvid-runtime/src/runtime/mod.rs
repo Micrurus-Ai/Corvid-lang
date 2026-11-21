@@ -42,6 +42,7 @@ pub use builder::RuntimeBuilder;
 mod builder;
 mod connector_dispatch;
 mod io;
+mod path;
 mod protocol_dispatch;
 mod jobs;
 mod llm_dispatch;
@@ -156,6 +157,17 @@ pub struct Runtime {
 pub struct DurableJobContext {
     pub queue: std::sync::Arc<crate::queue::DurableQueueRuntime>,
     pub job_id: String,
+    conversation_counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
+}
+
+impl DurableJobContext {
+    /// Separate repeated calls at the same source location within one job attempt.
+    pub fn conversation_label(&self, fingerprint: String) -> String {
+        let mut counts = self.conversation_counts.lock().unwrap();
+        let occurrence = counts.entry(fingerprint.clone()).or_default();
+        *occurrence += 1;
+        format!("prompt/{fingerprint}/{occurrence}")
+    }
 }
 
 #[derive(Clone)]
@@ -235,6 +247,7 @@ impl Runtime {
         clone.durable_job = Some(DurableJobContext {
             queue,
             job_id: job_id.into(),
+            conversation_counts: Default::default(),
         });
         clone
     }
@@ -315,6 +328,11 @@ impl Runtime {
     }
 
     pub fn default_model(&self) -> &str {
+        if self.default_model.is_empty() {
+            if let RuntimeMode::Replay(source) = &self.mode {
+                return source.next_model().unwrap_or("");
+            }
+        }
         &self.default_model
     }
 

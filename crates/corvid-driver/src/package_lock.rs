@@ -121,9 +121,10 @@ fn validate_entry(entry: &LockedPackage, path: &Path) -> Result<(), String> {
             entry.uri
         ));
     }
-    if !(entry.url.starts_with("https://") || entry.url.starts_with("http://")) {
+    if !(entry.url.starts_with("https://") || entry.url.starts_with("http://")
+        || (entry.url.starts_with("file://") && url::Url::parse(&entry.url).ok().and_then(|u| u.to_file_path().ok()).is_some())) {
         return Err(format!(
-            "`{}` package `{}` must resolve to an http(s) source URL",
+            "`{}` package `{}` must resolve to an HTTP(S) or file source URL",
             path.display(),
             entry.uri
         ));

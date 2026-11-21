@@ -204,11 +204,25 @@ cargo run --manifest-path ../../Cargo.toml --bin corvid -- build src/refund_bot.
 python3 tools.py
 ```
 
+### Document a language feature
+
+Add a complete example to the relevant book chapter or guide. Use a `corvid` code fence for an ordinary program. Use `corvid interp` for a program that requires the interpreter, such as a typed Python import. The guide check runs both kinds through `corvid check`. In guarded book chapters, interpreter examples also go through IR lowering.
+
+When a registry change affects the core semantics reference, run `corvid contract regen-doc docs/reference/core-semantics.md` from the project root with a CLI built from that revision. Run `cargo test --locked -p corvid-guarantees` to check the generated text against the registry.
+
 ### Run the test suite
 
 ```bash
-cargo test --workspace
+cargo test --locked --workspace --no-fail-fast
 cd runtime/python && python3 -m pytest
+```
+
+To run native/interpreter parity on its own, build the mock tool archive from the same checkout. The native programs link the Corvid runtime bundled in that archive. An older copy can produce unresolved runtime symbols before any comparison runs.
+
+```sh
+cargo build --locked -p corvid-runtime
+cargo build --locked --release -p corvid-test-tools --target-dir target
+cargo test --locked -p corvid-codegen-cl --test parity
 ```
 
 ### Git

@@ -63,6 +63,45 @@ pub fn completion_at(source: &str, position: Position) -> CompletionResponse {
     items.into_response()
 }
 
+pub(crate) fn imported_members_at(
+    documents: &std::collections::HashMap<lsp_types::Url, String>,
+    uri: &lsp_types::Url,
+    source: &str,
+    position: Position,
+) -> Option<CompletionResponse> {
+    use corvid_resolve::{collect_public_exports, resolve, Binding, DeclKind};
+    use corvid_syntax::TokKind;
+    let offset = lsp_position_to_byte(source, position);
+    let before = &source[..offset];
+    let receiver = before.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
+    if !receiver.trim_end().ends_with('.') { return None; }
+    let prefix = &before[receiver.len()..];
+    // Complete an unfinished member expression so the resolver can tell a
+    // module alias from a local variable with the same spelling.
+    let mut buffer = source.to_owned();
+    buffer.insert_str(offset, "__completion");
+    let tokens = lex(&buffer).ok()?;
+    let member = tokens.iter().position(|t| t.span.start <= offset && offset < t.span.end)?;
+    if member < 2 || !matches!(tokens[member].kind, TokKind::Ident(_))
+        || !matches!(tokens[member - 1].kind, TokKind::Dot) { return None; }
+    let (file, _) = parse_file(&tokens);
+    let resolved = resolve(&file);
+    let Binding::Decl(id) = resolved.bindings.get(&tokens[member - 2].span)? else { return None };
+    if resolved.symbols.get(*id).kind != DeclKind::Import { return None; }
+    let import = file.decls.iter().find_map(|d| match d {
+        Decl::Import(i) if i.source == corvid_ast::ImportSource::Corvid
+            && i.alias.as_ref().is_some_and(|a| resolved.symbols.lookup_def(&a.name) == Some(*id)) => Some(i),
+        _ => None,
+    })?;
+    let (_, target) = crate::navigation::local_module_source(documents, uri, &import.module)?;
+    let file = parse_lenient(&target);
+    let exports = collect_public_exports(&file, &resolve(&file));
+    let mut items = CompletionSet::default();
+    add_declarations(&mut items, &file);
+    items.items.retain(|name, _| exports.contains_key(name) && name.starts_with(prefix));
+    Some(items.into_response())
+}
+
 fn parse_lenient(source: &str) -> File {
     match lex(source) {
         Ok(tokens) => {
@@ -266,7 +305,17 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 "connector",
                 format!("connector {}", connector.name.name),
             )),
-            Decl::Import(_) | Decl::Extend(_) => {}
+            Decl::Import(import) => {
+                if let Some(alias) = &import.alias {
+                    items.add(symbol_item(&alias.name, CompletionItemKind::MODULE, "module", import.module.clone()));
+                }
+                for item in &import.use_items {
+                    let name = item.alias.as_ref().unwrap_or(&item.name);
+                    items.add(symbol_item(&name.name, CompletionItemKind::REFERENCE, "import",
+                        format!("{} from {}", item.name.name, import.module)));
+                }
+            }
+            Decl::Extend(_) => {}
         }
     }
 }
@@ -384,6 +433,21 @@ fn approval_label(tool_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfinished_module_access_completes_public_members_from_the_open_buffer() {
+        use lsp_types::Url;
+        let dir = std::env::temp_dir();
+        let uri = Url::from_file_path(dir.join("entry.cor")).unwrap();
+        let target = Url::from_file_path(dir.join("numbers.cor")).unwrap();
+        let documents = [(target, "public fn double(n: Int) -> Int:\n    return n * 2\nfn hidden() -> Int:\n    return 0\n".into())].into();
+        for partial in ["", "do"] {
+            let source = format!("import \"./numbers\" as math\nagent main() -> Int:\n    return math.{partial}\n");
+            let response = imported_members_at(&documents, &uri, &source, Position::new(2, 16 + partial.len() as u32)).unwrap();
+            let CompletionResponse::Array(items) = response else { panic!("expected completion items") };
+            assert_eq!(items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["double"]);
+        }
+    }
 
     fn labels(response: CompletionResponse) -> Vec<String> {
         match response {

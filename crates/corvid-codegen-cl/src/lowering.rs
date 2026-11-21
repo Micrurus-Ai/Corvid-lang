@@ -33,6 +33,8 @@ const _: () = {
 /// Declare the imported runtime helpers (retain, release, string
 /// concat / eq / cmp) and bundle their FuncIds with the overflow
 /// handler into a `RuntimeFuncs`.
+mod equality;
+pub use equality::{supports_structural_comparison, uses_structural_equality};
 mod runtime;
 use runtime::*;
 mod expr;
@@ -149,6 +151,20 @@ pub fn lower_file(
         runtime.struct_traces.insert(ty.id, trace_id);
         let typeinfo_id = emit_struct_typeinfo(module, ty, destroy_id, trace_id, &runtime)?;
         runtime.struct_typeinfos.insert(ty.id, typeinfo_id);
+        for (index, variant) in ty.variants.iter().enumerate() {
+            let tag = corvid_ir::IrField { name: "tag".into(), ty: Type::Int, refinement: None, span: variant.span };
+            let layout = corvid_ir::IrType {
+                id: ty.id, name: format!("variant.{}.{}", ty.id.0, index),
+                fields: std::iter::once(tag).chain(variant.fields.iter().cloned()).collect(),
+                variants: Vec::new(), span: variant.span,
+            };
+            let destroy = if variant.fields.iter().any(|f| is_refcounted_type(&f.ty)) {
+                Some(define_struct_destructor(module, &layout, &runtime)?)
+            } else { None };
+            let trace = define_struct_trace(module, &layout, &runtime)?;
+            let info = emit_struct_typeinfo(module, &layout, destroy, trace, &runtime)?;
+            runtime.variant_typeinfos.insert((ty.id, index as u32), info);
+        }
     }
 
     // Results: fixed-size tagged wrappers. Each wrapper stores
@@ -258,7 +274,8 @@ pub fn lower_file(
             define_agent(module, &transformed, func_id, &func_ids_by_def, &runtime)?;
         } else {
             runtime.prompt_pins.clear();
-            define_agent(module, agent, func_id, &func_ids_by_def, &runtime)?;
+            let (expanded, _) = crate::dup_drop::expand_propagation(agent);
+            define_agent(module, &expanded, func_id, &func_ids_by_def, &runtime)?;
         }
     }
 

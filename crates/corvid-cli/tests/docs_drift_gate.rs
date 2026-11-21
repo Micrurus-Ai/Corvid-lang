@@ -113,21 +113,15 @@ fn extract_corvid_blocks(file: &Path) -> Vec<CodeBlock> {
     blocks
 }
 
-fn run_corvid_check(source: &str) -> Result<(), String> {
-    let tmp = tempfile::Builder::new()
-        .prefix("docs_drift_gate_")
-        .suffix(".cor")
-        .tempfile()
-        .map_err(|e| format!("create temp .cor: {e}"))?;
-    fs::write(tmp.path(), source).map_err(|e| format!("write temp .cor: {e}"))?;
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest.parent().and_then(Path::parent).unwrap();
-    let output = Command::new("cargo")
-        .current_dir(workspace)
-        .args(["run", "-q", "-p", "corvid-cli", "--", "check"])
-        .arg(tmp.path())
+fn run_corvid_check(project: &Path, source: &str) -> Result<(), String> {
+    let example = project.join("src/examples/guide.cor");
+    fs::write(&example, source).map_err(|e| format!("write guide example: {e}"))?;
+    let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .current_dir(project)
+        .arg("check")
+        .arg(example)
         .output()
-        .map_err(|e| format!("spawn cargo run: {e}"))?;
+        .map_err(|e| format!("spawn corvid check: {e}"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -174,6 +168,16 @@ fn every_corvid_block_in_guides_compiles_clean() {
     let exempt: std::collections::HashMap<&str, &str> =
         EXEMPT_GUIDES.iter().copied().collect();
 
+    let temp = tempfile::tempdir().expect("create guide workspace");
+    let scaffold = Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .current_dir(temp.path())
+        .args(["new", "guide"])
+        .output()
+        .expect("scaffold guide project");
+    assert!(scaffold.status.success(), "{scaffold:?}");
+    let project = temp.path().join("guide");
+    fs::create_dir_all(project.join("src/examples")).expect("create example module directory");
+
     let mut failures: Vec<String> = Vec::new();
     for block in &blocks {
         let file_name = block
@@ -191,10 +195,10 @@ fn every_corvid_block_in_guides_compiles_clean() {
             // Visibly opted-out.
             continue;
         }
-        if block.language_tag != "corvid" {
+        if !matches!(block.language_tag.as_str(), "corvid" | "corvid interp") {
             // Some other tag like ```corvid foo``` we don't know.
             failures.push(format!(
-                "{}:{} unknown language tag `{}` — use `corvid` for \
+                "{}:{} unknown language tag `{}` — use `corvid` or `corvid interp` for \
                  gated blocks or `corvid skip` to visibly opt out",
                 block.file.display(),
                 block.start_line,
@@ -202,7 +206,7 @@ fn every_corvid_block_in_guides_compiles_clean() {
             ));
             continue;
         }
-        if let Err(err) = run_corvid_check(&block.body) {
+        if let Err(err) = run_corvid_check(&project, &block.body) {
             failures.push(format!(
                 "{}:{} did not pass `corvid check`:\n{err}",
                 block.file.display(),

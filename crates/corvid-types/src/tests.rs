@@ -1737,6 +1737,25 @@ agent ok(order: String) -> Job:
 }
 
 #[test]
+fn function_calling_prompt_reserves_a_bounded_conversation() {
+    let src = r#"effect model_call:
+    cost: $0.10
+
+fn double(n: Int) -> Int:
+    return n + n
+
+prompt solve(action: (Int) -> Int) -> String uses model_call:
+    "Compute the answer."
+
+@budget($0.50)
+agent main() -> String:
+    return solve(double)
+"#;
+    assert!(has_effect_violation(&check(src), "cost"));
+    assert!(check(&src.replace("$0.50", "$1.00")).errors.is_empty());
+}
+
+#[test]
 fn repair_attempts_multiply_worst_case_cost_for_budgets() {
     // `with repair 2` can re-ask twice: a $0.30 prompt's worst case
     // is $0.90, so a $0.50 budget must reject it. Without this the
@@ -2653,6 +2672,52 @@ connector github:
 }
 
 #[test]
+fn grounded_parameter_can_supply_a_helpers_return_provenance() {
+    let prefix = r#"
+agent decorate(value: Grounded<String>) -> Grounded<String>:
+    result = value + "!"
+    return result
+"#;
+    let valid = check(prefix);
+    assert!(valid.errors.is_empty(), "{:?}", valid.errors);
+
+    let invalid = check(&format!("{prefix}\ntool unverified() -> Grounded<String>\n\nagent main() -> Grounded<String>:\n    return decorate(unverified())\n"));
+    assert!(invalid.errors.iter().any(|error| matches!(
+        error.kind, TypeErrorKind::UngroundedReturn { .. }
+    )), "{:?}", invalid.errors);
+}
+
+#[test]
+fn grounded_returns_require_a_source_on_every_reachable_path() {
+    let prefix = "tool unverified() -> Grounded<String>\n\nagent check_path(value: Grounded<String>, again: Bool) -> Grounded<String>:\n";
+    for body in [
+        "    if again:\n        return value\n    return unverified()",
+        "    if again:\n        value = unverified()\n    return value",
+        "    while again:\n        value = unverified()\n        break\n    return value",
+        "    while again:\n        if again:\n            return value\n        value = unverified()\n        continue\n    return value",
+    ] {
+        let checked = check(&format!("{prefix}{body}\n"));
+        assert!(checked.errors.iter().any(|error| matches!(
+            error.kind, TypeErrorKind::UngroundedReturn { .. }
+        )), "{body}: {:?}", checked.errors);
+    }
+    let checked = check(&format!("{prefix}    if again:\n        return value\n    return value + \"!\"\n"));
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
+}
+
+#[test]
+fn grounded_prefix_is_valid_in_an_ordinary_record_name() {
+    let checked = check(r#"
+type GroundedNote:
+    title: String
+
+agent keep(note: GroundedNote) -> GroundedNote:
+    return note
+"#);
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
+}
+
+#[test]
 fn mutation_grounded_provenance_flows_through_prompts() {
     // Grounded input into a prompt should ground the prompt result.
     let c = check(MUTATION_PROVENANCE_BASE);
@@ -3487,6 +3552,15 @@ agent first(xs: Stream<String>) -> String:
 ";
     let c = check(src);
     assert!(c.errors.is_empty(), "got: {:?}", c.errors);
+}
+
+#[test]
+fn forwarded_stream_has_no_missing_yield_warning() {
+    let c = check("agent forward(items: Stream<Int>) -> Stream<Int>:\n    return items\n");
+    assert!(c.errors.is_empty(), "{:?}", c.errors);
+    assert!(!c.warnings.iter().any(|warning| matches!(
+        warning.kind, TypeWarningKind::StreamReturnWithoutYield { .. }
+    )));
 }
 
 #[test]
@@ -6559,6 +6633,7 @@ fn fake_module_resolution(
     let exports = corvid_resolve::collect_public_exports(&file, &resolved);
     let path = PathBuf::from(format!("/fake/{alias}.cor"));
     let module = corvid_resolve::ResolvedModule {
+        source: Arc::new(src.clone()),
         path: path.clone(),
         resolved: Arc::new(resolved),
         file: Arc::new(file),
@@ -6662,6 +6737,78 @@ agent f() -> Bool:
         "got: {:?}",
         checked.errors
     );
+}
+
+#[test]
+fn python_call_effects_follow_signatures_and_agent_calls() {
+    let src = r#"effect service_lookup:
+    cost: $0.30
+
+import python "catalog" as catalog effects: service_lookup:
+    fn lookup(key: String) -> String
+
+agent lookup_one() -> String:
+    return catalog.lookup("a")
+
+@budget($0.50)
+agent main() -> String:
+    return lookup_one() + lookup_one()
+
+fn bad() -> String:
+    return catalog.lookup("b")
+
+agent local(catalog: String) -> Int:
+    return catalog.length()
+"#;
+    let (file, resolved, checked) = checked_with_file(src);
+    assert!(resolved.errors.is_empty(), "{:?}", resolved.errors);
+    assert!(has_effect_violation(&checked, "cost"), "{:?}", checked.errors);
+    assert!(checked.errors.iter().any(|error| matches!(&error.kind,
+        TypeErrorKind::FnBodyNotPure { name, what } if name == "bad" && what.contains("catalog.lookup")
+    )));
+    let registry = crate::effects::EffectRegistry::from_decls(&[]);
+    for summary in crate::effects::analyze_effects(&file, &resolved, &registry) {
+        if summary.agent_name == "local" {
+            assert!(summary.inferred_effects.is_empty());
+        } else {
+            assert_eq!(summary.inferred_effects, ["service_lookup"]);
+        }
+    }
+    assert!(!has_effect_violation(&check(&src.replace("$0.50", "$0.60")), "cost"));
+}
+
+#[test]
+fn python_signature_checks_aliased_arguments_and_return_type() {
+    let checked = check(r#"
+import python "math" as numbers effects: pure:
+    fn gcd(left: Int, right: Int) -> Int
+
+agent main() -> String:
+    return numbers.gcd("18", 12)
+"#);
+    assert!(checked.errors.iter().any(|e| matches!(&e.kind,
+        TypeErrorKind::TypeMismatch { expected, got, context }
+        if expected == "Int" && got == "String" && context.contains("numbers.gcd")
+    )), "{:?}", checked.errors);
+    assert!(checked.errors.iter().any(|e| matches!(&e.kind,
+        TypeErrorKind::ReturnTypeMismatch { expected, got }
+        if expected == "String" && got == "Int"
+    )), "{:?}", checked.errors);
+}
+
+#[test]
+fn direct_python_call_reports_the_host_function() {
+    let checked = check(r#"
+import python "math" as numbers effects: pure
+
+agent main() -> Int:
+    return numbers.gcd(18, 12)
+"#);
+    assert!(checked.errors.iter().any(|error| matches!(
+        &error.kind,
+        TypeErrorKind::DirectPythonCallUnsupported { module, member }
+            if module == "math" && member == "gcd"
+    )), "{:?}", checked.errors);
 }
 
 #[test]
@@ -7075,6 +7222,7 @@ fn module_resolution_from_source(
     let exports = collect_public_exports(&file, &resolved);
     let path = PathBuf::from(format!("/fake/{alias}.cor"));
     let module = corvid_resolve::ResolvedModule {
+        source: Arc::new(source.to_owned()),
         path: path.clone(),
         resolved: Arc::new(resolved),
         file: Arc::new(file),

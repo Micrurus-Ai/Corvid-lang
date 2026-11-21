@@ -49,6 +49,8 @@ Additional parsed tables for advanced configuration:
 - `[package-policy]` — package import policy for the package manager.
 - `[run]` — run-time defaults for `corvid run`.
 
+The top-level `version` identifies your application. The installed compiler determines which language syntax the project accepts. Run `corvid --version` to see the compiler version, source revision and build date. When testing an upgrade, run `corvid upgrade check .` and your application tests with the candidate compiler.
+
 Package dependency pins are covered in the
 [package-imports reference](../reference/package-imports.md).
 
@@ -76,3 +78,11 @@ Each file is a module. Cross-file references go through `import`. See
   exercises `src/refund.cor`.
 - Examples that ship with libraries go under `examples/`.
 - Benchmarks under `benches/`.
+
+### Formatting a project
+
+Run `corvid fmt` from the project root to format Corvid files under `src/` and `tests/`. To format one file, use `corvid fmt src/main.cor`. Use `corvid fmt --check` in CI. It lists files that need formatting and exits with status 1 when it finds differences. It returns 0 when the files already match.
+
+After cloning a project, run `corvid check` to check the entry point and its imports, `corvid run` to execute it, and `corvid test tests/math.cor` to run tests in that file.
+
+When you edit an imported module, run `corvid run --target native` again. Corvid checks direct and nested imports before reusing a compiled executable. You can leave the project cache in place between edits.

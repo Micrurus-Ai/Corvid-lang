@@ -17,7 +17,8 @@
 //! only needs the two `cmd_migrate*` entry points.
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -30,7 +31,20 @@ pub(crate) fn cmd_migrate(
     dry_run: bool,
 ) -> Result<u8> {
     let migrations = scan_migration_files(dir)?;
-    let mut migration_state = load_migration_state(state)?;
+    let writing = action == "up" && !dry_run;
+    let mut connection = open_database(database, writing)?;
+    let tx = connection
+        .as_mut()
+        .map(|conn| {
+            conn.transaction_with_behavior(if writing {
+                TransactionBehavior::Immediate
+            } else {
+                TransactionBehavior::Deferred
+            })
+        })
+        .transpose()?;
+    let (mut migration_state, _pending_export) = read_history(tx.as_deref(), state)?;
+
     let drift = detect_migration_drift(&migrations, &migration_state);
     println!("corvid migrate {action}");
     println!("migrations: {}", dir.display());
@@ -75,8 +89,10 @@ pub(crate) fn cmd_migrate(
         return Ok(1);
     }
     if action == "up" && !dry_run {
-        apply_pending_sql_migrations(database, &migrations, &mut migration_state)?;
-        save_migration_state(state, &migration_state)?;
+        let tx = tx.expect("writing opens the database");
+        apply_pending_sql_migrations(&tx, &migrations, &mut migration_state)?;
+        commit_history(tx, &migration_state, "up")?;
+        export_history(connection.as_mut().unwrap(), state)?;
         println!("state_updated: true");
     } else {
         println!("state_updated: false");
@@ -102,7 +118,20 @@ pub(crate) fn cmd_migrate_down(
     dry_run: bool,
 ) -> Result<u8> {
     let migrations = scan_migration_files(dir)?;
-    let mut migration_state = load_migration_state(state)?;
+    let writing = !dry_run;
+    let mut connection = open_database(database, writing)?;
+    let tx = connection
+        .as_mut()
+        .map(|conn| {
+            conn.transaction_with_behavior(if writing {
+                TransactionBehavior::Immediate
+            } else {
+                TransactionBehavior::Deferred
+            })
+        })
+        .transpose()?;
+    let (mut migration_state, pending_export) = read_history(tx.as_deref(), state)?;
+
     let drift = detect_migration_drift(&migrations, &migration_state);
     println!("corvid migrate down");
     println!("migrations: {}", dir.display());
@@ -119,6 +148,13 @@ pub(crate) fn cmd_migrate_down(
         println!("drift_found: {}", drift.len());
         println!("state_updated: false");
         return Ok(1);
+    }
+    if writing && pending_export.as_deref() == Some("down") {
+        drop(tx);
+        export_history(connection.as_mut().unwrap(), state)?;
+        println!("state_updated: true");
+        println!("mutation_intent: recovered_rollback");
+        return Ok(0);
     }
     let Some(latest) = migration_state.migrations.last().cloned() else {
         println!("rollback: none");
@@ -142,9 +178,11 @@ pub(crate) fn cmd_migrate_down(
         println!("mutation_intent: rollback_latest");
         return Ok(0);
     }
-    execute_rollback_sql(database, &rollback, &latest.name)?;
+    let tx = tx.expect("writing opens the database");
+    execute_rollback_sql(&tx, &rollback, &latest.name)?;
     migration_state.migrations.pop();
-    save_migration_state(state, &migration_state)?;
+    commit_history(tx, &migration_state, "down")?;
+    export_history(connection.as_mut().unwrap(), state)?;
     println!("state_updated: true");
     println!("mutation_intent: rollback_latest");
     Ok(0)
@@ -287,7 +325,15 @@ fn save_migration_state(path: &Path, state: &MigrationState) -> Result<()> {
             .with_context(|| format!("cannot create migration state dir `{}`", parent.display()))?;
     }
     let json = serde_json::to_vec_pretty(state).context("cannot serialize migration state")?;
-    std::fs::write(path, json)
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(&json)?;
+    temp.persist(path)
+        .map(|_| ())
         .with_context(|| format!("cannot write migration state `{}`", path.display()))
 }
 
@@ -298,21 +344,76 @@ fn now_unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+fn open_database(database: &Path, writing: bool) -> Result<Option<Connection>> {
+    if !writing && !database.try_exists()? {
+        return Ok(None);
+    }
+    let conn = if writing {
+        if let Some(parent) = database.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        Connection::open(database)
+    } else {
+        Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    };
+    Ok(Some(conn.with_context(|| {
+        format!("cannot open migration database `{}`", database.display())
+    })?))
+}
+
+fn read_history(
+    conn: Option<&Connection>,
+    path: &Path,
+) -> Result<(MigrationState, Option<String>)> {
+    if let Some(conn) = conn {
+        let initialized: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_corvid_migration_history')",
+            [], |row| row.get(0),
+        )?;
+        if initialized {
+            let (json, pending): (String, Option<String>) = conn.query_row(
+                "SELECT history, pending_export FROM _corvid_migration_history WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            return Ok((serde_json::from_str(&json)?, pending));
+        }
+    }
+    Ok((load_migration_state(path)?, None))
+}
+
+fn commit_history(tx: Transaction<'_>, state: &MigrationState, action: &str) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _corvid_migration_history (
+        id INTEGER PRIMARY KEY CHECK(id = 1), history TEXT NOT NULL, pending_export TEXT
+    )",
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO _corvid_migration_history VALUES (1, ?1, ?2)",
+        (serde_json::to_string(state)?, action),
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn export_history(conn: &mut Connection, path: &Path) -> Result<()> {
+    // Serialize writers and export the newest committed snapshot.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let (state, _) = read_history(Some(&tx), path)?;
+    save_migration_state(path, &state)?;
+    tx.execute(
+        "UPDATE _corvid_migration_history SET pending_export = NULL WHERE id = 1",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
 
 fn apply_pending_sql_migrations(
-    database: &Path,
+    tx: &Transaction<'_>,
     migrations: &[MigrationFile],
     state: &mut MigrationState,
 ) -> Result<()> {
-    if let Some(parent) = database
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("cannot create database dir `{}`", parent.display()))?;
-    }
-    let mut conn = Connection::open(database)
-        .with_context(|| format!("cannot open migration database `{}`", database.display()))?;
     for migration in migrations {
         let applied = state
             .migrations
@@ -323,13 +424,8 @@ fn apply_pending_sql_migrations(
         }
         let sql = std::fs::read_to_string(&migration.path)
             .with_context(|| format!("cannot read migration SQL `{}`", migration.path.display()))?;
-        let tx = conn
-            .transaction()
-            .with_context(|| format!("cannot start transaction for `{}`", migration.name))?;
-        tx.execute_batch(&sql)
+        execute_migration_sql(tx, &sql)
             .with_context(|| format!("cannot execute migration `{}`", migration.name))?;
-        tx.commit()
-            .with_context(|| format!("cannot commit migration `{}`", migration.name))?;
         state.migrations.push(AppliedMigration {
             name: migration.name.clone(),
             sha256: migration.sha256.clone(),
@@ -339,21 +435,25 @@ fn apply_pending_sql_migrations(
     Ok(())
 }
 
+fn execute_migration_sql(tx: &Transaction<'_>, sql: &str) -> rusqlite::Result<()> {
+    // Only the runner may end the transaction that owns the history update.
+    tx.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+        AuthAction::Transaction { .. } => Authorization::Deny,
+        _ => Authorization::Allow,
+    }));
+    let result = tx.execute_batch(sql);
+    tx.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+    result
+}
+
 fn rollback_migration_path(down_dir: &Path, applied_name: &str) -> PathBuf {
     down_dir.join(format!("{applied_name}.down.sql"))
 }
 
-fn execute_rollback_sql(database: &Path, rollback: &Path, applied_name: &str) -> Result<()> {
+fn execute_rollback_sql(tx: &Transaction<'_>, rollback: &Path, applied_name: &str) -> Result<()> {
     let sql = std::fs::read_to_string(rollback)
         .with_context(|| format!("cannot read rollback SQL `{}`", rollback.display()))?;
-    let mut conn = Connection::open(database)
-        .with_context(|| format!("cannot open migration database `{}`", database.display()))?;
-    let tx = conn
-        .transaction()
-        .with_context(|| format!("cannot start rollback transaction for `{applied_name}`"))?;
-    tx.execute_batch(&sql)
+    execute_migration_sql(tx, &sql)
         .with_context(|| format!("cannot execute rollback for `{applied_name}`"))?;
-    tx.commit()
-        .with_context(|| format!("cannot commit rollback for `{applied_name}`"))?;
     Ok(())
 }

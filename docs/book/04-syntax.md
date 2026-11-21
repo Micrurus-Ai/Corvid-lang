@@ -204,13 +204,22 @@ conventional (`+ - * / %`, checked). Boolean ops are `and`, `or`,
 `not`. Postfix `?` on a `Result<T,E>` or `Option<T>` propagates the
 error/none to the caller.
 
-Method-call syntax (`x.method()`) works on user-declared types via
-`extend` blocks and on built-in types via the builtin-method table
-(shipped in 45c with `s.length()`; assignment targets like
-`x.field = v` and compound `+=` shipped in 45b).
+Corvid evaluates a chain of `and` or `or` operands from left to right.
+An `and` chain stops at the first false value. An `or` chain stops at the
+first true value. Calls and `?` expressions in the skipped operands do
+not run.
 
-> **Planned — the string/list method batches (`s.split(…)`,
-> `xs.append(…)`) land with slices 45d/45f.**
+For example, `divisor != 0 and total / divisor > 2` checks the divisor
+before dividing. With a zero divisor, the expression returns `false`.
+
+Double-quoted strings support `\n` for newline, `\r` for carriage return,
+`\t` for tab, `\\` for a backslash, `\"` for a double quote and `\0` for
+a null character. In `"A\07B"`, the null character is followed by the
+digit `7`. Generated Python preserves these characters.
+
+Call methods with `value.method()`. For example, `"a,b".split(",")` returns
+`["a", "b"]`, and `items.append(3)` adds an element to a list in place.
+See the [function reference](../reference/functions.md) for built-in methods.
 
 ## Effect rows in signatures
 

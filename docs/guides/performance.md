@@ -45,14 +45,23 @@ The durable runner (`corvid jobs run --source <path>.cor --workers=N`) scales to
 workers per process. Past a few thousand jobs/second per host, scale
 horizontally — multiple runner processes against one queue.
 
-## Profiling
+### Windows x64 release baseline
 
-```sh
-corvid run src/main.cor --profile
-```
+The [candidate run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) measured the same release binary twice on one runner. Each column gives the median in milliseconds from 15 samples after three warmups. The HTTP workloads use a loopback provider and average 16 sequential requests per sample.
 
-Emits a flamegraph for the run. Useful for finding hot paths in
-agent composition (rare) or in custom Rust FFI calls.
+| Workload | First run (ms) | Repeat (ms) |
+|---|---:|---:|
+| CLI startup | 17.482 | 16.465 |
+| Check 100 functions | 19.795 | 18.217 |
+| Native build of 100 functions | 462.281 | 457.090 |
+| Interpreter list slices | 25.713 | 25.502 |
+| HTTP ping | 13.860 | 13.784 |
+| Direct provider stream | 3.636 | 3.806 |
+| Corvid stream | 10.248 | 12.005 |
+
+The paired median overhead for a 16-chunk stream was 6.533 ms and 8.199 ms. The [first report](../../benches/results/application-windows-release/baseline.json) and [repeat report](../../benches/results/application-windows-release/repeat.json) include the raw samples and CLI hash.
+
+On [candidate 05c20e08](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44883568390), both profiles used the same Windows x64 executable. Median startup took 14.732 ms and 14.712 ms. The paired stream overhead was 6.138 ms and 6.431 ms. All seven repeat medians fell within the benchmark's same-runner thresholds. With performance verification enabled, the candidate workflow now checks the repeat against its first profile automatically and retains the measurements for inspection if the comparison fails. This comparison measures repeatability for one build.
 
 ## Reproducible benchmarks
 

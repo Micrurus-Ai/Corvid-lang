@@ -37,6 +37,28 @@ effect refund_effect:
 public tool refund(amount: Float, id: String) -> String dangerous uses refund_effect
 ```
 
+## Reusing a named function
+
+A module can export a pure function with `public fn`. Both CLI targets can call it by its qualified name or by a name introduced with `use`.
+
+```corvid-fragment
+# math.cor
+public fn double(n: Int) -> Int:
+    return n * 2
+```
+
+```corvid-fragment
+# main.cor
+import "./math" as math
+
+agent main() -> Int:
+    return math.double(4)
+```
+
+This returns `8`. You can also write `import "./math" use double as twice` and call `twice(4)`.
+
+A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error.
+
 ## Importing local modules
 
 ```corvid-fragment
@@ -98,3 +120,30 @@ embedded PyO3 runtime (see the [Python FFI guide](../guides/ffi-python.md)).
 > model EXPORT shipped in slice 45o — this note is about
 > RE-exporting a surface imported from somewhere else, which is
 > unscheduled.)
+
+### Passing a named function from another module
+
+Given a module `math.cor` exporting `public fn double(n: Int) -> Int`, import it with `import "./math" as m`. Use `m.double(3)` to call it immediately or `transform = m.double` to keep the function for later. The interpreter accepts `[1, 2].map(transform)` and produces `[2, 4]`. A renamed import such as `import "./math" use double as twice` keeps the same `(Int) -> Int` signature.
+
+A module can return a closure that keeps its captured values after the call returns.
+
+```corvid
+public agent add_offset(offset: Int) -> (Int) -> Int:
+    return fn (n: Int) -> n + offset
+```
+
+With this function in a module imported as `ops`, write `add_three = ops.add_offset(3)`. Calling `add_three(4)` returns `7` on both CLI targets. Integer captures keep their value at creation. A captured `List<Int>` stays alive and reflects updates made through another reference to the same list.
+
+### Imports in nested directories
+
+Import paths are relative to the file containing the import. If `main.cor` imports `"./lib/ops"` and `lib/ops.cor` imports `"../math"`, Corvid loads `math.cor` next to `main.cor`. Mark functions used across this boundary with `public fn`. The caller must supply the declared argument types.
+
+When an imported name conflicts with a local declaration, use a qualified call such as `ops.answer(21)` or give the import a distinct name with `use answer as compute`. Imports must form an acyclic graph. Run `corvid check main.cor` to locate a visibility error, argument mismatch, duplicate declaration, or import cycle before running the program.
+
+### Fixing a type error in an import
+
+Run `corvid check` from the project root. When an imported function declares `-> Int` and returns a string, the error points to the return statement in that module and names both types. Change the return expression to produce an integer, or change the declaration and its callers if the intended result is text.
+
+### Working with imports in an editor
+
+With `corvid-lsp`, type a module alias followed by a dot to complete its public members. Hover over an imported function to read its signature, or use Go to Definition to open its declaration. Renaming a public function updates its declaration and references in local workspace files, including closed files. An explicit local alias keeps its spelling. Editing a parameter type updates diagnostics in open callers before you save.

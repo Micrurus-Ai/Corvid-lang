@@ -384,6 +384,8 @@ pub struct HttpRouteDecl {
     pub query_ty: Option<TypeRef>,
     #[serde(default)]
     pub body_ty: Option<TypeRef>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub form_encoded: bool,
     /// Explicit multipart boundary policy for a direct
     /// `body Upload<Format>` route. Upload routes must declare this
     /// policy; the runtime never invents a hidden size limit.
@@ -955,6 +957,7 @@ pub struct RouteResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RouteResponseKind {
     Json,
+    Html,
 }
 
 /// Visibility modifier on a method declared inside an `extend` block.
@@ -1096,7 +1099,16 @@ pub struct ImportDecl {
     pub alias: Option<Ident>,
     #[serde(default)]
     pub use_items: Vec<ImportUseItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub python_functions: Vec<PythonFunctionSignature>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PythonFunctionSignature {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_ty: TypeRef,
 }
 
 /// Content pin attached to a Corvid import:

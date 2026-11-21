@@ -39,6 +39,7 @@
  * Non-atomic refcount: Corvid is single-threaded today.
  */
 
+#include "list_layout.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -221,6 +222,32 @@ const corvid_typeinfo corvid_typeinfo_String = {
     .name = "String",
 };
 
+/* This callback runs on both final release and collector sweep, before
+ * the allocator can hand the descriptor address to another value. */
+static void (*forget_grounded_pointer)(void*);
+
+static corvid_typeinfo corvid_typeinfo_GroundedString;
+
+static void corvid_clear_grounded_string(void* payload) {
+    forget_grounded_pointer(payload);
+    corvid_weak_clear_self(payload);
+}
+
+/* Called once by the bridge before any grounded string is tracked. */
+void corvid_init_grounded_string_cleanup(void (*forget)(void*)) {
+    forget_grounded_pointer = forget;
+    corvid_typeinfo_GroundedString = corvid_typeinfo_String;
+    corvid_typeinfo_GroundedString.weak_fn = corvid_clear_grounded_string;
+}
+
+void corvid_track_grounded_string(void* payload) {
+    if (payload == NULL) return;
+    corvid_header* h = (corvid_header*)((char*)payload - CORVID_HEADER_BYTES);
+    if (h->refcount_word != CORVID_REFCOUNT_IMMORTAL) {
+        h->typeinfo = &corvid_typeinfo_GroundedString;
+    }
+}
+
 long long corvid_alloc_count = 0;
 long long corvid_release_count = 0;
 long long corvid_retain_call_count = 0;
@@ -297,6 +324,9 @@ void* corvid_alloc_typed(long long payload_bytes, const corvid_typeinfo* typeinf
 }
 
 void corvid_free_block(corvid_header* h) {
+    if (h->typeinfo && (h->typeinfo->flags & CORVID_TI_GROWABLE_LIST)) {
+        corvid_list_free_storage((char*)h + CORVID_HEADER_BYTES);
+    }
     corvid_tracking_node* node =
         (corvid_tracking_node*)((char*)h - CORVID_TRACKING_BYTES);
     if (node->prev != NULL) {

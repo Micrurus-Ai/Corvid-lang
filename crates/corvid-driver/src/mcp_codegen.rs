@@ -110,6 +110,7 @@ fn typed_params(schema: &serde_json::Value) -> Option<Vec<(String, String, Param
         return Some(Vec::new());
     }
     let mut params = Vec::new();
+    let mut occurrences = std::collections::HashMap::new();
     for (key, prop) in properties {
         let kind = match prop.get("type").and_then(|t| t.as_str())? {
             "string" => ParamKind::String,
@@ -118,7 +119,15 @@ fn typed_params(schema: &serde_json::Value) -> Option<Vec<(String, String, Param
             "boolean" => ParamKind::Bool,
             _ => return None,
         };
-        params.push((key.clone(), sanitize_ident(key), kind));
+        let mut ident = sanitize_ident(key);
+        let count = occurrences.entry(ident.clone()).or_insert(0usize);
+        *count += 1;
+        if *count > 1 {
+            // sanitize_ident collapses repeated underscores, so this suffix
+            // cannot collide with another field's original sanitized name.
+            ident.push_str(&format!("__{count}"));
+        }
+        params.push((key.clone(), ident, kind));
     }
     Some(params)
 }
@@ -162,15 +171,21 @@ pub fn generate_mcp_module(server_name: &str, tools: &[McpToolDescriptor]) -> St
                 out.push_str(&format!(
                     "public agent {agent_name}({signature}) -> Result<String, String>:\n"
                 ));
-                out.push_str("    args = json_object_new()\n");
+                // Sanitized parameter names never end with an underscore.
+                let builder = if params.iter().any(|(_, name, _)| name == "args") {
+                    "args_"
+                } else {
+                    "args"
+                };
+                out.push_str(&format!("    {builder} = json_object_new()\n"));
                 for (key, ident, kind) in &params {
                     out.push_str(&format!(
-                        "    args = {}(args, \"{key}\", {ident})\n",
+                        "    {builder} = {}({builder}, \"{key}\", {ident})\n",
                         kind.setter()
                     ));
                 }
                 out.push_str(&format!(
-                    "    return mcp_call(\"{server_name}\", \"{}\", json_object_finish(args))\n",
+                    "    return mcp_call(\"{server_name}\", \"{}\", json_object_finish({builder}))\n",
                     tool.name
                 ));
             }
@@ -263,7 +278,12 @@ mod tests {
             "search-issues",
             serde_json::json!({
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {
+                    "args": {"type": "integer"},
+                    "item-id": {"type": "integer"},
+                    "item_id": {"type": "string"},
+                    "item_id_2": {"type": "boolean"}
+                },
             }),
         )];
         let module = generate_mcp_module("github", &tools);

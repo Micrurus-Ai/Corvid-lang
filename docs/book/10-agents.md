@@ -145,3 +145,16 @@ runner story.
 
 The reference apps under `examples/backend/` ship canonical agent
 shapes. Read them.
+
+## Returning a stream
+
+An agent can produce elements with `yield` or forward an existing stream with `return`. A caller iterates over either stream in the same way.
+
+```corvid
+agent numbers() -> Stream<Int>:
+    yield 2
+    yield 5
+
+agent forwarded() -> Stream<Int>:
+    return numbers()
+```

@@ -55,7 +55,7 @@ fn release_policy_defines_channels_semver_and_blockers() {
         "## Maintainer Signoff",
         "signed binaries",
         "SHA256SUMS.txt",
-        "corvid upgrade --check",
+        "corvid upgrade check PATH",
         "corvid claim audit",
     ] {
         assert!(
@@ -907,7 +907,7 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
          and a distroless stage 2 for the runtime"
     );
     assert!(
-        dockerfile.contains("gcr.io/distroless/cc-debian12"),
+        dockerfile.contains("gcr.io/distroless/python3-debian12"),
         "Dockerfile should use a distroless runtime base"
     );
     assert!(
@@ -1070,7 +1070,7 @@ fn upgrade_command_reports_and_applies_source_stdlib_migrations() {
     let source = temp.path().join("legacy.cor");
     fs::write(
         &source,
-        "pub extern \"c\"\nagent classify() -> String:\n    return std.llm.complete(\"x\")\n",
+        "pub extern \"c\"\r\nagent classify() -> String:\r\n    # std.cache.get_or_create(\r\n    return std.llm.complete(\"std.llm.complete(example)\")\r\n",
     )
     .expect("write legacy source");
 
@@ -1106,14 +1106,30 @@ fn upgrade_command_reports_and_applies_source_stdlib_migrations() {
         .output()
         .expect("run upgrade apply");
     assert!(
-        apply.status.success(),
-        "upgrade apply failed:\nstdout={}\nstderr={}",
+        apply.status.code() == Some(1),
+        "manual migration should remain:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&apply.stdout),
         String::from_utf8_lossy(&apply.stderr)
     );
     let rewritten = fs::read_to_string(&source).expect("read rewritten source");
     assert!(rewritten.contains("pub extern \"c\" agent classify"));
-    assert!(rewritten.contains("std.agent.run(\"x\")"));
+    assert!(rewritten.contains("std.llm.complete(\"std.llm.complete(example)\")"));
+    let findings: Value = serde_json::from_slice(&apply.stdout).expect("parse apply report");
+    let manual = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["kind"] == "stdlib")
+        .unwrap();
+    assert!(manual["replacement"].is_null());
+    assert_eq!(manual["occurrences"], 1);
+
+    // The developer ports the legacy call. Its literal and comment stay untouched.
+    let ported = rewritten.replace(
+        "std.llm.complete(\"std.llm.complete(example)\")",
+        "\"std.llm.complete(example)\"",
+    );
+    fs::write(&source, &ported).unwrap();
 
     let clean = Command::new(corvid_bin())
         .arg("upgrade")
@@ -1130,6 +1146,23 @@ fn upgrade_command_reports_and_applies_source_stdlib_migrations() {
 }
 
 #[test]
+fn upgrade_apply_preserves_earlier_files_on_invalid_metadata() {
+    let dir = tempfile::tempdir().expect("create project");
+    let trace = dir.path().join("a.json");
+    let original = r#"{"schema":"corvid.trace.v0"}"#;
+    fs::write(&trace, original).unwrap();
+    fs::write(dir.path().join("z.json"), "{").unwrap();
+    let output = Command::new(corvid_bin())
+        .args(["upgrade", "apply"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(trace).unwrap(), original);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
 fn upgrade_command_migrates_schema_trace_and_connector_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let schema = temp.path().join("migration-state.json");
@@ -1137,7 +1170,8 @@ fn upgrade_command_migrates_schema_trace_and_connector_json() {
     let connector = temp.path().join("connector.json");
     fs::write(&schema, "{\"schema\":\"corvid.migration_state.v0\"}\n")
         .expect("write schema json");
-    fs::write(&trace, "{\"schema\":\"corvid.trace.v0\"}\n").expect("write trace json");
+    let original_trace = "{\r\n  \"schema\" : \"corvid.trace.v0\",\r\n  \"payload\":{\"schema\":\"corvid.trace.v0\"}\r\n}\r\n";
+    fs::write(&trace, original_trace).expect("write trace json");
     fs::write(&connector, "{\"manifest_version\":\"0.1\"}\n")
         .expect("write connector json");
 
@@ -1185,9 +1219,10 @@ fn upgrade_command_migrates_schema_trace_and_connector_json() {
     assert!(fs::read_to_string(schema)
         .expect("read schema")
         .contains("corvid.migration_state.v1"));
-    assert!(fs::read_to_string(trace)
-        .expect("read trace")
-        .contains("corvid.trace.v1"));
+    assert_eq!(
+        fs::read_to_string(trace).expect("read trace"),
+        original_trace.replacen("corvid.trace.v0", "corvid.trace.v1", 1)
+    );
     assert!(fs::read_to_string(connector)
         .expect("read connector")
         .contains("\"manifest_version\":\"1.0\""));

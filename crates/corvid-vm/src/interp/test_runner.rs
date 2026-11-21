@@ -60,9 +60,18 @@ async fn run_test_decl(
     runtime: &Runtime,
     options: &TestRunOptions,
 ) -> Result<TestExecution, InterpError> {
+    let fixture = load_test_trace_fixture(test, options).transpose().map_err(|message|
+        InterpError::new(InterpErrorKind::Other(message), test.span))?;
+    let fixture = fixture.as_ref();
+    // Metadata-only assertions also work with older, inspection-only traces.
+    let executes_code = !test.body.stmts.is_empty() || test.assertions.iter().any(|assertion|
+        matches!(assertion, IrEvalAssert::Value { .. } | IrEvalAssert::Snapshot { .. }
+            | IrEvalAssert::Similar { .. } | IrEvalAssert::Judged { .. }));
+    let replay = fixture.filter(|_| executes_code).map(fixture_runtime).transpose()
+        .map_err(|message| InterpError::new(InterpErrorKind::Other(message), test.span))?;
+    let runtime = replay.as_ref().unwrap_or(runtime);
     let mut interp = Interpreter::new(ir, runtime).with_mocks();
     run_test_setup(&mut interp, test).await?;
-    let trace_fixture = load_test_trace_fixture(test, options);
 
     let mut assertions = Vec::with_capacity(test.assertions.len());
     for (index, assertion) in test.assertions.iter().enumerate() {
@@ -75,7 +84,7 @@ async fn run_test_decl(
                 assertion,
                 index,
                 options,
-                trace_fixture.as_ref(),
+                fixture,
             )
             .await,
         );
@@ -112,7 +121,7 @@ async fn eval_test_assertion<'ir>(
     assertion: &'ir IrEvalAssert,
     assertion_index: usize,
     options: &TestRunOptions,
-    trace_fixture: Option<&Result<TraceFixture, String>>,
+    trace_fixture: Option<&TraceFixture>,
 ) -> TestAssertionExecution {
     match assertion {
         IrEvalAssert::Value {
@@ -122,7 +131,7 @@ async fn eval_test_assertion<'ir>(
             ..
         } => {
             if confidence.is_some() || runs.is_some() {
-                eval_statistical_value_assertion(ir, test, runtime, assertion).await
+                eval_statistical_value_assertion(ir, test, runtime, assertion, trace_fixture).await
             } else {
                 eval_value_assertion(interp, expr, assertion_label(assertion)).await
             }
@@ -272,6 +281,16 @@ async fn eval_judged_assertion<'ir>(
     }
 }
 
+fn fixture_runtime(fixture: &TraceFixture) -> Result<Runtime, String> {
+    let replay = Runtime::builder().replay_from(&fixture.path).build();
+    let (agent, args) = fixture.events.iter().find_map(|event| match event {
+        corvid_runtime::TraceEvent::RunStarted { agent, args, .. } => Some((agent, args)),
+        _ => None,
+    }).ok_or("trace fixture is missing its run entry")?;
+    replay.prepare_run(agent, args).map_err(|err| err.to_string())?;
+    Ok(replay)
+}
+
 fn load_test_trace_fixture(
     test: &IrTest,
     options: &TestRunOptions,
@@ -287,10 +306,10 @@ fn load_test_trace_fixture(
 
 fn eval_trace_assertion(
     assertion: &IrEvalAssert,
-    trace_fixture: Option<&Result<TraceFixture, String>>,
+    trace_fixture: Option<&TraceFixture>,
 ) -> TestAssertionExecution {
     let label = assertion_label(assertion);
-    let Some(trace_fixture) = trace_fixture else {
+    let Some(fixture) = trace_fixture else {
         return TestAssertionExecution {
             label,
             status: TestAssertionStatus::Unsupported,
@@ -298,16 +317,6 @@ fn eval_trace_assertion(
                 "trace assertions require `test name from_trace \"trace.jsonl\":`".into(),
             ),
         };
-    };
-    let fixture = match trace_fixture {
-        Ok(fixture) => fixture,
-        Err(error) => {
-            return TestAssertionExecution {
-                label,
-                status: TestAssertionStatus::Error,
-                message: Some(error.clone()),
-            };
-        }
     };
     match evaluate_trace_assertion(assertion, fixture) {
         Ok(message) => TestAssertionExecution {
@@ -416,6 +425,7 @@ async fn eval_statistical_value_assertion<'ir>(
     test: &'ir IrTest,
     runtime: &'ir Runtime,
     assertion: &'ir IrEvalAssert,
+    fixture: Option<&TraceFixture>,
 ) -> TestAssertionExecution {
     let IrEvalAssert::Value {
         expr,
@@ -429,7 +439,13 @@ async fn eval_statistical_value_assertion<'ir>(
     let confidence = confidence.unwrap_or(1.0);
     let mut passed = 0_u64;
     for _ in 0..runs {
-        let mut fresh = Interpreter::new(ir, runtime).with_mocks();
+        let replay = match fixture.map(fixture_runtime).transpose() {
+            Ok(replay) => replay,
+            Err(message) => return TestAssertionExecution {
+                label: assertion_label(assertion), status: TestAssertionStatus::Error, message: Some(message),
+            },
+        };
+        let mut fresh = Interpreter::new(ir, replay.as_ref().unwrap_or(runtime)).with_mocks();
         if let Err(error) = run_test_setup(&mut fresh, test).await {
             return TestAssertionExecution {
                 label: assertion_label(assertion),

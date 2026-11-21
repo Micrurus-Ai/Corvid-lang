@@ -22,6 +22,8 @@ This is how Corvid prevents "the model said X, and we treated X as
 fact": sourced data is a different type, and strict agents refuse to
 launder it away.
 
+A record named `GroundedNote` is an ordinary record. Write `Grounded<GroundedNote>` when a note must carry source information.
+
 ## How you produce a grounded value
 
 A tool whose effect carries `data: grounded` returns `Grounded<T>` —
@@ -88,6 +90,21 @@ agent main() -> Grounded<String>:
 [E0208] error: type mismatch in argument 1 to `cite_answer`
     │ Help: change the value to produce a `Grounded<String>`, or update the signature
 ```
+
+Use `+` to join grounded text in the interpreter or a native build. For example, `"Found: " + result` and `result + "!"` both produce a `Grounded<String>` when `result` is grounded. You can also join two grounded strings. The result records the left and right operand chains in that order and uses the lower of their confidence scores. Plain text contributes an empty chain and a confidence of 1, including text obtained by explicitly discarding its sources.
+
+When a host calls `corvid_grounded_sources` on a handle with derived provenance, it receives retrieval names from the operands in left-to-right order. For example, if the left operand came from `catalog` and the right came from both `catalog` and `inventory`, the result lists `catalog` and `inventory` once each.
+
+A native host that needs to query a heap string's sources later must capture its grounded handle while it still owns a live reference to the string. The captured handle survives the string's release. Call `corvid_grounded_release` when you finish querying it.
+
+A helper can take a sourced value and return a new one. The checker follows the parameter through assignments and requires a source on each reachable return path.
+
+```corvid
+agent add_suffix(value: Grounded<String>) -> Grounded<String>:
+    return value + "!"
+```
+
+Command-line arguments arrive as plain data. Give a command-line entry agent a plain parameter and obtain its sourced value through a retrieval tool. A Rust host invoking the interpreter can pass an existing `Value::Grounded` to a `Grounded<T>` parameter. Passing an ordinary string there produces a type mismatch.
 
 ## Strict mode: `@grounded_pure`
 

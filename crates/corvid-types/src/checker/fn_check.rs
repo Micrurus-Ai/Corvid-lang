@@ -18,11 +18,11 @@ impl<'a> Checker<'a> {
         let declared_ret = self.type_ref_to_type(&f.return_ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         self.check_block(&f.body);
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
 
         self.walk_fn_purity_block(&f.name.name, &f.body);
     }
@@ -95,6 +95,13 @@ impl<'a> Checker<'a> {
     fn walk_fn_purity_expr(&mut self, fn_name: &str, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, span } => {
+                if let Some((import, function)) = crate::effects::python_call_target(
+                    callee, self.file, self.symbols, self.bindings,
+                ) {
+                    self.fn_purity_violation(
+                        fn_name, &format!("a call to Python function `{}.{}`", import.module, function.name.name), *span,
+                    );
+                }
                 if let Expr::Ident { name, .. } = callee.as_ref() {
                     match self.bindings.get(&name.span) {
                         Some(Binding::Decl(def_id)) => {
@@ -120,12 +127,9 @@ impl<'a> Checker<'a> {
                                     &format!("a call to fixture `{}`", name.name),
                                     *span,
                                 ),
-                                // Imported callables cross a module
-                                // boundary the purity walk cannot see
-                                // through; only imported FNs would be
-                                // pure, and cross-module fn calls are
-                                // not in the v1 surface.
-                                DeclKind::ImportedUse => self.fn_purity_violation(
+                                DeclKind::ImportedUse if !self.module_resolution
+                                    .and_then(|modules| modules.lookup_imported_use(&name.name))
+                                    .is_some_and(|target| matches!(target.export.kind, DeclKind::Fn | DeclKind::Type)) => self.fn_purity_violation(
                                     fn_name,
                                     &format!("a call to imported `{}`", name.name),
                                     *span,
@@ -143,6 +147,19 @@ impl<'a> Checker<'a> {
                         _ => {}
                     }
                 } else {
+                    if let Expr::FieldAccess { target, field, .. } = callee.as_ref() {
+                        if let Expr::Ident { name, .. } = target.as_ref() {
+                            let module_alias = matches!(self.bindings.get(&name.span),
+                                Some(Binding::Decl(id)) if self.symbols.get(*id).kind == DeclKind::Import);
+                            let member = self.module_resolution.map(|modules| modules.lookup_member(&name.name, &field.name));
+                            if module_alias && matches!(member,
+                                Some(corvid_resolve::ModuleLookup::Found { export, .. })
+                                    if matches!(export.kind, DeclKind::Agent | DeclKind::Tool | DeclKind::Prompt | DeclKind::Fixture))
+                            {
+                                self.fn_purity_violation(fn_name, &format!("a call to imported `{}.{}`", name.name, field.name), *span);
+                            }
+                        }
+                    }
                     self.walk_fn_purity_expr(fn_name, callee);
                 }
                 for a in args {

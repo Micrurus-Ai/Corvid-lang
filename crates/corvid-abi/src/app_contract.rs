@@ -302,6 +302,8 @@ pub struct ContractRoute {
     pub query_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_media_type: Option<String>,
     /// Explicit multipart policy for a direct `Upload<Format>` route
     /// body. Its maximum is source-declared and enforced by the live
     /// boundary; it is never supplied by a runtime constant.
@@ -311,6 +313,9 @@ pub struct ContractRoute {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ContractApprovalPolicy>,
     pub response_type: String,
+    /// Explicit response format for routes declared with a media type such as HTML.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_media_type: Option<String>,
     /// Permissions the route requires (from its effect row's trust /
     /// dangerous surface). Empty = no approval-requiring effect.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -873,6 +878,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .collect(),
         query_type: r.query_ty.as_ref().map(type_ref_name),
         body_type: r.body_ty.as_ref().map(type_ref_name),
+        request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
         upload: r
             .body_ty
             .as_ref()
@@ -886,6 +892,11 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             irreversible: policy.irreversible,
         }),
         response_type: type_ref_name(&r.response.ty),
+        response_media_type: match r.response.kind {
+            corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
+            corvid_ast::RouteResponseKind::Json if type_ref_head_is(&r.response.ty, "Stream") => Some("text/event-stream".into()),
+            corvid_ast::RouteResponseKind::Json => None,
+        },
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
         // names that require approval.

@@ -25,12 +25,18 @@ on:
       - "web/**"
       - ".github/workflows/test-installers.yml"
   workflow_dispatch:
+    inputs:
+      recovery_only:
+        description: Run only offline installer lifecycle and tagged source checks across native architectures
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   lint:
+    if: ${{ !inputs.recovery_only }}
     name: lint scripts
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +55,7 @@ jobs:
         run: node --check web/worker.js
 
   pwsh-lint:
+    if: ${{ !inputs.recovery_only }}
     name: PSScriptAnalyzer
     runs-on: windows-latest
     steps:
@@ -73,6 +80,23 @@ jobs:
               exit 1
           }
           Write-Host "install.ps1 clean"
+
+  upgrade-recovery:
+    name: offline upgrade recovery (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.recovery_only && '["ubuntu-latest","ubuntu-24.04-arm","macos-15-intel","macos-15","windows-latest","windows-11-arm"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Exercise installer replacement and recovery
+        run: python install/test_upgrade.py
+      - name: Build a stable source fallback from a tagged checkout
+        run: python install/test_source_install.py
 
   smoke-linux:
     name: smoke (ubuntu)

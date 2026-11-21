@@ -1,5 +1,229 @@
 # Corvid — Build Roadmap
 
+After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
+
+## Active task queue
+
+This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.
+
+Work through the first open item in order. Inspect its behavior, implement or reconcile the code, exercise the normal CLI or application entry point, and update the learning guide, grammar or function reference. Commit and push each verified task.
+
+**1. General language foundations**
+
+- [x] G01. Support List.first() and List.last() on both execution targets. Cover empty lists, trailing zero, and owned strings that outlive the list.
+  - Forced native and interpreter CLI runs passed for empty lists, trailing zero, heap strings escaping a temporary list, and nested options. All three parity tests passed with native leak checks.
+- [x] G02. Support string-map membership, distinct-key length and insertion-ordered key/value snapshots on both targets. Exercise duplicate keys, empty maps and updates through an alias.
+  - Forced native and interpreter runs passed for duplicate keys, empty maps and empty string values, overwrites, growth through aliases and stable snapshots. The ownership checks passed with both native ownership modes.
+- [x] G03. Support string maps with integer, string and local record values, including lists and options of those types. Check typed lookups, snapshots, updates and diagnostics for unsupported native key types.
+  - Five map programs passed on both CLI targets and in both native ownership modes. Coverage includes stored zero, nested absence, record and list snapshots, alias updates and integer compound assignments with side effects. Forced native execution reports unsupported key types, and both targets diagnose a compound update to a missing key.
+- [x] G04. Complete everyday control flow and assignment. Exercise nested loops, early returns, short-circuiting, record field updates and compound assignments with side effects evaluated once.
+  - Both CLI targets verified nested record and list writes with side effects, growable lists, skipped calls, loop snapshots, break, continue and early return. Native allocation checks passed on the successful paths in both ownership modes. Negative and past-the-end writes reported their index and length.
+- [x] G05. Finish expression composition. Exercise calls in arithmetic, collection operations and match arms, guards and nested patterns, and propagate typed errors across function boundaries.
+- [x] G06. Make functions and data types reusable. Verify functions as values, closures, user-defined sum types, records, type inference and built-in generic collection helpers across two modules.
+  - [x] Interpreter: pass local, qualified and renamed pure functions as callbacks across modules. The CLI checks incompatible callback signatures.
+  - [x] Native and interpreter CLI targets: pass a named integer function through an import, call a returned closure, capture scalars before rebinding, and keep shared and temporary integer lists alive.
+  - [x] In both targets, imported functions returning integer and string lists infer the corresponding option payload through the same last() method.
+  - [x] Native integer list callbacks for map, filter, fold, any and all passed the cross-module CLI test, including empty inputs, ordered evaluation and short-circuiting.
+  - [x] Both CLI targets constructed and matched imported sum values with record payloads. A guarded arm returned the original record, and native allocations balanced in both ownership modes.
+- [x] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
+- [x] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
+  - [x] Compare records, lists, string maps, options, results and sum variants by their contents on both CLI targets. Include aliases, mutations, independent recursive records and owned payloads.
+  - [x] Both CLI targets checked Float rounding and conversion limits, including halfway cases, loss of integer precision, NaN, infinity, and signed division overflow at the minimum Int.
+  - [x] Both CLI targets agree on Unicode scalar lengths and substring bounds, case mapping, trimming, search, replacement and splitting, including empty patterns and separators. Native allocation counts balanced in both ownership modes.
+  - [x] Option and Result propagation releases owned values across nested scopes, loop conditions, short-circuit expressions and collection updates. Both CLI targets preserved operand order and both native ownership modes balanced allocations.
+
+**2. Developer workflow**
+
+- [x] D01. Create, run, check, format and test a multi-file project from a clean checkout. Invalid input must identify the source location and a fix.
+  - [x] Created a project and verified fmt, fmt --check, check, both run targets and test from a clean local clone with an imported helper. The formatter preserves token meaning and reports syntax errors before writing files.
+  - [x] Imported parse, name and type errors identify the source module. A CLI regression verifies the offending line after a multibyte comment and both the declared and actual return types.
+  - [x] Native runs reused an unchanged executable and rebuilt after direct and nested module edits. Concurrent first runs both returned the expected result.
+- [x] D02. Make editor navigation work across local Corvid modules. Check diagnostics, hover, completion, go-to-definition and rename on real Corvid source.
+  - A three-file project exercised hover, definition, completion, workspace rename and diagnostics through the language server over stdio. Changing an unsaved helper signature updated its caller, and fixing a helper cleared its error.
+- [x] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
+  - A freshly scaffolded application read missing, empty and present environment variables, joined Unicode path components, wrote and parsed JSON, listed files and round-tripped a timestamp. The default CLI ran the workflow on the interpreter. Collection behavior on both targets is covered by G01 through G08.
+- [x] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.
+  - [x] Two fresh Windows project directories produced identical native executables. A local registry test restored a missing cache entry, ran offline after disconnecting the registry, rejected changed bytes, updated a version and detected a conflicting lock.
+  - [x] A fresh Debian container with networking disabled rebuilt the compiler using cached Rust dependencies. The offline package test passed and two separately built native programs both printed 12 and had SHA-256 `77dc307e1244195191d870e2bdacbf907d6fc991da49cd77a6910931342369dc`.
+
+**3. Application services**
+
+- [x] S01. Implement or verify typed request and response handling, routing, validation, configuration and errors in a running HTTP service.
+  - Live loopback requests exercised typed path and query input, range checks, UTF-8 decoding and sum-type JSON bodies. The service returned the declared response values and 400, 404 and 405 errors. OpenAPI describes positional variant payloads.
+- [x] S02. Persist typed records across restart. Exercise migrations, transactions, rollback and concurrent requests through the standard library.
+  - A SQLite service accepted four simultaneous writes, rolled back an audit insert on a duplicate note, and accepted the next request. After migration failure, retry and restart, all four original records were readable. All 12 migration tests passed.
+- [x] S03. Support outbound HTTP with structured data, timeouts and cancellation. Verify concurrency, streams, backpressure and resource cleanup when the caller disconnects.
+  - [x] A live SSE route held a SQLite write lock while yielding. Closing its client socket released the lock while the service stayed up. The VM stream tests verified bounded backpressure, consumer cancellation and resumable delivery.
+  - A live service sent JSON and returned a typed receipt while another request waited. A 300 ms deadline returned HTTP 504, and both timeout and caller disconnect closed the upstream connection. The VM also cancelled a stream waiting for its first chunk.
+- [x] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.
+
+  - Live HTTP tests verified session, role and tenant checks. A handler read an environment-backed secret and access logs recorded route templates and status. On Linux, SIGTERM closed the listener, an accepted request finished successfully, and the process exited.
+
+**4. AI-native application code**
+
+- [x] A01. Call a model using Corvid types. Cover provider configuration, a local test provider, text and structured results, malformed output and provider substitution.
+  - The same Corvid CLI program ran against local Ollama and OpenAI-compatible protocol responders. Both preserved role messages, returned text and a typed record, and rejected malformed JSON and an incorrect field type.
+- [x] A02. Stream model output to a consumer. Verify incremental chunks, cancellation, timeouts, retries and usage accounting.
+  - A live HTTP consumer received UTF-8 text while the local model provider held its next chunk. Disconnecting cancelled generation. The CLI integration test covered a first-chunk deadline, retry after HTTP 503, a truncated stream and a provider-reported token count over budget.
+- [x] A03. Use ordinary typed functions as tools. Exercise argument checking, multi-step agent execution, tool errors, bounded execution and resumable state.
+  - [x] A CLI agent matched a typed action, called a Corvid function, passed its result into the next prompt and stopped within three model calls. The test covered invalid argument types, unknown actions, function errors and exhaustion of the step limit.
+  - [x] CLI workers restored checkpoint payloads and remaining allowances across processes. Two workers attempting the same sequence committed one result and charged one step and one tool call. All 14 jobs integration tests passed.
+  - The default CLI passed a function directly into a prompt, validated batched named arguments and returned matching call IDs. A replacement job worker resumed the saved result and finished with one tool charge. All five local model-provider integration tests passed.
+- [x] A04. Build retrieval with document ingestion, embeddings, indexing, queries and source references using the standard library.
+  - Separate CLI runs verified that embedding and SQLite failures preserve the previous document. A served route returned the replacement passage with its source, character offsets and provenance key. Lexical search ranked all 141 matching chunks before applying the result limit.
+- [x] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
+  - A new project sent a confined PNG to two local provider protocols and received a typed caption. Invalid input and a path outside the root failed before model dispatch.
+  - A headless browser clicked, read the new text, captured the page for a prompt, closed and reopened with fresh state. Direct navigation and an HTTP redirect to a second origin failed without contacting the destination.
+- [x] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
+  - Recorded a provider mock calling a Corvid function, checked the structured tool result and replayed the conversation with credentials removed. Source and trace-based tests passed in two fresh processes. Changing the prompt input failed the recorded test.
+
+**5. Browser applications**
+
+- [x] F01. Render reusable views with state, events, forms and accessible controls. Exercise them in a browser through keyboard and pointer input.
+  - The packaged page and its compiled handlers passed pointer, keyboard and text-input checks in Edge.
+- [x] F02. Link frontend actions to typed backend handlers. Changing a shared record must identify affected callers at compile time.
+  - Submitted GET and POST forms in Edge using a shared imported record, followed its OpenAPI reference, and verified its field names. A renamed field failed checking. Malformed input, a failed refinement and JSON sent to the form route all preserved the previous saved value.
+- [x] F03. Deliver streamed AI results in the UI with loading, cancellation, error and reconnect behavior. Verify navigation, asset builds and a production frontend bundle.
+  - In Edge, the documented page streamed Unicode text from a local model responder. Cancellation and navigation closed the upstream connection. A fresh start recovered after connection and provider failures.
+  - Built identical web archives twice, verified a failed handler build preserved the archive, and ran the extracted app with its own project root. Its nested page loaded the compiled handler and streaming control.
+
+**6. Interoperability, performance and distribution**
+
+- [x] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
+  - [x] Served an extracted web archive with a synchronous Python standard-library tool. Verified record conversion, a mismatched return field, a Python exception and a subsequent successful request.
+  - [x] Loaded a separate Rust tool DLL beside an extracted Windows app. A Unicode value round-tripped, a missing DLL failed startup, and a missing symbol failed one request while subsequent valid calls succeeded. The approval-and-resume integration passed.
+  - [x] Typed synchronous Python imports work through module aliases in the interpreter. Verified argument and result checking, host errors, copy semantics, effect and approval checks, and replay after the Python module was removed. Native, Wasm and Python builds diagnose the interpreter-only boundary.
+  - [x] A separate C program linked against the generated import library and header, loaded the relocated Windows DLL, checked integer and UTF-8 string results, released strings and observations, and verified catalog errors. A separate Node.js consumer loaded the relocated Wasm package and checked i64 values, missing imports and host exceptions.
+  - [x] The [Windows x64 candidate](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44866623552) linked a Rust integer tool and ran the relocated executable by itself. It returned 42. The managed-device installation check remains tracked under R01.
+- [x] P01. Profile CLI startup, checking, native compilation, list slicing, local HTTP requests and model streams. Record repeatable baselines and validate measured improvements against unchanged results.
+  - [x] Profiled short slices through the interpreter CLI, removed a full-list copy and checked independence and bounds. Windows x64 development-build median fell from 918.326 ms to 59.005 ms with identical results. Release measurements are tracked separately.
+  - [x] Verified two Windows x64 release profiles on the same runner across all seven metrics. Both produced the expected application results and the repeat passed the baseline comparison. See the [measurements](docs/guides/performance.md#windows-x64-release-baseline).
+  - [x] Rechecked seven Windows x64 workloads on candidate 05c20e08 with 15 trials per workload in each profile. The repeat passed every same-host threshold. Performance-enabled candidate builds now apply that comparison automatically.
+- [x] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.
+  - [x] The [six native candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720) passed the installer-to-application check. The install guide records their tested Python runtimes.
+  - [x] All six [9d2a3c00 candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44882331435) passed the install-to-application and starter trace replay checks on hosted runners. The checksum job passed and publication was skipped.
+  - [x] Tested the Linux x64 upgrade from archive 3a29a662 to 9d2a3c00 on Debian 12 after checking both published workflow digests. A simulated move failure during activation restored all 42 file hashes and the application still returned 42. Retrying installed the new CLI with the archive digest for that binary. Uninstall preserved the developer-owned file.
+  - [x] The offline upgrade test now checks Unix permissions, hard-link identity and relative symbolic links after an activation failure. Verified the complete installer lifecycle on Debian 12.
+  - [x] Corrected Cargo inputs for CLI version reporting. Verified rebuilds after commit changes and fresh builds on unchanged checkouts, including packed refs and linked worktrees. See the [source build guide](docs/book/01-install.md#from-a-source-checkout).
+  - [x] On the managed Windows x64 device, the checksum-verified ddaeaddc archive passed the staged version check, Python host calls, starter replay, relocated frontend/backend application test and uninstall. Defender antivirus and real-time protection reported enabled. The Windows fixture-based upgrade and rollback suite also passed. Earlier candidates be524e1f and 3a29a662 had been blocked at the staged version check (Defender event 1121).
+- [x] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
+  - [x] The [clean workspace run on ddaeaddc](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44906344316/job/136852634379) passed 3,231 tests across 195 groups, with six ignored. All 15 [CI jobs](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44906344316) passed on that commit, including three-platform Wasm parity, Windows record/replay, Python integration, headless Chromium, effect-system checks and signed-artifact verification. The [six native packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44906344802) passed the install-to-application checks.
+  - [x] Grounded handle source queries traverse nested operator inputs, preserve operand order and omit duplicate retrieval names. See the [grounded values guide](docs/book/09-grounded.md).
+  - [x] Native heap strings discard uncaptured provenance on final release and collector sweep. A captured handle retains its provenance independently. Covered by the grounded string lifetime integration test.
+  - [x] Added the runtime operation for grounded string addition. It returns a fresh string with ordered operand chains and minimum confidence, and rejects missing required metadata. The [native grounded values design](docs/meta/native-grounded-handles-design.md) describes the implemented ownership model and remaining representation work.
+  - [x] The integrated Linux checkout passed the locked workspace library and integration suite in a clean build directory (194 test groups, 3,225 passed, zero failed, seven ignored). This run covers the integrated source snapshot, including the imported-function purity regression.
+  - [x] Reconciled the [build guide](docs/book/16-building.md) with CLI target names and flags. A fresh Windows project returned 42 on both interpreter and native runs and produced the documented Python, Wasm, native, shared-library and static-library artifacts.
+  - [x] Called a compiled Corvid agent from a Python host using the CLI and runtime from the 9d2a3c00 Linux x64 archive. The [build guide example](docs/book/16-building.md#calling-a-compiled-agent-from-python) returned 42 on clean Debian 12.
+  - [x] Verified source and JSON migration checks through the CLI. Split-line exports migrate mechanically, including on CRLF files. Legacy model and cache calls are reported for manual review. Comments and string literals retain their original content. See the [migration guide](docs/meta/upgrade-migrations.md).
+  - [x] Exported guarantee rows from a signed library through `claim --explain --json` with key and source verification. The upgrade command accepted identical manifests and reported removals with exit code 1. See the [comparison guide](docs/meta/upgrade-migrations.md#comparing-guarantees-across-library-versions).
+  - [x] Rechecked the refund example through `corvid check` after declaring its requester identity, reviewer role, and approval limits.
+  - [x] Reconciled the [release policy](docs/release-policy.md#verification) with CLI and archive checks. The CLI rejected mismatched stable, beta and nightly versions before staging any files.
+  - [x] Fixed native server wrapper builds for projects with typed HTTP routes and shared Cargo target directories. All five server integration tests passed on Windows, including the shared application and refund example that failed in the prior workspace run.
+  - [x] Fixed warning W0270 on agents that forward an existing stream. A CLI consumer received both yielded elements. A stream body containing only `pass` retained the warning.
+  - [x] Reconciled six nested bundle fixtures with the previously verified bindings metadata change. All five Linux bundle verification scripts passed with the candidate CLI on Debian 12.
+  - [x] Aligned Python-generated signed integer arithmetic with the interpreter. Checked 15 cases through the CLI and generated Python, including division above float precision, signed remainders, overflow, zero divisors and an ordinary float expression. The Python code generator and runtime suites passed.
+  - [x] Verified 11 floating-point division and remainder cases with both the interpreter CLI and generated Python. The results agree on signed remainders, negative zero, infinities and NaN. See the [arithmetic rules](docs/book/05-types.md).
+  - [x] Fixed generated Python modules containing a Corvid null escape. Built and imported an agent containing all six [string escapes](docs/book/04-syntax.md#expressions) and checked its exact return value, including a null followed by a digit.
+  - [x] Generated Python dictionaries for map literals with string, integer and boolean keys. Compared empty, nested and duplicate-key literals through the interpreter and a Python host. The [type guide](docs/book/05-types.md) records the remaining Python map limitations.
+  - [x] Fixed a malformed local Git URL in the skill-source test on Unix. On Debian 12 the installed CLI added a skill from a branch and subdirectory under a path with a space, pinned it and checked the consumer project. See the [skill guide](docs/guides/capabilities.md).
+  - [x] Reconciled the secret-helper compile tests with the two-argument constructor. Executing tests checked program access, missing keys and trace redaction. The [guide example](docs/reference/stdlib/secrets.md) returned only the presence flag in both CLI runs.
+  - [x] Verified string-list iteration during aliased writes through native and interpreter CLI runs. All six native reference-count baselines passed with the application runtime. The three-string loop allocated and freed both the source list and its snapshot.
+  - [x] Verified the effect after a native list loop in all four tiers through the CLI. The classifier still flags a weakened native trust profile and the deliberate disagreement fixture still fails verification. The verifier now uses a discoverable native runtime archive before attempting a Cargo build.
+  - [x] Fixed the generated Dockerfile to supply the Debian Python shared library and bundled runtime and select the target CPU archive. The CLI packaging regression test passed. Linux candidate jobs now build the generated image and run a Python tool inside it.
+  - [x] Reproduced the interpreter stack overflow with a 2 MiB test thread. Boxed call and prompt futures and made Boolean chains iterative. Both outside-world guide tests, all 18 built-in method tests and three native/interpreter parity cases passed with the same stack size.
+  - [x] The [Linux candidate jobs](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44888632949) built generated application images on x64 and ARM64. Both images ran the scaffolded Python tool and returned the expected string.
+  - [x] Checked 25 ordered agent calls in both `and` and `or` chains through the interpreter and native CLI. Both skipped the final division by zero and preserved each call exactly once.
+  - [x] Checked the Python build boundary for Result constructors. The interpreter returned `Ok(42)`; the generated Python module imported successfully and raised `NotImplementedError` when called. The [build guide](docs/book/16-building.md) describes how to check this from a host.
+  - [x] Fixed the interpreter stack overflow in nested guarded matches by polling a separate future for each expression variant. On 2 MiB test threads all 137 VM tests and five composed native/interpreter parity cases passed. The guarded-pattern program returned true through both CLI tiers.
+  - [x] Rebuilt the parity suite's runtime and mock tool archive for 6bc5be89. On Windows x64, all 160 enabled native/interpreter parity tests passed on 2 MiB threads. One native grounded string ownership case remains explicitly ignored. See the [contributor test commands](CONTRIBUTING.md#run-the-test-suite).
+  - [x] Before native concatenation landed, prevented grounded string addition from producing a crashing executable. With a native tool library present, both operand orders ran through automatic interpreter selection, forced native execution and building reported the limitation, and an explicit unwrap still ran natively. See the [grounded value guide](docs/book/09-grounded.md).
+  - [x] Verified that `corvid contract regen-doc` reproduced the committed 102,530-byte core semantics reference exactly. Fixed the registry test for Windows CRLF checkouts. All 28 guarantee tests passed.
+  - [x] The clean Linux [workspace job on 6bc5be89](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44892471166/job/136811062885) passed, including the previously failing guarded-pattern case. Its log reported 3,219 passes, zero failures and seven ignored across 194 test summaries.
+  - [x] Fixed JSON migrations that missed formatted envelope versions and rewrote matching fields in application payloads. CLI checks verified CRLF preservation, repeat application, and rejection of malformed or duplicate metadata without changing the affected file. Both upgrade integration tests passed. See the [migration guide](docs/meta/upgrade-migrations.md).
+  - [x] Verified multi-file upgrade recovery through the CLI. A malformed second file left both originals intact and no staging files behind. After correcting it, apply migrated both files and check reported no pending edits.
+  - [x] All 15 jobs in [CI on 6bc5be89](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44892471166) passed, including the downstream browser, Python, replay, effect-system and signed-artifact checks. This revision precedes the grounded string and multi-file migration changes.
+  - [x] Checked project and compiler version reporting in a fresh project. Changing the application version from 0.1.0 to 2.3.4 preserved the CLI version, and the same source checked and returned 42 in both cases. The [project layout guide](docs/book/14-project-layout.md) explains which version selects the language syntax.
+  - [x] Verified the three default version labels in locally staged release manifests and compared nightly tagging with the hosted candidate workflow. The [release policy](docs/release-policy.md#verification) records how to identify a candidate in each workflow.
+  - [x] The corpus CLI now reports completed comparisons when another program cannot be verified. Checked all three exit codes and the JSON output. On the 22-program corpus, 20 agreed, one deliberately diverged, and one was incomplete.
+  - [x] Native grounded string addition now runs through the compiler with provenance and reference counting. Four-tier verification completed all 22 corpus programs, including `combined_all.cor`. Only the deliberate `tier_disagree.cor` fixture diverged.
+  - [x] The checker recognizes the `Grounded<T>` wrapper structurally. Ordinary record names such as `GroundedNote` can be returned without a retrieval effect.
+  - [x] Raw host text cannot fill a grounded agent parameter through interpreter argument binding or native command-line arguments. An interpreter host can supply an existing grounded value. Native grounded returns still print normally.
+  - [x] Checked Corvid helpers can derive a grounded return from a grounded parameter. The checker follows binding identity through branches, reassignment and loops, and checks grounded arguments when proving the source of a returned agent call. See the [grounded values guide](docs/book/09-grounded.md).
+  - [x] Native cache keys cover every compiled C runtime source and its list layout header, including ordered maps. Cargo and the cache share the runtime build inputs. See the [build guide](docs/book/16-building.md#running-a-program).
+  - [x] Serialized access to the process-wide native heap in the type-info and weak-reference integration tests. This addresses the Linux workspace failure where a new allocation appeared with reference count zero. The [host-call guide](docs/book/16-building.md#libraries-and-host-calls) describes the threading contract.
+  - [x] Native cache keys also cover the Rust backend source and compilation target. A same-version compiler rebuild selected a fresh executable and the next run reused it. Moving identical backend sources to a different directory preserved their fingerprint.
+  - [x] The native backend build now writes its fingerprint to a generated file. Four reproducibility checks passed, and moving the crate and Cargo output preserved the fingerprint while changing source bytes invalidated it.
+  - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
+  - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
+- [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
+
+  - [x] All six [ddaeaddc candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44906344802) passed after the dependency and native compiler fixes. Verified the six archive and six inventory hashes, reproduced all 240 file entries across the inventories, and confirmed the patched dependency versions in each. Both Linux application images ran a Python tool. The Windows x64 archived compiler matched both performance runs. Publication was skipped.
+  - [x] Updated embedded Python to PyO3 0.29.3 with the CPython stable ABI. On Windows x64 with CPython 3.14, nine runtime bridge tests, two typed-import CLI tests and two Python-backed HTTP service tests passed. The CLI imports python3.dll. See the [installation guide](docs/book/01-install.md).
+  - [x] Upgraded the runtime PDF extractor to 0.12.1 with lopdf 0.42.0. All 13 retrieval runtime tests passed. The glyph generator, tables and core font metrics matched 0.10.0 byte for byte, and the Windows x64 inventory retained all seven upstream notice texts. The glyph redistribution review remains open.
+  - [x] Upgraded the Wasm backend test engine from Wasmtime 18.0.4 to 36.0.23. All 31 backend tests passed, including allocator, string ABI, interpreter parity and typed host imports. Node.js also executed a CLI-built Wasm export and returned 42. See the [build guide](docs/book/16-building.md).
+  - [x] Updated the locked postgres-protocol and quinn-proto dependencies to 0.6.12 and 0.11.15, and the editor extension override to brace-expansion 2.1.4. The previously verified archives predate these dependency changes. See the [release policy](docs/release-policy.md) for candidate dependency review.
+  - [x] All six [9b5d0d8d candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44902426407) built and served an application from the installed archive. Independently checked all six archive and six inventory digests and reproduced the six inventories byte for byte (240 file entries). Publication was skipped.
+  - [x] Ran the local nightly release command with an ephemeral key and independently verified the Ed25519 signature, manifest payload, copied binary digest and checksum file. Updated the command help and [release policy](docs/release-policy.md#verification) to describe its outputs.
+  - [x] Generated CycloneDX 1.6 inventories from all six 3a29a662 archives. Validated each against the official JSON schema and independently recomputed every archive digest and all 240 regular-file digests. The [release guide](docs/release-policy.md) describes the component inventory and verification command.
+  - [x] Downloaded all six SBOMs and archives from [candidate 615b0fdd](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44885911967). Independently checked both checksum manifests and regenerated each SBOM byte-for-byte from its archive. The publication job was skipped.
+
+  - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
+  - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
+  - [x] Added the pinned LCDF copyright statement and COPYING file to the PDF extraction dependency's notice entry. Verified both texts in the generated Windows x64 inventory. The glyph-data redistribution review remains open in the [release policy](docs/release-policy.md).
+  - [x] Reconstructed all 4,700 compiled PDF glyph mappings from the three pinned tables and compared the htfgen extension with historical LCDF 2.33. The [release policy](docs/release-policy.md) identifies the distinct upstream changes for redistribution review.
+
+  - [x] Verified the [quickstart](docs/book/02-quickstart.md) in a fresh project. The starter replayed the same clock value, the file example returned its typed result, and the prompt made one request with the interpolated input to a local provider.
+  - [x] Ran the collection examples on both CLI tiers and verified the interpreter-specific Python snippets through IR lowering. All three book snippet checks passed.
+
+  - [x] Extended the function index with result and option constructors, weak references, pagination, stream resumption, interaction calls and explicit source removal from grounded values. Checked all twelve signatures through the CLI.
+
+  - [x] Downloaded all six [3a29a662 candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44880478367) and verified their SHA-256 digests against the workflow manifest. Each contained the source revision's project license and all 21 standard-library modules, and included both pinned LCDF notices in the PDF dependency entry. All six native installer-to-application jobs passed.
+
+  - [x] Exercised starter trace replay through the production installer in clean Debian 12. The installed candidate reproduced the original greeting and timestamp, served the relocated web application and uninstalled successfully. The candidate test now checks this replay on each platform.
+
+  - [x] Verified a Python host running generated agents against the installed 05c20e08 Linux x64 candidate on Debian 12. The package test now compiles the agents, loads the bundled runtime and checks integer and signed floating-point results in an isolated Python process.
+
+  - [x] The guide test ran all eleven runnable examples through the built CLI, including both typed Python import examples. Two explicitly skipped fragments were outside the check.
+
+  - [x] Checked all twelve runnable guide examples in a freshly scaffolded project, including the [MCP wrapper](docs/guides/capabilities.md) with its standard-library imports. The guide test uses the same project layout.
+
+  - [x] Fixed the generated MCP wrapper for a tool with an integer field called `args`. A fresh project discovered the tool, checked the module and received both original field values from a local echo server.
+
+  - [x] Verified MCP registration and regeneration with an absolute Windows script path containing spaces. The saved TOML preserved both arguments, and the regenerated wrapper called the local tool successfully.
+
+  - [x] Checked generated MCP parameters for overlapping Corvid names. The local tool received distinct values under `item-id`, `item_id` and `item_id_2` after regenerating the wrapper and running its caller.
+
+  - [x] Verified the Windows x64 executable from [candidate 6ff347a4](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44890637390) against the baseline and repeat workload reports and its CycloneDX file entry. The downloaded ZIP and inventory matched their respective checksum manifests. All six package jobs and the checksum job passed. Publication was skipped.
+
+  - [x] Installed the bundled Python runtime from the Windows x64 6ff347a4 archive into a virtual environment. All 11 runtime tests passed against the installed package. The source wheel passed the same tests, and Python CI now runs them with isolated imports.
+
+  - [x] Downloaded all six [e42da8ea candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44894062420). Both executables in each archive matched the declared CPU, and 32 source files per archive matched the revision after line-ending normalization. Verified both checksum manifests, regenerated all six inventories byte-for-byte (240 file entries), and matched the packaged Windows x64 CLI to both performance reports. Publication was skipped.
+
+## Verified task results
+
+- [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
+- [x] Both hosted Bookworm archives matched SHA256SUMS and depend on libpython3.11.so.1.0. Both native architectures installed and served the relocated application, ran the Python host tool and uninstalled successfully in the [native archive run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720).
+- [x] Added an installer-to-application check before retaining each native candidate archive. A local Windows x64 debug package passed installation, version and language-server checks, Python host-tool execution, project scaffolding, relocated HTML and JSON routes, compiled browser asset checks, and uninstall with a user file preserved. Hosted production results are tracked separately.
+- [x] Generated dependency notices for the roadmap branch on all six target triples (370 to 379 locked packages each). Exercised the workflow staging commands for Linux, macOS and Windows with fixture binaries, read the notices and project license back from the archives, and verified a missing inventory fails staging. TeX glyph-table terms remain open for review.
+- [x] Manual candidate builds default to read-only package and checksum jobs. The publication job requires the full six-archive set. Validated the workflow with actionlint and ran its checksum commands against complete, missing, modified, extra and substituted files.
+- [x] Used the Windows x64 installer with a local debug CLI and standard-library archive, built an interactive app twice with identical output, and served the extracted copy from a new directory. Edge exercised pointer, keyboard and text handlers while the backend served JSON. A failed handler rebuild preserved the last archive. Production archive checks are tracked separately.
+- [x] A fresh project served an HTML page built with imported view helpers and a JSON API from one server on Windows x64. The HTTP bodies, media types, application contract and OpenAPI schemas matched the declarations. The checker rejected an integer return from the HTML route.
+- [x] The archive workflow treats beta tags as prereleases and checks beta and stable tags against the CLI package version. Ran the workflow's shell steps locally with eight branch/tag cases, a matching package version and a mismatched version.
+- [x] Verified the roadmap branch's eight static view helpers in a fresh project. The documented example rendered a page in Edge. Pointer and keyboard disclosure, current-page GET submission, a link, and a targeted GET form with an encoded ampersand passed. The CLI rejected a string child where a View was required.
+- [x] Rebuilt the imported-function regression on Linux from an empty Cargo target. The new CLI ran a qualified pure function and rejected a qualified agent call from a pure function. In the same container and directory the reused-target CLI accepted the invalid program. The earlier workspace run finished with 3,222 passes, one failure and seven ignored tests.
+- [x] The destructor and list-tracing tests now keep their observations on the executing test thread. On Linux, all six tests passed 100 consecutive times with eight test threads.
+- [x] The roadmap branch's native and interpreter targets ran public function calls via a module alias and a renamed selective import. The checker rejected wrong arguments, private members and a qualified call to an imported agent from a pure function. A page assembled with imported view helpers rendered through the interpreter.
+- [x] Ran a relocated Windows x64 CLI with absent, partial and complete standard-library installations. Each generated starter checked and ran, contained every expected module, and retained additional installed modules when present.
+- [x] Verified the generated Python host tool through a relocated Windows x64 CLI without PYTHONPATH. The generated async echo and an edited synchronous implementation returned their expected results. Missing arguments and import failures reached the CLI. The driver scaffold test and 11 Python runtime tests passed.
+- [x] Verified project-local `corvid check` and `corvid run` through the generated starter. Explicit paths, a missing manifest, a missing entry file and a type error were checked with both Windows x64 CLI builds.
+- [x] Switched Windows archive extraction to the two-argument .NET ZIP API after the native runner's Expand-Archive failed. The Windows x64 offline installer lifecycle passed locally. The staged-file diagnostic also uses the .NET SHA-256 API so it works when Get-FileHash is unavailable. The installer test matched the reported digest against Python's hashlib.
+- [x] Windows x64 and Linux x64 passed offline install, upgrade, rollback, failed replacement, uninstall and tagged source fallback. The Linux x64 installer also served a relocated application from the real candidate archive.
+- [x] All six native runners passed install, upgrade, rollback, failed replacement, uninstall and tagged source fallback with fixture packages on x64 and ARM64 Linux, macOS and Windows. See the [native installer run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44812107983).
+- [x] Verified the Windows source installer's direct Rust bootstrap URL for x64 and ARM64 in isolated PowerShell runs with intercepted downloads. Native ARM64 installation remains pending.
+- [x] Verified the language server's shutdown handshake with the input pipe left open. The Windows x64 executable returned status 1 on premature exit, rejected requests after shutdown and returned status 0 after an acknowledged shutdown. The branch language-server test suite passed.
+- [x] Hosted CLI builds pin generated Dockerfiles to the release that produced them. Verified beta and stable tags through the package command and tested the source-build nightly fallback.
+- [x] Fixed the native tool fixture path in the server integration suite. With Cargo outputs redirected to a separate directory, the original Linux run failed two tests before starting the server. All 26 server tests passed after the fixture build used its own target directory.
+
 > Phase-by-phase plan from v0.1 (complete) to v1.0 (public launch).
 > For feature definitions see [`FEATURES.md`](./FEATURES.md).
 > For architecture see [`ARCHITECTURE.md`](./ARCHITECTURE.md).

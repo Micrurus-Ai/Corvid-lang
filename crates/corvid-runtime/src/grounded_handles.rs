@@ -22,7 +22,7 @@ pub struct GroundedAttestation {
 impl GroundedAttestation {
     pub fn source_names(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for entry in &self.provenance.entries {
+        for entry in self.provenance.walk() {
             if !matches!(entry.kind, crate::provenance::ProvenanceKind::Retrieval) {
                 continue;
             }
@@ -59,6 +59,31 @@ pub fn attach_pointer_attestation(ptr: usize, attestation: Arc<GroundedAttestati
     }
     let mut store = store().lock().unwrap();
     store.pointer_attestations.insert(ptr, attestation);
+}
+
+/// A plain operand contributes an empty chain even when it aliases an
+/// explicitly unwrapped grounded descriptor. A grounded operand must have
+/// live source metadata. Reading it here leaves it available for later uses.
+pub(crate) fn derive_string_add(
+    left: Option<usize>,
+    right: Option<usize>,
+) -> Option<Arc<GroundedAttestation>> {
+    let store = store().lock().unwrap();
+    let operand = |key| match key {
+        Some(ptr) => store.pointer_attestations.get(&ptr)
+            .map(|attestation| ((*attestation.provenance).clone(), attestation.confidence)),
+        None => Some((ProvenanceChain::new(), 1.0)),
+    };
+    let (left_chain, left_confidence) = operand(left)?;
+    let (right_chain, right_confidence) = operand(right)?;
+    Some(make_attestation(
+        ProvenanceChain::derived("add", vec![left_chain, right_chain], 0),
+        left_confidence.min(right_confidence),
+    ))
+}
+
+pub(crate) fn forget_pointer_attestation(ptr: usize) {
+    store().lock().unwrap().pointer_attestations.remove(&ptr);
 }
 
 pub fn set_last_scalar_attestation(attestation: Arc<GroundedAttestation>) {

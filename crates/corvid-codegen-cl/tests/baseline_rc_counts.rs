@@ -25,31 +25,7 @@ use corvid_ir::lower;
 use corvid_resolve::resolve;
 use corvid_syntax::{lex, parse_file};
 use corvid_types::typecheck;
-use std::path::PathBuf;
 use std::process::Command;
-
-fn test_tools_lib_path() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf();
-    let name = if cfg!(windows) {
-        "corvid_test_tools.lib"
-    } else {
-        "libcorvid_test_tools.a"
-    };
-    let path = workspace_root.join("target").join("release").join(name);
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::link::link_binary`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
-}
 
 fn ir_of(src: &str) -> corvid_ir::IrFile {
     let tokens = lex(src).expect("lex");
@@ -94,7 +70,7 @@ fn run_and_count(src: &str) -> Counts {
         &ir,
         "corvid_baseline_rc",
         &bin_path,
-        &[test_tools_lib_path().as_path()],
+        &[],
     )
     .expect("compile + link");
     let output = Command::new(&produced)
@@ -214,22 +190,11 @@ agent list_of_strings_iter() -> Int:
 "#;
     let c = run_and_count(src);
     eprintln!("BASELINE list_of_strings_iter: {c:?}");
-    assert_eq!(c.allocs, 1, "list_of_strings_iter allocs");
-    // 17b-1b.2 peephole: 3 iterations × `s == "beta"` where s is
-    //   a bare Local — saves 3 retains + 3 releases.
-    // 17b-1b.4 peephole: `for s in xs` where xs is a bare Local —
-    //   iter is borrowed, saving the iter-retain + loop-exit-release
-    //   pair (1 retain + 1 release).
-    // Pre-17b-1b: 7/15. Post-17b-1b.2: 4/12. Post-17b-1b.4: 3/11.
-    // Post-17b-1b.6d (unified pass): 0 / 10 — the pass elides the
-    //   three per-iteration s retains entirely because `s` reads in
-    //   the body are classified at Borrowed (via BinOp peephole path)
-    //   and the unified pass schedules Drops precisely at last-use,
-    //   so intermediate retains disappear. Release count drops by
-    //   one because the pass's drop-on-iter-exit replaces the
-    //   scope-end release + separate drop pair with a single Drop.
-    assert_eq!(c.retain_calls, 0, "list_of_strings_iter retain_calls");
-    assert_eq!(c.release_calls, 10, "list_of_strings_iter release_calls");
+    // One allocation for the source list and one for its iteration snapshot.
+    // Each snapshot entry and each loop binding retain their string once.
+    assert_eq!(c.allocs, 2, "list_of_strings_iter allocs");
+    assert_eq!(c.retain_calls, 6, "list_of_strings_iter retain_calls");
+    assert_eq!(c.release_calls, 14, "list_of_strings_iter release_calls");
 }
 
 #[test]

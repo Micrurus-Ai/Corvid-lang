@@ -6,6 +6,7 @@
 
 use crate::errors::RuntimeError;
 use pyo3::prelude::*;
+use pyo3::IntoPyObjectExt;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use serde_json::{Map, Number, Value};
 use std::collections::HashSet;
@@ -34,18 +35,29 @@ impl PythonRuntime {
         args: &[Value],
         policy: &PythonSandboxProfile,
     ) -> Result<Value, RuntimeError> {
+        self.call_with_decoder(module, function, args, policy, py_to_json)
+    }
+
+    pub(crate) fn call_with_decoder(
+        &self,
+        module: &str,
+        function: &str,
+        args: &[Value],
+        policy: &PythonSandboxProfile,
+        decode: fn(&Bound<'_, PyAny>) -> PyResult<Value>,
+    ) -> Result<Value, RuntimeError> {
         policy.check_call(module, function)?;
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = (|| -> PyResult<Value> {
-                let module_obj = py.import_bound(module)?;
+                let module_obj = py.import(module)?;
                 let function_obj = module_obj.getattr(function)?;
                 let py_args = args
                     .iter()
                     .map(|arg| json_to_py(py, arg))
                     .collect::<PyResult<Vec<_>>>()?;
-                let tuple = PyTuple::new_bound(py, py_args);
+                let tuple = PyTuple::new(py, py_args)?;
                 let result = function_obj.call1(tuple)?;
-                py_to_json(&result)
+                decode(&result)
             })();
             result.map_err(|err| python_error(py, module, function, err))
         })
@@ -102,37 +114,49 @@ fn required_effect_for_call(module: &str, function: &str) -> Option<&'static str
     }
 }
 
-pub(crate) fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
+pub(crate) fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
     Ok(match value {
         Value::Null => py.None(),
-        Value::Bool(value) => value.into_py(py),
+        Value::Bool(value) => value.into_py_any(py)?,
         Value::Number(value) => {
             if let Some(value) = value.as_i64() {
-                value.into_py(py)
+                value.into_py_any(py)?
             } else if let Some(value) = value.as_u64() {
-                value.into_py(py)
+                value.into_py_any(py)?
             } else if let Some(value) = value.as_f64() {
-                value.into_py(py)
+                value.into_py_any(py)?
             } else {
                 py.None()
             }
         }
-        Value::String(value) => value.into_py(py),
+        Value::String(value) => value.into_py_any(py)?,
         Value::Array(values) => {
             let items = values
                 .iter()
                 .map(|value| json_to_py(py, value))
                 .collect::<PyResult<Vec<_>>>()?;
-            PyList::new_bound(py, items).into_py(py)
+            PyList::new(py, items)?.into_any().unbind()
         }
         Value::Object(values) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (key, value) in values {
                 dict.set_item(key, json_to_py(py, value)?)?;
             }
-            dict.into_py(py)
+            dict.into_any().unbind()
         }
     })
+}
+
+/// A typed import accepts JSON-shaped Python values. Let Python's encoder
+/// diagnose unsupported objects and cycles before decoding the declared type.
+pub(crate) fn typed_python_result(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let py = value.py();
+    let options = PyDict::new(py);
+    options.set_item("allow_nan", false)?;
+    let json: String = py.import("json")?.getattr("dumps")?
+        .call((value,), Some(&options))?.extract()?;
+    serde_json::from_str(&json)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 pub(crate) fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -156,21 +180,21 @@ pub(crate) fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(value) = value.extract::<String>() {
         return Ok(Value::String(value));
     }
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         let mut object = Map::new();
         for (key, value) in dict.iter() {
             object.insert(key.extract::<String>()?, py_to_json(&value)?);
         }
         return Ok(Value::Object(object));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         let mut values = Vec::with_capacity(list.len());
         for item in list.iter() {
             values.push(py_to_json(&item)?);
         }
         return Ok(Value::Array(values));
     }
-    if let Ok(tuple) = value.downcast::<PyTuple>() {
+    if let Ok(tuple) = value.cast::<PyTuple>() {
         let mut values = Vec::with_capacity(tuple.len());
         for item in tuple.iter() {
             values.push(py_to_json(&item)?);
@@ -200,11 +224,11 @@ fn python_error(
 }
 
 pub(crate) fn format_python_error(py: Python<'_>, err: &PyErr) -> Option<String> {
-    let traceback = py.import_bound("traceback").ok()?;
+    let traceback = py.import("traceback").ok()?;
     let formatted = traceback
         .getattr("format_exception")
         .ok()?
-        .call1((err.get_type_bound(py), err.value_bound(py), err.traceback_bound(py)))
+        .call1((err.get_type(py), err.value(py), err.traceback(py)))
         .ok()?;
     let lines = formatted.extract::<Vec<String>>().ok()?;
     Some(lines.join(""))

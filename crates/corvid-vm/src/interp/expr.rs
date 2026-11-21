@@ -154,7 +154,7 @@ fn int_arith(
                     span,
                 ))
             } else {
-                Ok(a.wrapping_div(b))
+                a.checked_div(b).ok_or_else(|| overflow(span))
             }
         }
         Mod => {
@@ -455,6 +455,7 @@ pub(super) fn eval_builtin_method(
     recv: Value,
     mut args: Vec<Value>,
     span: Span,
+    types: &std::collections::HashMap<corvid_resolve::DefId, &corvid_ir::IrType>,
 ) -> Result<Value, InterpError> {
     use corvid_types::BuiltinMethodKind::*;
 
@@ -530,21 +531,7 @@ pub(super) fn eval_builtin_method(
             )),
         },
         IntToFloat => Ok(Value::Float(want_int(&recv, span)? as f64)),
-        FloatToIntTruncated => {
-            let f = want_float(&recv, span)?;
-            // Always-checked rule: NaN and out-of-range trap rather
-            // than silently wrapping.
-            if f.is_nan() || f < (i64::MIN as f64) || f >= (i64::MAX as f64) {
-                return Err(InterpError::new(
-                    InterpErrorKind::TypeMismatch {
-                        expected: "a Float within Int range for `to_int_truncated`".into(),
-                        got: format!("`{}`", render_float(f)),
-                    },
-                    span,
-                ));
-            }
-            Ok(Value::Int(f.trunc() as i64))
-        }
+        FloatToIntTruncated => float_to_int_checked(want_float(&recv, span)?.trunc(), "to_int_truncated", span),
         StringParseInt => {
             let s = want_string_recv(&recv, span)?;
             match s.trim().parse::<i64>() {
@@ -744,6 +731,11 @@ pub(super) fn eval_builtin_method(
             ),
             span,
         )),
+        RouteForm => {
+            let target = want_string(&recv, span)?;
+            let label = want_string(&args[1], span)?;
+            super::form::render(&target, &args[0], &label, types, span)
+        }
         RangeIntList => {
             let start = want_int(&recv, span)?;
             let end = want_int(&args[0], span)?;
@@ -860,15 +852,9 @@ fn eval_list_method(
             })
         }
         ListSlice => {
-            let len = lv.len() as i64;
-            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
-            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
-            let items = if start >= end {
-                Vec::new()
-            } else {
-                lv.iter_cloned()[start..end].to_vec()
-            };
-            Ok(Value::List(crate::value::ListValue::new(items)))
+            let start = want_int(&args[0], span)?;
+            let end = want_int(&args[1], span)?;
+            Ok(Value::List(lv.slice(start, end)))
         }
         ListReverse => {
             lv.reverse_in_place();
@@ -1002,13 +988,9 @@ fn eval_string_method(
             Ok(Value::String(std::sync::Arc::from(s.replace(from.as_ref(), to.as_ref()))))
         }
         StringSubstring => {
-            let len = s.chars().count() as i64;
-            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
-            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
-            if start >= end {
-                return Ok(Value::String(std::sync::Arc::from(String::new())));
-            }
-            let piece: String = s.chars().skip(start).take(end - start).collect();
+            let start = want_int(&args[0], span)?;
+            let end = want_int(&args[1], span)?;
+            let piece = corvid_runtime::string::substring(&s, start, end);
             Ok(Value::String(std::sync::Arc::from(piece)))
         }
         // Conversion kinds are handled by the caller before

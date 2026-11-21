@@ -23,6 +23,12 @@ public tool rag_search(index_path: String, query: String, limit: Int) -> Result<
   error). Every retrieved chunk carries its `provenance_key` and
   an `effect_meta` envelope.
 
+## Updating a document
+
+Use the same `doc_id` when a source changes. For example, `rag_ingest("index.sqlite", "guide", "guide.txt", text, 800)` replaces all passages and embeddings for the guide. If embedding or writing fails, the call returns `Err(message)` and the previous version remains searchable. Passing empty text clears that document's passages and returns `Ok(0)`.
+
+Each search result includes the source, passage text and a provenance key. Its character offsets start at zero and exclude the end position. For example, a four-character passage starting at zero has offsets 0 and 4 even when a character takes multiple UTF-8 bytes.
+
 ## Governance
 
 - **Paths**: `index_path` resolves through the same `[io] root`

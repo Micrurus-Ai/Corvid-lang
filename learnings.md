@@ -6,6 +6,31 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 ---
 
+## Updating lists and records
+
+Write `scores[i] += 2`, `rows[i][j] = value`, or `state.counter.value += 1`
+on either execution target. Each index expression runs once. The right-hand
+side runs before Corvid reads the slot's current value. If that expression
+grows a list or replaces a nested record, the update follows the resulting
+container. Other variables referring to the list or record see the change.
+A `for` loop visits the entries present when it starts, including when the body
+changes an upcoming slot. [Lists and records](docs/book/05-types.md)
+
+## Working with ordered string maps
+
+Use `labels.contains_key(key)` to test membership and `labels.length()` to count distinct keys. Assigning through an alias updates the same map. Capture `labels.keys()` or `labels.values()` to keep an insertion-ordered snapshot across later writes. [Map examples](docs/book/05-types.md#maps)
+
+A lookup with `table[key]` or `table.get(key)` returns `Option<V>`. Use
+`Some(value)` to read a stored zero or an empty string and `None` for a
+missing key. Native maps accept string keys and integer, string, local
+record, list and option values. Integer entries support compound updates
+such as `counts["files"] += 1` after the first insertion.
+
+## Reading the ends of a list
+
+`items.first()` and `items.last()` return `Option<T>`. Use `Some(value)` and `None` to handle an empty list. A selected heap string remains usable after the list goes out of scope. For a list of options, an empty list gives `None` and an existing empty element gives `Some(None)`. The interpreter and native targets support these examples. [List methods and example](docs/book/05-types.md)
+
+
 ## Quick start
 
 ```bash
@@ -7795,3 +7820,271 @@ mock/real/replay, typed status→error mapping, and retry/rate-limit/circuit-bre
 all run end-to-end. Async provider state machines and provider-drift quarantine
 are later Phase 52 slices (52h/52i). See [dev-log.md](dev-log.md) (2026-07-23,
 52g-3a … 52g-3c).
+
+When preparing a local candidate with `corvid release build`, use a version that matches its channel. Examples are `1.0.0-nightly.local`, `1.0.0-beta.2`, and `1.0.0`. Corvid checks the version before creating the release files. See the [release policy](docs/release-policy.md).
+
+For hosted archives, the tag `v1.0.0-beta.2` selects a beta prerelease and `v1.0.0` selects a stable release. In both cases the version following `v` must match the CLI package version.
+
+When a release CLI generates a Dockerfile with `corvid deploy package`, the Dockerfile selects that same release. A package created by the `v1.0.0-beta.2` CLI therefore uses `ARG CORVID_VERSION=v1.0.0-beta.2`.
+
+The server integration fixture builds its shared library in its own target directory, including when the workspace uses an external `CARGO_TARGET_DIR`. Run `cargo test --locked -p corvid-cli --test serve_smoke` to exercise the installed tool bridge through the CLI server.
+
+An editor client stops `corvid-lsp` by sending a `shutdown` request, waiting for its response, then sending an `exit` notification. The server exits successfully even while the input pipe is open. Sending `exit` before an acknowledged shutdown gives exit status 1.
+
+If the Windows installer falls back to building from source and neither Cargo nor winget is available, it selects the Rust bootstrap executable for the detected Windows architecture.
+
+Set `CORVID_VERSION` to a release tag and rerun the installer to upgrade or roll back. The installer starts the staged CLI before replacing package files. Run the matching installer with `--uninstall` on Unix or `-Uninstall` on Windows to remove the package and preserve files outside its package directories.
+
+The Windows installer extracts downloaded archives into a fresh staging directory using the two-argument .NET ZIP API supported by Windows PowerShell 5.1. If Windows refuses to start the staged executable, the installer uses .NET to compute its SHA-256 and includes the digest in the launch error.
+
+Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.
+
+To try a Python-backed tool from the terminal, use `corvid new --with-python-tools notes`, change into `notes`, and run `corvid run src/python_tools_example.cor "Hello"`. See [Calling your own Python tool](docs/book/18-talking-to-the-outside-world.md#calling-your-own-python-tool).
+
+`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
+
+A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error. See the [module guide](docs/book/06-modules.md#reusing-a-named-function).
+
+The C runtime calls type-info destructors and trace markers synchronously. Tests can keep callback counters and recorded pointers thread-local so concurrent tests do not reset each other's observations.
+
+Use `ui.page` to render a list of typed views. The [static view reference](docs/book/19-browser-views.md#static-view-functions) records the signatures for text, labeled fields, submit buttons, both GET form helpers, disclosures, links and pages.
+
+### HTML route responses
+
+Write `route GET "/" -> html:` inside a server and return a `String`. To render typed views, return `ui.page(title, children)`. The HTTP response uses `text/html`. You can declare `-> json Type` on other routes in the same server. The [browser views chapter](docs/book/19-browser-views.md#serve-a-page-and-an-api) includes a complete two-route application.
+
+### Package browser handlers with the server
+
+Build a scaffolded application's `src/main.cor` with `--target web`. Corvid packages server sources and compiles optional `src/events.cor` handlers to WebAssembly. The [interactive page example](docs/book/19-browser-views.md#package-an-interactive-page) documents `ui.action`, `ui.int_state`, `ui.text_state`, `ui.interactive_page`, and how to run the extracted archive.
+
+### Download a candidate build
+
+A manual **release** workflow run defaults to building candidate packages. Download the six package artifacts and the checksum artifact from the same run. The [release policy](docs/release-policy.md#build-a-candidate-on-github) explains how to verify them.
+
+The installation carries the project license at `LICENSE`. Open `lib/corvid-rust-notices.txt` to see which Rust dependency versions and upstream notices were included for your platform.
+
+For Linux x64 and ARM64 candidate builds, the runtime baseline is Debian 12 with `libpython3.11`. The hosted build checks the extracted CLI in that environment.
+
+To verify a locally built candidate, run `python install/test_release_archive.py ARCHIVE VERSION` on its target operating system and architecture. Pass the CLI package version without a leading `v`. The probe installs into a temporary directory, builds and serves an application, then checks uninstall.
+
+A prebuilt installation can pass `corvid doctor` without Cargo or rustc. The doctor distinguishes those optional build tools from invalid configuration values and reports whether a Python command is available to run generated Python files.
+
+The macOS Intel CLI and language server load the CPython 3.14 framework. The Apple Silicon binaries load CPython 3.15. Both use the framework in /Library/Frameworks. Windows x64 and ARM64 passed with matching-architecture CPython 3.14. The Debian 12 packages use libpython3.11.
+
+## Calling agents in match expressions
+
+A guard runs after its pattern matches. If the guard returns false, Corvid tries the next arm. Only the selected arm evaluates its body. Calls in that body evaluate their arguments from left to right.
+
+A parameter such as `Result<Float, String>` supplies both payload types when you pass `Ok(7)` directly. Inside an agent returning a compatible Result, `value = read()?` extracts the success value or immediately returns the error.
+
+### Passing a named function from another module
+
+Given a module `math.cor` exporting `public fn double(n: Int) -> Int`, import it with `import "./math" as m`. Use `m.double(3)` to call it immediately or `transform = m.double` to keep the function for later. The interpreter accepts `[1, 2].map(transform)` and produces `[2, 4]`. A renamed import such as `import "./math" use double as twice` keeps the same `(Int) -> Int` signature.
+
+A module can return a closure that keeps its captured values after the call returns.
+
+```corvid
+public agent add_offset(offset: Int) -> (Int) -> Int:
+    return fn (n: Int) -> n + offset
+```
+
+With this function in a module imported as `ops`, write `add_three = ops.add_offset(3)`. Calling `add_three(4)` returns `7` on both CLI targets. Integer captures keep their value at creation. A captured `List<Int>` stays alive and reflects updates made through another reference to the same list.
+
+### Transforming an integer list
+
+Both CLI targets accept a named integer function or a closure as a callback on a `List<Int>`.
+
+```corvid
+values = [3, 1, 4]
+doubled = values.map(fn (n) -> n * 2)
+large = values.filter(fn (n) -> n >= 3)
+total = values.fold(0, fn (acc, n) -> acc + n)
+positive = values.all(fn (n) -> n > 0)
+has_four = values.any(fn (n) -> n == 4)
+```
+
+Here `doubled` is `[6, 2, 8]`, `large` is `[3, 4]`, and `total` is `8`. Both predicates return true. Callbacks visit elements in order. An empty list yields an empty map or filter result and the initial fold value. `any` stops at the first true result and returns false on an empty list. `all` stops at the first false result and returns true on an empty list.
+
+### Returning a record from a sum type
+
+```corvid
+public type Entry:
+    value: Int
+    label: String
+
+public type Reading:
+    | Empty
+    | Found(item: Entry, weight: Int)
+
+public agent entry(reading: Reading) -> Entry:
+    return match reading:
+        Found(item, weight) if weight > 1 -> item
+        Found(_, _) -> Entry(0, "zero")
+        Empty -> Entry(-1, "empty")
+```
+
+Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard sees both payload fields. A caller in another module can use the returned record and read its fields after the match finishes.
+
+### Imports in nested directories
+
+Import paths are relative to the file containing the import. If `main.cor` imports `"./lib/ops"` and `lib/ops.cor` imports `"../math"`, Corvid loads `math.cor` next to `main.cor`. Mark functions used across this boundary with `public fn`. The caller must supply the declared argument types.
+
+When an imported name conflicts with a local declaration, use a qualified call such as `ops.answer(21)` or give the import a distinct name with `use answer as compute`. Imports must form an acyclic graph. Run `corvid check main.cor` to locate a visibility error, argument mismatch, duplicate declaration, or import cycle before running the program.
+
+### Comparing values
+
+Use `==` and `!=` to compare records and collections by their current contents. Lists compare elements in order. String-keyed maps compare keys and values regardless of insertion order. Options, results and sum types compare the case first and then its payload. Two independently created records can compare equal, including recursive records that link back to themselves.
+
+```corvid
+first = {"a": 0, "b": 2}
+second = {"b": 2, "a": 0}
+same = first == second
+second["a"] = 1
+changed = first != second
+```
+
+Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.
+
+### Numeric conversions and overflow
+
+Integer arithmetic is checked by default. The smallest `Int` divided by `-1` overflows. Its remainder modulo `-1` is zero. A zero divisor is an error for both operators. In an `@wrapping` agent, integer addition, subtraction, multiplication and negation wrap at 64 bits.
+
+`to_int_truncated()` rounds a float toward zero. `floor()` rounds down, `ceil()` rounds up, and `round()` rounds to the nearest integer with ties away from zero. For example, `(-2.5).round()` returns `-3`. Each conversion requires a finite result from -2^63 inclusive to 2^63 exclusive. `to_float()` converts an integer to a binary64 float, which can lose precision when the integer magnitude exceeds 2^53.
+
+### Working with Unicode strings
+
+`text.length()` counts Unicode scalar values. A letter followed by a combining mark counts as two. `text.substring(start, end)` includes the scalar at `start` and stops before `end`. It clamps indices to the string bounds and returns an empty string for a reversed range.
+
+`to_upper()` and `to_lower()` use Unicode case mapping, which can change the length. `trim()` removes surrounding Unicode whitespace. `contains(needle)`, `starts_with(prefix)` and `ends_with(suffix)` compare exact text and accept an empty pattern. `replace(old, new)` replaces every match. An empty `old` inserts `new` at each scalar boundary.
+
+`"a,,b,".split(",")` returns `["a", "", "b", ""]`. Splitting requires a nonempty separator. `" 42 ".parse_int()` returns `Ok(42)`. Invalid text returns `Err`. Use `is_ok()` or `is_err()` to inspect the result, or use `?` to forward the error.
+
+### Returning early with `?`
+
+In an agent returning a `Result`, `text.parse_int()?` produces the parsed integer on success. On failure, it immediately returns the error from the agent. An `Option`-returning agent can use the same syntax to return `None` when an input is absent.
+
+```corvid
+agent replace_first(items: List<Int>, text: String) -> Result<Int, String>:
+    items[0] = text.parse_int()?
+    return Ok(items[0])
+```
+
+For a nonempty list, a successful parse updates the first item. If parsing fails, the assignment never writes to the list. Expressions before `?` keep their side effects. Later operands run only if evaluation reaches them. A skipped operand of `and` or `or` cannot propagate an error. Owned local values and temporaries are released when execution leaves their scope.
+
+### Formatting a project
+
+Run `corvid fmt` from the project root to format Corvid files under `src/` and `tests/`. To format one file, use `corvid fmt src/main.cor`. Use `corvid fmt --check` in CI. It lists files that need formatting and exits with status 1 when it finds differences. It returns 0 when the files already match.
+
+After cloning a project, run `corvid check` to check the entry point and its imports, `corvid run` to execute it, and `corvid test tests/math.cor` to run tests in that file.
+
+### Fixing a type error in an import
+
+Run `corvid check` from the project root. When an imported function declares `-> Int` and returns a string, the error points to the return statement in that module and names both types. Change the return expression to produce an integer, or change the declaration and its callers if the intended result is text.
+
+When you edit an imported module, run `corvid run --target native` again. Corvid checks direct and nested imports before reusing a compiled executable. You can leave the project cache in place between edits.
+
+### Working with imports in an editor
+
+With `corvid-lsp`, type a module alias followed by a dot to complete its public members. Hover over an imported function to read its signature, or use Go to Definition to open its declaration. Renaming a public function updates its declaration and references in local workspace files, including closed files. An explicit local alias keeps its spelling. Editing a parameter type updates diagnostics in open callers before you save.
+
+### Paths and environment variables
+
+Import the following tools from `"./std/path"`. They use the host operating system's path rules and run in the interpreter. Their inputs can refer to files that do not yet exist.
+
+| Function | Result |
+|---|---|
+| `path_join(base: String, child: String) -> String` | Combines two path components. |
+| `path_parent(path: String) -> Option<String>` | Returns the parent component, when present. |
+| `path_filename(path: String) -> Option<String>` | Returns the final filename, including its extension. |
+| `path_extension(path: String) -> Option<String>` | Returns the extension without the dot, when present. |
+| `path_is_absolute(path: String) -> Bool` | Tests whether the path is absolute on this host. |
+
+Import `env_get(name: String) -> Result<Option<String>, String>` from `"./std/env"`. An absent variable returns `Ok(None)`. An explicitly empty variable returns `Ok(Some(""))`. Blank names and names containing `=` or NUL return `Err`. Use `env_get("APP_MODE")?` to propagate the error and match on the returned option. A default `corvid run` uses the interpreter for these tools.
+
+### Rebuilding a project with a local registry
+
+Use `corvid add package @example/math@1 --registry ../registry` to select a compatible version from a local `index.json`. Relative artifact paths resolve beside the index. Commit `Corvid.lock` with the project so its version and SHA-256 travel with the source. Run `corvid package verify-lock` to check the lockfile.
+
+After installation, `target/cache/packages/<sha256>.cor` contains the verified artifact. Set `CORVID_OFFLINE=1` to use it without contacting the registry. A locked local file can refill an empty cache while its original path is accessible. A mismatched digest stops compilation. After `corvid update @example/math`, change any version-specific import to the URI in the updated lock.
+
+### Typed HTTP query and body values
+
+```corvid
+type Search:
+    term: String
+    limit: Int where between(1, 20)
+
+server catalog:
+    route GET "/owners/{id}/search" query Search -> json Int:
+        return query.limit
+```
+
+Start the service with `corvid serve src/main.cor --listen 127.0.0.1:8080`. A request to `/owners/lee/search?term=caf%C3%A9+au+lait&limit=2` supplies `path.id`, a UTF-8 search term, and an integer limit. Missing fields, invalid escapes, and out-of-range values produce HTTP 400. An unknown route produces 404 and an unsupported method produces 405.
+
+For a sum type with variant `Approved(approver: String)`, a JSON body such as `{"variant":"Approved","fields":["alice"]}` supplies the positional payload. A variant without payloads can omit `fields`. When present, `tag` must be `"variant"` and `type` must name the declared sum. The server describes the alternatives, payload lengths and payload types at `/openapi.json`.
+
+### Reading typed records from SQLite
+
+Import `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>` from `"./std/db"`. Each row is a JSON object. For example, `json_get_string(rows[0], "text")?` reads a selected text column after you check that the list contains a row.
+
+Use the same `DbHandle` for `BEGIN IMMEDIATE`, parameterized writes, and `COMMIT`. When an agent returns early with `?` and its last handle goes out of scope, SQLite rolls back the pending transaction. Set `[io] root` in the project manifest to give a served app access to its database directory. Run `corvid migrate up --dir schema --database notes.sqlite` from the project to apply schema changes.
+
+A route returning `Stream<T>` delivers values as server-sent events. A bounded stream makes the producer wait when its queue fills. Closing the last consumer cancels the producer and releases resources held inside it, including an open SQLite transaction. Ordinary streams discard consumed chunks. Resumable prompt streams keep the delivered chunks for their resume token.
+
+Use `return try deliver(message) timeout 300` to bound an outbound call from a route in milliseconds. If the deadline expires before the response, the caller receives HTTP 504. A stream start deadline includes the wait for its first value. Set `[http] allow` for the upstream host. The HTTP response envelope gives the actual `attempts` and `elapsed_ms`.
+
+### HTTP service access logs and shutdown
+
+Start a service with `corvid serve src/main.cor --access-log` to write one JSON record to stderr for each response. Each record contains the HTTP method, matched route template, response status and elapsed milliseconds. For `/configuration/{id}`, the log records the route pattern. Unmatched paths have a null route. Cookies, query values, request bodies and secret values are omitted.
+
+Use Ctrl+C locally or SIGTERM on Unix to stop accepting new requests. The server gives active requests up to 30 seconds to finish. A handler can fetch configuration with `secret_read(name)?` and return only the information needed by its caller.
+
+A prompt returning `String` produces text. A prompt returning a named record sends a schema and validates the model response against the declared fields. Keep the Corvid source the same when switching between `CORVID_MODEL=ollama:local-model` and `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model`. Use the model name and address from your running provider. See the typed `classify` example in `docs/book/11-prompts.md`.
+
+Declare a text-generating prompt as `-> Stream<String>` to consume its text incrementally. A route with the same return type forwards the chunks as server-sent events. Use `with max_tokens 200` for an output limit and `try answer(question) timeout 700 on error retry 2 times backoff linear 1` to retry a failed start. See the streaming route in `docs/book/11-prompts.md`.
+
+To let a model choose among a fixed set of actions, declare a sum type such as `Add(amount: Int) | Finish` and use it as a field of the prompt result. Corvid sends the variant names and positional payload types to the provider. Match the checked result, call your ordinary typed function with the bound arguments, and pass its result into the next prompt. A bounded `for` loop sets the maximum number of model decisions.
+
+### Checkpointing an agent step
+
+Use `corvid jobs checkpoint resume --job job_1 --json` to read the job's checkpoints, next sequence, and remaining step and tool allowances. To persist a tool result, pass that sequence to `corvid jobs checkpoint add --job job_1 --kind tool-result --label sum --payload '{"total":2}' --step-sequence 1`. Use the same `--state jobs.sqlite` for each process. A successful write saves the payload and charges the allowances in one transaction. If another worker already committed that sequence, read the resume state again to recover its result.
+
+Declare a prompt parameter such as `calculate: (Int, Int) -> Int` and pass a function directly, for example `answer(question, add)`. The provider calls the parameter by name and supplies the argument names from the function declaration. The interpreter validates their types and associates each result with its call ID. Function-calling prompts return `String` and support up to eight calls. Durable workers can resume a checkpointed result for a capture-free function. See the complete example in `docs/book/11-prompts.md`.
+
+### Updating a searchable document
+
+Import `rag_ingest`, `rag_search` and `RagChunkEnvelope` from `"./std/rag"`. Call `rag_ingest("index.sqlite", "guide", "guide.txt", text, 800)` whenever the guide changes. Reusing the document ID replaces its passages together, so you can retry a failed update. To retrieve up to three passages, call `rag_search("index.sqlite", question, 3)`. Each hit includes the original text, source and character offsets for displaying a citation. A server route can open the same index and use the project's configured embedder.
+
+### Working with images and browser sessions
+
+Use `io_read_image(path)?` from `./std/io` to get a `PromptImage`. Pass it as a typed prompt argument. In a local CLI program, `browser_open_scoped(width, height)` opens the host-selected start page. Use `browser_click(button_name)`, `browser_read_text(selector)` and `browser_capture()` to interact with it. Finish with `browser_close()`. The image prompt and browser examples in `docs/book/11-prompts.md` show the imports, host setup and return values.
+
+### Testing a prompt offline
+
+Declare a `mock` with the prompt's name, parameters and return type to give ordinary `test` declarations a predictable answer. For a recorded interaction, use `test uses_recording from_trace "recording.jsonl":` and call the application in the test body. Corvid reads the recording relative to the source file. A recorded function call includes the chosen function, its arguments and the result returned to the model. Each repetition of an assertion starts with its own replay cursor. The testing chapter shows how to record and run both kinds of tests without credentials.
+
+### Binding a browser form to its handler
+
+Use `form_for("GET /search", request, "Search")` for a route declared with `query Search`, or `form_for("POST /save", request, "Save")` for a route declared with `form Search`. Both forms derive their field names from the record and return an HTML string. Wrap it in `View(...)` to compose it with other controls. The GET handler reads `query`. The POST handler reads `body`. The server converts the submitted strings and checks field refinements before running the handler. The example in `docs/book/19-browser-views.md` uses one imported record for both forms.
+
+### Showing a streamed answer in a page
+
+Add `ui.stream_text("Answer", "/answer")` to the list of views passed to `ui.page` or `ui.interactive_page`. The path names a GET route returning `Stream<String>`. Start opens the request, Cancel keeps the text already on screen, and Start again begins a fresh answer. Leaving the page closes the request. The streaming and packaging examples in `docs/book/19-browser-views.md` show the prompt, route and page together.
+
+### Shipping a host tool written in Python
+
+Implement a declared Corvid tool with `@tool("name")` in the project's root `tools.py`. To return a Corvid record, return a dictionary with its declared field names and types. The web archive includes this file. The destination supplies Python and any external packages the tool imports. See the packaged service example in `docs/guides/ffi-python.md`.
+
+A served application can also implement a Corvid tool with a Rust shared library. Supply the library alongside the web archive and select it with `--with-tools-cdylib`. The C and Rust interop guide describes the callback symbol, JSON arguments, allocation contract and library lifetime.
+
+### Calling an installed Python function
+
+Write `import python "math" as numbers effects: pure:` and indent a signature such as `fn gcd(left: Int, right: Int) -> Int` underneath it. Call `numbers.gcd(18, 12)` in an agent. The checker uses the declared parameters and return type. The interpreter copies arguments into Python, checks the returned value and reports Python exceptions at the call. Use `approve alias.member(args)` when the import declares an effect requiring approval. The Python interop guide includes both forms and explains packaging and replay.
+
+### Using Corvid from C and JavaScript
+
+Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C. Follow the generated parameter order, release returned strings with `corvid_free_string` and release observation handles with `corvid_observation_release`. For a JavaScript host, build with `--target wasm` and use the generated module's `adaptImports` to supply tool implementations. Corvid integers cross the Wasm boundary as JavaScript BigInt values. The C and Wasm ABI guides include host examples.
+
+### Slicing a list
+
+`items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.

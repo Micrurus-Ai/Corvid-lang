@@ -26,6 +26,41 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare string_concat: {e}"), Span::new(0, 0))
         })?;
 
+    let mut grounded_concat_sig = concat_sig.clone();
+    grounded_concat_sig.params.push(AbiParam::new(I8));
+    let grounded_string_concat = module
+        .declare_function("corvid_grounded_string_concat", Linkage::Import, &grounded_concat_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare grounded string concat: {e}"), Span::new(0, 0)))?;
+
+    let mut declare = |name: &str, params: usize, returns_value: bool| {
+        let mut sig = module.make_signature();
+        sig.params.resize(params, AbiParam::new(I64));
+        if returns_value { sig.returns.push(AbiParam::new(I64)); }
+        module.declare_function(name, Linkage::Import, &sig)
+            .map_err(|error| CodegenError::cranelift(format!("declare {name}: {error}"), Span::new(0, 0)))
+    };
+    let list_map_int = declare("corvid_list_map_int", 4, true)?;
+    let list_filter_int = declare("corvid_list_filter_int", 4, true)?;
+    let list_fold_int = declare("corvid_list_fold_int", 5, true)?;
+    let list_snapshot = declare("corvid_list_snapshot", 2, true)?;
+    let list_new = declare("corvid_list_new", 2, true)?;
+    let list_bounds_error = declare("corvid_list_bounds_error", 2, false)?;
+    let list_append = declare("corvid_list_append", 2, false)?;
+    let map_new = declare("corvid_ordered_map_new_typed", 2, true)?;
+    let map_set = declare("corvid_ordered_map_set", 3, false)?;
+    let map_require_int = declare("corvid_ordered_map_require_int", 2, true)?;
+    let map_find = declare("corvid_ordered_map_find", 2, true)?;
+    let map_snapshot = declare("corvid_ordered_map_snapshot", 3, true)?;
+    let mut test_sig = module.make_signature();
+    test_sig.params.resize(5, AbiParam::new(I64));
+    test_sig.returns.push(AbiParam::new(I8));
+    let list_test_int = module.declare_function("corvid_list_test_int", Linkage::Import, &test_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list any/all: {e}"), Span::new(0, 0)))?;
+    let mut structural_sig = module.make_signature();
+    structural_sig.params.resize(3, AbiParam::new(I64));
+    structural_sig.returns.push(AbiParam::new(I8));
+    let structural_eq = module.declare_function("corvid_structural_eq", Linkage::Import, &structural_sig)
+        .map_err(|e| CodegenError::cranelift(e.to_string(), Span::new(0, 0)))?;
     let mut eq_sig = module.make_signature();
     eq_sig.params.push(AbiParam::new(I64));
     eq_sig.params.push(AbiParam::new(I64));
@@ -53,10 +88,30 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare string_char_len: {e}"), Span::new(0, 0))
         })?;
 
+    let mut substring_sig = char_len_sig.clone();
+    substring_sig.params.extend([AbiParam::new(I64), AbiParam::new(I64)]);
+    let mut declare_string_method = |name: &str, sig: &cranelift_codegen::ir::Signature| {
+        module.declare_function(name, Linkage::Import, sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {name}: {e}"), Span::new(0, 0)))
+    };
+    let string_to_upper = declare_string_method("corvid_string_to_upper", &char_len_sig)?;
+    let string_to_lower = declare_string_method("corvid_string_to_lower", &char_len_sig)?;
+    let string_substring = declare_string_method("corvid_string_substring", &substring_sig)?;
+    let string_trim = declare_string_method("corvid_string_trim", &char_len_sig)?;
+    let mut search_sig = concat_sig.clone();
+    search_sig.returns[0] = AbiParam::new(I8);
+    let string_contains = declare_string_method("corvid_string_contains", &search_sig)?;
+    let string_starts_with = declare_string_method("corvid_string_starts_with", &search_sig)?;
+    let string_ends_with = declare_string_method("corvid_string_ends_with", &search_sig)?;
+    let string_replace = declare_string_method("corvid_string_replace", &substring_sig)?;
+    let string_split = declare_string_method("corvid_string_split", &substring_sig)?;
     let mut char_at_sig = module.make_signature();
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.returns.push(AbiParam::new(I64));
+    let string_parse_int_id = module
+        .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
     let string_char_at_id = module
         .declare_function(STRING_CHAR_AT_SYMBOL, Linkage::Import, &char_at_sig)
         .map_err(|e| {
@@ -126,6 +181,9 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare String typeinfo: {e}"), Span::new(0, 0))
         })?;
+    let map_typeinfo = module
+        .declare_data("corvid_typeinfo_OrderedMap", Linkage::Import, false, false)
+        .map_err(|e| CodegenError::cranelift(format!("declare Map typeinfo: {e}"), Span::new(0, 0)))?;
     let weak_box_typeinfo_id = module
         .declare_data(WEAK_BOX_TYPEINFO_SYMBOL, Linkage::Import, false, false)
         .map_err(|e| {
@@ -1151,9 +1209,24 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
+        structural_eq, equality_layouts: Default::default(),
+        list_map_int, list_filter_int, list_fold_int, list_test_int,
+        list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
+        map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,
+        grounded_string_concat,
         string_eq: eq_id,
         string_cmp: cmp_id,
+        string_to_upper,
+        string_to_lower,
+        string_substring,
+        string_trim,
+        string_contains,
+        string_starts_with,
+        string_ends_with,
+        string_replace,
+        string_split,
+        string_parse_int: string_parse_int_id,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,
@@ -1163,6 +1236,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         weak_upgrade: weak_upgrade_id,
         weak_clear_self: weak_clear_self_id,
         string_typeinfo: string_typeinfo_id,
+        map_typeinfo,
         weak_box_typeinfo: weak_box_typeinfo_id,
         entry_init: entry_init_id,
         entry_arity_mismatch: arity_id,
@@ -1256,6 +1330,8 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // scattered-emit codegen for A/B comparison. That fallback
         // path will be removed once the unified pass has fully
         // stabilized in production.
+        in_match_operand: Default::default(),
+        next_variable: Default::default(),
         dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
             .map(|v| v != "0" && v != "false")
             .unwrap_or(true),
@@ -1264,6 +1340,8 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         tools_via_registry: false,
         struct_destructors: HashMap::new(),
         struct_traces: HashMap::new(),
+        callback_typeinfo: emit_callback_typeinfo(module)?,
+        variant_typeinfos: HashMap::new(),
         struct_typeinfos: HashMap::new(),
         struct_decoders: std::cell::RefCell::new(HashMap::new()),
         struct_to_json: std::cell::RefCell::new(HashMap::new()),

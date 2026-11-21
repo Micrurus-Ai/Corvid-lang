@@ -1,0 +1,27 @@
+{
+  "protocol": 2,
+  "service_requests_per_sample": 16,
+  "local_stream_overhead": null,
+  "cli_version": "corvid 0.0.1 (3b5c829c, 2026-11-21)",
+  "cli_sha256": "0e24203fb649d617cfb818949b432b2aa5652977f1219a8abb33ffd4bc2c1eb7",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "machine": "AMD64",
+  "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+  "python": "3.14.2",
+  "warmups": 2,
+  "trials": 7,
+  "metrics": {
+    "list_slice_interp": {
+      "median_ms": 918.326,
+      "samples_ms": [
+        880.764,
+        943.37,
+        883.043,
+        918.326,
+        846.891,
+        920.328,
+        930.423
+      ]
+    }
+  }
+}

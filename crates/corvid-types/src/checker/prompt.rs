@@ -20,6 +20,14 @@ impl<'a> Checker<'a> {
     pub(super) fn check_prompt(&mut self, p: &PromptDecl) {
         self.check_prompt_history(p);
         let return_ty = self.type_ref_to_type(&p.return_ty);
+        if p.params.iter().any(|param| matches!(param.ty, TypeRef::Function { .. }))
+            && !matches!(return_ty, Type::String | Type::Unknown)
+        {
+            self.errors.push(TypeError::new(TypeErrorKind::TypeMismatch {
+                expected: "String".into(), got: return_ty.display_name(),
+                context: format!("return type of function-calling prompt `{}`", p.name.name),
+            }, p.return_ty.span()));
+        }
         let has_stream_modifiers = p.stream.min_confidence.is_some()
             || p.stream.max_tokens.is_some()
             || p.stream.backpressure.is_some()

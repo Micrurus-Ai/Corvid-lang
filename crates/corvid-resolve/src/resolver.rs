@@ -183,6 +183,10 @@ impl Resolver {
                             span: i.span,
                         });
                     }
+                    for function in &i.python_functions {
+                        let id = self.symbols.allocate_def(&function.name.name, DeclKind::Tool, function.name.span);
+                        self.bindings.insert(function.name.span, Binding::Decl(id));
+                    }
                     for item in &i.use_items {
                         let lifted = item
                             .alias
@@ -431,7 +435,14 @@ impl Resolver {
     fn resolve_file(&mut self, file: &File) {
         for decl in &file.decls {
             match decl {
-                Decl::Import(_) => {}
+                Decl::Import(import) => {
+                    for function in &import.python_functions {
+                        for param in &function.params {
+                            self.resolve_type_ref(&param.ty);
+                        }
+                        self.resolve_type_ref(&function.return_ty);
+                    }
+                }
                 Decl::Type(t) => self.resolve_type_decl(t),
                 Decl::Store(s) => self.resolve_store_decl(s),
                 Decl::Tool(t) => self.resolve_tool_decl(t),
@@ -1042,7 +1053,10 @@ impl Resolver {
     /// top-level callee is a label, not a reference. The arguments are
     /// resolved normally.
     fn resolve_approve_action(&mut self, e: &Expr) {
-        if let Expr::Call { args, .. } = e {
+        if let Expr::Call { callee, args, .. } = e {
+            if let Expr::FieldAccess { target, .. } = callee.as_ref() {
+                self.resolve_expr(target);
+            }
             for arg in args {
                 self.resolve_expr(arg);
             }

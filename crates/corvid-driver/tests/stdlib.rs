@@ -339,7 +339,7 @@ agent main() -> Int:
 }
 
 #[test]
-fn std_secrets_adversarial_secret_value_leak_surface_is_rejected() {
+fn std_secrets_rejects_undeclared_raw_value_helper() {
     assert_std_adversarial_program_rejected(
         "secrets",
         true,
@@ -350,9 +350,6 @@ agent main() -> String:
     return secret_value("OPENAI_API_KEY")
 "#,
     );
-    let source = std_source("secrets");
-    assert!(source.contains("value_redacted: Bool"));
-    assert!(!source.contains("value: String"));
 }
 
 #[test]
@@ -585,9 +582,9 @@ fn std_secrets_imported_helpers_typecheck() {
 import "./std/secrets" use SecretReadEnvelope, secret_present, secret_missing
 
 agent main() -> Bool:
-    have = secret_present("ANTHROPIC_API_KEY")
+    have = secret_present("EXAMPLE_KEY", "example value")
     miss = secret_missing("UNSET_KEY")
-    return have.present and not miss.present
+    return have.present and have.value == "example value" and not miss.present and miss.value == ""
 "#,
     );
 }

@@ -144,7 +144,10 @@ pub(crate) fn cmd_jobs_run(
         })?;
 
     let queue = Arc::new(DurableQueueRuntime::open(state)?);
-    let runtime_handle = Arc::new(Runtime::builder().build());
+    let builder = Runtime::builder()
+        .io_policy(corvid_driver::load_io_tool_policy(source_path))
+        .http_policy(corvid_driver::load_http_egress_policy(source_path));
+    let runtime_handle = Arc::new(corvid_driver::apply_env_llm_wiring(builder).build());
     // Slice 52h-2: hand the executor the durable queue so a verified
     // provider protocol invoked inside a job persists its intent (and
     // every transition) as that job's checkpoints.
@@ -745,11 +748,23 @@ pub(crate) fn cmd_jobs_checkpoint_add(
     label: &str,
     payload: &str,
     payload_fingerprint: Option<String>,
+    step_sequence: Option<u64>,
 ) -> Result<u8> {
     let queue = DurableQueueRuntime::open(state)?;
     let payload = serde_json::from_str(payload).context("checkpoint payload must be valid JSON")?;
-    let checkpoint =
-        queue.record_checkpoint(job_id, kind.into(), label, payload, payload_fingerprint)?;
+    let checkpoint = match step_sequence {
+        Some(sequence) => queue.record_step_checkpoint(
+            job_id,
+            kind.into(),
+            label,
+            payload,
+            payload_fingerprint,
+            sequence,
+        )?,
+        None => {
+            queue.record_checkpoint(job_id, kind.into(), label, payload, payload_fingerprint)?
+        }
+    };
     println!("corvid jobs checkpoint add");
     println!("state: {}", state.display());
     print_checkpoint_summary(&checkpoint);
@@ -769,15 +784,42 @@ pub(crate) fn cmd_jobs_checkpoint_list(state: &Path, job_id: &str) -> Result<u8>
     Ok(0)
 }
 
-pub(crate) fn cmd_jobs_checkpoint_resume(state: &Path, job_id: &str) -> Result<u8> {
+pub(crate) fn cmd_jobs_checkpoint_resume(state: &Path, job_id: &str, json: bool) -> Result<u8> {
     let queue = DurableQueueRuntime::open(state)?;
     let resume = queue.resume_state(job_id)?;
+    if json {
+        let checkpoints: Vec<_> = resume
+            .checkpoints
+            .iter()
+            .map(|step| {
+                serde_json::json!({
+                    "sequence": step.sequence, "kind": step.kind.as_str(), "label": step.label,
+                    "payload": step.payload, "payload_fingerprint": step.payload_fingerprint,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "job": resume.job.id, "status": resume.job.status.as_str(),
+                "next_sequence": resume.next_sequence, "remaining_steps": resume.remaining_steps(),
+                "remaining_tool_calls": resume.remaining_tool_calls(), "checkpoints": checkpoints,
+            })
+        );
+        return Ok(0);
+    }
     println!("corvid jobs checkpoint resume");
     println!("state: {}", state.display());
     println!("job: {}", resume.job.id);
     println!("status: {}", resume.job.status.as_str());
     println!("checkpoint_count: {}", resume.checkpoints.len());
     println!("next_sequence: {}", resume.next_sequence);
+    if let Some(remaining) = resume.remaining_steps() {
+        println!("remaining_steps: {remaining}");
+    }
+    if let Some(remaining) = resume.remaining_tool_calls() {
+        println!("remaining_tool_calls: {remaining}");
+    }
     if let Some(checkpoint) = resume.last_checkpoint {
         println!("last_checkpoint: {}", checkpoint.id);
         println!("last_kind: {}", checkpoint.kind.as_str());
@@ -788,4 +830,3 @@ pub(crate) fn cmd_jobs_checkpoint_resume(state: &Path, job_id: &str) -> Result<u
     }
     Ok(0)
 }
-

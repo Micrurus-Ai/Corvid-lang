@@ -117,3 +117,48 @@ agent main() -> Int:
         98,
     );
 }
+
+#[test]
+fn ordered_map_snapshots_survive_growth_and_replacement() {
+    super::assert_parity_bool_without_tools(include_str!("string_map_iteration.cor"), true);
+}
+
+#[test]
+fn typed_string_map() {
+    super::assert_parity_bool_without_tools(include_str!("string_map.cor"), true);
+}
+
+#[test]
+fn typed_map_records() {
+    super::assert_parity_bool_without_tools(include_str!("map_records.cor"), true);
+}
+
+#[test]
+fn typed_map_nested() {
+    super::assert_parity_bool_without_tools(include_str!("map_nested.cor"), true);
+}
+
+#[test]
+fn typed_map_counters() {
+    super::assert_parity_bool_without_tools(include_str!("map_counters.cor"), true);
+}
+
+#[test]
+fn typed_map_reference_values() {
+    super::assert_parity_bool_without_tools(include_str!("map_reference_values.cor"), true);
+}
+
+#[test]
+fn list_updates_preserve_aliases_and_evaluate_operands_once() {
+    super::assert_parity_bool_without_tools(include_str!("list_updates.cor"), true);
+}
+
+#[test]
+fn record_updates_preserve_aliases_and_evaluate_operands_once() {
+    super::assert_parity_bool_without_tools(include_str!("record_updates.cor"), true);
+}
+
+#[test]
+fn nested_loops_and_short_circuit_preserve_control_flow() {
+    super::assert_parity_bool_without_tools(include_str!("control_flow_updates.cor"), true);
+}

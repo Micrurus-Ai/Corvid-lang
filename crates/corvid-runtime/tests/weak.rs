@@ -1,6 +1,9 @@
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// A collector sweep operates on the whole native heap in this test process.
+static HEAP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[repr(C)]
 struct CorvidTypeinfo {
     size: u32,
@@ -101,6 +104,7 @@ static REENTRANT_TYPEINFO: CorvidTypeinfo = CorvidTypeinfo {
 
 #[test]
 fn weak_upgrade_succeeds_while_strong_is_alive() {
+    let _heap = HEAP.lock().unwrap();
     unsafe {
         let strong = corvid_alloc_typed(8, &BOX_TYPEINFO);
         let weak = corvid_weak_new(strong);
@@ -116,6 +120,7 @@ fn weak_upgrade_succeeds_while_strong_is_alive() {
 
 #[test]
 fn weak_upgrade_returns_null_after_strong_drop() {
+    let _heap = HEAP.lock().unwrap();
     unsafe {
         let strong = corvid_alloc_typed(8, &BOX_TYPEINFO);
         let weak = corvid_weak_new(strong);
@@ -134,6 +139,7 @@ fn weak_upgrade_returns_null_after_strong_drop() {
 
 #[test]
 fn weak_is_cleared_before_destroy_fn_reenters_upgrade() {
+    let _heap = HEAP.lock().unwrap();
     unsafe {
         REENTRANT_SAW_NONE.store(false, Ordering::SeqCst);
         let strong = corvid_alloc_typed(8, &REENTRANT_TYPEINFO);
@@ -154,6 +160,7 @@ fn weak_is_cleared_before_destroy_fn_reenters_upgrade() {
 
 #[test]
 fn cycle_collector_sweep_clears_weak_slots() {
+    let _heap = HEAP.lock().unwrap();
     unsafe {
         let a = corvid_alloc_typed(16, &CELL_TYPEINFO);
         let b = corvid_alloc_typed(16, &CELL_TYPEINFO);

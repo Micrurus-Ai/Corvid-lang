@@ -61,6 +61,8 @@ agent tour(n: Int, c: Claim, o: Option<Int>, s: Status) -> String:
 
 A bare name in a pattern is a **unit-variant test** when it resolves
 to a variant (`Pending`), and a **binding** otherwise (`other`).
+A guard can call an agent with the values bound by its pattern. Corvid tries matching arms in source order. If a guard returns `false`, evaluation continues with the next arm.
+
 Guarded arms never count toward exhaustiveness — a guard can fail.
 
 ## Exhaustiveness

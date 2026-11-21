@@ -4,7 +4,25 @@ This policy defines how Corvid ships nightly, beta, and stable releases. It is a
 
 **Audience.** Two readers should be able to use this document without external context: a Corvid maintainer cutting a release, and a downstream developer or organization deciding whether to depend on Corvid for production. The first uses it as a checklist; the second uses it as the public contract for what changing-and-not-changing means at each channel.
 
-**Position.** The policy is intentionally narrow on what is promised and broad on what is enforced. Every rule below is paired with a CI gate, a CLI command, or a signed artifact field that catches violations before the release publishes — the [How this is enforced](#how-this-is-enforced) section at the end names each one.
+The channel sections specify release requirements. The [verification section](#verification) describes the checks currently available to maintainers.
+
+## Build a candidate on GitHub
+
+Run the **release** workflow on the desired branch and leave **Publish all candidate archives to GitHub Releases** unchecked. After all six builds succeed, download the platform packages and `corvid-archive-checksums` from the workflow run. Extract the artifacts into one directory and run `sha256sum --check --strict SHA256SUMS.txt` there. These hashes check the downloaded bytes. Installation and application tests establish whether a candidate works on its target platform.
+
+Download `corvid-archive-sboms` from the same workflow run. It contains one CycloneDX 1.6 JSON document per archive and `SBOM-SHA256SUMS.txt`. Run `sha256sum --check --strict SBOM-SHA256SUMS.txt` in the extracted directory. Each document records the archive digest, the digest of each regular file, and package names and versions from the bundled Rust notices, Python runtime manifest and VS Code extension (including its bundled npm dependencies). The Rust list includes build dependencies. To verify the inventory against downloaded bytes, run `python install/archive_sbom.py ARCHIVE rebuilt.json` with Python 3.11 or later from the matching checkout and compare `rebuilt.json` byte-for-byte with the downloaded document.
+
+Each platform archive carries the project `LICENSE` and a target-specific Rust dependency inventory at `lib/corvid-rust-notices.txt`. It lists the locked package versions, their declared licenses, and the notice files available for those versions. The PDF extraction dependency incorporates TeX glyph mappings from two tables. The inventory includes the LCDF package's copyright statement and COPYING file. Its README describes the license for source code. The second table identifies itself as an extension of LCDF version 2.33. The applicability of those terms to the generated mappings remains open for review before publication. [LCDF README](https://github.com/kohler/lcdf-typetools/blob/46fa0a9f2fe86fbd0eb11ac1fc83a1ad43a20615/README), [extended glyph table](https://github.com/michal-h21/htfgen/blob/0d9e796ebe9d6f8978f7c069d4922278e8716a75/glyphlist-extended.txt)
+
+For the PDF notice review, the three pinned input tables reproduce all 4,700 name/code pairs in the locked `pdf-extract 0.12.1` package. Its generator takes the first applicable mapping in input order and adds `mapsto`. The htfgen input differs from the historical LCDF 2.33 file even after removing comments and blank lines. Review the htfgen modifications alongside the LCDF material before deciding whether to distribute the package. [Generator](https://docs.rs/crate/pdf-extract/0.12.1/source/src/glyphlist-export.py), [historical LCDF table](https://github.com/kohler/lcdf-typetools/blob/e767ccc0381036ffd9f6f15fe64e896cc7d8cddd/glyphlist.txt), [htfgen file history](https://github.com/michal-h21/htfgen/commits/0d9e796ebe9d6f8978f7c069d4922278e8716a75/glyphlist-extended.txt).
+
+LCDF addressed an Adobe Glyph List licensing report by replacing `glyphlist.txt`. The upstream commit changed only that file. It provides no determination for `texglyphlist.txt` or the htfgen extension used by this candidate. [Upstream issue](https://github.com/kohler/lcdf-typetools/issues/11), [licensing change](https://github.com/kohler/lcdf-typetools/commit/f5c66c42c317986dc0309e0622ddb4092e16ea75).
+
+The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow tests Linux packages in a fresh Debian 12 container. On each of the six platforms it passes the archive through the production installer, checks the language server, invokes a Python host tool and runs a starter. It then builds and extracts a web app, renames the source project, and requests the HTML, JSON and WebAssembly assets from the relocated server. Uninstall must preserve a user-created file.
+
+For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. The workspace CI job caches downloaded dependencies and builds the compiler and tests from the checked-out source. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
+
+When reviewing GitHub dependency alerts for a candidate, compare the advisory range with the lockfile at the candidate revision. For Rust dependencies, check whether the crate is a development dependency and inspect the target-specific inventory. For the editor extension, inspect its npm lockfile and the dependencies inside the packaged VSIX. The Wasm backend uses Wasmtime in its test suite.
 
 ## Channels
 
@@ -76,7 +94,7 @@ A release is blocked when any of these are true:
 - signed artifact generation fails,
 - checksums or SBOM are missing,
 - `corvid claim audit` reports an aspirational launch claim,
-- `corvid upgrade --check` reports an unhandled weakening,
+- a comparison using `corvid upgrade check PATH --claims-current CURRENT --claims-target TARGET` reports a removed or downgraded guarantee,
 - generated docs drift from the guarantee registry,
 - migration execution or drift detection fails,
 - a security advisory marked release-blocking is open,
@@ -97,23 +115,15 @@ Stable release signoff requires:
 
 The same person may hold more than one role, but each role must be recorded in the release manifest.
 
-## How this is enforced
+## Verification
 
-Every rule above is paired with a machine-checked gate so a violation surfaces before the artifact ships, not after. The toolchain treats this section as the source of truth for what the release pipeline actually does.
-
-| Rule | Enforcement |
-|---|---|
-| Channel format + cadence | `corvid release <channel>` rejects malformed version strings and refuses to publish a second nightly per UTC day from the same commit. |
-| Required artifacts present | `corvid release` writes `release-manifest.json` with every required field; the publish step verifies the manifest before push. |
-| `SHA256SUMS.txt` covers every artifact | `corvid release` regenerates the file from the on-disk artifact set; mismatches fail the release. |
-| Signed binaries (DSSE attestation) | `corvid receipt verify-abi <artifact>` is run by CI against the published artifact set; an unverified attestation is a release blocker. |
-| SemVer covers the listed contracts | `corvid upgrade --check` consults the guarantee registry and refuses to advance the version when a stable contract has weakened. The breakage rule for each contract is encoded in the registry under `crates/corvid-guarantees/`. |
-| Breaking changes have an upgrade rule + migration note + accepted/rejected fixtures | `corvid claim audit` cross-references the migration directory; missing fixtures fail the audit. |
-| Release blockers | CI's release job fails closed when any of the listed conditions hold (missing artifacts, audit failures, open release-blocking advisories, migration drift). |
-| Key rotation | Release keys are pinned in the release manifest; the publisher rejects a manifest whose key id does not match the signing key. Rotation notes live alongside the previous and new keys in the receipts pipeline (see [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md)). |
-| Maintainer signoff | The release manifest carries one signoff field per role. The publisher refuses a stable release when any role is unfilled. |
-
-The point of this table is that *neither* the maintainer cutting a release *nor* the downstream developer reading the policy has to trust that someone is doing the right thing — the right thing is the only thing the tooling will let happen.
+- **Version and channel.** The local `corvid release build CHANNEL VERSION --out DIR` command parses SemVer and checks the channel before creating its output directory. Stable takes a plain version such as `1.0.0`, beta takes a numbered prerelease such as `1.0.0-beta.2`, and nightly accepts a prerelease starting with `nightly.`. Publication cadence is a maintainer responsibility.
+- **Candidate identifiers.** The hosted workflow computes a nightly tag as `nightly-YYYY-MM-DD-<short-sha>` using UTC. Stable and beta tags must equal `v` followed by the CLI package version. For local staging, omitting `VERSION` selects `0.0.0-nightly.local` for nightly, `1.0.0-beta.1` for beta, or the running CLI's package version for stable. Supply the intended SemVer explicitly when producing a local manifest for a particular candidate.
+- **Archive contents.** The hosted workflow checks version tags against the CLI package version, tests each candidate archive and computes its checksum. The local release command creates its own signed release record. Before publishing, verify that signatures and inventory cover the actual downloads.
+- **Windows performance measurements.** A manual candidate build with `verify_performance` enabled retains `baseline.json` and `repeat.json` in the `application-profile-windows-x64` artifact. To identify the measured executable, verify the Windows x64 ZIP against `SHA256SUMS.txt`, extract it, and run `Get-FileHash -Algorithm SHA256 .\bin\corvid.exe` from the extracted package directory. Compare the hexadecimal digest with `cli_sha256` in both reports and the SHA-256 for `bin/corvid.exe` in the archive's CycloneDX inventory.
+- **Local attestation.** `corvid release build` copies the running CLI. Its signed DSSE payload contains the exact bytes of `release-manifest.json`. Verify the Ed25519 signature with the expected release public key, then compare the copied binary's SHA-256 with `binary_sha256` in that manifest. This command does not generate a software bill of materials (SBOM). The hosted workflow generates the candidate SBOM from the finished archive.
+- **Compatibility.** Run `corvid upgrade check PATH` and the application's tests with the candidate CLI. To compare embedded library guarantees, supply the two exported manifests using `--claims-current` and `--claims-target`. See the [migration guide](meta/upgrade-migrations.md#comparing-guarantees-across-library-versions).
+- **Maintainer review.** Record signoff, review open advisories and beta feedback, and check that changelog entries, upgrade instructions and key rotation records apply to this candidate.
 
 ## See also
 

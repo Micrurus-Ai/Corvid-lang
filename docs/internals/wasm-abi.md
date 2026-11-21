@@ -45,6 +45,22 @@ Browser and edge deployment must preserve Corvid's effect, approval,
 provenance, budget, and replay contracts instead of compiling those
 features away.
 
+## Calling a host tool from Node.js
+
+Build with `corvid build calc.cor --target wasm` and copy the contents of `target/wasm/` into the application. Load the generated JavaScript as an ES module (for example, use `"type": "module"` in the host's `package.json`). For a module with `tool double(n: Int) -> Int` and an agent `compute(n: Int)` returning `double(n) + 1`, the host can instantiate directly from local bytes.
+
+```javascript
+import { readFile } from "node:fs/promises";
+import { adaptImports } from "./calc.js";
+
+const bytes = await readFile(new URL("./calc.wasm", import.meta.url));
+const imports = adaptImports({ tools: { double: n => n * 2n } });
+const { instance } = await WebAssembly.instantiate(bytes, imports);
+console.log(instance.exports.compute(21n)); // 43n
+```
+
+The scalar ABI passes Corvid integers by value as WebAssembly i64 and JavaScript BigInt. No result buffer needs releasing. Instantiating without the required raw host imports fails during linking. An exception thrown by a supplied tool reaches the JavaScript caller. The generated TypeScript declarations and manifest describe the application-specific exports and required host imports.
+
 ## String ABI
 
 Phase 20n-B ships a real WASM-side string ABI: `String` parameters and

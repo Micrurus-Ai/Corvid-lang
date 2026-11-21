@@ -76,7 +76,8 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             name,
             with_python_tools,
         }) => cmd_new(&name, with_python_tools),
-        Some(Command::Check { file }) => cmd_check(&file),
+        Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
+        Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {
             crate::cli::root::AddCommand::Skill {
                 source,
@@ -142,6 +143,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
         Some(Command::Serve {
+            access_log,
             file,
             listen,
             host,
@@ -156,6 +158,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 &composed_listen,
                 with_tools_cdylib.as_deref(),
                 mode.as_deref(),
+                access_log,
             )
         }
         Some(Command::Dev { file, listen, out }) => {
@@ -447,6 +450,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Claim {
             command,
             explain,
+            json,
             cdylib,
             key,
             source,
@@ -463,6 +467,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     claim_cmd::run_claim_explain(
                         &cdylib,
                         explain,
+                        json,
                         key.as_deref(),
                         source.as_deref(),
                     )
@@ -784,6 +789,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     label,
                     payload,
                     payload_fingerprint,
+                    step_sequence,
                 } => cmd_jobs_checkpoint_add(
                     &state,
                     &job,
@@ -791,12 +797,13 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     &label,
                     &payload,
                     payload_fingerprint,
+                    step_sequence,
                 ),
                 JobsCheckpointCommand::List { state, job } => {
                     cmd_jobs_checkpoint_list(&state, &job)
                 }
-                JobsCheckpointCommand::Resume { state, job } => {
-                    cmd_jobs_checkpoint_resume(&state, &job)
+                JobsCheckpointCommand::Resume { state, job, json } => {
+                    cmd_jobs_checkpoint_resume(&state, &job, json)
                 }
             },
             JobsCommand::Dlq { state } => cmd_jobs_dlq(&state),

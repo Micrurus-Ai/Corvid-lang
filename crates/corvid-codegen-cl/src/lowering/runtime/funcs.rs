@@ -12,8 +12,35 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub retain: FuncId,
     pub release: FuncId,
     pub string_concat: FuncId,
+    pub grounded_string_concat: FuncId,
     pub string_eq: FuncId,
+    pub structural_eq: FuncId,
+    pub equality_layouts: std::cell::RefCell<HashMap<Type, cranelift_module::DataId>>,
+    pub list_map_int: FuncId,
+    pub list_filter_int: FuncId,
+    pub list_fold_int: FuncId,
+    pub list_test_int: FuncId,
+    pub list_snapshot: FuncId,
+    pub list_new: FuncId,
+    pub list_bounds_error: FuncId,
+    pub list_append: FuncId,
+    pub return_temporaries: std::cell::RefCell<Vec<ClValue>>,
+    pub map_new: FuncId,
+    pub map_set: FuncId,
+    pub map_require_int: FuncId,
+    pub map_find: FuncId,
+    pub map_snapshot: FuncId,
     pub string_cmp: FuncId,
+    pub string_to_upper: FuncId,
+    pub string_to_lower: FuncId,
+    pub string_substring: FuncId,
+    pub string_trim: FuncId,
+    pub string_contains: FuncId,
+    pub string_starts_with: FuncId,
+    pub string_ends_with: FuncId,
+    pub string_replace: FuncId,
+    pub string_split: FuncId,
+    pub string_parse_int: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
@@ -33,6 +60,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// Runtime-provided `corvid_typeinfo_String` data
     /// symbol. Imported so codegen can relocate its address into
     /// static string literals and List<String>'s elem_typeinfo slot.
+    pub map_typeinfo: cranelift_module::DataId,
     pub string_typeinfo: cranelift_module::DataId,
     pub weak_box_typeinfo: cranelift_module::DataId,
     // Entry helpers used by the codegen-emitted `main`.
@@ -149,6 +177,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// (pass is active); set to false to fall back to pre-17b-1b.6c
     /// behavior for A/B debugging.
     pub dup_drop_enabled: bool,
+    pub in_match_operand: std::cell::Cell<bool>,
+    pub next_variable: std::cell::Cell<u32>,
     /// When true (library targets: cdylib/staticlib), a tool call is
     /// dispatched through the runtime registry
     /// (`corvid_invoke_tool_<type>`) so the binary links without the
@@ -168,9 +198,12 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// fields — those trace fns are empty bodies, kept for uniform
     /// dispatch in the collector mark walk without a per-object NULL check).
     pub struct_traces: HashMap<DefId, FuncId>,
+    /// Heap descriptor for callback environments containing only scalar captures.
+    pub callback_typeinfo: cranelift_module::DataId,
     /// Per-struct-type typeinfo data symbols. Every
     /// refcounted struct allocation references its block via
     /// `corvid_alloc_typed(size, &typeinfo)`.
+    pub variant_typeinfos: HashMap<(DefId, u32), cranelift_module::DataId>,
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
     /// Per-struct-type JSON-decoder functions. Emitted lazily on
     /// first reference (a prompt with `Type::Struct(def_id)` return)
@@ -253,6 +286,13 @@ pub(in crate::lowering) struct RuntimeFuncs {
 }
 
 impl RuntimeFuncs {
+    pub fn declare_variable(&self, builder: &mut FunctionBuilder, ty: clir::Type) -> Variable {
+        let index = self.next_variable.get();
+        self.next_variable.set(index + 1);
+        let variable = Variable::from_u32(index);
+        builder.declare_var(variable, ty);
+        variable
+    }
     /// Allocate the next unique literal symbol number.
     pub(in crate::lowering) fn next_literal_id(&self) -> u64 {
         let n = self.literal_counter.get();

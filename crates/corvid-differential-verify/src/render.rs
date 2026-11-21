@@ -204,11 +204,16 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                     out.push_str(&render_type_ref(query_ty));
                 }
                 if let Some(body_ty) = &route.body_ty {
-                    out.push_str(" body ");
+                    out.push_str(if route.form_encoded { " form " } else { " body " });
                     out.push_str(&render_type_ref(body_ty));
                 }
-                out.push_str(" -> json ");
-                out.push_str(&render_type_ref(&route.response.ty));
+                match route.response.kind {
+                    corvid_ast::RouteResponseKind::Html => out.push_str(" -> html"),
+                    corvid_ast::RouteResponseKind::Json => {
+                        out.push_str(" -> json ");
+                        out.push_str(&render_type_ref(&route.response.ty));
+                    }
+                }
                 if !route.effect_row.effects.is_empty() {
                     out.push_str(" uses ");
                     out.push_str(&render_effect_row_names(&route.effect_row.effects));

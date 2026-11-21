@@ -40,7 +40,7 @@ pub(crate) fn build_imported_def_ids(
         for entry in module.resolved.symbols.entries() {
             if matches!(
                 entry.kind,
-                DeclKind::Type | DeclKind::Tool | DeclKind::Prompt | DeclKind::Agent
+                DeclKind::Type | DeclKind::Tool | DeclKind::Prompt | DeclKind::Agent | DeclKind::Fn
             ) {
                 out.insert(
                     ImportedDefKey {

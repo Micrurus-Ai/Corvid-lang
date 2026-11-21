@@ -16,7 +16,7 @@ use corvid_types::{typecheck_with_config, CorvidConfig};
 
 use crate::diagnostic::Diagnostic;
 
-use super::{lower_driver_file, typecheck_driver_file};
+use super::{lower_driver_file, typecheck_with_sources};
 
 /// Outcome of a compile. Always contains the Python source (even
 /// partial) when possible, and any diagnostics found.
@@ -118,6 +118,14 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
 /// Refuse LOUDLY at transpile time instead, naming each call and the
 /// tier that runs it.
 fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Some(vec![Diagnostic {
+            origin: None,
+            span: tool.span,
+            message: "typed Python imports require the interpreter".into(),
+            hint: Some("run the application with corvid run".into()),
+        }]);
+    }
     let hits = corvid_codegen_py::find_stdlib_executing_tool_calls(ir);
     if hits.is_empty() {
         return None;
@@ -125,6 +133,7 @@ fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
     Some(
         hits.into_iter()
             .map(|hit| Diagnostic {
+                origin: None,
                 span: hit.span,
                 message: format!(
                     "stdlib tool `{}` cannot be transpiled to Python — the transpile tier has no stdlib dispatch, so the generated code would fail at runtime far from this call",
@@ -152,7 +161,17 @@ pub fn analyze_with_config_at_path(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
-    compile_front_at_path(source, source_path, config).0
+    analyze_with_open_sources(source, source_path, config, &|_| None)
+}
+
+/// Analyze a document with editor buffers overriding local imports before disk lookup.
+pub fn analyze_with_open_sources(
+    source: &str,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> CompileResult {
+    compile_front_at_path(source, source_path, config, open_source).0
 }
 
 /// Transpile pipeline (`corvid build --target=python`): the shared
@@ -162,7 +181,7 @@ pub fn compile_with_config_at_path(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
-    let (mut result, ir) = compile_front_at_path(source, source_path, config);
+    let (mut result, ir) = compile_front_at_path(source, source_path, config, &|_| None);
     let Some(ir) = ir else {
         return result;
     };
@@ -182,6 +201,7 @@ fn compile_front_at_path(
     source: &str,
     source_path: &Path,
     config: Option<&CorvidConfig>,
+    open_source: &dyn Fn(&Path) -> Option<Vec<u8>>,
 ) -> (CompileResult, Option<corvid_ir::IrFile>) {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let tokens = match lex(source) {
@@ -203,7 +223,7 @@ fn compile_front_at_path(
     let resolved = resolve(&file);
     diagnostics.extend(resolved.errors.iter().cloned().map(Diagnostic::from));
 
-    let typechecked = typecheck_driver_file(&file, &resolved, source_path, config);
+    let typechecked = typecheck_with_sources(&file, &resolved, source_path, config, open_source);
     diagnostics.extend(typechecked.diagnostics);
     diagnostics.extend(
         typechecked

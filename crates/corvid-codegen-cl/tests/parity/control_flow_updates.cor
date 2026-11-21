@@ -1,0 +1,37 @@
+agent mark(calls: List<String>) -> Bool:
+    calls.append("called")
+    return true
+
+agent label(items: List<String>) -> String:
+    for name in items:
+        for suffix in ["value" + "!"]:
+            return name + suffix
+    return "empty"
+
+agent main() -> Bool:
+    calls: List<String> = []
+    left = false and mark(calls)
+    right = true or mark(calls)
+    score = 0
+    i = 0
+    while i < 5:
+        i += 1
+        if i == 2:
+            continue
+        for j in [1, 2, 3]:
+            if j == 3:
+                break
+            score += j
+        if i == 4:
+            break
+    names = ["a", "b" + "!"]
+    seen = ""
+    for name in names:
+        names[1] = "changed"
+        names.append("new")
+        seen = seen + name
+    amounts = [1.25, 2.75]
+    total = 0.0
+    for amount in amounts:
+        total += amount
+    return seen == "ab!" and names.length() == 4 and total == 4.0 and not left and right and calls.length() == 0 and score == 9 and label([]) == "empty" and label(["A" + "da"]) == "Adavalue!"

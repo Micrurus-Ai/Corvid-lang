@@ -56,12 +56,9 @@ impl Codegen {
             "from corvid_runtime import tool_call, approve_gate, llm_call, register_tools, register_prompts",
         );
         self.out.blank_line();
-        self.out.writeln("def __corvid_wrap_i64(value):");
-        self.out.indent();
-        self.out.writeln("value &= (1 << 64) - 1");
-        self.out
-            .writeln("return value - (1 << 64) if value >= (1 << 63) else value");
-        self.out.dedent();
+        for line in include_str!("numeric_helpers.py").lines() {
+            self.out.writeln(line);
+        }
         self.out.blank_line();
     }
 
@@ -321,6 +318,7 @@ impl Codegen {
     }
 
     fn emit_expr(&mut self, e: &IrExpr) {
+        use corvid_types::Type;
         match &e.kind {
             IrExprKind::Match { .. } => {
                 self.out.write(
@@ -342,9 +340,24 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
                 );
             }
+            IrExprKind::MapLiteral { keys, values }
+                if matches!(&e.ty, Type::Map(key, _)
+                    if matches!(key.as_ref(), Type::String | Type::Int | Type::Bool)) =>
+            {
+                self.out.write("{");
+                for (i, (key, value)) in keys.iter().zip(values).enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.emit_expr(key);
+                    self.out.write(": ");
+                    self.emit_expr(value);
+                }
+                self.out.write("}");
+            }
             IrExprKind::MapLiteral { .. } => {
                 self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",
+                    "(_ for _ in ()).throw(NotImplementedError(\"Python map literals require String, Int or Bool keys\"))",
                 );
             }
             IrExprKind::BuiltinMethod { .. } => {
@@ -371,9 +384,19 @@ impl Codegen {
                 self.out.write("]");
             }
             IrExprKind::BinOp { op, left, right } => {
-                self.out.write("(");
+                let (prefix, separator) = match (&e.ty, op) {
+                    (Type::Float, BinaryOp::Div) => ("__corvid_div_f64(", ", ".into()),
+                    (Type::Float, BinaryOp::Mod) => ("__corvid_rem_f64(", ", ".into()),
+                    (Type::Int, BinaryOp::Div) => ("__corvid_div_i64(", ", ".into()),
+                    (Type::Int, BinaryOp::Mod) => ("__corvid_rem_i64(", ", ".into()),
+                    (Type::Int, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) => {
+                        ("__corvid_checked_i64(", format!(" {} ", binary_op_str(*op)))
+                    }
+                    _ => ("(", format!(" {} ", binary_op_str(*op))),
+                };
+                self.out.write(prefix);
                 self.emit_expr(left);
-                self.out.write(&format!(" {} ", binary_op_str(*op)));
+                self.out.write(&separator);
                 self.emit_expr(right);
                 self.out.write(")");
             }
@@ -385,8 +408,15 @@ impl Codegen {
                 self.out.write(")");
             }
             IrExprKind::UnOp { op, operand } => {
+                let checked_neg = *op == UnaryOp::Neg && e.ty == corvid_types::Type::Int;
+                if checked_neg {
+                    self.out.write("__corvid_checked_i64(");
+                }
                 self.out.write(unary_op_str(*op));
                 self.emit_expr(operand);
+                if checked_neg {
+                    self.out.write(")");
+                }
             }
             IrExprKind::WrappingUnOp { op, operand } => {
                 self.out.write("__corvid_wrap_i64(");
@@ -647,6 +677,7 @@ fn escape_string(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\x00"),
             other => out.push(other),
         }
     }

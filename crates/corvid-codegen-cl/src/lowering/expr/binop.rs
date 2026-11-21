@@ -46,11 +46,17 @@ pub fn lower_binop_strict(
             })
         }
         (BinaryOp::Div, ArithDomain::Int) => {
-            trap_on_zero(builder, r, module, runtime);
+            let zero = builder.ins().icmp_imm(IntCC::Equal, r, 0);
+            let min = builder.ins().icmp_imm(IntCC::Equal, l, i64::MIN);
+            let minus_one = builder.ins().icmp_imm(IntCC::Equal, r, -1);
+            let overflow = builder.ins().band(min, minus_one);
+            let invalid = builder.ins().bor(zero, overflow);
+            trap_if(builder, invalid, module, runtime);
             Ok(builder.ins().sdiv(l, r))
         }
         (BinaryOp::Mod, ArithDomain::Int) => {
-            trap_on_zero(builder, r, module, runtime);
+            let zero = builder.ins().icmp_imm(IntCC::Equal, r, 0);
+            trap_if(builder, zero, module, runtime);
             Ok(builder.ins().srem(l, r))
         }
 
@@ -271,23 +277,27 @@ pub fn lower_short_circuit(
     let merge_block = builder.create_block();
     let result = builder.append_block_param(merge_block, I8);
 
+    let skipped = builder.create_block();
     match op {
-        BinaryOp::And => {
-            // l != 0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ eval right; l == 0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ short-circuit to false.
-            let short_val = builder.ins().iconst(I8, 0);
-            builder
-                .ins()
-                .brif(l, right_block, &[], merge_block, &[short_val.into()]);
-        }
-        BinaryOp::Or => {
-            // l != 0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ short-circuit to true; l == 0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ eval right.
-            let short_val = builder.ins().iconst(I8, 1);
-            builder
-                .ins()
-                .brif(l, merge_block, &[short_val.into()], right_block, &[]);
-        }
+        BinaryOp::And => builder.ins().brif(l, right_block, &[], skipped, &[]),
+        BinaryOp::Or => builder.ins().brif(l, skipped, &[], right_block, &[]),
         _ => unreachable!("lower_short_circuit only handles And/Or"),
+    };
+    builder.switch_to_block(skipped);
+    builder.seal_block(skipped);
+    // The ownership pass reserves each consuming use before the condition.
+    // Match arms retain at each executed read and have no reservation to retire.
+    if runtime.dup_drop_enabled && !runtime.in_match_operand.get() {
+        for read in crate::dataflow::collect_reads(right, true) {
+            if read.kind == crate::dataflow::ReadKind::Owned {
+                if let Some((var, _)) = env.get(&read.local_id) {
+                    let value = builder.use_var(*var);
+                    emit_release(builder, module, runtime, value);
+                }
+            }
+        }
     }
+    builder.ins().jump(merge_block, &[l.into()]);
 
     builder.switch_to_block(right_block);
     builder.seal_block(right_block);

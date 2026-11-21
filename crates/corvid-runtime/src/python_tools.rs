@@ -144,6 +144,15 @@ fn find_bundled_corvid_runtime() -> Option<std::path::PathBuf> {
         }
     }
 
+    // Cargo can place debug binaries outside the checkout via CARGO_TARGET_DIR.
+    #[cfg(debug_assertions)]
+    if let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2) {
+        let candidate = root.join("runtime/python");
+        if candidate.join("corvid_runtime").is_dir() {
+            return Some(candidate);
+        }
+    }
+
     None
 }
 
@@ -174,11 +183,11 @@ pub fn install_python_tools(
         return Ok(ToolRegistry::default());
     };
 
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let result: PyResult<ToolRegistry> = (|| {
             // Prepend the project root to sys.path so `import tools`
             // resolves to <project_root>/tools.py.
-            let sys = py.import_bound("sys")?;
+            let sys = py.import("sys")?;
             let path = sys.getattr("path")?;
             let project_root_str = project_root
                 .to_str()
@@ -220,12 +229,12 @@ pub fn install_python_tools(
             // Importing `tools` runs the user's module top-level code,
             // which registers every decorated implementation via
             // `corvid_runtime.registry._TOOL_IMPLS`.
-            py.import_bound("tools")?;
+            py.import("tools")?;
 
             // Read the registry the decorators populated.
-            let registry_mod = py.import_bound("corvid_runtime.registry")?;
+            let registry_mod = py.import("corvid_runtime.registry")?;
             let impls_obj = registry_mod.getattr("_TOOL_IMPLS")?;
-            let impls = impls_obj.downcast::<PyDict>().map_err(|err| {
+            let impls = impls_obj.cast::<PyDict>().map_err(|err| {
                 pyo3::exceptions::PyTypeError::new_err(format!(
                     "corvid_runtime.registry._TOOL_IMPLS is not a dict: {err}"
                 ))
@@ -255,7 +264,7 @@ pub fn install_python_tools(
 /// 1. Acquire the GIL.
 /// 2. Convert `Vec<serde_json::Value>` args to a Python tuple via
 ///    [`crate::python_ffi::json_to_py`].
-/// 3. Call the function (returns a coroutine).
+/// 3. Create the registry coroutine for a sync or async implementation.
 /// 4. Run the coroutine to completion via `asyncio.run(coro)`.
 /// 5. Convert the result back to `serde_json::Value`.
 ///
@@ -280,7 +289,7 @@ fn register_python_tool(registry: &mut ToolRegistry, name: String, callable: Py<
             let dispatch_name = captured_name.clone();
             // GIL-acquiring sync block executed on the tokio worker thread.
             tokio::task::spawn_blocking(move || {
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     dispatch_python_tool(py, callable.as_ref(), &dispatch_name, &args)
                 })
             })
@@ -309,17 +318,11 @@ fn dispatch_python_tool(
             .iter()
             .map(|arg| crate::python_ffi::json_to_py(py, arg))
             .collect::<PyResult<Vec<_>>>()?;
-        let tuple = PyTuple::new_bound(py, py_args);
+        let tuple = PyTuple::new(py, py_args)?;
 
-        // Bind the callable to the current GIL scope and invoke it.
-        // A user's `async def echo(message)` returns a coroutine
-        // object here, not the awaited result.
-        let coro = callable.bind(py).call1(tuple)?;
-
-        // Drive the coroutine to completion synchronously via
-        // `asyncio.run(coro)`. This blocks the GIL-holding thread
-        // until the coroutine yields its final result.
-        let asyncio = py.import_bound("asyncio")?;
+        let registry = py.import("corvid_runtime.registry")?;
+        let coro = registry.call_method1("invoke_tool", (callable.bind(py), tuple))?;
+        let asyncio = py.import("asyncio")?;
         let result = asyncio.call_method1("run", (coro,))?;
         crate::python_ffi::py_to_json(&result)
     })();

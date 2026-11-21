@@ -3,22 +3,14 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum ReleaseCommand {
-    /// Produce signed release-channel artifacts (binary + SBOM +
-    /// SHA256SUMS + signed manifest). The pre-existing positional
-    /// `corvid release <channel> <version>` shape became
-    /// `corvid release build <channel> <version>` in slice
-    /// `35V2-P43-T-LR-release-notes` to make room for sibling
-    /// subcommands. The direct-channel forms `corvid release
-    /// nightly|beta|stable <version>` are aliases of
-    /// `corvid release build <channel> <version>` — they match
-    /// the launch-rehearsal smoke-command shape published in
-    /// `docs/launch-rehearsal.md` and the reference_apps
-    /// integration test that gates Phase 43.
+    /// Copy the running CLI and write its checksum, release manifest and signed attestation.
+    ///
+    /// Set CORVID_RELEASE_SIGNING_KEY to a hex-encoded Ed25519 seed.
+    /// The output also includes installer scripts, a changelog and release notes for operators.
     Build {
         /// Release channel: nightly, beta, or stable.
         channel: String,
-        /// Explicit version. Nightly requires `-nightly.`, beta
-        /// requires `-beta.`, stable is plain SemVer.
+        /// Release version, such as 1.0.0-nightly.local, 1.0.0-beta.2, or 1.0.0.
         version: Option<String>,
         /// Output directory for generated release artifacts.
         #[arg(long, value_name = "DIR")]

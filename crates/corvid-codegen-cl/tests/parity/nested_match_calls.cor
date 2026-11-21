@@ -1,0 +1,25 @@
+agent mark(log: List<String>, label: String) -> String:
+    log.append(label)
+    return label
+
+agent pair(first: String, second: String) -> List<String>:
+    return [first, second]
+
+agent keep(items: List<String>) -> List<String>:
+    return items
+
+agent process(input: Result<String, String>, log: List<String>) -> List<String>:
+    return match input:
+        Ok(name) -> keep(pair(mark(log, name), mark(log, "second")))
+        Err(reason) -> keep(pair(mark(log, "error"), mark(log, reason)))
+
+agent main() -> Bool:
+    log: List<String> = []
+    good = process(Ok("fir" + "st"), log)
+    bad = process(Err("ba" + "d"), log)
+    first_call = log[0] == "first" and log[1] == "second"
+    second_call = log[2] == "error" and log[3] == "bad"
+    ordered = log.length() == 4 and first_call and second_call
+    ok_pair = good[0] == "first" and good[1] == "second"
+    err_pair = bad[0] == "error" and bad[1] == "bad"
+    return ordered and ok_pair and err_pair

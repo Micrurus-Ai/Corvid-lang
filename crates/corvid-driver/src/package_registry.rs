@@ -187,6 +187,9 @@ fn load_registry_index(location: &str) -> Result<RegistryIndex> {
 
 fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
     if location.starts_with("http://") || location.starts_with("https://") {
+        if crate::package_cache::offline() {
+            anyhow::bail!("cannot fetch `{location}` while CORVID_OFFLINE=1");
+        }
         let response = ureq::get(location)
             .call()
             .map_err(|err| anyhow!(err.to_string()))?;
@@ -199,6 +202,10 @@ fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
             .read_to_end(&mut bytes)
             .context("failed reading HTTP response")?;
         Ok(bytes)
+    } else if location.starts_with("file://") {
+        let path = url::Url::parse(location)?.to_file_path()
+            .map_err(|_| anyhow!("invalid file artifact URL `{location}`"))?;
+        std::fs::read(path).with_context(|| format!("failed to read `{location}`"))
     } else {
         std::fs::read(location).with_context(|| format!("failed to read `{location}`"))
     }

@@ -1,0 +1,15 @@
+agent last_number(items: List<Int>) -> Int:
+    return match items.last():
+        Some(n) -> n
+        None -> -1
+
+agent label() -> Option<String>:
+    return ["unused", "co" + "rvid"].last()
+
+agent main() -> Bool:
+    name = match label():
+        Some(text) -> text
+        None -> ""
+    empty = last_number([]) == -1
+    zero = last_number([3, 0]) == 0
+    return empty and zero and name == "corvid"

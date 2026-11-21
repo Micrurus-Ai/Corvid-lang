@@ -698,7 +698,9 @@ fn build_serve_tools_fixture() -> PathBuf {
     );
 
     let status = Command::new(env!("CARGO"))
-        .args(["build", "--release", "--manifest-path"])
+        .args(["build", "--release", "--target-dir"])
+        .arg(fixture_dir.join("target"))
+        .arg("--manifest-path")
         .arg(&manifest)
         .status()
         .expect("spawn cargo build for serve_tools_fixture");
@@ -2764,4 +2766,662 @@ fn the_reference_application_serves_its_connector_route() {
         body.contains("mock-carrier"),
         "the connector route must return the compiled mock payload; got: {body}"
     );
+}
+
+#[test]
+fn serve_page_and_json_api_from_one_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = Command::new(corvid_bin())
+        .current_dir(dir.path())
+        .args(["new", "notes"])
+        .output()
+        .unwrap();
+    assert!(new.status.success(), "{new:?}");
+    let project = dir.path().join("notes");
+    let main = project.join("src/main.cor");
+    let source = r#"import "./std/ui" as ui
+
+server notes:
+    route GET "/" -> html:
+        return ui.page("Notes", [ui.text("Ready & listening")])
+
+    route GET "/api/status" -> json String:
+        return "ready"
+"#;
+    std::fs::write(
+        &main,
+        source.replace("ui.page(\"Notes\", [ui.text(\"Ready & listening\")])", "42"),
+    )
+    .unwrap();
+    let invalid = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(["check", "src/main.cor"])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success(), "{invalid:?}");
+    let diagnostic = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        diagnostic.contains("E0207") && diagnostic.contains("String"),
+        "{diagnostic}"
+    );
+    std::fs::write(main, source).unwrap();
+
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    for (path, mime, expected) in [
+        ("/", "text/html", "<p>Ready &amp; listening</p>"),
+        ("/api/status", "application/json", "\"ready\""),
+    ] {
+        let raw = http_get_raw(port, path).unwrap();
+        let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200"), "{headers}");
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains(&format!("content-type: {mime}")),
+            "{headers}"
+        );
+        if path == "/" {
+            assert!(
+                body.starts_with("<!doctype html>") && body.contains(expected),
+                "{body}"
+            );
+        } else {
+            assert_eq!(body, expected);
+        }
+    }
+
+    let json = |path| {
+        let (status, body) = http_get(port, path).unwrap();
+        assert_eq!(status, 200);
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()
+    };
+    let contract = json("/.well-known/corvid");
+    let routes = contract["routes"].as_array().unwrap();
+    let home = routes.iter().find(|r| r["path"] == "/").unwrap();
+    assert_eq!(home["response_media_type"], "text/html");
+    assert_eq!(home["response_type"], "String");
+    let spec = json("/openapi.json");
+    for (path, mime) in [("/", "text/html"), ("/api/status", "application/json")] {
+        let content = &spec["paths"][path]["get"]["responses"]["200"]["content"];
+        assert_eq!(content[mime]["schema"]["type"], "string");
+        assert_eq!(content.as_object().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn serve_round_trips_sum_variants_and_checks_payloads() {
+    use serde_json::{json, Value};
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(
+        &src,
+        r#"public type Status:
+    | Pending
+    | Approved(approver: String)
+
+type Search:
+    term: String
+    limit: Int where between(1, 20)
+
+type SearchReply:
+    owner: String
+    term: String
+    limit: Int
+
+server status_api:
+    route GET "/owners/{id}/search" query Search -> json SearchReply:
+        return SearchReply(path.id, query.term, query.limit)
+    route POST "/echo" body Status -> json Status:
+        return body
+"#,
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(dir.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, reply) = http_get(port, "/openapi.json").unwrap();
+    assert_eq!(status, 200);
+    let spec: Value = serde_json::from_str(&reply).unwrap();
+    let variants = &spec["components"]["schemas"]["Status"]["oneOf"];
+    assert_eq!(variants[0]["properties"]["fields"]["maxItems"], 0);
+    assert_eq!(
+        variants[1]["properties"]["fields"]["prefixItems"][0]["type"],
+        "string"
+    );
+    for (variant, fields) in [("Pending", json!([])), ("Approved", json!(["alice"]))] {
+        let body = json!({"tag":"variant","type":"Status","variant":variant,"fields":fields});
+        let (status, reply) = http_post(port, "/echo", &body.to_string()).unwrap();
+        assert_eq!(status, 200, "{reply}");
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap(), body);
+    }
+    let (status, reply) =
+        http_get(port, "/owners/lee/search?term=caf%C3%A9+au+lait&limit=2").unwrap();
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap(),
+        json!({"owner":"lee","term":"caf\u{e9} au lait","limit":2})
+    );
+    for query in [
+        "term=valid",
+        "term=ok&limit=no",
+        "term=ok&limit=21",
+        "term=%FF&limit=2",
+        "term=%a&limit=2",
+    ] {
+        let (status, reply) = http_get(port, &format!("/owners/lee/search?{query}")).unwrap();
+        assert_eq!(status, 400, "{reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_query"
+        );
+    }
+    assert_eq!(http_get(port, "/missing").unwrap().0, 404);
+    assert_eq!(http_get(port, "/echo").unwrap().0, 405);
+    let (status, reply) = http_post(port, "/echo", "{").unwrap();
+    assert_eq!(status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap()["error"],
+        "invalid_json"
+    );
+    for invalid in [
+        json!({"variant":"Pending","fields":[3]}),
+        json!({"variant":"Pending","type":"Other"}),
+        json!({"variant":"Pending","tag":"none"}),
+        json!({"variant":"Pending","fields":false}),
+        json!({"variant":"Approved"}),
+        json!({"variant":"Approved","fields":[3]}),
+        json!({"variant":"Unknown"}),
+    ] {
+        let (status, reply) = http_post(port, "/echo", &invalid.to_string()).unwrap();
+        assert_eq!(status, 400, "{invalid} -> {reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_body"
+        );
+    }
+}
+
+#[test]
+fn sqlite_service_transactions_survive_restart() {
+    use serde_json::{json, Value};
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("notes");
+    let run = |dir: &std::path::Path, args: &[&str]| {
+        let result = Command::new(corvid_bin())
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+    };
+    run(temp.path(), &["new", "notes"]);
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/sqlite_service.cor"),
+    )
+    .unwrap();
+    std::fs::create_dir(project.join("schema")).unwrap();
+    std::fs::write(project.join("schema/001_notes.sql"), "CREATE TABLE notes(name TEXT PRIMARY KEY, text TEXT NOT NULL); CREATE TABLE writes(name TEXT NOT NULL);").unwrap();
+    run(
+        &project,
+        &[
+            "migrate",
+            "up",
+            "--dir",
+            "schema",
+            "--database",
+            "notes.sqlite",
+        ],
+    );
+    let start = || {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let child = Command::new(corvid_bin())
+            .current_dir(&project)
+            .args([
+                "serve",
+                "src/main.cor",
+                "--listen",
+                &format!("127.0.0.1:{port}"),
+            ])
+            .env_remove("CORVID_IO_ROOT")
+            .spawn()
+            .unwrap();
+        let guard = ServedApp(child);
+        assert!(wait_until_ready(port));
+        (guard, port)
+    };
+    let (guard, port) = start();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..4)
+            .map(|i| {
+                scope.spawn(move || {
+                    let note = json!({"name": format!("n{i}"), "text": format!("note {i}")});
+                    let (status, body) = http_post(port, "/notes", &note.to_string()).unwrap();
+                    assert_eq!(status, 200, "{body}");
+                    assert_eq!(
+                        serde_json::from_str::<Value>(&body).unwrap()["ok"],
+                        note,
+                        "{body}"
+                    );
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    let (_, duplicate) =
+        http_post(port, "/notes", r#"{"name":"n0","text":"replacement"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&duplicate).unwrap()["tag"],
+        "err",
+        "{duplicate}"
+    );
+    let (_, recovery) =
+        http_post(port, "/notes", r#"{"name":"next","text":"after rollback"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&recovery).unwrap()["tag"],
+        "ok",
+        "{recovery}"
+    );
+    drop(guard);
+    std::fs::write(
+        project.join("schema/002_index.sql"),
+        "CREATE INDEX ix_notes ON notes(text);",
+    )
+    .unwrap();
+    let next = project.join("schema/003_extend.sql");
+    std::fs::write(
+        &next,
+        "ALTER TABLE nonexistent ADD COLUMN revision INTEGER;",
+    )
+    .unwrap();
+    let migrate = [
+        "migrate",
+        "up",
+        "--dir",
+        "schema",
+        "--database",
+        "notes.sqlite",
+    ];
+    let failed = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(migrate)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success(), "{failed:?}");
+    std::fs::write(
+        &next,
+        "ALTER TABLE notes ADD COLUMN revision INTEGER DEFAULT 1;",
+    )
+    .unwrap();
+    run(&project, &migrate);
+    run(&project, &migrate);
+    let (_guard, port) = start();
+    for i in 0..4 {
+        let (status, body) = http_get(port, &format!("/notes/n{i}")).unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["ok"]["text"],
+            format!("note {i}"),
+            "{body}"
+        );
+    }
+    let db = rusqlite::Connection::open(project.join("notes.sqlite")).unwrap();
+    let writes: i64 = db
+        .query_row("SELECT count(*) FROM writes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(writes, 5);
+
+    // The producer holds a SQLite write transaction across yields. Observing
+    // the lock before and after a socket disconnect tests the whole HTTP path.
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    socket.write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    let mut response = Vec::new();
+    let mut buf = [0; 1024];
+    while !response.windows(4).any(|window| window == b"tick") {
+        let n = socket.read(&mut buf).unwrap();
+        assert!(n > 0 && response.len() < 16384, "stream failed to yield a tick");
+        response.extend_from_slice(&buf[..n]);
+    }
+    db.busy_timeout(Duration::ZERO).unwrap();
+    let error = db.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+    assert_eq!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+    drop(socket);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match db.execute_batch("BEGIN IMMEDIATE") {
+            Ok(()) => break,
+            Err(err) if err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(err) => panic!("stream failed to release its database handle: {err}"),
+        }
+    }
+    db.execute_batch("ROLLBACK").unwrap();
+}
+
+#[test]
+fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("relay");
+    let created = Command::new(corvid_bin())
+        .current_dir(tmp.path())
+        .args(["new", "relay"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/http_relay.cor"),
+    )
+    .unwrap();
+    let manifest = project.join("corvid.toml");
+    let original = std::fs::read_to_string(&manifest).unwrap();
+    let configured = original.replace("allow = []", "allow = [\"upstream.test\"]");
+    assert_ne!(configured, original);
+    std::fs::write(&manifest, configured).unwrap();
+
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .env("HTTP_PROXY", &proxy_url)
+        .env("http_proxy", &proxy_url)
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .env_remove("CORVID_HTTP_ALLOW")
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+
+    // A loopback HTTP proxy represents the project's allowlisted upstream.
+    // Deliver each accepted request to the test without external DNS or network.
+    proxy.set_nonblocking(true).unwrap();
+    let next = || {
+        let until = Instant::now() + Duration::from_secs(5);
+        let socket = loop {
+            match proxy.accept() {
+                Ok((socket, _)) => break socket,
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(err) => panic!("expected an upstream request: {err}"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            headers.push_str(&line);
+        }
+        (reader, headers)
+    };
+    let closed = |mut socket: BufReader<TcpStream>| {
+        let mut buf = [0; 1];
+        match socket.read(&mut buf) {
+            Ok(0) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            other => panic!("upstream connection remained open: {other:?}"),
+        }
+    };
+    std::thread::scope(|scope| {
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(b"GET /wait HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let (waiting, _) = next();
+        let post = scope.spawn(|| http_post(port, "/messages", r#"{"text":"hello"}"#).unwrap());
+        let (mut request, headers) = next();
+        assert!(headers.starts_with("POST http://upstream.test/messages "));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (key, v) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| v.trim().parse().unwrap())
+            })
+            .unwrap();
+        let mut payload = vec![0; length];
+        request.read_exact(&mut payload).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({"text":"hello"})
+        );
+        std::thread::sleep(Duration::from_millis(25));
+        request.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\n{\"id\":7}").unwrap();
+        let (status, body) = post.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        let receipt: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(receipt["ok"]["id"], 7);
+        assert_eq!(receipt["ok"]["attempts"], 1);
+        assert!(receipt["ok"]["elapsed_ms"].as_u64().unwrap() >= 20);
+
+        let deadline = scope.spawn(|| http_get(port, "/deadline").unwrap());
+        let (upstream, _) = next();
+        let (status, body) = deadline.join().unwrap();
+        assert_eq!(status, 504, "{body}");
+        assert!(body.contains("timed out after 300ms"), "{body}");
+        closed(upstream);
+
+        let redirected = scope.spawn(|| http_get(port, "/wait").unwrap());
+        let (mut redirected_request, _) = next();
+        redirected_request.get_mut().write_all(b"HTTP/1.1 302 Found\r\nLocation: http://other.test/messages\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        let (status, body) = redirected.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["tag"],
+            "err"
+        );
+        drop(client);
+        closed(waiting);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_drains_an_inflight_route_before_exiting() {
+    use std::net::TcpListener;
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
+        .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
+    let mut guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    // Wait for HTTP 100 Continue so the test signals a request the server has accepted.
+    stream.write_all(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 12\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n").unwrap();
+    let mut interim = [0; 25];
+    stream.read_exact(&mut interim).unwrap();
+    assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+    assert!(Command::new("kill").args(["-TERM", &guard.0.id().to_string()]).status().unwrap().success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        assert!(Instant::now() < deadline, "listener stayed open after SIGTERM");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stream.write_all(br#"{"text":"x"}"#).unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    assert!(reply.contains(r#"{"text":"x"}"#), "{reply}");
+    loop {
+        if let Some(exit) = guard.0.try_wait().unwrap() {
+            assert!(exit.success(), "{exit}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "server failed to exit after draining");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn access_log_reports_templates_and_status_while_a_route_uses_a_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("service");
+    let created = Command::new(corvid_bin()).current_dir(dir.path()).args(["new", "service"]).output().unwrap();
+    assert!(created.status.success(), "{created:?}");
+    let source = r#"import "./std/secrets" use secret_read
+
+agent configured() -> Result<Bool, String>:
+    secret = secret_read("CORVID_TEST_SERVICE_KEY")?
+    return Ok(secret.present and secret.value.length() > 0)
+
+server app:
+    route GET "/configuration/{id}" -> json Result<Bool, String>:
+        return configured()
+"#;
+    std::fs::write(project.join("src/main.cor"), source).unwrap();
+    let log = project.join("access.log");
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).current_dir(&project)
+        .args(["serve", "--access-log", "--listen", &format!("127.0.0.1:{port}")])
+        .env("CORVID_TEST_SERVICE_KEY", "sample-secret-for-service")
+        .stderr(std::fs::File::create(&log).unwrap()).spawn().unwrap();
+    let guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, body) = http_get_with_cookie(port, "/configuration/private-id?key=private-query", "value=private-cookie").unwrap();
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["ok"], true);
+    assert_eq!(http_get(port, "/unknown-private-path").unwrap().0, 404);
+    drop(guard);
+    let log = std::fs::read_to_string(log).unwrap();
+    for secret in ["sample-secret-for-service", "private-id", "private-query", "private-cookie", "unknown-private-path"] {
+        assert!(!log.contains(secret), "{log}");
+    }
+    let events: Vec<serde_json::Value> = log.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+    assert!(events.iter().any(|e| e["event"] == "http_request" && e["method"] == "GET" && e["route"] == "/configuration/:id" && e["status"] == 200 && e["elapsed_ms"].is_u64()), "{log}");
+    assert!(events.iter().any(|e| e["status"] == 404 && e["route"].is_null()), "{log}");
+}
+
+#[tokio::test]
+async fn serve_validates_an_imported_form_record_and_advertises_its_schema() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("filter.cor"),
+        "public type Filter:
+    term: String
+    limit: Int where between(1, 5)
+",
+    )
+    .unwrap();
+    let source = project.path().join("main.cor");
+    std::fs::write(
+        &source,
+        r#"import "./filter" use Filter as Query
+server forms:
+    route POST "/apply" form Query -> html:
+        return body.term
+"#,
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .args(["serve"])
+        .arg(&source)
+        .args(["--listen", &format!("127.0.0.1:{port}")])
+        .current_dir(project.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{port}");
+    let spec: serde_json::Value = client
+        .get(format!("{base}/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let media = "application/x-www-form-urlencoded";
+    let reference = spec["paths"]["/apply"]["post"]["requestBody"]["content"][media]["schema"]
+        ["$ref"]
+        .as_str()
+        .unwrap();
+    let fields = &spec.pointer(reference.strip_prefix('#').unwrap()).unwrap()["properties"];
+    assert_eq!(fields["term"]["type"], "string");
+    assert_eq!(fields["limit"]["type"], "integer");
+    for (content_type, data, status) in [
+        (media, "term=milk+%26+tea&limit=2", 200),
+        (media, "term=x&limit=6", 400),
+        (media, "term=x&limit=no", 400),
+        ("application/json", "{}", 415),
+    ] {
+        let response = client
+            .post(format!("{base}/apply"))
+            .header("Content-Type", content_type)
+            .body(data)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), status);
+        if status == 200 {
+            assert_eq!(response.text().await.unwrap(), "milk & tea");
+        }
+    }
 }

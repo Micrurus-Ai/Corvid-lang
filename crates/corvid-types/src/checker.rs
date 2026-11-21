@@ -360,6 +360,7 @@ fn typecheck_with_everything(
 }
 
 struct Checker<'a> {
+    file: &'a File,
     symbols: &'a SymbolTable,
     bindings: &'a HashMap<Span, Binding>,
     types: HashMap<Span, Type>,
@@ -438,7 +439,7 @@ struct Checker<'a> {
     /// forever without this.
     alias_depth: usize,
     in_test_body: bool,
-    saw_yield: bool,
+    saw_stream_output: bool,
 
     /// Approvals visible at the current point. Represented as a flat
     /// stack that is truncated back to its parent's length when a block
@@ -707,6 +708,7 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             tools_by_id: tools,
+            file,
             operations_by_id: operations,
             prompts_by_id: prompts,
             agents_by_id: agents,
@@ -725,7 +727,7 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             alias_depth: 0,
             in_test_body: false,
-            saw_yield: false,
+            saw_stream_output: false,
             approvals: Vec::new(),
             approvals_seen_in_agent: Vec::new(),
             effect_frontier: EffectFrontier::default(),
@@ -871,6 +873,7 @@ mod case;
 mod decl;
 mod decl_eval;
 mod decl_extern_c;
+mod form;
 mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;

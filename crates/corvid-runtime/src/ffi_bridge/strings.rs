@@ -66,6 +66,10 @@ extern "C" {
 /// Allocate a Corvid String from a Rust `String`. The returned
 /// `CorvidString` has refcount 1 — caller takes ownership.
 pub fn string_from_rust(s: String) -> CorvidString {
+    string_from_str(&s)
+}
+
+fn string_from_str(s: &str) -> CorvidString {
     let bytes = s.as_bytes();
     let ptr = bytes.as_ptr();
     let len = bytes.len() as i64;
@@ -119,4 +123,102 @@ pub(crate) unsafe fn read_corvid_string(cs: CorvidString) -> String {
 /// Borrow a `CorvidString` as UTF-8 for the duration of the call.
 pub(crate) unsafe fn borrow_corvid_string<'a>(cs: &'a CorvidString) -> &'a str {
     unsafe { cs.as_str() }
+}
+
+/// # Safety
+/// The receiver must remain a live Corvid string for this call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_to_upper(value: CorvidString) -> CorvidString {
+    string_from_rust(unsafe { value.as_str() }.to_uppercase())
+}
+
+/// # Safety
+/// The receiver must remain a live Corvid string for this call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_to_lower(value: CorvidString) -> CorvidString {
+    string_from_rust(unsafe { value.as_str() }.to_lowercase())
+}
+
+/// # Safety
+/// The receiver must remain a live Corvid string for this call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_substring(value: CorvidString, start: i64, end: i64) -> CorvidString {
+    let piece = crate::string::substring(unsafe { value.as_str() }, start, end);
+    string_from_str(piece)
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_trim(value: CorvidString) -> CorvidString {
+    string_from_str(unsafe { value.as_str() }.trim())
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_contains(value: CorvidString, needle: CorvidString) -> u8 {
+    unsafe { value.as_str().contains(needle.as_str()) as u8 }
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_starts_with(value: CorvidString, prefix: CorvidString) -> u8 {
+    unsafe { value.as_str().starts_with(prefix.as_str()) as u8 }
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_ends_with(value: CorvidString, suffix: CorvidString) -> u8 {
+    unsafe { value.as_str().ends_with(suffix.as_str()) as u8 }
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_replace(value: CorvidString, from: CorvidString, to: CorvidString) -> CorvidString {
+    string_from_rust(unsafe { value.as_str().replace(from.as_str(), to.as_str()) })
+}
+
+/// # Safety
+/// The inputs must remain live. The destination must be a fresh native list of strings.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_split(value: CorvidString, separator: CorvidString, list: *mut std::ffi::c_void) -> *mut std::ffi::c_void {
+    extern "C" {
+        fn corvid_list_append(list: *mut std::ffi::c_void, slot: i64);
+    }
+    let separator = unsafe { separator.as_str() };
+    if separator.is_empty() {
+        eprintln!("corvid: split requires a non-empty separator");
+        unsafe { corvid_release(list.cast()) };
+        return std::ptr::null_mut();
+    }
+    for piece in unsafe { value.as_str() }.split(separator) {
+        let descriptor = unsafe { corvid_string_from_bytes(piece.as_ptr(), piece.len() as i64) };
+        unsafe { corvid_list_append(list, descriptor as isize as i64) };
+    }
+    list
+}
+
+/// Borrow a String and initialize a Result<Int, String> payload slot.
+/// Return 0 for Ok or 1 for Err, transferring the error string to the caller.
+///
+/// # Safety
+/// The input descriptor must remain live for this call. `payload` must
+/// point to an aligned, writable native Result payload slot.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_parse_int(value: CorvidString, payload: *mut i64) -> i64 {
+    let text = unsafe { borrow_corvid_string(&value) };
+    match crate::string::parse_int(text) {
+        Ok(number) => {
+            unsafe { payload.write(number) };
+            0
+        }
+        Err(message) => {
+            unsafe { payload.cast::<CorvidString>().write(string_from_rust(message)) };
+            1
+        }
+    }
 }

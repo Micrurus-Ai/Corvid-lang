@@ -2,6 +2,8 @@ use super::{ExprFlow, Interpreter};
 
 mod adversarial;
 mod cost;
+mod journal;
+mod tools;
 mod route_dispatch;
 mod voting;
 use crate::errors::{InterpError, InterpErrorKind};
@@ -422,7 +424,18 @@ pub(crate) fn build_message_segments(
     use corvid_runtime::llm::LlmMessage;
     let has_roles = !prompt.messages.is_empty();
     let has_history = prompt.history_param.is_some();
-    if !has_roles && !has_history {
+    let mut images = Vec::new();
+    for (param, value) in prompt.params.iter().zip(args) {
+        if is_prompt_image(value) {
+            let parse_error = |msg: String| InterpError::new(InterpErrorKind::Marshal(
+                format!("invalid image for {}: {msg}", param.name)), span);
+            let image: corvid_runtime::llm::PromptImage = serde_json::from_value(value_to_json(value))
+                .map_err(|err| parse_error(err.to_string()))?;
+            image.validate().map_err(parse_error)?;
+            images.push(image);
+        }
+    }
+    if !has_roles && !has_history && images.is_empty() {
         return Ok(MessageSegments {
             system: Vec::new(),
             history: Vec::new(),
@@ -435,6 +448,7 @@ pub(crate) fn build_message_segments(
     if has_roles {
         for m in &prompt.messages {
             let msg = LlmMessage {
+                images: Vec::new(),
                 role: m.role.clone(),
                 content: render_template(&m.template, prompt, args),
             };
@@ -446,6 +460,7 @@ pub(crate) fn build_message_segments(
         }
     } else {
         turn.push(LlmMessage {
+            images: Vec::new(),
             role: "user".to_string(),
             content: render_template(&prompt.template, prompt, args),
         });
@@ -481,8 +496,16 @@ pub(crate) fn build_message_segments(
                         span,
                     ));
                 }
-                history.push(LlmMessage { role, content });
+                history.push(LlmMessage { role, content, images: Vec::new() });
             }
+        }
+    }
+
+    if !images.is_empty() {
+        if let Some(user) = turn.iter_mut().rev().find(|m| m.role == "user") {
+            user.images = images;
+        } else {
+            turn.push(LlmMessage { role: "user".into(), content: String::new(), images });
         }
     }
 
@@ -494,6 +517,7 @@ pub(crate) fn build_message_segments(
         let suffix = suffix.trim();
         if !suffix.is_empty() {
             turn.push(LlmMessage {
+                images: Vec::new(),
                 role: "user".to_string(),
                 content: suffix.to_string(),
             });
@@ -507,12 +531,16 @@ pub(crate) fn build_message_segments(
     })
 }
 
+fn is_prompt_image(value: &Value) -> bool {
+    matches!(value, Value::Struct(s) if s.type_name().rsplit('.').next() == Some("PromptImage"))
+}
+
 fn render_template(template: &str, prompt: &IrPrompt, args: &[Value]) -> String {
     let mut out = template.to_string();
     for (param, value) in prompt.params.iter().zip(args) {
         let needle = format!("{{{}}}", param.name);
         if out.contains(&needle) {
-            let replacement = value_to_json(value).to_string();
+            let replacement = if is_prompt_image(value) { "[image]".to_string() } else { value_to_json(value).to_string() };
             out = out.replace(&needle, &replacement);
         }
     }

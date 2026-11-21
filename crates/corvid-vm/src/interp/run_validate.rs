@@ -180,6 +180,9 @@ pub async fn bind_and_run_agent(
         })?;
     let mut interp = Interpreter::new(ir, runtime);
     for (id, v) in params_with_values {
+        if let Some(param) = agent.params.iter().find(|param| param.local_id == id) {
+            Interpreter::check_grounded_argument(param, &v)?;
+        }
         interp.env.bind(id, v);
     }
     interp.run_body(agent).await

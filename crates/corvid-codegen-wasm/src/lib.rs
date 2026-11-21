@@ -76,6 +76,9 @@ pub fn emit_wasm_artifacts(
     ir: &IrFile,
     module_name: &str,
 ) -> Result<WasmArtifacts, WasmCodegenError> {
+    if ir.tools.iter().any(|tool| tool.python.is_some()) {
+        return Err(WasmCodegenError::unsupported("typed Python imports require the interpreter"));
+    }
     let scalar_agents = ir
         .agents
         .iter()

@@ -1,0 +1,20 @@
+type User:
+    name: String
+
+agent users() -> Map<String, User>:
+    return {"owner": User("A" + "da")}
+
+agent main() -> Bool:
+    saved = users()["owner"]
+    owner = match saved:
+        Some(user) -> user
+        None -> fallback()
+    directory = users()
+    snapshot = directory.values()
+    directory["owner"] = User("Grace")
+    missing = not directory.contains_key("missing")
+    previous = snapshot[0]
+    return owner.name == "Ada" and previous.name == "Ada" and missing
+
+agent fallback() -> User:
+    return User("missing")

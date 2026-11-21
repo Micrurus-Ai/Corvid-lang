@@ -321,6 +321,7 @@ pub(crate) fn build_resolution(
     for (path, loaded_module) in loaded {
         let exports = collect_public_exports(&loaded_module.file, &loaded_module.resolved);
         let resolved_module = ResolvedModule {
+            source: loaded_module.source.clone(),
             path: path.clone(),
             resolved: loaded_module.resolved.clone(),
             file: loaded_module.file.clone(),

@@ -254,6 +254,8 @@ impl MockAdapter {
 }
 
 impl LlmAdapter for MockAdapter {
+    fn supports_tool_turns(&self) -> bool { true }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -352,6 +354,8 @@ impl EnvVarMockAdapter {
 }
 
 impl LlmAdapter for EnvVarMockAdapter {
+    fn supports_tool_turns(&self) -> bool { true }
+
     fn name(&self) -> &str {
         &self.name
     }

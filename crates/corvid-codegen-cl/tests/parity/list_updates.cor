@@ -1,0 +1,38 @@
+agent position(trace: List<Int>) -> Int:
+    trace.append(1)
+    return 0
+
+agent amount(items: List<Int>, trace: List<Int>) -> Int:
+    trace.append(2)
+    items.append(17)
+    items[0] = 10
+    return 3
+
+agent replace_row(rows: List<List<Int>>, trace: List<Int>) -> Int:
+    trace.append(3)
+    rows[0] = [20]
+    return 4
+
+agent main() -> Bool:
+    items = [2]
+    trace: List<Int> = []
+    alias = items
+    items[position(trace)] += amount(alias, trace)
+    words = ["first" + " word"]
+    saved = words[0]
+    words[0] = "second"
+    live_words = ["initial" + " value"]
+    live_alias = live_words
+    observed = ""
+    for word in live_words:
+        live_alias[0] = "replacement"
+        observed = word
+    total = 2
+    total *= items[0]
+    total -= 6
+    rows = [[1]]
+    old_row = rows[0]
+    calls: List<Int> = []
+    rows[position(calls)][position(calls)] += replace_row(rows, calls)
+    nested = calls.length() == 3 and calls[2] == 3 and old_row[0] == 1 and rows[0][0] == 24
+    return nested and total == 20 and trace.length() == 2 and trace[0] == 1 and trace[1] == 2 and alias[0] == 13 and items[1] == 17 and saved == "first word" and words[0] == "second" and observed == "initial value" and live_words[0] == "replacement"

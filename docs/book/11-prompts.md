@@ -261,3 +261,92 @@ latency, and cost. `corvid replay` reproduces the run from the
 recording without hitting the provider. `corvid eval --swap-model`
 re-runs the prompt against a different model and diffs the result
 against the baseline.
+
+### Switching a typed prompt between local providers
+
+```corvid
+effect model_call:
+    cost: 1.0
+
+type Decision:
+    urgent: Bool
+    reason: String
+
+prompt classify(text: String) -> Decision uses model_call:
+    system: "Classify the message."
+    user: "{text}"
+
+agent main() -> Bool:
+    decision = classify("The parcel is late.")
+    return decision.urgent
+```
+
+For Ollama, set `CORVID_MODEL=ollama:local-model` and `OLLAMA_BASE_URL` to the running server. For an OpenAI-compatible server, set `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model` and, if needed, `OPENAI_COMPAT_API_KEY`. Replace `local-model` with the model name served at that address. Run `corvid run --target interp src/main.cor` in either configuration. Both adapters send the system and user messages and the record schema. Corvid checks the returned fields before making the record available to the caller.
+
+### Serving generated text as it arrives
+
+```corvid
+prompt answer(question: String) -> Stream<String>:
+    with max_tokens 200
+    "{question}"
+
+server answers:
+    route GET "/answer/{question}" -> json Stream<String>:
+        return try answer(path.question) timeout 700 on error retry 2 times backoff linear 1
+```
+
+With an OpenAI-compatible streaming provider, the client can consume server-sent events while generation continues. The 700 ms deadline applies to starting each attempt and receiving the first chunk. A setup error can trigger a retry. A provider disconnect after text has been delivered ends that stream with an error. Closing the consumer connection cancels the pending generation. Corvid estimates token use as text arrives and checks the provider's final completion-token count against `max_tokens`.
+
+### Passing a Corvid function to a prompt
+
+```corvid
+fn add(left: Int, right: Int) -> Int:
+    return left + right
+
+prompt answer(question: String, calculate: (Int, Int) -> Int) -> String:
+    "{question}"
+
+agent main() -> String:
+    return answer("What is 17 plus 25?", add)
+```
+
+Select a Chat Completions provider with function calling enabled and run the file with `corvid run`. The provider sees a function named `calculate` with integer arguments named `left` and `right`. Corvid checks every call in a batch before invoking the supplied functions, then returns each result with its original call ID. The prompt returns the provider's final text. A conversation allows up to eight function calls and reserves a final model turn.
+
+Durable jobs use capture-free functions for this form. Once a worker checkpoints a tool result, its replacement can reuse that result when continuing the conversation. If your function changes an external system, give that operation an idempotency key to handle interruption between the external write and the checkpoint.
+
+### Passing an image to a prompt
+
+```corvid
+import "./std/io" use PromptImage, io_read_image
+
+type Caption:
+    label: String
+
+prompt describe(photo: PromptImage) -> Caption:
+    "Describe {photo} in one sentence."
+
+agent caption_file(path: String) -> Result<String, String>:
+    photo = io_read_image(path)?
+    caption = describe(photo)
+    return Ok(caption.label)
+```
+
+Configure the project's I/O root and select a model that accepts images. Paths passed to `io_read_image` resolve under that root. Corvid checks the file signature for PNG or JPEG and accepts up to 8 MiB per file. The provider receives the image as a media part in the user message.
+
+### Reading a page selected by the user
+
+```corvid
+import "./std/browser" use browser_open_scoped, browser_click, browser_read_text, browser_capture, browser_close
+
+agent main() -> String:
+    browser_open_scoped(800, 600)
+    browser_click("Update")
+    status = browser_read_text("#status")
+    browser_capture()
+    browser_close()
+    return status
+```
+
+Set `CORVID_BROWSER_URL` to the page to open, then execute the program with `corvid run`. The example expects a button named Update and a status element with ID `status`. The host supplies Python with Playwright and a Chromium browser. Select the Python executable with `CORVID_BROWSER_PYTHON` and the Chromium channel with `CORVID_BROWSER_CHANNEL` (Edge by default on Windows).
+
+The viewport width and height each accept 100 to 4096 pixels. Clicking uses the button's accessible name. Reading uses a CSS selector. The scoped session blocks cross-origin HTTP requests, HTTP redirects and WebSockets. `browser_capture()` returns the PNG path. Set `CORVID_BROWSER_EVIDENCE_DIR` inside the I/O root to pass captures to `io_read_image`. Closing the session discards its browser context. Opening another starts with fresh page state.
