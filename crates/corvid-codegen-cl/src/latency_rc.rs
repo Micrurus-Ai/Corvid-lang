@@ -201,7 +201,9 @@ fn collect_prompt_pins_in_expr(
             let mut pinned = BTreeSet::new();
             for arg in args {
                 if let IrExprKind::Local { local_id, .. } = arg.kind {
-                    if matches!(arg.ty, Type::String) && borrowed_reads.contains(&local_id) {
+                    let string = matches!(arg.ty, Type::String)
+                        || matches!(&arg.ty, Type::Grounded(inner) if **inner == Type::String);
+                    if string && borrowed_reads.contains(&local_id) {
                         pinned.insert(local_id);
                     }
                 }

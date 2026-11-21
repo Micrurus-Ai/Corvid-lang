@@ -302,9 +302,9 @@ pub(super) fn lower_prompt_call(
 
     let pinned_locals = runtime.prompt_pins.get(&span);
     let mut arg_vals: Vec<ClValue> = Vec::with_capacity(args.len());
-    let mut arg_pinned: Vec<bool> = Vec::with_capacity(args.len());
+    let outer_temporaries = runtime.return_temporaries.borrow().len();
     for a in args {
-        let v = lower_expr(
+        let (v, borrowed) = lower_container_maybe_borrowed(
             builder,
             a,
             current_return_ty,
@@ -323,7 +323,12 @@ pub(super) fn lower_prompt_call(
                 )
             });
         arg_vals.push(v);
-        arg_pinned.push(pinned);
+        if !pinned && is_refcounted_type(&a.ty) {
+            if borrowed {
+                emit_retain(builder, module, runtime, v);
+            }
+            runtime.return_temporaries.borrow_mut().push(v);
+        }
     }
 
     let segments = parse_prompt_template(&prompt.template, &prompt.params, span)?;
@@ -344,7 +349,7 @@ pub(super) fn lower_prompt_call(
                     let aty = &args[*idx].ty;
                     (
                         emit_stringify_arg(builder, module, runtime, av, aty, span)?,
-                        arg_pinned[*idx] && is_string_like_prompt_arg(aty),
+                        is_string_like_prompt_arg(aty),
                     )
                 }
             };
@@ -515,12 +520,8 @@ pub(super) fn lower_prompt_call(
     emit_release(builder, module, runtime, model_val);
     emit_release(builder, module, runtime, trace_payload.type_tags);
 
-    for (v, a) in arg_vals.iter().zip(args.iter()) {
-        if is_refcounted_type(&a.ty) {
-            let _ = v;
-        } else {
-            let _ = v;
-        }
+    for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
+        emit_release(builder, module, runtime, value);
     }
 
     if matches!(return_ty, Type::Grounded(_)) {

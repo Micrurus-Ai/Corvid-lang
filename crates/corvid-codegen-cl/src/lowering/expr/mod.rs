@@ -417,7 +417,32 @@ pub(super) fn lower_expr(
         )),
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if crate::requires_grounded_string_concat(*op, &left.ty, &right.ty) => {
-                Err(CodegenError::not_supported("grounded string concatenation requires the interpreter", expr.span))
+                let (l, borrowed_l) = lower_string_operand_maybe_borrowed(
+                    builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                if !borrowed_l {
+                    runtime.return_temporaries.borrow_mut().push(l);
+                }
+                let (r, borrowed_r) = lower_string_operand_maybe_borrowed(
+                    builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                if !borrowed_l {
+                    runtime.return_temporaries.borrow_mut().pop();
+                }
+                let mask = i64::from(matches!(left.ty, Type::Grounded(_)))
+                    | (i64::from(matches!(right.ty, Type::Grounded(_))) << 1);
+                let mask = builder.ins().iconst(clir::types::I8, mask);
+                let callee = module.declare_func_in_func(runtime.grounded_string_concat, builder.func);
+                let call = builder.ins().call(callee, &[l, r, mask]);
+                let result = builder.inst_results(call)[0];
+                if !borrowed_l {
+                    emit_release(builder, module, runtime, l);
+                }
+                if !borrowed_r {
+                    emit_release(builder, module, runtime, r);
+                }
+                builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
+                Ok(result)
             }
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
@@ -460,18 +485,6 @@ pub(super) fn lower_expr(
             // call results) still produce an Owned +1 and are
             // released by the helper as before ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the original
             // ownership contract.
-            // NOTE: this routes only on bare `Type::String`, not
-            // `Grounded<String>`. Routing a grounded-string operator
-            // through the String helpers produces correct *values*
-            // but leaks the result: the dataflow / dup-drop passes
-            // treat `Grounded<...>` as opaque (see
-            // `ownership::is_refcounted`), so no Drop is scheduled.
-            // Grounded-refcounted-type operator value-correctness is
-            // entangled with the native grounded ownership model and
-            // is the `native-grounded-handles` follow-up phase, not
-            // slice 5. Grounded *scalars* (Int/Bool/Float) are
-            // already value-correct — they are not refcounted, so
-            // there is no ownership entanglement.
             if matches!(&left.ty, Type::String) && matches!(&right.ty, Type::String) {
                 let (l, l_borrowed) =
                     lower_string_operand_maybe_borrowed(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
@@ -700,33 +713,20 @@ pub(super) fn lower_expr(
                     Some(id)
                 };
 
-                // Tool-call ABI: refcount lifecycle matches
-                // the agent-call convention ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â caller
-                // produces an Owned (+1) refcounted arg via the
-                // existing `lower_expr` path (use_var retains to
-                // convert BorrowedÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢Owned), the `#[tool]` wrapper
-                // reads bytes without touching refcount
-                // (`abi::FromCorvidAbi for String` is borrow-only so
-                // the wrapper neither retains nor releases), and
-                // after the call returns the caller releases its +1.
-                // Net effect: one retain + one release around the
-                // call = zero net refcount change, which is what a
-                // borrow-style FFI boundary should look like. Without
-                // the release, the +1 leaks.
+                // The tool borrows its inputs. Bare locals stay owned by
+                // their scope; computed arguments must survive until the
+                // call returns (or be released if a later argument exits).
+                let outer_temporaries = runtime.return_temporaries.borrow().len();
                 let mut arg_vals = Vec::with_capacity(args.len());
-                let mut arg_refcounted: Vec<bool> = Vec::with_capacity(args.len());
-                for a in args {
-                    arg_vals.push(lower_expr(
-                        builder,
-                        a,
-                        current_return_ty,
-                        env,
-                        scope_stack,
-                        func_ids_by_def,
-                        module,
-                        runtime,
-                    )?);
-                    arg_refcounted.push(is_refcounted_type(&a.ty));
+                for arg in args {
+                    let (value, borrowed) = lower_container_maybe_borrowed(
+                        builder, arg, current_return_ty, env, scope_stack,
+                        func_ids_by_def, module, runtime,
+                    )?;
+                    if !borrowed && is_refcounted_type(&arg.ty) {
+                        runtime.return_temporaries.borrow_mut().push(value);
+                    }
+                    arg_vals.push(value);
                 }
                 let trace_arg_tys = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
                 let trace_payload =
@@ -1047,16 +1047,8 @@ pub(super) fn lower_expr(
                 builder.seal_block(join_b);
                 emit_release(builder, module, runtime, trace_payload.type_tags);
 
-                // Release the +1 we put on each refcounted arg. For
-                // literals (refcount = i64::MIN sentinel) this is a
-                // no-op; for heap values it decrements the refcount
-                // we bumped pre-call.
-                if !runtime.dup_drop_enabled {
-                    for (v, is_ref) in arg_vals.iter().zip(arg_refcounted.iter()) {
-                        if *is_ref {
-                            emit_release(builder, module, runtime, *v);
-                        }
-                    }
+                for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
+                    emit_release(builder, module, runtime, value);
                 }
                 emit_release(builder, module, runtime, tool_name_val);
 

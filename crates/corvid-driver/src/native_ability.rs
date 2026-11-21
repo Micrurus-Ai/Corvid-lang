@@ -51,7 +51,6 @@ pub enum NotNativeReason {
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
     UnsupportedEquality,
-    GroundedStringConcat,
     CallbackNotNative,
     PromptToolsRequireInterpreter,
     UnsupportedMap,
@@ -94,7 +93,6 @@ impl std::fmt::Display for NotNativeReason {
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
-            Self::GroundedStringConcat => f.write_str("grounded string concatenation requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
             Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
@@ -400,9 +398,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             scan_expr(index, current_return_ty, context)
         }
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right } => {
-            if corvid_codegen_cl::requires_grounded_string_concat(*op, &left.ty, &right.ty) {
-                return Err(NotNativeReason::GroundedStringConcat);
-            }
             if corvid_codegen_cl::lowering::uses_structural_equality(*op, &left.ty)
                 && !corvid_codegen_cl::lowering::supports_structural_comparison(*op, left, right, context.types) {
                 return Err(NotNativeReason::UnsupportedEquality);
@@ -525,15 +520,15 @@ mod tests {
     #[test]
     fn tool_library_does_not_hide_later_interpreter_requirements() {
         let ir = crate::compile_to_ir(r#"
-effect retrieval:
-    data: grounded
-tool fetch() -> Grounded<String> uses retrieval
-agent main() -> String:
+tool fetch() -> String
+agent main() -> Int:
     value = fetch()
-    return (value + "!").unwrap_discarding_sources()
-"#).expect("valid grounded expression");
+    words = [value, "other"]
+    words.sort()
+    return words.length()
+"#).expect("valid program using a tool and list sorting");
         assert!(matches!(native_ability(&ir), Err(NotNativeReason::ToolCall { .. })));
-        assert!(matches!(native_ability_with_tools(&ir, true), Err(NotNativeReason::GroundedStringConcat)));
+        assert!(matches!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BuiltinMethodNotNative)));
     }
 
     #[test]

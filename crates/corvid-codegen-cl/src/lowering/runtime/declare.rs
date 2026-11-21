@@ -26,6 +26,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare string_concat: {e}"), Span::new(0, 0))
         })?;
 
+    let mut grounded_concat_sig = concat_sig.clone();
+    grounded_concat_sig.params.push(AbiParam::new(I8));
+    let grounded_string_concat = module
+        .declare_function("corvid_grounded_string_concat", Linkage::Import, &grounded_concat_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare grounded string concat: {e}"), Span::new(0, 0)))?;
+
     let mut declare = |name: &str, params: usize, returns_value: bool| {
         let mut sig = module.make_signature();
         sig.params.resize(params, AbiParam::new(I64));
@@ -1208,6 +1214,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,
+        grounded_string_concat,
         string_eq: eq_id,
         string_cmp: cmp_id,
         string_to_upper,
