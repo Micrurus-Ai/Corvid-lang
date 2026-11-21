@@ -55,7 +55,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] S03. Support outbound HTTP with structured data, timeouts and cancellation. Verify concurrency, streams, backpressure and resource cleanup when the caller disconnects.
   - [x] A live SSE route held a SQLite write lock while yielding. Closing its client socket released the lock while the service stayed up. The VM stream tests verified bounded backpressure, consumer cancellation and resumable delivery.
   - A live service sent JSON and returned a typed receipt while another request waited. A 300 ms deadline returned HTTP 504, and both timeout and caller disconnect closed the upstream connection. The VM also cancelled a stream waiting for its first chunk.
-- [ ] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.
+- [x] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.
+
+  - Live HTTP tests verified session, role and tenant checks. A handler read an environment-backed secret and access logs recorded route templates and status. On Linux, SIGTERM closed the listener, an accepted request finished successfully, and the process exited.
 
 **4. AI-native application code**
 

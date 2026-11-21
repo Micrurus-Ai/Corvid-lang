@@ -133,6 +133,7 @@ pub(crate) fn cmd_serve(
     listen: &str,
     tools_cdylib: Option<&Path>,
     mode: Option<&str>,
+    access_log: bool,
 ) -> Result<u8> {
     let connector_mode = crate::run_cmd::parse_connector_mode(mode)?;
     let source =
@@ -520,6 +521,9 @@ pub(crate) fn cmd_serve(
     // banner below can still see the IR for the 33Q9 approval-label
     // check.
     let state_for_banner = state.clone();
+    if access_log {
+        app = app.layer(axum::middleware::from_fn(log_request));
+    }
     let app = app.with_state(state);
 
     // HTTP workers evaluate the same nested Corvid calls as the CLI thread.
@@ -571,9 +575,65 @@ pub(crate) fn cmd_serve(
             println!("  POST   /auth/logout                -> revoke the session + clear the cookie");
             println!("  GET    /auth/session               -> the current authenticated actor");
         }
-        axum::serve(listener, app).await.context("serve").map(|_| ())
+        let (shutdown, requested) = tokio::sync::oneshot::channel();
+        let server = std::future::IntoFuture::into_future(
+            axum::serve(listener, app).with_graceful_shutdown(async { let _ = requested.await; })
+        );
+        tokio::pin!(server);
+        tokio::select! {
+            outcome = &mut server => return outcome.context("serve"),
+            signal = shutdown_signal() => signal.context("listen for shutdown signal")?,
+        }
+        let _ = shutdown.send(());
+        eprintln!("corvid serve: draining active requests");
+        match tokio::time::timeout(std::time::Duration::from_secs(30), server).await {
+            Ok(outcome) => outcome.context("drain server"),
+            Err(_) => {
+                eprintln!("corvid serve: 30-second drain deadline expired");
+                Ok(())
+            }
+        }
     })?;
     Ok(0)
+}
+
+async fn log_request(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use std::io::Write;
+    let started = std::time::Instant::now();
+    let method = req.method().clone();
+    let route = req.extensions().get::<axum::extract::MatchedPath>().cloned();
+    let response = next.run(req).await;
+    let record = serde_json::json!({
+        "event": "http_request",
+        "method": method.as_str(),
+        "route": route.as_ref().map(|path| path.as_str()),
+        "status": response.status().as_u16(),
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+    });
+    let _ = writeln!(std::io::stderr().lock(), "{record}");
+    response
+}
+
+/// Handle interactive interruption and the termination signal sent by service managers.
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut interrupt = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = interrupt.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    tokio::signal::ctrl_c().await
 }
 
 /// Resolve the durable serve data directory from `CORVID_SERVE_DATA_DIR`

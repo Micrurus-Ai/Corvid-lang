@@ -183,6 +183,9 @@ pub enum Command {
     /// handler is a direct agent call with literal arguments are
     /// served; other shapes return 501 until later serve slices.
     Serve {
+        /// Write one JSON access record per request to stderr.
+        #[arg(long)]
+        access_log: bool,
         /// Source file. Defaults to `src/main.cor` in a Corvid project.
         file: Option<PathBuf>,
         /// Address to bind, `host:port`. Honors `CORVID_HOST`/`CORVID_PORT`

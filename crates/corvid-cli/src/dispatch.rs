@@ -143,6 +143,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
         Some(Command::Serve {
+            access_log,
             file,
             listen,
             host,
@@ -157,6 +158,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 &composed_listen,
                 with_tools_cdylib.as_deref(),
                 mode.as_deref(),
+                access_log,
             )
         }
         Some(Command::Dev { file, listen, out }) => {

@@ -3273,3 +3273,82 @@ fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
         closed(waiting);
     });
 }
+
+#[cfg(unix)]
+#[test]
+fn sigterm_drains_an_inflight_route_before_exiting() {
+    use std::net::TcpListener;
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
+    let port = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
+        .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
+    let mut guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    // Wait for HTTP 100 Continue so the test signals a request the server has accepted.
+    stream.write_all(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 12\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n").unwrap();
+    let mut interim = [0; 25];
+    stream.read_exact(&mut interim).unwrap();
+    assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+    assert!(Command::new("kill").args(["-TERM", &guard.0.id().to_string()]).status().unwrap().success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        assert!(Instant::now() < deadline, "listener stayed open after SIGTERM");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stream.write_all(br#"{"text":"x"}"#).unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    assert!(reply.contains(r#"{"text":"x"}"#), "{reply}");
+    loop {
+        if let Some(exit) = guard.0.try_wait().unwrap() {
+            assert!(exit.success(), "{exit}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "server failed to exit after draining");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn access_log_reports_templates_and_status_while_a_route_uses_a_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("service");
+    let created = Command::new(corvid_bin()).current_dir(dir.path()).args(["new", "service"]).output().unwrap();
+    assert!(created.status.success(), "{created:?}");
+    let source = r#"import "./std/secrets" use secret_read
+
+agent configured() -> Result<Bool, String>:
+    secret = secret_read("CORVID_TEST_SERVICE_KEY")?
+    return Ok(secret.present and secret.value.length() > 0)
+
+server app:
+    route GET "/configuration/{id}" -> json Result<Bool, String>:
+        return configured()
+"#;
+    std::fs::write(project.join("src/main.cor"), source).unwrap();
+    let log = project.join("access.log");
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).current_dir(&project)
+        .args(["serve", "--access-log", "--listen", &format!("127.0.0.1:{port}")])
+        .env("CORVID_TEST_SERVICE_KEY", "sample-secret-for-service")
+        .stderr(std::fs::File::create(&log).unwrap()).spawn().unwrap();
+    let guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, body) = http_get_with_cookie(port, "/configuration/private-id?key=private-query", "value=private-cookie").unwrap();
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["ok"], true);
+    assert_eq!(http_get(port, "/unknown-private-path").unwrap().0, 404);
+    drop(guard);
+    let log = std::fs::read_to_string(log).unwrap();
+    for secret in ["sample-secret-for-service", "private-id", "private-query", "private-cookie", "unknown-private-path"] {
+        assert!(!log.contains(secret), "{log}");
+    }
+    let events: Vec<serde_json::Value> = log.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+    assert!(events.iter().any(|e| e["event"] == "http_request" && e["method"] == "GET" && e["route"] == "/configuration/:id" && e["status"] == 200 && e["elapsed_ms"].is_u64()), "{log}");
+    assert!(events.iter().any(|e| e["status"] == 404 && e["route"].is_null()), "{log}");
+}

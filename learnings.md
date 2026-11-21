@@ -8032,3 +8032,9 @@ Use the same `DbHandle` for `BEGIN IMMEDIATE`, parameterized writes, and `COMMIT
 A route returning `Stream<T>` delivers values as server-sent events. A bounded stream makes the producer wait when its queue fills. Closing the last consumer cancels the producer and releases resources held inside it, including an open SQLite transaction. Ordinary streams discard consumed chunks. Resumable prompt streams keep the delivered chunks for their resume token.
 
 Use `return try deliver(message) timeout 300` to bound an outbound call from a route in milliseconds. If the deadline expires before the response, the caller receives HTTP 504. A stream start deadline includes the wait for its first value. Set `[http] allow` for the upstream host. The HTTP response envelope gives the actual `attempts` and `elapsed_ms`.
+
+### HTTP service access logs and shutdown
+
+Start a service with `corvid serve src/main.cor --access-log` to write one JSON record to stderr for each response. Each record contains the HTTP method, matched route template, response status and elapsed milliseconds. For `/configuration/{id}`, the log records the route pattern. Unmatched paths have a null route. Cookies, query values, request bodies and secret values are omitted.
+
+Use Ctrl+C locally or SIGTERM on Unix to stop accepting new requests. The server gives active requests up to 30 seconds to finish. A handler can fetch configuration with `secret_read(name)?` and return only the information needed by its caller.
