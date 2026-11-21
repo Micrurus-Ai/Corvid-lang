@@ -61,6 +61,10 @@ pub fn attach_pointer_attestation(ptr: usize, attestation: Arc<GroundedAttestati
     store.pointer_attestations.insert(ptr, attestation);
 }
 
+pub(crate) fn forget_pointer_attestation(ptr: usize) {
+    store().lock().unwrap().pointer_attestations.remove(&ptr);
+}
+
 pub fn set_last_scalar_attestation(attestation: Arc<GroundedAttestation>) {
     LAST_SCALAR_ATTESTATION.with(|slot| {
         *slot.borrow_mut() = Some(attestation);

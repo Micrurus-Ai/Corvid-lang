@@ -178,6 +178,15 @@ pub unsafe extern "C" fn corvid_grounded_attest_bool(
     value
 }
 
+extern "C" {
+    fn corvid_init_grounded_string_cleanup(forget: extern "C" fn(*mut std::ffi::c_void));
+    fn corvid_track_grounded_string(value: CorvidString);
+}
+
+extern "C" fn forget_grounded_pointer(payload: *mut std::ffi::c_void) {
+    grounded_handles::forget_pointer_attestation(payload as usize);
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn corvid_grounded_attest_string(
     value: CorvidString,
@@ -187,6 +196,9 @@ pub unsafe extern "C" fn corvid_grounded_attest_string(
     let source = read_corvid_string(source_name);
     let chain =
         crate::provenance::ProvenanceChain::with_retrieval(&source, crate::tracing::now_ms());
+    static INIT_CLEANUP: std::sync::Once = std::sync::Once::new();
+    INIT_CLEANUP.call_once(|| corvid_init_grounded_string_cleanup(forget_grounded_pointer));
+    corvid_track_grounded_string(value);
     grounded_handles::attach_pointer_attestation(
         value.descriptor_key(),
         grounded_handles::make_attestation(chain, confidence),

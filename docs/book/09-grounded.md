@@ -93,6 +93,8 @@ Adding a `Grounded<String>` and a `String` in either order runs in the interpret
 
 When a host calls `corvid_grounded_sources` on a handle with derived provenance, it receives retrieval names from the operands in left-to-right order. For example, if the left operand came from `catalog` and the right came from both `catalog` and `inventory`, the result lists `catalog` and `inventory` once each.
 
+A native host that needs to query a heap string's sources later must capture its grounded handle while it still owns a live reference to the string. The captured handle survives the string's release. Call `corvid_grounded_release` when you finish querying it.
+
 ## Strict mode: `@grounded_pure`
 
 By default, passing a `Grounded<String>` into a plain `String` slot
