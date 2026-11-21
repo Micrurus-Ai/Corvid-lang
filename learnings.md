@@ -8,6 +8,8 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 ## Saving a typed form in a packaged app
 
+For a model-assisted edit, keep the selected shelf in the request and ask the model for a typed action. The reading list allows one shelf lookup before it requires a proposed title. A successful proposal populates another ordinary save form. In the packaged HTTP trial, malformed replies and cancellation left the stored title intact, and the applied title survived restart. [Try the suggestion](docs/book/19-browser-views.md#try-a-typed-suggestion)
+
 Build the reading list from a fresh scaffold to get the standard library that ships with the CLI. Its `form_for("POST /save", reading, "Save to shelf")` call generates labeled fields from the same record that the route receives as `body`. A parameterized SQLite update saves the edit. Run the migration in the unpacked app directory so the CLI and server open the same database. The packaged HTTP trial recovered the saved title in a new server process. [Build and run the reading list](docs/book/19-browser-views.md#package-and-restart-a-reading-list)
 
 ## Updating lists and records

@@ -2,15 +2,20 @@
 import argparse
 from contextlib import contextmanager, nullcontext
 from html import escape
+from html.parser import HTMLParser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import shutil
 import socket
 import statistics
 import subprocess
+from queue import Queue
 import tarfile
 from tempfile import TemporaryDirectory
 import time
+from threading import Event, Thread
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -49,6 +54,125 @@ def read(url, data=None):
 
 def report(label, samples):
     print(f"{label} (ms): {samples}; median {statistics.median(samples):.2f}")
+
+
+class LocalModel(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.requests.put(request)
+        output = self.server.outputs.get(timeout=5)
+        if output is None:
+            self.server.waiting.set()
+            self.connection.settimeout(8)
+            try:
+                closed = self.connection.recv(1) == b""
+            except ConnectionResetError:
+                closed = True
+            if closed:
+                self.server.closed.set()
+            return
+        payload = json.dumps({"choices": [{"message": {"role": "assistant", "content": output}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+def action(name, value):
+    return json.dumps({"action": {"variant": name, "fields": [value]}})
+
+
+class PreviewForm(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.fields = {}
+        self.action = None
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            assert attrs["method"].upper() == "POST"
+            self.action = attrs["action"]
+        elif tag == "input":
+            self.fields[attrs["name"]] = attrs["value"]
+
+
+def check_suggestions(url, provider, original, channel, http_only):
+    def suggest():
+        return read(url + "/suggest", b"shelf=2")
+
+    title = 'Books & "birds" <2026>'
+    for output in ["{", action("Suggest", 17)]:
+        provider.outputs.put(output)
+        try:
+            suggest()
+        except HTTPError as error:
+            assert error.code == 500
+        else:
+            raise AssertionError("Malformed proposal was accepted")
+        provider.requests.get(timeout=2)
+    provider.outputs.put(action("Lookup", 4))
+    assert "shelf was not found" in suggest()
+    provider.requests.get(timeout=2)
+    provider.outputs.put(action("Suggest", "  "))
+    assert "suggested title was empty" in suggest()
+    provider.requests.get(timeout=2)
+    for _ in range(2):
+        provider.outputs.put(action("Lookup", 1))
+    assert "lookup limit" in suggest()
+    for _ in range(2):
+        provider.requests.get(timeout=2)
+    provider.outputs.put(action("Lookup", 1))
+    provider.outputs.put(action("Suggest", title))
+    preview = suggest()
+    assert 'action="/save"' in preview and escape(title) in preview
+    form = PreviewForm(preview)
+    assert form.action == "/save" and form.fields == {"shelf": "2", "title": title}
+    first = provider.requests.get(timeout=2)
+    second = provider.requests.get(timeout=2)
+    variants = first["response_format"]["json_schema"]["schema"]["properties"]["action"]["oneOf"]
+    assert [v["properties"]["variant"]["const"] for v in variants] == ["Lookup", "Suggest"]
+    assert "The Odyssey" in second["messages"][-1]["content"]
+    assert "Shelf 2: " + escape(original) in read(url)
+
+    provider.outputs.put(None)
+    if http_only:
+        address = url.removeprefix("http://").split(":")
+        with socket.create_connection((address[0], int(address[1])), timeout=3) as client:
+            client.sendall(b"POST /suggest HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\nshelf=2")
+            assert provider.waiting.wait(3)
+        assert provider.closed.wait(5), "Model request survived client disconnect"
+        assert "Shelf 2: " + escape(original) in read(url)
+        result = read(url + form.action, urlencode(form.fields).encode())
+        assert "Shelf 2: " + escape(title) in result
+    else:
+        from playwright.sync_api import expect, sync_playwright
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel=channel)
+            page = browser.new_page()
+            page.goto(url + "/edit?shelf=2")
+            start = page.get_by_role("button", name="Suggest a title")
+            start.click()
+            assert provider.waiting.wait(3)
+            page.get_by_role("button", name="Cancel suggestion").click()
+            expect(page.get_by_role("status")).to_have_text("Suggestion cancelled.")
+            assert provider.closed.wait(5), "Model request survived Cancel"
+            provider.outputs.put("{")
+            start.click()
+            expect(page.get_by_role("status")).to_contain_text("Suggestion failed")
+            provider.outputs.put(action("Suggest", title))
+            start.click()
+            draft = page.locator("#preview").get_by_label("title", exact=True)
+            expect(draft).to_have_value(title)
+            assert "Shelf 2: " + escape(original) in read(url)
+            title += " edited"
+            draft.fill(title)
+            page.get_by_role("button", name="Apply suggestion").click()
+            expect(page.get_by_text("Saved", exact=True)).to_be_visible()
+            browser.close()
+    return title
 
 
 def check_http(url):
@@ -139,6 +263,17 @@ def verify(args):
             title = check_http(url)
             if not args.http_only:
                 title = check_browser(url, args.channel)
+        with ThreadingHTTPServer(("127.0.0.1", 0), LocalModel) as provider:
+            provider.requests, provider.outputs = Queue(), Queue()
+            provider.waiting, provider.closed = Event(), Event()
+            Thread(target=provider.serve_forever, daemon=True).start()
+            local_env = dict(env, CORVID_TEST_MOCK_LLM="0", NO_PROXY="127.0.0.1",
+                             CORVID_MODEL=f"openai-compat:http://127.0.0.1:{provider.server_port}/v1:local-model")
+            try:
+                with serve(cli, installed, local_env) as url:
+                    title = check_suggestions(url, provider, title, args.channel, args.http_only)
+            finally:
+                provider.shutdown()
         with serve(cli, installed, env) as url:
             result = read(url)
             for label in ["Shelf 1: The Odyssey", "Shelf 2: " + escape(title),

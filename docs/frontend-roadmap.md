@@ -18,6 +18,8 @@ Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execut
 
 ### Grow a simple app in the same codebase
 
+**Step 2 trial.** In the packaged reading list, a loopback provider requested shelf 1 and received its stored title on the second turn. The resulting preview contained an escaped, editable title and submitted to the existing save route. The HTTP trial checked the original row before applying and the updated row after restart. It recovered from invalid JSON and a wrong field type, rejected an invalid shelf and a repeated lookup, and observed the provider socket close on client disconnect. The cancellable preview currently uses inline JavaScript. The full packaged trial passed in Edge 158 with the local model responder, including cancellation, preview, apply and restart readback. The A07 new-reader explanation remains open. [First-agent exercise](book/10-agents.md#your-first-agent-in-the-reading-list)
+
 Developers choose their starting architecture. The growth trial below checks one path. A team building a large product can start the independent full-stack trial directly with its intended modules, UI, server, storage and AI workflows. For a headless agent, use the [large-project agent trial](../ROADMAP.md#building-agents-in-corvid). The delivery order describes how the Corvid team verifies the language.
 
 Judge language and grammar proposals by two questions. How much must a newcomer learn to ship the first useful version? Can that developer build a more ambitious version by extending the code they already understand?
