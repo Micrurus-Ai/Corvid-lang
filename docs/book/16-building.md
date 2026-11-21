@@ -38,7 +38,7 @@ Use `corvid serve src/main.cor` for a source application with typed `server`
 routes, forms and streaming handlers. Use the web target to distribute that
 application with its compiled browser handlers. The server build target wraps
 a native entry agent in an HTTP server and uses Cargo to build the wrapper.
-The wrapper forwards application requests to the compiled handler. Use `corvid serve` to dispatch requests to declared routes.
+The wrapper forwards application requests to the compiled entry agent. A file can also declare HTTP routes. The compiler checks those routes before building the entry agent. Cargo can use a shared compilation cache through `CARGO_TARGET_DIR`. Corvid copies the finished wrapper into the application's `target/server/` directory. Use `corvid serve` to dispatch requests to declared routes.
 
 ## Libraries and host calls
 
