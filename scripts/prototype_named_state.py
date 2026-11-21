@@ -38,9 +38,12 @@ def lower(path):
     actions = []
     handlers = []
     while current:
-        (caption,) = take(rf"    button\(({LABEL})\):", "button with a quoted label")
-        take("        on click:", "on click:")
-        (step,) = take(rf"            {state} = {state} \+ (0|[1-9][0-9]*)",
+        caption, inline = take(rf"    button\(({LABEL})\)( on click)?:", "button with a click handler")
+        indent = "        "
+        if not inline:
+            take("        on click:", "on click:")
+            indent += "    "
+        (step,) = take(rf"{indent}{state} = {state} \+ (0|[1-9][0-9]*)",
                        f"{state} = {state} + a nonnegative Int literal")
         if int(step) > 2**63 - 1:
             raise ValueError(f"{path}: increment exceeds Int range")

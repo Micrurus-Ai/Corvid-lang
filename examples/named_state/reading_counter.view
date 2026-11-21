@@ -3,10 +3,8 @@ component ReadingCounter:
 
     text("Pages read this session: {pages_read}")
 
-    button("Read one page"):
-        on click:
-            pages_read = pages_read + 1
+    button("Read one page") on click:
+        pages_read = pages_read + 1
 
-    button("Read two pages"):
-        on click:
-            pages_read = pages_read + 2
+    button("Read two pages") on click:
+        pages_read = pages_read + 2

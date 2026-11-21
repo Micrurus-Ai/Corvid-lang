@@ -17,12 +17,16 @@ VIEW = Path(__file__).resolve().parents[1] / "examples/named_state/reading_count
 def verify(cli, channel):
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
+        nested = root / "nested.view"
+        nested.write_text(VIEW.read_text().replace(
+            ") on click:\n        ", "):\n        on click:\n            "))
+        assert lower(nested) == lower(VIEW)
         invalid = root / "invalid.view"
         invalid.write_text(VIEW.read_text().replace("pages_read + 2", "unknown + 2"))
         try:
             lower(invalid)
         except ValueError as error:
-            assert "invalid.view:12:" in str(error), error
+            assert "invalid.view:10:" in str(error), error
         else:
             raise AssertionError("An undeclared state reference passed")
         project = root / "counter"

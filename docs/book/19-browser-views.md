@@ -275,13 +275,11 @@ component ReadingCounter:
 
     text("Pages read this session: {pages_read}")
 
-    button("Read one page"):
-        on click:
-            pages_read = pages_read + 1
+    button("Read one page") on click:
+        pages_read = pages_read + 1
 
-    button("Read two pages"):
-        on click:
-            pages_read = pages_read + 2
+    button("Read two pages") on click:
+        pages_read = pages_read + 2
 ```
 
 Read the declaration as a name, a type, and a starting value. The braces in the text display the current value. Each assignment runs when its button is activated, including by keyboard. To change how much a button adds, edit the number on its assignment line.
@@ -295,3 +293,7 @@ python scripts/prototype_named_state.py examples/named_state/reading_counter.vie
 ```
 
 The package is written to `counter-app/target/web.tar`. With Python Playwright and Edge installed, run `python scripts/verify_named_state.py target/debug/corvid.exe` to exercise the packaged page. [Editable example](../../examples/named_state/reading_counter.view)
+
+### Navigation and visibility design
+
+For future component examples, use a link when the reader chooses a destination, as in `link("Reading history", to: ReadingHistory)`. Use an ordinary `if` around content that appears conditionally. Reserve `open ReadingHistory` for navigation initiated by code and `on open:` for work that should run once when a component instance first appears. These are design directions for a future navigation example. The counter prototype implements named state, text, buttons and click handlers.
