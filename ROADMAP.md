@@ -124,6 +124,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Generated Python dictionaries for map literals with string, integer and boolean keys. Compared empty, nested and duplicate-key literals through the interpreter and a Python host. The [type guide](docs/book/05-types.md) records the remaining Python map limitations.
   - [x] Fixed a malformed local Git URL in the skill-source test on Unix. On Debian 12 the installed CLI added a skill from a branch and subdirectory under a path with a space, pinned it and checked the consumer project. See the [skill guide](docs/guides/capabilities.md).
   - [x] Reconciled the secret-helper compile tests with the two-argument constructor. Executing tests checked program access, missing keys and trace redaction. The [guide example](docs/reference/stdlib/secrets.md) returned only the presence flag in both CLI runs.
+  - [x] Verified string-list iteration during aliased writes through native and interpreter CLI runs. All six native reference-count baselines passed with the application runtime. The three-string loop allocated and freed both the source list and its snapshot.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 

@@ -230,7 +230,9 @@ agent transform(xs: List<Int>) -> Int:
 A `for` loop visits a snapshot of the list entries taken at loop entry.
 Appending or replacing a slot during the loop affects the original list.
 The remaining iterations still visit the original entries. A snapshot
-of records shares the records themselves.
+of records shares the records themselves. With a list of strings, replacing
+a slot through an alias leaves the current loop variable and the remaining
+iterations holding their original strings.
 
 List indices in a write are evaluated once, from left to right. Corvid
 then evaluates the right-hand side and updates the current list at those
