@@ -1,3 +1,5 @@
+import registry from "../crates/corvid-driver/src/package_registry/catalog.json" with {type: "json"};
+
 const revision = "1022d50b9e11fc4c10c982715929245ad9d9f402";
 const repository = "Micrurus-Ai/Corvid-lang";
 const packages = [{
@@ -5,8 +7,6 @@ const packages = [{
   description: "Build browser views with native buttons, forms and expandable details.",
   keywords: "disclosure accordion expand collapse show hide details text input submit stack row grid",
   source: `https://github.com/${repository}/blob/${revision}/std/ui.cor`,
-  url: `https://raw.githubusercontent.com/${repository}/${revision}/std/ui.cor`,
-  sha256: "63d02561610ab9750fd90fdb6c4a32cc1092e9be8b29cb69957ac134bcc3c703",
   example: 'agent main() -> String:\n    return ui.disclosure("Details", [ui.text("Hello")]).html',
   preview: "<details><summary>Details</summary><p>Hello</p></details>",
 }];
@@ -36,13 +36,7 @@ export function catalog(url) {
   const entries = packages.map(entry).filter(p => terms.every(term =>
     [p.name, p.description, p.keywords].join(" ").toLowerCase().includes(term)));
   if (path === "/packages/catalog.json") return Response.json(entries);
-  if (path === "/packages/index.json") {
-    const index = {};
-    for (const {name, version, url, sha256} of packages) {
-      (index[name] ??= {versions: {}}).versions[version] = {name, version, url, sha256};
-    }
-    return Response.json({packages:index});
-  }
+  if (path === "/packages/index.json") return Response.json(registry);
   if (path === "/packages") {
     const results = entries.map(p => `<article><a href="${p.path}"><strong>${escape(p.name)}</strong></a> ? ${p.version}<p>${escape(p.description)}</p></article>`).join("");
     return page("Packages", `<h1>Find a package</h1><label for="q">Package name or task</label><form action="/packages"><input id="q" name="q" type="search" value="${escape(query)}" placeholder="expand details"><button>Search</button></form>${results || "<p>No matching packages. Try another name or task.</p>"}`);
@@ -51,7 +45,7 @@ export function catalog(url) {
   if (!pkg) return page("Package not found", "<h1>Package not found</h1>", 404);
   const p = entry(pkg);
   return page(p.name, `<h1>${p.name}</h1><p>${p.description}</p><p>Publisher: ${p.name.split("/")[0]} ? Version ${p.version} ? Tested with Corvid ${p.testedWith}</p><a href="${p.source}">View source</a>
-<h2>Try it</h2>${pkg.preview}<h2>Use in a project</h2><p>Add the package to the project lockfile once.</p><pre>corvid add package ${p.name}@${p.version} --registry ${escape(url.origin)}/packages/index.json</pre>
+<h2>Try it</h2>${pkg.preview}<h2>Use in a project</h2><p>Paste this example into <code>src/main.cor</code> and run <code>corvid run src/main.cor</code>. For a local or private catalog, set <code>CORVID_PACKAGE_REGISTRY</code> to <code>${escape(url.origin)}/packages/index.json</code>.</p>
 <pre><code id="snippet">${escape(p.importLine)}</code>\n\n${escape(pkg.example)}</pre>
 <button id="copy">Copy import</button> <span role="status" id="status"></span>
 <script>document.querySelector("#copy").onclick=async()=>{const status=document.querySelector("#status");try{await navigator.clipboard.writeText(document.querySelector("#snippet").textContent);status.textContent="Copied."}catch{status.textContent="Select the import line above to copy it."}}</script>`);

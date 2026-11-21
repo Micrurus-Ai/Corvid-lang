@@ -14,6 +14,8 @@ use super::PackageMutationOutcome;
 
 pub fn remove_package(spec: &str, project_dir: &Path) -> Result<PackageMutationOutcome> {
     validate_package_name(spec)?;
+    let mut guard = super::mutation_lock(project_dir)?;
+    let _writer = guard.write()?;
     let manifest_updated = remove_dependency(project_dir, spec)?.is_some();
     let lockfile = lock_path_for_project(project_dir);
     let mut lock = load_or_empty_at(&lockfile).map_err(|message| anyhow!(message))?;

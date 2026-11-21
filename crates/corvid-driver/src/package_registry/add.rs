@@ -26,13 +26,24 @@ pub fn add_package(
     registry: Option<&str>,
 ) -> Result<AddPackageOutcome> {
     let spec = parse_package_spec(spec)?;
+    let mut guard = super::mutation_lock(project_dir)?;
+    let _writer = guard.write()?;
+    add_resolved(&spec, project_dir, registry, None)
+}
+
+pub(super) fn add_resolved(
+    spec: &PackageSpec,
+    project_dir: &Path,
+    registry: Option<&str>,
+    expected_uri: Option<&str>,
+) -> Result<AddPackageOutcome> {
     let registry_location =
         match resolve_registry_location(registry, std::env::var("CORVID_PACKAGE_REGISTRY").ok()) {
             Ok(location) => location,
             Err(reason) => return Ok(AddPackageOutcome::Rejected { reason }),
         };
     let index = load_registry_index(&registry_location)?;
-    let Some(selected) = select_package(&index, &spec)? else {
+    let Some(selected) = select_package(&index, spec)? else {
         return Ok(AddPackageOutcome::Rejected {
             reason: format!(
                 "registry `{registry_location}` has no package `{}` matching the requested version",
@@ -41,6 +52,13 @@ pub fn add_package(
         });
     };
 
+    let uri = selected
+        .uri
+        .clone()
+        .unwrap_or_else(|| format!("corvid://{}/v{}", selected.name, selected.version));
+    if selected.name != spec.name || expected_uri.is_some_and(|expected| expected != uri) {
+        anyhow::bail!("registry returned an incompatible package identity: {uri}");
+    }
     let url = if selected.url.starts_with("https://") || selected.url.starts_with("http://") {
         selected.url.clone()
     } else if registry_location.starts_with("https://") || registry_location.starts_with("http://")
@@ -107,10 +125,6 @@ pub fn add_package(
     )?;
     let lockfile = lock_path_for_project(project_dir);
     let mut lock = load_or_empty_at(&lockfile).map_err(|message| anyhow!(message))?;
-    let uri = selected
-        .uri
-        .clone()
-        .unwrap_or_else(|| format!("corvid://{}/v{}", selected.name, selected.version));
     remove_packages_by_name(&mut lock, &spec.name);
     upsert_package(
         &mut lock,
@@ -126,13 +140,15 @@ pub fn add_package(
             semantic_summary: Some(summary.clone()),
         },
     );
+    if expected_uri.is_none() || crate::package_manifest::dependency(project_dir, &spec.name)?.is_none() {
+        upsert_dependency(
+            project_dir,
+            &spec.name,
+            &spec.raw_requirement,
+            Some(registry_location.as_str()),
+        )?;
+    }
     write_package_lock(&lockfile, &lock).map_err(|message| anyhow!(message))?;
-    upsert_dependency(
-        project_dir,
-        &spec.name,
-        &spec.raw_requirement,
-        Some(registry_location.as_str()),
-    )?;
 
     Ok(AddPackageOutcome::Added {
         uri,

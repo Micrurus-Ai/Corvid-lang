@@ -9,6 +9,7 @@ description = "Pipeline orchestrator for the Corvid compiler."
 python = ["corvid-runtime/python"]
 
 [dependencies]
+fd-lock = "4.0.4"
 corvid-ast = { workspace = true }
 corvid-syntax = { workspace = true }
 corvid-resolve = { workspace = true }

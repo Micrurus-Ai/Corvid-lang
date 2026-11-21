@@ -876,6 +876,7 @@ dependencies = [
  "corvid-types",
  "corvid-vm",
  "ed25519-dalek",
+ "fd-lock",
  "hex",
  "reqwest",
  "semver",

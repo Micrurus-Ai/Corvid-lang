@@ -147,7 +147,7 @@ fn load_manifest_value(path: &Path) -> Result<Value> {
 fn write_manifest_value(path: &Path, value: &Value) -> Result<()> {
     let source = toml::to_string_pretty(value)
         .with_context(|| format!("failed to serialize `{}`", path.display()))?;
-    std::fs::write(path, source).with_context(|| format!("failed to write `{}`", path.display()))
+    crate::package_cache::store(path, source.as_bytes()).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
 #[cfg(test)]

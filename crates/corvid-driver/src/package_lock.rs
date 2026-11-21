@@ -44,7 +44,7 @@ impl PackageLock {
 pub(crate) fn write_package_lock(path: &Path, lock: &PackageLock) -> Result<(), String> {
     let source = toml::to_string_pretty(lock)
         .map_err(|err| format!("failed to serialize `{}`: {err}", path.display()))?;
-    std::fs::write(path, source)
+    crate::package_cache::store(path, source.as_bytes())
         .map_err(|err| format!("failed to write `{}`: {err}", path.display()))
 }
 

@@ -149,7 +149,12 @@ pub fn run_with_target(
         }
     };
     let config = load_corvid_config_for(path);
-    let ir = match compile_to_ir_with_config_at_path(&source, path, config.as_ref()) {
+    let compile = || compile_to_ir_with_config_at_path(&source, path, config.as_ref());
+    let mut compiled = compile();
+    if compiled.is_err() && crate::package_registry::resolve_missing_for_run(path, &source)? {
+        compiled = compile();
+    }
+    let ir = match compiled {
         Ok(ir) => ir,
         Err(diags) => {
             eprint!("{}", render_all_pretty(&diags, path, &source));
