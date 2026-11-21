@@ -130,7 +130,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Ran the local nightly release command with an ephemeral key and independently verified the Ed25519 signature, manifest payload, copied binary digest and checksum file. Updated the command help and [release policy](docs/release-policy.md#verification) to describe its outputs.
   - [x] Generated CycloneDX 1.6 inventories from all six 3a29a662 archives. Validated each against the official JSON schema and independently recomputed every archive digest and all 240 regular-file digests. The [release guide](docs/release-policy.md) describes the component inventory and verification command.
-  - [ ] Confirm a hosted candidate retains all six SBOMs and verify the downloaded documents against that run's archives.
+  - [x] Downloaded all six SBOMs and archives from [candidate 615b0fdd](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44885911967). Independently checked both checksum manifests and regenerated each SBOM byte-for-byte from its archive. The publication job was skipped.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
