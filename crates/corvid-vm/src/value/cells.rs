@@ -21,6 +21,25 @@ use crate::cycle_collector;
 use super::heap::HeapMeta;
 use super::{ObjectRef, Value};
 
+// Recursive Corvid types pass through a named record or variant. A back
+// edge to the same pair has no additional fields to compare on this path.
+fn compare_named_values(left: usize, right: usize, fields_equal: impl FnOnce() -> bool) -> bool {
+    thread_local! {
+        static ACTIVE: std::cell::RefCell<std::collections::HashSet<(usize, usize)>> = Default::default();
+    }
+    struct Comparing((usize, usize));
+    impl Drop for Comparing {
+        fn drop(&mut self) {
+            ACTIVE.with_borrow_mut(|pairs| pairs.remove(&self.0));
+        }
+    }
+    if !ACTIVE.with_borrow_mut(|pairs| pairs.insert((left, right))) {
+        return true;
+    }
+    let _guard = Comparing((left, right));
+    fields_equal()
+}
+
 #[derive(Debug)]
 pub(crate) struct StructInner {
     pub(super) meta: HeapMeta,
@@ -209,8 +228,13 @@ impl Drop for StructValue {
 
 impl PartialEq for StructValue {
     fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        // Release both locks before recursively comparing nested records.
         self.type_id() == other.type_id()
-            && self.with_fields(|a| other.with_fields(|b| a == b))
+            && compare_named_values(self.ptr_key(), other.ptr_key(), ||
+                self.with_fields(Clone::clone) == other.with_fields(Clone::clone))
     }
 }
 
@@ -411,7 +435,7 @@ impl PartialEq for EnumValue {
         }
         self.0.type_id == other.0.type_id
             && self.0.variant_index == other.0.variant_index
-            && self.fields_cloned() == other.fields_cloned()
+            && compare_named_values(self.ptr_key(), other.ptr_key(), || self.fields_cloned() == other.fields_cloned())
     }
 }
 

@@ -602,3 +602,17 @@ public agent entry(reading: Reading) -> Entry:
 ```
 
 Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard sees both payload fields. A caller in another module can use the returned record and read its fields after the match finishes.
+
+### Comparing values
+
+Use `==` and `!=` to compare records and collections by their current contents. Lists compare elements in order. String-keyed maps compare keys and values regardless of insertion order. Options, results and sum types compare the case first and then its payload. Two independently created records can compare equal, including recursive records that link back to themselves.
+
+```corvid
+first = {"a": 0, "b": 2}
+second = {"b": 2, "a": 0}
+same = first == second
+second["a"] = 1
+changed = first != second
+```
+
+Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.

@@ -31,6 +31,11 @@ typedef struct {
     int64_t owns_values;
 } ordered_map;
 
+/* Borrowed count followed by alternating key/value slots, valid until mutation. */
+const void* corvid_ordered_map_entries(const ordered_map* map) {
+    return map->entries;
+}
+
 static void destroy_entries(void* payload) {
     map_slots* entries = payload;
     for (int64_t i = 0; i < entries->count * 2; ++i) corvid_release(entries->slots[i]);

@@ -33,6 +33,8 @@ const _: () = {
 /// Declare the imported runtime helpers (retain, release, string
 /// concat / eq / cmp) and bundle their FuncIds with the overflow
 /// handler into a `RuntimeFuncs`.
+mod equality;
+pub use equality::{supports_structural_comparison, uses_structural_equality};
 mod runtime;
 use runtime::*;
 mod expr;

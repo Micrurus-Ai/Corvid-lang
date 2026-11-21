@@ -282,7 +282,9 @@ agent main() -> Bool:
     zero = r.entry(r.lookup(0))
     missing = r.entry(r.lookup(-1))
     present = good.value == 7 and good.label == "found"
-    return present and zero.label == "zero" and missing.value == -1 and missing.label == "empty"
+    same = reading == r.lookup(7) and r.lookup(-1) == r.lookup(-2)
+    different = reading != r.lookup(8) and reading != r.lookup(-1)
+    return same and different and present and zero.label == "zero" and missing.value == -1 and missing.label == "empty"
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
@@ -316,4 +318,109 @@ fn nested_relative_imports_resolve_and_report_boundary_errors() {
     reject("import \"./lib/ops\" use answer\nfn answer() -> Int:\n    return 0\n", "duplicate declaration");
     std::fs::write(&ops, "import \"../main\" as root\npublic fn answer(n: Int) -> Int:\n    return n\n").unwrap();
     reject(source, "cyclic Corvid import graph");
+}
+
+#[test]
+fn collections_and_tagged_values_compare_by_contents() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent main() -> Bool:
+    a = [1, 2]
+    b = [1, 2]
+    x: Option<Int> = Some(0)
+    y: Option<Int> = Some(0)
+    ok: Result<Int, String> = Ok(0)
+    other_ok: Result<Int, String> = Ok(0)
+    err: Result<Int, String> = Err("e")
+    counts = {"a": 0, "b": 2}
+    copy = {"b": 2, "a": 0}
+    equal = a == b and x == y and x != None and ok == other_ok and ok != err and counts == copy
+    b[1] = 7
+    copy["a"] = 1
+    return equal and a != b and counts != copy
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}
+
+#[test]
+fn equality_terminates_on_recursive_record_pairs() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+type Node:
+    value: Int
+    link: Option<Node>
+
+agent main() -> Bool:
+    empty: Option<Node> = None
+    left = Node(3, empty)
+    right = Node(3, empty)
+    left.link = Some(left)
+    right.link = Some(right)
+    equal = left == right
+    right.value = 4
+    unequal = left != right
+    left.link = empty
+    right.link = empty
+    return equal and unequal
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}
+
+#[test]
+fn records_compare_collection_fields_and_tagged_payloads() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+type Row:
+    enabled: Bool
+    weight: Float
+    labels: List<String>
+    counts: Map<String, Int>
+    score: Option<Int>
+    status: Result<Int, String>
+
+agent main() -> Bool:
+    labels = ["one", "two"]
+    a = Row(true, -0.0, labels, {"x": 3, "y": 0}, Some(0), Err("bad"))
+    b = Row(true, 0.0, ["one", "two"], {"y": 0, "x": 3}, Some(0), Err("b" + "ad"))
+    same = a == b
+    b.enabled = false
+    flag = a != b
+    b.enabled = true
+    b.score = None
+    absent = a != b
+    b.score = Some(0)
+    b.status = Ok(0)
+    tag = a != b
+    b.status = Err("bad")
+    labels[0] = "other"
+    return same and flag and absent and tag and a != b
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}
+
+#[test]
+fn both_targets_compare_nested_records_and_aliases() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+type Item:
+    value: Int
+
+type Boxed:
+    item: Item
+
+agent main() -> Bool:
+    item = Item(3)
+    first = Boxed(item)
+    alias = first
+    independent = Boxed(Item(3))
+    shared = Boxed(item)
+    equal = first == alias and first == independent and first == shared
+    item.value = 9
+    return equal and first == shared and first != independent
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
 }

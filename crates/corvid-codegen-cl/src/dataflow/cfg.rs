@@ -521,6 +521,11 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             walk_expr(target, false, out);
             walk_expr(index, !crate::native_string_map(&target.ty), out);
         }
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::lowering::uses_structural_equality(*op, &left.ty) => {
+            walk_expr(left, false, out);
+            walk_expr(right, false, out);
+        }
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
             // String concat consumes both operands (releases at
             // codegen line 3336–3340). Other BinOps on primitives

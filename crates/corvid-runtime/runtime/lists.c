@@ -34,7 +34,7 @@ static const struct corvid_typeinfo* list_info(const void* list) {
     return ((const corvid_header*)list - 1)->typeinfo;
 }
 
-static int64_t* list_slots(void* payload) {
+int64_t* corvid_list_slots(void* payload) {
     if (list_info(payload)->flags & CORVID_TI_GROWABLE_LIST)
         return ((corvid_list*)payload)->data;
     return (int64_t*)payload + 1;
@@ -60,7 +60,7 @@ corvid_list* corvid_list_new(int64_t capacity, const struct corvid_typeinfo* inf
 corvid_list* corvid_list_snapshot(corvid_list* source, const struct corvid_typeinfo* info) {
     const int64_t count = source->length;
     corvid_list* result = corvid_list_new(count, info);
-    memcpy(result->data, list_slots(source), (size_t)count * sizeof(int64_t));
+    memcpy(result->data, corvid_list_slots(source), (size_t)count * sizeof(int64_t));
     if (info->elem_typeinfo) {
         for (int64_t i = 0; i < count; i++) corvid_retain((void*)(intptr_t)result->data[i]);
     }
@@ -149,7 +149,7 @@ uint8_t corvid_list_test_int(corvid_list* source, void* closure,
 void corvid_destroy_list(void* payload) {
     long long* p = (long long*)payload;
     long long length = p[0];
-    int64_t* slots = list_slots(payload);
+    int64_t* slots = corvid_list_slots(payload);
     for (long long i = 0; i < length; i++) {
         void* elem = (void*)(intptr_t)slots[i];
         if (elem != NULL) {
@@ -174,7 +174,7 @@ void corvid_trace_list(void* payload,
     }
     long long* p = (long long*)payload;
     long long length = p[0];
-    int64_t* slots = list_slots(payload);
+    int64_t* slots = corvid_list_slots(payload);
     for (long long i = 0; i < length; i++) {
         void* elem = (void*)(intptr_t)slots[i];
         if (elem != NULL) {

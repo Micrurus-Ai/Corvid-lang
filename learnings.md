@@ -7930,3 +7930,17 @@ Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard see
 Import paths are relative to the file containing the import. If `main.cor` imports `"./lib/ops"` and `lib/ops.cor` imports `"../math"`, Corvid loads `math.cor` next to `main.cor`. Mark functions used across this boundary with `public fn`. The caller must supply the declared argument types.
 
 When an imported name conflicts with a local declaration, use a qualified call such as `ops.answer(21)` or give the import a distinct name with `use answer as compute`. Imports must form an acyclic graph. Run `corvid check main.cor` to locate a visibility error, argument mismatch, duplicate declaration, or import cycle before running the program.
+
+### Comparing values
+
+Use `==` and `!=` to compare records and collections by their current contents. Lists compare elements in order. String-keyed maps compare keys and values regardless of insertion order. Options, results and sum types compare the case first and then its payload. Two independently created records can compare equal, including recursive records that link back to themselves.
+
+```corvid
+first = {"a": 0, "b": 2}
+second = {"b": 2, "a": 0}
+same = first == second
+second["a"] = 1
+changed = first != second
+```
+
+Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.

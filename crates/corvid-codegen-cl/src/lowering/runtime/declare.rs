@@ -50,6 +50,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     test_sig.returns.push(AbiParam::new(I8));
     let list_test_int = module.declare_function("corvid_list_test_int", Linkage::Import, &test_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare list any/all: {e}"), Span::new(0, 0)))?;
+    let mut structural_sig = module.make_signature();
+    structural_sig.params.resize(3, AbiParam::new(I64));
+    structural_sig.returns.push(AbiParam::new(I8));
+    let structural_eq = module.declare_function("corvid_structural_eq", Linkage::Import, &structural_sig)
+        .map_err(|e| CodegenError::cranelift(e.to_string(), Span::new(0, 0)))?;
     let mut eq_sig = module.make_signature();
     eq_sig.params.push(AbiParam::new(I64));
     eq_sig.params.push(AbiParam::new(I64));
@@ -1178,6 +1183,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
+        structural_eq, equality_layouts: Default::default(),
         list_map_int, list_filter_int, list_fold_int, list_test_int,
         list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,

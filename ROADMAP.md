@@ -27,6 +27,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Both CLI targets constructed and matched imported sum values with record payloads. A guarded arm returned the original record, and native allocations balanced in both ownership modes.
 - [x] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
+  - [x] Compare records, lists, string maps, options, results and sum variants by their contents on both CLI targets. Include aliases, mutations, independent recursive records and owned payloads.
 
 **2. Developer workflow**
 

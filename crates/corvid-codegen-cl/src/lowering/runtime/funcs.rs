@@ -13,6 +13,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub release: FuncId,
     pub string_concat: FuncId,
     pub string_eq: FuncId,
+    pub structural_eq: FuncId,
+    pub equality_layouts: std::cell::RefCell<HashMap<Type, cranelift_module::DataId>>,
     pub list_map_int: FuncId,
     pub list_filter_int: FuncId,
     pub list_fold_int: FuncId,

@@ -335,6 +335,10 @@ pub(super) fn lower_expr(
             "declaration reference (imports/functions as values)",
             expr.span,
         )),
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
+                builder, *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime, expr.span,
+            ),
         IrExprKind::BinOp { op, left, right } => {
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 return lower_short_circuit(

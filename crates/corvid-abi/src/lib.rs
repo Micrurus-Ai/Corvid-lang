@@ -1,3 +1,4 @@
+pub mod equality;
 pub mod adversarial_refresh;
 mod approval_contract;
 mod attestation;
