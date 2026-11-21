@@ -118,6 +118,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Verified the [quickstart](docs/book/02-quickstart.md) in a fresh project. The starter replayed the same clock value, the file example returned its typed result, and the prompt made one request with the interpolated input to a local provider.
   - [x] Ran the collection examples on both CLI tiers and verified the interpreter-specific Python snippets through IR lowering. All three book snippet checks passed.
 
+  - [x] Extended the function index with result and option constructors, weak references, pagination, stream resumption, interaction calls and explicit source removal from grounded values. Checked all twelve signatures through the CLI.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.

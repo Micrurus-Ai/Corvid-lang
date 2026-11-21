@@ -34,9 +34,20 @@ def render():
         groups.setdefault(group, []).append(call)
     if sum(map(len, groups.values())) != len(re.findall(r"^    \w+,$", enum, re.M)):
         raise ValueError("Every builtin method needs a documented signature")
+    scope = (ROOT / "crates/corvid-resolve/src/scope.rs").read_text(encoding="utf-8")
+    for signature in re.findall(r"^    /// Call: `([^`]+)`\.$", scope, re.M):
+        groups["Built-in functions"].append(signature)
     for group, calls in groups.items():
         lines.extend(["", f"## {group}", ""])
         lines.extend(f"- `{call}`" for call in calls)
+        if group == "Built-in functions":
+            lines.extend(["", "Use `None` for an absent option. Pass a type name as the second "
+                          "argument to `ask`, for example `ask(\"How many?\", Int)`. "
+                          "`Weak::new` accepts strings, records and lists. "
+                          "`resume` takes the name of a streaming prompt."])
+    lines.extend(["", "## Grounded", "",
+                  "- `Grounded<T>.unwrap_discarding_sources() -> T`", "",
+                  "Returns the underlying value and discards its source information."])
 
     lines.extend(["", "## Standard library", "",
                   "Import the module that declares the call. A tool's `uses` clause "

@@ -89,6 +89,19 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 
 - `range(start: Int, end: Int) -> List<Int>`
 - `form_for(target: String, initial: Record, submit_label: String) -> String`
+- `Ok(value: T) -> Result<T, E>`
+- `Err(error: E) -> Result<T, E>`
+- `Some(value: T) -> Option<T>`
+- `Weak::new(value: T) -> Weak<T>`
+- `Weak::upgrade(reference: Weak<T>) -> Option<T>`
+- `merge(streams: List<Stream<T>>) -> Stream<T>`
+- `resume(streaming_prompt, token: ResumeToken<T>) -> Stream<T>`
+- `resume_token(stream: Stream<T>) -> ResumeToken<T>`
+- `ask(question: String, T) -> T`
+- `choose(options: List<T>) -> T`
+- `Page(items: List<T>, next_cursor: Option<String>) -> Page<T>`
+
+Use `None` for an absent option. Pass a type name as the second argument to `ask`, for example `ask("How many?", Int)`. `Weak::new` accepts strings, records and lists. `resume` takes the name of a streaming prompt.
 
 ## Upload
 
@@ -97,6 +110,12 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `Upload<Format>.filename() -> String`
 - `Upload<Format>.content_type() -> String`
 - `Upload<Format>.size() -> Int`
+
+## Grounded
+
+- `Grounded<T>.unwrap_discarding_sources() -> T`
+
+Returns the underlying value and discards its source information.
 
 ## Standard library
 
