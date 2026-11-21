@@ -69,22 +69,8 @@ impl LlmAdapter for OpenAiCompatibleAdapter {
             let (base_url, model_name) = parse_spec(&req.model)?;
             let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-            let mut body = json!({
-                "model": model_name,
-                "messages": [
-                    {"role": "user", "content": req.rendered}
-                ],
-            });
-            if let Some(schema) = &req.output_schema {
-                body["response_format"] = json!({
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": format!("respond_with_{}", req.prompt),
-                        "strict": true,
-                        "schema": schema,
-                    }
-                });
-            }
+            let mut body = super::openai::build_request_body(req);
+            body["model"] = json!(model_name);
 
             let mut request = self
                 .client

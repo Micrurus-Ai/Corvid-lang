@@ -16,7 +16,7 @@ use super::{
 use corvid_ir::IrFile;
 use corvid_runtime::{
     load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, HttpEgressPolicy, IoToolPolicy,
-    OllamaAdapter, OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
+    OllamaAdapter, OpenAiAdapter, OpenAiCompatibleAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
 };
 use corvid_vm::{InterpError, Value};
 use std::fmt;
@@ -1226,5 +1226,7 @@ pub fn apply_env_llm_wiring(
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
         builder = builder.llm(std::sync::Arc::new(OpenAiAdapter::new(key)));
     }
-    builder.llm(std::sync::Arc::new(OllamaAdapter::new()))
+    let compat_key = std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default();
+    builder.llm(std::sync::Arc::new(OpenAiCompatibleAdapter::new(compat_key)))
+        .llm(std::sync::Arc::new(OllamaAdapter::new()))
 }

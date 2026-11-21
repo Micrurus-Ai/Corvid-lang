@@ -61,7 +61,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 **4. AI-native application code**
 
-- [ ] A01. Call a model using Corvid types. Cover provider configuration, a local test provider, text and structured results, malformed output and provider substitution.
+- [x] A01. Call a model using Corvid types. Cover provider configuration, a local test provider, text and structured results, malformed output and provider substitution.
+  - The same Corvid CLI program ran against local Ollama and OpenAI-compatible protocol responders. Both preserved role messages, returned text and a typed record, and rejected malformed JSON and an incorrect field type.
 - [ ] A02. Stream model output to a consumer. Verify incremental chunks, cancellation, timeouts, retries and usage accounting.
 - [ ] A03. Use ordinary typed functions as tools. Exercise argument checking, multi-step agent execution, tool errors, bounded execution and resumable state.
 - [ ] A04. Build retrieval with document ingestion, embeddings, indexing, queries and source references using the standard library.

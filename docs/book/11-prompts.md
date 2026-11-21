@@ -261,3 +261,24 @@ latency, and cost. `corvid replay` reproduces the run from the
 recording without hitting the provider. `corvid eval --swap-model`
 re-runs the prompt against a different model and diffs the result
 against the baseline.
+
+### Switching a typed prompt between local providers
+
+```corvid
+effect model_call:
+    cost: 1.0
+
+type Decision:
+    urgent: Bool
+    reason: String
+
+prompt classify(text: String) -> Decision uses model_call:
+    system: "Classify the message."
+    user: "{text}"
+
+agent main() -> Bool:
+    decision = classify("The parcel is late.")
+    return decision.urgent
+```
+
+For Ollama, set `CORVID_MODEL=ollama:local-model` and `OLLAMA_BASE_URL` to the running server. For an OpenAI-compatible server, set `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model` and, if needed, `OPENAI_COMPAT_API_KEY`. Replace `local-model` with the model name served at that address. Run `corvid run --target interp src/main.cor` in either configuration. Both adapters send the system and user messages and the record schema. Corvid checks the returned fields before making the record available to the caller.

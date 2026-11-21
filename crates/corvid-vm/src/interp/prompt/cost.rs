@@ -411,7 +411,7 @@ impl<'ir> Interpreter<'ir> {
             other => other,
         };
 
-        let output_schema = Some(crate::schema::schema_for(result_ty, &self.types_by_id));
+        let output_schema = crate::schema::prompt_output_schema(result_ty, &self.types_by_id);
         let sampling = self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or(""));
         // Conversation history + context-window policy (46c): build
         // the segmented message form, then drop history OLDEST-FIRST
@@ -567,7 +567,7 @@ impl<'ir> Interpreter<'ir> {
                 model: actual_model.clone(),
                 rendered: retry_rendered.clone(),
                 args: arg_values.iter().map(value_to_json).collect(),
-                output_schema: Some(crate::schema::schema_for(result_ty, &self.types_by_id)),
+                output_schema: crate::schema::prompt_output_schema(result_ty, &self.types_by_id),
                 sampling: self.resolve_sampling(prompt, &actual_model),
                 messages: Vec::new(),
             };

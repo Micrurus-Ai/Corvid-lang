@@ -8038,3 +8038,5 @@ Use `return try deliver(message) timeout 300` to bound an outbound call from a r
 Start a service with `corvid serve src/main.cor --access-log` to write one JSON record to stderr for each response. Each record contains the HTTP method, matched route template, response status and elapsed milliseconds. For `/configuration/{id}`, the log records the route pattern. Unmatched paths have a null route. Cookies, query values, request bodies and secret values are omitted.
 
 Use Ctrl+C locally or SIGTERM on Unix to stop accepting new requests. The server gives active requests up to 30 seconds to finish. A handler can fetch configuration with `secret_read(name)?` and return only the information needed by its caller.
+
+A prompt returning `String` produces text. A prompt returning a named record sends a schema and validates the model response against the declared fields. Keep the Corvid source the same when switching between `CORVID_MODEL=ollama:local-model` and `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model`. Use the model name and address from your running provider. See the typed `classify` example in `docs/book/11-prompts.md`.

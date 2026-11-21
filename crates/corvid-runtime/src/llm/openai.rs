@@ -181,7 +181,7 @@ impl LlmAdapter for OpenAiAdapter {
     }
 }
 
-fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
+pub(super) fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
     // Multi-message form (46b): OpenAI takes roles verbatim.
     let messages: Value = if req.messages.is_empty() {
         json!([{"role": "user", "content": req.rendered}])
