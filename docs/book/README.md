@@ -3,6 +3,8 @@
 Sequential learning material. Read top to bottom on your first
 pass; come back to specific chapters as reference later.
 
+Look up argument and return types in the [function reference](../reference/functions.md).
+
 ## Table of contents
 
 1. [Why Corvid](00-why-corvid.md) — the moat in three minutes.

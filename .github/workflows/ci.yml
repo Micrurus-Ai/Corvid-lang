@@ -272,6 +272,9 @@ jobs:
       - name: Signed build claim-coverage refusal
         run: cargo test -p corvid-driver signed_claim_coverage -- --nocapture
 
+      - name: Check the learner function reference
+        run: python3 scripts/update_function_reference.py --check
+
       - name: Core semantics registry + doc drift gate
         run: |
           cargo test -p corvid-guarantees

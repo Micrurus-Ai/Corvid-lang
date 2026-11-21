@@ -104,6 +104,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] The integrated Linux checkout passed the locked workspace library and integration suite in a clean build directory (194 test groups, 3,225 passed, zero failed, seven ignored). This run covers the integrated source snapshot, including the imported-function purity regression.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
+  - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
