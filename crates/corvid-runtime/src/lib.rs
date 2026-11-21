@@ -110,6 +110,7 @@ pub mod replay_dispatch;
 pub mod review_queue;
 pub mod runtime;
 pub mod secrets;
+pub mod string;
 pub mod store;
 pub mod test_from_traces;
 pub mod tools;

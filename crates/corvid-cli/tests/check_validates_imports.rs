@@ -481,3 +481,67 @@ fn minimum_integer_division_and_remainder() {
         }
     }
 }
+
+#[test]
+fn string_search_split_and_replace_agree_across_targets() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent rewrite(value: Result<String, String>) -> Result<String, String>:
+    return Ok(("🐧" + "🐧").replace("🐧".to_lower(), value?))
+
+agent pieces(value: Option<String>) -> List<String>:
+    return match value:
+        Some(s) -> s.trim().split("🐧")
+        None -> "".split(",")
+
+agent main() -> Bool:
+    words = pieces(Some("　🐧猫🐧🐧　"))
+    empty = pieces(None)
+    fields = words.length() == 4 and words[0] == "" and words[1] == "猫" and words[2] == "" and words[3] == ""
+    text = " 猫🐧 ".trim()
+    checks = text.contains("猫🐧") and text.starts_with("猫") and text.ends_with("🐧") and not text.contains("犬")
+    patterns = text.contains("") and text.starts_with("") and text.ends_with("") and "猫".replace("", "-") == "-猫-"
+    replaced = match rewrite(Ok("犬")):
+        Ok(s) -> s == "犬犬"
+        Err(_) -> false
+    failed = rewrite(Err("missing")).is_err()
+    return fields and empty.length() == 1 and empty[0] == "" and checks and patterns and replaced and failed
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+    std::fs::write(&main, "agent main() -> Int:\n    return \"a\".split(\"\").length()\n").unwrap();
+    for target in ["interp", "native"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .args(["run", "--target", target]).arg(&main).output().unwrap();
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && diagnostic.contains("non-empty separator"), "{target}: {diagnostic}");
+    }
+}
+
+#[test]
+fn unicode_slices_and_case_conversions_preserve_scalars() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent next(trace: List<Int>, value: Int) -> Int:
+    trace.append(value)
+    return value
+
+agent cut(code: String) -> Result<String, String>:
+    return Ok(("A" + "🐧").substring(0, code.parse_int()?))
+
+agent main() -> Bool:
+    text = "A🐧é"
+    trace: List<Int> = []
+    piece = text.substring(next(trace, 1), next(trace, 2))
+    bounds = text.substring(-8, 1) == "A" and text.substring(2, 9223372036854775807) == "é"
+    empty = text.substring(3, 2) == "" and text.substring(99, 100) == "" and "".substring(0, 1) == ""
+    cases = "straße".to_upper() == "STRASSE" and "ΟΣ".to_lower() == "ος" and "İ".to_lower().length() == 2
+    selected = match cut("2"):
+        Ok(s) -> s.substring(1, 2).to_lower() == piece
+        Err(_) -> false
+    failed = cut("invalid").is_err()
+    return selected and failed and bounds and empty and cases and trace[0] == 1 and trace[1] == 2 and piece == "🐧"
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}

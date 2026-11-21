@@ -29,6 +29,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
   - [x] Compare records, lists, string maps, options, results and sum variants by their contents on both CLI targets. Include aliases, mutations, independent recursive records and owned payloads.
   - [x] Both CLI targets checked Float rounding and conversion limits, including halfway cases, loss of integer precision, NaN, infinity, and signed division overflow at the minimum Int.
+  - [x] Both CLI targets agree on Unicode scalar lengths and substring bounds, case mapping, trimming, search, replacement and splitting, including empty patterns and separators. Native allocation counts balanced in both ownership modes.
 
 **2. Developer workflow**
 

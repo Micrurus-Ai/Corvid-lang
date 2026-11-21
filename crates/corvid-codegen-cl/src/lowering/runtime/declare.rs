@@ -82,10 +82,30 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare string_char_len: {e}"), Span::new(0, 0))
         })?;
 
+    let mut substring_sig = char_len_sig.clone();
+    substring_sig.params.extend([AbiParam::new(I64), AbiParam::new(I64)]);
+    let mut declare_string_method = |name: &str, sig: &cranelift_codegen::ir::Signature| {
+        module.declare_function(name, Linkage::Import, sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {name}: {e}"), Span::new(0, 0)))
+    };
+    let string_to_upper = declare_string_method("corvid_string_to_upper", &char_len_sig)?;
+    let string_to_lower = declare_string_method("corvid_string_to_lower", &char_len_sig)?;
+    let string_substring = declare_string_method("corvid_string_substring", &substring_sig)?;
+    let string_trim = declare_string_method("corvid_string_trim", &char_len_sig)?;
+    let mut search_sig = concat_sig.clone();
+    search_sig.returns[0] = AbiParam::new(I8);
+    let string_contains = declare_string_method("corvid_string_contains", &search_sig)?;
+    let string_starts_with = declare_string_method("corvid_string_starts_with", &search_sig)?;
+    let string_ends_with = declare_string_method("corvid_string_ends_with", &search_sig)?;
+    let string_replace = declare_string_method("corvid_string_replace", &substring_sig)?;
+    let string_split = declare_string_method("corvid_string_split", &substring_sig)?;
     let mut char_at_sig = module.make_signature();
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.returns.push(AbiParam::new(I64));
+    let string_parse_int_id = module
+        .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
     let string_char_at_id = module
         .declare_function(STRING_CHAR_AT_SYMBOL, Linkage::Import, &char_at_sig)
         .map_err(|e| {
@@ -1190,6 +1210,16 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_concat: concat_id,
         string_eq: eq_id,
         string_cmp: cmp_id,
+        string_to_upper,
+        string_to_lower,
+        string_substring,
+        string_trim,
+        string_contains,
+        string_starts_with,
+        string_ends_with,
+        string_replace,
+        string_split,
+        string_parse_int: string_parse_int_id,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,

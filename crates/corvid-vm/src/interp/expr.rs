@@ -988,13 +988,9 @@ fn eval_string_method(
             Ok(Value::String(std::sync::Arc::from(s.replace(from.as_ref(), to.as_ref()))))
         }
         StringSubstring => {
-            let len = s.chars().count() as i64;
-            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
-            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
-            if start >= end {
-                return Ok(Value::String(std::sync::Arc::from(String::new())));
-            }
-            let piece: String = s.chars().skip(start).take(end - start).collect();
+            let start = want_int(&args[0], span)?;
+            let end = want_int(&args[1], span)?;
+            let piece = corvid_runtime::string::substring(&s, start, end);
             Ok(Value::String(std::sync::Arc::from(piece)))
         }
         // Conversion kinds are handled by the caller before

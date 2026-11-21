@@ -261,17 +261,93 @@ pub(super) fn lower_expr(
             }
             Ok(output)
         }
-        IrExprKind::BuiltinMethod {
-            kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
-        } => {
-            let (list, borrowed) = lower_container_maybe_borrowed(
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_method(*kind) => {
+            use corvid_types::BuiltinMethodKind::*;
+            let outer_temporaries = runtime.return_temporaries.borrow().len();
+            let (text, borrowed) = lower_container_maybe_borrowed(
                 builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )?;
-            let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
             if !borrowed {
-                emit_release(builder, module, runtime, list);
+                runtime.return_temporaries.borrow_mut().push(text);
             }
-            Ok(length)
+            let mut operands = vec![text];
+            for arg in args {
+                let (value, borrowed) = lower_container_maybe_borrowed(
+                    builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                if !borrowed && is_refcounted_type(&arg.ty) {
+                    runtime.return_temporaries.borrow_mut().push(value);
+                }
+                operands.push(value);
+            }
+            if *kind == StringSplit {
+                let capacity = builder.ins().iconst(I64, 0);
+                operands.push(allocate_slots(builder, module, runtime, &Type::String, capacity, expr.span)?);
+            }
+            let method = match kind {
+                StringLength => runtime.string_char_len,
+                StringSubstring => runtime.string_substring,
+                StringToUpper => runtime.string_to_upper,
+                StringToLower => runtime.string_to_lower,
+                StringTrim => runtime.string_trim,
+                StringContains => runtime.string_contains,
+                StringStartsWith => runtime.string_starts_with,
+                StringEndsWith => runtime.string_ends_with,
+                StringReplace => runtime.string_replace,
+                StringSplit => runtime.string_split,
+                _ => unreachable!(),
+            };
+            let func = module.declare_func_in_func(method, builder.func);
+            let call = builder.ins().call(func, &operands);
+            let result = builder.inst_results(call)[0];
+            for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
+                emit_release(builder, module, runtime, value);
+            }
+            if *kind == StringSplit {
+                builder.ins().trapz(result, clir::TrapCode::unwrap_user(2));
+            }
+            Ok(result)
+        }
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ListLength
+                | corvid_types::BuiltinMethodKind::ResultIsOk
+                | corvid_types::BuiltinMethodKind::ResultIsErr),
+            receiver, ..
+        } => {
+            use corvid_types::BuiltinMethodKind::*;
+            let (container, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let value = match kind {
+                ListLength => builder.ins().load(I64, MemFlags::trusted(), container, 0),
+                _ => {
+                    let tag = builder.ins().load(I64, MemFlags::trusted(), container, RESULT_TAG_OFFSET);
+                    let expected = if *kind == ResultIsOk { RESULT_TAG_OK } else { RESULT_TAG_ERR };
+                    builder.ins().icmp_imm(IntCC::Equal, tag, expected)
+                }
+            };
+            if !borrowed {
+                emit_release(builder, module, runtime, container);
+            }
+            Ok(value)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::StringParseInt, receiver, .. } => {
+            let (text, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let zero = builder.ins().iconst(I64, 0);
+            let result = emit_result_wrapper_value(
+                builder, module, runtime, &expr.ty, zero, &Type::Int, RESULT_TAG_OK, expr.span,
+            )?;
+            let slot = builder.ins().iadd_imm(result, i64::from(RESULT_PAYLOAD_OFFSET));
+            let parse = module.declare_func_in_func(runtime.string_parse_int, builder.func);
+            let call = builder.ins().call(parse, &[text, slot]);
+            let tag = builder.inst_results(call)[0];
+            builder.ins().store(MemFlags::trusted(), tag, result, RESULT_TAG_OFFSET);
+            if !borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(result)
         }
         IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListAppend, receiver, args } => {
             let item = &args[0];

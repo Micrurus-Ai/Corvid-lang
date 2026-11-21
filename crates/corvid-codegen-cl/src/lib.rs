@@ -327,6 +327,12 @@ pub fn native_integer_list_transform(
             if params.len() == arity && **ret == result)
 }
 
+pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, StringLength | StringSubstring | StringToUpper | StringToLower | StringTrim
+        | StringContains | StringStartsWith | StringEndsWith | StringSplit | StringReplace)
+}
+
 pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
     use corvid_types::BuiltinMethodKind::*;
     matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)

@@ -612,3 +612,11 @@ changed = first != second
 ```
 
 Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.
+
+### Working with Unicode strings
+
+`text.length()` counts Unicode scalar values. A letter followed by a combining mark counts as two. `text.substring(start, end)` includes the scalar at `start` and stops before `end`. It clamps indices to the string bounds and returns an empty string for a reversed range.
+
+`to_upper()` and `to_lower()` use Unicode case mapping, which can change the length. `trim()` removes surrounding Unicode whitespace. `contains(needle)`, `starts_with(prefix)` and `ends_with(suffix)` compare exact text and accept an empty pattern. `replace(old, new)` replaces every match. An empty `old` inserts `new` at each scalar boundary.
+
+`"a,,b,".split(",")` returns `["a", "", "b", ""]`. Splitting requires a nonempty separator. `" 42 ".parse_int()` returns `Ok(42)`. Invalid text returns `Err`. Use `is_ok()` or `is_err()` to inspect the result, or use `?` to forward the error.

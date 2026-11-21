@@ -7950,3 +7950,11 @@ Both `same` and `changed` are true. A comparison observes values at the time it 
 Integer arithmetic is checked by default. The smallest `Int` divided by `-1` overflows. Its remainder modulo `-1` is zero. A zero divisor is an error for both operators. In an `@wrapping` agent, integer addition, subtraction, multiplication and negation wrap at 64 bits.
 
 `to_int_truncated()` rounds a float toward zero. `floor()` rounds down, `ceil()` rounds up, and `round()` rounds to the nearest integer with ties away from zero. For example, `(-2.5).round()` returns `-3`. Each conversion requires a finite result from -2^63 inclusive to 2^63 exclusive. `to_float()` converts an integer to a binary64 float, which can lose precision when the integer magnitude exceeds 2^53.
+
+### Working with Unicode strings
+
+`text.length()` counts Unicode scalar values. A letter followed by a combining mark counts as two. `text.substring(start, end)` includes the scalar at `start` and stops before `end`. It clamps indices to the string bounds and returns an empty string for a reversed range.
+
+`to_upper()` and `to_lower()` use Unicode case mapping, which can change the length. `trim()` removes surrounding Unicode whitespace. `contains(needle)`, `starts_with(prefix)` and `ends_with(suffix)` compare exact text and accept an empty pattern. `replace(old, new)` replaces every match. An empty `old` inserts `new` at each scalar boundary.
+
+`"a,,b,".split(",")` returns `["a", "", "b", ""]`. Splitting requires a nonempty separator. `" 42 ".parse_int()` returns `Ok(42)`. Invalid text returns `Err`. Use `is_ok()` or `is_err()` to inspect the result, or use `?` to forward the error.

@@ -19,13 +19,13 @@ fn operand_supported(expr: &IrExpr) -> bool {
             operand_supported(operand)
         }
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. }
-            if left.ty == Type::Int && right.ty == Type::Int => {
+            if (left.ty == Type::Int && right.ty == Type::Int) || (left.ty == Type::String && right.ty == Type::String) => {
                 operand_supported(left) && operand_supported(right)
             }
         IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),
         IrExprKind::BuiltinMethod { receiver, args, kind } => {
             use corvid_types::BuiltinMethodKind::*;
-            (crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength))
+            (crate::native_string_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength))
                 && operand_supported(receiver)
                 && args.iter().all(operand_supported)
         }
