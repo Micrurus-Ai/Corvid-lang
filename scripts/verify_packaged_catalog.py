@@ -62,7 +62,7 @@ def verify(archive, editor):
                 page.keyboard.insert_text("Corvid: Add Package Import")
                 page.get_by_text("Corvid: Add Package Import", exact=True).last.click()
                 page.get_by_text("@corvid/ui", exact=True).last.wait_for()
-                field.fill("expand")
+                field.fill("expand details")
                 page.get_by_text("@corvid/ui", exact=True).last.click()
                 page.keyboard.press("Control+s")
                 for _ in range(40):

@@ -19,9 +19,11 @@ Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execut
 ### Reuse and distribute a developer-authored component
 
 - [x] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
-- [ ] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
+- [x] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
 
 The step 4 storefront imports the same local picker in the notebook and pencil modules. Both typed POST handlers rendered the selected shade from an extracted web package and rejected invalid values. Edge 158 passed keyboard selection on both screens with scripting enabled and disabled. [Example and test commands](book/19-browser-views.md#edit-a-keyed-cart-and-reuse-a-color-picker)
+
+The signed storefront picker ran in a separate theme editor. Its native select worked with the keyboard with scripting enabled and disabled. An incompatible input failed type checking in the consumer. The Windows preview also passed live catalog discovery from an installed VSIX on a fresh runner without a source checkout. [Picker exercise](../scripts/verify_published_picker.py) ? [Installed preview test](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44959552181/job/137021872305)
 
 ### Grow a simple app in the same codebase
 
