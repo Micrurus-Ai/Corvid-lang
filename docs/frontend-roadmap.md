@@ -18,8 +18,10 @@ Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execut
 
 ### Reuse and distribute a developer-authored component
 
-- [ ] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
+- [x] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
 - [ ] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
+
+The step 4 storefront imports the same local picker in the notebook and pencil modules. Both typed POST handlers rendered the selected shade from an extracted web package and rejected invalid values. Edge 158 passed keyboard selection on both screens with scripting enabled and disabled. [Example and test commands](book/19-browser-views.md#edit-a-keyed-cart-and-reuse-a-color-picker)
 
 ### Grow a simple app in the same codebase
 
