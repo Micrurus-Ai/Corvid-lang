@@ -120,14 +120,12 @@ fn run_corvid_check(source: &str) -> Result<(), String> {
         .tempfile()
         .map_err(|e| format!("create temp .cor: {e}"))?;
     fs::write(tmp.path(), source).map_err(|e| format!("write temp .cor: {e}"))?;
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest.parent().and_then(Path::parent).unwrap();
-    let output = Command::new("cargo")
-        .current_dir(workspace)
-        .args(["run", "-q", "-p", "corvid-cli", "--", "check"])
+    let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .current_dir(workspace_root())
+        .arg("check")
         .arg(tmp.path())
         .output()
-        .map_err(|e| format!("spawn cargo run: {e}"))?;
+        .map_err(|e| format!("spawn corvid check: {e}"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -191,10 +189,10 @@ fn every_corvid_block_in_guides_compiles_clean() {
             // Visibly opted-out.
             continue;
         }
-        if block.language_tag != "corvid" {
+        if !matches!(block.language_tag.as_str(), "corvid" | "corvid interp") {
             // Some other tag like ```corvid foo``` we don't know.
             failures.push(format!(
-                "{}:{} unknown language tag `{}` — use `corvid` for \
+                "{}:{} unknown language tag `{}` — use `corvid` or `corvid interp` for \
                  gated blocks or `corvid skip` to visibly opt out",
                 block.file.display(),
                 block.start_line,

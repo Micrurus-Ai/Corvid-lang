@@ -204,6 +204,10 @@ cargo run --manifest-path ../../Cargo.toml --bin corvid -- build src/refund_bot.
 python3 tools.py
 ```
 
+### Document a language feature
+
+Add a complete example to the relevant book chapter or guide. Use a `corvid` code fence for an ordinary program. Use `corvid interp` for a program that requires the interpreter, such as a typed Python import. The guide check runs both kinds through `corvid check`. In guarded book chapters, interpreter examples also go through IR lowering.
+
 ### Run the test suite
 
 ```bash
