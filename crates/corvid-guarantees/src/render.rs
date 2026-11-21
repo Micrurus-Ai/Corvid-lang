@@ -180,7 +180,8 @@ mod tests {
     fn rendered_markdown_matches_committed_doc() {
         let committed = include_str!("../../../docs/reference/core-semantics.md");
         let rendered = render_core_semantics_markdown();
-        // Tolerate trailing-newline differences but nothing else.
+        // Git can check out this generated Markdown using CRLF on Windows.
+        let committed = committed.replace("\r\n", "\n");
         let committed_norm = committed.trim_end_matches('\n');
         let rendered_norm = rendered.trim_end_matches('\n');
         assert_eq!(

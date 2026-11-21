@@ -208,6 +208,8 @@ python3 tools.py
 
 Add a complete example to the relevant book chapter or guide. Use a `corvid` code fence for an ordinary program. Use `corvid interp` for a program that requires the interpreter, such as a typed Python import. The guide check runs both kinds through `corvid check`. In guarded book chapters, interpreter examples also go through IR lowering.
 
+When a registry change affects the core semantics reference, run `corvid contract regen-doc docs/reference/core-semantics.md` from the project root with a CLI built from that revision. Run `cargo test --locked -p corvid-guarantees` to check the generated text against the registry.
+
 ### Run the test suite
 
 ```bash
