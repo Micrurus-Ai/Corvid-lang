@@ -118,7 +118,7 @@ impl<'ir> Interpreter<'ir> {
         let effect_confidence = prompt.effect_confidence;
         let per_call_cost = prompt.effect_cost;
         let feed_span = span;
-        tokio::spawn(async move {
+        stream.spawn_producer(async move {
             let mut chunks = chunk_stream;
             let mut total_tokens: u64 = 0;
             while let Some(item) = futures::StreamExt::next(&mut chunks).await {

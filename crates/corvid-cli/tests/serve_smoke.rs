@@ -3104,4 +3104,31 @@ fn sqlite_service_transactions_survive_restart() {
         .query_row("SELECT count(*) FROM writes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(writes, 5);
+
+    // The producer holds a SQLite write transaction across yields. Observing
+    // the lock before and after a socket disconnect tests the whole HTTP path.
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    socket.write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    let mut response = Vec::new();
+    let mut buf = [0; 1024];
+    while !response.windows(4).any(|window| window == b"tick") {
+        let n = socket.read(&mut buf).unwrap();
+        assert!(n > 0 && response.len() < 16384, "stream failed to yield a tick");
+        response.extend_from_slice(&buf[..n]);
+    }
+    db.busy_timeout(Duration::ZERO).unwrap();
+    let error = db.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+    assert_eq!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+    drop(socket);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match db.execute_batch("BEGIN IMMEDIATE") {
+            Ok(()) => break,
+            Err(err) if err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(err) => panic!("stream failed to release its database handle: {err}"),
+        }
+    }
+    db.execute_batch("ROLLBACK").unwrap();
 }

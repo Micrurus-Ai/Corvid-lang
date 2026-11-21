@@ -53,6 +53,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] S02. Persist typed records across restart. Exercise migrations, transactions, rollback and concurrent requests through the standard library.
   - A SQLite service accepted four simultaneous writes, rolled back an audit insert on a duplicate note, and accepted the next request. After migration failure, retry and restart, all four original records were readable. All 12 migration tests passed.
 - [ ] S03. Support outbound HTTP with structured data, timeouts and cancellation. Verify concurrency, streams, backpressure and resource cleanup when the caller disconnects.
+  - [x] A live SSE route held a SQLite write lock while yielding. Closing its client socket released the lock while the service stayed up. The VM stream tests verified bounded backpressure, consumer cancellation and resumable delivery.
 - [ ] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.
 
 **4. AI-native application code**

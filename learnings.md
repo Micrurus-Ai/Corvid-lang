@@ -8028,3 +8028,5 @@ For a sum type with variant `Approved(approver: String)`, a JSON body such as `{
 Import `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>` from `"./std/db"`. Each row is a JSON object. For example, `json_get_string(rows[0], "text")?` reads a selected text column after you check that the list contains a row.
 
 Use the same `DbHandle` for `BEGIN IMMEDIATE`, parameterized writes, and `COMMIT`. When an agent returns early with `?` and its last handle goes out of scope, SQLite rolls back the pending transaction. Set `[io] root` in the project manifest to give a served app access to its database directory. Run `corvid migrate up --dir schema --database notes.sqlite` from the project to apply schema changes.
+
+A route returning `Stream<T>` delivers values as server-sent events. A bounded stream makes the producer wait when its queue fills. Closing the last consumer cancels the producer and releases resources held inside it, including an open SQLite transaction. Ordinary streams discard consumed chunks. Resumable prompt streams keep the delivered chunks for their resume token.

@@ -41,7 +41,7 @@ impl<'ir> Interpreter<'ir> {
         let agent = agent.clone();
         let env = self.env.clone();
         let local_names = self.local_names.clone();
-        tokio::spawn(async move {
+        stream.spawn_producer(async move {
             let mut sub = Interpreter::new(&ir, &runtime).with_mocks();
             sub.env = env;
             sub.local_names = local_names;
@@ -130,7 +130,7 @@ impl<'ir> Interpreter<'ir> {
     pub(super) fn prepend_stream_chunk(&self, first: StreamChunk, stream: StreamValue) -> Value {
         let backpressure = stream.backpressure().clone();
         let (sender, combined) = StreamValue::channel(backpressure);
-        tokio::spawn(async move {
+        combined.spawn_producer(async move {
             if !sender.send_chunk(Ok(first)).await {
                 return;
             }

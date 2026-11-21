@@ -22,7 +22,20 @@ agent load(name: String) -> Result<Note, String>:
     text_read = json_get_string(rows[0], "text")?
     return Ok(Note(name_read, text_read))
 
+agent locked_events(db: DbHandle) -> Stream<String>:
+    started = db_execute(db, "BEGIN IMMEDIATE", [])
+    if started.is_ok():
+        while true:
+            yield "tick"
+
+agent failed_events(reason: String) -> Stream<String>:
+    yield reason
+
 server notes_api:
+    route GET "/events" -> json Stream<String>:
+        return match db_open("notes.sqlite"):
+            Ok(handle) -> locked_events(handle)
+            Err(reason) -> failed_events(reason)
     route POST "/notes" body Note -> json Result<Note, String>:
         return save(body)
     route GET "/notes/{name}" -> json Result<Note, String>:
