@@ -24,6 +24,12 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "io_read_text",
     "io_write_text",
     "io_list_dir",
+    // std/path
+    "path_join",
+    "path_parent",
+    "path_filename",
+    "path_extension",
+    "path_is_absolute",
     // std/http
     "http_get",
     "http_post_json",

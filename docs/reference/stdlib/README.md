@@ -21,6 +21,8 @@ things, states which in its file header, and appears in this table:
 
 | module | disposition | executing surface / runtime counterpart |
 |---|---|---|
+| `std/env` | **Executing** | `env_get` returns a typed optional process variable through `secret_read`. |
+| `std/path` | **Executing** | `path_join`, `path_parent`, `path_filename`, `path_extension`, and `path_is_absolute` use host filesystem conventions. |
 | `std/io` | **Executing** | `io_read_text` / `io_write_text` / `io_list_dir` over `[io] root` confinement |
 | `std/http` | **Executing** | `http_get` / `http_post_json` over SSRF block + `[http] allow` |
 | `std/db` | **Executing** (SQLite) | `db_open` / `db_query` / `db_execute`; Postgres path is contract-only |

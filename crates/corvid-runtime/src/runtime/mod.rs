@@ -42,6 +42,7 @@ pub use builder::RuntimeBuilder;
 mod builder;
 mod connector_dispatch;
 mod io;
+mod path;
 mod protocol_dispatch;
 mod jobs;
 mod llm_dispatch;

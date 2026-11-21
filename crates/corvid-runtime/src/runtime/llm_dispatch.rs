@@ -66,6 +66,8 @@ impl Runtime {
             self.dispatch_stdlib_cache_tool(name, &args)
         } else if is_stdlib_io_tool(name) {
             self.dispatch_stdlib_io_tool(name, args.clone()).await
+        } else if let Some(result) = super::path::dispatch(&self.io, name, &args) {
+            result
         } else if is_stdlib_http_tool(name) {
             self.dispatch_stdlib_http_tool(name, args.clone()).await
         } else if is_stdlib_time_tool(name) {

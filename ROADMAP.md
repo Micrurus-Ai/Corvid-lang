@@ -40,7 +40,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Native runs reused an unchanged executable and rebuilt after direct and nested module edits. Concurrent first runs both returned the expected result.
 - [x] D02. Make editor navigation work across local Corvid modules. Check diagnostics, hover, completion, go-to-definition and rename on real Corvid source.
   - A three-file project exercised hover, definition, completion, workspace rename and diagnostics through the language server over stdio. Changing an unsaved helper signature updated its caller, and fixing a helper cleared its error.
-- [ ] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
+- [x] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
+  - A freshly scaffolded application read missing, empty and present environment variables, joined Unicode path components, wrote and parsed JSON, listed files and round-tripped a timestamp. The default CLI ran the workflow on the interpreter. Collection behavior on both targets is covered by G01?G08.
 - [ ] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.
 
 **3. Application services**

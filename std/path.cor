@@ -1,0 +1,6 @@
+# Lexical operations on host filesystem paths. Inputs need not exist.
+public tool path_join(base: String, child: String) -> String
+public tool path_parent(path: String) -> Option<String>
+public tool path_filename(path: String) -> Option<String>
+public tool path_extension(path: String) -> Option<String>
+public tool path_is_absolute(path: String) -> Bool

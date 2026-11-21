@@ -7986,3 +7986,17 @@ When you edit an imported module, run `corvid run --target native` again. Corvid
 ### Working with imports in an editor
 
 With `corvid-lsp`, type a module alias followed by a dot to complete its public members. Hover over an imported function to read its signature, or use Go to Definition to open its declaration. Renaming a public function updates its declaration and references in local workspace files, including closed files. An explicit local alias keeps its spelling. Editing a parameter type updates diagnostics in open callers before you save.
+
+### Paths and environment variables
+
+Import the following tools from `"./std/path"`. They use the host operating system's path rules and run in the interpreter. Their inputs can refer to files that do not yet exist.
+
+| Function | Result |
+|---|---|
+| `path_join(base: String, child: String) -> String` | Combines two path components. |
+| `path_parent(path: String) -> Option<String>` | Returns the parent component, when present. |
+| `path_filename(path: String) -> Option<String>` | Returns the final filename, including its extension. |
+| `path_extension(path: String) -> Option<String>` | Returns the extension without the dot, when present. |
+| `path_is_absolute(path: String) -> Bool` | Tests whether the path is absolute on this host. |
+
+Import `env_get(name: String) -> Result<Option<String>, String>` from `"./std/env"`. An absent variable returns `Ok(None)`. An explicitly empty variable returns `Ok(Some(""))`. Blank names and names containing `=` or NUL return `Err`. Use `env_get("APP_MODE")?` to propagate the error and match on the returned option. A default `corvid run` uses the interpreter for these tools.
