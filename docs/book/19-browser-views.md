@@ -317,3 +317,7 @@ The package is written to `counter-app/target/web.tar`. With Python Playwright a
 ### Navigation and visibility design
 
 For future component examples, use a link when the reader chooses a destination, as in `link("Reading history", to: ReadingHistory)`. Use an ordinary `if` around content that appears conditionally. Reserve `open ReadingHistory` for navigation initiated by code and `on open:` for work that should run once when a component instance first appears. These are design directions for a future navigation example. The counter prototype implements named state, text, buttons and click handlers.
+
+### Sharing a component with another app
+
+Use `import "std:ui" as ui` inside a component that will be published. The compiler supplies the standard library even after the component moves to a registry. Export the component and its input type with `public`. The consuming screen can pass a typed value and its own form action. On an interactive page, standard change-submit selects work without a custom browser module. [Publisher exercise](../reference/package-imports.md#publishing-a-component-with-standard-library-dependencies)

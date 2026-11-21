@@ -1,5 +1,5 @@
-import "./std/ui" as ui
-import "./std/ui" use View
+import "std:ui" as ui
+import "std:ui" use View
 
 public type Color:
     shade: Int where between(0, 2)

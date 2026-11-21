@@ -243,3 +243,9 @@ or replay contract, the metadata page changes with the source.
 ## Finding a package
 
 The catalog prototype at `/packages` accepts package names and task descriptions. For example, search for **expand details**, open **@corvid/ui**, and activate **Details** with the keyboard. Each entry shows the version, source, example, and import. In a project with `corvid.toml`, `corvid run` resolves missing exact-version imports using a declared dependency registry, `CORVID_PACKAGE_REGISTRY`, or the catalog index bundled with the CLI, in that order. Commit the resulting manifest and lockfile. Subsequent runs use the locked artifact and can use the verified cache offline. Set `CORVID_PACKAGE_REGISTRY` to your local catalog index during development. Build and check commands require the lock entry in advance. The editor command **Corvid: Add Package Import** reads the same catalog. [Run the catalog locally](../../web/README.md#package-discovery)
+
+## Publishing a component with standard-library dependencies
+
+A component can import an embedded Corvid standard module by name. For example, `import "std:ui" use View` makes the same `View` definition available in both the author's project and a project that consumes the published module. The installed compiler supplies the standard module. A relative import such as `"./std/ui"` refers to files relative to the importing module.
+
+The [storefront picker](../../examples/storefront/src/color_picker.cor) exports `Color`, `ColorPicker`, and `color_name`. The [publisher exercise](../../scripts/verify_published_picker.py) signs that source in a local test registry, imports it into a separate theme editor, and checks type errors at the point of use. Run `python scripts/verify_published_picker.py target/debug/corvid.exe` with Playwright and Edge. Native form submission works by keyboard, and an interactive page submits a changed selection automatically.

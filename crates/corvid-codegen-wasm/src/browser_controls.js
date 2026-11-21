@@ -6,9 +6,6 @@ if (typeof document !== "undefined" && Array.from(
 }
 
 async function bindStateControls() {
-  for (const select of document.querySelectorAll("select[data-corvid-submit-change]")) {
-    select.addEventListener("change", () => select.form.requestSubmit());
-  }
   for (const region of document.querySelectorAll("[data-corvid-list]")) bindKeyedList(region);
   const panels = document.querySelectorAll("fieldset[data-corvid-state]");
   const readers = new Map();

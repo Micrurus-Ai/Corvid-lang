@@ -11,6 +11,10 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
+      verify_catalog:
+        description: Exercise the Windows preview and installed editor on a fresh runner
+        type: boolean
+        default: false
       verify_performance:
         description: Measure the Windows x64 application baseline and exercise native tool linking
         type: boolean
@@ -390,6 +394,33 @@ jobs:
           path: dist/corvid-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
           compression-level: 0
+
+  catalog-preview:
+    if: ${{ !cancelled() && inputs.verify_catalog }}
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: corvid-package-x86_64-pc-windows-msvc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Exercise the archive without a source checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          curl.exe -fsSL --retry 3 "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/scripts/verify_packaged_catalog.py" -o verify_packaged_catalog.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          curl.exe -fsSL --retry 3 "https://update.code.visualstudio.com/latest/win32-x64-archive/stable" -o editor.zip
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Expand-Archive editor.zip editor
+          $editor = (Get-Item editor/Code.exe).FullName
+          if ((Get-AuthenticodeSignature $editor).Status -ne 'Valid') { throw 'Invalid editor signature' }
+          python -m pip install playwright
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python verify_packaged_catalog.py corvid-x86_64-pc-windows-msvc.zip $editor
 
   checksums:
     needs: build
