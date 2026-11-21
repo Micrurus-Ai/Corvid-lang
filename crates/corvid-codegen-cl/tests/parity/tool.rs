@@ -153,7 +153,7 @@ tool grounded_echo(s: String) -> Grounded<String> uses retrieval
 tool string_len(s: String) -> Int
 
 agent add_suffix(value: Grounded<String>) -> Grounded<String>:
-    return value + grounded_echo(" world")
+    return value + " world"
 
 agent main() -> Int:
     g = grounded_echo("hello")

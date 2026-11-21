@@ -97,6 +97,13 @@ When a host calls `corvid_grounded_sources` on a handle with derived provenance,
 
 A native host that needs to query a heap string's sources later must capture its grounded handle while it still owns a live reference to the string. The captured handle survives the string's release. Call `corvid_grounded_release` when you finish querying it.
 
+A helper can take a sourced value and return a new one. The checker follows the parameter through assignments and requires a source on each reachable return path.
+
+```corvid
+agent add_suffix(value: Grounded<String>) -> Grounded<String>:
+    return value + "!"
+```
+
 Command-line arguments arrive as plain data. Give a command-line entry agent a plain parameter and obtain its sourced value through a retrieval tool. A Rust host invoking the interpreter can pass an existing `Value::Grounded` to a `Grounded<T>` parameter. Passing an ordinary string there produces a type mismatch.
 
 ## Strict mode: `@grounded_pure`

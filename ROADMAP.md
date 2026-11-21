@@ -148,7 +148,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Native grounded string addition now runs through the compiler with provenance and reference counting. Four-tier verification completed all 22 corpus programs, including `combined_all.cor`. Only the deliberate `tier_disagree.cor` fixture diverged.
   - [x] The checker recognizes the `Grounded<T>` wrapper structurally. Ordinary record names such as `GroundedNote` can be returned without a retrieval effect.
   - [x] Raw host text cannot fill a grounded agent parameter through interpreter argument binding or native command-line arguments. An interpreter host can supply an existing grounded value. Native grounded returns still print normally.
-  - [ ] The provenance checker rejects a helper returning `value + "!"` when its only source is a typed `Grounded<String>` parameter. Reconcile parameter provenance at checked Corvid calls and external boundaries.
+  - [x] Checked Corvid helpers can derive a grounded return from a grounded parameter. The checker follows binding identity through branches, reassignment and loops, and checks grounded arguments when proving the source of a returned agent call. See the [grounded values guide](docs/book/09-grounded.md).
   - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.

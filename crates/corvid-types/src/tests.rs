@@ -2672,6 +2672,40 @@ connector github:
 }
 
 #[test]
+fn grounded_parameter_can_supply_a_helpers_return_provenance() {
+    let prefix = r#"
+agent decorate(value: Grounded<String>) -> Grounded<String>:
+    result = value + "!"
+    return result
+"#;
+    let valid = check(prefix);
+    assert!(valid.errors.is_empty(), "{:?}", valid.errors);
+
+    let invalid = check(&format!("{prefix}\ntool unverified() -> Grounded<String>\n\nagent main() -> Grounded<String>:\n    return decorate(unverified())\n"));
+    assert!(invalid.errors.iter().any(|error| matches!(
+        error.kind, TypeErrorKind::UngroundedReturn { .. }
+    )), "{:?}", invalid.errors);
+}
+
+#[test]
+fn grounded_returns_require_a_source_on_every_reachable_path() {
+    let prefix = "tool unverified() -> Grounded<String>\n\nagent check_path(value: Grounded<String>, again: Bool) -> Grounded<String>:\n";
+    for body in [
+        "    if again:\n        return value\n    return unverified()",
+        "    if again:\n        value = unverified()\n    return value",
+        "    while again:\n        value = unverified()\n        break\n    return value",
+        "    while again:\n        if again:\n            return value\n        value = unverified()\n        continue\n    return value",
+    ] {
+        let checked = check(&format!("{prefix}{body}\n"));
+        assert!(checked.errors.iter().any(|error| matches!(
+            error.kind, TypeErrorKind::UngroundedReturn { .. }
+        )), "{body}: {:?}", checked.errors);
+    }
+    let checked = check(&format!("{prefix}    if again:\n        return value\n    return value + \"!\"\n"));
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
+}
+
+#[test]
 fn grounded_prefix_is_valid_in_an_ordinary_record_name() {
     let checked = check(r#"
 type GroundedNote:

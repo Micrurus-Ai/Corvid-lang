@@ -1070,8 +1070,7 @@ impl TypeErrorKind {
                 "use `with confidence P over N runs` with 0.0 <= P <= 1.0 and N > 0".into(),
             ),
             Self::UngroundedReturn { .. } => Some(
-                "call a tool declared `uses retrieval` (or any effect with `data: grounded`) \
-                 and pass its result to the return value, directly or through a prompt"
+                "derive each return value from a grounded parameter or a tool or prompt with a grounded effect such as `uses retrieval`"
                     .into(),
             ),
             Self::PromptCitationUnknownParam { .. } => Some(
