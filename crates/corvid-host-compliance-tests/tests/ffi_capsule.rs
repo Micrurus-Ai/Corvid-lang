@@ -143,7 +143,7 @@ fn find_python() -> Option<Vec<String>> {
 #[test]
 fn c_recording_replays_from_python_and_bad_json_is_not_silent() {
     let root = workspace_root();
-    let demo_dir = root.join("examples").join("cdylib_catalog_demo");
+    let demo_dir = root.join("examples").join("shared_library_catalog");
     let source = demo_dir.join("src").join("classify.cor");
     let tools_lib = test_tools_lib_path();
 

@@ -1,6 +1,6 @@
 """Corvid replay-determinism harness.
 
-Invokes `cargo run -p refund_bot_demo` N times against the
+Invokes `cargo run -p offline_refund_bot` N times against the
 mocked-tools / mocked-LLM demo runner, normalizes the resulting
 JSONL traces, and asks whether all N runs are byte-identical
 after normalization.
@@ -104,9 +104,9 @@ def collect_existing_traces(trace_dir: Path) -> set[Path]:
 
 
 def run_once(workspace_root: Path, trace_dir: Path, attempt: int) -> Path:
-    """Invoke `cargo run -p refund_bot_demo` once. Return the new trace path."""
+    """Invoke `cargo run -p offline_refund_bot` once. Return the new trace path."""
     before = collect_existing_traces(trace_dir)
-    cmd = ["cargo", "run", "-q", "-p", "refund_bot_demo"]
+    cmd = ["cargo", "run", "-q", "-p", "offline_refund_bot"]
     proc = subprocess.run(
         cmd,
         cwd=workspace_root,
@@ -116,7 +116,7 @@ def run_once(workspace_root: Path, trace_dir: Path, attempt: int) -> Path:
     )
     if proc.returncode != 0:
         raise SystemExit(
-            f"refund_bot_demo run #{attempt} failed (exit {proc.returncode})\n"
+            f"offline_refund_bot run #{attempt} failed (exit {proc.returncode})\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
     after = collect_existing_traces(trace_dir)
@@ -127,12 +127,12 @@ def run_once(workspace_root: Path, trace_dir: Path, attempt: int) -> Path:
         # first. Sleep briefly and surface a clearer error if it
         # happens twice in a row.
         raise SystemExit(
-            f"refund_bot_demo run #{attempt} did not produce a new "
+            f"offline_refund_bot run #{attempt} did not produce a new "
             f"trace file under {trace_dir} — possible run_id collision"
         )
     if len(new_files) > 1:
         raise SystemExit(
-            f"refund_bot_demo run #{attempt} produced multiple new trace "
+            f"offline_refund_bot run #{attempt} produced multiple new trace "
             f"files: {sorted(new_files)}"
         )
     return next(iter(new_files))
@@ -173,15 +173,15 @@ def main() -> int:
     trace_dir = (
         workspace_root
         / "examples"
-        / "refund_bot_demo"
+        / "offline_refund_bot"
         / "target"
         / "trace"
     )
 
     # Pre-build so we don't conflate compile time with run time.
-    print(f"[corvid] cargo build -p refund_bot_demo (warmup)", file=sys.stderr)
+    print(f"[corvid] cargo build -p offline_refund_bot (warmup)", file=sys.stderr)
     proc = subprocess.run(
-        ["cargo", "build", "-q", "-p", "refund_bot_demo"],
+        ["cargo", "build", "-q", "-p", "offline_refund_bot"],
         cwd=workspace_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

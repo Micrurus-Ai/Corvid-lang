@@ -38,16 +38,16 @@ benches/corvid/tools/Cargo.lock
 crates/corvid-codegen-cl/*.obj
 crates/corvid-cli/*.obj
 
-# cdylib_catalog_demo C-host build outputs + runtime trace dumps
-examples/cdylib_catalog_demo/host_c/*.exe
-examples/cdylib_catalog_demo/trace_output/
+# shared_library_catalog C-host build outputs + runtime trace dumps
+examples/shared_library_catalog/host_c/*.exe
+examples/shared_library_catalog/trace_output/
 
 # Phase 23-F browser CI test dependencies (Playwright + browsers
 # install per-runner; not committed).
-examples/wasm_browser_demo/test/node_modules/
-examples/wasm_browser_demo/test/test-results/
-examples/wasm_browser_demo/test/playwright-report/
-examples/wasm_browser_demo/test/package-lock.json
+examples/browser_refund_approval/test/node_modules/
+examples/browser_refund_approval/test/test-results/
+examples/browser_refund_approval/test/playwright-report/
+examples/browser_refund_approval/test/package-lock.json
 
 # Phase 33-N moat-benchmark deps (npm + pip install per-runner /
 # per-developer; not committed).

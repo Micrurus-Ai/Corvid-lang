@@ -11,7 +11,7 @@ A bundle makes one cdylib release auditable without network access:
 - signed receipt material for offline verification
 - lineage links to predecessor bundles
 
-The reference example lives in [examples/phase22_demo](../examples/phase22_demo/verify.sh). Its predecessor bundle lives in [examples/phase22_demo_base](../examples/phase22_demo_base/).
+The reference example lives in [examples/sentiment_classifier_bundle](../../examples/sentiment_classifier_bundle/verify.sh). Its predecessor bundle lives in [examples/sentiment_classifier_bundle_base](../../examples/sentiment_classifier_bundle_base/). The signed artifacts retain the source paths recorded when they were built.
 
 ## Goals
 
@@ -43,7 +43,7 @@ A bundle is a directory containing a root manifest named `corvid-bundle.toml`.
 Typical layout:
 
 ```text
-phase22_demo/
+sentiment_classifier_bundle/
 ├── artifacts/
 │   ├── libcorvid_test_tools.a
 │   └── release/
@@ -66,7 +66,7 @@ phase22_demo/
 Notes:
 
 - The committed demo artifacts are Linux-only: `x86_64-unknown-linux-gnu`.
-- The committed `safe.jsonl` traces in the phase-22 demo were recorded on the Windows development box and are replayed against the Linux artifact for rebuild verification.
+- The committed `safe.jsonl` traces in the sentiment classifier bundle were recorded on the Windows development box and are replayed against the Linux artifact for rebuild verification.
 - The bundle does not depend on `target/` contents being committed. Public artifacts live under `artifacts/`.
 
 ## Manifest Schema
@@ -77,7 +77,7 @@ Example:
 
 ```toml
 bundle_schema_version = 1
-name = "phase22-demo"
+name = "sentiment-classifier-bundle"
 target_triple = "x86_64-unknown-linux-gnu"
 primary_source = "src/classify.cor"
 tools_staticlib_path = "artifacts/libcorvid_test_tools.a"
@@ -90,11 +90,11 @@ receipt_envelope_path = "keys/receipt.envelope.json"
 receipt_verify_key_path = "keys/verify.hex"
 
 [lineage]
-bundle_id = "phase22-demo"
+bundle_id = "sentiment-classifier-bundle"
 
 [[lineage.predecessors]]
 name = "base"
-path = "../phase22_demo_base"
+path = "../sentiment_classifier_bundle_base"
 relation = "parent"
 
 [[traces]]
@@ -172,11 +172,11 @@ Bundles can declare predecessor edges:
 
 ```toml
 [lineage]
-bundle_id = "phase22-demo"
+bundle_id = "sentiment-classifier-bundle"
 
 [[lineage.predecessors]]
 name = "base"
-path = "../phase22_demo_base"
+path = "../sentiment_classifier_bundle_base"
 relation = "parent"
 ```
 
@@ -197,7 +197,7 @@ relation = "parent"
 Current demo usage:
 
 ```bash
-corvid bundle query examples/phase22_demo \
+corvid bundle query examples/sentiment_classifier_bundle \
   --delta agent.replayable_gained:classify \
   --json
 ```
@@ -224,13 +224,13 @@ The committed demo bundle is Linux-only, so `--rebuild` is expected to run on Li
 
 The shipped examples are:
 
-- [examples/phase22_demo](../examples/phase22_demo/verify.sh): happy-path public spec bundle
-- [examples/phase22_demo_base](../examples/phase22_demo_base/): predecessor bundle for diff/query/lineage
-- [examples/failing_hash](../examples/failing_hash/verify.sh): committed hash mismatch
-- [examples/failing_signature](../examples/failing_signature/verify.sh): receipt signature failure
-- [examples/failing_rebuild](../examples/failing_rebuild/verify.sh): rebuild mismatch
-- [examples/failing_lineage](../examples/failing_lineage/verify.sh): predecessor signature failure
-- [examples/failing_adversarial](../examples/failing_adversarial/verify.sh): four guard cases, including deterministic offline audit behavior under a hostile question
+- [examples/sentiment_classifier_bundle](../../examples/sentiment_classifier_bundle/verify.sh): happy-path public spec bundle
+- [examples/sentiment_classifier_bundle_base](../../examples/sentiment_classifier_bundle_base/): predecessor bundle for diff/query/lineage
+- [examples/failing_hash](../../examples/failing_hash/verify.sh): committed hash mismatch
+- [examples/failing_signature](../../examples/failing_signature/verify.sh): receipt signature failure
+- [examples/failing_rebuild](../../examples/failing_rebuild/verify.sh): rebuild mismatch
+- [examples/failing_lineage](../../examples/failing_lineage/verify.sh): predecessor signature failure
+- [examples/failing_adversarial](../../examples/failing_adversarial/verify.sh): four guard cases, including deterministic offline audit behavior under a hostile question
 
 The GitHub Actions launch gate runs the happy bundle script, every failing-case script, and the focused `bundle_*` test binaries on Linux.
 

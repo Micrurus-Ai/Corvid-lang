@@ -2,7 +2,7 @@
 //! refund_bot agent against a fixed list of varied tickets, each
 //! paired with a varied mocked LLM decision and approver outcome.
 //!
-//! The agent under test is `examples/refund_bot_demo/src/refund_bot.cor`.
+//! The agent under test is `examples/offline_refund_bot/src/refund_bot.cor`.
 //! Each invocation produces one JSONL trace under
 //! `<--out>/run-<NN>.jsonl`. The output filenames are sequence-numbered
 //! (not timestamp-keyed) so the committed corpus is reproducible: a
@@ -27,7 +27,7 @@ use corvid_driver::{
 };
 use serde_json::{json, Value as JsonValue};
 
-const SOURCE_REL: &str = "examples/refund_bot_demo/src/refund_bot.cor";
+const SOURCE_REL: &str = "examples/offline_refund_bot/src/refund_bot.cor";
 
 #[derive(Parser, Debug)]
 #[command(about = "Generate the time_to_audit corpus.", long_about = None)]

@@ -149,8 +149,8 @@ jobs:
       - name: cargo test -p corvid-cli --test bundle_lineage
         run: cargo test -p corvid-cli --test bundle_lineage
 
-      - name: examples/phase22_demo/verify.sh
-        run: bash examples/phase22_demo/verify.sh
+      - name: examples/sentiment_classifier_bundle/verify.sh
+        run: bash examples/sentiment_classifier_bundle/verify.sh
 
       - name: examples/failing_hash/verify.sh
         run: bash examples/failing_hash/verify.sh
@@ -212,74 +212,74 @@ jobs:
       - name: refund_bot replay
         run: cargo run -q -p corvid-cli -- replay examples/refund_bot/traces/refund_bot_approval_gate.jsonl
 
-      - name: local_model_demo build
-        working-directory: examples/local_model_demo
+      - name: local_model_chat build
+        working-directory: examples/local_model_chat
         run: cargo run -q -p corvid-cli -- build
 
-      - name: local_model_demo run
-        working-directory: examples/local_model_demo
+      - name: local_model_chat run
+        working-directory: examples/local_model_chat
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider-neutral local inference with deterministic replay.
           CORVID_MODEL: ollama:llama3.2
         run: cargo run -q -p corvid-cli -- run
 
-      - name: local_model_demo tests
+      - name: local_model_chat tests
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider-neutral local inference with deterministic replay.
           CORVID_MODEL: ollama:llama3.2
         run: |
-          cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/unit.cor
-          cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/integration.cor
-          cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/replay_invariant.cor
+          cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/unit.cor
+          cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/integration.cor
+          cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/replay_invariant.cor
 
-      - name: local_model_demo eval
+      - name: local_model_chat eval
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider-neutral local inference with deterministic replay.
           CORVID_MODEL: ollama:llama3.2
-        run: cargo run -q -p corvid-cli -- eval examples/local_model_demo/evals/local_model_demo.cor
+        run: cargo run -q -p corvid-cli -- eval examples/local_model_chat/evals/local_model_chat.cor
 
-      - name: local_model_demo replay
+      - name: local_model_chat replay
         run: |
-          cargo run -q -p corvid-cli -- replay examples/local_model_demo/traces/local_model_demo_mock_chat.jsonl
-          cargo run -q -p corvid-cli -- replay examples/local_model_demo/seed/traces/local_model_demo_mock_chat.jsonl
+          cargo run -q -p corvid-cli -- replay examples/local_model_chat/traces/local_model_chat_mock_chat.jsonl
+          cargo run -q -p corvid-cli -- replay examples/local_model_chat/seed/traces/local_model_chat_mock_chat.jsonl
 
-      - name: provider_routing_demo build
-        working-directory: examples/provider_routing_demo
+      - name: model_provider_routing build
+        working-directory: examples/model_provider_routing
         run: cargo run -q -p corvid-cli -- build
 
-      - name: provider_routing_demo run
-        working-directory: examples/provider_routing_demo
+      - name: model_provider_routing run
+        working-directory: examples/model_provider_routing
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider routing selected the expected mocked response.
         run: cargo run -q -p corvid-cli -- run
 
-      - name: provider_routing_demo tests
+      - name: model_provider_routing tests
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider routing selected the expected mocked response.
         run: |
-          cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/unit.cor
-          cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/integration.cor
-          cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/replay_invariant.cor
+          cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/unit.cor
+          cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/integration.cor
+          cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/replay_invariant.cor
 
-      - name: provider_routing_demo eval
+      - name: model_provider_routing eval
         env:
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: provider routing selected the expected mocked response.
-        run: cargo run -q -p corvid-cli -- eval examples/provider_routing_demo/evals/provider_routing_demo.cor
+        run: cargo run -q -p corvid-cli -- eval examples/model_provider_routing/evals/model_provider_routing.cor
 
-      - name: provider_routing_demo replay
+      - name: model_provider_routing replay
         run: |
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_openai.jsonl
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_ollama.jsonl
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_anthropic.jsonl
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_openai.jsonl
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_ollama.jsonl
-          cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_anthropic.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_openai.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_ollama.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_anthropic.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_openai.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_ollama.jsonl
+          cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_anthropic.jsonl
 
       - name: rag_qa_bot build
         working-directory: examples/rag_qa_bot

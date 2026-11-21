@@ -263,7 +263,7 @@ export function createIndexedDbStoreHost(
 ## Browser Demo
 
 The committed browser smoke demo lives in
-`examples/wasm_browser_demo`. It compiles `src/refund_gate.cor` to WASM,
+`examples/browser_refund_approval`. It compiles `src/refund_gate.cor` to WASM,
 loads the generated ES module from `target/wasm/refund_gate.js`, supplies typed
 prompt/tool/approval host capabilities, displays the approval decision, and
 renders the generated trace events. The page uses the generated
@@ -272,8 +272,8 @@ reloads through IndexedDB; the Phase 23 browser CI test covers that persistence
 path.
 
 ```powershell
-examples/wasm_browser_demo/verify.ps1
-python -m http.server 8000 -d examples/wasm_browser_demo
+examples/browser_refund_approval/verify.ps1
+python -m http.server 8000 -d examples/browser_refund_approval
 ```
 
 Open `http://localhost:8000/web/` after the build finishes.

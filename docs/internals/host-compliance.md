@@ -64,8 +64,8 @@ Replay should warn on version mismatch and fail only on actual schema or ABI inc
 
 `crates/corvid-host-compliance-tests` provides the executable reference:
 
-- record in C via `examples/cdylib_catalog_demo/host_c/capsule_host.c`
-- replay in Python via `examples/cdylib_catalog_demo/host_py/replay_host.py`
+- record in C via `examples/shared_library_catalog/host_c/capsule_host.c`
+- replay in Python via `examples/shared_library_catalog/host_py/replay_host.py`
 
 Passing that suite demonstrates cross-language replay compatibility for the current Corvid C ABI.*** End Patch
 

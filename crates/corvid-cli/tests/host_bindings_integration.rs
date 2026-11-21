@@ -302,7 +302,7 @@ if __name__ == "__main__":
 fn generated_host_bindings_compile_call_demo_and_fail_on_descriptor_drift() {
     let _guard = demo_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = workspace_root();
-    let demo_dir = root.join("examples").join("cdylib_catalog_demo");
+    let demo_dir = root.join("examples").join("shared_library_catalog");
     let demo_source = demo_dir.join("src").join("classify.cor");
     let tools_lib = test_tools_lib_path();
 

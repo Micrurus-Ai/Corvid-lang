@@ -135,7 +135,7 @@ fn build_catalog_library() -> BuiltLibrary {
         &ir,
         &registry,
         &EmitOptions {
-            source_path: "examples/cdylib_catalog_demo/src/classify.cor",
+            source_path: "examples/shared_library_catalog/src/classify.cor",
             source_text: CATALOG_SRC,
             compiler_version: "0.6.0-phase22",
             generated_at: "1970-01-01T00:00:00Z",
@@ -189,7 +189,7 @@ unsafe extern "C" fn reject_approver(
 /// the runtime now routes every tool call through `corvid_register_tool`
 /// and the host MUST register a callback before invoking any agent
 /// that reaches the tool. Same architectural shape as the C-host echo
-/// stub in `examples/cdylib_catalog_demo/host_c/host.c` and the
+/// stub in `examples/shared_library_catalog/host_c/host.c` and the
 /// `echo_first_string_arg` helper in
 /// `crates/corvid-codegen-cl/tests/cdylib_emission.rs`.
 unsafe extern "C" fn host_echo_string_arg(

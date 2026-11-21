@@ -106,13 +106,13 @@ agent main() -> Int:
 }
 
 #[test]
-fn committed_wasm_browser_demo_builds_and_uses_generated_loader() {
+fn committed_browser_refund_approval_builds_and_uses_generated_loader() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())
         .expect("workspace root")
         .to_path_buf();
-    let demo = root.join("examples").join("wasm_browser_demo");
+    let demo = root.join("examples").join("browser_refund_approval");
     let source = demo.join("src").join("refund_gate.cor");
     let output = run_corvid(
         &["build", source.to_str().unwrap(), "--target=wasm"],

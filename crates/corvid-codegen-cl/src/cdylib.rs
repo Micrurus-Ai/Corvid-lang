@@ -271,7 +271,7 @@ fn link_shared_library(
         // The architecturally correct integration is for the
         // host to register tools explicitly via the
         // `corvid_register_tool` C ABI after dlopen — see the
-        // `examples/cdylib_catalog_demo/host_c/host.c` change
+        // `examples/shared_library_catalog/host_c/host.c` change
         // that lands alongside this commit for the pattern.
         // The `#[tool]` macro still emits `__corvid_tool_<name>`
         // wrappers that the host dlsym's, so the host's

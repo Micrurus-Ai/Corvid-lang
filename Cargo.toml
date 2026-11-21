@@ -31,7 +31,7 @@ members = [
     "crates/corvid-host-compliance-tests",
     "crates/corvid-shadow-daemon",
     "crates/corvid-lsp",
-    "examples/refund_bot_demo",
+    "examples/offline_refund_bot",
     "examples/openai_hello",
     "examples/anthropic_hello",
     "benches/moat/time_to_audit/corpus_gen",

@@ -72,7 +72,7 @@ into a named follow-up slice.
 | Claim | Source | Status |
 |---|---|---|
 | SQLite (native) backing | [store.rs:372-558](../crates/corvid-runtime/src/store.rs) | Shipped. |
-| IndexedDB (wasm) backing | `crates/corvid-codegen-wasm/src/companions.rs` emits `createIndexedDbStoreHost`, a typed browser host helper for `store.get` / `store.put` / `store.delete` backed by IndexedDB. | `examples/wasm_browser_demo/test/browser.spec.js` reloads the demo and verifies persisted run count + last result survive through IndexedDB. |
+| IndexedDB (wasm) backing | `crates/corvid-codegen-wasm/src/companions.rs` emits `createIndexedDbStoreHost`, a typed browser host helper for `store.get` / `store.put` / `store.delete` backed by IndexedDB. | `examples/browser_refund_approval/test/browser.spec.js` reloads the demo and verifies persisted run count + last result survive through IndexedDB. |
 
 ## Where the ROADMAP claims have a real gap
 

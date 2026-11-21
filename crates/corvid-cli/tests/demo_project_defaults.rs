@@ -230,11 +230,11 @@ fn refund_bot_adversarial_cases_carry_registered_guarantee_ids() {
 }
 
 #[test]
-fn local_model_demo_adversarial_cases_carry_registered_guarantee_ids() {
+fn local_model_chat_adversarial_cases_carry_registered_guarantee_ids() {
     let repo = repo_root();
     let adversarial_dir = repo
         .join("examples")
-        .join("local_model_demo")
+        .join("local_model_chat")
         .join("tests")
         .join("adversarial");
     for case in [
@@ -249,11 +249,11 @@ fn local_model_demo_adversarial_cases_carry_registered_guarantee_ids() {
 }
 
 #[test]
-fn provider_routing_demo_adversarial_cases_carry_registered_guarantee_ids() {
+fn model_provider_routing_adversarial_cases_carry_registered_guarantee_ids() {
     let repo = repo_root();
     let adversarial_dir = repo
         .join("examples")
-        .join("provider_routing_demo")
+        .join("model_provider_routing")
         .join("tests")
         .join("adversarial");
     for case in [
@@ -288,8 +288,8 @@ fn rag_qa_bot_adversarial_cases_carry_registered_guarantee_ids() {
 }
 
 #[test]
-fn local_model_demo_runs_with_mock_llm() {
-    let app = repo_root().join("examples").join("local_model_demo");
+fn local_model_chat_runs_with_mock_llm() {
+    let app = repo_root().join("examples").join("local_model_chat");
 
     let out = Command::new(corvid_bin())
         .arg("run")
@@ -316,9 +316,9 @@ fn local_model_demo_runs_with_mock_llm() {
 }
 
 #[test]
-fn local_model_demo_corvid_tests_pass_with_mock_llm() {
+fn local_model_chat_corvid_tests_pass_with_mock_llm() {
     let repo = repo_root();
-    let app = repo.join("examples").join("local_model_demo");
+    let app = repo.join("examples").join("local_model_chat");
 
     for suite in ["unit.cor", "integration.cor"] {
         let out = Command::new(corvid_bin())
@@ -345,13 +345,13 @@ fn local_model_demo_corvid_tests_pass_with_mock_llm() {
 }
 
 #[test]
-fn local_model_demo_eval_harness_passes_with_mock_llm() {
+fn local_model_chat_eval_harness_passes_with_mock_llm() {
     let repo = repo_root();
     let eval = repo
         .join("examples")
-        .join("local_model_demo")
+        .join("local_model_chat")
         .join("evals")
-        .join("local_model_demo.cor");
+        .join("local_model_chat.cor");
     let out = Command::new(corvid_bin())
         .arg("eval")
         .arg(eval)
@@ -372,20 +372,20 @@ fn local_model_demo_eval_harness_passes_with_mock_llm() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("local_model_demo_contract_eval"),
+        stdout.contains("local_model_chat_contract_eval"),
         "{stdout}"
     );
     assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
 }
 
 #[test]
-fn local_model_demo_replay_fixture_is_deterministic() {
+fn local_model_chat_replay_fixture_is_deterministic() {
     let repo = repo_root();
     let trace = repo
         .join("examples")
-        .join("local_model_demo")
+        .join("local_model_chat")
         .join("traces")
-        .join("local_model_demo_mock_chat.jsonl");
+        .join("local_model_chat_mock_chat.jsonl");
     let out = Command::new(corvid_bin())
         .arg("replay")
         .arg(trace)
@@ -408,8 +408,8 @@ fn local_model_demo_replay_fixture_is_deterministic() {
 }
 
 #[test]
-fn provider_routing_demo_runs_with_mock_llm() {
-    let app = repo_root().join("examples").join("provider_routing_demo");
+fn model_provider_routing_runs_with_mock_llm() {
+    let app = repo_root().join("examples").join("model_provider_routing");
 
     let out = Command::new(corvid_bin())
         .arg("run")
@@ -435,9 +435,9 @@ fn provider_routing_demo_runs_with_mock_llm() {
 }
 
 #[test]
-fn provider_routing_demo_corvid_tests_pass_with_mock_llm() {
+fn model_provider_routing_corvid_tests_pass_with_mock_llm() {
     let repo = repo_root();
-    let app = repo.join("examples").join("provider_routing_demo");
+    let app = repo.join("examples").join("model_provider_routing");
 
     for suite in ["unit.cor", "integration.cor"] {
         let out = Command::new(corvid_bin())
@@ -463,13 +463,13 @@ fn provider_routing_demo_corvid_tests_pass_with_mock_llm() {
 }
 
 #[test]
-fn provider_routing_demo_eval_harness_passes_with_mock_llm() {
+fn model_provider_routing_eval_harness_passes_with_mock_llm() {
     let repo = repo_root();
     let eval = repo
         .join("examples")
-        .join("provider_routing_demo")
+        .join("model_provider_routing")
         .join("evals")
-        .join("provider_routing_demo.cor");
+        .join("model_provider_routing.cor");
     let out = Command::new(corvid_bin())
         .arg("eval")
         .arg(eval)
@@ -489,30 +489,30 @@ fn provider_routing_demo_eval_harness_passes_with_mock_llm() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("provider_routing_demo_contract_eval"),
+        stdout.contains("model_provider_routing_contract_eval"),
         "{stdout}"
     );
     assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
 }
 
 #[test]
-fn provider_routing_demo_replay_fixtures_are_deterministic() {
+fn model_provider_routing_replay_fixtures_are_deterministic() {
     let repo = repo_root();
     let trace_dir = repo
         .join("examples")
-        .join("provider_routing_demo")
+        .join("model_provider_routing")
         .join("traces");
     let fixtures = [
         (
-            "provider_routing_demo_openai.jsonl",
+            "model_provider_routing_openai.jsonl",
             "provider routing selected the expected mocked response.",
         ),
         (
-            "provider_routing_demo_ollama.jsonl",
+            "model_provider_routing_ollama.jsonl",
             "local provider route stays on the deterministic Ollama fixture.",
         ),
         (
-            "provider_routing_demo_anthropic.jsonl",
+            "model_provider_routing_anthropic.jsonl",
             "deep provider route stays on the deterministic Anthropic fixture.",
         ),
     ];
