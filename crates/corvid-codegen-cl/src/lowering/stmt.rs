@@ -964,7 +964,10 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
                 || args.iter().any(|a| expr_mentions_local(a, target))
         }
         IrExprKind::Local { local_id, .. } => *local_id == target,
-        IrExprKind::Call { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
+        IrExprKind::Call { kind, args, .. } => {
+            matches!(kind, corvid_ir::IrCallKind::ClosureLocal { local_id, .. } if *local_id == target)
+                || args.iter().any(|arg| expr_mentions_local(arg, target))
+        }
         IrExprKind::FieldAccess { target: inner, .. }
         | IrExprKind::UnwrapGrounded { value: inner }
         | IrExprKind::WeakNew { strong: inner }

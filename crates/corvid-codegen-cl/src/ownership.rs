@@ -455,7 +455,7 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             expr_references(t, target) || expr_references(index, target)
         }
         IrExprKind::List { items } => items.iter().any(|i| expr_references(i, target)),
-        IrExprKind::Call { args, .. } => args.iter().any(|a| expr_references(a, target)),
+        IrExprKind::Call { kind, args, .. } => matches!(kind, corvid_ir::IrCallKind::ClosureLocal { local_id, .. } if *local_id == target) || args.iter().any(|a| expr_references(a, target)),
         // Tagged-union/retry nodes recurse into sub-expressions.
         IrExprKind::WeakNew { strong: inner }
         | IrExprKind::WeakUpgrade { weak: inner }
@@ -584,6 +584,7 @@ fn transform_agent(
 pub(crate) fn is_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
+        Type::Function { .. } => crate::native_callback_type(ty),
         Type::String | Type::Struct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }

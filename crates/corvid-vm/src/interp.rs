@@ -2023,7 +2023,7 @@ impl<'ir> Interpreter<'ir> {
             }
             // Closure call (slice 45j): `f(x)` where `f` is a
             // function-typed local holding a closure value.
-            IrCallKind::ClosureLocal { local_id } => {
+            IrCallKind::ClosureLocal { local_id, .. } => {
                 let callee = self.env.lookup(*local_id).ok_or_else(|| {
                     InterpError::new(InterpErrorKind::UndefinedLocal(*local_id), span)
                 })?;

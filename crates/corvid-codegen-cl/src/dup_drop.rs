@@ -538,7 +538,10 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
             expr_reads_local(operand, target)
         }
-        IrExprKind::Call { args, .. } => args.iter().any(|a| expr_reads_local(a, target)),
+        IrExprKind::Call { kind, args, .. } => {
+            matches!(kind, corvid_ir::IrCallKind::ClosureLocal { local_id, .. } if *local_id == target)
+                || args.iter().any(|arg| expr_reads_local(arg, target))
+        }
         IrExprKind::List { items } => items.iter().any(|it| expr_reads_local(it, target)),
         IrExprKind::WeakNew { strong } => expr_reads_local(strong, target),
         IrExprKind::WeakUpgrade { weak } => expr_reads_local(weak, target),

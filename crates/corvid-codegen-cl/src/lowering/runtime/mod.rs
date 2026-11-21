@@ -26,7 +26,7 @@ pub(super) use type_query::{
     is_native_wide_option_type, is_refcounted_type, mangle_type_name, option_uses_wrapper,
 };
 pub(super) use typeinfo::{
-    emit_list_typeinfo, emit_option_typeinfo, emit_result_typeinfo, emit_struct_typeinfo,
+    emit_callback_typeinfo, emit_list_typeinfo, emit_option_typeinfo, emit_result_typeinfo, emit_struct_typeinfo,
     typeinfo_data_for_refcounted_payload, OPTION_PAYLOAD_BYTES, OPTION_PAYLOAD_OFFSET,
     RESULT_PAYLOAD_BYTES, RESULT_PAYLOAD_OFFSET, RESULT_TAG_ERR, RESULT_TAG_OFFSET, RESULT_TAG_OK,
 };

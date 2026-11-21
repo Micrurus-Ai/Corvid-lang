@@ -145,3 +145,88 @@ agent main() -> Int:
     let diagnostic = String::from_utf8_lossy(&output.stderr);
     assert!(diagnostic.contains("(String) -> Int"), "{diagnostic}");
 }
+
+#[test]
+fn integer_callbacks_cross_modules_and_outlive_captured_locals() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(dir.path().join("ops.cor"), r#"
+public fn twice(n: Int) -> Int:
+    return n * 2
+
+public agent apply(value: Int, transform: (Int) -> Int) -> Int:
+    return transform(value)
+
+public agent make(base: Int, factor: Int) -> (Int) -> Int:
+    return fn (n: Int) -> base + twice(n) * factor
+
+public agent reader(values: List<Int>, offset: Int) -> (Int) -> Int:
+    return fn (i: Int) -> values[i] + values.length() + offset
+"#).unwrap();
+    std::fs::write(&main, r#"
+import "./ops" as ops
+
+agent main() -> Bool:
+    offset = 3
+    add: (Int) -> Int = fn (n) -> n + offset
+    offset = 10
+    a = ops.apply(4, add)
+    b = add(1)
+    other = ops.make(3, 4)
+    c = other(5)
+    d = ops.apply(6, ops.twice)
+    items = [1, 2]
+    read = ops.reader(items, 4)
+    items[0] = 10
+    items.append(30)
+    temporary = ops.reader([8], 2)
+    return read(0) == 17 and temporary(0) == 11 and a == 7 and b == 4 and c == 43 and d == 12
+"#).unwrap();
+
+    assert_both_targets_without_leaks(&main);
+}
+
+fn assert_both_targets_without_leaks(main: &std::path::Path) {
+    for target in ["interp", "native"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .args(["run", "--target", target]).arg(&main)
+            .env("CORVID_DEBUG_ALLOC", "1").output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{target}: {stderr}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
+        if target == "native" {
+            let count = |label: &str| stderr.lines().find_map(|line| line.strip_prefix(label))
+                .unwrap().parse::<usize>().unwrap();
+            assert!(count("ALLOCS=") > 0);
+            assert_eq!(count("ALLOCS="), count("RELEASES="), "{stderr}");
+        }
+    }
+}
+
+#[test]
+fn last_infers_element_types_across_modules() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(dir.path().join("items.cor"), r#"
+public fn numbers() -> List<Int>:
+    return [3, 0]
+
+public fn labels() -> List<String>:
+    return ["first", "la" + "st"]
+"#).unwrap();
+    std::fs::write(&main, r#"
+import "./items" as items
+
+agent main() -> Bool:
+    number = items.numbers().last()
+    label = items.labels().last()
+    actual_number = match number:
+        Some(n) -> n
+        None -> -1
+    actual_label = match label:
+        Some(s) -> s
+        None -> ""
+    return actual_number == 0 and actual_label == "last"
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}

@@ -1,5 +1,6 @@
 use super::*;
 
+mod callback;
 mod binop;
 mod constructors;
 mod match_value;
@@ -121,6 +122,8 @@ pub(super) fn lower_expr(
         IrExprKind::Match { scrutinee, arms } => match_value::lower_match(
             builder, expr, scrutinee, arms, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
         ),
+        IrExprKind::Lambda { .. } | IrExprKind::Decl { .. } if crate::native_callback_type(&expr.ty) =>
+            callback::create(builder, expr, env, func_ids_by_def, module, runtime),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
             "lambdas are interpreter-only in 45j",
             expr.span,
@@ -391,6 +394,18 @@ pub(super) fn lower_expr(
             )
         }
         IrExprKind::Call { kind, callee_name, args } => match kind {
+            IrCallKind::ClosureLocal { local_id, signature } if crate::native_callback_type(signature) => {
+                let var = env.get(local_id).ok_or_else(|| CodegenError::cranelift("unbound callback", expr.span))?.0;
+                let handle = builder.use_var(var);
+                let mut operands = vec![handle];
+                for arg in args {
+                    operands.push(lower_expr(builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?);
+                }
+                let sig = builder.import_signature(callback::signature(module, args.len(), cl_type_for(&expr.ty, expr.span)?));
+                let address = builder.ins().load(I64, MemFlags::trusted(), handle, 0);
+                let call = builder.ins().call_indirect(sig, address, &operands);
+                Ok(builder.inst_results(call)[0])
+            }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(CodegenError::not_supported(
                     "closure calls are interpreter-only in 45j",

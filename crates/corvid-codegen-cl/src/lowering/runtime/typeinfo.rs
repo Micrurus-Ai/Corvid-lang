@@ -277,6 +277,7 @@ pub fn typeinfo_data_for_refcounted_payload(
     match ty {
         Type::Map(_, _) if crate::native_string_map(ty) => Some(runtime.map_typeinfo),
         Type::String => Some(runtime.string_typeinfo),
+        Type::Function { .. } if crate::native_callback_type(ty) => Some(runtime.callback_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),
         Type::Result(_, _) => runtime.result_typeinfos.get(ty).copied(),
@@ -290,4 +291,16 @@ pub fn typeinfo_data_for_refcounted_payload(
         }
         _ => None,
     }
+}
+
+/// Integer-only environments have no outgoing heap references.
+pub fn emit_callback_typeinfo(module: &mut ObjectModule) -> Result<cranelift_module::DataId, CodegenError> {
+    let span = Span::new(0, 0);
+    let id = module.declare_anonymous_data(false, false)
+        .map_err(|e| CodegenError::cranelift(e.to_string(), span))?;
+    let mut data = DataDescription::new();
+    data.set_align(8);
+    data.define_zeroinit(TYPEINFO_BYTES);
+    module.define_data(id, &data).map_err(|e| CodegenError::cranelift(e.to_string(), span))?;
+    Ok(id)
 }

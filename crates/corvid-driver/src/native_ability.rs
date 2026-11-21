@@ -50,6 +50,7 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
+    CallbackNotNative,
     UnsupportedMap,
     UnsupportedMatch,
     /// Builtin methods on built-in receiver types (`String.length()`
@@ -90,6 +91,7 @@ impl std::fmt::Display for NotNativeReason {
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
+            Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
             }
@@ -140,8 +142,8 @@ fn is_native_value_type(ty: &Type) -> bool {
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.
         Type::Upload(_) | Type::Page(_) => false,
+        Type::Function { .. } => corvid_codegen_cl::native_callback_type(ty),
         Type::Nothing
-        | Type::Function { .. }
         | Type::Stream(_)
         | Type::Partial(_)
         | Type::ResumeToken(_)
@@ -294,7 +296,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
         }
         IrExprKind::Match { .. } => Err(NotNativeReason::UnsupportedMatch),
         // Lambdas are interpreter-only in 45j.
-        IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::Lambda { body, .. } if corvid_codegen_cl::native_callback_type(&expr.ty)
+            && corvid_codegen_cl::native_lambda_locals(body).is_some() => Ok(()),
+        IrExprKind::Lambda { .. } => Err(NotNativeReason::CallbackNotNative),
         // Named struct literals are interpreter-only in 45n.
         IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `Page<Item>` responses are interpreter-only in 52c-2.
@@ -331,9 +335,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 IrCallKind::EnumConstructor { .. } => {
                     return Err(NotNativeReason::PlaceAssignmentNotNative)
                 }
-                // Closure calls are interpreter-only in 45j.
+                IrCallKind::ClosureLocal { signature, .. } if corvid_codegen_cl::native_callback_type(signature) => {}
                 IrCallKind::ClosureLocal { .. } => {
-                    return Err(NotNativeReason::PlaceAssignmentNotNative)
+                    return Err(NotNativeReason::CallbackNotNative)
                 }
                 IrCallKind::Tool { .. } => {
                     return Err(NotNativeReason::ToolCall {

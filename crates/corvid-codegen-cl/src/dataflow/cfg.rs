@@ -554,6 +554,9 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             //   - Unknown: treat conservatively — Borrowed avoids
             //     scheduling a consumption-style Drop on an arg we
             //     can't prove is actually consumed.
+            if let corvid_ir::IrCallKind::ClosureLocal { local_id, .. } = kind {
+                out.push(LocalRead { local_id: *local_id, kind: ReadKind::Borrowed });
+            }
             let args_consumed = match kind {
                 corvid_ir::IrCallKind::Tool { .. }
                 | corvid_ir::IrCallKind::Prompt { .. }

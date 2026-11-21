@@ -1978,6 +1978,7 @@ impl<'a> Lowerer<'a> {
                 Some(Binding::Local(local_id)) => (
                     IrCallKind::ClosureLocal {
                         local_id: *local_id,
+                        signature: self.types.get(&name.span).cloned().unwrap_or(Type::Unknown),
                     },
                     name.name.clone(),
                 ),
@@ -2256,7 +2257,11 @@ impl<'a> Lowerer<'a> {
                 Box::new(self.type_ref_to_type(inner)),
                 effects.unwrap_or_else(corvid_ast::WeakEffectRow::any),
             ),
-            TypeRef::Function { .. } => Type::Unknown,
+            TypeRef::Function { params, ret, .. } => Type::Function {
+                params: params.iter().map(|p| self.type_ref_to_type(p)).collect(),
+                ret: Box::new(self.type_ref_to_type(ret)),
+                effect: Effect::Safe,
+            },
         }
     }
 }

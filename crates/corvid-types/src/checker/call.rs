@@ -100,6 +100,7 @@ impl<'a> Checker<'a> {
                 // stay lenient; anything else is not callable.
                 let lid = *lid;
                 let callee_ty = self.local_types.get(&lid).cloned().unwrap_or(Type::Unknown);
+                self.types.insert(callee.span(), callee_ty.clone());
                 match callee_ty {
                     Type::Function { params, ret, .. } => {
                         if args.len() != params.len() {

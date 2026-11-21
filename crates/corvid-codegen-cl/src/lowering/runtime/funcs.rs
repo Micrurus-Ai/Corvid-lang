@@ -181,6 +181,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// fields — those trace fns are empty bodies, kept for uniform
     /// dispatch in the collector mark walk without a per-object NULL check).
     pub struct_traces: HashMap<DefId, FuncId>,
+    /// Heap descriptor for callback environments containing only scalar captures.
+    pub callback_typeinfo: cranelift_module::DataId,
     /// Per-struct-type typeinfo data symbols. Every
     /// refcounted struct allocation references its block via
     /// `corvid_alloc_typed(size, &typeinfo)`.

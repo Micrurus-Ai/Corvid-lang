@@ -256,3 +256,57 @@ fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
 fn span_zero() -> corvid_ast::Span {
     corvid_ast::Span::new(0, 0)
 }
+
+/// Integer callbacks share one native ABI: environment handle followed by arguments.
+pub fn native_callback_type(ty: &corvid_types::Type) -> bool {
+    use corvid_types::Type;
+    matches!(ty, Type::Function { params, ret, .. } if matches!(**ret, Type::Int | Type::Bool) && params.iter().all(|p| *p == Type::Int))
+}
+
+/// Collect each local needed by an integer callback, with its storage type.
+pub fn native_lambda_locals(body: &corvid_ir::IrExpr) -> Option<Vec<(corvid_resolve::LocalId, corvid_types::Type)>> {
+    use corvid_ir::{IrExpr, IrExprKind};
+    use corvid_resolve::LocalId;
+    use corvid_types::{BuiltinMethodKind, Type};
+
+    fn local(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        let IrExprKind::Local { local_id, .. } = &expr.kind else { return None };
+        if !locals.iter().any(|(id, _)| id == local_id) {
+            locals.push((*local_id, expr.ty.clone()));
+        }
+        Some(())
+    }
+
+    fn list(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(&expr.ty, Type::List(element) if **element == Type::Int) { return None; }
+        local(expr, locals)
+    }
+
+    fn collect(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(expr.ty, Type::Int | Type::Bool) { return None; }
+        match &expr.kind {
+            IrExprKind::Literal(corvid_ir::IrLiteral::Int(_) | corvid_ir::IrLiteral::Bool(_)) => {}
+            IrExprKind::Local { .. } => local(expr, locals)?,
+            IrExprKind::Index { target, index } => {
+                list(target, locals)?;
+                collect(index, locals)?;
+            }
+            IrExprKind::BuiltinMethod { kind: BuiltinMethodKind::ListLength, receiver, .. } => {
+                list(receiver, locals)?;
+            }
+            IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
+                collect(left, locals)?;
+                collect(right, locals)?;
+            }
+            IrExprKind::Call { kind: corvid_ir::IrCallKind::Agent { .. }, args, .. } => {
+                for arg in args { collect(arg, locals)?; }
+            }
+            IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => collect(operand, locals)?,
+            _ => return None,
+        }
+        Some(())
+    }
+    let mut locals = Vec::new();
+    collect(body, &mut locals)?;
+    Some(locals)
+}

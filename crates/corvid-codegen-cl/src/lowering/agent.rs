@@ -422,6 +422,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Nothing` — use a bare `return` instead",
             span,
         )),
+        Type::Function { .. } if crate::native_callback_type(ty) => Ok(I64),
         Type::Function { .. } => Err(CodegenError::not_supported(
             "function types as values — first-class callables are not implemented in native codegen yet",
             span,

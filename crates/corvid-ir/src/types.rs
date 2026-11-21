@@ -1213,6 +1213,7 @@ pub enum IrCallKind {
     /// the environment and applies the closure.
     ClosureLocal {
         local_id: LocalId,
+        signature: Type,
     },
     /// Something we couldn't resolve (graceful degradation).
     Unknown,

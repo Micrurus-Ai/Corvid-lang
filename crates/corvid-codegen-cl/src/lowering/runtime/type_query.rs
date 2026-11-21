@@ -503,6 +503,7 @@ pub fn emit_release(
 /// (12f), `List` (12g) — both will return true here.
 pub fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
+        Type::Function { .. } => crate::native_callback_type(ty),
         Type::String
         | Type::Struct(_)
         | Type::ImportedStruct(_)
@@ -551,8 +552,8 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // them. False routes any program mentioning them away from the
         // native backend, mirroring `DbHandle`.
         Type::Upload(_) | Type::Page(_) => false,
+        Type::Function { .. } => crate::native_callback_type(ty),
         Type::Nothing
-        | Type::Function { .. }
         | Type::RouteParams(_)
         | Type::Stream(_)
         | Type::Partial(_)

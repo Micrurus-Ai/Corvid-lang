@@ -124,3 +124,12 @@ embedded PyO3 runtime (see the [Python FFI guide](../guides/ffi-python.md)).
 ### Passing a named function from another module
 
 Given a module `math.cor` exporting `public fn double(n: Int) -> Int`, import it with `import "./math" as m`. Use `m.double(3)` to call it immediately or `transform = m.double` to keep the function for later. The interpreter accepts `[1, 2].map(transform)` and produces `[2, 4]`. A renamed import such as `import "./math" use double as twice` keeps the same `(Int) -> Int` signature.
+
+A module can return a closure that keeps its captured values after the call returns.
+
+```corvid
+public agent add_offset(offset: Int) -> (Int) -> Int:
+    return fn (n: Int) -> n + offset
+```
+
+With this function in a module imported as `ops`, write `add_three = ops.add_offset(3)`. Calling `add_three(4)` returns `7` on both CLI targets. Integer captures keep their value at creation. A captured `List<Int>` stays alive and reflects updates made through another reference to the same list.
