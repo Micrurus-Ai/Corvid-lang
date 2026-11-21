@@ -49,6 +49,8 @@ Additional parsed tables for advanced configuration:
 - `[package-policy]` — package import policy for the package manager.
 - `[run]` — run-time defaults for `corvid run`.
 
+The top-level `version` identifies your application. The installed compiler determines which language syntax the project accepts. Run `corvid --version` to see the compiler version, source revision and build date. When testing an upgrade, run `corvid upgrade check .` and your application tests with the candidate compiler.
+
 Package dependency pins are covered in the
 [package-imports reference](../reference/package-imports.md).
 
