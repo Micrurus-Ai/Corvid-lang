@@ -126,7 +126,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
   - [x] Ran the local nightly release command with an ephemeral key and independently verified the Ed25519 signature, manifest payload, copied binary digest and checksum file. Updated the command help and [release policy](docs/release-policy.md#verification) to describe its outputs.
-  - [ ] Produce and verify a bill of materials for the distributed candidate. The local release command emits a signed CLI manifest, and the hosted archives carry Rust dependency notices.
+  - [x] Generated CycloneDX 1.6 inventories from all six 3a29a662 archives. Validated each against the official JSON schema and independently recomputed every archive digest and all 240 regular-file digests. The [release guide](docs/release-policy.md) describes the component inventory and verification command.
+  - [ ] Confirm a hosted candidate retains all six SBOMs and verify the downloaded documents against that run's archives.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.

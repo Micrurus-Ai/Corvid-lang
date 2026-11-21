@@ -374,6 +374,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: corvid-package-*
@@ -399,6 +400,17 @@ jobs:
             exit 1
           fi
           sha256sum -- "${archives[@]}" > SHA256SUMS.txt
+          for archive in "${archives[@]}"; do
+            python3 ../install/archive_sbom.py "$archive" "$archive.cdx.json"
+          done
+          sha256sum -- *.cdx.json > SBOM-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corvid-archive-sboms
+          path: |
+            dist/*.cdx.json
+            dist/SBOM-SHA256SUMS.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: corvid-archive-checksums
@@ -421,9 +433,13 @@ jobs:
         with:
           name: corvid-archive-checksums
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: corvid-archive-sboms
+          path: dist
       - name: Verify downloaded archives against the candidate checksums
         working-directory: dist
-        run: sha256sum --check --strict SHA256SUMS.txt
+        run: sha256sum --check --strict SHA256SUMS.txt SBOM-SHA256SUMS.txt
       - name: Upload candidate archives to release
         uses: softprops/action-gh-release@v2
         with:
@@ -435,3 +451,4 @@ jobs:
           files: |
             dist/corvid-*
             dist/SHA256SUMS.txt
+            dist/SBOM-SHA256SUMS.txt
