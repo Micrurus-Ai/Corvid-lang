@@ -162,6 +162,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
   - [x] Added the pinned LCDF copyright statement and COPYING file to the PDF extraction dependency's notice entry. Verified both texts in the generated Windows x64 inventory. The glyph-data redistribution review remains open in the [release policy](docs/release-policy.md).
+  - [x] Reconstructed all 4,700 compiled PDF glyph mappings from the three pinned tables and compared the htfgen extension with historical LCDF 2.33. The [release policy](docs/release-policy.md) identifies the distinct upstream changes for redistribution review.
 
   - [x] Verified the [quickstart](docs/book/02-quickstart.md) in a fresh project. The starter replayed the same clock value, the file example returned its typed result, and the prompt made one request with the interpolated input to a local provider.
   - [x] Ran the collection examples on both CLI tiers and verified the interpreter-specific Python snippets through IR lowering. All three book snippet checks passed.
