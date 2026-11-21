@@ -56,7 +56,7 @@ impl Codegen {
             "from corvid_runtime import tool_call, approve_gate, llm_call, register_tools, register_prompts",
         );
         self.out.blank_line();
-        for line in include_str!("integer_helpers.py").lines() {
+        for line in include_str!("numeric_helpers.py").lines() {
             self.out.writeln(line);
         }
         self.out.blank_line();
@@ -368,11 +368,13 @@ impl Codegen {
                 self.out.write("]");
             }
             IrExprKind::BinOp { op, left, right } => {
-                let integer = e.ty == corvid_types::Type::Int;
-                let (prefix, separator) = match (integer, op) {
-                    (true, BinaryOp::Div) => ("__corvid_div_i64(", ", ".into()),
-                    (true, BinaryOp::Mod) => ("__corvid_rem_i64(", ", ".into()),
-                    (true, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) => {
+                use corvid_types::Type;
+                let (prefix, separator) = match (&e.ty, op) {
+                    (Type::Float, BinaryOp::Div) => ("__corvid_div_f64(", ", ".into()),
+                    (Type::Float, BinaryOp::Mod) => ("__corvid_rem_f64(", ", ".into()),
+                    (Type::Int, BinaryOp::Div) => ("__corvid_div_i64(", ", ".into()),
+                    (Type::Int, BinaryOp::Mod) => ("__corvid_rem_i64(", ", ".into()),
+                    (Type::Int, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) => {
                         ("__corvid_checked_i64(", format!(" {} ", binary_op_str(*op)))
                     }
                     _ => ("(", format!(" {} ", binary_op_str(*op))),

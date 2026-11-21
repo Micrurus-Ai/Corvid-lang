@@ -230,6 +230,15 @@ agent negate(x: Int) -> Int:
     }
 
     #[test]
+    fn emits_float_division_and_remainder() {
+        let py = src_to_py(
+            "agent divide(x: Float, y: Float) -> Float:\n    return x / y\n\nagent remainder(x: Float, y: Float) -> Float:\n    return x % y\n",
+        );
+        assert!(py.contains("return __corvid_div_f64(x, y)"));
+        assert!(py.contains("return __corvid_rem_f64(x, y)"));
+    }
+
+    #[test]
     fn emits_wrapping_integer_arithmetic() {
         let src = "\
 @wrapping

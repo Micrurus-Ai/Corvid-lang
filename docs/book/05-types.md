@@ -127,6 +127,8 @@ under replay, and rejected inside `@deterministic` agents. See the
 
 Integer arithmetic is checked by default. The smallest `Int` divided by `-1` overflows. Its remainder modulo `-1` is zero. A zero divisor is an error for both operators. In an `@wrapping` agent, integer addition, subtraction, multiplication and negation wrap at 64 bits. The Python target follows these integer rules too. For example, `-7 / 3` returns the integer `-2` and `-7 % 3` returns `-1`. In generated Python, checked integer overflow raises `OverflowError` and a zero divisor raises `ZeroDivisionError`.
 
+For `Float`, division by zero gives a signed infinity when the numerator is positive or negative. Zero divided by zero gives NaN. The remainder has the sign of the dividend, so `-7.5 % 2.0` gives `-1.5`. A zero divisor or an infinite dividend gives NaN for remainder. These rules apply in the interpreter and generated Python.
+
 `to_int_truncated()` rounds a float toward zero. `floor()` rounds down, `ceil()` rounds up, and `round()` rounds to the nearest integer with ties away from zero. For example, `(-2.5).round()` returns `-3`. Each conversion requires a finite result from -2^63 inclusive to 2^63 exclusive. `to_float()` converts an integer to a binary64 float, which can lose precision when the integer magnitude exceeds 2^53.
 
 ## Lists
