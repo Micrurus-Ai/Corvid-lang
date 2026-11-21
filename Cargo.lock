@@ -998,6 +998,7 @@ name = "corvid-runtime"
 version = "0.0.1"
 dependencies = [
  "argon2",
+ "async-stream",
  "base64 0.22.1",
  "cc",
  "chrono",

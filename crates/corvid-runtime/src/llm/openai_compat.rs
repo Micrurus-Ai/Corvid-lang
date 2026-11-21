@@ -61,6 +61,18 @@ impl LlmAdapter for OpenAiCompatibleAdapter {
         model.starts_with(OPENAI_COMPAT_MODEL_PREFIX)
     }
 
+    fn stream<'a>(
+        &'a self,
+        req: &'a LlmRequestRef<'a>,
+    ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
+        Box::pin(async move {
+            let (base, model) = parse_spec(req.model)?;
+            let mut request = self.client.post(format!("{}/chat/completions", base.trim_end_matches('/')));
+            if !self.api_key.is_empty() { request = request.bearer_auth(&self.api_key); }
+            super::openai::stream_chat(self, req, request, model, "openai-compat").await
+        })
+    }
+
     fn call<'a>(
         &'a self,
         req: &'a LlmRequestRef<'a>,

@@ -8040,3 +8040,5 @@ Start a service with `corvid serve src/main.cor --access-log` to write one JSON 
 Use Ctrl+C locally or SIGTERM on Unix to stop accepting new requests. The server gives active requests up to 30 seconds to finish. A handler can fetch configuration with `secret_read(name)?` and return only the information needed by its caller.
 
 A prompt returning `String` produces text. A prompt returning a named record sends a schema and validates the model response against the declared fields. Keep the Corvid source the same when switching between `CORVID_MODEL=ollama:local-model` and `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model`. Use the model name and address from your running provider. See the typed `classify` example in `docs/book/11-prompts.md`.
+
+Declare a text-generating prompt as `-> Stream<String>` to consume its text incrementally. A route with the same return type forwards the chunks as server-sent events. Use `with max_tokens 200` for an output limit and `try answer(question) timeout 700 on error retry 2 times backoff linear 1` to retry a failed start. See the streaming route in `docs/book/11-prompts.md`.

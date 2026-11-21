@@ -282,3 +282,17 @@ agent main() -> Bool:
 ```
 
 For Ollama, set `CORVID_MODEL=ollama:local-model` and `OLLAMA_BASE_URL` to the running server. For an OpenAI-compatible server, set `CORVID_MODEL=openai-compat:http://127.0.0.1:8080/v1:local-model` and, if needed, `OPENAI_COMPAT_API_KEY`. Replace `local-model` with the model name served at that address. Run `corvid run --target interp src/main.cor` in either configuration. Both adapters send the system and user messages and the record schema. Corvid checks the returned fields before making the record available to the caller.
+
+### Serving generated text as it arrives
+
+```corvid
+prompt answer(question: String) -> Stream<String>:
+    with max_tokens 200
+    "{question}"
+
+server answers:
+    route GET "/answer/{question}" -> json Stream<String>:
+        return try answer(path.question) timeout 700 on error retry 2 times backoff linear 1
+```
+
+With an OpenAI-compatible streaming provider, the client can consume server-sent events while generation continues. The 700 ms deadline applies to starting each attempt and receiving the first chunk. A setup error can trigger a retry. A provider disconnect after text has been delivered ends that stream with an error. Closing the consumer connection cancels the pending generation. Corvid estimates token use as text arrives and checks the provider's final completion-token count against `max_tokens`.

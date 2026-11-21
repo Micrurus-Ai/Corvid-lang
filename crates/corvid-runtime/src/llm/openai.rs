@@ -67,70 +67,10 @@ impl LlmAdapter for OpenAiAdapter {
         &'a self,
         req: &'a LlmRequestRef<'a>,
     ) -> BoxFuture<'a, Result<crate::llm::LlmChunkStream, RuntimeError>> {
-        use futures::StreamExt;
         Box::pin(async move {
-            if req.output_schema.is_some() {
-                let resp = self.call(req).await?;
-                let text = match resp.value {
-                    Value::String(s) => s,
-                    other => other.to_string(),
-                };
-                return Ok(Box::pin(futures::stream::once(async move {
-                    Ok(crate::llm::LlmStreamChunk {
-                        delta: text,
-                        done: true,
-                        usage: None,
-                        confidence: None,
-                    })
-                })) as crate::llm::LlmChunkStream);
-            }
-            let url = format!(
-                "{}/v1/chat/completions",
-                self.base_url.trim_end_matches('/')
-            );
-            let mut body = build_request_body(req);
-            body["stream"] = json!(true);
-            let resp = self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| RuntimeError::AdapterFailed {
-                    adapter: "openai".into(),
-                    message: format!("HTTP send failed: {e}"),
-                })?;
-            let status = resp.status();
-            if !status.is_success() {
-                let body_text = resp.text().await.unwrap_or_default();
-                return Err(RuntimeError::AdapterFailed {
-                    adapter: "openai".into(),
-                    message: format!("HTTP {status}: {body_text}"),
-                });
-            }
-            let lines = super::sse::response_lines(resp, "openai");
-            let chunks = lines.filter_map(|line| async move {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(e) => return Some(Err(e)),
-                };
-                let data = super::sse::sse_data(&line)?;
-                let data = data.trim();
-                if data == "[DONE]" {
-                    return Some(Ok(crate::llm::LlmStreamChunk {
-                        delta: String::new(),
-                        done: true,
-                        usage: None,
-                        confidence: None,
-                    }));
-                }
-                let json: Value = serde_json::from_str(data).ok()?;
-                let delta = json["choices"][0]["delta"]["content"].as_str()?.to_string();
-                Some(Ok(crate::llm::LlmStreamChunk { delta, done: false, usage: None, confidence: None }))
-            });
-            Ok(Box::pin(chunks) as crate::llm::LlmChunkStream)
+            let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+            let request = self.client.post(url).bearer_auth(&self.api_key);
+            stream_chat(self, req, request, req.model, "openai").await
         })
     }
 
@@ -179,6 +119,56 @@ impl LlmAdapter for OpenAiAdapter {
             extract_response(&parsed, req.output_schema.is_some())
         })
     }
+}
+
+pub(super) async fn stream_chat(
+    adapter: &dyn LlmAdapter,
+    req: &LlmRequestRef<'_>,
+    request: reqwest::RequestBuilder,
+    model: &str,
+    name: &'static str,
+) -> Result<crate::llm::LlmChunkStream, RuntimeError> {
+    use crate::llm::LlmStreamChunk;
+    use futures::StreamExt;
+    if req.output_schema.is_some() {
+        let response = adapter.call(req).await?;
+        return Ok(Box::pin(futures::stream::once(async move {
+            Ok(LlmStreamChunk {
+                delta: match response.value { Value::String(s) => s, v => v.to_string() },
+                done: true, usage: Some(response.usage), confidence: response.confidence,
+            })
+        })));
+    }
+    let mut body = build_request_body(req);
+    body["model"] = json!(model);
+    body["stream"] = json!(true);
+    body["stream_options"] = json!({"include_usage":true});
+    let fail = move |message: String| RuntimeError::AdapterFailed { adapter: name.into(), message };
+    let response = request.json(&body).send().await.map_err(|e| fail(e.to_string()))?;
+    if !response.status().is_success() {
+        return Err(fail(format!("HTTP {}: {}", response.status(), response.text().await.unwrap_or_default())));
+    }
+    Ok(Box::pin(async_stream::try_stream! {
+        let lines = super::sse::response_lines(response, name);
+        futures::pin_mut!(lines);
+        let mut usage = None;
+        loop {
+            let line = lines.next().await.ok_or_else(|| fail("provider stream ended before [DONE]".into()))??;
+            let Some(data) = super::sse::sse_data(&line) else { continue };
+            if data.trim() == "[DONE]" {
+                yield LlmStreamChunk { delta: String::new(), done: true, usage, confidence: None };
+                break;
+            }
+            let event: Value = serde_json::from_str(data).map_err(|e| fail(format!("invalid stream event: {e}")))?;
+            if let Some(error) = event.get("error") { Err(fail(format!("provider stream error: {error}")))?; }
+            if event["usage"]["completion_tokens"].is_u64() { usage = Some(extract_usage(&event)); }
+            if let Some(text) = event["choices"][0]["delta"]["content"].as_str() {
+                if !text.is_empty() {
+                    yield LlmStreamChunk { delta: text.into(), done: false, usage: None, confidence: None };
+                }
+            }
+        }
+    }))
 }
 
 pub(super) fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
