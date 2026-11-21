@@ -182,6 +182,14 @@ impl<'a> Checker<'a> {
             panic!("tool/operation DefId not indexed");
         };
 
+        self.check_external_call(tool_name, params, effect, effect_row, return_ty, args, span)
+    }
+
+    pub(super) fn check_external_call(
+        &mut self, tool_name: &str, params: &[Param], effect: Effect,
+        effect_row: &corvid_ast::EffectRow, return_ty: &corvid_ast::TypeRef,
+        args: &[Expr], span: Span,
+    ) -> Type {
         let arg_types = self.check_args_collecting_types(tool_name, params, args, false);
 
         // Effect check: a `dangerous` tool must have a prior matching
@@ -196,10 +204,22 @@ impl<'a> Checker<'a> {
             self.registry,
         );
         if matches!(effect, Effect::Dangerous) || derived_trust.is_some() {
+            let matches_approval = |a: &super::Approval| {
+                a.arity == args.len() && if tool_name.contains('.') {
+                    a.label == tool_name
+                } else {
+                    snake_case(&a.label) == tool_name
+                }
+            };
+            let expected_label = || if tool_name.contains('.') {
+                tool_name.to_owned()
+            } else {
+                pascal_case(tool_name)
+            };
             let authorized = self
                 .approvals
                 .iter()
-                .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                .any(matches_approval);
             if !authorized {
                 // Discriminate between two registry rows:
                 //   - `approval.token_lexical_only`: an approve with the
@@ -217,7 +237,7 @@ impl<'a> Checker<'a> {
                 let approve_exists_out_of_scope = self
                     .approvals_seen_in_agent
                     .iter()
-                    .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                    .any(matches_approval);
                 let is_dangerous = matches!(effect, Effect::Dangerous);
                 let guarantee_id = if approve_exists_out_of_scope {
                     "approval.token_lexical_only"
@@ -233,7 +253,7 @@ impl<'a> Checker<'a> {
                 let kind = if is_dangerous {
                     TypeErrorKind::UnapprovedDangerousCall {
                         tool: tool_name.to_string(),
-                        expected_approve_label: pascal_case(tool_name),
+                        expected_approve_label: expected_label(),
                         arity: args.len(),
                     }
                 } else {
@@ -241,7 +261,7 @@ impl<'a> Checker<'a> {
                         derived_trust.clone().expect("derived_trust is Some here");
                     TypeErrorKind::UnapprovedHighTrustCall {
                         tool: tool_name.to_string(),
-                        expected_approve_label: pascal_case(tool_name),
+                        expected_approve_label: expected_label(),
                         arity: args.len(),
                         deriving_effect,
                         trust_tier,
@@ -1197,7 +1217,7 @@ impl<'a> Checker<'a> {
         Type::Struct(def_id)
     }
 
-    fn check_args_against_params(&mut self, callee_name: &str, params: &[Param], args: &[Expr]) {
+    pub(super) fn check_args_against_params(&mut self, callee_name: &str, params: &[Param], args: &[Expr]) {
         self.check_args_collecting_types(callee_name, params, args, false);
     }
 

@@ -1099,7 +1099,16 @@ pub struct ImportDecl {
     pub alias: Option<Ident>,
     #[serde(default)]
     pub use_items: Vec<ImportUseItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub python_functions: Vec<PythonFunctionSignature>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PythonFunctionSignature {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_ty: TypeRef,
 }
 
 /// Content pin attached to a Corvid import:

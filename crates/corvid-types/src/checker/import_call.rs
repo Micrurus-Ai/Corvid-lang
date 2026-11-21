@@ -364,6 +364,33 @@ impl<'a> Checker<'a> {
             return None;
         }
 
+        let import_span = self.symbols.get(*alias_def).span;
+        if let Some(import) = self.file.decls.iter().find_map(|decl| match decl {
+            Decl::Import(import)
+                if import.span == import_span && matches!(import.source, corvid_ast::ImportSource::Python) =>
+            {
+                Some(import)
+            }
+            _ => None,
+        }) {
+            if let Some(signature) = import.python_functions.iter().find(|f| f.name.name == field.name) {
+                let callee = format!("{}.{}", alias.name, field.name);
+                return Some(self.check_external_call(&callee, &signature.params, Effect::Safe,
+                    &import.effect_row, &signature.return_ty, args, call_span));
+            }
+            self.errors.push(TypeError::new(
+                TypeErrorKind::DirectPythonCallUnsupported {
+                    module: import.module.clone(),
+                    member: field.name.clone(),
+                },
+                callee_span,
+            ));
+            for arg in args {
+                let _ = self.check_expr(arg);
+            }
+            return Some(Type::Unknown);
+        }
+
         let Some(modules) = self.module_resolution else {
             self.errors.push(TypeError::new(
                 TypeErrorKind::CorvidImportNotYetResolved {

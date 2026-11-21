@@ -59,6 +59,9 @@ pub fn compile_to_object(
     // host's tools. False for native binaries (linked tool wrappers).
     tools_via_registry: bool,
 ) -> Result<(), CodegenError> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Err(CodegenError::not_supported("typed Python imports (use the interpreter)", tool.span));
+    }
     // Run the ownership analysis pass before codegen.
     // Output is a transformed IrFile with borrow_sig populated on
     // every agent. Codegen downstream consults borrow_sig at call

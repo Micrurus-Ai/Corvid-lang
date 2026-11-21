@@ -6,7 +6,7 @@ use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::{describe_token, Parser};
 use crate::token::TokKind;
 use corvid_ast::{
-    EffectRef, EffectRow, Ident, ImportContentHash, ImportDecl, ImportSource, ImportUseItem,
+    EffectRef, EffectRow, Ident, ImportContentHash, ImportDecl, ImportSource, ImportUseItem, PythonFunctionSignature,
 };
 
 impl<'a> Parser<'a> {
@@ -170,8 +170,44 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        let end = self.peek_span();
-        self.expect_newline()?;
+        let mut end = self.peek_span();
+        let mut python_functions = Vec::new();
+        if matches!(source, ImportSource::Python) && matches!(self.peek(), TokKind::Colon) {
+            self.bump();
+            self.expect_newline()?;
+            self.expect(TokKind::Indent, "an indented Python function signature")?;
+            let mut names = std::collections::HashSet::new();
+            loop {
+                self.skip_newlines();
+                if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+                    break;
+                }
+                self.expect(TokKind::KwFn, "`fn` before the Python function name")?;
+                let (name, span) = self.expect_ident()?;
+                if !names.insert(name.clone()) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("duplicate Python function signature `{name}`"),
+                            expected: "one signature per imported function".into(),
+                        },
+                        span,
+                    });
+                }
+                let params = self.parse_params()?;
+                self.expect(TokKind::Arrow, "`->` before the Python return type")?;
+                let return_ty = self.parse_type_ref()?;
+                end = return_ty.span();
+                self.expect_newline()?;
+                python_functions.push(PythonFunctionSignature {
+                    name: Ident::new(name, span),
+                    params,
+                    return_ty,
+                });
+            }
+            self.expect(TokKind::Dedent, "end of the Python import block")?;
+        } else {
+            self.expect_newline()?;
+        }
         Ok(ImportDecl {
             source,
             module,
@@ -181,6 +217,7 @@ impl<'a> Parser<'a> {
             effect_row,
             alias,
             use_items,
+            python_functions,
             span: start.merge(end),
         })
     }

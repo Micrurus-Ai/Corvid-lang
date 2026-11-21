@@ -118,6 +118,14 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
 /// Refuse LOUDLY at transpile time instead, naming each call and the
 /// tier that runs it.
 fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Some(vec![Diagnostic {
+            origin: None,
+            span: tool.span,
+            message: "typed Python imports require the interpreter".into(),
+            hint: Some("run the application with corvid run".into()),
+        }]);
+    }
     let hits = corvid_codegen_py::find_stdlib_executing_tool_calls(ir);
     if hits.is_empty() {
         return None;

@@ -101,6 +101,7 @@ fn actor_route_params_type() -> Type {
 }
 
 struct Lowerer<'a> {
+    python_members: HashMap<(DefId, String), (DefId, String)>,
     symbols: &'a SymbolTable,
     bindings: &'a HashMap<Span, Binding>,
     types: &'a HashMap<Span, Type>,
@@ -148,6 +149,7 @@ impl<'a> Lowerer<'a> {
         imported_def_ids: &'a HashMap<ImportedDefKey, DefId>,
     ) -> Self {
         Self {
+            python_members: HashMap::new(),
             symbols: &resolved.symbols,
             bindings: &resolved.bindings,
             types: &checked.types,
@@ -253,6 +255,36 @@ impl<'a> Lowerer<'a> {
         let mut models = Vec::new();
         let mut connectors = Vec::new();
 
+        for decl in &file.decls {
+            let Decl::Import(import) = decl else { continue };
+            if import.python_functions.is_empty() { continue; }
+            let alias = import.alias.as_ref().map(|a| &a.name).unwrap_or(&import.module);
+            let alias_id = self.symbols.lookup_def(alias).expect("resolved Python import");
+            for function in &import.python_functions {
+                let Some(Binding::Decl(id)) = self.bindings.get(&function.name.span) else {
+                    unreachable!("resolved Python function signature")
+                };
+                let name = format!("python:{}.{}", import.module, function.name.name);
+                let declaration = ToolDecl {
+                    name: Ident::new(name.clone(), function.name.span),
+                    params: function.params.clone(),
+                    return_ty: function.return_ty.clone(),
+                    return_ownership: None,
+                    breaker: None,
+                    effect: Effect::Safe,
+                    effect_row: import.effect_row.clone(),
+                    visibility: corvid_ast::Visibility::Private,
+                    span: function.name.span,
+                };
+                let mut tool = self.lower_tool_with_id(&declaration, *id);
+                tool.python_approval_required = corvid_types::effects::effect_row_trust_requires_approval(
+                    &import.effect_row, &self.effect_registry,
+                ).is_some();
+                tool.python = Some((import.module.clone(), function.name.name.clone()));
+                self.python_members.insert((alias_id, function.name.name.clone()), (tool.id, name));
+                tools.push(tool);
+            }
+        }
         for decl in &file.decls {
             match decl {
                 Decl::Import(i) => imports.push(self.lower_import(i)),
@@ -466,6 +498,8 @@ impl<'a> Lowerer<'a> {
             // operation-tool's breaker threshold (slice 52g-3c-5), so the
             // existing Tool-arm circuit-breaker machinery trips a
             // repeatedly-failing connector operation for free.
+            python: None,
+            python_approval_required: false,
             breaker: circuit_breaker,
             id: self.remap_def_id(id),
             name: op.name.name.clone(),
@@ -813,6 +847,8 @@ impl<'a> Lowerer<'a> {
         let effect_cost = numeric_profile_dimension(&profile, "cost");
         let effect_reversible = profile_is_reversible(&profile);
         IrTool {
+            python: None,
+            python_approval_required: false,
             breaker: t.breaker,
             id: self.remap_def_id(id),
             name: t.name.name.clone(),
@@ -1294,6 +1330,9 @@ impl<'a> Lowerer<'a> {
 
     fn extract_approve_action(&self, action: &Expr) -> (String, Vec<IrExpr>) {
         if let Expr::Call { callee, args, .. } = action {
+            if let Some((_, name)) = self.python_member(callee) {
+                return (name.clone(), args.iter().map(|arg| self.lower_expr(arg)).collect());
+            }
             if let Expr::Ident { name, .. } = &**callee {
                 let lowered_args: Vec<IrExpr> = args.iter().map(|a| self.lower_expr(a)).collect();
                 return (name.name.clone(), lowered_args);
@@ -1724,6 +1763,13 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    fn python_member(&self, callee: &Expr) -> Option<&(DefId, String)> {
+        let Expr::FieldAccess { target, field, .. } = callee else { return None };
+        let Expr::Ident { name, .. } = target.as_ref() else { return None };
+        let Binding::Decl(id) = self.bindings.get(&name.span)? else { return None };
+        self.python_members.get(&(*id, field.name.clone()))
+    }
+
     fn lower_call(&self, callee: &Expr, args: &[Expr]) -> IrExprKind {
         // `target.method(args)` rewrites to a regular call
         // with the receiver prepended. Method DefId comes from the
@@ -1735,6 +1781,13 @@ impl<'a> Lowerer<'a> {
             // catchall narrower below.)
         }
         if let Expr::FieldAccess { target, field, .. } = callee {
+            if let Some((def_id, callee_name)) = self.python_member(callee) {
+                return IrExprKind::Call {
+                    kind: IrCallKind::Tool { def_id: *def_id, effect: Effect::Safe },
+                    callee_name: callee_name.clone(),
+                    args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
+                };
+            }
             if let Some(rewrite) = self.try_imported_call(callee, field, args) {
                 return rewrite;
             }

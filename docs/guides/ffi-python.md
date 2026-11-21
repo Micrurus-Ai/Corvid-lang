@@ -1,12 +1,30 @@
-# FFI: Calling Python
+# Calling Python from a Corvid service
 
-Phase 30 ships PyO3-backed Python FFI. The runtime side (PyO3
-bridge, type conversion, sandbox enforcement, replay
-quarantine) is shipped and tested; the source-level
-`py.import(...)` / `module.call(...)` ergonomic surface is
-post-v1.0 — today Python interop enters Corvid through `tool`
-declarations whose host-side implementation wraps the PyO3
-runtime, the same pattern persistence + connectors follow.
+## Direct imports in an interpreted program
+
+```corvid
+import python "math" as numbers effects: pure:
+    fn gcd(left: Int, right: Int) -> Int
+
+agent main() -> Int:
+    return numbers.gcd(18, 12)
+```
+
+Run `corvid run main.cor` with a Python-enabled CLI and a compatible Python installation. The example prints `6`. Direct imports currently run on the interpreter target. Native compilation, WebAssembly and Python source generation report this target limitation. Install third-party modules on the deployment machine in the embedded interpreter's import path. Direct imports use synchronous Python functions. Values cross the boundary by copying, and Corvid checks the returned data against the declared type. A Python exception includes the function name and traceback. The import effect list applies to each member. To deploy your own Python module, install it or include its directory on the embedded interpreter's `PYTHONPATH`. Replay can supply the recorded result even when the module is absent. For an operation whose declared trust level requires approval, use the imported function's qualified name.
+
+```corvid
+effect reviewed:
+    trust: human_required
+
+import python "math" as numbers effects: reviewed:
+    fn gcd(left: Int, right: Int) -> Int
+
+agent main() -> Int:
+    approve numbers.gcd(18, 12)
+    return numbers.gcd(18, 12)
+```
+
+The approval statement shows the module, function and argument values to the reviewer. The following call executes after acceptance. Each approval covers one invocation with those argument values in the enclosing block. Bind computed arguments to locals first when both statements should use the same result.
 
 ## When to use it
 
@@ -67,23 +85,9 @@ mutates state irreversibly, and the typechecker will refuse to
 call it without a matching `approve` boundary (the existing
 `approval.dangerous_call_requires_token` rule applies).
 
-## Sandboxing
+## Host execution
 
-Python calls run in a host-side sandbox: filesystem-read allow-
-list, network deny-list, max wall time, max memory. Configure
-via environment variables on the running agent:
-
-```sh
-export CORVID_PY_ALLOW_FS_READ=data/,models/
-export CORVID_PY_DENY_NETWORK=true
-export CORVID_PY_MAX_WALL_TIME_SECONDS=30
-export CORVID_PY_MAX_MEMORY_MB=1024
-```
-
-The sandbox is a runtime check, not a compile-time guarantee.
-The `py_call_effect` row carries `trust: model_only` by default;
-declare the tool `dangerous` (and require `approve`) if the
-Python code does anything the operator should gate on.
+Direct imports run inside the host Python interpreter. The declared effect list is used by the Corvid checker and by the runtime's policy checks for recognized host calls. Use trusted Python code in this process.
 
 ## Shipping a Python tool with a Corvid service
 

@@ -8076,3 +8076,7 @@ Add `ui.stream_text("Answer", "/answer")` to the list of views passed to `ui.pag
 Implement a declared Corvid tool with `@tool("name")` in the project's root `tools.py`. To return a Corvid record, return a dictionary with its declared field names and types. The web archive includes this file. The destination supplies Python and any external packages the tool imports. See the packaged service example in `docs/guides/ffi-python.md`.
 
 A served application can also implement a Corvid tool with a Rust shared library. Supply the library alongside the web archive and select it with `--with-tools-cdylib`. The C and Rust interop guide describes the callback symbol, JSON arguments, allocation contract and library lifetime.
+
+### Calling an installed Python function
+
+Write `import python "math" as numbers effects: pure:` and indent a signature such as `fn gcd(left: Int, right: Int) -> Int` underneath it. Call `numbers.gcd(18, 12)` in an agent. The checker uses the declared parameters and return type. The interpreter copies arguments into Python, checks the returned value and reports Python exceptions at the call. Use `approve alias.member(args)` when the import declares an effect requiring approval. The Python interop guide includes both forms and explains packaging and replay.

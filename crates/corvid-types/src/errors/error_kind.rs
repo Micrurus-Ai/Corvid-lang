@@ -31,6 +31,7 @@ pub enum TypeErrorKind {
 
     /// Calling something that isn't callable (e.g. a primitive value).
     NotCallable { got: String },
+    InvalidQualifiedApproval,
 
     /// Field access on a non-struct value.
     NotAStruct { got: String },
@@ -76,6 +77,8 @@ pub enum TypeErrorKind {
 
     /// The return type declared doesn't match what the body returns.
     ReturnTypeMismatch { expected: String, got: String },
+
+    DirectPythonCallUnsupported { module: String, member: String },
 
     /// `alias.TypeName` type reference encountered, but the Corvid
     /// `.cor` import-resolver is not yet wired up. The grammar parses
@@ -502,6 +505,7 @@ impl TypeErrorKind {
             Self::UnknownField { struct_name, field } => {
                 format!("no field named `{field}` on type `{struct_name}`")
             }
+            Self::InvalidQualifiedApproval => "a qualified approval must name a declared Python import function".into(),
             Self::NotCallable { got } => {
                 format!("cannot call a value of type `{got}`")
             }
@@ -551,6 +555,9 @@ impl TypeErrorKind {
             }
             Self::ReturnTypeMismatch { expected, got } => {
                 format!("return type mismatch: declared `{expected}`, but the body returns `{got}`")
+            }
+            Self::DirectPythonCallUnsupported { module, member } => {
+                format!("Python function `{module}.{member}` has no declared signature")
             }
             Self::CorvidImportNotYetResolved { alias, name } => {
                 format!(
@@ -912,6 +919,7 @@ impl TypeErrorKind {
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),
+            Self::InvalidQualifiedApproval => Some("use `approve alias.member(args)` with the same import alias and function as the call".into()),
             Self::NotCallable { .. } => Some(
                 "only tools, agents, prompts, and imported functions can be called".into(),
             ),
@@ -953,6 +961,9 @@ impl TypeErrorKind {
             Self::ReturnTypeMismatch { expected, .. } => Some(format!(
                 "change the final `return` to produce a `{expected}`, or update the declared return type"
             )),
+            Self::DirectPythonCallUnsupported { .. } => Some(
+                "declare a bodyless `fn` signature in the indented Python import block".into(),
+            ),
             Self::CorvidImportNotYetResolved { .. } => Some(
                 "for now, use an unqualified local type or wait for cross-file Corvid import resolution to land"
                     .into(),

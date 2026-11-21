@@ -43,6 +43,19 @@ impl Runtime {
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
+        self.dispatch_tool(name, args, None).await
+    }
+
+    pub async fn call_imported_python(
+        &self, module: &str, member: &str, effects: &[String], args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let name = format!("python:{module}.{member}");
+        self.dispatch_tool(&name, args, Some((module, member, effects))).await
+    }
+
+    async fn dispatch_tool(
+        &self, name: &str, args: Vec<serde_json::Value>, python: Option<(&str, &str, &[String])>,
+    ) -> Result<serde_json::Value, RuntimeError> {
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
                 ts_ms: now_ms(),
@@ -62,6 +75,24 @@ impl Runtime {
             self.dispatch_stdlib_secret_tool(&args)
         } else if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)
+        } else if let Some((module, member, effects)) = python {
+            #[cfg(feature = "python")]
+            {
+                let policy = crate::PythonSandboxProfile::new(effects.iter().cloned());
+                let module = module.to_owned();
+                let member = member.to_owned();
+                let args = args.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::PythonRuntime::new().call_with_decoder(
+                        &module, &member, &args, &policy, crate::python_ffi::typed_python_result,
+                    )
+                }).await.map_err(|e| RuntimeError::ToolFailed { tool: name.into(), message: e.to_string() })?
+            }
+            #[cfg(not(feature = "python"))]
+            {
+                let _ = (module, member, effects);
+                Err(RuntimeError::ToolFailed { tool: name.into(), message: "this runtime was built without Python support".into() })
+            }
         } else if is_stdlib_cache_tool(name) {
             self.dispatch_stdlib_cache_tool(name, &args)
         } else if is_stdlib_io_tool(name) {

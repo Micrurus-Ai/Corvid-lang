@@ -1594,6 +1594,14 @@ impl<'ir> Interpreter<'ir> {
                 let json_args: Vec<serde_json::Value> =
                     arg_values.iter().map(value_to_json).collect();
 
+                if tool.python_approval_required && !self.env.consume_python_approval(callee_name, &json_args) {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Runtime(corvid_runtime::RuntimeError::ApprovalDenied {
+                            action: callee_name.into(),
+                        }), span,
+                    ));
+                }
+
                 // Runtime confidence gate: if the tool has
                 // `trust: autonomous_if_confident(T)` in its declared
                 // effects, check that composed input confidence >= T.
@@ -1783,10 +1791,11 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )?
                 } else {
-                    let outcome = self
-                        .runtime
-                        .call_tool(callee_name, json_args)
-                        .await
+                    let outcome = if let Some((module, member)) = &tool.python {
+                        self.runtime.call_imported_python(module, member, &tool.effect_names, json_args).await
+                    } else {
+                        self.runtime.call_tool(callee_name, json_args).await
+                    }
                         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span));
                     // Circuit-breaker accounting (slice 50k): a
                     // runtime error or an Err-envelope result counts

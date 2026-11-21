@@ -95,6 +95,13 @@ impl<'a> Checker<'a> {
     fn walk_fn_purity_expr(&mut self, fn_name: &str, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, span } => {
+                if let Some((import, function)) = crate::effects::python_call_target(
+                    callee, self.file, self.symbols, self.bindings,
+                ) {
+                    self.fn_purity_violation(
+                        fn_name, &format!("a call to Python function `{}.{}`", import.module, function.name.name), *span,
+                    );
+                }
                 if let Expr::Ident { name, .. } = callee.as_ref() {
                     match self.bindings.get(&name.span) {
                         Some(Binding::Decl(def_id)) => {

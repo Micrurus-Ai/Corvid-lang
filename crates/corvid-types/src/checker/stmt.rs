@@ -453,6 +453,24 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_approve(&mut self, action: &Expr) {
         if let Expr::Call { callee, args, .. } = action {
+            if let Expr::FieldAccess { target, field, .. } = callee.as_ref() {
+                if let Some((_, signature)) = crate::effects::python_call_target(
+                    callee, self.file, self.symbols, self.bindings,
+                ) {
+                    let Expr::Ident { name, .. } = target.as_ref() else { unreachable!() };
+                    let label = format!("{}.{}", name.name, field.name);
+                    self.check_args_against_params(&label, &signature.params, args);
+                    let approval = Approval { label, arity: args.len() };
+                    self.approvals.push(approval.clone());
+                    self.approvals_seen_in_agent.push(approval);
+                } else {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::InvalidQualifiedApproval,
+                        callee.span(),
+                    ));
+                }
+                return;
+            }
             if let Expr::Ident { name, .. } = &**callee {
                 let approval = Approval {
                     label: name.name.clone(),

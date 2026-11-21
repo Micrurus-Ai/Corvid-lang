@@ -180,6 +180,9 @@ fn is_native_result_type(ty: &Type) -> bool {
 /// else the first reason found (early exit - one reason is enough to
 /// route the caller to the interpreter tier).
 pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
+    if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
+        return Err(NotNativeReason::PythonImport { module: module.clone() });
+    }
     for import in &ir.imports {
         match import.source {
             IrImportSource::Python => {

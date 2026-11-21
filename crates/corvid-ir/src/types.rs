@@ -267,6 +267,9 @@ pub struct IrField {
 /// A tool declaration (no body — externally implemented).
 #[derive(Debug, Clone)]
 pub struct IrTool {
+    /// Python module and member implementing this typed host call.
+    pub python: Option<(String, String)>,
+    pub python_approval_required: bool,
     /// Circuit breaker threshold (slice 50k).
     pub breaker: Option<u64>,
     pub id: DefId,

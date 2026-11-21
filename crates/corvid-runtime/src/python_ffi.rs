@@ -34,6 +34,17 @@ impl PythonRuntime {
         args: &[Value],
         policy: &PythonSandboxProfile,
     ) -> Result<Value, RuntimeError> {
+        self.call_with_decoder(module, function, args, policy, py_to_json)
+    }
+
+    pub(crate) fn call_with_decoder(
+        &self,
+        module: &str,
+        function: &str,
+        args: &[Value],
+        policy: &PythonSandboxProfile,
+        decode: fn(&Bound<'_, PyAny>) -> PyResult<Value>,
+    ) -> Result<Value, RuntimeError> {
         policy.check_call(module, function)?;
         Python::with_gil(|py| {
             let result = (|| -> PyResult<Value> {
@@ -45,7 +56,7 @@ impl PythonRuntime {
                     .collect::<PyResult<Vec<_>>>()?;
                 let tuple = PyTuple::new_bound(py, py_args);
                 let result = function_obj.call1(tuple)?;
-                py_to_json(&result)
+                decode(&result)
             })();
             result.map_err(|err| python_error(py, module, function, err))
         })
@@ -133,6 +144,18 @@ pub(crate) fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
             dict.into_py(py)
         }
     })
+}
+
+/// A typed import accepts JSON-shaped Python values. Let Python's encoder
+/// diagnose unsupported objects and cycles before decoding the declared type.
+pub(crate) fn typed_python_result(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let py = value.py();
+    let options = PyDict::new_bound(py);
+    options.set_item("allow_nan", false)?;
+    let json: String = py.import_bound("json")?.getattr("dumps")?
+        .call((value,), Some(&options))?.extract()?;
+    serde_json::from_str(&json)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 pub(crate) fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {

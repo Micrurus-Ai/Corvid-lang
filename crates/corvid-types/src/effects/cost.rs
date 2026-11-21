@@ -163,7 +163,12 @@ impl<'a> CostAnalyzer<'a> {
                 action: value,
                 span,
             } => {
-                let mut estimate = self.analyze_expr(value, agent_name);
+                let mut estimate = match (stmt, value) {
+                    (corvid_ast::Stmt::Approve { .. }, corvid_ast::Expr::Call { args, .. }) => {
+                        self.analyze_items(args, agent_name, "approval arguments", *span)
+                    }
+                    _ => self.analyze_expr(value, agent_name),
+                };
                 estimate.tree.name = "stmt".into();
                 estimate.tree.kind = CostNodeKind::Sequence;
                 estimate.tree.costs = estimate.dimensions.clone();
@@ -572,26 +577,7 @@ impl<'a> CostAnalyzer<'a> {
                     bounded,
                 }
             }
-            corvid_ast::Expr::List { items, span } => {
-                let mut children = Vec::new();
-                let mut warnings = Vec::new();
-                let mut bounded = true;
-                for item in items {
-                    let estimate = self.analyze_expr(item, agent_name);
-                    if !tree_is_zero(&estimate.tree) {
-                        children.push(estimate.tree);
-                    }
-                    warnings.extend(estimate.warnings);
-                    bounded &= estimate.bounded;
-                }
-                let tree = sequence_tree("list", CostNodeKind::Sequence, children, *span);
-                CostEstimate {
-                    dimensions: tree.costs.clone(),
-                    tree,
-                    warnings,
-                    bounded,
-                }
-            }
+            corvid_ast::Expr::List { items, span } => self.analyze_items(items, agent_name, "list", *span),
             corvid_ast::Expr::TryPropagate { inner, .. } => self.analyze_expr(inner, agent_name),
             corvid_ast::Expr::TrustBoundary { inner, .. } => self.analyze_expr(inner, agent_name),
             corvid_ast::Expr::TryRetry { body, span, .. } => {
@@ -660,12 +646,45 @@ impl<'a> CostAnalyzer<'a> {
         }
     }
 
+    fn analyze_items(&mut self, items: &[corvid_ast::Expr], agent_name: &str, label: &str, span: corvid_ast::Span) -> CostEstimate {
+        let mut children = Vec::new();
+        let mut warnings = Vec::new();
+        let mut bounded = true;
+        for item in items {
+            let estimate = self.analyze_expr(item, agent_name);
+            if !tree_is_zero(&estimate.tree) {
+                children.push(estimate.tree);
+            }
+            warnings.extend(estimate.warnings);
+            bounded &= estimate.bounded;
+        }
+        let tree = sequence_tree(label, CostNodeKind::Sequence, children, span);
+        CostEstimate {
+            dimensions: tree.costs.clone(),
+            tree,
+            warnings,
+            bounded,
+        }
+    }
+
     fn call_cost_tree(
         &mut self,
         callee: &corvid_ast::Expr,
         agent_name: &str,
         span: corvid_ast::Span,
     ) -> Option<CostTreeNode> {
+        if let Some((import, function)) = super::python_call_target(
+            callee, self.file, &self.resolved.symbols, &self.resolved.bindings,
+        ) {
+            return Some(effect_node_for_decl(
+                &format!("{}.{}", import.module, function.name.name),
+                CostNodeKind::Tool,
+                &import.effect_row,
+                Effect::Safe,
+                self.registry,
+                span,
+            ));
+        }
         let corvid_ast::Expr::Ident { name, .. } = callee else {
             return None;
         };
