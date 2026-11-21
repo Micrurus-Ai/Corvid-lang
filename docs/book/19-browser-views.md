@@ -109,6 +109,20 @@ Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an e
 
 The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.
 
+### Display state in more than one view
+
+`ui.shared_int_state(name, label, initial, controls)` creates an integer control with a page-wide name. Give each owner a unique name. `ui.state_output(name, label)` adds a labeled, read-only display anywhere on that page. It picks up the initial value when the browser handlers load and updates after each successful action. Reloading the page restores the initial value.
+
+For example, place the quantity control in a product card and the item count in a header. Use the `increment` browser handler shown above.
+
+```corvid-fragment
+server shop:
+    route GET "/" -> html:
+        header = ui.state_output("items", "Cart items")
+        quantity = ui.shared_int_state("items", "Quantity", 0, [ui.action("Add one", "increment")])
+        return ui.interactive_page("Shop", [header, quantity])
+```
+
 ## Serving a form and its result
 
 A route declared with `-> html` returns a Corvid `String`. The server sends it as an HTML document. Use a typed query record to validate submitted values before the result page renders.

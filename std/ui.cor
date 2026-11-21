@@ -44,6 +44,13 @@ public fn action(label: String, handler: String) -> View:
 public fn int_state(label: String, initial: Int, controls: List<View>) -> View:
     return View("<fieldset data-corvid-state><legend>" + escaped(label) + "</legend><output>" + initial.to_string() + "</output>" + children(controls) + "<span role=\"alert\"></span></fieldset>")
 
+# Give one integer control a page-wide name so other views can display its value.
+public fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View:
+    return View("<div data-corvid-owner=\"" + escaped(name) + "\">" + int_state(label, initial, controls).html + "</div>")
+
+public fn state_output(name: String, label: String) -> View:
+    return View("<label>" + escaped(label) + " <output data-corvid-read=\"" + escaped(name) + "\"></output></label>")
+
 public fn interactive_page(title: String, content: List<View>) -> String:
     loader = View("<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script>")
     return page(title, content + [loader])

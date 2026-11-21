@@ -7,6 +7,12 @@ if (typeof document !== "undefined" && Array.from(
 
 async function bindStateControls() {
   const panels = document.querySelectorAll("fieldset[data-corvid-state]");
+  const readers = new Map();
+  for (const output of document.querySelectorAll("output[data-corvid-read]")) {
+    const name = output.dataset.corvidRead;
+    if (!readers.has(name)) readers.set(name, []);
+    readers.get(name).push(output);
+  }
   let handlers;
   try {
     handlers = await instantiate();
@@ -41,6 +47,9 @@ async function bindStateControls() {
       continue;
     }
     let value = BigInt(output.value);
+    const name = panel.parentElement.dataset.corvidOwner;
+    const mirrors = readers.get(name) ?? [];
+    for (const mirror of mirrors) mirror.value = output.value;
     for (const button of panel.querySelectorAll("button[data-corvid-action]")) {
       if (button.closest("fieldset[data-corvid-state]") !== panel) continue;
       const name = button.dataset.corvidAction;
@@ -52,6 +61,7 @@ async function bindStateControls() {
         try {
           value = handlers[name](value);
           output.value = value.toString();
+          for (const mirror of mirrors) mirror.value = output.value;
         } catch (error) {
           alert.textContent = "Corvid handler " + name + " failed: " + error.message;
         }

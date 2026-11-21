@@ -390,6 +390,8 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn page(title: String, content: List<View>) -> String`
 - `fn action(label: String, handler: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`
+- `fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View`
+- `fn state_output(name: String, label: String) -> View`
 - `fn interactive_page(title: String, content: List<View>) -> String`
 - `fn text_state(label: String, initial: String, handler: String) -> View`
 - `fn query_form(path: String, controls: List<View>) -> View`
