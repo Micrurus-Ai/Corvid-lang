@@ -87,14 +87,19 @@ parameters from the server's own JSON schemas and arguments built via
 the `std/json` builder (escaping is runtime-handled, never string
 concatenation):
 
-```corvid skip
+```corvid
 # GENERATED — regenerate with `corvid mcp regen github`.
+import "../std/mcp" use mcp_call
+import "../std/json" use json_object_new, json_object_set_string, json_object_set_int, json_object_finish
+
 public agent search_issues(limit: Int, query: String) -> Result<String, String>:
     args = json_object_new()
     args = json_object_set_int(args, "limit", limit)
     args = json_object_set_string(args, "query", query)
     return mcp_call("github", "search-issues", json_object_finish(args))
 ```
+
+Run `corvid check src/mcp/github.cor` from the project root to check the generated module against the bundled standard library.
 
 Servers are **untrusted by default** — every call through the
 generated wrappers stays approval-gated until you add

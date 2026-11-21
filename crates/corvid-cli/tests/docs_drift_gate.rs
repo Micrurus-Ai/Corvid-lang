@@ -113,17 +113,13 @@ fn extract_corvid_blocks(file: &Path) -> Vec<CodeBlock> {
     blocks
 }
 
-fn run_corvid_check(source: &str) -> Result<(), String> {
-    let tmp = tempfile::Builder::new()
-        .prefix("docs_drift_gate_")
-        .suffix(".cor")
-        .tempfile()
-        .map_err(|e| format!("create temp .cor: {e}"))?;
-    fs::write(tmp.path(), source).map_err(|e| format!("write temp .cor: {e}"))?;
+fn run_corvid_check(project: &Path, source: &str) -> Result<(), String> {
+    let example = project.join("src/examples/guide.cor");
+    fs::write(&example, source).map_err(|e| format!("write guide example: {e}"))?;
     let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
-        .current_dir(workspace_root())
+        .current_dir(project)
         .arg("check")
-        .arg(tmp.path())
+        .arg(example)
         .output()
         .map_err(|e| format!("spawn corvid check: {e}"))?;
     if output.status.success() {
@@ -172,6 +168,16 @@ fn every_corvid_block_in_guides_compiles_clean() {
     let exempt: std::collections::HashMap<&str, &str> =
         EXEMPT_GUIDES.iter().copied().collect();
 
+    let temp = tempfile::tempdir().expect("create guide workspace");
+    let scaffold = Command::new(env!("CARGO_BIN_EXE_corvid"))
+        .current_dir(temp.path())
+        .args(["new", "guide"])
+        .output()
+        .expect("scaffold guide project");
+    assert!(scaffold.status.success(), "{scaffold:?}");
+    let project = temp.path().join("guide");
+    fs::create_dir_all(project.join("src/examples")).expect("create example module directory");
+
     let mut failures: Vec<String> = Vec::new();
     for block in &blocks {
         let file_name = block
@@ -200,7 +206,7 @@ fn every_corvid_block_in_guides_compiles_clean() {
             ));
             continue;
         }
-        if let Err(err) = run_corvid_check(&block.body) {
+        if let Err(err) = run_corvid_check(&project, &block.body) {
             failures.push(format!(
                 "{}:{} did not pass `corvid check`:\n{err}",
                 block.file.display(),
