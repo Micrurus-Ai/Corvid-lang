@@ -390,6 +390,10 @@ pub(crate) fn cmd_serve(
         // (slice 51r): the Application Contract at the well-known path
         // and a standard OpenAPI 3.1 document.
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route("/.well-known/corvid/stream.js", on(MethodFilter::GET, || async {
+            ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                include_str!("serve_cmd/stream.js"))
+        }))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
     // Serve only the compiled browser entrypoint and its companion Wasm.
@@ -427,6 +431,9 @@ pub(crate) fn cmd_serve(
                 .find(|a| a.name == route.handler_agent)
                 .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default();
+            if route.method == HttpMethod::Get && route.path == "/.well-known/corvid/stream.js" {
+                anyhow::bail!("route path `{}` is reserved for the browser streaming module", route.path);
+            }
             let meta = Arc::new(RouteMeta {
                 form_encoded: route.form_encoded,
                 response_kind: route.response_kind,

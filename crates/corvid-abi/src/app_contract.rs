@@ -894,6 +894,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
         response_type: type_ref_name(&r.response.ty),
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
+            corvid_ast::RouteResponseKind::Json if type_ref_head_is(&r.response.ty, "Stream") => Some("text/event-stream".into()),
             corvid_ast::RouteResponseKind::Json => None,
         },
         // A route inherits the permission surface of its effect row;

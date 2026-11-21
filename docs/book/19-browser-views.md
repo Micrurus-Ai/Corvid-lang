@@ -145,3 +145,56 @@ The save example uses a public route. Cookie-authenticated mutations also requir
 The separate preview route accepts the same record as JSON. Posting `{"term":"meeting","limit":2}` to `/preview` returns its rendered page.
 
 Open `/openapi.json` on the running service to inspect the form's contract. In this example, the query and POST body both reference the `Search` schema, whose properties are `term` (string) and `limit` (integer). Use `corvid contract openapi src/main.cor --out -` to inspect the same schema before starting the server. Imported records keep their nested field definitions and field constraints. Follow the emitted schema reference when different modules declare the same type name.
+
+## Displaying a streamed answer
+
+```corvid-fragment
+# src/main.cor
+import "./std/ui" as ui
+
+prompt answer(topic: String) -> Stream<String>:
+    "{topic}"
+
+server help:
+    route GET "/" -> html:
+        return ui.page("Help", [ui.stream_text("Answer", "/answer")])
+
+    route GET "/answer" -> json Stream<String>:
+        return answer("Explain the search feature")
+```
+
+Set `CORVID_MODEL` to your streaming provider and run `corvid serve src/main.cor`. Open the root page and press Start. The answer appears as chunks arrive. Cancel closes the connection and keeps the text already received. If the connection fails, Start again makes a fresh request and clears the old answer. Leaving the page closes an active stream. The path argument is an application-relative GET URL on the same origin. Each message must carry a JSON string. The Corvid server sends the completion and error events and serves the browser module.
+
+## Packaging an interactive application
+
+Place the server in `src/main.cor`. Use `ui.link` with a trusted application path to navigate between pages.
+
+```corvid-fragment
+import "./std/ui" as ui
+
+prompt answer(topic: String) -> Stream<String>:
+    "{topic}"
+
+server notes:
+    route GET "/" -> html:
+        return ui.page("Notes", [ui.link("Open workspace", "/notes/workspace")])
+
+    route GET "/notes/workspace" -> html:
+        count = ui.int_state("Notes reviewed", 0, [ui.action("Review", "increment")])
+        answer_view = ui.stream_text("Answer", "/answer")
+        return ui.interactive_page("Workspace", [count, answer_view, ui.link("Home", "/")])
+
+    route GET "/answer" -> json Stream<String>:
+        return answer("Explain the search feature")
+```
+
+Define the button handler in `src/events.cor`.
+
+```corvid
+agent increment(current: Int) -> Int:
+    return current + 1
+```
+
+Run `corvid build src/main.cor --target web` from the project root. The build checks the staged application, compiles the browser handler, and writes `target/web.tar`. Extract the archive into an empty directory. From that directory, set the model configuration and run `corvid serve src/main.cor` with the matching Corvid CLI. Open the root page and follow **Open workspace** to use the counter and the streamed answer.
+
+The archive includes Corvid and Python source files under `src/`, the project manifest and lockfile when present, root `tools.py` when present, SQL files under `migrations/`, and the compiled JavaScript and WebAssembly pair when `src/events.cor` exists. The CLI supplies the streaming module. Supply external providers, runtime credentials, host dependencies and application data in the destination environment.

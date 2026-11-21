@@ -8066,3 +8066,7 @@ Declare a `mock` with the prompt's name, parameters and return type to give ordi
 ### Binding a browser form to its handler
 
 Use `form_for("GET /search", request, "Search")` for a route declared with `query Search`, or `form_for("POST /save", request, "Save")` for a route declared with `form Search`. Both forms derive their field names from the record and return an HTML string. Wrap it in `View(...)` to compose it with other controls. The GET handler reads `query`. The POST handler reads `body`. The server converts the submitted strings and checks field refinements before running the handler. The example in `docs/book/19-browser-views.md` uses one imported record for both forms.
+
+### Showing a streamed answer in a page
+
+Add `ui.stream_text("Answer", "/answer")` to the list of views passed to `ui.page` or `ui.interactive_page`. The path names a GET route returning `Stream<String>`. Start opens the request, Cancel keeps the text already on screen, and Start again begins a fresh answer. Leaving the page closes the request. The streaming and packaging examples in `docs/book/19-browser-views.md` show the prompt, route and page together.

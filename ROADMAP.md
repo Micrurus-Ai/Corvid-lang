@@ -83,7 +83,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - The packaged page and its compiled handlers passed pointer, keyboard and text-input checks in Edge.
 - [x] F02. Link frontend actions to typed backend handlers. Changing a shared record must identify affected callers at compile time.
   - Submitted GET and POST forms in Edge using a shared imported record, followed its OpenAPI reference, and verified its field names. A renamed field failed checking. Malformed input, a failed refinement and JSON sent to the form route all preserved the previous saved value.
-- [ ] F03. Deliver streamed AI results in the UI with loading, cancellation, error and reconnect behavior. Verify navigation, asset builds and a production frontend bundle.
+- [x] F03. Deliver streamed AI results in the UI with loading, cancellation, error and reconnect behavior. Verify navigation, asset builds and a production frontend bundle.
+  - In Edge, the documented page streamed Unicode text from a local model responder. Cancellation and navigation closed the upstream connection. A fresh start recovered after connection and provider failures.
+  - Built identical web archives twice, verified a failed handler build preserved the archive, and ran the extracted app with its own project root. Its nested page loaded the compiled handler and streaming control.
 
 **6. Interoperability, performance and distribution**
 
