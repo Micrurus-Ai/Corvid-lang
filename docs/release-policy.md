@@ -20,6 +20,8 @@ The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11
 
 For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. The workspace CI job caches downloaded dependencies and builds the compiler and tests from the checked-out source. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
 
+When reviewing GitHub dependency alerts for a candidate, compare the advisory range with the lockfile at the candidate revision. For Rust dependencies, check whether the crate is a development dependency and inspect the target-specific inventory. For the editor extension, inspect its npm lockfile and the dependencies inside the packaged VSIX. The Wasm backend uses Wasmtime in its test suite.
+
 ## Channels
 
 ### Nightly
