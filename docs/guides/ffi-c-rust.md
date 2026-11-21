@@ -107,6 +107,12 @@ Treat the cdylib as a normal `extern "C"` library. The
 `corvid-abi` crate ships `CorvidString` + the helper types so a
 Rust embedder doesn't need to redeclare them by hand.
 
+## Using a Rust tool in a packaged service
+
+Ship the platform's tool library alongside the extracted Corvid application. For a Windows library named `host.dll`, run `corvid serve src/main.cor --with-tools-cdylib host.dll` from the extraction directory. A declared tool named `echo_string` uses the exported symbol `__corvid_tool_echo_string`. A missing library fails at startup. A missing symbol leaves that tool without a handler and a call to it fails the request.
+
+The callback receives a borrowed UTF-8 JSON array of arguments and its byte length. Return one JSON value in a NUL-terminated string allocated with Rust's `CString::into_raw` and a compatible allocator. The runtime takes ownership using `CString::from_raw`. Returning a null pointer reports failure. The service keeps the loaded library alive for the process lifetime.
+
 ## Pointers to the registry contracts
 
 | Property | Registry id | Class | Where |

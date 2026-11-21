@@ -91,6 +91,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 - [ ] I01. Verify optional interop for existing host libraries across the supported boundaries. Document type conversion, lifetime, errors and packaging for each supported route.
   - [x] Served an extracted web archive with a synchronous Python standard-library tool. Verified record conversion, a mismatched return field, a Python exception and a subsequent successful request.
+  - [x] Loaded a separate Rust tool DLL beside an extracted Windows app. A Unicode value round-tripped, a missing DLL failed startup, and a missing symbol failed one request while subsequent valid calls succeeded. The approval-and-resume integration passed.
 - [ ] P01. Profile CLI startup, checking, native compilation, list slicing, local HTTP requests and model streams. Record repeatable baselines and validate measured improvements against unchanged results.
 - [ ] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.
   - [x] The [six native candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720) passed the installer-to-application check. The install guide records their tested Python runtimes.

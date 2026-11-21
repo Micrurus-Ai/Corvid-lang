@@ -8074,3 +8074,5 @@ Add `ui.stream_text("Answer", "/answer")` to the list of views passed to `ui.pag
 ### Shipping a host tool written in Python
 
 Implement a declared Corvid tool with `@tool("name")` in the project's root `tools.py`. To return a Corvid record, return a dictionary with its declared field names and types. The web archive includes this file. The destination supplies Python and any external packages the tool imports. See the packaged service example in `docs/guides/ffi-python.md`.
+
+A served application can also implement a Corvid tool with a Rust shared library. Supply the library alongside the web archive and select it with `--with-tools-cdylib`. The C and Rust interop guide describes the callback symbol, JSON arguments, allocation contract and library lifetime.
