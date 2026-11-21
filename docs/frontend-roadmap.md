@@ -14,6 +14,17 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## What to build first
 
+### How developers should experience Corvid
+
+| Design goal | Trial for the first working application |
+| --- | --- |
+| Easy to read | Give an unfamiliar developer one screen and its handler. Before running it, ask them to point to the network call, the data sent to the model and the line that saves an edit. Compare their prediction with the actual behavior. |
+| Easy to write | From the documented starter, ask the developer to add a field and show it on screen. Track time to a working change, duplicated declarations, documentation lookups and places where they need help. Try both candidate view styles on the same task. |
+| Easy to understand when something breaks | Change the type of the field. Ask the developer to use the diagnostic to find the incompatible caller and fix it. Separately, interrupt a request and ask them to explain what the user sees and what was saved. |
+| Reliable during collaboration | Have a model propose edits to three independently editable records. Display the proposed differences in the existing view. While the preview is open, manually change one record. Applying all three should save the two eligible edits and identify the conflict, under an application policy that permits partial application. Retry the request and replay the scenario as a test with a recorded model response. |
+
+Use existing language constructs for the trial. If developers repeatedly misunderstand the same line, revise the API, naming or grammar and repeat the task with fresh readers. Document each adopted function or grammar rule with a runnable example in the learning guide. The three-record exercise extends the single-record application once its basic save and reload path works.
+
 **Design goal for shared actions.** Define an operation once in Corvid. From its typed inputs, outcomes and explicit exposure, the toolchain should derive browser bindings, server boundary validation and the assistant's action schema. The developer owns the handler and its authorization rules. An exposed input or result can be narrower than an internal database record. The editor should let the developer follow a UI event or assistant binding back to the handler that can change application state.
 
 Use a change to a real action as an acceptance test for the component and action prototype. For example, replace a required integer `quantity` with a record containing `amount` and `unit`. Use equivalent types in the independent developer's chosen application.
