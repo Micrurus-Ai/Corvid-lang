@@ -8,6 +8,113 @@ use corvid_syntax::{lex, parse_file};
 use lsp_types::{Location, Position, Range, SymbolInformation, SymbolKind, Url};
 use std::collections::BTreeSet;
 
+mod rename;
+pub(crate) use rename::workspace_rename;
+
+pub(crate) struct ImportedSymbol {
+    pub location: Location,
+    pub hover: Option<lsp_types::Hover>,
+}
+
+pub(crate) fn local_module_source<'a>(
+    documents: &'a std::collections::HashMap<Url, String>,
+    importer: &Url,
+    module: &str,
+) -> Option<(Url, std::borrow::Cow<'a, str>)> {
+    use std::borrow::Cow;
+    let path = corvid_resolve::resolve_import_path(&importer.to_file_path().ok()?, module);
+    let uri = Url::from_file_path(&path).ok()?;
+    if let Some(text) = documents.get(&uri) {
+        return Some((uri, Cow::Borrowed(text)));
+    }
+    let canonical = path.canonicalize().ok()?;
+    for (open, text) in documents {
+        if open.to_file_path().ok().and_then(|p| p.canonicalize().ok()).as_ref() == Some(&canonical) {
+            return Some((open.clone(), Cow::Borrowed(text)));
+        }
+    }
+    Some((uri, Cow::Owned(std::fs::read_to_string(path).ok()?)))
+}
+
+/// Follow a selective import or a module-qualified expression. The receiver
+/// must bind to the import, since a parameter can shadow the module name.
+pub(crate) fn imported_symbol_at(
+    documents: &std::collections::HashMap<Url, String>,
+    uri: &Url,
+    source: &str,
+    position: Position,
+) -> Option<ImportedSymbol> {
+    use corvid_ast::ImportSource;
+    use corvid_syntax::TokKind;
+    let offset = lsp_position_to_byte(source, position);
+    let tokens = lex(source).ok()?;
+    if !tokens.iter().any(|token| matches!(token.kind, TokKind::KwImport)) {
+        return None;
+    }
+    let index = tokens
+        .iter()
+        .position(|t| matches!(t.kind, TokKind::Ident(_)) && contains(t.span, offset))?;
+    let token = &tokens[index];
+    let TokKind::Ident(name) = &token.kind else {
+        return None;
+    };
+    let (file, _) = parse_file(&tokens);
+    let resolved = resolve(&file);
+    let bound_to = |span, kind, binding: &str| {
+        matches!(resolved.bindings.get(&span),
+        Some(Binding::Decl(id)) if resolved.symbols.get(*id).kind == kind
+            && resolved.symbols.lookup_def(binding) == Some(*id))
+    };
+    for decl in &file.decls {
+        let Decl::Import(import) = decl else { continue };
+        if import.source != ImportSource::Corvid {
+            continue;
+        }
+        let selective = import.use_items.iter().find(|item| {
+            let local = item.alias.as_ref().unwrap_or(&item.name);
+            token.span == item.name.span
+                || token.span == local.span
+                || (local.name == *name && bound_to(token.span, DeclKind::ImportedUse, name))
+        });
+        let member = if let Some(item) = selective {
+            &item.name.name
+        } else if index >= 2
+            && matches!(tokens[index - 1].kind, TokKind::Dot)
+            && import.alias.as_ref().is_some_and(|alias| {
+                bound_to(tokens[index - 2].span, DeclKind::Import, &alias.name)
+            })
+        {
+            name
+        } else {
+            continue;
+        };
+        let (target_uri, text) = local_module_source(documents, uri, &import.module)?;
+        let target = text.as_ref();
+        let (file, _) = parse_file(&lex(target).ok()?);
+        let resolved = resolve(&file);
+        let exports = corvid_resolve::collect_public_exports(&file, &resolved);
+        let export = exports.get(member)?;
+        let definition = top_level_definitions(&file, &resolved)
+            .into_iter()
+            .find(|d| d.def_id == export.def_id)?;
+        let span = definition.span;
+        let range = byte_span_to_lsp_range(target, span.start, span.end);
+        let hover = crate::hover::declaration_hover(target, &file, span.start).map(|mut hover| {
+            hover.range = Some(byte_span_to_lsp_range(
+                source,
+                token.span.start,
+                token.span.end,
+            ));
+            hover
+        });
+        return Some(ImportedSymbol {
+            location: Location::new(target_uri, range),
+            hover,
+        });
+    }
+    None
+}
+
 pub fn definition_range_at(source: &str, position: Position) -> Option<Range> {
     let offset = lsp_position_to_byte(source, position);
     let index = NavigationIndex::build(source)?;
@@ -361,6 +468,27 @@ fn is_identifier(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_follow_public_declarations_in_the_open_module() {
+        let root = std::env::temp_dir().join("corvid-lsp-navigation");
+        let main = Url::from_file_path(root.join("main.cor")).unwrap();
+        let math = Url::from_file_path(root.join("math.cor")).unwrap();
+        let documents = [(math.clone(), "fn hidden() -> Int:\n    return 0\npublic fn twice(n: Int) -> Int:\n    return n * 2\n".into())].into();
+        let source = "import \"./math\" as m use twice as double\nagent main() -> Int:\n    return m.twice(double(2))\n";
+        for (line, col) in [(0, 25), (0, 35), (2, 14), (2, 21)] {
+            let symbol = imported_symbol_at(&documents, &main, source, Position::new(line, col)).unwrap();
+            assert_eq!(symbol.location.uri, math);
+            assert_eq!(symbol.location.range.start, Position::new(2, 10));
+            let hover = symbol.hover.unwrap();
+            assert_eq!(hover.range.unwrap().start.line, line);
+            assert!(format!("{:?}", hover.contents).contains("fn twice(n: Int) -> Int"));
+        }
+        let private = source.replace("m.twice(", "m.hidden(");
+        assert!(imported_symbol_at(&documents, &main, &private, Position::new(2, 14)).is_none());
+        let shadow = "import \"./math\" as m\nagent read(m: Int) -> Int:\n    return m.twice(2)\n";
+        assert!(imported_symbol_at(&documents, &main, shadow, Position::new(2, 14)).is_none());
+    }
 
     fn range_text<'a>(source: &'a str, range: Range) -> &'a str {
         let start = offset_for_position(source, range.start);

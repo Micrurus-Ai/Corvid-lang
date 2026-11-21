@@ -27,7 +27,7 @@
 //!   6. `corvid_release` on a refcount=1 allocation dispatches the
 //!      destructor exactly once; on rc>1 does not.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::{Cell, RefCell};
 
 /// Layout mirror of the C `corvid_typeinfo` struct. `repr(C)` so the
 /// in-memory layout matches what alloc.c expects.
@@ -87,10 +87,14 @@ fn string_typeinfo_has_expected_shape() {
     }
 }
 
-static DESTROYED_COUNT: AtomicUsize = AtomicUsize::new(0);
+// The C runtime invokes these callbacks synchronously on the calling test thread.
+thread_local! {
+    static DESTROYED_COUNT: Cell<usize> = const { Cell::new(0) };
+    static MARKED_POINTERS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
 
 unsafe extern "C" fn counting_destroy(_payload: *mut u8) {
-    DESTROYED_COUNT.fetch_add(1, Ordering::SeqCst);
+    DESTROYED_COUNT.set(DESTROYED_COUNT.get() + 1);
 }
 
 unsafe extern "C" fn empty_trace(
@@ -113,14 +117,14 @@ static TEST_TI_WITH_DESTROY: CorvidTypeinfo = CorvidTypeinfo {
 /// (2) alloc + release dispatches destroy_fn.
 #[test]
 fn alloc_typed_then_release_runs_destructor() {
-    DESTROYED_COUNT.store(0, Ordering::SeqCst);
+    DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
         assert!(!p.is_null());
         corvid_release(p);
     }
     assert_eq!(
-        DESTROYED_COUNT.load(Ordering::SeqCst),
+        DESTROYED_COUNT.get(),
         1,
         "destroy_fn must fire exactly once when rc→0"
     );
@@ -129,18 +133,18 @@ fn alloc_typed_then_release_runs_destructor() {
 /// (6) rc>1 does NOT dispatch destructor until final release.
 #[test]
 fn retain_defers_destruction_until_final_release() {
-    DESTROYED_COUNT.store(0, Ordering::SeqCst);
+    DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
         corvid_retain(p);
         corvid_retain(p); // rc = 3
         corvid_release(p); // rc = 2
-        assert_eq!(DESTROYED_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(DESTROYED_COUNT.get(), 0);
         corvid_release(p); // rc = 1
-        assert_eq!(DESTROYED_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(DESTROYED_COUNT.get(), 0);
         corvid_release(p); // rc = 0 → destroy
     }
-    assert_eq!(DESTROYED_COUNT.load(Ordering::SeqCst), 1);
+    assert_eq!(DESTROYED_COUNT.get(), 1);
 }
 
 /// (3,4) `corvid_trace_list` behavior on primitive vs refcounted lists.
@@ -149,14 +153,11 @@ fn retain_defers_destruction_until_final_release() {
 /// For this test we allocate the payload manually via `corvid_alloc_typed`
 /// with a list typeinfo we construct here.
 
-static MARKED_POINTERS: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
-
 unsafe extern "C" fn counting_marker(obj: *mut u8, ctx: *mut u8) {
     let ctx_val = ctx as usize;
-    let mut v = MARKED_POINTERS.lock().unwrap();
     // Encode obj-pointer XOR ctx so the test can assert ctx was threaded
     // through.
-    v.push((obj as usize) ^ ctx_val);
+    MARKED_POINTERS.with_borrow_mut(|marked| marked.push((obj as usize) ^ ctx_val));
 }
 
 /// Minimal trace_fn that matches the runtime's `corvid_trace_list`
@@ -193,7 +194,7 @@ unsafe extern "C" fn corvid_trace_list_raw(
 
 #[test]
 fn trace_list_primitive_elements_no_ops() {
-    MARKED_POINTERS.lock().unwrap().clear();
+    MARKED_POINTERS.with_borrow_mut(Vec::clear);
     unsafe {
         // length=3, three garbage i64s that would be Ints.
         let p = corvid_alloc_typed(8 + 3 * 8, &LIST_PRIMITIVE_TI);
@@ -208,7 +209,7 @@ fn trace_list_primitive_elements_no_ops() {
         corvid_release(p);
     }
     assert_eq!(
-        MARKED_POINTERS.lock().unwrap().len(),
+        MARKED_POINTERS.with_borrow(Vec::len),
         0,
         "primitive-element list must not invoke marker — prevents List<Int> mis-trace"
     );
@@ -216,7 +217,7 @@ fn trace_list_primitive_elements_no_ops() {
 
 #[test]
 fn trace_list_refcounted_elements_invokes_marker() {
-    MARKED_POINTERS.lock().unwrap().clear();
+    MARKED_POINTERS.with_borrow_mut(Vec::clear);
     unsafe {
         // length=2; pretend pointers (we're not releasing them, just
         // testing that the tracer dispatches).
@@ -235,7 +236,7 @@ fn trace_list_refcounted_elements_invokes_marker() {
         // so the fake pointers never get dereferenced.
         corvid_release(p);
     }
-    let marked = MARKED_POINTERS.lock().unwrap();
+    let marked = MARKED_POINTERS.take();
     assert_eq!(marked.len(), 2, "one marker call per element");
     // ctx was XOR'd into each recorded value; unXOR to recover elem ptrs.
     let ctx_val = 0x55usize;
@@ -251,7 +252,7 @@ fn trace_list_refcounted_elements_invokes_marker() {
 /// code did a retain or release.
 #[test]
 fn retain_release_preserves_high_bits() {
-    DESTROYED_COUNT.store(0, Ordering::SeqCst);
+    DESTROYED_COUNT.set(0);
     unsafe {
         let p = corvid_alloc_typed(16, &TEST_TI_WITH_DESTROY);
         // Reach into the header and set bit 61 (mark bit). The header
@@ -275,10 +276,10 @@ fn retain_release_preserves_high_bits() {
         let after_release = *header_rc;
         assert_eq!(after_release & 0x1FFF_FFFF_FFFF_FFFF, 1);
         assert_ne!(after_release & (1i64 << 61), 0, "mark bit preserved after release");
-        assert_eq!(DESTROYED_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(DESTROYED_COUNT.get(), 0);
 
         // Final release — destructor fires.
         corvid_release(p);
     }
-    assert_eq!(DESTROYED_COUNT.load(Ordering::SeqCst), 1);
+    assert_eq!(DESTROYED_COUNT.get(), 1);
 }

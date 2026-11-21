@@ -382,9 +382,10 @@ fn emit_grounded_handle_store(
 /// `CodegenError::NotSupported` with a descriptive feature boundary.
 pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> {
     match ty {
+        Type::Map(_, _) if crate::native_string_map(ty) => Ok(I64),
         Type::Map(_, _) => Err(CodegenError::not_supported(
-            "Map<K, V> is interpreter-only in 45g",
-            Span::new(0, 0),
+            "native maps require String keys and supported value types (strings, integers, records, lists or options)",
+            span,
         )),
         Type::Int => Ok(I64),
         Type::Bool => Ok(I8),
@@ -422,6 +423,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Nothing` — use a bare `return` instead",
             span,
         )),
+        Type::Function { .. } if crate::native_callback_type(ty) => Ok(I64),
         Type::Function { .. } => Err(CodegenError::not_supported(
             "function types as values — first-class callables are not implemented in native codegen yet",
             span,
@@ -495,16 +497,14 @@ pub(super) fn define_agent(
         builder.seal_block(entry);
 
         let mut env: HashMap<LocalId, (Variable, clir::Type)> = HashMap::new();
-        let mut var_idx: usize = 0;
+        runtime.next_variable.set(0);
         let mut scope_stack: Vec<Vec<(LocalId, Variable)>> = vec![Vec::new()];
         let mut loop_stack: Vec<LoopCtx> = Vec::new();
 
         for (i, p) in agent.params.iter().enumerate() {
             let block_arg = builder.block_params(entry)[i];
-            let var = Variable::from_u32(var_idx as u32);
-            var_idx += 1;
             let ty = cl_type_for(&p.ty, p.span)?;
-            builder.declare_var(var, ty);
+            let var = runtime.declare_variable(&mut builder, ty);
             if is_refcounted_type(&p.ty) {
                 builder.declare_value_needs_stack_map(block_arg);
             }
@@ -531,7 +531,6 @@ pub(super) fn define_agent(
             &agent.body,
             &agent.return_ty,
             &mut env,
-            &mut var_idx,
             &mut scope_stack,
             &mut loop_stack,
             func_ids_by_def,
@@ -547,7 +546,9 @@ pub(super) fn define_agent(
                     let terminated = last_inst
                         .map(|i| builder.func.dfg.insts[i].opcode().is_terminator())
                         .unwrap_or(false);
-                    if !terminated {
+                    if !terminated && agent.return_ty == Type::Nothing {
+                        emit_function_return_void(&mut builder, &scope_stack, module, runtime);
+                    } else if !terminated {
                         builder
                             .ins()
                             .trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);

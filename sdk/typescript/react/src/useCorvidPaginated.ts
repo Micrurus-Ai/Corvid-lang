@@ -35,36 +35,45 @@ export function useCorvidPaginated<Item>(
   const cursor = useRef<string | undefined>(undefined);
   const inFlight = useRef(false);
 
-  const loadMore = useCallback(async (): Promise<void> => {
-    if (inFlight.current || !hasMore) return;
+  const generation = useRef(0);
+  const fetch = useCallback(async (first = false): Promise<void> => {
+    if (inFlight.current || (!first && !hasMore)) return;
+    const current = generation.current;
     inFlight.current = true;
     setLoading(true);
     setError(null);
     try {
       const page = await fetchPage(cursor.current);
+      if (current !== generation.current) return;
       setItems((prev) => [...prev, ...page.items]);
       cursor.current = page.next_cursor ?? undefined;
       setHasMore(page.has_more && page.next_cursor != null);
     } catch (err) {
+      if (current !== generation.current) return;
       setError(err instanceof CorvidError ? err : new CorvidError(0, err, String(err)));
     } finally {
-      inFlight.current = false;
-      setLoading(false);
+      if (current === generation.current) {
+        inFlight.current = false;
+        setLoading(false);
+      }
     }
   }, [fetchPage, hasMore]);
 
   const reset = useCallback(() => {
+    generation.current++;
+    inFlight.current = false;
     cursor.current = undefined;
     setItems([]);
     setHasMore(true);
-    setError(null);
-  }, []);
+    void fetch(true);
+  }, [fetch]);
 
   // Load the first page on mount.
   useEffect(() => {
-    void loadMore();
+    void fetch(true);
+    return () => { generation.current++; inFlight.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { items, loadMore, hasMore, loading, error, reset };
+  return { items, loadMore: () => fetch(), hasMore, loading, error, reset };
 }

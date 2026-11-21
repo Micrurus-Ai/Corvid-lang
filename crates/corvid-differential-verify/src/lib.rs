@@ -648,17 +648,26 @@ mod tests {
     }
 
     #[test]
-    fn native_drop_fixture_is_classified_as_too_loose() {
-        let report =
-            verify_program(&repo_root().join("tests/corpus/should_fail/native_drops_effect.cor"))
-                .expect("verify native drop fixture");
+    fn effect_after_list_loop_agrees_and_a_missing_trust_requirement_is_detected() {
+        let report = verify_program(&repo_root().join("tests/corpus/effect_after_list_loop.cor"))
+            .expect("verify effect after list loop");
+        assert!(report.divergences.is_empty(), "{:?}", report.divergences);
+        let mut reports = report.reports;
+        for tier in &reports {
+            assert_eq!(tier.profile.trust, TrustLevel::HumanRequired);
+            assert!(tier.effect_names.iter().any(|name| name == "late_effect"));
+        }
+        // Exercise the classifier independently of whether a backend has a bug.
+        let native = reports.iter_mut().find(|r| r.tier == Tier::Native).unwrap();
+        native.profile.trust = TrustLevel::Autonomous;
+        let divergences = diff_reports(&reports).expect("compare weakened native profile");
         assert!(
-            report.divergences.iter().any(|divergence| {
+            divergences.iter().any(|divergence| {
                 divergence.dimension == "trust"
                     && divergence.classification == DivergenceClass::StaticTooLoose
             }),
             "expected native trust drop to classify as static-too-loose: {:?}",
-            report.divergences
+            divergences
         );
     }
 

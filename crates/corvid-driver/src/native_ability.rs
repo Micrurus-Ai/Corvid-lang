@@ -50,6 +50,7 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
+    InterpreterFeature(&'static str),
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
     BuiltinMethodNotNative,
@@ -84,10 +85,11 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses `ask` or `choose` - human input boundaries are interpreter-only in this slice")
             }
             Self::BuiltinMethodNotNative => {
-                write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
+                write!(f, "program uses a builtin method that requires the interpreter")
             }
+            Self::InterpreterFeature(feature) => write!(f, "{feature} requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
-                write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
+                write!(f, "this assignment requires the interpreter; native record writes support field paths with plain or numeric compound assignment; native list writes support one index and plain or numeric compound assignment; native map writes support a local string-keyed map with a supported value type, one key and plain `=` or integer compound assignment")
             }
         }
     }
@@ -95,6 +97,7 @@ impl std::fmt::Display for NotNativeReason {
 
 fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
+        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
         Type::String
         | Type::Struct(_)
         | Type::ImportedStruct(_)
@@ -110,7 +113,7 @@ fn is_refcounted_type(ty: &Type) -> bool {
 
 fn is_native_value_type(ty: &Type) -> bool {
     match ty {
-        Type::Map(_, _) => false,
+        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),
@@ -169,6 +172,19 @@ fn is_native_result_type(ty: &Type) -> bool {
 /// else the first reason found (early exit - one reason is enough to
 /// route the caller to the interpreter tier).
 pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
+    if ir.prompts.iter().flat_map(|p| &p.params).any(|p| match &p.ty {
+        Type::Struct(id) => ir.types.iter().any(|t| t.id == *id && t.name == "PromptImage"),
+        Type::ImportedStruct(t) => t.name == "PromptImage",
+        _ => false,
+    }) {
+        return Err(NotNativeReason::InterpreterFeature("image prompt parameters"));
+    }
+    if ir.prompts.iter().any(|prompt| prompt.params.iter().any(|p| matches!(p.ty, Type::Function { .. }))) {
+        return Err(NotNativeReason::InterpreterFeature("model calls to Corvid functions"));
+    }
+    if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
+        return Err(NotNativeReason::PythonImport { module: module.clone() });
+    }
     for import in &ir.imports {
         match import.source {
             IrImportSource::Python => {
@@ -182,27 +198,44 @@ pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
         }
     }
     for agent in &ir.agents {
+        if agent.name == "main" && agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)).any(|ty| {
+            let id = match ty { Type::Struct(id) => *id, Type::ImportedStruct(t) => t.def_id, _ => return false };
+            ir.types.iter().any(|t| t.id == id && !t.variants.is_empty())
+        }) {
+            return Err(NotNativeReason::InterpreterFeature("a sum type at the CLI boundary"));
+        }
         if matches!(agent.return_ty, Type::Stream(_)) {
             return Err(NotNativeReason::StreamLoweringNotImplemented);
         }
-        scan_block(&agent.body, &agent.return_ty)?;
+        scan_block(&agent.body, &ScanContext { return_ty: &agent.return_ty, types: &ir.types })?;
     }
     Ok(())
 }
 
-fn scan_block(block: &IrBlock, current_return_ty: &Type) -> Result<(), NotNativeReason> {
+struct ScanContext<'a> {
+    return_ty: &'a Type,
+    types: &'a [corvid_ir::IrType],
+}
+
+fn scan_block(block: &IrBlock, context: &ScanContext<'_>) -> Result<(), NotNativeReason> {
     for stmt in &block.stmts {
-        scan_stmt(stmt, current_return_ty)?;
+        scan_stmt(stmt, context)?;
     }
     Ok(())
 }
 
-fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeReason> {
+fn scan_stmt(stmt: &IrStmt, context: &ScanContext<'_>) -> Result<(), NotNativeReason> {
+    if let Some((_, key, value, _)) = corvid_codegen_cl::native_indexed_assignment(stmt) {
+        scan_expr(key, context)?;
+        return scan_expr(value, context);
+    }
     match stmt {
-        IrStmt::Let { value, .. } => scan_expr(value, current_return_ty),
+        IrStmt::Let { value, .. } => scan_expr(value, context),
+        IrStmt::Assign { value, .. } if corvid_codegen_cl::native_record_assignment(stmt) || corvid_codegen_cl::native_local_compound(stmt) =>
+            scan_expr(value, context),
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
-        IrStmt::Return { value: Some(v), .. } => scan_expr(v, current_return_ty),
+        IrStmt::Return { value: Some(v), .. } => scan_expr(v, context),
         IrStmt::Return { value: None, .. } => Ok(()),
         IrStmt::If {
             cond,
@@ -210,36 +243,36 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
             else_block,
             ..
         } => {
-            scan_expr(cond, current_return_ty)?;
-            scan_block(then_block, current_return_ty)?;
+            scan_expr(cond, context)?;
+            scan_block(then_block, context)?;
             if let Some(b) = else_block {
-                scan_block(b, current_return_ty)?;
+                scan_block(b, context)?;
             }
             Ok(())
         }
         IrStmt::For { iter, body, .. } => {
-            scan_expr(iter, current_return_ty)?;
-            scan_block(body, current_return_ty)
+            scan_expr(iter, context)?;
+            scan_block(body, context)
         }
         // Destructuring is interpreter-only in 45n.
-        IrStmt::Destructure { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrStmt::Destructure { .. } => Err(NotNativeReason::InterpreterFeature("destructuring")),
         // Parallel blocks are interpreter-only in 46e.
-        IrStmt::Parallel { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrStmt::Parallel { .. } => Err(NotNativeReason::InterpreterFeature("parallel execution")),
         // `while` (45k) lowers natively like `for` — walk cond + body.
         IrStmt::While { cond, body, .. } => {
-            scan_expr(cond, current_return_ty)?;
-            scan_block(body, current_return_ty)
+            scan_expr(cond, context)?;
+            scan_block(body, context)
         }
         IrStmt::Approve { args, .. } => {
             // `approve` compiles to a no-op in generated native code.
             // Still walk the arg expressions so any tool/prompt call
             // buried in an approve arg is reported.
             for a in args {
-                scan_expr(a, current_return_ty)?;
+                scan_expr(a, context)?;
             }
             Ok(())
         }
-        IrStmt::Expr { expr, .. } => scan_expr(expr, current_return_ty),
+        IrStmt::Expr { expr, .. } => scan_expr(expr, context),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => Ok(()),
         // Ownership ops contain no user expressions; they don't change
         // whether this agent can run natively.
@@ -247,23 +280,81 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type) -> Result<(), NotNativeRea
     }
 }
 
-fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeReason> {
+fn scan_expr(expr: &IrExpr, context: &ScanContext<'_>) -> Result<(), NotNativeReason> {
     if matches!(expr.ty, Type::Stream(_)) {
         return Err(NotNativeReason::StreamLoweringNotImplemented);
     }
+    if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
+        scan_expr(receiver, context)?;
+        return scan_expr(key, context);
+    }
     match &expr.kind {
-        // Map is interpreter-only in 45g; a MapLiteral anywhere routes
-        // the program to the interpreter tier.
-        IrExprKind::MapLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
-        // match is interpreter-only in 45i.
-        IrExprKind::Match { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
-        // Lambdas are interpreter-only in 45j.
-        IrExprKind::Lambda { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::MapLength
+            | corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues, receiver, .. }
+            if corvid_codegen_cl::native_string_map(&receiver.ty) => scan_expr(receiver, context),
+        IrExprKind::MapLiteral { keys, values } if corvid_codegen_cl::native_string_map(&expr.ty) => {
+            for part in keys.iter().chain(values) {
+                scan_expr(part, context)?;
+            }
+            Ok(())
+        }
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if corvid_codegen_cl::lowering::uses_structural_equality(*op, &left.ty) => {
+            if !corvid_codegen_cl::lowering::supports_structural_comparison(*op, left, right, context.types) {
+                return Err(NotNativeReason::InterpreterFeature("a comparison outside the native value layouts"));
+            }
+            scan_expr(left, context)?;
+            scan_expr(right, context)
+        }
+        IrExprKind::BinOp { left, .. } | IrExprKind::WrappingBinOp { left, .. }
+            if matches!(left.ty, Type::Struct(_) | Type::ImportedStruct(_)) =>
+            Err(NotNativeReason::InterpreterFeature("record ordering")),
+        IrExprKind::BinOp { left, .. } | IrExprKind::WrappingBinOp { left, .. }
+            if matches!(left.ty, Type::Map(_, _)) => Err(NotNativeReason::InterpreterFeature("map comparison")),
+        IrExprKind::MapLiteral { .. } => Err(NotNativeReason::InterpreterFeature("a map outside the native string-keyed subset (String, Int, record, list or option values)")),
+        IrExprKind::Match { scrutinee, arms }
+            if (is_native_result_type(&scrutinee.ty) || is_native_option_type(&scrutinee.ty) || matches!(scrutinee.ty, Type::Struct(_) | Type::ImportedStruct(_)))
+                && corvid_codegen_cl::result_match::supports_match(&scrutinee.ty, arms) =>
+        {
+            scan_expr(scrutinee, context)?;
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    scan_expr(guard, context)?;
+                }
+                scan_expr(&arm.body, context)?;
+            }
+            Ok(())
+        }
+        IrExprKind::Match { .. } => Err(NotNativeReason::InterpreterFeature("pattern matching")),
+        IrExprKind::Lambda { body, .. } if corvid_codegen_cl::native_callback_type(&expr.ty)
+            && corvid_codegen_cl::native_lambda_locals(body).is_some() => Ok(()),
+        IrExprKind::Lambda { .. } => Err(NotNativeReason::InterpreterFeature("a lambda outside the native integer-callback subset")),
         // Named struct literals are interpreter-only in 45n.
-        IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::StructLiteral { .. } => Err(NotNativeReason::InterpreterFeature("a named struct literal")),
         // `Page<Item>` responses are interpreter-only in 52c-2.
-        IrExprKind::PageNew { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::PageNew { .. } => Err(NotNativeReason::InterpreterFeature("a page response")),
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast, receiver, .. }
+            if is_native_option_type(&expr.ty) => scan_expr(receiver, context),
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ListLength | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr, receiver, .. } => {
+            scan_expr(receiver, context)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListAppend, receiver, args }
+            if args.len() == 1 && corvid_codegen_cl::native_list_append(&receiver.ty, &args[0].ty) => {
+            scan_expr(receiver, context)?;
+            scan_expr(&args[0], context)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if corvid_codegen_cl::native_string_method(*kind)
+                || corvid_codegen_cl::native_numeric_conversion(*kind)
+                || corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) => {
+                scan_expr(receiver, context)?;
+                for arg in args { scan_expr(arg, context)?; }
+                Ok(())
+            }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
+        IrExprKind::Decl { .. } if corvid_codegen_cl::native_callback_type(&expr.ty) => Ok(()),
+        IrExprKind::Decl { .. } if matches!(expr.ty, Type::Function { .. }) =>
+            Err(NotNativeReason::InterpreterFeature("a named function value")),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
             kind,
@@ -271,13 +362,10 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             args,
         } => {
             match kind {
-                // Sum-type construction is interpreter-only in 45h.
-                IrCallKind::EnumConstructor { .. } => {
-                    return Err(NotNativeReason::PlaceAssignmentNotNative)
-                }
-                // Closure calls are interpreter-only in 45j.
+                IrCallKind::EnumConstructor { .. } => {}
+                IrCallKind::ClosureLocal { signature, .. } if corvid_codegen_cl::native_callback_type(signature) => {}
                 IrCallKind::ClosureLocal { .. } => {
-                    return Err(NotNativeReason::PlaceAssignmentNotNative)
+                    return Err(NotNativeReason::InterpreterFeature("a closure call"))
                 }
                 IrCallKind::Tool { .. } => {
                     return Err(NotNativeReason::ToolCall {
@@ -301,56 +389,63 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 });
             }
             for a in args {
-                scan_expr(a, current_return_ty)?;
+                scan_expr(a, context)?;
             }
             Ok(())
         }
-        IrExprKind::FieldAccess { target, .. } => scan_expr(target, current_return_ty),
-        IrExprKind::UnwrapGrounded { value } => scan_expr(value, current_return_ty),
+        IrExprKind::FieldAccess { target, .. } => scan_expr(target, context),
+        IrExprKind::UnwrapGrounded { value } => scan_expr(value, context),
+        IrExprKind::Index { target, .. } if matches!(target.ty, Type::Map(_, _)) =>
+            Err(NotNativeReason::InterpreterFeature("map indexing")),
         IrExprKind::Index { target, index } => {
-            scan_expr(target, current_return_ty)?;
-            scan_expr(index, current_return_ty)
+            scan_expr(target, context)?;
+            scan_expr(index, context)
+        }
+        IrExprKind::BinOp { op: corvid_ast::BinaryOp::Add, left, right }
+            if matches!(expr.ty, Type::List(_)) && !corvid_codegen_cl::native_list_concat(left, right) =>
+        {
+            Err(NotNativeReason::InterpreterFeature("list concatenation with element conversion"))
         }
         IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
-            scan_expr(left, current_return_ty)?;
-            scan_expr(right, current_return_ty)
+            scan_expr(left, context)?;
+            scan_expr(right, context)
         }
         IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
-            scan_expr(operand, current_return_ty)
+            scan_expr(operand, context)
         }
         IrExprKind::List { items } => {
             for it in items {
-                scan_expr(it, current_return_ty)?;
+                scan_expr(it, context)?;
             }
             Ok(())
         }
-        IrExprKind::WeakNew { strong } => scan_expr(strong, current_return_ty),
-        IrExprKind::WeakUpgrade { weak } => scan_expr(weak, current_return_ty),
+        IrExprKind::WeakNew { strong } => scan_expr(strong, context),
+        IrExprKind::WeakUpgrade { weak } => scan_expr(weak, context),
         IrExprKind::StreamSplitBy { stream, .. } => {
-            scan_expr(stream, current_return_ty)?;
+            scan_expr(stream, context)?;
             Err(NotNativeReason::StreamLoweringNotImplemented)
         }
         IrExprKind::StreamMerge { groups, .. } => {
-            scan_expr(groups, current_return_ty)?;
+            scan_expr(groups, context)?;
             Err(NotNativeReason::StreamLoweringNotImplemented)
         }
         IrExprKind::StreamOrderedBy { stream, .. } => {
-            scan_expr(stream, current_return_ty)?;
+            scan_expr(stream, context)?;
             Err(NotNativeReason::StreamLoweringNotImplemented)
         }
         IrExprKind::StreamResumeToken { stream } => {
-            scan_expr(stream, current_return_ty)?;
+            scan_expr(stream, context)?;
             Err(NotNativeReason::StreamLoweringNotImplemented)
         }
         IrExprKind::ResumeStream { token, .. } => {
-            scan_expr(token, current_return_ty)?;
+            scan_expr(token, context)?;
             Err(NotNativeReason::StreamLoweringNotImplemented)
         }
         // Tagged-union/retry nodes are accepted only for the current
         // native subset. Recurse into sub-expressions first so any
         // nested tool/prompt calls still get reported correctly.
         IrExprKind::OptionSome { inner } => {
-            scan_expr(inner, current_return_ty)?;
+            scan_expr(inner, context)?;
             if is_native_option_expr_type(&expr.ty) {
                 Ok(())
             } else {
@@ -358,7 +453,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             }
         }
         IrExprKind::ResultOk { inner } | IrExprKind::ResultErr { inner } => {
-            scan_expr(inner, current_return_ty)?;
+            scan_expr(inner, context)?;
             if is_native_result_type(&expr.ty) {
                 Ok(())
             } else {
@@ -373,11 +468,11 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             }
         }
         IrExprKind::TryPropagate { inner } => {
-            scan_expr(inner, current_return_ty)?;
+            scan_expr(inner, context)?;
             match &inner.ty {
                 Type::Option(_) => {
                     if is_native_option_expr_type(&inner.ty)
-                        && is_native_option_expr_type(current_return_ty)
+                        && is_native_option_expr_type(context.return_ty)
                     {
                         Ok(())
                     } else {
@@ -386,8 +481,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 }
                 Type::Result(_, _) => {
                     if is_native_result_type(&inner.ty) {
-                        if let Type::Result(_, outer_err) = current_return_ty {
-                            if is_native_result_type(current_return_ty) {
+                        if let Type::Result(_, outer_err) = context.return_ty {
+                            if is_native_result_type(context.return_ty) {
                                 if let Type::Result(_, inner_err) = &inner.ty {
                                     if &**outer_err == &**inner_err {
                                         return Ok(());
@@ -401,9 +496,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
                 _ => Err(NotNativeReason::TaggedUnionRetryNotNative),
             }
         }
-        IrExprKind::TrustBoundary { inner } => scan_expr(inner, current_return_ty),
+        IrExprKind::TrustBoundary { inner } => scan_expr(inner, context),
         IrExprKind::TryRetry { body, .. } => {
-            scan_expr(body, current_return_ty)?;
+            scan_expr(body, context)?;
             if &body.ty == &expr.ty
                 && (is_native_result_type(&body.ty) || is_native_option_expr_type(&body.ty))
             {
@@ -431,6 +526,7 @@ mod tests {
     fn stream_return_type_is_not_native() {
         let span = Span::new(0, 0);
         let ir = IrFile {
+            import_fingerprint: None,
             imports: vec![],
             types: vec![],
             tools: vec![],

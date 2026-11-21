@@ -29,6 +29,8 @@ The implementation keeps protocol concerns separated: `server.rs` owns JSON-RPC
 method handling and document state, while `transport.rs` owns LSP
 `Content-Length` framing over stdin/stdout.
 
+Editor clients should send a `shutdown` request, wait for the response, then send the `exit` notification. The server exits with status 0 for this sequence and status 1 if the client sends `exit` first. After acknowledging shutdown, it rejects further requests with `InvalidRequest`.
+
 Hover support is compiler-backed, not regex-based. `hover.rs` parses, resolves,
 and typechecks the current document, then returns Markdown summaries for:
 
@@ -69,9 +71,10 @@ Server discovery order:
 
 1. `corvid.lsp.path` VS Code setting.
 2. `CORVID_LSP_PATH` environment variable.
-3. Repository-local `target/debug/corvid-lsp(.exe)`.
-4. Repository-local `target/release/corvid-lsp(.exe)`.
-5. `corvid-lsp` on `PATH`.
+3. The executable in `CORVID_HOME/bin` from the installation selected for this session.
+4. Repository-local `target/debug/corvid-lsp(.exe)`.
+5. Repository-local `target/release/corvid-lsp(.exe)`.
+6. `corvid-lsp` on `PATH`.
 
 Current validation:
 

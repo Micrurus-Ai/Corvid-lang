@@ -24,6 +24,7 @@ pub mod errors;
 pub mod latency_rc;
 pub mod link;
 pub mod lowering;
+pub mod result_match;
 pub mod module;
 pub mod ownership;
 pub mod pair_elim;
@@ -53,6 +54,9 @@ pub fn compile_to_object(
     // host's tools. False for native binaries (linked tool wrappers).
     tools_via_registry: bool,
 ) -> Result<(), CodegenError> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Err(CodegenError::not_supported("typed Python imports (use the interpreter)", tool.span));
+    }
     // Run the ownership analysis pass before codegen.
     // Output is a transformed IrFile with borrow_sig populated on
     // every agent. Codegen downstream consults borrow_sig at call
@@ -249,4 +253,161 @@ fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
 
 fn span_zero() -> corvid_ast::Span {
     corvid_ast::Span::new(0, 0)
+}
+
+/// Native concat copies element slots verbatim. An empty literal has no slots.
+pub fn native_list_concat(left: &corvid_ir::IrExpr, right: &corvid_ir::IrExpr) -> bool {
+    let empty = |e: &corvid_ir::IrExpr| matches!(&e.kind, corvid_ir::IrExprKind::List { items } if items.is_empty());
+    left.ty == right.ty || empty(left) || empty(right)
+}
+
+/// Maps with native string keys and a supported value representation.
+pub fn native_string_map(ty: &corvid_types::Type) -> bool {
+    use corvid_types::Type;
+    fn supported_value(ty: &Type) -> bool {
+        match ty {
+            Type::String | Type::Int | Type::Struct(_) => true,
+            Type::Option(inner) | Type::List(inner) => supported_value(inner),
+            _ => false,
+        }
+    }
+    matches!(ty, Type::Map(key, value) if **key == Type::String && supported_value(value))
+}
+
+/// Compound arithmetic on a numeric local reuses its existing binding.
+pub fn native_local_compound(stmt: &corvid_ir::IrStmt) -> bool {
+    use corvid_types::Type;
+    matches!(stmt, corvid_ir::IrStmt::Assign { root_ty: Type::Int | Type::Float, path, op: Some(_), .. } if path.is_empty())
+}
+
+/// Native record writes can traverse a chain of fields and use numeric compound operators.
+pub fn native_record_assignment(stmt: &corvid_ir::IrStmt) -> bool {
+    use corvid_ir::{IrPathSeg, IrStmt};
+    use corvid_types::Type;
+    matches!(stmt, IrStmt::Assign { root_ty: Type::Struct(_), path, op, value, .. }
+        if !path.is_empty() && path.iter().all(|part| matches!(part, IrPathSeg::Field(_)))
+            && (op.is_none() || matches!(value.ty, Type::Int | Type::Float)))
+}
+
+/// A single list slot or string-map entry that native code can update.
+pub fn native_indexed_assignment(stmt: &corvid_ir::IrStmt) -> Option<(corvid_resolve::LocalId, &corvid_ir::IrExpr, &corvid_ir::IrExpr, &corvid_types::Type)> {
+    use corvid_types::Type;
+    let corvid_ir::IrStmt::Assign { local_id, root_ty, path, op, value, .. } = stmt else { return None };
+    let [corvid_ir::IrPathSeg::Index(index)] = path.as_slice() else { return None };
+    let element = match root_ty {
+        Type::List(element) if op.is_none() || matches!(element.as_ref(), Type::Int | Type::Float) => element,
+        Type::Map(_, element) if native_string_map(root_ty) && (op.is_none() || **element == Type::Int) => element,
+        _ => return None,
+    };
+    Some((*local_id, index, value, element))
+}
+
+/// Keyed reads and membership tests borrow the map and key.
+pub fn native_string_map_lookup(expr: &corvid_ir::IrExpr) -> Option<(&corvid_ir::IrExpr, &corvid_ir::IrExpr)> {
+    use corvid_ir::IrExprKind;
+    let (receiver, key) = match &expr.kind {
+        IrExprKind::Index { target, index } => (target.as_ref(), index.as_ref()),
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::MapGet | corvid_types::BuiltinMethodKind::MapContainsKey, receiver, args } => {
+            let [key] = args.as_slice() else { return None };
+            (receiver.as_ref(), key)
+        }
+        _ => return None,
+    };
+    native_string_map(&receiver.ty).then_some((receiver, key))
+}
+
+/// Element layouts supported by the native list append operation.
+pub fn native_list_append(receiver: &corvid_types::Type, item: &corvid_types::Type) -> bool {
+    use corvid_types::Type;
+    let Type::List(element) = receiver else { return false };
+    if **element == Type::Float && *item == Type::Int {
+        return true;
+    }
+    // These slots have a concrete native representation and, for heap
+    // elements, a corresponding list element destructor and tracer.
+    element.as_ref() == item && matches!(item,
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Struct(_)
+        | Type::List(_) | Type::Result(_, _) | Type::Option(_) | Type::Weak(_, _)
+    )
+}
+
+/// Integer callbacks share one native ABI: environment handle followed by arguments.
+pub fn native_callback_type(ty: &corvid_types::Type) -> bool {
+    use corvid_types::Type;
+    matches!(ty, Type::Function { params, ret, .. } if matches!(**ret, Type::Int | Type::Bool) && params.iter().all(|p| *p == Type::Int))
+}
+
+/// Collect each local needed by an integer callback, with its storage type.
+pub fn native_lambda_locals(body: &corvid_ir::IrExpr) -> Option<Vec<(corvid_resolve::LocalId, corvid_types::Type)>> {
+    use corvid_ir::{IrExpr, IrExprKind};
+    use corvid_resolve::LocalId;
+    use corvid_types::{BuiltinMethodKind, Type};
+
+    fn local(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        let IrExprKind::Local { local_id, .. } = &expr.kind else { return None };
+        if !locals.iter().any(|(id, _)| id == local_id) {
+            locals.push((*local_id, expr.ty.clone()));
+        }
+        Some(())
+    }
+
+    fn list(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(&expr.ty, Type::List(element) if **element == Type::Int) { return None; }
+        local(expr, locals)
+    }
+
+    fn collect(expr: &IrExpr, locals: &mut Vec<(LocalId, Type)>) -> Option<()> {
+        if !matches!(expr.ty, Type::Int | Type::Bool) { return None; }
+        match &expr.kind {
+            IrExprKind::Literal(corvid_ir::IrLiteral::Int(_) | corvid_ir::IrLiteral::Bool(_)) => {}
+            IrExprKind::Local { .. } => local(expr, locals)?,
+            IrExprKind::Index { target, index } => {
+                list(target, locals)?;
+                collect(index, locals)?;
+            }
+            IrExprKind::BuiltinMethod { kind: BuiltinMethodKind::ListLength, receiver, .. } => {
+                list(receiver, locals)?;
+            }
+            IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. } => {
+                collect(left, locals)?;
+                collect(right, locals)?;
+            }
+            IrExprKind::Call { kind: corvid_ir::IrCallKind::Agent { .. }, args, .. } => {
+                for arg in args { collect(arg, locals)?; }
+            }
+            IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => collect(operand, locals)?,
+            _ => return None,
+        }
+        Some(())
+    }
+    let mut locals = Vec::new();
+    collect(body, &mut locals)?;
+    Some(locals)
+}
+
+pub fn native_integer_list_transform(
+    method: corvid_types::BuiltinMethodKind, receiver: &corvid_types::Type, args: &[corvid_ir::IrExpr],
+) -> bool {
+    use corvid_types::{BuiltinMethodKind, Type};
+    let (callback, arity, result) = match (method, args) {
+        (BuiltinMethodKind::ListMap, [f]) => (f, 1, Type::Int),
+        (BuiltinMethodKind::ListFilter | BuiltinMethodKind::ListAny | BuiltinMethodKind::ListAll, [f]) => (f, 1, Type::Bool),
+        (BuiltinMethodKind::ListFold, [init, f]) if init.ty == Type::Int => (f, 2, Type::Int),
+        _ => return false,
+    };
+    matches!(receiver, Type::List(element) if **element == Type::Int)
+        && native_callback_type(&callback.ty)
+        && matches!(&callback.ty, Type::Function { params, ret, .. }
+            if params.len() == arity && **ret == result)
+}
+
+pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, StringLength | StringSubstring | StringToUpper | StringToLower | StringTrim
+        | StringContains | StringStartsWith | StringEndsWith | StringSplit | StringReplace)
+}
+
+pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)
 }

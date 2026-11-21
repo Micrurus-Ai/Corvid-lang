@@ -74,7 +74,11 @@ impl From<ResolveError> for Diagnostic {
 
 impl From<TypeError> for Diagnostic {
     fn from(e: TypeError) -> Self {
-        let hint = e.hint();
+        let hint = match (e.hint(), e.guarantee_id) {
+            (Some(hint), Some(id)) => Some(format!("{hint} [guarantee: {id}]")),
+            (None, Some(id)) => Some(format!("[guarantee: {id}]")),
+            (hint, None) => hint,
+        };
         let message = e.message();
         Diagnostic {
             span: e.span,

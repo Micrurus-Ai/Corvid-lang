@@ -1,6 +1,4 @@
-# Native list-loop lowering currently exits before the later prompt runs.
-# The verifier should keep the native partial trace and report that the
-# `late_effect` trust requirement never appeared in the native tier.
+# Every tier must preserve the trust requirement of the prompt after the loop.
 effect early_effect:
     cost: $0.10
 

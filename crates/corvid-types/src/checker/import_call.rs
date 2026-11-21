@@ -266,6 +266,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    pub(super) fn imported_fn_value(&mut self, module: &ResolvedModule, id: DefId, span: Span) -> Option<Type> {
+        let Decl::Fn(f) = imported_decl(module, id)? else { return None };
+        self.imported_calls.insert(span, ImportedCallTarget {
+            module_path: module.path.to_string_lossy().into_owned(),
+            def_id: id,
+            name: f.name.name.clone(),
+            kind: ImportedCallKind::Agent,
+        });
+        Some(Type::Function {
+            params: f.params.iter().map(|p| self.imported_type_ref_to_type(&p.ty, module)).collect(),
+            ret: Box::new(self.imported_type_ref_to_type(&f.return_ty, module)),
+            effect: Effect::Safe,
+        })
+    }
+
     pub(super) fn check_imported_use_call(
         &mut self,
         def_id: DefId,
@@ -303,7 +318,7 @@ impl<'a> Checker<'a> {
             DeclKind::Type => ImportedCallKind::Type,
             DeclKind::Tool => ImportedCallKind::Tool,
             DeclKind::Prompt => ImportedCallKind::Prompt,
-            DeclKind::Agent => ImportedCallKind::Agent,
+            DeclKind::Agent | DeclKind::Fn => ImportedCallKind::Agent,
             _ => {
                 for arg in args {
                     let _ = self.check_expr(arg);
@@ -349,6 +364,33 @@ impl<'a> Checker<'a> {
             return None;
         }
 
+        let import_span = self.symbols.get(*alias_def).span;
+        if let Some(import) = self.file.decls.iter().find_map(|decl| match decl {
+            Decl::Import(import)
+                if import.span == import_span && matches!(import.source, corvid_ast::ImportSource::Python) =>
+            {
+                Some(import)
+            }
+            _ => None,
+        }) {
+            if let Some(signature) = import.python_functions.iter().find(|f| f.name.name == field.name) {
+                let callee = format!("{}.{}", alias.name, field.name);
+                return Some(self.check_external_call(&callee, &signature.params, Effect::Safe,
+                    &import.effect_row, &signature.return_ty, args, call_span));
+            }
+            self.errors.push(TypeError::new(
+                TypeErrorKind::DirectPythonCallUnsupported {
+                    module: import.module.clone(),
+                    member: field.name.clone(),
+                },
+                callee_span,
+            ));
+            for arg in args {
+                let _ = self.check_expr(arg);
+            }
+            return Some(Type::Unknown);
+        }
+
         let Some(modules) = self.module_resolution else {
             self.errors.push(TypeError::new(
                 TypeErrorKind::CorvidImportNotYetResolved {
@@ -373,7 +415,7 @@ impl<'a> Checker<'a> {
                         DeclKind::Type => ImportedCallKind::Type,
                         DeclKind::Tool => ImportedCallKind::Tool,
                         DeclKind::Prompt => ImportedCallKind::Prompt,
-                        DeclKind::Agent => ImportedCallKind::Agent,
+                        DeclKind::Agent | DeclKind::Fn => ImportedCallKind::Agent,
                         _ => {
                             for arg in args {
                                 let _ = self.check_expr(arg);
@@ -523,6 +565,11 @@ impl<'a> Checker<'a> {
                 self.bump_effect(WeakEffect::Llm);
                 self.imported_type_ref_to_type(&prompt.return_ty, module)
             }
+            DeclKind::Fn => {
+                let Some(Decl::Fn(f)) = imported_decl(module, def_id) else { return Type::Unknown };
+                self.check_args_against_imported_params(name, &f.params, args, module);
+                self.imported_type_ref_to_type(&f.return_ty, module)
+            }
             DeclKind::Agent => {
                 let Some(Decl::Agent(agent)) = imported_decl(module, def_id) else {
                     for arg in args {
@@ -628,13 +675,14 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn imported_decl<'a>(module: &'a ResolvedModule, def_id: DefId) -> Option<&'a Decl> {
+pub(super) fn imported_decl<'a>(module: &'a ResolvedModule, def_id: DefId) -> Option<&'a Decl> {
     module.file.decls.iter().find(|decl| {
         let name = match decl {
             Decl::Type(decl) => &decl.name.name,
             Decl::Tool(decl) => &decl.name.name,
             Decl::Prompt(decl) => &decl.name.name,
             Decl::Agent(decl) => &decl.name.name,
+            Decl::Fn(decl) => &decl.name.name,
             _ => return false,
         };
         module

@@ -21,6 +21,7 @@ pub mod proof_replay;
 mod import_integrity;
 mod package_conflicts;
 mod package_lock;
+mod package_cache;
 mod package_manifest;
 mod package_metadata;
 mod package_policy;
@@ -132,7 +133,7 @@ pub use replay_job::replay_job_from_source;
 pub use trace_fresh::run_fresh_from_source_async;
 pub use build::{
     build_catalog_descriptor_for_source, build_native_to_disk, build_target_to_disk,
-    build_server_to_disk, build_to_disk, build_wasm_to_disk, AbiBuildOutput, BuildOutput,
+    build_server_to_disk, build_to_disk, build_wasm_to_disk, wasm_output_dir_for, AbiBuildOutput, BuildOutput,
     BuildTarget, NativeBuildOutput, ServerBuildOutput, SigningRequest, TargetBuildOutput,
     WasmBuildOutput,
 };
@@ -143,7 +144,7 @@ pub use law::{
 };
 pub use proof_replay::{replay_dimension_proof, ProofReplayResult, ProofReplayStatus};
 pub use run::{
-    apply_env_llm_wiring, build_or_get_cached_native, load_mcp_servers, run_native, run_with_target,
+    apply_env_llm_wiring, apply_project_storage, build_or_get_cached_native, load_http_egress_policy, load_io_tool_policy, load_mcp_servers, run_native, run_with_target,
     CachedNativeBinary, RunError, RunTarget,
 };
 pub use scaffold::{

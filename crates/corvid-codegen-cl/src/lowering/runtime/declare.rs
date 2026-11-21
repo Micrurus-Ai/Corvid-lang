@@ -10,6 +10,10 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .declare_function(RETAIN_SYMBOL, Linkage::Import, &retain_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare retain: {e}"), Span::new(0, 0)))?;
 
+    let missing_map_key = module
+        .declare_function("corvid_missing_map_key", Linkage::Import, &retain_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare missing map key: {e}"), Span::new(0, 0)))?;
+
     let mut release_sig = module.make_signature();
     release_sig.params.push(AbiParam::new(I64));
     let release_id = module
@@ -25,6 +29,34 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare string_concat: {e}"), Span::new(0, 0))
         })?;
+
+    let list_new = module
+        .declare_function("corvid_list_new", Linkage::Import, &concat_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list allocation: {e}"), Span::new(0, 0)))?;
+    let mut map_sig = concat_sig.clone();
+    map_sig.params.extend([AbiParam::new(I64), AbiParam::new(I64)]);
+    let list_map_int = module.declare_function("corvid_list_map_int", Linkage::Import, &map_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list map: {e}"), Span::new(0, 0)))?;
+    let list_filter_int = module.declare_function("corvid_list_filter_int", Linkage::Import, &map_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list filter: {e}"), Span::new(0, 0)))?;
+    let mut fold_sig = map_sig.clone();
+    fold_sig.params.push(AbiParam::new(I64));
+    let list_fold_int = module.declare_function("corvid_list_fold_int", Linkage::Import, &fold_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list fold: {e}"), Span::new(0, 0)))?;
+    let mut test_sig = fold_sig;
+    test_sig.returns[0] = AbiParam::new(I8);
+    let list_test_int = module.declare_function("corvid_list_test_int", Linkage::Import, &test_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list any/all: {e}"), Span::new(0, 0)))?;
+    let mut append_sig = concat_sig.clone();
+    append_sig.returns.clear();
+    let list_append = module
+        .declare_function("corvid_list_append", Linkage::Import, &append_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list append: {e}"), Span::new(0, 0)))?;
+    let mut list_concat_sig = concat_sig.clone();
+    list_concat_sig.params.push(AbiParam::new(I64));
+    let list_concat = module
+        .declare_function("corvid_list_concat_typed", Linkage::Import, &list_concat_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list concat: {e}"), Span::new(0, 0)))?;
 
     let mut eq_sig = module.make_signature();
     eq_sig.params.push(AbiParam::new(I64));
@@ -54,9 +86,32 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         })?;
 
     let mut char_at_sig = module.make_signature();
+    let mut substring_sig = char_len_sig.clone();
+    substring_sig.params.extend([AbiParam::new(I64), AbiParam::new(I64)]);
+    let mut declare_string_method = |name: &str, sig: &cranelift_codegen::ir::Signature| {
+        module.declare_function(name, Linkage::Import, sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {name}: {e}"), Span::new(0, 0)))
+    };
+    let string_to_upper = declare_string_method("corvid_string_to_upper", &char_len_sig)?;
+    let string_to_lower = declare_string_method("corvid_string_to_lower", &char_len_sig)?;
+    let string_substring = declare_string_method("corvid_string_substring", &substring_sig)?;
+    let string_trim = declare_string_method("corvid_string_trim", &char_len_sig)?;
+    let mut search_sig = concat_sig.clone();
+    search_sig.returns[0] = AbiParam::new(I8);
+    let string_contains = declare_string_method("corvid_string_contains", &search_sig)?;
+    let mut structural_eq_sig = search_sig.clone();
+    structural_eq_sig.params.push(AbiParam::new(I64));
+    let structural_eq = declare_string_method("corvid_structural_eq", &structural_eq_sig)?;
+    let string_starts_with = declare_string_method("corvid_string_starts_with", &search_sig)?;
+    let string_ends_with = declare_string_method("corvid_string_ends_with", &search_sig)?;
+    let string_replace = declare_string_method("corvid_string_replace", &substring_sig)?;
+    let string_split = declare_string_method("corvid_string_split", &substring_sig)?;
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.params.push(AbiParam::new(I64));
     char_at_sig.returns.push(AbiParam::new(I64));
+    let string_parse_int_id = module
+        .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
     let string_char_at_id = module
         .declare_function(STRING_CHAR_AT_SYMBOL, Linkage::Import, &char_at_sig)
         .map_err(|e| {
@@ -1148,13 +1203,33 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         })?;
 
     Ok(RuntimeFuncs {
+        missing_map_key,
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
         string_concat: concat_id,
+        list_concat,
+        list_new,
+        list_filter_int,
+        list_fold_int,
+        list_test_int,
+        list_map_int,
+        list_append,
         string_eq: eq_id,
         string_cmp: cmp_id,
         string_char_len: string_char_len_id,
+        string_parse_int: string_parse_int_id,
+        string_to_upper,
+        structural_eq,
+        equality_layouts: Default::default(),
+        string_trim,
+        string_contains,
+        string_starts_with,
+        string_ends_with,
+        string_replace,
+        string_split,
+        string_to_lower,
+        string_substring,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,
         list_destroy: list_destroy_id,
@@ -1245,6 +1320,10 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         trace_tool_result_bool: trace_tool_result_bool_id,
         trace_tool_result_float: trace_tool_result_float_id,
         trace_tool_result_string: trace_tool_result_string_id,
+        return_temporaries: Default::default(),
+        in_match_operand: Default::default(),
+        callback_typeinfo: emit_callback_typeinfo(module)?,
+        next_variable: std::cell::Cell::new(0),
         literal_counter: std::cell::Cell::new(0),
         // The unified ownership pass is the default. It produces
         // refcount-correct code
@@ -1256,14 +1335,13 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // scattered-emit codegen for A/B comparison. That fallback
         // path will be removed once the unified pass has fully
         // stabilized in production.
-        dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true),
+        dup_drop_enabled: crate::dup_drop::enabled(),
         // Default to the native (link-time wrapper) dispatch; `lower_file`
         // sets this true for library targets (cdylib/staticlib).
         tools_via_registry: false,
         struct_destructors: HashMap::new(),
         struct_traces: HashMap::new(),
+        variant_typeinfos: HashMap::new(),
         struct_typeinfos: HashMap::new(),
         struct_decoders: std::cell::RefCell::new(HashMap::new()),
         struct_to_json: std::cell::RefCell::new(HashMap::new()),

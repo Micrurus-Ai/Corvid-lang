@@ -41,8 +41,10 @@ impl<'ir> Interpreter<'ir> {
         let agent = agent.clone();
         let env = self.env.clone();
         let local_names = self.local_names.clone();
-        tokio::spawn(async move {
-            let mut sub = Interpreter::new(&ir, &runtime).with_mocks();
+        let mocks_enabled = !self.mock_tools.is_empty();
+        stream.spawn_producer(async move {
+            let mut sub = Interpreter::new(&ir, &runtime);
+            if mocks_enabled { sub = sub.with_mocks(); }
             sub.env = env;
             sub.local_names = local_names;
             sub.stream_sender = Some(sender);
@@ -130,7 +132,7 @@ impl<'ir> Interpreter<'ir> {
     pub(super) fn prepend_stream_chunk(&self, first: StreamChunk, stream: StreamValue) -> Value {
         let backpressure = stream.backpressure().clone();
         let (sender, combined) = StreamValue::channel(backpressure);
-        tokio::spawn(async move {
+        combined.spawn_producer(async move {
             if !sender.send_chunk(Ok(first)).await {
                 return;
             }
@@ -191,13 +193,16 @@ impl<'ir> Interpreter<'ir> {
         &mut self,
         block: &'ir IrBlock,
     ) -> Result<Flow, InterpError> {
+        let depth = self.env.approval_depth();
+        let mut flow = Ok(Flow::Normal);
         for stmt in &block.stmts {
-            match self.eval_stmt(stmt).await? {
-                Flow::Normal => continue,
-                other => return Ok(other),
+            flow = self.eval_stmt(stmt).await;
+            if !matches!(flow, Ok(Flow::Normal)) {
+                break;
             }
         }
-        Ok(Flow::Normal)
+        self.env.leave_approval_scope(depth);
+        flow
     }
 
     #[async_recursion]
@@ -680,6 +685,7 @@ impl<'ir> Interpreter<'ir> {
 
                     match action {
                         StepAction::Approve => {
+                            self.env.record_python_approval(label, json_args);
                             if self.should_yield_boundary() {
                                 self.maybe_yield(StepEvent::AfterApproval {
                                     label: label.clone(),
@@ -712,6 +718,7 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
 
+                let reviewed = label.starts_with("python:").then(|| json_args.clone());
                 let result = self.runtime.approval_gate(label, json_args).await;
                 let approved = result.is_ok();
 
@@ -725,6 +732,9 @@ impl<'ir> Interpreter<'ir> {
                 }
 
                 result.map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), *span))?;
+                if let Some(args) = reviewed {
+                    self.env.record_python_approval(label, args);
+                }
                 Ok(Flow::Normal)
             }
             IrStmt::Expr { expr, .. } => {
@@ -747,6 +757,7 @@ impl<'ir> Interpreter<'ir> {
                 op,
                 value,
                 span,
+                ..
             } => {
                 let mut idx_values: Vec<Option<Value>> = Vec::with_capacity(path.len());
                 for seg in path {

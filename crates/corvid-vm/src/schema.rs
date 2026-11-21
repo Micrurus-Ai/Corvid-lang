@@ -8,3 +8,12 @@
 //! call sites without forcing every caller to update.
 
 pub use corvid_prompt_format::schema_for;
+
+/// Plain text needs no provider-side JSON wrapper. Other return types
+/// carry their schema and are decoded against the declared Corvid type.
+pub(crate) fn prompt_output_schema(
+    ty: &corvid_types::Type,
+    types: &std::collections::HashMap<corvid_resolve::DefId, &corvid_ir::IrType>,
+) -> Option<serde_json::Value> {
+    (!matches!(ty, corvid_types::Type::String)).then(|| schema_for(ty, types))
+}

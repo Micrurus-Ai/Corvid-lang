@@ -2,7 +2,10 @@ use super::*;
 
 impl DurableQueueRuntime {
     pub fn get(&self, id: &str) -> Result<Option<QueueJob>, RuntimeError> {
-        let conn = self.conn.lock().unwrap();
+        Self::read_job(&self.conn.lock().unwrap(), id)
+    }
+
+    pub(super) fn read_job(conn: &Connection, id: &str) -> Result<Option<QueueJob>, RuntimeError> {
         let mut stmt = conn
             .prepare(
                 "select id, task, payload_json, input_schema, status, attempts, max_retries, budget_usd,

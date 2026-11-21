@@ -7,10 +7,10 @@ effect llm:
 tool retrieve(query: String) -> Grounded<String> uses retrieval
 
 prompt reply(history: List<Grounded<String>>, turn: Grounded<String>) -> Grounded<String> uses llm:
-    "answer the next turn given history: {history} and retrieved: {turn}"
     cites turn strictly
+    "answer the next turn given history: {history} and retrieved: {turn}"
 
 agent conversational_rag(history: List<String>, query: String) -> Grounded<String>:
-    grounded_history: List<Grounded<String>> = map(history, retrieve)
+    grounded_history: List<Grounded<String>> = history.map(fn (item) -> retrieve(item))
     turn_doc: Grounded<String> = retrieve(query)
     return reply(grounded_history, turn_doc)

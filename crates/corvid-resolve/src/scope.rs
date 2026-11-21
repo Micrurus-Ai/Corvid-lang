@@ -49,6 +49,7 @@ pub enum BuiltIn {
     WeakNew,
     /// `range(start, end) -> List<Int>` (slice 45f).
     Range,
+    FormFor,
     WeakUpgrade,
     StreamMerge,
     Resume,
@@ -169,6 +170,7 @@ impl SymbolTable {
         self.builtins.insert("None".into(), BuiltIn::None);
         self.builtins.insert("Weak::new".into(), BuiltIn::WeakNew);
         self.builtins.insert("range".into(), BuiltIn::Range);
+        self.builtins.insert("form_for".into(), BuiltIn::FormFor);
         self.builtins
             .insert("Weak::upgrade".into(), BuiltIn::WeakUpgrade);
         self.builtins.insert("merge".into(), BuiltIn::StreamMerge);

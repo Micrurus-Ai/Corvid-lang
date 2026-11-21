@@ -48,11 +48,11 @@
       "patterns": [
         {
           "name": "constant.numeric.money.corvid",
-          "match": "\\$[0-9]+(?:\\.[0-9]+)?"
+          "match": "\\$[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
         },
         {
           "name": "constant.numeric.corvid",
-          "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+          "match": "\\b[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b"
         }
       ]
     },

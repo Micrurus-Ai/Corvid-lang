@@ -32,8 +32,8 @@ tool retrieve_docs(query: String) -> List<Grounded<String>> uses doc_lookup
 tool share_source(doc_id: String, user_id: String) -> String dangerous uses share_externally
 
 prompt synthesize(q: Grounded<String>, docs: List<Grounded<String>>) -> Grounded<String> uses llm:
-    "answer the question {q} using only: {docs}"
     cites docs strictly
+    "answer the question {q} using only: {docs}"
 
 @budget($10.00)
 @min_confidence(0.7)

@@ -17,8 +17,7 @@ pub enum ReleaseCommand {
     Build {
         /// Release channel: nightly, beta, or stable.
         channel: String,
-        /// Explicit version. Nightly requires `-nightly.`, beta
-        /// requires `-beta.`, stable is plain SemVer.
+        /// Release version, such as 1.0.0-nightly.local, 1.0.0-beta.2, or 1.0.0.
         version: Option<String>,
         /// Output directory for generated release artifacts.
         #[arg(long, value_name = "DIR")]

@@ -17,8 +17,8 @@ The extension resolves the server in this order:
 
 1. `corvid.lsp.path` setting.
 2. `CORVID_LSP_PATH` environment variable.
-3. Repository-local `target/debug/corvid-lsp(.exe)`.
-4. Repository-local `target/release/corvid-lsp(.exe)`.
+3. The language server in `CORVID_HOME/bin`.
+4. Repository-local `target/debug/corvid-lsp(.exe)`, then the release build.
 5. `corvid-lsp` on `PATH`.
 
 Build the server from the repository with:

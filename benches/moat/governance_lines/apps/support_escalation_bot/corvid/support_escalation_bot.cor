@@ -35,8 +35,8 @@ tool fetch_history(customer_id: String) -> List<Grounded<String>> uses ticket_lo
 tool escalate_to_oncall(ticket_id: String, severity: String) -> String dangerous uses page_humans
 
 prompt classify_severity(ticket: Grounded<String>, history: List<Grounded<String>>) -> Grounded<String> uses llm:
-    "decide severity for {ticket} given history {history}"
     cites ticket strictly
+    "decide severity for {ticket} given history {history}"
     cites history strictly
 
 @budget($5.00)

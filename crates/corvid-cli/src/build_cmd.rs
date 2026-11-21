@@ -19,6 +19,8 @@ use corvid_driver::{
 };
 use std::path::Path;
 
+mod web;
+
 pub(crate) fn cmd_build(
     file: &Path,
     target: &str,
@@ -100,6 +102,12 @@ pub(crate) fn cmd_build(
                 Ok(1)
             }
         }
+        "web" => {
+            if header || abi_descriptor || tools_lib.is_some() {
+                anyhow::bail!("web bundles accept a Corvid application entrypoint without library artifact flags");
+            }
+            web::build(file)
+        }
         "wasm" => {
             if tools_lib.is_some() {
                 anyhow::bail!(
@@ -157,7 +165,7 @@ pub(crate) fn cmd_build(
         }
         other => {
             anyhow::bail!(
-                "unknown target `{other}`; valid: `python` (default), `native`, `server`, `wasm`, `cdylib`, `staticlib`"
+                "unknown target `{other}`; valid: `python` (default), `native`, `server`, `web`, `wasm`, `cdylib`, `staticlib`"
             )
         }
     }

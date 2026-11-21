@@ -215,20 +215,10 @@ agent list_of_strings_iter() -> Int:
     let c = run_and_count(src);
     eprintln!("BASELINE list_of_strings_iter: {c:?}");
     assert_eq!(c.allocs, 1, "list_of_strings_iter allocs");
-    // 17b-1b.2 peephole: 3 iterations × `s == "beta"` where s is
-    //   a bare Local — saves 3 retains + 3 releases.
-    // 17b-1b.4 peephole: `for s in xs` where xs is a bare Local —
-    //   iter is borrowed, saving the iter-retain + loop-exit-release
-    //   pair (1 retain + 1 release).
-    // Pre-17b-1b: 7/15. Post-17b-1b.2: 4/12. Post-17b-1b.4: 3/11.
-    // Post-17b-1b.6d (unified pass): 0 / 10 — the pass elides the
-    //   three per-iteration s retains entirely because `s` reads in
-    //   the body are classified at Borrowed (via BinOp peephole path)
-    //   and the unified pass schedules Drops precisely at last-use,
-    //   so intermediate retains disappear. Release count drops by
-    //   one because the pass's drop-on-iter-exit replaces the
-    //   scope-end release + separate drop pair with a single Drop.
-    assert_eq!(c.retain_calls, 0, "list_of_strings_iter retain_calls");
+    // A loop binding owns the current element even if the body replaces
+    // the list slot through an alias. Each of the three iterations retains
+    // its element once. The equality comparison borrows the bound string.
+    assert_eq!(c.retain_calls, 3, "list_of_strings_iter retain_calls");
     assert_eq!(c.release_calls, 10, "list_of_strings_iter release_calls");
 }
 

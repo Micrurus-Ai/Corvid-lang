@@ -4,7 +4,7 @@ effect retrieval:
 effect llm:
     cost: $0.10
 
-struct Product:
+type Product:
     name: String
     price: Float
     description: String
@@ -12,8 +12,8 @@ struct Product:
 tool retrieve(query: String) -> Grounded<String> uses retrieval
 
 prompt extract_product(doc: Grounded<String>) -> Grounded<Product> uses llm:
-    "extract a product record from: {doc}"
     cites doc strictly
+    "extract a product record from: {doc}"
 
 agent rag_to_json_record(query: String) -> Grounded<Product>:
     doc: Grounded<String> = retrieve(query)

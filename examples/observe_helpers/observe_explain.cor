@@ -26,6 +26,7 @@ type IncidentExplanation:
 tool fetch_trace_events(trace_id: String) -> List<Grounded<String>> uses lineage_read
 
 prompt explain_incident(events: List<Grounded<String>>) -> Grounded<IncidentExplanation> uses llm:
+    cites events strictly
     """
     You are a production incident analyst. Given the structured
     lineage events for one trace, identify the first non-OK event,
@@ -33,7 +34,6 @@ prompt explain_incident(events: List<Grounded<String>>) -> Grounded<IncidentExpl
     The output must cite the trace_id + span_id of every event
     it reasons about.
     """
-    cites events strictly
 
 @budget($0.05)
 @min_confidence(0.7)

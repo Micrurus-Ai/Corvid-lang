@@ -100,6 +100,7 @@ impl<'a> Checker<'a> {
                 // stay lenient; anything else is not callable.
                 let lid = *lid;
                 let callee_ty = self.local_types.get(&lid).cloned().unwrap_or(Type::Unknown);
+                self.types.insert(callee.span(), callee_ty.clone());
                 match callee_ty {
                     Type::Function { params, ret, .. } => {
                         if args.len() != params.len() {
@@ -181,6 +182,14 @@ impl<'a> Checker<'a> {
             panic!("tool/operation DefId not indexed");
         };
 
+        self.check_external_call(tool_name, params, effect, effect_row, return_ty, args, span)
+    }
+
+    pub(super) fn check_external_call(
+        &mut self, tool_name: &str, params: &[Param], effect: Effect,
+        effect_row: &corvid_ast::EffectRow, return_ty: &corvid_ast::TypeRef,
+        args: &[Expr], span: Span,
+    ) -> Type {
         let arg_types = self.check_args_collecting_types(tool_name, params, args, false);
 
         // Effect check: a `dangerous` tool must have a prior matching
@@ -195,10 +204,22 @@ impl<'a> Checker<'a> {
             self.registry,
         );
         if matches!(effect, Effect::Dangerous) || derived_trust.is_some() {
+            let matches_approval = |a: &super::Approval| {
+                a.arity == args.len() && if tool_name.contains('.') {
+                    a.label == tool_name
+                } else {
+                    snake_case(&a.label) == tool_name
+                }
+            };
+            let expected_label = || if tool_name.contains('.') {
+                tool_name.to_owned()
+            } else {
+                pascal_case(tool_name)
+            };
             let authorized = self
                 .approvals
                 .iter()
-                .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                .any(matches_approval);
             if !authorized {
                 // Discriminate between two registry rows:
                 //   - `approval.token_lexical_only`: an approve with the
@@ -216,7 +237,7 @@ impl<'a> Checker<'a> {
                 let approve_exists_out_of_scope = self
                     .approvals_seen_in_agent
                     .iter()
-                    .any(|a| snake_case(&a.label) == tool_name && a.arity == args.len());
+                    .any(matches_approval);
                 let is_dangerous = matches!(effect, Effect::Dangerous);
                 let guarantee_id = if approve_exists_out_of_scope {
                     "approval.token_lexical_only"
@@ -232,7 +253,7 @@ impl<'a> Checker<'a> {
                 let kind = if is_dangerous {
                     TypeErrorKind::UnapprovedDangerousCall {
                         tool: tool_name.to_string(),
-                        expected_approve_label: pascal_case(tool_name),
+                        expected_approve_label: expected_label(),
                         arity: args.len(),
                     }
                 } else {
@@ -240,7 +261,7 @@ impl<'a> Checker<'a> {
                         derived_trust.clone().expect("derived_trust is Some here");
                     TypeErrorKind::UnapprovedHighTrustCall {
                         tool: tool_name.to_string(),
-                        expected_approve_label: pascal_case(tool_name),
+                        expected_approve_label: expected_label(),
                         arity: args.len(),
                         deriving_effect,
                         trust_tier,
@@ -399,7 +420,7 @@ impl<'a> Checker<'a> {
         expected: Option<&Type>,
     ) -> Type {
         match builtin {
-            BuiltIn::Ok => {
+            BuiltIn::Ok | BuiltIn::Err => {
                 if args.len() != 1 {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::ArityMismatch {
@@ -414,34 +435,35 @@ impl<'a> Checker<'a> {
                     }
                     return Type::Result(Box::new(Type::Unknown), Box::new(Type::Unknown));
                 }
-                let ok_ty = self.check_expr(&args[0]);
-                let err_ty = match &self.current_return {
-                    Some(Type::Result(_, err)) => (**err).clone(),
-                    _ => Type::Unknown,
-                };
-                Type::Result(Box::new(ok_ty), Box::new(err_ty))
-            }
-            BuiltIn::Err => {
-                if args.len() != 1 {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::ArityMismatch {
-                            callee: name.name.clone(),
-                            expected: 1,
-                            got: args.len(),
-                        },
-                        name.span,
-                    ));
-                    for arg in args {
-                        let _ = self.check_expr(arg);
+                let is_ok = builtin == BuiltIn::Ok;
+                let (payload_hint, other) = match expected {
+                    Some(Type::Result(ok, err)) if is_ok => (Some(ok.as_ref()), err.as_ref().clone()),
+                    Some(Type::Result(ok, err)) => (Some(err.as_ref()), ok.as_ref().clone()),
+                    _ => {
+                        // Keep the enclosing return type as the legacy hint for
+                        // an unannotated constructor with no local Result context.
+                        let other = match &self.current_return {
+                            Some(Type::Result(_, err)) if is_ok => err.as_ref().clone(),
+                            Some(Type::Result(ok, _)) => ok.as_ref().clone(),
+                            _ => Type::Unknown,
+                        };
+                        (None, other)
                     }
-                    return Type::Result(Box::new(Type::Unknown), Box::new(Type::Unknown));
-                }
-                let err_ty = self.check_expr(&args[0]);
-                let ok_ty = match &self.current_return {
-                    Some(Type::Result(ok, _)) => (**ok).clone(),
-                    _ => Type::Unknown,
                 };
-                Type::Result(Box::new(ok_ty), Box::new(err_ty))
+                let actual = self.check_expr_as(&args[0], payload_hint);
+                let payload = match (payload_hint, &actual) {
+                    (Some(Type::Float), Type::Int) => Type::Float,
+                    (Some(expected), Type::Grounded(_)) if actual.is_assignable_to(expected) => {
+                        self.record_if_grounded_coercion(&actual, expected, args[0].span());
+                        expected.clone()
+                    }
+                    _ => actual,
+                };
+                if is_ok {
+                    Type::Result(Box::new(payload), Box::new(other))
+                } else {
+                    Type::Result(Box::new(other), Box::new(payload))
+                }
             }
             BuiltIn::Some => {
                 if args.len() != 1 {
@@ -474,6 +496,7 @@ impl<'a> Checker<'a> {
                 };
                 Type::Option(Box::new(final_inner_ty))
             }
+            BuiltIn::FormFor => self.check_form_for(name, args),
             BuiltIn::Range => {
                 if args.len() != 2 {
                     self.errors.push(TypeError::new(
@@ -1194,7 +1217,7 @@ impl<'a> Checker<'a> {
         Type::Struct(def_id)
     }
 
-    fn check_args_against_params(&mut self, callee_name: &str, params: &[Param], args: &[Expr]) {
+    pub(super) fn check_args_against_params(&mut self, callee_name: &str, params: &[Param], args: &[Expr]) {
         self.check_args_collecting_types(callee_name, params, args, false);
     }
 

@@ -10,13 +10,13 @@ corvid upgrade check my_app/ --json
 corvid upgrade apply my_app/
 ```
 
-The v1 source/stdlib migrator currently performs these safe rewrites:
+The source migrator distinguishes mechanical edits from calls that need a developer decision:
 
-- `syntax.pub_extern_agent_single_line`: migrates legacy split-line `pub extern "c"` plus `agent` into the stable `pub extern "c" agent` spelling.
-- `stdlib.llm_complete_to_agent_run`: migrates `std.llm.complete(` calls to policy-aware `std.agent.run(` calls.
-- `stdlib.cache_get_or_create_to_remember`: migrates `std.cache.get_or_create(` calls to `std.cache.remember(` calls.
+- `syntax.pub_extern_agent_single_line`: joins the split-line export declaration into the accepted `pub extern "c" agent` spelling.
+- `stdlib.llm_complete_to_agent_run`: flags a legacy model call for manual migration to a Corvid prompt with the intended input and result types.
+- `stdlib.cache_get_or_create_to_remember`: flags a legacy cache call for review of its key, storage and lifetime.
 
-Each finding includes a stable rule id, migration kind, file path, occurrence count, and replacement text. Rules that cannot be safely rewritten must be emitted as hand-review findings instead of silently changing source.
+Each finding includes a stable rule id, migration kind, file path, occurrence count, and replacement text. A manual finding has a null replacement. Both check and apply return exit code 1 while a manual finding remains. Apply still writes the mechanical edits. Text inside comments and string literals is preserved.
 
 ## CI Contract
 

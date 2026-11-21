@@ -12,6 +12,8 @@ use corvid_types::Type;
 /// A full `.cor` file in IR form.
 #[derive(Debug, Clone)]
 pub struct IrFile {
+    /// Digest of resolved imports and their source bytes for file-backed builds.
+    pub import_fingerprint: Option<[u8; 32]>,
     pub imports: Vec<IrImport>,
     pub types: Vec<IrType>,
     pub tools: Vec<IrTool>,
@@ -144,6 +146,7 @@ pub struct IrRoute {
     pub query_ty: Option<Type>,
     /// Resolved type of the `body` binding, when the route declares one.
     pub body_ty: Option<Type>,
+    pub form_encoded: bool,
     pub response_kind: RouteResponseKind,
     pub response_ty: Type,
     /// Names of the effects the route's handler declares (`uses ...`).
@@ -264,6 +267,9 @@ pub struct IrField {
 /// A tool declaration (no body — externally implemented).
 #[derive(Debug, Clone)]
 pub struct IrTool {
+    /// Python module and member implementing this typed host call.
+    pub python: Option<(String, String)>,
+    pub python_approval_required: bool,
     /// Circuit breaker threshold (slice 50k).
     pub breaker: Option<u64>,
     pub id: DefId,
@@ -770,6 +776,7 @@ pub enum IrStmt {
     /// the path evaluate exactly once.
     Assign {
         local_id: LocalId,
+        root_ty: Type,
         name: String,
         path: Vec<IrPathSeg>,
         op: Option<BinaryOp>,
@@ -1212,6 +1219,7 @@ pub enum IrCallKind {
     /// the environment and applies the closure.
     ClosureLocal {
         local_id: LocalId,
+        signature: Type,
     },
     /// Something we couldn't resolve (graceful degradation).
     Unknown,

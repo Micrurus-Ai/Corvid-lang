@@ -53,7 +53,7 @@ pub fn chunk_document_with_config(
         if end_idx == chars.len() {
             break;
         }
-        start = end_idx.saturating_sub(overlap);
+        start = end_idx.saturating_sub(overlap).max(start + 1);
     }
     Ok(chunks)
 }

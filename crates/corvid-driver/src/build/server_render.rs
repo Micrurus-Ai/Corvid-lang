@@ -17,14 +17,6 @@ pub(super) fn server_binary_path_for(out_dir: &Path, stem: &str) -> PathBuf {
     }
 }
 
-pub(super) fn server_binary_name_for_package(package: &str) -> String {
-    if cfg!(windows) {
-        format!("{package}.exe")
-    } else {
-        package.to_string()
-    }
-}
-
 pub(super) fn server_package_name(stem: &str) -> String {
     let mut out = String::from("corvid_generated_");
     for ch in stem.chars() {

@@ -1,0 +1,41 @@
+agent count(totals: Map<String, Int>, key: String) -> Int:
+    return match totals[key]:
+        Some(n) -> n
+        None -> -1
+
+agent key(trace: List<Int>) -> String:
+    trace.append(1)
+    return "fi" + "les"
+
+agent amount(counts: Map<String, Int>, trace: List<Int>) -> Int:
+    trace.append(2)
+    counts["files"] = 40
+    return 2
+
+agent main() -> Bool:
+    totals = {"files": 5, "errors": -7, "files": 0}
+    alias = totals
+    old = totals.get("files")
+    before = totals.values()
+    trace: List<Int> = []
+    alias[key(trace)] += amount(totals, trace)
+    checkpoint = totals.get("files")
+    alias["files"] *= 2
+    alias["files"] /= 2
+    alias["files"] %= 10
+    alias["files"] -= 1
+    unchanged = match checkpoint:
+        Some(n) -> n == 42
+        None -> false
+    totals["other"] = 3
+    zero = match old:
+        Some(n) -> n == 0
+        None -> false
+    sum = 0
+    for n in totals.values():
+        sum = sum + n
+    missing = count(totals, "absent") == -1
+    saved = before[0] == 0 and before[1] == -7
+    ordered = trace.length() == 2 and trace[0] == 1 and trace[1] == 2
+    snapshots = zero and saved and unchanged
+    return ordered and snapshots and missing and sum == -3 and count(alias, "files") == 1

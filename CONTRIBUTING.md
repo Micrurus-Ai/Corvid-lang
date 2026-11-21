@@ -4,6 +4,12 @@ This document is for the people building Corvid — today that's a team of two, 
 
 ---
 
+## Document every language change
+
+For each added, changed, or removed user-facing function, builtin method, or grammar form, update [learnings.md](learnings.md) in the same change. Give the spelling or signature, a short Corvid example and its result, and any relevant empty-input, error, or target-specific behavior. Update the corresponding [book chapter](docs/book/README.md) so readers can learn it in context.
+
+For a syntax change, update the production in the [grammar reference](docs/reference/grammar.md) and its parser example in the grammar drift test. For a builtin method or public standard-library call, refresh the [function reference](docs/reference/functions.md) with `python scripts/update_function_reference.py`. Run the script with `--check` to verify the checked-in index.
+
 ## Mission
 
 **Make programming AI agents as safe and natural as programming anything else.**

@@ -56,17 +56,19 @@ decl              ::= visibility? (
                       | prompt_decl
                       | agent_decl
                       | fn_decl
+                      | effect_decl
+                      | model_decl
+                      | server_decl
                       )
                     | import_decl
-                    | server_decl
+                    | identity_decl
+                    | connector_decl
                     | schedule_decl
                     | eval_decl
                     | test_decl
                     | fixture_decl
                     | mock_decl
                     | extend_decl
-                    | effect_decl
-                    | model_decl
 
 visibility        ::= 'public' ('(' 'package' ')')?
 ```
@@ -75,13 +77,15 @@ visibility        ::= 'public' ('(' 'package' ')')?
 
 Local modules, package URIs (`corvid://name@version`), remote URLs
 (hash-pinned), and external-ecosystem imports all use string targets;
-the `use` list is braceless with optional per-item aliases.
+the `use` list is braceless with optional per-item aliases. Only a Python import can end with an indented signature block. Its signatures have no bodies.
 
 ```ebnf
-import_decl       ::= 'import' import_target ('as' IDENT)? ('use' import_list)? NEWLINE
+import_decl       ::= 'import' import_target ('as' IDENT)? ('effects' ':' IDENT (',' IDENT)*)? ('use' import_list)? (':' NEWLINE INDENT python_signature+ DEDENT | NEWLINE)
 
 import_target     ::= STRING_LITERAL             # "./module", "corvid://pkg@1.0.0", "https://…"
                     | 'python' STRING_LITERAL    # external ecosystem: import python "mylib"
+
+python_signature  ::= 'fn' IDENT params '->' type_ref NEWLINE
 
 import_list       ::= import_item (',' import_item)*
 
@@ -264,21 +268,107 @@ extend_method     ::= visibility? (agent_decl | prompt_decl | tool_decl)
 ## Server and schedule declarations
 
 Routes carry an HTTP method, an optional typed query/body contract,
-a typed `json` response, and a handler body block. The `zone` clause
+a `json Type` or `html` response, and a handler body block. HTML handlers return `String`.
+A route can require a signed-in caller, a role, or a permission. Join requirements
+with `and`, as in `requires authenticated and permission("status.read")`.
+The `zone` clause
 on schedules is mandatory.
 
 ```ebnf
 server_decl       ::= 'server' IDENT ':' INDENT route_decl+ DEDENT
 
-route_decl        ::= 'route' http_method STRING_LITERAL
-                      ('query' type_ref)? ('body' type_ref)?
-                      '->' 'json' type_ref uses_clause? ':' INDENT block DEDENT
+route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
+                      | approval_annotation NEWLINE (upload_annotation NEWLINE)?)?
+                      'route' http_method STRING_LITERAL
+                      (route_query route_payload? | route_payload route_query?)?
+                      '->' ('json' type_ref | 'html') uses_clause? route_policy? ':' INDENT block DEDENT
+
+route_query       ::= 'query' type_ref
+route_payload     ::= ('body' | 'form') type_ref
+route_policy      ::= 'requires' route_requirement ('and' route_requirement)*
+route_requirement ::= 'authenticated' | ('role' | 'permission') '(' STRING_LITERAL ')'
+
+upload_annotation ::= '@' 'upload' '(' (upload_arg (',' upload_arg)* ','?)? ')'
+upload_arg        ::= ('max_mb' | 'max_bytes' | 'retention_days') ':' INT | 'mime' ':' STRING_LITERAL
+approval_annotation ::= '@' 'approval' '(' approval_arg (',' approval_arg)* ','? ')'
+approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
+                    | 'expires_ms' ':' INT | 'max_cost_usd' ':' '$' (FLOAT | INT)
+                    | 'irreversible' ':' ('true' | 'false')
 
 http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
                       '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE
 ```
+
+## Identity declarations
+
+An identity block declares sign-in providers and can configure sessions,
+account linking, provisioning and roles. Within a provisioning block,
+`first_login` is required. Both `open` and `invited` require an explicit
+tenant assignment. A role's quoted value lists its permissions separated by commas.
+The parser recognizes `approval_required` for first login. The checker reports
+it as a future feature. Use `open` or `invited` for a runnable application.
+
+```ebnf
+identity_decl     ::= 'identity' IDENT ':' INDENT identity_item+ DEDENT
+identity_item     ::= 'provider' identity_provider NEWLINE
+                    | 'session' ':' INDENT (session_setting NEWLINE)+ DEDENT
+                    | 'linking' ':' INDENT (linking_setting NEWLINE)+ DEDENT
+                    | 'provisioning' ':' INDENT (provisioning_setting NEWLINE)+ DEDENT
+                    | 'roles' ':' INDENT (IDENT ':' STRING_LITERAL NEWLINE)+ DEDENT
+identity_provider ::= 'google' | 'github' | 'microsoft' | 'apple' | 'discord' | 'slack'
+                    | 'oidc' STRING_LITERAL 'as' IDENT
+session_setting   ::= 'lifetime' ':' INT ('s' | 'm' | 'h' | 'd')
+                    | 'same_site' ':' ('strict' | 'lax' | 'none')
+                    | ('secure' | 'http_only' | 'rotate_on_privilege_change' | 'insecure_opt_out') ':' ('true' | 'false')
+linking_setting   ::= 'email_match' ':' ('never' | 'verified_domain')
+                    | 'verified_domains' ':' STRING_LITERAL
+provisioning_setting ::= 'first_login' ':' ('open' | 'invited' | 'approval_required')
+                    | 'tenant' ':' tenant_assignment
+                    | 'default_role' ':' IDENT
+tenant_assignment ::= 'fixed' '(' STRING_LITERAL ')' | 'from_invitation'
+                    | 'from_claim' '(' STRING_LITERAL ')' 'allow' STRING_LITERAL
+```
+
+## Connector declarations
+
+A connector groups HTTP operations under a base URL. Declare the modes
+callers may use in `modes`. Credentials refer to named secrets. A request
+can send one operation parameter as a JSON body or a form.
+
+```ebnf
+connector_decl    ::= 'connector' IDENT ':' INDENT connector_item+ DEDENT
+connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
+                    | 'auth' ':' connector_auth NEWLINE
+                    | ('retry' | 'circuit_breaker') ':' INT NEWLINE
+                    | 'rate_limit' ':' INT 'per' INT 's'? NEWLINE
+                    | 'modes' ':' '[' (connector_mode (',' connector_mode)* ','?)? ']' NEWLINE
+                    | operation_decl
+connector_mode    ::= 'mock' | 'replay' | 'real'
+connector_auth    ::= 'bearer' '(' secret_ref ')'
+                    | 'header' '(' STRING_LITERAL ',' secret_ref ')'
+                    | 'basic' '(' secret_ref ',' secret_ref ')'
+secret_ref        ::= 'secret' '(' STRING_LITERAL ')'
+operation_decl    ::= 'operation' IDENT params '->' type_ref 'dangerous'? uses_clause? ':'
+                      INDENT http_method STRING_LITERAL (('body' | 'form') IDENT)? NEWLINE
+                      operation_item* DEDENT
+operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEWLINE
+                    | 'async' ':' INDENT protocol_item+ DEDENT
+protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE
+                    | ('initial' | 'deadline_target') ':' IDENT NEWLINE
+                    | 'deadline' ':' INT 's'? NEWLINE
+                    | 'idempotency' ':' 'intent' 'via' 'header' STRING_LITERAL NEWLINE
+                    | ('poll' | 'cancel') http_method STRING_LITERAL NEWLINE
+                    | 'every' ':' ('adaptive' | INT 's'?) NEWLINE
+                    | 'on_protocol_change' ':' ('refuse' | 'resume') NEWLINE
+                    | 'state' IDENT ':' INDENT ('on' IDENT '->' IDENT NEWLINE)+ DEDENT
+protocol_names    ::= '[' (IDENT (',' IDENT)* ','?)? ']'
+```
+
+An `async` block requires statuses, initial and terminal states, a deadline
+and its target, an idempotency header, a polling request and interval, and
+an explicit policy for protocol changes. A cancel request is optional.
 
 ## Test surface
 
@@ -340,7 +430,7 @@ for_stmt          ::= 'for' IDENT 'in' expr ':' INDENT block DEDENT
 # unbounded (no static iteration count).
 while_stmt        ::= 'while' expr ':' INDENT block DEDENT
 
-approve_stmt      ::= 'approve' IDENT '(' arg_list? ')' NEWLINE
+approve_stmt      ::= 'approve' IDENT ('.' IDENT)? '(' arg_list? ')' NEWLINE
 
 break_stmt        ::= 'break' NEWLINE
 continue_stmt     ::= 'continue' NEWLINE
@@ -478,7 +568,7 @@ retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
 
 Keywords (reserved): `agent`, `tool`, `prompt`, `eval`, `test`,
 `fixture`, `mock`, `server`, `route`, `schedule`, `zone`, `type`,
-`session`, `memory`, `import`, `as`, `pub`, `extern`, `extend`,
+`identity`, `connector`, `session`, `memory`, `import`, `as`, `pub`, `extern`, `extend`,
 `public`, `package`, `try`, `on`, `error`, `retry`, `times`,
 `backoff`, `linear`, `exponential`, `approve`, `dangerous`, `effect`,
 `uses`, `assert`, `assert_snapshot`, `model`, `requires`,
@@ -496,8 +586,11 @@ bare or annotated assignment (decision recorded at ROADMAP slice
 
 Identifiers: `[A-Za-z_][A-Za-z0-9_]*` excluding keywords.
 
-Numeric literals: `INT` is `[0-9]+`; `FLOAT` is
-`[0-9]+\.[0-9]+(e[+-]?[0-9]+)?`. There is no hex literal form.
+Decimal digits alone produce an `Int`. A fractional part or an exponent
+produces a `Float`, as in `4.5`, `3e-4`, and `1.25E+2`. A fractional
+part requires digits after the decimal point. An exponent takes an optional
+sign and at least one decimal digit. Float literals must fit in a finite
+64-bit floating-point value.
 
 String literals: `"..."` (single-line, escape-processed) or
 `"""..."""` (multi-line, raw).

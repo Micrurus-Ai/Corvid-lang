@@ -98,6 +98,8 @@ corvid migrate up [--dry-run]
 corvid migrate down [--dry-run]
 ```
 
+Migration history lives in the SQLite database. For recovery after a failed state-file write and instructions for existing databases, see the [persistence guide](../guides/persistence.md).
+
 ## Package management (Phase 25)
 
 ```sh
@@ -106,10 +108,7 @@ corvid package publish
 corvid import-summary <file>
 ```
 
-## Self-management
+## Version and installation
 
-```sh
-corvid --version
-corvid self update
-corvid self uninstall
-```
+Run `corvid --version` to inspect the executable. Use the platform installer for
+updates, rollback and removal. See the [installation chapter](../book/01-install.md).

@@ -84,7 +84,7 @@ be merged and credited.
 
 Current published numbers:
 
-- Corvid (`cargo run -q -p corvid-cli -- check`): **50/50 rejected**.
+- Corvid (`cargo run -q -p corvid-cli -- check`): **34/50 rejected with the expected guarantee ID**.
 - Python (`mypy --strict + pydantic`): **0/50 rejected**.
 - TypeScript (`tsc --strict + zod`): **0/50 rejected**.
 
@@ -115,7 +115,7 @@ Current published numbers (10 chains — RAG aggregate, extract+translate,
 RAG-through-tool, classify+route, multi-source dedupe, RAG-to-JSON,
 conversational RAG, safety filter, numeric aggregation, rerank top-k):
 
-- Corvid: **10/10 preserved**.
+- Corvid: **4/10 preserved by the offline execution probe**.
 - Python (LangChain + pydantic): **0/10 preserved**.
 - TypeScript (Vercel AI SDK + zod): **0/10 preserved**.
 

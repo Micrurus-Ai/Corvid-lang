@@ -31,6 +31,7 @@ prompt generate_assertion(
     feedback: Grounded<String>,
     events: List<Grounded<String>>,
 ) -> Grounded<EvalFixture> uses llm:
+    cites feedback strictly
     """
     You are an eval-corpus author. Given the user's "wrong
     answer" feedback record and the lineage events that produced
@@ -40,7 +41,6 @@ prompt generate_assertion(
     count. Cite both the feedback record and the events you
     reason from.
     """
-    cites feedback strictly
     cites events strictly
 
 @budget($0.05)

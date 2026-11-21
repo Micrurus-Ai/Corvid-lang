@@ -147,6 +147,24 @@ mod tests {
     }
 
     #[test]
+    fn scientific_literals() {
+        assert_eq!(
+            kinds("3e-4 1.25E+2 7e0"),
+            vec![
+                TokKind::Float(0.0003),
+                TokKind::Float(125.0),
+                TokKind::Float(7.0),
+                TokKind::Newline,
+                TokKind::Eof
+            ]
+        );
+        for source in ["1e", "2.5E+", "1e999"] {
+            let errors = lex(source).unwrap_err();
+            assert!(matches!(&errors[0].kind, LexErrorKind::InvalidNumber(s) if s == source));
+        }
+    }
+
+    #[test]
     fn dot_after_integer_is_field_access() {
         // `x.y` should lex as Ident Dot Ident.
         // `42.foo` should lex as Int Dot Ident (not a malformed float).

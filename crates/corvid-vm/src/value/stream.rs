@@ -23,17 +23,28 @@ use super::{
     UNBOUNDED_STREAM_WARN_THRESHOLD,
 };
 
-
 pub struct StreamValue(Arc<StreamInner>);
 
+impl Drop for StreamInner {
+    fn drop(&mut self) {
+        if let Some(task) = self.producer.get() {
+            task.abort();
+        }
+    }
+}
+
 struct StreamInner {
+    producer: std::sync::OnceLock<tokio::task::AbortHandle>,
     receiver: AsyncMutex<StreamReceiver>,
     backpressure: BackpressurePolicy,
     provenance: Mutex<ProvenanceChain>,
-    history: Mutex<Vec<StreamChunk>>,
-    resume_context: Mutex<Option<StreamResumeContext>>,
-    pending: AtomicUsize,
-    warned_unbounded: AtomicBool,
+    resume: Mutex<Option<ResumeHistory>>,
+    pending: Arc<AtomicUsize>,
+}
+
+struct ResumeHistory {
+    context: StreamResumeContext,
+    delivered: Vec<StreamChunk>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +61,8 @@ enum StreamReceiver {
 }
 
 pub(crate) struct StreamSender {
-    inner: Arc<StreamInner>,
+    pending: Arc<AtomicUsize>,
+    warned_unbounded: AtomicBool,
     kind: StreamSenderKind,
 }
 
@@ -61,62 +73,41 @@ enum StreamSenderKind {
 
 impl StreamValue {
     pub(crate) fn channel(backpressure: BackpressurePolicy) -> (StreamSender, Self) {
-        match backpressure {
-            BackpressurePolicy::Bounded(size) => {
-                let (sender, receiver) = mpsc::channel(size as usize);
-                let inner = Arc::new(StreamInner {
-                    receiver: AsyncMutex::new(StreamReceiver::Bounded(receiver)),
-                    backpressure: BackpressurePolicy::Bounded(size),
-                    provenance: Mutex::new(ProvenanceChain::new()),
-                    history: Mutex::new(Vec::new()),
-                    resume_context: Mutex::new(None),
-                    pending: AtomicUsize::new(0),
-                    warned_unbounded: AtomicBool::new(false),
-                });
-                let stream = Self(Arc::clone(&inner));
-                let sender = StreamSender {
-                    inner,
-                    kind: StreamSenderKind::Bounded(sender),
-                };
-                (sender, stream)
-            }
-            BackpressurePolicy::PullsFrom(source) => {
-                let (sender, receiver) = mpsc::channel(1);
-                let inner = Arc::new(StreamInner {
-                    receiver: AsyncMutex::new(StreamReceiver::Bounded(receiver)),
-                    backpressure: BackpressurePolicy::PullsFrom(source),
-                    provenance: Mutex::new(ProvenanceChain::new()),
-                    history: Mutex::new(Vec::new()),
-                    resume_context: Mutex::new(None),
-                    pending: AtomicUsize::new(0),
-                    warned_unbounded: AtomicBool::new(false),
-                });
-                let stream = Self(Arc::clone(&inner));
-                let sender = StreamSender {
-                    inner,
-                    kind: StreamSenderKind::Bounded(sender),
-                };
-                (sender, stream)
-            }
+        let bounded = |capacity| {
+            let (tx, rx) = mpsc::channel(capacity);
+            (StreamSenderKind::Bounded(tx), StreamReceiver::Bounded(rx))
+        };
+        let (kind, receiver) = match &backpressure {
+            BackpressurePolicy::Bounded(size) => bounded(*size as usize),
+            BackpressurePolicy::PullsFrom(_) => bounded(1),
             BackpressurePolicy::Unbounded => {
-                let (sender, receiver) = mpsc::unbounded_channel();
-                let inner = Arc::new(StreamInner {
-                    receiver: AsyncMutex::new(StreamReceiver::Unbounded(receiver)),
-                    backpressure: BackpressurePolicy::Unbounded,
-                    provenance: Mutex::new(ProvenanceChain::new()),
-                    history: Mutex::new(Vec::new()),
-                    resume_context: Mutex::new(None),
-                    pending: AtomicUsize::new(0),
-                    warned_unbounded: AtomicBool::new(false),
-                });
-                let stream = Self(Arc::clone(&inner));
-                let sender = StreamSender {
-                    inner,
-                    kind: StreamSenderKind::Unbounded(sender),
-                };
-                (sender, stream)
+                let (tx, rx) = mpsc::unbounded_channel();
+                (
+                    StreamSenderKind::Unbounded(tx),
+                    StreamReceiver::Unbounded(rx),
+                )
             }
-        }
+        };
+        let pending = Arc::new(AtomicUsize::new(0));
+        let stream = Self(Arc::new(StreamInner {
+            producer: Default::default(),
+            receiver: AsyncMutex::new(receiver),
+            backpressure,
+            provenance: Mutex::new(ProvenanceChain::new()),
+            resume: Mutex::new(None),
+            pending: pending.clone(),
+        }));
+        let sender = StreamSender {
+            kind,
+            pending,
+            warned_unbounded: AtomicBool::new(false),
+        };
+        (sender, stream)
+    }
+
+    pub(crate) fn spawn_producer(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
+        let task = tokio::spawn(future);
+        self.0.producer.set(task.abort_handle()).expect("one producer per stream");
     }
 
     pub async fn next(&self) -> Option<Result<Value, InterpError>> {
@@ -135,11 +126,15 @@ impl StreamValue {
             self.0.pending.fetch_sub(1, Ordering::AcqRel);
         }
         if let Some(Ok(chunk)) = &item {
-            self.0
-                .history
+            if let Some(resume) = self
+                .0
+                .resume
                 .lock()
-                .expect("stream history poisoned")
-                .push(chunk.clone());
+                .expect("stream resume state poisoned")
+                .as_mut()
+            {
+                resume.delivered.push(chunk.clone());
+            }
             if let Some(chain) = chunk.provenance() {
                 self.0
                     .provenance
@@ -164,31 +159,20 @@ impl StreamValue {
     }
 
     pub(crate) fn set_resume_context(&self, context: StreamResumeContext) {
-        *self
-            .0
-            .resume_context
-            .lock()
-            .expect("stream resume context poisoned") = Some(context);
+        *self.0.resume.lock().expect("stream resume state poisoned") = Some(ResumeHistory {
+            context,
+            delivered: Vec::new(),
+        });
     }
 
     pub(crate) fn resume_token(&self) -> Option<ResumeTokenValue> {
-        let context = self
-            .0
-            .resume_context
-            .lock()
-            .expect("stream resume context poisoned")
-            .clone()?;
-        let delivered = self
-            .0
-            .history
-            .lock()
-            .expect("stream history poisoned")
-            .clone();
+        let history = self.0.resume.lock().expect("stream resume state poisoned");
+        let resume = history.as_ref()?;
         Some(ResumeTokenValue {
-            prompt_name: context.prompt_name,
-            args: context.args,
-            delivered,
-            provider_session: context.provider_session,
+            prompt_name: resume.context.prompt_name.clone(),
+            args: resume.context.args.clone(),
+            delivered: resume.delivered.clone(),
+            provider_session: resume.context.provider_session.clone(),
         })
     }
 
@@ -209,28 +193,28 @@ impl PartialEq for StreamValue {
     }
 }
 
-
 impl StreamSender {
     pub async fn send(&self, item: Result<Value, InterpError>) -> bool {
         self.send_chunk(item.map(StreamChunk::new)).await
     }
 
     pub(crate) async fn send_chunk(&self, item: Result<StreamChunk, InterpError>) -> bool {
-        let pending_after_send = self.inner.pending.fetch_add(1, Ordering::AcqRel) + 1;
         match &self.kind {
             StreamSenderKind::Bounded(sender) => {
-                if sender.send(item).await.is_err() {
-                    self.inner.pending.fetch_sub(1, Ordering::AcqRel);
+                let Ok(permit) = sender.reserve().await else {
                     return false;
-                }
+                };
+                self.pending.fetch_add(1, Ordering::AcqRel);
+                permit.send(item);
             }
             StreamSenderKind::Unbounded(sender) => {
+                let pending_after_send = self.pending.fetch_add(1, Ordering::AcqRel) + 1;
                 if sender.send(item).is_err() {
-                    self.inner.pending.fetch_sub(1, Ordering::AcqRel);
+                    self.pending.fetch_sub(1, Ordering::AcqRel);
                     return false;
                 }
                 if pending_after_send > UNBOUNDED_STREAM_WARN_THRESHOLD
-                    && !self.inner.warned_unbounded.swap(true, Ordering::AcqRel)
+                    && !self.warned_unbounded.swap(true, Ordering::AcqRel)
                 {
                     eprintln!(
                         "warning: unbounded stream buffer exceeded {} queued items",
@@ -267,5 +251,35 @@ impl StreamChunk {
             Value::Grounded(grounded) => Some(&grounded.provenance),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod consumer_lifetime_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn dropping_last_consumer_wakes_a_blocked_producer() {
+        let (sender, stream) = StreamValue::channel(BackpressurePolicy::Bounded(1));
+        let other_consumer = stream.clone();
+        drop(stream);
+        assert!(sender.send(Ok(Value::Int(1))).await);
+        let second = sender.send(Ok(Value::Int(2)));
+        tokio::pin!(second);
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut second)
+            .await
+            .is_err());
+        drop(other_consumer);
+        assert!(!tokio::time::timeout(Duration::from_secs(1), second)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn unbounded_producer_observes_consumer_drop() {
+        let (sender, stream) = StreamValue::channel(BackpressurePolicy::Unbounded);
+        drop(stream);
+        assert!(!sender.send(Ok(Value::Int(1))).await);
     }
 }

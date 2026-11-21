@@ -163,3 +163,25 @@ agent review_refund(amount: Int) -> Int:
     let observed = run_wasmtime_i64(&ir, "refund_gate", "review_refund", &[120]);
     assert_eq!(observed, 120);
 }
+
+#[test]
+fn numeric_edges_and_short_circuit_match_corvid_semantics() {
+    let ir = ir_of("agent mixed(x: Int, y: Float) -> Float:\n    return x + y\n\nagent guarded(x: Int) -> Bool:\n    return x != 0 and 10 / x > 1\n\nagent product(x: Int, y: Int) -> Int:\n    return x * y\n\nagent sum(x: Int, y: Int) -> Int:\n    return x + y\n");
+    let bytes = emit_wasm_artifacts(&ir, "numeric").unwrap().wasm;
+    let engine = Engine::default();
+    let module = Module::new(&engine, &bytes).unwrap();
+    let mut store = Store::new(&engine, ());
+    let instance = Linker::new(&engine).instantiate(&mut store, &module).unwrap();
+    let mixed = instance.get_typed_func::<(i64, f64), f64>(&mut store, "mixed").unwrap();
+    assert_eq!(mixed.call(&mut store, (2, 0.5)).unwrap(), 2.5);
+    let guarded = instance.get_typed_func::<i64, i32>(&mut store, "guarded").unwrap();
+    assert_eq!(guarded.call(&mut store, 0).unwrap(), 0);
+    for (name, op) in [("product", i64::checked_mul as fn(i64, i64) -> Option<i64>), ("sum", i64::checked_add)] {
+        let f = instance.get_typed_func::<(i64, i64), i64>(&mut store, name).unwrap();
+        for x in [i64::MIN, -2, -1, 0, 1, 2, i64::MAX] {
+            for y in [i64::MIN, -2, -1, 0, 1, 2, i64::MAX] {
+                assert_eq!(f.call(&mut store, (x, y)).ok(), op(x, y), "{name}({x}, {y})");
+            }
+        }
+    }
+}

@@ -25,12 +25,18 @@ on:
       - "web/**"
       - ".github/workflows/test-installers.yml"
   workflow_dispatch:
+    inputs:
+      recovery_only:
+        description: Run only offline installer lifecycle and tagged source checks across native architectures
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   lint:
+    if: ${{ !inputs.recovery_only }}
     name: lint scripts
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +55,7 @@ jobs:
         run: node --check web/worker.js
 
   pwsh-lint:
+    if: ${{ !inputs.recovery_only }}
     name: PSScriptAnalyzer
     runs-on: windows-latest
     steps:
@@ -74,94 +81,83 @@ jobs:
           }
           Write-Host "install.ps1 clean"
 
-  smoke-linux:
-    name: smoke (ubuntu)
-    runs-on: ubuntu-latest
-    needs: lint
-    if: contains(github.event.pull_request.changed_files, 'install/') || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: smoke-installer
-
-      - name: Install via install.sh against this checkout
-        env:
-          # Force the source-build fallback by pointing at a tag that
-          # cannot exist. The fallback builds from this very repo.
-          CORVID_VERSION: nonexistent-test-tag
-          CORVID_REPO: ${{ github.repository }}
-          CORVID_HOME: ${{ runner.temp }}/.corvid
-        run: |
-          set -euxo pipefail
-          # Run the script directly (not via curl|sh) so we test this branch's
-          # install.sh, not main's. CORVID_REPO + CORVID_VERSION are read by
-          # the script; the intentionally-broken version forces cargo fallback.
-          sh install/install.sh
-
-      - name: corvid is on PATH
-        run: |
-          export PATH="${{ runner.temp }}/.corvid/bin:$PATH"
-          command -v corvid
-          corvid --version || corvid --help | head -1
-
-      - name: corvid new produces a checkable project
-        run: |
-          export PATH="${{ runner.temp }}/.corvid/bin:$PATH"
-          export CORVID_HOME="${{ runner.temp }}/.corvid"
-          mkdir -p "${{ runner.temp }}/work" && cd "${{ runner.temp }}/work"
-          corvid new testproj
-          test -f testproj/corvid.toml
-          test -f testproj/src/main.cor
-          # std/ should have been vendored from $CORVID_HOME/std
-          test -d testproj/std
-          cd testproj
-          corvid doctor || true   # doctor is informational, not a gate
-
-  smoke-matrix:
-    name: smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    needs: lint
-    if: github.event_name == 'workflow_dispatch'
+  upgrade-recovery:
+    name: offline upgrade recovery (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.recovery_only && '["ubuntu-latest","ubuntu-24.04-arm","macos-15-intel","macos-15","windows-latest","windows-11-arm"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Exercise installer replacement and recovery
+        run: python install/test_upgrade.py
+      - name: Build a stable source fallback from a tagged checkout
+        run: python install/test_source_install.py
+
+  source-checkout:
+    name: Source installation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [lint, pwsh-lint]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: smoke-${{ matrix.os }}
+          key: source-installer-${{ matrix.os }}
 
-      - name: Install (Unix)
-        if: matrix.os == 'macos-latest'
-        env:
-          CORVID_VERSION: nonexistent-test-tag
-          CORVID_REPO: ${{ github.repository }}
-          CORVID_HOME: ${{ runner.temp }}/.corvid
-        run: sh install/install.sh
+      - name: Pin the checked-out commit in a local Git repository
+        shell: python
+        run: |
+          import os
+          import subprocess
+          from pathlib import Path
+          checkout = Path.cwd()
+          tag = "installer-check-" + os.environ["GITHUB_SHA"]
+          subprocess.run(["git", "tag", tag, "HEAD"], check=True)
+          settings = {
+              "CORVID_REPO": "installer-fixture/corvid",
+              "CORVID_VERSION": tag,
+              "CORVID_HOME": str(Path(os.environ["RUNNER_TEMP"]) / ".corvid"),
+              "CORVID_SKIP_EDITOR_EXTENSION": "1",
+              "CORVID_NO_MODIFY_PROFILE": "1",
+              "CARGO_TARGET_DIR": str(checkout / "target"),
+              "GIT_CONFIG_COUNT": "1",
+              "GIT_CONFIG_KEY_0": f"url.{checkout.as_uri()}.insteadOf",
+              "GIT_CONFIG_VALUE_0": "https://github.com/installer-fixture/corvid.git",
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as out:
+              for key, value in settings.items():
+                  print(f"{key}={value}", file=out)
 
-      - name: Install (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Install from source (Unix)
+        if: runner.os != 'Windows'
+        run: sh install/install.sh --from-source
+
+      - name: Install from source (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          CORVID_VERSION: nonexistent-test-tag
-          CORVID_REPO: ${{ github.repository }}
-          CORVID_HOME: ${{ runner.temp }}\.corvid
-        run: |
-          .\install\install.ps1
+        run: .\install\install.ps1 -FromSource
 
-      - name: Verify corvid is callable
-        shell: bash
+      - name: Check installed source and a fresh application
+        shell: python
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            export PATH="${{ runner.temp }}\\.corvid\\bin:$PATH"
-          else
-            export PATH="${{ runner.temp }}/.corvid/bin:$PATH"
-          fi
-          command -v corvid
-          corvid --help | head -1
+          import os
+          import subprocess
+          from pathlib import Path
+          root = Path(os.environ["CORVID_HOME"])
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root / "src", text=True)
+          assert commit.strip() == os.environ["GITHUB_SHA"]
+          app_parent = Path(os.environ["RUNNER_TEMP"])
+          subprocess.run(["corvid", "--version"], check=True)
+          subprocess.run(["corvid", "new", "testproj"], cwd=app_parent, check=True)
+          project = app_parent / "testproj"
+          assert (project / "src/std").is_dir()
+          subprocess.run(["corvid", "check", "src/main.cor"], check=True, cwd=project)

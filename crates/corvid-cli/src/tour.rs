@@ -64,13 +64,8 @@ mod tests {
     #[test]
     fn all_tour_sources_compile() {
         for topic in TOPICS {
-            let compiled = corvid_driver::compile(topic.source);
-            assert!(
-                compiled.ok(),
-                "tour topic `{}` failed to compile: {:?}",
-                topic.name,
-                compiled.diagnostics
-            );
+            corvid_driver::compile_to_ir(topic.source)
+                .unwrap_or_else(|errors| panic!("tour topic `{}` failed to compile: {errors:?}", topic.name));
         }
     }
 }

@@ -14,7 +14,7 @@ Five independent techniques run on every build. A regression in any one fails CI
 
 **Implementation.** [`crates/corvid-differential-verify/`](../../crates/corvid-differential-verify/). Public API: `verify_program(path) -> DivergenceReport`, `verify_corpus(dir) -> Vec<DivergenceReport>`. CLI: `corvid verify --corpus <dir>`. Shipped in commit `d89c910` + native-tier follow-ups in commits `3b1a380`/`9616c20`/`7d63e1c`.
 
-**Corpus.** `tests/corpus/` — 20 programs that agree across all four tiers, plus `should_fail/tier_disagree.cor` and `should_fail/native_drops_effect.cor` that prove the harness catches divergences. The deliberate-fail fixtures are the harness testing *itself*.
+**Corpus.** The four tiers agree on the trust requirement after a list loop in `tests/corpus/effect_after_list_loop.cor`. The deliberate divergence in `tests/corpus/should_fail/tier_disagree.cor` exercises the verifier's failure path.
 
 **Inventive angles shipped.**
 - **Minimum-divergent shrinker.** `corvid verify --shrink P.cor` reduces a divergent program to its smallest reproducer.

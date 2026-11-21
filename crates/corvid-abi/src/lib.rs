@@ -7,6 +7,7 @@ pub mod pr_describe;
 mod effect_emit;
 mod embedded;
 mod emit;
+pub mod equality;
 mod introspection_catalog;
 mod provenance_emit;
 pub mod app_contract;

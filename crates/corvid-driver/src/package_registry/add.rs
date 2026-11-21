@@ -8,7 +8,8 @@ use semver::Version;
 use crate::import_integrity::sha256_hex;
 use crate::modules::summarize_module_source;
 use crate::package_lock::{
-    load_or_empty_at, lock_path_for_project, upsert_package, write_package_lock, LockedPackage,
+    load_or_empty_at, lock_path_for_project, remove_packages_by_name, upsert_package,
+    write_package_lock, LockedPackage,
 };
 use crate::package_manifest::upsert_dependency;
 use crate::package_policy::{load_package_policy, package_policy_violation};
@@ -40,7 +41,28 @@ pub fn add_package(
         });
     };
 
-    let bytes = fetch_bytes(&selected.url)
+    let url = if selected.url.starts_with("https://") || selected.url.starts_with("http://") {
+        selected.url.clone()
+    } else if registry_location.starts_with("https://") || registry_location.starts_with("http://")
+    {
+        return Ok(AddPackageOutcome::Rejected {
+            reason: "a remote registry must supply an HTTP(S) artifact URL".into(),
+        });
+    } else if selected.url.starts_with("file://") {
+        selected.url.clone()
+    } else {
+        let index_path = Path::new(&registry_location);
+        let base = if index_path.is_dir() {
+            index_path
+        } else {
+            index_path.parent().unwrap_or(Path::new("."))
+        };
+        let path = base.join(&selected.url).canonicalize()?;
+        url::Url::from_file_path(&path)
+            .map_err(|_| anyhow!("invalid artifact path {}", path.display()))?
+            .to_string()
+    };
+    let bytes = fetch_bytes(&url)
         .with_context(|| format!("failed to fetch package source `{}`", selected.url))?;
     let actual = sha256_hex(&bytes);
     if !actual.eq_ignore_ascii_case(&selected.sha256) {
@@ -79,17 +101,22 @@ pub fn add_package(
         }
     }
 
+    crate::package_cache::store(
+        &crate::package_cache::artifact(project_dir, &actual),
+        source.as_bytes(),
+    )?;
     let lockfile = lock_path_for_project(project_dir);
     let mut lock = load_or_empty_at(&lockfile).map_err(|message| anyhow!(message))?;
     let uri = selected
         .uri
         .clone()
         .unwrap_or_else(|| format!("corvid://{}/v{}", selected.name, selected.version));
+    remove_packages_by_name(&mut lock, &spec.name);
     upsert_package(
         &mut lock,
         LockedPackage {
             uri: uri.clone(),
-            url: selected.url.clone(),
+            url,
             sha256: selected.sha256.to_ascii_lowercase(),
             registry: selected
                 .registry

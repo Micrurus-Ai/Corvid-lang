@@ -20,16 +20,31 @@ use corvid_ir::{IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrStmt};
 /// `stdlib_tool_list_matches_std_sources` test below — adding a
 /// stdlib tool without updating this list fails CI.
 pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
+    // std/browser
+    "browser_open",
+    "browser_open_scoped",
+    "browser_read_text",
+    "browser_click",
+    "browser_capture",
+    "browser_close",
     // std/io
     "io_read_text",
+    "io_read_image",
     "io_write_text",
     "io_list_dir",
+    // std/path
+    "path_join",
+    "path_parent",
+    "path_filename",
+    "path_extension",
+    "path_is_absolute",
     // std/http
     "http_get",
     "http_post_json",
     // std/db
     "db_open",
     "db_query",
+    "db_query_rows",
     "db_execute",
     // std/json
     "json_parse",

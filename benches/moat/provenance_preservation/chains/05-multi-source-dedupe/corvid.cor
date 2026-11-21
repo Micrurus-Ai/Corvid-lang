@@ -17,5 +17,7 @@ prompt aggregate(parts: List<Grounded<String>>) -> Grounded<String> uses llm:
 agent multi_source_dedupe(query: String) -> Grounded<String>:
     wiki: List<Grounded<String>> = retrieve_wiki(query)
     internal: List<Grounded<String>> = retrieve_internal(query)
-    merged: List<Grounded<String>> = dedupe(wiki ++ internal)
+    for item in internal:
+        wiki.append(item)
+    merged: List<Grounded<String>> = dedupe(wiki)
     return aggregate(merged)

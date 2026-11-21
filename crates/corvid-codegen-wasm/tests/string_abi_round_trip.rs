@@ -215,3 +215,26 @@ fn many_round_trips_do_not_grow_memory() {
         "200-iteration churn must reuse memory; pages went {initial_pages} -> {final_pages}",
     );
 }
+
+#[test]
+fn string_comparisons_use_contents_across_distinct_addresses() {
+    let src = "agent same(a: String, b: String) -> Bool:\n    return a == b\n\nagent different(a: String, b: String) -> Bool:\n    return a != b\n";
+    let bytes = build_module_bytes(src, "compare");
+    let engine = Engine::default();
+    let module = Module::new(&engine, &bytes).unwrap();
+    let mut store = Store::new(&engine, ());
+    let instance = Linker::new(&engine).instantiate(&mut store, &module).unwrap();
+    let alloc = instance.get_typed_func::<i32, i32>(&mut store, "corvid_alloc").unwrap();
+    let memory = instance.get_memory(&mut store, "memory").unwrap();
+    let left = alloc.call(&mut store, 8).unwrap();
+    let right = alloc.call(&mut store, 8).unwrap();
+    let same = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "same").unwrap();
+    let diff = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "different").unwrap();
+    for (a, b) in [("", ""), ("", "x"), ("a\0b", "a\0c"), ("\u{732b}", "\u{732b}"), ("\u{732b}", "\u{72ac}")] {
+        memory.write(&mut store, left as usize, a.as_bytes()).unwrap();
+        memory.write(&mut store, right as usize, b.as_bytes()).unwrap();
+        let args = (left, a.len() as i32, right, b.len() as i32);
+        assert_eq!(same.call(&mut store, args).unwrap(), i32::from(a == b));
+        assert_eq!(diff.call(&mut store, args).unwrap(), i32::from(a != b));
+    }
+}

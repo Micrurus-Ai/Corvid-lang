@@ -261,3 +261,93 @@ latency, and cost. `corvid replay` reproduces the run from the
 recording without hitting the provider. `corvid eval --swap-model`
 re-runs the prompt against a different model and diffs the result
 against the baseline.
+
+### Running the same prompt on different providers
+
+For a prompt without a pinned model, set `CORVID_MODEL` in the process
+that starts `corvid run` or `corvid serve`. For an Ollama model installed
+locally as `local-model`, use `ollama:local-model`. To send the same
+program to an OpenAI-compatible server listening on port 8080, use
+`openai-compat:http://127.0.0.1:8080/v1:local-model`. Substitute the
+actual model name and address. Set `OPENAI_COMPAT_API_KEY` only when the
+server requires a credential. `OLLAMA_BASE_URL` overrides the Ollama address.
+
+A `String` result requests text. A declared record result sends the
+record's schema to the provider and checks the returned fields before the
+calling agent uses them. Role blocks preserve the order of system and
+user messages when switching between these providers. Hosted Gemini
+models use the `gemini-` model prefix and read `GOOGLE_API_KEY` or
+`GEMINI_API_KEY`.
+
+## Serve a streamed prompt
+
+```corvid
+prompt generate(topic: String) -> Stream<String>:
+    with max_tokens 20
+    "{topic}"
+
+server answers:
+    route GET "/answer/{topic}" -> json Stream<String>:
+        return try generate(path.topic) timeout 700 on error retry 2 times backoff linear 1
+```
+
+With the service listening on port 8080, run
+`curl -N http://127.0.0.1:8080/answer/weather` to see each text event as
+it arrives. The timeout bounds the wait for the first item in each attempt
+in milliseconds. Once output starts, a provider interruption reaches the
+consumer as a stream error. A successful response ends with a done event.
+Closing the client connection cancels the active stream.
+
+## Pass a function to a prompt
+
+Declare a function parameter when the model needs to ask Corvid to compute
+a result. The parameter name is the tool name the model sees. The function
+you pass supplies the argument names and implementation.
+
+```corvid
+fn add(left: Int, right: Int) -> Int:
+    return left + right
+
+prompt answer(question: String, calculate: (Int, Int) -> Int) -> String:
+    "{question}"
+
+agent main() -> String:
+    return answer("Use calculate to add 18 and 24.", add)
+```
+
+Run the file with `corvid run` and an OpenAI-compatible chat model that
+supports function calls. Corvid advertises `calculate(left, right)`,
+checks the model's named arguments, invokes `add`, and sends the result
+back with the model's call ID. The model can then answer or call again.
+A single conversation accepts up to eight function calls. An unknown
+function, malformed arguments, a repeated call ID, or an additional call
+beyond the limit ends the prompt with an error. The static cost estimate
+allows for up to nine provider requests, including the final answer.
+
+## Pass a local image to a prompt
+
+Declare a `PromptImage` parameter and pass it the result of
+`io_read_image`. Corvid attaches its bytes to the user message. An
+interpolation such as `{photo}` places the text `[image]` in the prompt.
+You can also omit the interpolation and refer to the attachment in words.
+
+```corvid
+import "./std/io" use PromptImage, io_read_image
+
+type Caption:
+    label: String
+
+prompt describe(photo: PromptImage) -> Caption:
+    "Give this image a short caption."
+
+agent caption_file(path: String) -> Result<String, String>:
+    photo = io_read_image(path)?
+    caption = describe(photo)
+    return Ok(caption.label)
+```
+
+Choose a vision-capable model through `CORVID_MODEL` and configure an
+`[io] root` for local files. `io_read_image` accepts PNG or JPEG file
+signatures up to 8 MiB per file. A missing file, a path outside the
+root, or an unsupported signature returns `Err(message)`. The model
+provider receives the image and can apply its own format and size limits.

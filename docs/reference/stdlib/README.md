@@ -22,6 +22,8 @@ things, states which in its file header, and appears in this table:
 | module | disposition | executing surface / runtime counterpart |
 |---|---|---|
 | `std/io` | **Executing** | `io_read_text` / `io_write_text` / `io_list_dir` over `[io] root` confinement |
+| `std/env` | **Executing** | `env_get(name: String) -> Result<Option<String>, String>` reads process configuration using the environment-backed `secret_read` tool. An absent variable returns `Ok(None)`. |
+| `std/path` | **Executing** | `path_join`, `path_parent`, `path_filename`, `path_extension` and `path_is_absolute` apply host path rules to strings. |
 | `std/http` | **Executing** | `http_get` / `http_post_json` over SSRF block + `[http] allow` |
 | `std/db` | **Executing** (SQLite) | `db_open` / `db_query` / `db_execute`; Postgres path is contract-only |
 | `std/json` | **Executing** | `json_parse` family + typed-decoder convention |
@@ -146,6 +148,7 @@ Executing tools:
 
 - `db_open(path) -> Result<DbHandle, String> uses db_egress_open` — executing tool
 - `db_query(handle, sql, params) -> Result<List<DbResult>, String> uses db_egress_read` — executing tool
+- `db_query_rows(handle, sql, params) -> Result<List<JsonValue>, String>` reads rows as objects keyed by column name.
 - `db_execute(handle, sql, params) -> Result<DbResult, String> uses db_egress_write` — executing tool
 
 Recoverable failures (open/SQL/binding errors, confinement refusals) are

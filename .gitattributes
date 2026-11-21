@@ -47,3 +47,7 @@ examples/_bundle_demo_common.sh text eol=lf
 # committed traces stable across platforms.
 *.cor   text eol=lf
 *.jsonl text eol=lf
+
+# The generated reference is compared byte-for-byte with the registry output.
+docs/reference/core-semantics.md text eol=lf
+install/upstream-notices/** -text

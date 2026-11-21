@@ -68,6 +68,14 @@ impl ApprovalQueueRuntime {
                     created_ms integer not null,
                     updated_ms integer not null
                 );
+                create table if not exists approval_execution_receipts (
+                    approval_id text primary key references approval_queue(id),
+                    outcome text not null
+                );
+                create table if not exists approval_continuations (
+                    approval_id text primary key references approval_queue(id),
+                    checkpoint text not null
+                );
                 create index if not exists approval_queue_tenant_status on approval_queue(tenant_id, status);
                 create index if not exists approval_queue_target on approval_queue(tenant_id, target_kind, target_id);
                 create table if not exists approval_queue_audit (

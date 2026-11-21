@@ -12,6 +12,8 @@
 //! behaviour:
 //!
 //!   - source bytes (the `.cor` file text)
+//!   - the loaded Corvid import graph, including transitive module contents
+//!   - the active native ownership mode
 //!   - the `corvid-codegen-cl` package version (changes on codegen edits)
 //!   - the native support library payload used at link time
 //!   - the benchmark tools library payload when one is linked in
@@ -56,14 +58,25 @@ pub fn cache_dir_for(source_path: &Path) -> PathBuf {
 /// distinct cached binaries even when the library is rebuilt in place.
 /// Pass an empty string for the no-tools case (default for tool-free
 /// programs).
-pub fn cache_key_with_tools(source: &str, tools_lib_path: &str) -> String {
+pub fn cache_key_with_tools(
+    source: &str,
+    tools_lib_path: &str,
+    imports: Option<&[u8; 32]>,
+) -> String {
     let base = cache_key(source);
-    if tools_lib_path.is_empty() {
+    if tools_lib_path.is_empty() && imports.is_none() {
         return base;
     }
-    let tool_bytes = std::fs::read(tools_lib_path).unwrap_or_default();
     let mut h: u64 = 0xcbf29ce484222325;
     feed_bytes(base.as_bytes(), &mut h);
+    if let Some(digest) = imports {
+        feed_bytes(b"|resolved-imports=", &mut h);
+        feed_bytes(digest, &mut h);
+    }
+    if tools_lib_path.is_empty() {
+        return format!("{h:016x}");
+    }
+    let tool_bytes = std::fs::read(tools_lib_path).unwrap_or_default();
     feed_bytes(b"|tools-path=", &mut h);
     feed_bytes(tools_lib_path.as_bytes(), &mut h);
     feed_bytes(b"|tools-bytes=", &mut h);
@@ -78,6 +91,9 @@ pub fn cache_key(source: &str) -> String {
     feed_bytes(source.as_bytes(), &mut h);
     feed_bytes(b"|cl=", &mut h);
     feed_bytes(env!("CARGO_PKG_VERSION").as_bytes(), &mut h);
+    let ownership_pass = corvid_codegen_cl::dup_drop::enabled();
+    feed_bytes(b"|ownership=", &mut h);
+    feed_bytes(&[ownership_pass as u8, (ownership_pass && corvid_codegen_cl::dup_drop::dry_run()) as u8], &mut h);
     // Fold the native support sources into the key so edits to
     // entry.c, alloc.c, verify.c, and the other native support
     // files invalidate cached binaries. The previous formulation

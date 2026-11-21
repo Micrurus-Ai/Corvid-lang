@@ -5,7 +5,7 @@
 ## Headline numbers
 
 - Cases run: **50**
-- Rejected by Corvid: **50/50**
+- Rejected by Corvid: **34/50**
 - Rejected by Python (`mypy --strict + pydantic`): **0/50**
 - Rejected by TypeScript (`tsc --strict + zod`): **0/50**
 
@@ -14,9 +14,9 @@
 | Case | Bug class | Corvid | Python | TypeScript | Match expected? |
 |------|-----------|--------|--------|------------|-----------------|
 | `01-unapproved-dangerous-call` | approval-bypass | rejected | accepted | accepted | ✓ |
-| `02-effect-row-under-report` | effect-under-report | rejected | accepted | accepted | ✓ |
+| `02-effect-row-under-report` | effect-under-report | error | accepted | accepted | ✗ |
 | `03-grounded-without-citation` | grounded-without-citation | rejected | accepted | accepted | ✓ |
-| `04-approve-in-if-branch-doesnt-leak` | approval-bypass | rejected | accepted | accepted | ✓ |
+| `04-approve-in-if-branch-doesnt-leak` | approval-bypass | error | accepted | accepted | ✗ |
 | `05-approve-wrong-arity` | approval-arity-mismatch | rejected | accepted | accepted | ✓ |
 | `06-approve-label-mismatch` | approval-label-mismatch | rejected | accepted | accepted | ✓ |
 | `07-approve-only-in-else-branch` | approval-bypass | rejected | accepted | accepted | ✓ |
@@ -24,25 +24,25 @@
 | `09-approve-consumed-once-not-twice` | approval-bypass | rejected | accepted | accepted | ✓ |
 | `10-approve-in-helper-doesnt-cover-outer` | approval-bypass | rejected | accepted | accepted | ✓ |
 | `11-approve-after-call-too-late` | approval-ordering | rejected | accepted | accepted | ✓ |
-| `12-approve-conditional-on-runtime-flag` | approval-bypass | rejected | accepted | accepted | ✓ |
+| `12-approve-conditional-on-runtime-flag` | approval-bypass | error | accepted | accepted | ✗ |
 | `13-dangerous-second-tool-needs-its-own-approve` | approval-mistargeted | rejected | accepted | accepted | ✓ |
-| `14-trust-drift-tool-call` | effect-under-report | rejected | accepted | accepted | ✓ |
+| `14-trust-drift-tool-call` | effect-under-report | error | accepted | accepted | ✗ |
 | `15-reversibility-drift-tool-call` | effect-under-report | rejected | accepted | accepted | ✓ |
 | `16-composed-cost-over-budget` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `17-sub-agent-cost-over-budget` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `18-confidence-floor-not-met` | confidence-under-threshold | rejected | accepted | accepted | ✓ |
-| `19-trust-drift-via-prompt-call` | effect-under-report | rejected | accepted | accepted | ✓ |
-| `20-multi-dim-cost-and-trust-drift` | effect-under-report | rejected | accepted | accepted | ✓ |
+| `19-trust-drift-via-prompt-call` | effect-under-report | error | accepted | accepted | ✗ |
+| `20-multi-dim-cost-and-trust-drift` | effect-under-report | error | accepted | accepted | ✗ |
 | `21-tokens-budget-over` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `22-latency-budget-over` | budget-overrun | rejected | accepted | accepted | ✓ |
-| `23-trust-narrower-via-helper-chain` | effect-under-report | rejected | accepted | accepted | ✓ |
+| `23-trust-narrower-via-helper-chain` | effect-under-report | error | accepted | accepted | ✗ |
 | `24-grounded-via-fabrication` | grounded-without-citation | rejected | accepted | accepted | ✓ |
 | `25-grounded-via-string-concat` | grounded-without-citation | rejected | accepted | accepted | ✓ |
 | `26-grounded-from-non-retrieval-tool` | grounded-without-citation | rejected | accepted | accepted | ✓ |
 | `27-grounded-via-helper-without-retrieval` | grounded-without-citation | rejected | accepted | accepted | ✓ |
 | `28-grounded-via-constructor-without-source` | grounded-without-citation | rejected | accepted | accepted | ✓ |
-| `29-prompt-cites-strictly-non-grounded` | prompt-citation-mistype | rejected | accepted | accepted | ✓ |
-| `30-prompt-cites-strictly-unknown-param` | prompt-citation-typo | rejected | accepted | accepted | ✓ |
+| `29-prompt-cites-strictly-non-grounded` | prompt-citation-mistype | error | accepted | accepted | ✗ |
+| `30-prompt-cites-strictly-unknown-param` | prompt-citation-typo | error | accepted | accepted | ✗ |
 | `31-grounded-broken-via-non-rag-prompt` | grounded-without-citation | rejected | accepted | accepted | ✓ |
 | `32-budget-direct-tool-cost-exceeds` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `33-budget-loop-aggregate-cost` | budget-overrun | rejected | accepted | accepted | ✓ |
@@ -50,19 +50,38 @@
 | `35-budget-cumulative-three-tools` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `36-budget-tightened-after-callee-shipped` | budget-overrun | rejected | accepted | accepted | ✓ |
 | `37-eval-confidence-greater-than-one` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
-| `38-eval-confidence-negative` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
-| `39-prompt-stream-min-confidence-out-of-range` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
-| `40-progressive-stage-threshold-out-of-range` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
-| `41-eval-with-zero-runs` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
+| `38-eval-confidence-negative` | confidence-out-of-range | error | accepted | accepted | ✗ |
+| `39-prompt-stream-min-confidence-out-of-range` | confidence-out-of-range | error | accepted | accepted | ✗ |
+| `40-progressive-stage-threshold-out-of-range` | confidence-out-of-range | error | accepted | accepted | ✗ |
+| `41-eval-with-zero-runs` | confidence-out-of-range | error | accepted | accepted | ✗ |
 | `42-deterministic-calls-tool` | deterministic-impure-call | rejected | accepted | accepted | ✓ |
 | `43-deterministic-calls-prompt` | deterministic-impure-call | rejected | accepted | accepted | ✓ |
-| `44-deterministic-calls-ask-builtin` | deterministic-impure-call | rejected | accepted | accepted | ✓ |
+| `44-deterministic-calls-ask-builtin` | deterministic-impure-call | error | accepted | accepted | ✗ |
 | `45-deterministic-calls-non-deterministic-agent` | deterministic-impure-call | rejected | accepted | accepted | ✓ |
-| `46-replayable-calls-prompt` | replayable-uncaptured-source | rejected | accepted | accepted | ✓ |
+| `46-replayable-calls-prompt` | replayable-uncaptured-source | error | accepted | accepted | ✗ |
 | `47-dangerous-grounded-budget-conflict` | multi-contract | rejected | accepted | accepted | ✓ |
 | `48-effect-row-replayable-imported-tool` | replayable-uncaptured-source | rejected | accepted | accepted | ✓ |
 | `49-confidence-min-confidence-attribute` | confidence-out-of-range | rejected | accepted | accepted | ✓ |
-| `50-grounded-loss-via-prompt-citation` | grounded-without-citation | rejected | accepted | accepted | ✓ |
+| `50-grounded-loss-via-prompt-citation` | grounded-without-citation | error | accepted | accepted | ✗ |
+
+## Notes
+
+- `02-effect-row-under-report`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `effect_row.body_completeness`. Diagnostic surface may have drifted.
+- `04-approve-in-if-branch-doesnt-leak`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `approval.dangerous_call_requires_token`. Diagnostic surface may have drifted.
+- `12-approve-conditional-on-runtime-flag`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `approval.dangerous_call_requires_token`. Diagnostic surface may have drifted.
+- `14-trust-drift-tool-call`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `effect_row.body_completeness`. Diagnostic surface may have drifted.
+- `19-trust-drift-via-prompt-call`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `effect_row.body_completeness`. Diagnostic surface may have drifted.
+- `20-multi-dim-cost-and-trust-drift`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `effect_row.body_completeness`. Diagnostic surface may have drifted.
+- `23-trust-narrower-via-helper-chain`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `effect_row.body_completeness`. Diagnostic surface may have drifted.
+- `29-prompt-cites-strictly-non-grounded`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `grounded.provenance_required`. Diagnostic surface may have drifted.
+- `30-prompt-cites-strictly-unknown-param`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `grounded.provenance_required`. Diagnostic surface may have drifted.
+- `38-eval-confidence-negative`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `confidence.min_threshold`. Diagnostic surface may have drifted.
+- `39-prompt-stream-min-confidence-out-of-range`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `confidence.min_threshold`. Diagnostic surface may have drifted.
+- `40-progressive-stage-threshold-out-of-range`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `confidence.min_threshold`. Diagnostic surface may have drifted.
+- `41-eval-with-zero-runs`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `confidence.min_threshold`. Diagnostic surface may have drifted.
+- `44-deterministic-calls-ask-builtin`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `replay.deterministic_pure_path`. Diagnostic surface may have drifted.
+- `46-replayable-calls-prompt`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `replay.deterministic_pure_path`. Diagnostic surface may have drifted.
+- `50-grounded-loss-via-prompt-citation`: Diagnostic mismatch: rejected but did not mention expected guarantee_id `grounded.provenance_required`. Diagnostic surface may have drifted.
 
 ## Methodology
 

@@ -42,6 +42,16 @@ root = "."
 allow = []
 ```
 
+The top-level `version` identifies your project. The installed compiler determines
+the grammar available to its source files. To reproduce a build, select the
+same compiler release with `CORVID_VERSION` and record its `corvid --version`
+output. To assess an upgrade, run `corvid upgrade check .` with the candidate,
+then check and run your project's tests. A null replacement in the JSON upgrade
+report indicates a manual migration. `upgrade apply` leaves that call in place and
+exits with status 1 until you port it. `corvid upgrade refresh-std .` updates
+the project's vendored standard library and can overwrite local edits under
+`src/std/`.
+
 Additional parsed tables for advanced configuration:
 
 - `[effect-system]` — user-declared effect dimensions and dimension

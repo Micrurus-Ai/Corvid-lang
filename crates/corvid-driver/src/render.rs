@@ -188,6 +188,11 @@ fn detect_error_code(msg: &str) -> &'static str {
 /// ariadne duplicates the message if we pass the full text, so we keep
 /// the headline short and put detail on the label and help lines.
 fn short_headline(msg: &str) -> String {
+    // Imported-module spans may fall outside the entry source. Keep their
+    // diagnostic visible even if the renderer cannot place a source label.
+    if msg.starts_with("in imported module `") {
+        return msg.to_owned();
+    }
     // Strip anything after a colon so the headline stays tight.
     if let Some(idx) = msg.find(':') {
         if idx < 80 {

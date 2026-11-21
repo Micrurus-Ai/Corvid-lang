@@ -170,6 +170,20 @@ pub struct JobResumeState {
     pub checkpoints: Vec<JobCheckpoint>,
     pub last_checkpoint: Option<JobCheckpoint>,
     pub next_sequence: u64,
+    pub limits: Option<JobLoopLimits>,
+    pub usage: Option<JobLoopUsage>,
+}
+
+impl JobResumeState {
+    pub fn remaining_steps(&self) -> Option<u64> {
+        let limit = self.limits.as_ref()?.max_steps?;
+        Some(limit.saturating_sub(self.usage.as_ref().map_or(0, |usage| usage.steps)))
+    }
+
+    pub fn remaining_tool_calls(&self) -> Option<u64> {
+        let limit = self.limits.as_ref()?.max_tool_calls?;
+        Some(limit.saturating_sub(self.usage.as_ref().map_or(0, |usage| usage.tool_calls)))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

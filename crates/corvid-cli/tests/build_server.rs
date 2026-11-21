@@ -82,7 +82,12 @@ fn build_server_emits_runnable_local_http_binary() {
         source_path.to_string_lossy().into_owned(),
         "--target=server".to_string(),
     ];
-    let out = run_corvid(&args, dir.path());
+    let out = Command::new(corvid_bin())
+        .args(&args)
+        .env("CARGO_TARGET_DIR", dir.path().join("cargo-cache"))
+        .current_dir(dir.path())
+        .output()
+        .expect("build server with a custom Cargo target directory");
     assert!(
         out.status.success(),
         "server build failed:\nstdout={}\nstderr={}",

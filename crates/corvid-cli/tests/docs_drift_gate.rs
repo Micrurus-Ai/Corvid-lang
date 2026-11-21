@@ -122,12 +122,12 @@ fn run_corvid_check(source: &str) -> Result<(), String> {
     fs::write(tmp.path(), source).map_err(|e| format!("write temp .cor: {e}"))?;
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest.parent().and_then(Path::parent).unwrap();
-    let output = Command::new("cargo")
+    let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
         .current_dir(workspace)
-        .args(["run", "-q", "-p", "corvid-cli", "--", "check"])
+        .arg("check")
         .arg(tmp.path())
         .output()
-        .map_err(|e| format!("spawn cargo run: {e}"))?;
+        .map_err(|e| format!("spawn corvid check: {e}"))?;
     if output.status.success() {
         Ok(())
     } else {

@@ -241,10 +241,7 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "skill"]);
 
-        let url = format!(
-            "file:///{}",
-            upstream.path().display().to_string().replace('\\', "/")
-        );
+        let url = url::Url::from_file_path(upstream.path()).expect("absolute repository path");
         let source = SkillSource::parse(&format!("git:{url}//skills/greeter")).unwrap();
         let resolved = resolve(&source).expect("clone resolves");
         assert!(resolved.skill_dir.join("skill.toml").exists());

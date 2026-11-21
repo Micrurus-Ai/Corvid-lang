@@ -32,6 +32,7 @@ prompt narrate_drift(
     baseline: List<Grounded<String>>,
     candidate: List<Grounded<String>>,
 ) -> Grounded<DriftReport> uses llm:
+    cites baseline strictly
     """
     Compare the baseline and candidate traces event-by-event by
     (kind, name). For each matched pair, identify which of the
@@ -40,7 +41,6 @@ prompt narrate_drift(
     contribution in plain language. Cite the (trace_id, span_id)
     of every pair you reason about.
     """
-    cites baseline strictly
     cites candidate strictly
 
 @budget($0.05)

@@ -52,6 +52,7 @@ mod dispatch;
 mod doctor_cmd;
 mod eval_cmd;
 mod format;
+mod fmt_cmd;
 mod jobs_explain_cmd;
 mod lineage_cmd;
 mod migrate_cmd;
@@ -83,10 +84,12 @@ use std::process::ExitCode;
 
 use cli::root::Cli;
 
+const CLI_STACK_BYTES: usize = 16 * 1024 * 1024;
+
 fn main() -> ExitCode {
     match std::thread::Builder::new()
         .name("corvid-cli".to_string())
-        .stack_size(16 * 1024 * 1024)
+        .stack_size(CLI_STACK_BYTES)
         .spawn(main_impl)
     {
         Ok(handle) => handle.join().unwrap_or_else(|_| {

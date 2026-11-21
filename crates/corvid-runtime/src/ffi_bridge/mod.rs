@@ -59,6 +59,7 @@ mod prompt_exports;
 mod replay_exports;
 mod state;
 mod strings;
+mod equality;
 mod tokio_handle;
 mod tool_iter;
 pub use approval_exports::{corvid_approve_sync, corvid_citation_verify_or_panic};

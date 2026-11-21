@@ -112,6 +112,7 @@ pub fn analyze(ir: IrFile) -> (IrFile, HashMap<DefId, AgentSummary>) {
     }
 
     let out = IrFile {
+        import_fingerprint: ir.import_fingerprint,
         imports: ir.imports,
         types: ir.types,
         tools: ir.tools,
@@ -255,6 +256,14 @@ fn param_is_consumed(
                     consumed = true;
                 }
             }
+            IrStmt::Assign { value, .. } => {
+                if crate::native_record_assignment(stmt) || crate::native_local_compound(stmt) {
+                    consumed |= expr_references(value, target);
+                }
+                if let Some((_, key, value, _)) = crate::native_indexed_assignment(stmt) {
+                    consumed |= expr_references(key, target) || expr_references(value, target);
+                }
+            }
             IrStmt::Expr { expr, .. } => {
                 if expr_consumes_target(expr, target, sigs) {
                     consumed = true;
@@ -295,7 +304,7 @@ fn expr_consumes_target(
         IrExprKind::MapLiteral { keys, values } => keys
             .iter()
             .chain(values)
-            .any(|e| expr_consumes_target(e, target, sigs)),
+            .any(|e| expr_references(e, target)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_consumes_target(scrutinee, target, sigs)
                 || arms.iter().any(|arm| {
@@ -447,7 +456,10 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             expr_references(t, target) || expr_references(index, target)
         }
         IrExprKind::List { items } => items.iter().any(|i| expr_references(i, target)),
-        IrExprKind::Call { args, .. } => args.iter().any(|a| expr_references(a, target)),
+        IrExprKind::Call { kind, args, .. } => {
+            matches!(kind, corvid_ir::IrCallKind::ClosureLocal { local_id, .. } if *local_id == target)
+                || args.iter().any(|arg| expr_references(arg, target))
+        }
         // Tagged-union/retry nodes recurse into sub-expressions.
         IrExprKind::WeakNew { strong: inner }
         | IrExprKind::WeakUpgrade { weak: inner }
@@ -575,7 +587,9 @@ fn transform_agent(
 /// forthcoming 17b-3 / 17b-5 escape + reuse analyses).
 pub(crate) fn is_refcounted(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::Struct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
+        Type::Function { .. } => crate::native_callback_type(ty),
+        Type::Map(_, _) => crate::native_string_map(ty),
+        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }
         Type::Option(inner) => {
@@ -608,7 +622,8 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
 #[allow(dead_code)]
 pub(crate) fn is_strong_refcounted(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::Struct(_) | Type::List(_) | Type::Result(_, _) => true,
+        Type::Map(_, _) => crate::native_string_map(ty),
+        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
         // Weak is never a strong edge — it carries a weak slot.
         Type::Weak(_, _) => false,
         // Option<strong> is maybe-strong; callers requiring

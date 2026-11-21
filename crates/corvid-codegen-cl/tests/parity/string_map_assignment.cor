@@ -1,0 +1,20 @@
+agent rename(names: Map<String, String>, id: String, name: String) -> Nothing:
+    names[id] = name
+
+agent read(names: Map<String, String>, id: String) -> String:
+    return match names[id]:
+        Some(name) -> name
+        None -> "missing"
+
+agent main() -> Bool:
+    names: Map<String, String> = {}
+    alias = names
+    id = "own" + "er"
+    names[id] = "A" + "da"
+    before = read(alias, id)
+    rename(alias, "ow" + "ner", "Gr" + "ace")
+    names["blank"] = ""
+    updated = read(names, id)
+    blank = read(alias, "blank")
+    absent = read(names, "other")
+    return before == "Ada" and updated == "Grace" and blank == "" and absent == "missing"

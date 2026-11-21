@@ -72,11 +72,18 @@ pub(crate) use connectors::cmd_connectors;
 /// `std::process::ExitCode`.
 pub(crate) fn run(cli: Cli) -> Result<u8> {
     match cli.command {
+        Some(Command::Ready { port }) => {
+            let client = reqwest::blocking::Client::builder()
+                .no_proxy().timeout(std::time::Duration::from_secs(5)).build()?;
+            let response = client.get(format!("http://127.0.0.1:{port}/readyz")).send()?;
+            Ok(if response.status().is_success() { 0 } else { 1 })
+        }
         Some(Command::New {
             name,
             with_python_tools,
         }) => cmd_new(&name, with_python_tools),
-        Some(Command::Check { file }) => cmd_check(&file),
+        Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
+        Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {
             crate::cli::root::AddCommand::Skill {
                 source,
@@ -142,6 +149,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
         Some(Command::Serve {
+            access_log,
             file,
             listen,
             host,
@@ -154,6 +162,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             cmd_serve(
                 &file,
                 &composed_listen,
+                access_log,
                 with_tools_cdylib.as_deref(),
                 mode.as_deref(),
             )
@@ -477,9 +486,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Doctor) => cmd_doctor_v2(),
         Some(Command::Audit { file, json }) => audit_cmd::run_audit(&file, json),
         Some(Command::Deploy { command }) => match command {
-            DeployCommand::Package { app, out, cdylib } => {
+            DeployCommand::Package { app, out, cdylib, mode } => {
                 let out = out.unwrap_or_else(|| app.join("target").join("deploy-package"));
-                deploy_cmd::run_package(&app, &out, cdylib.as_deref()).map(|_| 0)
+                deploy_cmd::run_package(&app, &out, cdylib.as_deref(), mode.as_deref()).map(|_| 0)
             }
             DeployCommand::Compose { app, out } => {
                 let out = out.unwrap_or_else(|| app.join("target").join("compose"));
@@ -784,6 +793,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     label,
                     payload,
                     payload_fingerprint,
+                    step_sequence,
                 } => cmd_jobs_checkpoint_add(
                     &state,
                     &job,
@@ -791,12 +801,13 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     &label,
                     &payload,
                     payload_fingerprint,
+                    step_sequence,
                 ),
                 JobsCheckpointCommand::List { state, job } => {
                     cmd_jobs_checkpoint_list(&state, &job)
                 }
-                JobsCheckpointCommand::Resume { state, job } => {
-                    cmd_jobs_checkpoint_resume(&state, &job)
+                JobsCheckpointCommand::Resume { state, job, json } => {
+                    cmd_jobs_checkpoint_resume(&state, &job, json)
                 }
             },
             JobsCommand::Dlq { state } => cmd_jobs_dlq(&state),

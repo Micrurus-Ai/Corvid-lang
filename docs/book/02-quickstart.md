@@ -15,6 +15,8 @@ keep failing (`crates/corvid-driver/tests/book_snippets_compile.rs`).
 ```sh
 corvid new hello-corvid
 cd hello-corvid
+corvid check
+corvid run
 ```
 
 This creates:
@@ -23,11 +25,12 @@ This creates:
 hello-corvid/
 ├── corvid.toml         # project manifest + [io]/[http] security boundaries
 ├── .gitignore
-├── src/
-│   ├── main.cor        # entry point (a minimal echo tool)
-│   └── std/            # vendored stdlib modules (io, http, db, json, …)
-└── tools.py            # optional Python host tools for the starter echo
+└── src/
+    ├── main.cor        # greets you with the current UTC time
+    └── std/            # project copy of the standard library
 ```
+
+`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
 
 The scaffolded `corvid.toml` declares the executing-I/O security
 boundaries from day one: `[io] root = "."` confines file access to the
@@ -36,8 +39,16 @@ until you name trusted hosts.
 
 ## Step 2 — Write the entry point
 
-The scaffold's starter program is a one-line echo tool. Replace
-`src/main.cor` with an LLM-backed program:
+From the project root, `corvid check` and `corvid run` use
+`src/main.cor`. You can also pass either command a specific source file.
+Run `corvid fmt` to format the project's `.cor` files under `src/` and
+`tests/`. It skips the vendored `src/std/` directory. Use
+`corvid fmt src/main.cor src/math.cor` to select files yourself.
+`corvid fmt --check` lists files that would change and exits with status
+1 when formatting is needed. Run a test file with `corvid test tests/unit.cor`.
+
+To call a model, replace the starter greeting in `src/main.cor` with
+the following program.
 
 ```corvid
 effect llm_call:

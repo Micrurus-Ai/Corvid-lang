@@ -95,20 +95,23 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
 
     // 5. Lower + 6. Codegen. Only when everything before is clean.
     let ir = lower(&file, &resolved, &checked);
-    if let Some(diags) = stdlib_transpile_refusal(&ir) {
-        return CompileResult {
-            python_source: None,
-            diagnostics: diags,
-            warnings,
-        };
-    }
-    let py = emit(&ir);
+    transpile(&ir, CompileResult { python_source: None, diagnostics, warnings })
+}
 
-    CompileResult {
-        python_source: Some(py),
-        diagnostics: Vec::new(),
-        warnings,
+fn transpile(ir: &corvid_ir::IrFile, mut result: CompileResult) -> CompileResult {
+    if let Some(diags) = stdlib_transpile_refusal(ir) {
+        result.diagnostics = diags;
+    } else {
+        match emit(ir) {
+            Ok(source) => result.python_source = Some(source),
+            Err(errors) => result.diagnostics.extend(errors.into_iter().map(|(span, feature)| Diagnostic {
+                span,
+                message: format!("Python target does not support {feature}"),
+                hint: Some("Use corvid run --target interp to execute this program.".into()),
+            })),
+        }
     }
+    result
 }
 
 /// The Python transpile tier has no dispatch for the stdlib's
@@ -162,17 +165,11 @@ pub fn compile_with_config_at_path(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> CompileResult {
-    let (mut result, ir) = compile_front_at_path(source, source_path, config);
+    let (result, ir) = compile_front_at_path(source, source_path, config);
     let Some(ir) = ir else {
         return result;
     };
-    if let Some(diags) = stdlib_transpile_refusal(&ir) {
-        result.diagnostics = diags;
-        result.python_source = None;
-        return result;
-    }
-    result.python_source = Some(emit(&ir));
-    result
+    transpile(&ir, result)
 }
 
 /// Shared front half for the two pipelines above. Returns the

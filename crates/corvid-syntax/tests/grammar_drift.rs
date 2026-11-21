@@ -287,7 +287,8 @@ const SNIPPETS: &[(&str, &str)] = &[
         r#"import "./util"
 import "./util" as u
 import "./std/io" use io_read_text, io_write_text as write
-import python "mylib" as ml
+import python "mylib" as ml effects: network:
+    fn lookup(key: String) -> List<String>
 "#,
     ),
     (
@@ -392,12 +393,61 @@ extend Customer:
 "#,
     ),
     (
+        "connector_settings",
+        r#"connector reports:
+    base_url: "https://example.org"
+    auth: bearer(secret("REPORTS_TOKEN"))
+    modes: [real]
+    operation generate(input: String) -> String dangerous:
+        POST "/reports" body input
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 60s
+            deadline_target: failed
+            idempotency: intent via header "Idempotency-Key"
+            poll GET "/reports/{id}"
+            every: 2s
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+"#,
+    ),
+    (
+        "identity_settings",
+        r#"identity users:
+    provider github
+    provider oidc "https://example.org/.well-known/openid-configuration" as workplace
+    session:
+        lifetime: 8h
+        same_site: lax
+        secure: true
+    linking:
+        email_match: never
+    provisioning:
+        first_login: invited
+        tenant: from_invitation
+        default_role: reader
+    roles:
+        reader: "status.read"
+"#,
+    ),
+    (
         "server_and_schedule",
         r#"type HealthStatus:
     healthy: Bool
 
 server api:
     route GET "/health" -> json HealthStatus:
+        return HealthStatus(true)
+    @approval(role: "reviewer", risk: "status_update", data: "internal", expires_ms: 600000, max_cost_usd: $0, irreversible: false)
+    route POST "/review" body HealthStatus query HealthStatus -> json HealthStatus requires authenticated and role("reviewer") and permission("status.read"):
+        return body
+    @upload(max_mb: 2, retention_days: 1, mime: "text/csv")
+    route POST "/import" body Upload<Csv> -> json HealthStatus:
         return HealthStatus(true)
 
 schedule "0 9 * * *" zone "UTC" -> daily_summary()
@@ -613,6 +663,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("decl", "imports"),
     ("visibility", "agents_annotations_extern"),
     ("import_decl", "imports"),
+    ("python_signature", "imports"),
     ("import_target", "imports"),
     ("import_list", "imports"),
     ("import_item", "imports"),
@@ -648,6 +699,30 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("extend_method", "extend_blocks"),
     ("server_decl", "server_and_schedule"),
     ("route_decl", "server_and_schedule"),
+    ("route_query", "server_and_schedule"),
+    ("approval_arg", "server_and_schedule"),
+    ("approval_annotation", "server_and_schedule"),
+    ("upload_arg", "server_and_schedule"),
+    ("upload_annotation", "server_and_schedule"),
+    ("route_payload", "server_and_schedule"),
+    ("route_policy", "server_and_schedule"),
+    ("identity_decl", "identity_settings"),
+    ("connector_decl", "connector_settings"),
+    ("connector_item", "connector_settings"),
+    ("connector_mode", "connector_settings"),
+    ("connector_auth", "connector_settings"),
+    ("secret_ref", "connector_settings"),
+    ("operation_decl", "connector_settings"),
+    ("operation_item", "connector_settings"),
+    ("protocol_item", "connector_settings"),
+    ("protocol_names", "connector_settings"),
+    ("identity_item", "identity_settings"),
+    ("identity_provider", "identity_settings"),
+    ("session_setting", "identity_settings"),
+    ("linking_setting", "identity_settings"),
+    ("provisioning_setting", "identity_settings"),
+    ("tenant_assignment", "identity_settings"),
+    ("route_requirement", "server_and_schedule"),
     ("schedule_decl", "server_and_schedule"),
     ("eval_decl", "test_surface"),
     ("test_decl", "test_surface"),

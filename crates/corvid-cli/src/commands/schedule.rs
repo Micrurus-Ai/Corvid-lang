@@ -106,7 +106,8 @@ pub(crate) fn cmd_schedule_run(
         );
     }
 
-    let runtime_handle = Arc::new(Runtime::builder().build());
+    let builder = corvid_driver::apply_project_storage(Runtime::builder(), source);
+    let runtime_handle = Arc::new(corvid_driver::apply_env_llm_wiring(builder).build());
     let executor: Arc<dyn JobRuntimeExecutor> =
         Arc::new(DefaultJobRuntimeExecutor::new(Arc::new(ir)));
     let job_executor = into_pool_executor(executor, runtime_handle);

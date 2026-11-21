@@ -64,6 +64,10 @@ fn emit_struct_to_json(
     runtime: &RuntimeFuncs,
     ir_type: &corvid_ir::IrType,
 ) -> Result<FuncId, CodegenError> {
+    if !ir_type.variants.is_empty() {
+        return Err(CodegenError::not_supported("sum types at a native JSON boundary", ir_type.span));
+    }
+
     // Reject any unsupported field type up-front. Mirror of the
     // decoder's policy — v1 covers `Int` / `Bool` / `Float` /
     // `String` only.

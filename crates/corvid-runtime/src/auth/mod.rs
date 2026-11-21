@@ -35,6 +35,12 @@ pub struct SessionAuthRuntime {
 }
 
 impl SessionAuthRuntime {
+    pub fn check_readiness(&self) -> Result<(), RuntimeError> {
+        self.conn.lock().unwrap().query_row(
+            "select exists(select 1 from auth_sessions limit 1)", [], |_| Ok(())
+        ).map_err(|err| RuntimeError::Other(format!("auth store unavailable: {err}")))
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, RuntimeError> {
         let conn = Connection::open(path.as_ref())
             .map_err(|err| RuntimeError::Other(format!("failed to open auth db: {err}")))?;

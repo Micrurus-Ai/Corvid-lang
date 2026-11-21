@@ -75,6 +75,7 @@ impl<'a> Checker<'a> {
                 | (Type::Int, Type::Float)
                 | (Type::Float, Type::Int) => Type::Float,
                 (Type::String, Type::String) => Type::String,
+                (Type::List(a), Type::List(b)) if **b == Type::Unknown => Type::List(a.clone()),
                 (Type::List(a), Type::List(b)) if a.is_assignable_to(b) => Type::List(b.clone()),
                 (Type::List(a), Type::List(b)) if b.is_assignable_to(a) => Type::List(a.clone()),
                 (Type::Unknown, _) | (_, Type::Unknown) => Type::Unknown,

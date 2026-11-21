@@ -74,7 +74,7 @@
         "corvid.lsp.path": {
           "type": "string",
           "default": "",
-          "description": "Path to the corvid-lsp executable. Leave empty to use CORVID_LSP_PATH, the repository target/debug binary, or corvid-lsp on PATH."
+          "description": "Path to the corvid-lsp executable. Leave empty to use CORVID_LSP_PATH, CORVID_HOME/bin, a repository build, or corvid-lsp on PATH."
         },
         "corvid.lsp.trace.server": {
           "type": "string",

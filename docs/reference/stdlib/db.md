@@ -316,3 +316,13 @@ returns the verbatim metacharacter string.
   interpreter routing branch + `extract_db_params` converter.
 - `std/db.cor` — the tool declarations + typed parameter
   constructors + envelope types.
+
+### Reading selected columns
+
+`db_query_rows(handle, sql, params) -> Result<List<JsonValue>, String>`
+accepts a read-only SQLite statement and bound parameters. It returns one
+JSON object per row. Use column aliases for duplicate names. SQLite
+integers, reals, text and null map to the corresponding JSON values.
+Binary columns currently yield the text placeholder `<blob:redacted>`.
+The last reference to a database handle closes its connection and rolls
+back an open transaction. The same lifetime applies in a served route.

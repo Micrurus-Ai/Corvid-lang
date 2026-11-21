@@ -480,7 +480,7 @@ server test_serve_5_api:
 
 /// Slice `serve-6` end-to-end gate: a reviewer POST-ing to
 /// `/__approvals/:id/approve` MUST transition the queued approval,
-/// re-execute the original agent, and return the agent's result;
+/// resume the waiting agent, and return the agent's result;
 /// a `POST /__approvals/:id/deny` MUST mark the approval denied
 /// and drop the pending invocation without re-running anything.
 /// Both endpoints MUST 404 on unknown ids and 409 on already-
@@ -488,11 +488,11 @@ server test_serve_5_api:
 ///
 /// Hermetic: same minimal handcrafted source as the
 /// `E0-serve-5` test but with a more interesting receipt return
-/// so the re-execution result is observable from the response.
+/// so the resumption result is observable from the response.
 /// Uses port `8196` so it can't collide with the 5-app smoke
 /// (8190-8194) or the serve-5 test (8195).
 #[test]
-fn approval_transition_endpoints_approve_re_executes_and_deny_drops_pending() {
+fn approval_transition_endpoints_approve_resumes_and_deny_drops_pending() {
     let dir = tempfile::tempdir().unwrap();
     let src_path = dir.path().join("main.cor");
     let source = r#"type SendReq:
@@ -510,6 +510,7 @@ effect send_external:
 tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
 
 agent execute_send(req: SendReq) -> SendReceipt uses send_external:
+    approve SendMessage(req)
     approve SendMessage(req)
     return SendReceipt(req.body, true)
 "#;
@@ -574,10 +575,16 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
         &reviewer,
     )
     .expect("POST /__approvals/<id>/approve failed");
+    assert_eq!(approve_status, 202, "the second boundary needs its own review: {approve_body}");
+    let second: serde_json::Value = serde_json::from_str(&approve_body).unwrap();
+    let second_id = second["approval_id"].as_str().unwrap();
+    assert_ne!(approval_id, second_id);
+    let (approve_status, approve_body) = http_post_with_headers(port,
+        &format!("/__approvals/{second_id}/approve"), "", &reviewer).unwrap();
     assert_eq!(
         approve_status, 200,
-        "POST /__approvals/<id>/approve must answer 200 (transition succeeded + agent re-executed). got status={approve_status} body=`{approve_body}`. \
-         If 404: the queue runtime forgot the approval id mid-test (cross-process leak?). If 409: the pending invocation wasn't captured (the dispatch-handler stash regressed). If 500: the re-execution itself errored — read the response body."
+        "POST /__approvals/<id>/approve must answer 200 (transition succeeded + agent resumed). got status={approve_status} body=`{approve_body}`. \
+         If 404: the queue runtime forgot the approval id mid-test (cross-process leak?). If 409: the pending invocation wasn't captured (the dispatch-handler stash regressed). If 500: the resumption itself errored — read the response body."
     );
     let approve_resp: serde_json::Value =
         serde_json::from_str(&approve_body).expect("/approve body must be valid JSON");
@@ -587,13 +594,13 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     );
     let result = approve_resp
         .get("result")
-        .expect("/approve body must carry a `result` from the re-executed agent");
-    // The agent re-executes with the original args, so the receipt
+        .expect("/approve body must carry a `result` from the resumed agent");
+    // The agent resumes with the original args, so the receipt
     // body should reflect the original POST body.
     assert_eq!(
         result.get("echoed_body").and_then(|v| v.as_str()),
         Some("hello, please approve"),
-        "re-executed agent's result must echo the original POST body. body={approve_body}"
+        "resumed agent's result must echo the original POST body. body={approve_body}"
     );
     assert_eq!(result.get("delivered").and_then(|v| v.as_bool()), Some(true));
 
@@ -698,7 +705,9 @@ fn build_serve_tools_fixture() -> PathBuf {
     );
 
     let status = Command::new(env!("CARGO"))
-        .args(["build", "--release", "--manifest-path"])
+        .args(["build", "--release", "--target-dir"])
+        .arg(fixture_dir.join("target"))
+        .arg("--manifest-path")
         .arg(&manifest)
         .status()
         .expect("spawn cargo build for serve_tools_fixture");
@@ -875,7 +884,7 @@ async def echo_string(value: str) -> str:
     assert_eq!(
         result.get("echoed").and_then(|v| v.as_str()),
         Some(probe_value),
-        "re-executed agent's `echoed` field must equal the original POST \
+        "resumed agent's `echoed` field must equal the original POST \
          `value`, proving the tools.py @tool(\"echo_string\") implementation \
          was actually invoked via PyO3 + asyncio.run end-to-end. body={approve_body}"
     );
@@ -1167,53 +1176,18 @@ server test_serve_q1a_api:
     );
     let result = approve_resp
         .get("result")
-        .expect("/approve body must carry a `result` envelope from the re-executed agent");
+        .expect("/approve body must carry a `result` envelope from the resumed agent");
     assert_eq!(
         result.get("echoed").and_then(|v| v.as_str()),
         Some(probe_value),
-        "re-executed agent's `echoed` field must equal the original POST `value`, \
+        "resumed agent's `echoed` field must equal the original POST `value`, \
          proving the fixture cdylib's __corvid_tool_echo_string was actually invoked \
          end-to-end. body={approve_body}"
     );
 }
 
-/// 33Q2 end-to-end gate. The anonymous-2026-06-04 round-2 trial
-/// report P1.2 documented that a handler error under
-/// `/__approvals/<id>/approve` consumed the approval anyway — a
-/// transient handler failure permanently burned a human approval,
-/// an approval-budget-integrity bug, not just UX.
-///
-/// This test pins the leave-pending fix: a Corvid app declares a
-/// `dangerous` tool the cdylib does NOT implement (so the runtime
-/// produces `UnknownTool` when reached after approval), an
-/// approve-gated agent that calls it, and a POST route. The flow:
-///
-/// 1. POST `/broken` → 202 + approval_id.
-/// 2. POST `/__approvals/<id>/approve` → 500. The 500 body MUST
-///    carry `approval_status: "pending"` + `retry.possible: true` +
-///    the `detail` field naming the runtime error. The approval
-///    MUST NOT transition to `approved`.
-/// 3. GET `/__approvals/<id>` → 200 with `status: "pending"` +
-///    `last_handler_error` populated + `retry_possible: true`. The
-///    reviewer can see WHY their grant didn't take effect.
-/// 4. POST `/__approvals/<id>/approve` AGAIN → still 500, still
-///    pending. The reviewer's authorization is preserved across
-///    retry attempts.
-/// 5. POST `/__approvals/<id>/deny` → 200, terminates the pending
-///    invocation. After deny, `/approve` answers 409 (already
-///    decided) — the reviewer's safety valve to exit a permanently-
-///    broken loop.
-///
-/// Adversarial: across multiple /approve retries against a
-/// permanently-broken handler, the approval state never transitions
-/// to `approved`. A handler-error cannot expose any approval-bypass
-/// primitive (the `ProgrammaticApprover::always_yes` bypass runtime
-/// is local to each approve_approval call and never escapes).
-///
-/// Port `8199` so it can't collide with the other serve tests
-/// (8190-8198).
 #[test]
-fn serve_approval_is_preserved_when_handler_errors_and_terminates_only_on_deny() {
+fn approval_decision_is_consumed_before_handler_resumes() {
     // We re-use the cdylib fixture (echo_string) — but the Corvid
     // app declares a SECOND tool `permanently_broken_tool` that the
     // fixture does NOT implement. The 33Q1a loader logs it as
@@ -1287,10 +1261,6 @@ server test_serve_q2_api:
         .expect("202 body must carry an `approval_id`")
         .to_string();
 
-    // 2. POST /approve → 500 with approval_status: pending, retry.possible: true.
-    //    Pre-33Q2 this answered 500 too, but the approval got silently
-    //    consumed AND the pending invocation removed — leaving the
-    //    reviewer with no way to recover.
     let approve_url = format!("/__approvals/{approval_id}/approve");
     let (approve_status, approve_body) =
         http_post_with_headers(port, &approve_url, "", &reviewer).expect("POST /approve failed");
@@ -1305,107 +1275,10 @@ server test_serve_q2_api:
         Some("approved_execution_failed"),
         "500 body must use the `approved_execution_failed` error code: {approve_body}"
     );
-    assert_eq!(
-        approve_resp.get("approval_status").and_then(|v| v.as_str()),
-        Some("pending"),
-        "500 body MUST carry `approval_status: pending` so the reviewer \
-         knows the approval was NOT consumed — the load-bearing assertion \
-         for 33Q2's leave-pending behaviour: {approve_body}"
-    );
-    let retry = approve_resp
-        .get("retry")
-        .expect("500 body must carry a `retry` envelope describing the retry path");
-    assert_eq!(
-        retry.get("possible").and_then(|v| v.as_bool()),
-        Some(true),
-        "retry.possible MUST be true so the reviewer's client knows to \
-         try /approve again or /deny: {approve_body}"
-    );
-
-    // 3. GET /__approvals/<id> → status: pending + last_handler_error captured.
-    let get_url = format!("/__approvals/{approval_id}");
-    let (get_status, get_body) =
-        http_get_with_headers(port, &get_url, &reviewer).expect("GET /__approvals/<id> failed");
-    assert_eq!(get_status, 200, "GET /__approvals/<id> must answer 200");
-    let one: serde_json::Value =
-        serde_json::from_str(&get_body).expect("GET body must be valid JSON");
-    assert_eq!(
-        one.get("status").and_then(|v| v.as_str()),
-        Some("pending"),
-        "GET /__approvals/<id> must report status=pending after a failed \
-         /approve — proves the approval was not consumed: {get_body}"
-    );
-    let last_err = one
-        .get("last_handler_error")
-        .and_then(|v| v.as_str())
-        .expect("GET /__approvals/<id> must include `last_handler_error` after a failed /approve");
-    assert!(
-        !last_err.is_empty(),
-        "last_handler_error must not be empty — operator needs the failure \
-         signal to decide whether to retry or deny: {get_body}"
-    );
-    assert_eq!(
-        one.get("retry_possible").and_then(|v| v.as_bool()),
-        Some(true),
-        "GET must report retry_possible=true so the reviewer's client can \
-         render the retry option: {get_body}"
-    );
-
-    // 4. POST /approve AGAIN → still 500, still pending (adversarial:
-    //    no number of retries against a permanently-broken handler
-    //    can flip the approval state to `approved`).
-    let (approve2_status, approve2_body) =
-        http_post_with_headers(port, &approve_url, "", &reviewer).expect("POST /approve retry failed");
-    assert_eq!(
-        approve2_status, 500,
-        "second /approve against the still-broken handler must also \
-         answer 500: {approve2_body}"
-    );
-    let approve2_resp: serde_json::Value =
-        serde_json::from_str(&approve2_body).expect("retry body must be valid JSON");
-    assert_eq!(
-        approve2_resp.get("approval_status").and_then(|v| v.as_str()),
-        Some("pending"),
-        "second /approve attempt must STILL report `pending` — handler \
-         errors cannot expose any path that transitions the approval to \
-         `approved` without a successful handler invocation: {approve2_body}"
-    );
-
-    // GET again — still pending, last_handler_error STILL populated
-    // (and refreshed to whatever the second attempt produced).
-    let (get2_status, get2_body) = http_get_with_headers(port, &get_url, &reviewer)
-        .expect("second GET /__approvals/<id> failed");
-    assert_eq!(get2_status, 200);
-    let two: serde_json::Value = serde_json::from_str(&get2_body).unwrap();
-    assert_eq!(
-        two.get("status").and_then(|v| v.as_str()),
-        Some("pending"),
-        "after the second /approve attempt the approval STILL stays \
-         pending: {get2_body}"
-    );
-
-    // 5. POST /deny → 200, approval terminates as denied. This is the
-    //    reviewer's safety valve to exit a permanently-broken loop.
-    let deny_url = format!("/__approvals/{approval_id}/deny");
-    let (deny_status, deny_body) = http_post_with_headers(port, &deny_url, "", &reviewer).expect("POST /deny failed");
-    assert_eq!(deny_status, 200, "POST /deny must answer 200: {deny_body}");
-    let deny_resp: serde_json::Value = serde_json::from_str(&deny_body).unwrap();
-    assert_eq!(
-        deny_resp.get("status").and_then(|v| v.as_str()),
-        Some("denied"),
-        "/deny must transition to denied: {deny_body}"
-    );
-
-    // After deny, /approve answers 409 (already decided) — the
-    // approval can no longer be retried because the reviewer
-    // explicitly terminated it.
-    let (approve3_status, _) =
-        http_post(port, &approve_url, "").expect("post-deny /approve failed");
-    assert_eq!(
-        approve3_status, 409,
-        "/approve after /deny must answer 409 — the reviewer's explicit \
-         deny is terminal"
-    );
+    assert_eq!(approve_resp["approval_status"], "approved");
+    assert_eq!(approve_resp["retry"]["possible"], false);
+    let (status, _) = http_post_with_headers(port, &approve_url, "", &reviewer).unwrap();
+    assert_eq!(status, 409, "An effect that already ran cannot be retried by regranting approval");
 }
 
 /// 33Q9 acceptance — maintainer-as-reviewer-2026-06-05 P2.1.
@@ -2086,7 +1959,7 @@ server ping_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8204;
+    let port: u16 = 8304;
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2177,7 +2050,7 @@ tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
 
 agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     approve SendMessage(req)
-    return send_message(req)
+    return SendReceipt(true)
 
 server durable_api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -2186,7 +2059,7 @@ server durable_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8205;
+    let port: u16 = 8305;
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
 
@@ -2251,6 +2124,27 @@ server durable_api:
         list_body.contains(&approval_id),
         "the queued approval `{approval_id}` must survive the restart: {list_body}"
     );
+    let decision = format!("/__approvals/{approval_id}/approve");
+    let barrier = std::sync::Barrier::new(2);
+    let send = || {
+        barrier.wait();
+        http_post_with_headers(port, &decision, "", &reviewer).unwrap()
+    };
+    let mut replies = std::thread::scope(|scope| {
+        let first = scope.spawn(&send);
+        let second = send();
+        [first.join().unwrap(), second]
+    });
+    replies.sort_by_key(|reply| reply.0);
+    let [(status, body), (conflict, _)] = replies;
+    assert_eq!(conflict, 409);
+    assert_eq!(status, 200, "resume durable checkpoint: {body}");
+    let response: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(response["result"]["delivered"], true);
+    let (_, record) = http_get_with_headers(port, &format!("/__approvals/{approval_id}"), &reviewer).unwrap();
+    let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(record["execution"], "completed");
+    assert_eq!(http_post_with_headers(port, &decision, "", &reviewer).unwrap().0, 409);
 }
 
 /// Slice 52f end-to-end authorization gate. A role-gated route, served
@@ -2320,7 +2214,7 @@ server admin_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8206;
+    let port: u16 = 8306;
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2454,7 +2348,7 @@ server adversary_api:
 "#);
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8207;
+    let port: u16 = 8307;
     let child = Command::new(corvid_bin())
         .arg("serve").arg(&src_path).arg("--listen").arg(format!("127.0.0.1:{port}"))
         .envs(reviewer_serve_env(&data_dir))
@@ -2621,7 +2515,7 @@ server repo_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8196;
+    let port: u16 = 8296;
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2728,7 +2622,7 @@ fn the_reference_application_serves_its_connector_route() {
         .join("main.cor");
     assert!(main.exists(), "missing {}", main.display());
 
-    let port: u16 = 8198;
+    let port: u16 = 8298;
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&main)
@@ -2764,4 +2658,588 @@ fn the_reference_application_serves_its_connector_route() {
         body.contains("mock-carrier"),
         "the connector route must return the compiled mock payload; got: {body}"
     );
+}
+
+#[test]
+fn serve_round_trips_sum_variants_and_checks_payloads() {
+    use serde_json::{json, Value};
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(
+        &src,
+        r#"public type Status:
+    | Pending
+    | Approved(approver: String)
+
+type Search:
+    term: String
+    limit: Int
+
+type SearchReply:
+    owner: String
+    term: String
+    limit: Int
+
+server status_api:
+    route GET "/owners/{id}/search" query Search -> json SearchReply:
+        return SearchReply(path.id, query.term, query.limit)
+    route POST "/echo" body Status -> json Status:
+        return body
+"#,
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(dir.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, reply) = http_get(port, "/openapi.json").unwrap();
+    assert_eq!(status, 200);
+    let spec: Value = serde_json::from_str(&reply).unwrap();
+    let variants = &spec["components"]["schemas"]["Status"]["oneOf"];
+    assert_eq!(variants[0]["properties"]["fields"]["maxItems"], 0);
+    assert_eq!(
+        variants[1]["properties"]["fields"]["prefixItems"][0]["type"],
+        "string"
+    );
+    for (variant, fields) in [("Pending", json!([])), ("Approved", json!(["alice"]))] {
+        let body = json!({"tag":"variant","type":"Status","variant":variant,"fields":fields});
+        let (status, reply) = http_post(port, "/echo", &body.to_string()).unwrap();
+        assert_eq!(status, 200, "{reply}");
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap(), body);
+    }
+    let (status, reply) =
+        http_get(port, "/owners/lee/search?term=caf%C3%A9+au+lait&limit=2").unwrap();
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap(),
+        json!({"owner":"lee","term":"caf\u{e9} au lait","limit":2})
+    );
+    for query in [
+        "term=valid",
+        "term=ok&limit=no",
+        "term=%FF&limit=2",
+        "term=%a&limit=2",
+    ] {
+        let (status, reply) = http_get(port, &format!("/owners/lee/search?{query}")).unwrap();
+        assert_eq!(status, 400, "{reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_query"
+        );
+    }
+    assert_eq!(http_get(port, "/missing").unwrap().0, 404);
+    assert_eq!(http_get(port, "/echo").unwrap().0, 405);
+    let (status, reply) = http_post(port, "/echo", "{").unwrap();
+    assert_eq!(status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap()["error"],
+        "invalid_json"
+    );
+    for invalid in [
+        json!({"variant":"Pending","fields":[3]}),
+        json!({"variant":"Pending","type":"Other"}),
+        json!({"variant":"Pending","tag":"none"}),
+        json!({"variant":"Pending","fields":false}),
+        json!({"variant":"Approved"}),
+        json!({"variant":"Approved","fields":[3]}),
+        json!({"variant":"Unknown"}),
+    ] {
+        let (status, reply) = http_post(port, "/echo", &invalid.to_string()).unwrap();
+        assert_eq!(status, 400, "{invalid} -> {reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_body"
+        );
+    }
+}
+
+#[test]
+fn sqlite_service_transactions_survive_restart() {
+    use serde_json::{json, Value};
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("notes");
+    let run = |dir: &std::path::Path, args: &[&str]| {
+        let result = Command::new(corvid_bin())
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+    };
+    run(temp.path(), &["new", "notes"]);
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/sqlite_service.cor"),
+    )
+    .unwrap();
+    std::fs::create_dir(project.join("schema")).unwrap();
+    std::fs::write(project.join("schema/001_notes.sql"), "CREATE TABLE notes(name TEXT PRIMARY KEY, text TEXT NOT NULL); CREATE TABLE writes(name TEXT NOT NULL);").unwrap();
+    run(
+        &project,
+        &[
+            "migrate",
+            "up",
+            "--dir",
+            "schema",
+            "--database",
+            "notes.sqlite",
+        ],
+    );
+    let start = || {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let child = Command::new(corvid_bin())
+            .current_dir(&project)
+            .args([
+                "serve",
+                "src/main.cor",
+                "--listen",
+                &format!("127.0.0.1:{port}"),
+            ])
+            .env_remove("CORVID_IO_ROOT")
+            .spawn()
+            .unwrap();
+        let guard = ServedApp(child);
+        assert!(wait_until_ready(port));
+        (guard, port)
+    };
+    let (guard, port) = start();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..4)
+            .map(|i| {
+                scope.spawn(move || {
+                    let note = json!({"name": format!("n{i}"), "text": format!("note {i}")});
+                    let (status, body) = http_post(port, "/notes", &note.to_string()).unwrap();
+                    assert_eq!(status, 200, "{body}");
+                    assert_eq!(
+                        serde_json::from_str::<Value>(&body).unwrap()["ok"],
+                        note,
+                        "{body}"
+                    );
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    let (_, duplicate) =
+        http_post(port, "/notes", r#"{"name":"n0","text":"replacement"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&duplicate).unwrap()["tag"],
+        "err",
+        "{duplicate}"
+    );
+    let (_, recovery) =
+        http_post(port, "/notes", r#"{"name":"next","text":"after rollback"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&recovery).unwrap()["tag"],
+        "ok",
+        "{recovery}"
+    );
+    drop(guard);
+    std::fs::write(
+        project.join("schema/002_index.sql"),
+        "CREATE INDEX ix_notes ON notes(text);",
+    )
+    .unwrap();
+    let next = project.join("schema/003_extend.sql");
+    std::fs::write(
+        &next,
+        "ALTER TABLE nonexistent ADD COLUMN revision INTEGER;",
+    )
+    .unwrap();
+    let migrate = [
+        "migrate",
+        "up",
+        "--dir",
+        "schema",
+        "--database",
+        "notes.sqlite",
+    ];
+    let failed = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(migrate)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success(), "{failed:?}");
+    std::fs::write(
+        &next,
+        "ALTER TABLE notes ADD COLUMN revision INTEGER DEFAULT 1;",
+    )
+    .unwrap();
+    run(&project, &migrate);
+    run(&project, &migrate);
+    let (_guard, port) = start();
+    for i in 0..4 {
+        let (status, body) = http_get(port, &format!("/notes/n{i}")).unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["ok"]["text"],
+            format!("note {i}"),
+            "{body}"
+        );
+    }
+    let db = rusqlite::Connection::open(project.join("notes.sqlite")).unwrap();
+    let writes: i64 = db
+        .query_row("SELECT count(*) FROM writes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(writes, 5);
+
+    // The producer holds a SQLite write transaction across yields. Observing
+    // the lock before and after a socket disconnect tests the whole HTTP path.
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    socket.write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    let mut response = Vec::new();
+    let mut buf = [0; 1024];
+    while !response.windows(4).any(|window| window == b"tick") {
+        let n = socket.read(&mut buf).unwrap();
+        assert!(n > 0 && response.len() < 16384, "stream failed to yield a tick");
+        response.extend_from_slice(&buf[..n]);
+    }
+    db.busy_timeout(Duration::ZERO).unwrap();
+    let error = db.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+    assert_eq!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+    drop(socket);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match db.execute_batch("BEGIN IMMEDIATE") {
+            Ok(()) => break,
+            Err(err) if err.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(err) => panic!("stream failed to release its database handle: {err}"),
+        }
+    }
+    db.execute_batch("ROLLBACK").unwrap();
+}
+
+#[test]
+fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("relay");
+    let created = Command::new(corvid_bin())
+        .current_dir(tmp.path())
+        .args(["new", "relay"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/http_relay.cor"),
+    )
+    .unwrap();
+    let manifest = project.join("corvid.toml");
+    let original = std::fs::read_to_string(&manifest).unwrap();
+    let configured = original.replace("allow = []", "allow = [\"upstream.test\"]");
+    assert_ne!(configured, original);
+    std::fs::write(&manifest, configured).unwrap();
+
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    let port = TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .env("HTTP_PROXY", &proxy_url)
+        .env("http_proxy", &proxy_url)
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .env_remove("CORVID_HTTP_ALLOW")
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+
+    // A loopback HTTP proxy represents the project's allowlisted upstream.
+    // Deliver each accepted request to the test without external DNS or network.
+    proxy.set_nonblocking(true).unwrap();
+    let next = || {
+        let until = Instant::now() + Duration::from_secs(5);
+        let socket = loop {
+            match proxy.accept() {
+                Ok((socket, _)) => break socket,
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(err) => panic!("expected an upstream request: {err}"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            headers.push_str(&line);
+        }
+        (reader, headers)
+    };
+    let closed = |mut socket: BufReader<TcpStream>| {
+        let mut buf = [0; 1];
+        match socket.read(&mut buf) {
+            Ok(0) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            other => panic!("upstream connection remained open: {other:?}"),
+        }
+    };
+    std::thread::scope(|scope| {
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(b"GET /wait HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let (waiting, _) = next();
+        let post = scope.spawn(|| http_post(port, "/messages", r#"{"text":"hello"}"#).unwrap());
+        let (mut request, headers) = next();
+        assert!(headers.starts_with("POST http://upstream.test/messages "));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (key, v) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| v.trim().parse().unwrap())
+            })
+            .unwrap();
+        let mut payload = vec![0; length];
+        request.read_exact(&mut payload).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({"text":"hello"})
+        );
+        std::thread::sleep(Duration::from_millis(25));
+        request.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\n{\"id\":7}").unwrap();
+        let (status, body) = post.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        let receipt: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(receipt["ok"]["id"], 7);
+        assert_eq!(receipt["ok"]["attempts"], 1);
+        assert!(receipt["ok"]["elapsed_ms"].as_u64().unwrap() >= 20);
+
+        let deadline = scope.spawn(|| http_get(port, "/deadline").unwrap());
+        let (upstream, _) = next();
+        let (status, body) = deadline.join().unwrap();
+        assert_eq!(status, 504, "{body}");
+        assert!(body.contains("timed out after 300ms"), "{body}");
+        closed(upstream);
+
+        let redirected = scope.spawn(|| http_get(port, "/wait").unwrap());
+        let (mut redirected_request, _) = next();
+        redirected_request.get_mut().write_all(b"HTTP/1.1 302 Found\r\nLocation: http://other.test/messages\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        let (status, body) = redirected.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["tag"],
+            "err"
+        );
+        drop(client);
+        closed(waiting);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_drains_an_inflight_route_before_exiting() {
+    use std::net::TcpListener;
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
+    let port = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
+        .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
+    let mut guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    // Wait for HTTP 100 Continue so the test signals a request the server has accepted.
+    stream.write_all(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 12\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n").unwrap();
+    let mut interim = [0; 25];
+    stream.read_exact(&mut interim).unwrap();
+    assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+    assert!(Command::new("kill").args(["-TERM", &guard.0.id().to_string()]).status().unwrap().success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        assert!(Instant::now() < deadline, "listener stayed open after SIGTERM");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stream.write_all(br#"{"text":"x"}"#).unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    assert!(reply.contains(r#"{"text":"x"}"#), "{reply}");
+    loop {
+        if let Some(exit) = guard.0.try_wait().unwrap() {
+            assert!(exit.success(), "{exit}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "server failed to exit after draining");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn access_log_reports_templates_and_status_while_a_route_uses_a_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("service");
+    let created = Command::new(corvid_bin()).current_dir(dir.path()).args(["new", "service"]).output().unwrap();
+    assert!(created.status.success(), "{created:?}");
+    let source = r#"import "./std/secrets" use secret_read
+
+agent configured() -> Result<Bool, String>:
+    secret = secret_read("CORVID_TEST_SERVICE_KEY")?
+    return Ok(secret.present and secret.value.length() > 0)
+
+server app:
+    route GET "/configuration/{id}" -> json Result<Bool, String>:
+        return configured()
+"#;
+    std::fs::write(project.join("src/main.cor"), source).unwrap();
+    let log = project.join("access.log");
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin()).current_dir(&project)
+        .args(["serve", "--access-log", "--listen", &format!("127.0.0.1:{port}")])
+        .env("CORVID_TEST_SERVICE_KEY", "sample-secret-for-service")
+        .stderr(std::fs::File::create(&log).unwrap()).spawn().unwrap();
+    let guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, body) = http_get_with_cookie(port, "/configuration/private-id?key=private-query", "value=private-cookie").unwrap();
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["ok"], true);
+    assert_eq!(http_get(port, "/unknown-private-path").unwrap().0, 404);
+    drop(guard);
+    let log = std::fs::read_to_string(log).unwrap();
+    for secret in ["sample-secret-for-service", "private-id", "private-query", "private-cookie", "unknown-private-path"] {
+        assert!(!log.contains(secret), "{log}");
+    }
+    let events: Vec<serde_json::Value> = log.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+    assert!(events.iter().any(|e| e["event"] == "http_request" && e["method"] == "GET" && e["route"] == "/configuration/:id" && e["status"] == 200 && e["elapsed_ms"].is_u64()), "{log}");
+    assert!(events.iter().any(|e| e["status"] == 404 && e["route"].is_null()), "{log}");
+}
+
+#[test]
+fn serve_page_and_json_api_from_one_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = Command::new(corvid_bin())
+        .current_dir(dir.path())
+        .args(["new", "notes"])
+        .output()
+        .unwrap();
+    assert!(new.status.success(), "{new:?}");
+    let project = dir.path().join("notes");
+    let main = project.join("src/main.cor");
+    let source = r#"import "./std/ui" as ui
+
+server notes:
+    route GET "/" -> html:
+        return ui.page("Notes", [ui.text("Ready & listening")])
+
+    route GET "/api/status" -> json String:
+        return "ready"
+"#;
+    std::fs::write(
+        &main,
+        source.replace("ui.page(\"Notes\", [ui.text(\"Ready & listening\")])", "42"),
+    )
+    .unwrap();
+    let invalid = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(["check", "src/main.cor"])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success(), "{invalid:?}");
+    let diagnostic = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        diagnostic.contains("E0207") && diagnostic.contains("String"),
+        "{diagnostic}"
+    );
+    std::fs::write(main, source).unwrap();
+
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    for (path, mime, expected) in [
+        ("/", "text/html", "<p>Ready &amp; listening</p>"),
+        ("/api/status", "application/json", "\"ready\""),
+    ] {
+        let raw = http_get_raw(port, path).unwrap();
+        let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200"), "{headers}");
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains(&format!("content-type: {mime}")),
+            "{headers}"
+        );
+        if path == "/" {
+            assert!(
+                body.starts_with("<!doctype html>") && body.contains(expected),
+                "{body}"
+            );
+        } else {
+            assert_eq!(body, expected);
+        }
+    }
+
+    let json = |path| {
+        let (status, body) = http_get(port, path).unwrap();
+        assert_eq!(status, 200);
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()
+    };
+    let contract = json("/.well-known/corvid");
+    let routes = contract["routes"].as_array().unwrap();
+    let home = routes.iter().find(|r| r["path"] == "/").unwrap();
+    assert_eq!(home["response_media_type"], "text/html");
+    assert_eq!(home["response_type"], "String");
+    let spec = json("/openapi.json");
+    for (path, mime) in [("/", "text/html"), ("/api/status", "application/json")] {
+        let content = &spec["paths"][path]["get"]["responses"]["200"]["content"];
+        assert_eq!(content[mime]["schema"]["type"], "string");
+        assert_eq!(content.as_object().unwrap().len(), 1);
+    }
 }

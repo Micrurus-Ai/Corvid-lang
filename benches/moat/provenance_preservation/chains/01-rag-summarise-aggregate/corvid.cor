@@ -10,8 +10,8 @@ tool retrieve(query: String) -> List<Grounded<String>> uses retrieval
 # Step 2 + 3: prompts that consume Grounded<String> and return
 # Grounded<String>. Provenance survives by construction.
 prompt summarise(doc: Grounded<String>) -> Grounded<String> uses llm:
-    "summarise: {doc}"
     cites doc strictly
+    "summarise: {doc}"
 
 prompt aggregate(parts: List<Grounded<String>>) -> Grounded<String> uses llm:
     "aggregate the following: {parts}"
@@ -20,5 +20,5 @@ prompt aggregate(parts: List<Grounded<String>>) -> Grounded<String> uses llm:
 # returns the original retrieved doc IDs. End-to-end citation chain.
 agent multi_hop_rag(query: String) -> Grounded<String>:
     docs: List<Grounded<String>> = retrieve(query)
-    summaries: List<Grounded<String>> = map(docs, summarise)
+    summaries: List<Grounded<String>> = docs.map(fn (item) -> summarise(item))
     return aggregate(summaries)

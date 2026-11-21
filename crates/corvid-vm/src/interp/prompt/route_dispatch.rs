@@ -71,7 +71,7 @@ impl<'ir> Interpreter<'ir> {
     /// stream, then feeds deltas into a Corvid stream as they
     /// arrive. Token limits apply CUMULATIVELY mid-stream; cost is
     /// charged on the final chunk from accumulated estimates. On
-    /// stream-setup failure, falls back to the whole-call path.
+    /// stream-setup failure, the caller can retry through ordinary Corvid syntax.
     async fn dispatch_streaming_prompt(
         &mut self,
         prompt: &'ir IrPrompt,
@@ -83,11 +83,13 @@ impl<'ir> Interpreter<'ir> {
         let rendered = super::render_prompt(prompt, arg_values);
         let json_args: Vec<serde_json::Value> =
             arg_values.iter().map(crate::conv::value_to_json).collect();
-        let sampling = self.resolve_sampling(prompt, "");
+        let model = self.select_prompt_model(prompt, callee_name, &rendered, arg_values, span)
+            .await?.unwrap_or_default();
+        let sampling = self.resolve_sampling(prompt, &model);
         let segments = super::build_message_segments(prompt, arg_values, &rendered, span)?;
         let req = corvid_runtime::llm::LlmRequest {
             prompt: callee_name.to_string(),
-            model: String::new(),
+            model,
             rendered: if segments.is_empty() {
                 rendered.clone()
             } else {
@@ -98,18 +100,8 @@ impl<'ir> Interpreter<'ir> {
             sampling,
             messages: segments.flatten(),
         };
-        let chunk_stream = match self.runtime.call_llm_stream(req).await {
-            Ok(s) => s,
-            Err(_) => {
-                // Setup failed — fall back to the whole-call path.
-                let result = self
-                    .dispatch_prompt(prompt, callee_name, arg_values, span)
-                    .await?;
-                return self
-                    .finalize_prompt_result(prompt, callee_name, arg_values, result, span)
-                    .await;
-            }
-        };
+        let chunk_stream = self.runtime.call_llm_stream(req).await
+            .map_err(|err| InterpError::new(InterpErrorKind::Runtime(err), span))?;
 
         let backpressure = super::super::effect_compose::prompt_backpressure(prompt);
         let (sender, stream) = crate::value::StreamValue::channel(backpressure);
@@ -118,9 +110,10 @@ impl<'ir> Interpreter<'ir> {
         let effect_confidence = prompt.effect_confidence;
         let per_call_cost = prompt.effect_cost;
         let feed_span = span;
-        tokio::spawn(async move {
+        stream.spawn_producer(async move {
             let mut chunks = chunk_stream;
-            let mut total_tokens: u64 = 0;
+            let mut emitted_tokens = 0u64;
+            let mut characters = 0u64;
             while let Some(item) = futures::StreamExt::next(&mut chunks).await {
                 match item {
                     Ok(chunk) => {
@@ -129,19 +122,14 @@ impl<'ir> Interpreter<'ir> {
                         // is authoritative (the mock and whole-call
                         // fallback report it); mid-stream deltas use
                         // the text estimate.
-                        let tokens = match &chunk.usage {
-                            Some(usage) => {
-                                total_tokens = u64::from(usage.completion_tokens);
-                                u64::from(usage.completion_tokens)
-                            }
-                            None => {
-                                let t = crate::interp::effect_compose::estimate_tokens(
-                                    &chunk.delta,
-                                );
-                                total_tokens += t;
-                                t
-                            }
+                        characters = characters.saturating_add(chunk.delta.chars().count() as u64);
+                        let total_tokens = match &chunk.usage {
+                            Some(usage) => u64::from(usage.completion_tokens),
+                            None if characters > 0 => (characters / 4).max(1),
+                            None => 0,
                         };
+                        let tokens = total_tokens.saturating_sub(emitted_tokens);
+                        emitted_tokens = total_tokens;
                         if let Some(limit) = token_limit {
                             if total_tokens > limit {
                                 let _ = sender
@@ -236,11 +224,16 @@ impl<'ir> Interpreter<'ir> {
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
         let prompt = self.prompt_by_id(def_id, callee_name, span)?;
+        if let Some(mock) = self.mock_tools.get(&def_id).copied() {
+            let value = self.eval_mock_body(mock, callee_name, arg_values.to_vec(), span).await?;
+            let value = super::super::grounding::maybe_ground_prompt_result(prompt, callee_name, value);
+            return Ok(ExprFlow::Value(value));
+        }
         // Real provider streaming (slice 46d): plain-path
         // Stream<String> prompts stream incrementally. Everything
         // else (dispatch clauses, mocks, structured outputs) keeps
         // the whole-call-then-singleton behavior.
-        if Self::prompt_streams_live(prompt) && !self.mock_tools.contains_key(&def_id) {
+        if Self::prompt_streams_live(prompt) {
             return self
                 .dispatch_streaming_prompt(prompt, callee_name, arg_values, span)
                 .await;

@@ -34,6 +34,10 @@ pub fn run_release(channel: &str, version: Option<&str>, out: &Path) -> Result<(
         .map(str::to_string)
         .unwrap_or_else(|| default_version(normalized));
     validate_version(normalized, &version)?;
+    let signing_key = std::env::var("CORVID_RELEASE_SIGNING_KEY")
+        .context("CORVID_RELEASE_SIGNING_KEY is required for release attestation")?;
+    let key = load_signing_key(&KeySource::Env(signing_key))
+        .map_err(|err| anyhow::anyhow!("load release signing key: {err}"))?;
 
     fs::create_dir_all(out)
         .with_context(|| format!("create release output dir `{}`", out.display()))?;
@@ -77,7 +81,7 @@ pub fn run_release(channel: &str, version: Option<&str>, out: &Path) -> Result<(
     fs::write(out.join("release-manifest.json"), &manifest_json)
         .context("write release manifest")?;
 
-    let attestation = sign_release_manifest(&manifest_json)?;
+    let attestation = sign_release_manifest(&manifest_json, &key)?;
     fs::write(out.join("release-attestation.dsse.json"), attestation)
         .context("write release attestation")?;
 
@@ -113,12 +117,16 @@ fn default_version(channel: &str) -> String {
 }
 
 fn validate_version(channel: &str, version: &str) -> Result<()> {
+    let parsed = semver::Version::parse(version)
+        .with_context(|| format!("invalid release version `{version}`; expected SemVer"))?;
+    let prerelease = parsed.pre.as_str();
     match channel {
-        "nightly" if version.contains("-nightly.") => Ok(()),
-        "beta" if version.contains("-beta.") => Ok(()),
-        "stable" if !version.contains('-') && version.split('.').count() == 3 => Ok(()),
-        "nightly" => bail!("nightly versions must contain `-nightly.`"),
-        "beta" => bail!("beta versions must contain `-beta.`"),
+        "nightly" if prerelease.starts_with("nightly.") => Ok(()),
+        "beta" if parsed.build.is_empty() && prerelease.strip_prefix("beta.")
+            .is_some_and(|n| n.bytes().all(|digit| digit.is_ascii_digit())) => Ok(()),
+        "stable" if parsed.pre.is_empty() && parsed.build.is_empty() => Ok(()),
+        "nightly" => bail!("nightly versions must use a nightly prerelease, such as 1.0.0-nightly.local"),
+        "beta" => bail!("beta versions must use MAJOR.MINOR.PATCH-beta.N"),
         "stable" => bail!("stable versions must be plain MAJOR.MINOR.PATCH"),
         _ => unreachable!("channel normalized before version validation"),
     }
@@ -482,15 +490,11 @@ fn render_section(out: &mut String, title: &str, commits: &[CommitLine]) {
     out.push('\n');
 }
 
-fn sign_release_manifest(manifest_json: &str) -> Result<String> {
-    let signing_key = std::env::var("CORVID_RELEASE_SIGNING_KEY")
-        .context("CORVID_RELEASE_SIGNING_KEY is required for release attestation")?;
-    let key = load_signing_key(&KeySource::Env(signing_key))
-        .map_err(|err| anyhow::anyhow!("load release signing key: {err}"))?;
+fn sign_release_manifest(manifest_json: &str, key: &ed25519_dalek::SigningKey) -> Result<String> {
     let envelope = sign_envelope(
         manifest_json.as_bytes(),
         "application/vnd.corvid.release.manifest.v1+json",
-        &key,
+        key,
         "release-channel",
     );
     serde_json::to_string_pretty(&envelope).context("serialize release attestation")
@@ -533,6 +537,10 @@ mod tests {
         // accepted as beta.
         assert!(validate_version("beta", "1.0.0").is_err());
         assert!(validate_version("beta", "1.0.0-nightly.20260518").is_err());
+        assert!(validate_version("stable", "one.two.three").is_err());
+        assert!(validate_version("stable", "1.0.0+build").is_err());
+        assert!(validate_version("nightly", "1.0.0+build-nightly.3").is_err());
+        assert!(validate_version("beta", "1.0.0-beta.preview").is_err());
         // Unknown channel refused at normalization.
         assert!(normalize_channel("preview").is_err());
         assert!(normalize_channel("rc").is_err());
@@ -754,12 +762,9 @@ mod tests {
     /// guarding against.
     #[test]
     fn sign_release_manifest_emits_v1_payload_type() {
-        std::env::set_var(
-            "CORVID_RELEASE_SIGNING_KEY",
-            "0".repeat(64),
-        );
+        let key = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
         let manifest_json = r#"{"schema":"corvid.release.manifest.v1","channel":"nightly"}"#;
-        let envelope_json = sign_release_manifest(manifest_json).expect("sign manifest");
+        let envelope_json = sign_release_manifest(manifest_json, &key).expect("sign manifest");
         let parsed: serde_json::Value =
             serde_json::from_str(&envelope_json).expect("envelope JSON");
         assert_eq!(
@@ -781,6 +786,5 @@ mod tests {
             serde_json::from_slice(&payload_bytes).expect("payload JSON");
         assert_eq!(payload["schema"], "corvid.release.manifest.v1");
         assert_eq!(payload["channel"], "nightly");
-        std::env::remove_var("CORVID_RELEASE_SIGNING_KEY");
     }
 }

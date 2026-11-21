@@ -134,12 +134,98 @@ agent drain(work_items: List<Int>) -> Int:
 Production agents that loop over model calls should declare
 `@max_steps` / `@max_wall_time` bounds.
 
+## Let a model choose a local function
+
+For a chat model with native function calling, pass the Corvid function
+directly as a prompt argument. See [Pass a function to a prompt](11-prompts.md#pass-a-function-to-a-prompt).
+For a model that selects actions through structured output, use the following pattern.
+
+Use a sum type to list the actions your application accepts. Each variant
+carries its own argument types. A prompt can return the action inside a
+record, and an exhaustive match calls the corresponding Corvid function.
+
+```corvid
+type Action:
+    | Add(amount: Int)
+    | Finish
+
+type Decision:
+    action: Action
+
+prompt choose(total: Int) -> Decision:
+    "The current total is {total}. Choose Add or Finish."
+
+fn add(total: Int, amount: Int) -> Result<Int, String>:
+    if amount < 0:
+        return Err("negative amount")
+    return Ok(total + amount)
+
+agent next_total(total: Int) -> Result<Int, String>:
+    decision = choose(total)
+    return match decision.action:
+        Add(amount) -> add(total, amount)
+        Finish -> Ok(total)
+```
+
+The prompt sends the available variants and their positional argument types
+in its JSON schema. Corvid checks the returned action before entering the
+match. A response with `"two"` in the integer position fails at the prompt.
+A negative integer reaches `add`, which returns the application's own error.
+For a multi-turn workflow, pass the updated total to the next prompt, return
+on `Finish`, and bound the number of calls with a finite loop.
+
 ## Durability
 
 Agents tagged `@replayable` and run via the durable job runner survive
 process restart. Their step checkpoints, tool-call results, and
 approval-wait state persist. See **[Jobs](/docs/jobs)** for the
 runner story.
+
+### Resume a worker that calls local functions
+
+When a durable job calls a prompt with a function parameter, Corvid saves
+each completed tool result with its call ID. A replacement worker opens the
+same queue, rebuilds the conversation, and sends saved results back to the
+model. Run the same Corvid source and model configuration on each attempt.
+Use capture-free functions for durable prompts so all arguments and results
+can travel with the conversation.
+
+For the `main` agent in the [function-calling example](11-prompts.md#pass-a-function-to-a-prompt),
+these commands allow one tool call and a final answer:
+
+```sh
+corvid jobs enqueue --task main --payload '[]'
+corvid jobs loop limits --job job_1 --max-steps 2 --max-tool-calls 1
+corvid jobs run --source main.cor --workers 1
+```
+
+Use the job ID printed by enqueue. Workers read `CORVID_MODEL` and provider
+credentials just as `corvid run` does. If the worker exits, run the worker
+command again. After the old lease expires, the next worker can recover the
+job. A pending model request may be sent again. The recovered conversation
+uses the committed tool results and retains the remaining job allowance.
+
+A worker can store a function result and charge it to a durable job in
+one SQLite transaction. For example, a job with two steps and one tool
+call available can save the first result like this:
+
+```sh
+corvid jobs loop limits --job job_1 --max-steps 2 --max-tool-calls 1
+corvid jobs checkpoint add --job job_1 --step-sequence 1 --kind tool-result --label add --payload '{"total":2}'
+corvid jobs checkpoint resume --job job_1 --json
+```
+
+Run the commands against the same queue, using `--state PATH` when the job
+lives outside the default queue. The JSON snapshot gives the new worker
+the saved total, next sequence (2), remaining steps (1), and remaining tool
+calls (0). An unset limit appears as `null`. Pass the next sequence when
+saving the next result. A stale sequence or exhausted allowance fails the
+write and leaves the saved state intact. Each sequenced checkpoint counts
+as one step, and a tool result also counts as one tool call.
+
+This transaction covers the checkpoint and its accounting. For functions
+that change an external service, use that service's idempotency mechanism
+to handle a crash between the external change and the local commit.
 
 ## Examples in the wild
 

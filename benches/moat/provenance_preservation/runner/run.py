@@ -5,14 +5,9 @@ implementation as `preserved` / `lost` based on whether the final
 function's return type carries a typed provenance / sources field at
 the language-type level.
 
-Classification heuristics (deliberately conservative — false
-positives would give Corvid an unfair advantage):
-
-  Corvid (.cor):
-    The final agent's return type contains the literal substring
-    `Grounded<` AND the file does not redeclare `Grounded` as a
-    user type. The `Grounded<T>` shape carries provenance by
-    construction.
+Corvid chains compile and run with local deterministic tool and model
+fixtures. The final value must carry every expected retrieval source.
+The Python and TypeScript columns inspect declared return types.
 
   Python (.py):
     The final function's return type annotation is parsed. It is
@@ -28,10 +23,6 @@ positives would give Corvid an unfair advantage):
     `provenance:` at the type level. `string`, `string[]`, untyped
     objects, or types lacking those fields are `lost`.
 
-The runner is intentionally static — no LLM calls run. The point is
-the TYPE-LEVEL guarantee, not whether a particular runtime exhibits
-provenance after instrumentation.
-
 Usage:
     python3 benches/moat/provenance_preservation/runner/run.py \\
         --chains-dir benches/moat/provenance_preservation/chains \\
@@ -42,6 +33,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,19 +72,13 @@ def classify_corvid(corvid_src: Path) -> tuple[str, str]:
     """Returns (verdict, note)."""
     if not corvid_src.exists():
         return "error", "missing corvid.cor"
-    text = corvid_src.read_text(encoding="utf-8")
-    # Look at the final agent's signature.
-    agent_match = re.findall(
-        r"^agent\s+\w+\s*\([^)]*\)\s*->\s*([^:]+):",
-        text,
-        re.MULTILINE,
-    )
-    if not agent_match:
-        return "lost", "no agent signature found"
-    final_return = agent_match[-1].strip()
-    if "Grounded<" in final_return or "List<Grounded<" in final_return:
-        return "preserved", ""
-    return "lost", f"final agent return is `{final_return}` — no `Grounded<...>`"
+    command = ["cargo", "run", "--locked", "--quiet", "-p", "corvid-driver",
+               "--example", "provenance_probe", "--", str(corvid_src)]
+    proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode:
+        return "error", (proc.stderr.strip().splitlines() or ["probe failed"])[-1]
+    result = json.loads(proc.stdout)
+    return result["verdict"], result["note"]
 
 
 def classify_python(py_src: Path) -> tuple[str, str]:
@@ -298,10 +285,8 @@ def render_results_md(results: list[ChainResult]) -> str:
     out.append(
         "See `benches/moat/provenance_preservation/README.md` for the "
         "chain format, what counts as preserved, and the honesty rules. "
-        "The runner is static — it parses the final return type of "
-        "each stack's outer function and asks whether it exposes a "
-        "typed sources / source_documents / provenance field at the "
-        "language-type level."
+        "Corvid verdicts require execution against deterministic fixtures and matching retrieval source identities in the returned value. "
+        "Python and TypeScript verdicts describe return annotations only. These measurements have different scopes."
     )
 
     return "\n".join(out) + "\n"

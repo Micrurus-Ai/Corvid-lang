@@ -8,13 +8,33 @@ use super::*;
 /// `literal_counter` is a `Cell` so recursive lowering paths can take
 /// `&self` and still bump the counter for unique `.rodata` symbol names.
 pub(in crate::lowering) struct RuntimeFuncs {
+    pub missing_map_key: FuncId,
     pub overflow: FuncId,
     pub retain: FuncId,
     pub release: FuncId,
     pub string_concat: FuncId,
+    pub list_concat: FuncId,
+    pub list_new: FuncId,
+    pub list_fold_int: FuncId,
+    pub list_test_int: FuncId,
+    pub list_filter_int: FuncId,
+    pub list_map_int: FuncId,
+    pub list_append: FuncId,
     pub string_eq: FuncId,
     pub string_cmp: FuncId,
     pub string_char_len: FuncId,
+    pub string_parse_int: FuncId,
+    pub string_to_upper: FuncId,
+    pub structural_eq: FuncId,
+    pub equality_layouts: std::cell::RefCell<HashMap<Type, cranelift_module::DataId>>,
+    pub string_trim: FuncId,
+    pub string_contains: FuncId,
+    pub string_starts_with: FuncId,
+    pub string_ends_with: FuncId,
+    pub string_replace: FuncId,
+    pub string_split: FuncId,
+    pub string_to_lower: FuncId,
+    pub string_substring: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
     /// `alloc`/`alloc_with_destructor` pair. Signature:
@@ -140,6 +160,13 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub trace_tool_result_bool: FuncId,
     pub trace_tool_result_float: FuncId,
     pub trace_tool_result_string: FuncId,
+    /// Fresh Cranelift variable IDs for the function currently being lowered.
+    pub return_temporaries: std::cell::RefCell<Vec<ClValue>>,
+    /// Match operands borrow surrounding locals and payloads. Retain owned reads
+    /// where they execute, including inside short-circuit branches.
+    pub in_match_operand: std::cell::Cell<bool>,
+    pub callback_typeinfo: cranelift_module::DataId,
+    pub next_variable: std::cell::Cell<u32>,
     pub literal_counter: std::cell::Cell<u64>,
     /// When true, codegen-level scattered
     /// `emit_retain` / `emit_release` sites are skipped because the
@@ -171,6 +198,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// Per-struct-type typeinfo data symbols. Every
     /// refcounted struct allocation references its block via
     /// `corvid_alloc_typed(size, &typeinfo)`.
+    pub variant_typeinfos: HashMap<(DefId, u32), cranelift_module::DataId>,
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
     /// Per-struct-type JSON-decoder functions. Emitted lazily on
     /// first reference (a prompt with `Type::Struct(def_id)` return)
@@ -253,6 +281,14 @@ pub(in crate::lowering) struct RuntimeFuncs {
 }
 
 impl RuntimeFuncs {
+    pub fn declare_variable(&self, builder: &mut FunctionBuilder, ty: clir::Type) -> Variable {
+        let index = self.next_variable.get();
+        self.next_variable.set(index + 1);
+        let variable = Variable::from_u32(index);
+        builder.declare_var(variable, ty);
+        variable
+    }
+
     /// Allocate the next unique literal symbol number.
     pub(in crate::lowering) fn next_literal_id(&self) -> u64 {
         let n = self.literal_counter.get();

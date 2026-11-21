@@ -10,7 +10,8 @@ Prompts are registered by generated code's `PROMPTS` dict: name → {"template",
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, TypedDict
+from inspect import isawaitable
+from typing import Any, Callable, Iterable, TypeVar, TypedDict
 
 from .errors import UnknownPrompt, UnknownTool
 
@@ -25,22 +26,30 @@ class PromptMetadata(TypedDict):
     params: list[str]
 
 
-# Registered Python implementations: tool name → async callable.
-_TOOL_IMPLS: dict[str, Callable[..., Awaitable[Any]]] = {}
+ToolFunction = TypeVar("ToolFunction", bound=Callable[..., Any])
+
+_TOOL_IMPLS: dict[str, Callable[..., Any]] = {}
 
 # Compiler-provided metadata. Populated by generated modules on import.
 _TOOL_META: dict[str, ToolMetadata] = {}
 _PROMPT_META: dict[str, PromptMetadata] = {}
 
 
-def tool(name: str) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
+def tool(name: str) -> Callable[[ToolFunction], ToolFunction]:
     """Decorator: register `fn` as the implementation of tool `name`."""
 
-    def wrap(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    def wrap(fn: ToolFunction) -> ToolFunction:
         _TOOL_IMPLS[name] = fn
         return fn
 
     return wrap
+
+
+async def invoke_tool(impl: Callable[..., Any], args: Iterable[Any]) -> Any:
+    result = impl(*args)
+    if isawaitable(result):
+        return await result
+    return result
 
 
 def register_tools(meta: dict[str, ToolMetadata]) -> None:
@@ -53,7 +62,7 @@ def register_prompts(meta: dict[str, PromptMetadata]) -> None:
     _PROMPT_META.update(meta)
 
 
-def get_tool_impl(name: str) -> Callable[..., Awaitable[Any]]:
+def get_tool_impl(name: str) -> Callable[..., Any]:
     try:
         return _TOOL_IMPLS[name]
     except KeyError as e:

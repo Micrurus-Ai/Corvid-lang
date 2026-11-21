@@ -435,7 +435,7 @@ pub(super) fn emit_entry_main(
 fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), CodegenError> {
     match ty {
         Type::Map(_, _) => Err(CodegenError::not_supported(
-            format!("entry agent {role} of type `Map<K, V>` - interpreter-only in 45g"),
+            format!("entry agent {role} of type `Map<K, V>` requires an entry-point map serializer"),
             Span::new(0, 0),
         )),
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),

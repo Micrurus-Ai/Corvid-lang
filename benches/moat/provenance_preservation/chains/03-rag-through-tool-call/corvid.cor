@@ -15,8 +15,8 @@ tool retrieve(query: String) -> Grounded<String> uses retrieval
 tool enrich_from_db(doc: Grounded<String>) -> Grounded<String> uses db_lookup
 
 prompt answer(doc: Grounded<String>, related: Grounded<String>) -> Grounded<String> uses llm:
-    "answer using {doc} and related {related}"
     cites doc strictly
+    "answer using {doc} and related {related}"
 
 agent retrieve_enrich_answer(query: String) -> Grounded<String>:
     doc: Grounded<String> = retrieve(query)

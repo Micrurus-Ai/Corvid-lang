@@ -187,7 +187,11 @@ impl Type {
             Type::Nothing => "Nothing".into(),
             Type::Struct(_) => "struct".into(),
             Type::ImportedStruct(imported) => imported.name.clone(),
-            Type::Function { .. } => "function".into(),
+            Type::Function { params, ret, .. } => format!(
+                "({}) -> {}",
+                params.iter().map(Type::display_name).collect::<Vec<_>>().join(", "),
+                ret.display_name(),
+            ),
             Type::List(inner) => format!("List<{}>", inner.display_name()),
             Type::Map(k, v) => format!("Map<{}, {}>", k.display_name(), v.display_name()),
             Type::Stream(inner) => format!("Stream<{}>", inner.display_name()),

@@ -1,0 +1,27 @@
+agent directory() -> Map<String, String>:
+    key = "al" + "pha"
+    return {key: "old", "beta": "", "alpha": "ne" + "w"}
+
+agent main() -> Bool:
+    names = directory()
+    alias = names
+    size = names.length()
+    keys = names.keys()
+    values = names.values()
+    alias["alpha"] = "changed"
+    alias["gamma"] = "last"
+    present = names.contains_key("be" + "ta")
+    absent = not names.contains_key("missing")
+    order = ""
+    for k in names.keys():
+        order = order + k
+    joined = ""
+    for value in alias.values():
+        joined = joined + value
+    sizes = size == 2 and names.length() == 3 and keys.length() == 2
+    original = keys[0] == "alpha" and values[0] == "new" and values[1] == ""
+    empty: Map<String, String> = {}
+    no_entries = empty.length() == 0 and empty.keys().length() == 0 and empty.values().length() == 0
+    contents = order == "alphabetagamma" and joined == "changedlast"
+    membership = present and absent and not empty.contains_key("")
+    return sizes and original and membership and contents and no_entries

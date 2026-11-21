@@ -247,7 +247,7 @@ impl<'a> Parser<'a> {
         let first_login = first_login.ok_or_else(|| ParseError {
             kind: ParseErrorKind::UnexpectedToken {
                 got: "a `provisioning:` block without `first_login`".into(),
-                expected: "`first_login: open | invited`".into(),
+                expected: "`first_login: open` or `first_login: invited` (`approval_required` is reserved for future use)".into(),
             },
             span: start.merge(end),
         })?;

@@ -46,7 +46,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{on, MethodFilter};
 use axum::{Json, Router};
-use corvid_ast::HttpMethod;
+use corvid_ast::{HttpMethod, RouteResponseKind};
 use corvid_driver::{
     compile_to_application_contract_with_config, compile_to_ir_with_config_at_path,
     load_corvid_config_for, render_all_pretty,
@@ -62,29 +62,20 @@ use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 use libloading::{Library, Symbol};
 
+mod recovery;
+
 use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
 
-/// What the serve loop remembers about each in-flight approval so the
-/// `/__approvals/:id/approve` handler can re-execute the original
-/// agent without the client having to re-POST. Captured when an
-/// `approve` boundary surfaces `ApprovalQueued` — the dispatch handler
-/// already has the agent name + args at that point and just stashes
-/// them under the freshly-minted approval id.
-///
-/// 33Q2 — `last_handler_error` carries the most recent
-/// re-execution failure when an approval was granted but the
-/// downstream handler errored. The approval stays `pending` so the
-/// reviewer can retry without re-granting; the captured error is
-/// surfaced by `GET /__approvals/<id>` and in the 500 body returned
-/// by `POST /__approvals/<id>/approve` so the reviewer can decide
-/// whether to retry (transient) or `/deny` (permanently broken).
-/// Pre-33Q2 a 500 silently consumed the approval — the bug
-/// anonymous-2026-06-04 P1.2 reported.
-#[derive(Clone)]
+/// Ownership of the suspended interpreter transfers to a single reviewed
+/// decision. Resumption continues after exactly the boundary that emitted it.
+struct Invocation {
+    execution: futures::future::BoxFuture<'static, Result<Value, RunError>>,
+    pauses: tokio::sync::mpsc::UnboundedReceiver<crate::serve_approval::ApprovalPause>,
+}
+
 struct PendingInvocation {
-    agent: String,
-    args: Vec<Value>,
-    last_handler_error: Option<String>,
+    invocation: Invocation,
+    decision: tokio::sync::oneshot::Sender<corvid_runtime::approvals::ApprovalDecision>,
 }
 
 /// Shared, read-only serving state: the lowered app, the interpreter
@@ -95,24 +86,11 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
-    ir: IrFile,
+    ir: Arc<IrFile>,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
-    /// `approval_id -> PendingInvocation` so the transition handler
-    /// can re-run the agent on `/approve` without the client re-
-    /// POSTing the original request. Populated by the dispatch
-    /// handlers on the queued path; drained on either `/approve`
-    /// (re-executed) or `/deny` (discarded).
+    /// Live VM continuations keyed by the exact boundary awaiting a decision.
     pending_invocations: Arc<Mutex<HashMap<String, PendingInvocation>>>,
-    /// Tool handlers registered at startup — typically populated by
-    /// the `--with-tools-cdylib <path>` loader, but could also carry
-    /// handlers from future loader paths (e.g. 33Q1b's tools.py
-    /// autoloader). Cloned into the `/approve` handler's
-    /// `bypass_runtime` builder so the re-executed agent sees the
-    /// same tool registry as the original request, instead of
-    /// failing with "no handler registered for tool `<name>`" — the
-    /// regression anonymous-2026-06-04 round-2 P1.1 documented.
-    host_tools: ToolRegistry,
     /// The Application Contract JSON, served at `/.well-known/corvid`
     /// so clients + tooling discover the surface from the live backend
     /// (slice 51r). `{}` when the contract could not be built.
@@ -129,10 +107,12 @@ struct ServeState {
 pub(crate) fn cmd_serve(
     file: &Path,
     listen: &str,
+    access_log: bool,
     tools_cdylib: Option<&Path>,
     mode: Option<&str>,
 ) -> Result<u8> {
-    let connector_mode = crate::run_cmd::parse_connector_mode(mode)?;
+    let env_mode = std::env::var("CORVID_CONNECTOR_MODE").ok();
+    let connector_mode = crate::run_cmd::parse_connector_mode(mode.or(env_mode.as_deref()))?;
     let source =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
     let config = load_corvid_config_for(file);
@@ -251,13 +231,14 @@ pub(crate) fn cmd_serve(
     }
 
     let runtime = corvid_driver::apply_env_llm_wiring(
-        Runtime::builder()
+        corvid_driver::apply_project_storage(Runtime::builder(), file)
             // The process-wide runtime has no requester identity. Every
             // authenticated HTTP request installs its own contextual
             // QueueApprover below; any accidental non-request path fails
             // closed rather than minting an anonymous approval.
             .approver(Arc::new(ProgrammaticApprover::always_no()))
-            .tool_registry(host_tools.clone())
+            .http_policy(corvid_driver::load_http_egress_policy(file))
+            .tool_registry(host_tools)
             // A served route that calls a connector operation must be able
             // to EXECUTE it. Without these two, the contract could
             // advertise a connector a route can never reach — the gap the
@@ -331,11 +312,10 @@ pub(crate) fn cmd_serve(
         .context("serialize live Corvid OpenAPI contract")?;
 
     let state = Arc::new(ServeState {
-        ir,
+        ir: Arc::new(ir),
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
-        host_tools,
         contract_json,
         openapi_json,
         // Share the ONE AuthContext with the app-route enforcement path
@@ -345,7 +325,9 @@ pub(crate) fn cmd_serve(
 
     let mut app: Router<Arc<ServeState>> = Router::new()
         .route("/healthz", on(MethodFilter::GET, || async { StatusCode::OK }))
-        .route("/readyz", on(MethodFilter::GET, || async { StatusCode::OK }))
+        .route("/readyz", on(MethodFilter::GET, |State(state): State<Arc<ServeState>>| async move {
+            if state.approval_queue.check_readiness().is_ok() && state.auth_context.as_ref().is_none_or(|ctx| ctx.auth.check_readiness().is_ok()) { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }
+        }))
         // Admin endpoints (`E0-serve-5`). Read-only at the slice MVP
         // boundary; the transition surface (POST .../approve|deny) is
         // a follow-up. Hidden under `/__approvals` so they cannot
@@ -359,7 +341,7 @@ pub(crate) fn cmd_serve(
             on(MethodFilter::GET, get_approval),
         )
         // Transition endpoints (`serve-6`): a reviewer marks an
-        // approval granted, the server re-executes the original
+        // approval granted, the server resumes the suspended
         // request and returns the result; or marks it denied and
         // discards the pending invocation. axum 0.7 colon-capture.
         .route(
@@ -374,7 +356,31 @@ pub(crate) fn cmd_serve(
         // (slice 51r): the Application Contract at the well-known path
         // and a standard OpenAPI 3.1 document.
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route("/.well-known/corvid/stream.js", on(MethodFilter::GET, || async {
+            ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                include_str!("serve_cmd/stream.js"))
+        }))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
+
+    // Serve only the compiled browser entrypoint and its companion Wasm.
+    // Read both once so running requests see a consistent build.
+    let asset_dir = corvid_driver::wasm_output_dir_for(file);
+    let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
+    if has_events {
+        for (name, mime) in [("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")] {
+            let path = asset_dir.join(name);
+            let bytes = Bytes::from(std::fs::read(&path)
+                .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
+            let route = format!("/target/wasm/{name}");
+            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+                anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
+            }
+            app = app.route(&route, on(MethodFilter::GET, move || {
+                let bytes = bytes.clone();
+                async move { ([(axum::http::header::CONTENT_TYPE, mime)], bytes) }
+            }));
+        }
+    }
 
     // Slice 52a: register EVERY declared route and execute its body via
     // the synthetic per-route handler agent — any shape (path params,
@@ -391,7 +397,12 @@ pub(crate) fn cmd_serve(
                 .find(|a| a.name == route.handler_agent)
                 .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default();
+            if route.path == "/.well-known/corvid/stream.js" {
+                anyhow::bail!("route path `{}` is reserved for the browser streaming module", route.path);
+            }
             let meta = Arc::new(RouteMeta {
+                form_encoded: route.form_encoded,
+                response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
                 path_params: route
                     .path_params
@@ -491,9 +502,14 @@ pub(crate) fn cmd_serve(
     // banner below can still see the IR for the 33Q9 approval-label
     // check.
     let state_for_banner = state.clone();
+    if access_log {
+        app = app.layer(axum::middleware::from_fn(log_request));
+    }
     let app = app.with_state(state);
 
+    // HTTP workers evaluate the same nested Corvid calls as the CLI thread.
     let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(crate::CLI_STACK_BYTES)
         .enable_all()
         .build()
         .context("build tokio runtime")?;
@@ -530,7 +546,7 @@ pub(crate) fn cmd_serve(
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
-        println!("  POST   /__approvals/<id>/approve   -> approve + re-execute the original request");
+        println!("  POST   /__approvals/<id>/approve   -> approve + resume the reviewed boundary");
         println!("  POST   /__approvals/<id>/deny      -> deny + drop the pending invocation");
         println!("  GET    /.well-known/corvid         -> the Application Contract");
         println!("  GET    /openapi.json               -> OpenAPI 3.1");
@@ -540,9 +556,65 @@ pub(crate) fn cmd_serve(
             println!("  POST   /auth/logout                -> revoke the session + clear the cookie");
             println!("  GET    /auth/session               -> the current authenticated actor");
         }
-        axum::serve(listener, app).await.context("serve").map(|_| ())
+        let (shutdown, requested) = tokio::sync::oneshot::channel();
+        let server = std::future::IntoFuture::into_future(
+            axum::serve(listener, app).with_graceful_shutdown(async { let _ = requested.await; })
+        );
+        tokio::pin!(server);
+        tokio::select! {
+            outcome = &mut server => return outcome.context("serve"),
+            signal = shutdown_signal() => signal.context("listen for shutdown signal")?,
+        }
+        let _ = shutdown.send(());
+        eprintln!("corvid serve: draining active requests");
+        match tokio::time::timeout(std::time::Duration::from_secs(30), server).await {
+            Ok(outcome) => outcome.context("drain server"),
+            Err(_) => {
+                eprintln!("corvid serve: 30-second drain deadline expired");
+                Ok(())
+            }
+        }
     })?;
     Ok(0)
+}
+
+async fn log_request(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use std::io::Write;
+    let started = std::time::Instant::now();
+    let method = req.method().clone();
+    let route = req.extensions().get::<axum::extract::MatchedPath>().cloned();
+    let response = next.run(req).await;
+    let record = serde_json::json!({
+        "event": "http_request",
+        "method": method.as_str(),
+        "route": route.as_ref().map(|path| path.as_str()),
+        "status": response.status().as_u16(),
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+    });
+    let _ = writeln!(std::io::stderr().lock(), "{record}");
+    response
+}
+
+/// Handle interactive interruption and the termination signal sent by service managers.
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut interrupt = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = interrupt.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    tokio::signal::ctrl_c().await
 }
 
 /// Resolve the durable serve data directory from `CORVID_SERVE_DATA_DIR`
@@ -580,6 +652,8 @@ fn declared_identity(source: &str) -> Option<corvid_ast::IdentityDecl> {
 /// Per-route metadata captured for the general request handler
 /// (slice 52a).
 struct RouteMeta {
+    form_encoded: bool,
+    response_kind: RouteResponseKind,
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
     /// Declared path params: `(name, type)` in path order.
@@ -1064,7 +1138,7 @@ async fn run_route(
 
     // Query string → the declared query struct value.
     let query_value = match &meta.query_ty {
-        Some(ty) => match query_string_to_value(&raw_query, ty, &types_by_id) {
+        Some(ty) => match urlencoded_record(&raw_query, ty, &types_by_id, "query") {
             Ok(v) => Some(v),
             Err(e) => return bad_request("invalid_query", &e),
         },
@@ -1075,6 +1149,27 @@ async fn run_route(
     // is parsed from the multipart request (slice 52c-2); every other
     // body type is typed JSON.
     let body_value = match &meta.body_ty {
+        Some(ty) if meta.form_encoded => {
+            let media_type = headers.get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split(';').next())
+                .unwrap_or("").trim();
+            if !media_type.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+                return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(serde_json::json!({
+                    "error": "unsupported_media_type", "detail": "expected application/x-www-form-urlencoded"
+                }))).into_response();
+            }
+            let RouteRequestBody::Buffered(bytes) = body else {
+                return internal_error("request_body_mode_mismatch", "form requires a buffered body");
+            };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                return bad_request("invalid_form", "form body must be UTF-8");
+            };
+            match urlencoded_record(text, ty, &types_by_id, "form") {
+                Ok(value) => Some(value),
+                Err(err) => return bad_request("invalid_form", &err),
+            }
+        }
         Some(Type::Upload(_)) => {
             let Some(policy) = &meta.upload_policy else {
                 return internal_error(
@@ -1113,7 +1208,7 @@ async fn run_route(
             };
             match json_to_value(json, ty, &types_by_id) {
                 Ok(v) => Some(v),
-                Err(e) => return bad_request("invalid_body", &format!("{e:?}")),
+                Err(e) => return bad_request("invalid_body", &e.to_string()),
             }
         }
         None => None,
@@ -1136,6 +1231,7 @@ async fn run_route(
         }
     }
 
+    let (pause_tx, pauses) = tokio::sync::mpsc::unbounded_channel();
     let request_runtime = match (&enforced_actor, &meta.approval_policy) {
         (Some(enforced), Some(policy)) => {
             state.runtime.with_approver(Arc::new(QueueApprover::new(
@@ -1153,19 +1249,17 @@ async fn run_route(
                     max_cost_usd: policy.max_cost_usd,
                     irreversible: policy.irreversible,
                 },
-            )))
+            ).with_checkpoint(recovery::plan(&state, &meta.handler_agent).map(|p| (p.label, p.key)))
+             .suspend_at_boundaries(pause_tx)))
         }
         _ => state.runtime.clone(),
     };
-    let outcome = run_ir_with_runtime(
-        &state.ir,
-        Some(&meta.handler_agent),
-        args.clone(),
-        &request_runtime,
-    )
-    .await;
-    capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome)
+    let ir = state.ir.clone();
+    let agent = meta.handler_agent.clone();
+    let execution = Box::pin(async move {
+        run_ir_with_runtime(&ir, Some(&agent), args, &request_runtime).await
+    });
+    advance_invocation(&state, Invocation { execution, pauses }, Some(meta.response_kind)).await
 }
 
 enum RouteRequestBody {
@@ -1286,36 +1380,36 @@ async fn parse_multipart_upload(
 
 /// Parse a URL query string (`a=1&b=x`) into the declared query struct
 /// value, coercing each field from its string form (slice 52a).
-fn query_string_to_value(
-    query: &str,
+fn urlencoded_record(
+    encoded: &str,
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
+    source: &str,
 ) -> Result<Value, String> {
-    let Type::Struct(def_id) = ty else {
-        return Err("query type must be a struct".to_string());
+    let def_id = match ty {
+        Type::Struct(id) => id,
+        Type::ImportedStruct(record) => &record.def_id,
+        _ => return Err(format!("{source} type must be a struct")),
     };
     let ir_type = types_by_id
         .get(def_id)
         .copied()
-        .ok_or_else(|| "unknown query struct type".to_string())?;
-    let pairs: HashMap<String, String> = query
-        .split('&')
-        .filter(|s| !s.is_empty())
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            Some((
-                urldecode(k),
-                urldecode(v),
-            ))
-        })
-        .collect();
+        .ok_or_else(|| format!("unknown {source} struct type"))?;
+    let mut pairs = HashMap::new();
+    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        pairs.insert(urldecode(key)?, urldecode(value)?);
+    }
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
         let raw = pairs
             .get(&field.name)
             .cloned()
-            .ok_or_else(|| format!("missing query param `{}`", field.name))?;
-        fields.push((field.name.clone(), coerce_str_to_value(&raw, &field.ty)?));
+            .ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
+        let value = coerce_str_to_value(&raw, &field.ty)?;
+        corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
+            .map_err(|err| err.to_string())?;
+        fields.push((field.name.clone(), value));
     }
     Ok(Value::Struct(corvid_driver::StructValue::new(
         ir_type.id,
@@ -1324,53 +1418,48 @@ fn query_string_to_value(
     )))
 }
 
-/// Minimal percent-decoding for query keys/values (slice 52a).
-fn urldecode(s: &str) -> String {
-    let bytes = s.replace('+', " ");
-    let mut out = String::with_capacity(bytes.len());
-    let mut chars = bytes.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hi = chars.next();
-            let lo = chars.next();
-            if let (Some(hi), Some(lo)) = (hi, lo) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
+/// Decode form-encoded query text as UTF-8 after expanding percent escapes.
+fn urldecode(s: &str) -> Result<String, String> {
+    let mut decoded = Vec::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'+' => decoded.push(b' '),
+            b'%' => {
+                let mut digit = || bytes.next().and_then(|b| char::from(b).to_digit(16))
+                    .ok_or_else(|| "invalid percent escape in query".to_string());
+                decoded.push((digit()? * 16 + digit()?) as u8);
             }
-        } else {
-            out.push(c);
+            other => decoded.push(other),
         }
     }
-    out
+    String::from_utf8(decoded).map_err(|_| "query parameter must be UTF-8".into())
 }
 
-/// If the dispatch outcome surfaced an `ApprovalQueued` from the
-/// runtime, stash the agent name + args under that approval id so
-/// `/__approvals/:id/approve` can re-execute the original request.
-/// No-op for any other outcome (200 success, 403 deny, 500 error).
-fn capture_pending_invocation_if_queued(
-    state: &Arc<ServeState>,
-    agent: &str,
-    args: &[Value],
-    outcome: &Result<Value, RunError>,
-) {
-    let approval_id = match outcome {
-        Err(RunError::Interp(e)) => match approval_queued_id(&e.kind) {
-            Some(id) => id.to_string(),
-            None => return,
-        },
-        _ => return,
-    };
-    state.pending_invocations.lock().unwrap().insert(
-        approval_id,
-        PendingInvocation {
-            agent: agent.to_string(),
-            args: args.to_vec(),
-            last_handler_error: None,
-        },
-    );
+async fn advance_invocation(state: &ServeState, mut invocation: Invocation, response_kind: Option<RouteResponseKind>) -> Response {
+    tokio::select! {
+        Some(pause) = invocation.pauses.recv() => {
+            let id = pause.id;
+            state.pending_invocations.lock().unwrap().insert(id.clone(), PendingInvocation {
+                invocation, decision: pause.decision,
+            });
+            let poll = format!("/__approvals/{id}");
+            (StatusCode::ACCEPTED, [(axum::http::header::LOCATION, poll.clone())],
+                Json(serde_json::json!({"approval_id": id, "status": "pending", "poll": poll}))).into_response()
+        }
+        outcome = &mut invocation.execution => match outcome {
+            Ok(Value::String(html)) if response_kind == Some(RouteResponseKind::Html) =>
+                axum::response::Html(html.to_string()).into_response(),
+            Ok(value) if response_kind.is_none() => (StatusCode::OK, Json(serde_json::json!({
+                "status": "approved", "result": value_to_json(&value)
+            }))).into_response(),
+            Err(err) if response_kind.is_none() => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": "approved_execution_failed", "detail": err.user_facing_detail(),
+                "approval_status": "approved", "retry": {"possible": false}
+            }))).into_response(),
+            other => finish(other),
+        }
+    }
 }
 
 /// Map a handler outcome to an HTTP response: 200 + JSON on success,
@@ -1411,10 +1500,17 @@ fn finish(outcome: Result<Value, RunError>) -> Response {
                     }
                 }
             };
-            axum::response::Sse::new(sse).into_response()
+            axum::response::Sse::new(sse)
+                .keep_alive(axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(5)))
+                .into_response()
         }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
         Err(RunError::Interp(e)) => {
+            if matches!(e.kind, InterpErrorKind::Timeout { .. }) {
+                return (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
+                    "error": "handler_timeout", "detail": e.kind.to_string()
+                }))).into_response();
+            }
             if let Some(approval_id) = approval_queued_id(&e.kind) {
                 let approval_id = approval_id.to_string();
                 return (
@@ -1546,15 +1642,7 @@ async fn list_approvals(
     }
 }
 
-/// `POST /__approvals/:id/approve` — slice `serve-6`. Reviewer marks the
-/// approval granted; the server transitions the queue record, looks
-/// up the pending invocation captured at queue time, re-runs the
-/// agent under an always-yes approver (the approval is already
-/// granted at this layer, so the inner `approve` boundary must pass
-/// without re-queuing), and returns the agent's result. Errors:
-/// 404 if the approval doesn't exist, 409 if already decided or no
-/// pending invocation linked, 500 if the queue transition or the
-/// re-execution itself failed.
+/// Commit the verified decision before resuming the suspended interpreter.
 async fn approve_approval(
     State(state): State<Arc<ServeState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
@@ -1570,145 +1658,49 @@ async fn approve_approval(
             Err(resp) => return resp,
         };
 
-    // 33Q2 — peek the pending invocation BEFORE transitioning the
-    // queue. If the handler errors, the approval stays at `pending`
-    // so the reviewer can retry without re-granting; the invocation
-    // stays in `pending_invocations` for the retry path. Pre-33Q2,
-    // `queue.approve()` ran first and then the invocation was
-    // pop'd unconditionally — a handler 500 left the approval
-    // permanently `approved` AND the invocation gone, so neither
-    // /approve (409 already-decided) nor a re-POST of the original
-    // request (would create a NEW approval — silently double-
-    // billing the reviewer's authorization) could recover. That's
-    // the regression anonymous-2026-06-04 P1.2 documented.
-    //
-    // The invocation is CLONED, not removed; removal only happens
-    // after the queue transition succeeds (which itself only runs
-    // after the handler succeeds).
-    let invocation = match state.pending_invocations.lock().unwrap().get(&id).cloned() {
-        Some(inv) => inv,
-        None => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({
-                    "error": "no_pending_invocation",
-                    "id": id,
-                    "detail": "approval is pending but no pending invocation is linked in this serve process — re-execution is not possible. This happens when the approval id is not one this server queued.",
-                })),
-            )
-                .into_response();
+    let pending = {
+        let mut invocations = state.pending_invocations.lock().unwrap();
+        let restored = if invocations.contains_key(&id) { None } else {
+            match recovery::restore(&state, &record) {
+                Ok(Some(invocation)) => Some(invocation),
+                Ok(None) => return (StatusCode::CONFLICT, Json(serde_json::json!({
+                    "error": "no_pending_invocation", "detail": "No compatible execution checkpoint is available."
+                }))).into_response(),
+                Err(detail) => return internal_error("approval_checkpoint_error", &detail),
+            }
+        };
+        let actor = reviewer_context(&reviewer, &record);
+        if let Err(err) = state.approval_queue.approve(&id, &record.tenant_id, &actor,
+            Some("approved via /__approvals/:id/approve")) {
+            return (StatusCode::CONFLICT, Json(serde_json::json!({
+                "error": "approval_transition_failed", "detail": err.to_string()
+            }))).into_response();
+        }
+        if let Some(invocation) = restored {
+            invocation
+        } else {
+            let pending = invocations.remove(&id).expect("entry held under the same lock");
+            let _ = pending.decision.send(corvid_runtime::approvals::ApprovalDecision::Approve);
+            pending.invocation
         }
     };
-
-    // Re-run the agent under a fresh runtime whose approver is
-    // `ProgrammaticApprover::always_yes()`. The granted approval
-    // lives at the HTTP/queue layer; the inner `approve` boundary
-    // must pass at this layer or the agent would re-queue forever.
-    // The IR / approval queue / pending-invocation map are all
-    // shared, so the re-execution can still hit other approval
-    // boundaries — those would re-queue normally. (Slice MVP
-    // assumes a single approve boundary per route — multi-step
-    // approval chains are a follow-up.)
-    //
-    // Tool registry is cloned from the host's startup config
-    // (`ServeState::host_tools`) so the re-executed agent sees the
-    // same `--with-tools-cdylib` / `tools.py` handlers as the
-    // original request. Pre-33Q1a this was an empty default
-    // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
-    let bypass_runtime = Runtime::builder()
-        .approver(Arc::new(ProgrammaticApprover::always_yes()))
-        .tool_registry(state.host_tools.clone())
-        .build();
-    let outcome = run_ir_with_runtime(
-        &state.ir,
-        Some(&invocation.agent),
-        invocation.args,
-        &bypass_runtime,
-    )
-    .await;
-
-    match outcome {
-        Ok(value) => {
-            // Handler succeeded — NOW transition the queue and pop
-            // the pending invocation. The 200 response carries the
-            // re-executed agent's result. The transition records the
-            // durable decision under the VERIFIED reviewer (52f-4b); the
-            // queue's own tenant + self-approval checks run again as
-            // defense in depth (the reviewer's role is set to the
-            // approval's `required_role`, since the HTTP layer already
-            // authorized via the `approvals.decide` permission).
-            let actor = reviewer_context(&reviewer, &record);
-            if let Err(e) = state.approval_queue.approve(
-                &id,
-                &record.tenant_id,
-                &actor,
-                Some("approved via /__approvals/:id/approve"),
-            ) {
-                // Queue transition failed AFTER successful handler
-                // execution — the side effect already happened, so
-                // we surface the queue error but the action is done.
-                // Leave the pending invocation in place so the
-                // operator can inspect/retry the queue transition if
-                // needed. (This is a very rare edge case — SQLite
-                // write failure mid-handler.)
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": "approval_transition_failed",
-                        "detail": e.to_string(),
-                        "handler_outcome": "succeeded",
-                    })),
-                )
-                    .into_response();
-            }
-            state.pending_invocations.lock().unwrap().remove(&id);
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "status": "approved",
-                    "result": value_to_json(&value),
-                })),
-            )
-                .into_response()
+    // An HTTP disconnect after the commit must not cancel authorised work.
+    match tokio::spawn(async move {
+        let response = advance_invocation(&state, pending, None).await;
+        let outcome = match response.status() {
+            StatusCode::OK => "completed",
+            StatusCode::ACCEPTED => "awaiting_next_approval",
+            _ => "handler_failed",
+        };
+        if let Err(err) = state.approval_queue.record_execution_receipt(&id, outcome) {
+            return internal_error("approval_receipt_write_failed", &err.to_string());
         }
-        Err(err) => {
-            // Handler errored — KEEP the approval pending, keep the
-            // pending invocation, capture the error for diagnostic
-            // surfacing via GET. The reviewer can /approve again to
-            // retry (transient failure) or /deny to terminate
-            // (permanent failure). Adversarial: a permanently-broken
-            // handler creates a replayable approval but the reviewer
-            // can /deny to exit; nothing here bypasses the original
-            // approve boundary because retrying /approve still runs
-            // the same `ProgrammaticApprover::always_yes` bypass
-            // runtime that's local to this handler call.
-            //
-            // 33Q10: user_facing_detail strips the IR `[start..end]`
-            // byte-span prefix from interpreter errors so 500 bodies
-            // (and the `last_handler_error` field that surfaces in
-            // GET) don't leak internal compiler artifacts to clients.
-            let detail = err.user_facing_detail();
-            {
-                let mut pending = state.pending_invocations.lock().unwrap();
-                if let Some(stored) = pending.get_mut(&id) {
-                    stored.last_handler_error = Some(detail.clone());
-                }
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "approved_execution_failed",
-                    "detail": detail,
-                    "approval_status": "pending",
-                    "retry": {
-                        "possible": true,
-                        "url": format!("/__approvals/{id}/approve"),
-                        "note": "approval was not consumed; POST again to retry, or POST /__approvals/<id>/deny to terminate the pending invocation if the handler is permanently broken",
-                    },
-                })),
-            )
-                .into_response()
-        }
+        response
+    }).await {
+        Ok(response) => response,
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "error": "approved_execution_interrupted", "approval_status": "approved"
+        }))).into_response(),
     }
 }
 
@@ -1791,18 +1783,14 @@ async fn get_approval(
     };
     match state.approval_queue.get(&id) {
         Ok(Some(record)) if record.tenant_id == actor.tenant_id => {
-            // 33Q2 — surface the captured `last_handler_error` (if any)
-            // from `PendingInvocation` so a reviewer probing why an
-            // approval is still `pending` after they POSTed /approve
-            // can see "the handler errored with <message>; you may
-            // retry or deny" instead of guessing.
-            let last_handler_error = state
-                .pending_invocations
-                .lock()
-                .unwrap()
-                .get(&id)
-                .and_then(|inv| inv.last_handler_error.clone());
-            let mut body = serde_json::json!({
+            let execution = if record.status == "approved" {
+                match state.approval_queue.execution_receipt(&id) {
+                    Ok(outcome) => Some(outcome.unwrap_or_else(|| "unconfirmed".into())),
+                    Err(error) => return internal_error("approval_receipt_read_failed", &error.to_string()),
+                }
+            } else { None };
+            let body = serde_json::json!({
+                "execution": execution,
                 "id": record.id,
                 "action": record.action,
                 "status": record.status,
@@ -1811,10 +1799,6 @@ async fn get_approval(
                 "created_ms": record.created_ms,
                 "updated_ms": record.updated_ms,
             });
-            if let Some(err) = last_handler_error {
-                body["last_handler_error"] = serde_json::json!(err);
-                body["retry_possible"] = serde_json::json!(true);
-            }
             (StatusCode::OK, Json(body)).into_response()
         }
         Ok(Some(_)) | Ok(None) => (
@@ -2244,8 +2228,8 @@ mod tests {
 
     #[test]
     fn urldecode_handles_percent_and_plus() {
-        assert_eq!(urldecode("a%20b+c"), "a b c");
-        assert_eq!(urldecode("plain"), "plain");
+        assert_eq!(urldecode("a%20b+c").unwrap(), "a b c");
+        assert_eq!(urldecode("plain").unwrap(), "plain");
     }
 
     #[test]
@@ -2273,7 +2257,7 @@ mod tests {
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
         let value =
-            query_string_to_value("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id)
+            urlencoded_record("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id, "query")
                 .expect("coerces");
         let Value::Struct(s) = value else {
             panic!("expected struct")
@@ -2298,6 +2282,6 @@ mod tests {
         };
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
-        assert!(query_string_to_value("", &Type::Struct(DefId(9)), &types_by_id).is_err());
+        assert!(urlencoded_record("", &Type::Struct(DefId(9)), &types_by_id, "query").is_err());
     }
 }

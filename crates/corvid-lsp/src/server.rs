@@ -1,13 +1,13 @@
 use crate::{
     analyze_document, completion_at, definition_range_at, hover_at, references_at,
-    rename_ranges_at, workspace_symbols_for_document, DocumentSnapshot,
+    workspace_symbols_for_document, DocumentSnapshot,
 };
 use lsp_types::{
     CompletionOptions, CompletionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     GotoDefinitionParams, GotoDefinitionResponse, HoverParams, InitializeResult, Location,
     OneOf, PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -23,6 +23,7 @@ pub enum ServerMessage {
 pub struct LanguageServerState {
     documents: HashMap<Url, String>,
     shutdown_requested: bool,
+    workspace_roots: Vec<std::path::PathBuf>,
 }
 
 impl LanguageServerState {
@@ -36,18 +37,48 @@ impl LanguageServerState {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let id = request.get("id").cloned();
+        if self.shutdown_requested {
+            return match id {
+                Some(id) => vec![ServerMessage::Error {
+                    id: Some(id),
+                    code: -32600,
+                    message: "language server has shut down".into(),
+                }],
+                None => Vec::new(),
+            };
+        }
         match method {
-            "initialize" => self.initialize(id),
+            "initialize" => {
+                let params = &request["params"];
+                self.workspace_roots = params["workspaceFolders"].as_array().into_iter().flatten()
+                    .map(|folder| &folder["uri"])
+                    .chain(std::iter::once(&params["rootUri"]))
+                    .filter_map(|u| Url::parse(u.as_str()?).ok()?.to_file_path().ok())
+                    .filter(|path| path.is_dir()).collect();
+                self.workspace_roots.sort();
+                self.workspace_roots.dedup();
+                self.initialize(id)
+            }
             "initialized" => Vec::new(),
             "shutdown" => {
+                let Some(id) = id else { return Vec::new() };
                 self.shutdown_requested = true;
                 vec![ServerMessage::Response {
-                    id: id.unwrap_or(Value::Null),
+                    id,
                     result: Value::Null,
                 }]
             }
             "exit" => Vec::new(),
             "textDocument/didOpen" => self.did_open(request.get("params").cloned()),
+            "textDocument/didClose" => {
+                let Ok(params) = parse_params::<lsp_types::DidCloseTextDocumentParams>(request.get("params").cloned()) else { return Vec::new() };
+                let uri = params.text_document.uri;
+                self.documents.remove(&uri);
+                vec![ServerMessage::Notification {
+                    method: "textDocument/publishDiagnostics".into(),
+                    params: json!({"uri":uri, "diagnostics":[]}),
+                }]
+            }
             "textDocument/didChange" => self.did_change(request.get("params").cloned()),
             "textDocument/didSave" => self.did_save(request.get("params").cloned()),
             "textDocument/hover" => self.hover(id, request.get("params").cloned()),
@@ -155,7 +186,8 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .and_then(|text| hover_at(text, position))
+            .and_then(|text| crate::navigation::imported_symbol_at(&self.documents, &uri, text, position)
+                .and_then(|symbol| symbol.hover).or_else(|| hover_at(text, position)))
             .map(serde_json::to_value)
             .transpose()
             .expect("hover serializes")
@@ -176,7 +208,8 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .map(|text| completion_at(text, position))
+            .map(|text| crate::completion::imported_members_at(&self.documents, &uri, text, position)
+                .unwrap_or_else(|| completion_at(text, position)))
             .map(serde_json::to_value)
             .transpose()
             .expect("completion serializes")
@@ -197,8 +230,10 @@ impl LanguageServerState {
         let result = self
             .documents
             .get(&uri)
-            .and_then(|text| definition_range_at(text, position))
-            .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range }))
+            .and_then(|text| crate::navigation::imported_symbol_at(&self.documents, &uri, text, position)
+                .map(|symbol| symbol.location)
+                .or_else(|| definition_range_at(text, position).map(|range| Location { uri, range })))
+            .map(GotoDefinitionResponse::Scalar)
             .map(serde_json::to_value)
             .transpose()
             .expect("definition serializes")
@@ -245,25 +280,9 @@ impl LanguageServerState {
         };
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let result = self
-            .documents
-            .get(&uri)
-            .and_then(|text| rename_ranges_at(text, position, &params.new_name))
-            .map(|ranges| {
-                let edits = ranges
-                    .into_iter()
-                    .map(|range| TextEdit {
-                        range,
-                        new_text: params.new_name.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                let mut changes = HashMap::new();
-                changes.insert(uri, edits);
-                WorkspaceEdit {
-                    changes: Some(changes),
-                    ..WorkspaceEdit::default()
-                }
-            })
+        let result = crate::navigation::workspace_rename(
+            &self.documents, &uri, position, &params.new_name, &self.workspace_roots,
+        )
             .map(serde_json::to_value)
             .transpose()
             .expect("rename edit serializes")

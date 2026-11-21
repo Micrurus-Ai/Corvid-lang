@@ -5,7 +5,7 @@
 ## Headline numbers
 
 - Chains run: **10**
-- Provenance preserved by Corvid: **10/10**
+- Provenance preserved by Corvid: **4/10**
 - Provenance preserved by Python (LangChain + pydantic): **0/10**
 - Provenance preserved by TypeScript (Vercel AI SDK + zod): **0/10**
 
@@ -13,40 +13,50 @@
 
 | Chain | Hops | Corvid | Python | TypeScript | Match expected? |
 |-------|------|--------|--------|------------|-----------------|
-| `01-rag-summarise-aggregate` | 4 | preserved | lost | lost | ✓ |
-| `02-extract-translate` | 3 | preserved | lost | lost | ✓ |
+| `01-rag-summarise-aggregate` | 4 | error | lost | lost | ✗ |
+| `02-extract-translate` | 3 | error | lost | lost | ✗ |
 | `03-rag-through-tool-call` | 3 | preserved | lost | lost | ✓ |
 | `04-rag-classify-route` | 4 | preserved | lost | lost | ✓ |
-| `05-multi-source-dedupe` | 4 | preserved | lost | lost | ✓ |
+| `05-multi-source-dedupe` | 4 | error | lost | lost | ✗ |
 | `06-rag-to-json-record` | 3 | preserved | lost | lost | ✓ |
 | `07-conversational-rag` | 4 | preserved | lost | lost | ✓ |
-| `08-rag-safety-filter` | 3 | preserved | lost | lost | ✓ |
-| `09-rag-numeric-aggregation` | 4 | preserved | lost | lost | ✓ |
-| `10-rag-rerank-top-k` | 3 | preserved | lost | lost | ✓ |
+| `08-rag-safety-filter` | 3 | error | lost | lost | ✗ |
+| `09-rag-numeric-aggregation` | 4 | error | lost | lost | ✗ |
+| `10-rag-rerank-top-k` | 3 | error | lost | lost | ✗ |
 
 ## Notes
 
+- `01-rag-summarise-aggregate`: corvid: compile: ungrounded return in agent `multi_hop_rag`: agent `multi_hop_rag` returns `Grounded<String>` but no provenance path from a `data: grounded` source feeds into the return value. Call a tool with `uses retrieval` and pass its result (directly or through a prompt) to the return.
 - `01-rag-summarise-aggregate`: python: return type is primitive `str`
 - `01-rag-summarise-aggregate`: typescript: return type is `string`
+- `02-extract-translate`: corvid: marshalling error: prompt `extract_entities`: expected `Grounded<String>`, got `string`
 - `02-extract-translate`: python: return type is `list[str]` — sources gone
 - `02-extract-translate`: typescript: return type is `string[]` — sources gone
+- `03-rag-through-tool-call`: corvid: expected {"retrieve"}, returned {"enrich_from_db", "retrieve"}
 - `03-rag-through-tool-call`: python: return type is primitive `str`
 - `03-rag-through-tool-call`: typescript: return type is `string`
+- `04-rag-classify-route`: corvid: expected {"retrieve"}, returned {"retrieve"}
 - `04-rag-classify-route`: python: return type is primitive `str`
 - `04-rag-classify-route`: typescript: return type is `string`
+- `05-multi-source-dedupe`: corvid: compile: ungrounded return in agent `multi_source_dedupe`: agent `multi_source_dedupe` returns `Grounded<String>` but no provenance path from a `data: grounded` source feeds into the return value. Call a tool with `uses retrieval` and pass its result (directly or through a prompt) to the return.
 - `05-multi-source-dedupe`: python: return type is primitive `str`
 - `05-multi-source-dedupe`: typescript: return type is `string`
+- `06-rag-to-json-record`: corvid: expected {"retrieve"}, returned {"retrieve"}
 - `06-rag-to-json-record`: python: class `Product` lacks typed provenance (sources/source_documents/provenance) field
 - `06-rag-to-json-record`: typescript: type `Product` not declared locally — cannot verify
+- `07-conversational-rag`: corvid: expected {"retrieve"}, returned {"retrieve"}
 - `07-conversational-rag`: python: return type is primitive `str`
 - `07-conversational-rag`: typescript: return type is `string`
+- `08-rag-safety-filter`: corvid: compile: ungrounded return in agent `rag_safety_filter`: agent `rag_safety_filter` returns `Grounded<String>` but no provenance path from a `data: grounded` source feeds into the return value. Call a tool with `uses retrieval` and pass its result (directly or through a prompt) to the return.
 - `08-rag-safety-filter`: python: return type is primitive `str`
 - `08-rag-safety-filter`: typescript: return type is `string`
+- `09-rag-numeric-aggregation`: corvid: compile: ungrounded return in agent `rag_numeric_aggregation`: agent `rag_numeric_aggregation` returns `Grounded<Float>` but no provenance path from a `data: grounded` source feeds into the return value. Call a tool with `uses retrieval` and pass its result (directly or through a prompt) to the return.
 - `09-rag-numeric-aggregation`: python: return type is primitive `float`
 - `09-rag-numeric-aggregation`: typescript: return type is `number`
+- `10-rag-rerank-top-k`: corvid: marshalling error: tool `retrieve`: expected `Grounded<String>`, got `string`
 - `10-rag-rerank-top-k`: python: return type is `list[str]` — sources gone
 - `10-rag-rerank-top-k`: typescript: return type is `string[]` — sources gone
 
 ## Methodology
 
-See `benches/moat/provenance_preservation/README.md` for the chain format, what counts as preserved, and the honesty rules. The runner is static — it parses the final return type of each stack's outer function and asks whether it exposes a typed sources / source_documents / provenance field at the language-type level.
+See `benches/moat/provenance_preservation/README.md` for the chain format, what counts as preserved, and the honesty rules. Corvid verdicts require execution against deterministic fixtures and matching retrieval source identities in the returned value. Python and TypeScript verdicts describe return annotations only. These measurements have different scopes.

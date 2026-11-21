@@ -6,6 +6,71 @@ This is the "how to actually use Corvid" document. For the pitch, see [README.md
 
 ---
 
+## Trying a release alongside your current installation
+
+When preparing a local candidate with `corvid release build`, use a version that matches its channel. Examples are `1.0.0-nightly.local`, `1.0.0-beta.2`, and `1.0.0`. Corvid checks the version before creating the release files. See the [release policy](docs/release-policy.md).
+
+For hosted archives, the tag `v1.0.0-beta.2` selects a beta prerelease and `v1.0.0` selects a stable release. In both cases the version following `v` must match the CLI package version.
+
+When a release CLI generates a Dockerfile with `corvid deploy package`, the Dockerfile selects that same release. A package created by the `v1.0.0-beta.2` CLI therefore uses `ARG CORVID_VERSION=v1.0.0-beta.2`.
+
+With `CORVID_NO_MODIFY_PROFILE=1`, use the printed shell commands to select an installation for your session. The Unix installer prints `export` commands when needed, and the Windows installer prints PowerShell environment assignments.
+
+Launch VS Code from that session to use the language server in `CORVID_HOME/bin`. An explicit `corvid.lsp.path` or `CORVID_LSP_PATH` still takes precedence.
+
+Applications packaged with `corvid deploy package` carry the selected distribution's license files in the final image. See [Container distribution notices](docs/book/16-building.md#container-distribution-notices).
+
+In a packaged service, an application-level `tools.py` can import `tool` from the Python runtime bundled with Corvid. See [Python tools in a container](docs/book/16-building.md#python-tools-in-a-container).
+
+To try a Python-backed tool from the terminal, use `corvid new --with-python-tools notes`, change into `notes`, and run `corvid run src/python_tools_example.cor "Hello"`. See [Calling your own Python tool](docs/book/18-talking-to-the-outside-world.md#calling-your-own-python-tool).
+
+Set `CORVID_HOME` to an empty directory and `CORVID_NO_MODIFY_PROFILE=1` before running the installer. Run the new `bin/corvid` directly (`bin/corvid.exe` on Windows). To switch that installation to another release, rerun the installer with the same directory and the desired `CORVID_VERSION` tag. See the [installation chapter](docs/book/01-install.md#upgrade-or-roll-back).
+
+To remove that copy, use `sh install/install.sh --uninstall` or
+`.\install\install.ps1 -Uninstall` from the checkout with the same `CORVID_HOME`.
+The package receipt identifies the installed directories. Top-level files outside
+the receipt survive both upgrades and removal.
+
+If an archive is unavailable, the installer builds the CLI, language server
+and native library from the selected release and copies its standard library
+and Python runtime. To request a source build directly, use `--from-source`
+on the shell installer or `-FromSource` on PowerShell. For a project upgrade, record `corvid --version`, preview
+changes with `corvid upgrade check .`, and run your checks with the new CLI.
+The upgrade report flags legacy model and cache calls for manual review. Its
+JSON output has a null replacement for those calls. Comments and literal text
+are preserved when applying source migrations.
+
+The [build guide](docs/book/16-building.md) lists the command and output
+directory for each target.
+
+## Recovering an interrupted database migration
+
+Run `corvid migrate status` with the same database to see which migrations committed. After fixing a failed JSON state-file write, repeat the original command. A retried rollback finishes recording the previous rollback. See the [persistence guide](docs/guides/persistence.md).
+
+## Sharing values between modules
+
+On both CLI targets, `a == b` compares records of the same type by their fields, including nested records. If two records share an inner record, updating that inner record affects both. An independently constructed copy keeps its earlier field values. For sum types, equality requires matching variant tags and equal payloads.
+
+You can also compare typed lists, string-keyed maps, options and results directly. Lists compare in order. Maps compare by key regardless of insertion order. `Some(0)` differs from `None`, and two `Ok` values compare equal when their payloads compare equal.
+
+Declare a public sum type with one line per variant, such as `| Empty` and `| Found(item: Entry, weight: Int)`. In the defining module, return `Empty` or construct `Found(record, 2)`. A caller that imports the module as `r` can pass the result of `r.lookup(7)` directly to `r.entry(reading)` after binding it as `reading`. Inside the helper, `Found(item, weight) if weight > 1 -> item` binds both fields and returns the record. Add arms for other weights and for `Empty`. Both CLI targets support this pattern. Use the interpreter for a sum passed directly through the CLI JSON boundary.
+
+For collections returned by another module, local variables can use the imported return type. Calling `.last()` on a returned `List<Int>` produces `Option<Int>`, and calling it on a returned `List<String>` produces `Option<String>`. Both targets infer the element type for a `Some(value)` arm.
+
+## Converting numbers
+
+Both CLI targets support `to_float()`, `to_int_truncated()`, `floor()`, `ceil()` and `round()`. For `x = -2.5`, truncation and ceiling give `-2`, while floor and rounding give `-3`. Converting an integer to a float can lose precision above 2⁵³. Keep integer identifiers as `Int` when their exact value matters.
+
+Converting a float to an integer requires a finite result at least −2⁶³ and strictly below 2⁶³. Both targets report an error for NaN, infinity and out-of-range results.
+
+## Comparing and measuring strings
+
+In a match, `Some(s) if enabled and s == "ready" -> s.length()` compares the payload and returns its length. Both CLI targets count Unicode scalar values. A penguin emoji has length one, and an `e` followed by a combining acute accent has length two. A false left operand of `and` skips the comparison and any calls on the right.
+
+`"A🐧B".substring(1, 2)` returns `"🐧"`. The end index is exclusive. Bounds outside the string are clipped, and an empty or reversed range returns `""`. Both CLI targets also support full Unicode casing. For example, `"straße".to_upper()` returns `"STRASSE"`, and `"ΟΣ".to_lower()` uses final sigma and returns `"ος"`.
+
+`trim()` removes surrounding Unicode whitespace. To keep empty fields in delimited input, use `split(separator)`. For example, `"猫🐧🐧犬".split("🐧")` returns `["猫", "", "犬"]`. Supply a nonempty separator. For a literal search, use `contains`, `starts_with` or `ends_with`. To change every match, use `replace(from, to)`. An empty search string matches at each Unicode scalar boundary, so `"猫".replace("", "-")` returns `"-猫-"`.
+
 ## Quick start
 
 ```bash
@@ -25,7 +90,60 @@ corvid build --target=native hello.cor
 
 Corvid is Python-shaped on the surface, with AI-native primitives on top. You already know how to read most of it.
 
+## Find a function or grammar rule
+
+- To look up a builtin method or a public standard-library call by name, use the [function reference](docs/reference/functions.md). It lists parameter and return types.
+- To learn how to write a declaration, expression, or pattern, start with the [Corvid Book](docs/book/README.md). For the exact syntax and the meaning of planned productions, use the [grammar reference](docs/reference/grammar.md).
+
+### Get the first item or supply a default
+
+`List<T>.first() -> Option<T>` returns `Some(item)` for a populated list and `None` for an empty one. A first item of zero, `false`, or an empty string is still present. This program returns `"Untitled"` on both the native and interpreter targets.
+
+```corvid
+agent first_label(labels: List<String>) -> String:
+    return match labels.first():
+        Some(label) -> label
+        None -> "Untitled"
+
+agent main() -> String:
+    return first_label([])
+```
+
+The same arm syntax handles `Ok(value)` and `Err(reason)` from `String.parse_int() -> Result<Int, String>`. Use `items.append(value)` to add to an existing list. In an unguarded two-arm native match, either arm can call a helper, including a nested call such as `record_number(numbers, normalize(value))`. Only the selected arm runs, and its arguments are evaluated from left to right. [Worked examples](docs/book/13-pattern-matching.md)
+
 ---
+
+### Read the last item
+
+`List<T>.last() -> Option<T>` uses the same match arms as `first()` on the native and interpreter targets. For example, `[3, 0].last()` returns `Some(0)`. For `items: List<Int> = []`, `items.last()` returns `None`.
+
+### Look up a name by key
+
+On both targets, `names[id]` and `names.get(id)` return `Option<String>` for a `Map<String, String>`. The map expression runs first, then the key expression, each once. This program returns `"Ada"`. Looking up `"guest"` returns `"Unknown user"`, and looking up `"blank"` returns the stored empty string.
+
+```corvid
+agent display_name(names: Map<String, String>, id: String) -> String:
+    return match names[id]:
+        Some(name) -> name
+        None -> "Unknown user"
+
+agent main() -> String:
+    return display_name({"owner": "Ada", "blank": ""}, "owner")
+```
+
+Use `names: Map<String, String> = {}` for an empty map. On either target, `names["owner"] = "Ada"` inserts the key, and a later `names["owner"] = "Grace"` replaces its value. The next read returns `Some("Grace")` through any alias. A string read before replacement remains usable even after the map goes out of scope. See [Maps](docs/book/05-types.md#maps) for a runnable update example, costs, and target support.
+
+### Count and iterate a string map
+
+Given `names = {"owner": "Ada", "guest": ""}`, `names.length()` returns `2` and `names.contains_key("guest")` returns `true`. Both targets support `for id in names.keys():`. The corresponding `names.values()` snapshot contains `["Ada", ""]`. A previously obtained list keeps its entries when the map changes. [Maps](docs/book/05-types.md#maps)
+
+### Store integer counters by name
+
+`counts = {"files": 0}` creates a `Map<String, Int>`. Both CLI targets return `Some(0)` for `counts["files"]` and `None` for `counts.get("unknown")`. After `counts["files"] = 3`, `counts.values()` returns `[3]`. Older snapshots keep their integer values. [Maps](docs/book/05-types.md#maps)
+
+### Keep records, lists and optional values by name
+
+If `users` has type `Map<String, User>`, `users["owner"]` returns `Option<User>` and `users.values()` returns a `List<User>` snapshot. For `Map<String, List<Int>>`, a retrieved list can be updated through either reference. For `limits: Map<String, Option<Int>> = {"daily": None}`, `limits["daily"]` returns `Some(None)` and `limits["unknown"]` returns `None`. These forms work on both CLI targets. [Maps](docs/book/05-types.md#maps)
 
 ## File structure
 
@@ -63,7 +181,7 @@ corvid: runtime error: integer overflow or division by zero
 
 Division and modulo by zero trap the same way. The safety story behind this is in [dev-log Day 19](dev-log.md).
 
-If you want wrapping arithmetic (e.g., hash mixing), a `@wrapping` annotation is on the long-range roadmap.
+For hash mixing or other operations that need wraparound, place `@wrapping` above the agent declaration. It applies to integer addition, subtraction, multiplication and unary negation.
 
 ### `Bool` — true / false
 
@@ -7795,3 +7913,394 @@ mock/real/replay, typed status→error mapping, and retry/rate-limit/circuit-bre
 all run end-to-end. Async provider state machines and provider-drift quarantine
 are later Phase 52 slices (52h/52i). See [dev-log.md](dev-log.md) (2026-07-23,
 52g-3a … 52g-3c).
+
+### Record field updates and control flow
+
+A plain field write such as `counter.label = "ready"` changes the shared record. A previously read string keeps its value. In `state.counter.value += step()`, the right-hand side runs once before the current field is read. See the record chapter in `docs/book/05-types.md`. The `record_updates.cor` fixture combines aliasing, replacement of a nested record, short-circuiting and return from two loops. The native parity harness checks the result and balances allocations against releases.
+
+### Indexed assignment on lists
+
+Both CLI targets run `items[position()] += amount()` in index-then-value order, once each. The write uses the list buffer and current item after both expressions finish. The `list_updates.cor` fixture covers an alias that appends and replaces an item during the right-hand call, as well as replacing a string while an earlier read remains alive. A negative index and an index equal to the list length fail at runtime. See the list chapter in `docs/book/05-types.md`.
+
+Numeric locals also support compound arithmetic on both targets. The same fixture multiplies a local by an indexed value and subtracts a constant.
+
+### Compound updates on string-keyed integer maps
+
+Initialize a counter with `counts[key] = 0`. After initialization all five arithmetic assignment operators work on the entry. Each reads the value after evaluating the key and the right-hand side once. A retained `Some(n)` from a previous lookup still holds the original integer. Both targets report the key when an update finds it missing.
+
+### Calls in match-arm arithmetic
+
+In a two-arm Option or Result match, a scalar arithmetic expression can combine calls, including a call under unary negation. The match_arithmetic fixture traces the arguments from each selected arm in evaluation order.
+
+### Guarded and nested Option and Result patterns
+
+Postfix `?` evaluates its operand once. In `mark(trace, 1) + text.parse_int()? + mark(trace, 2)`, an invalid integer leaves only the first marker in the trace. If the parse happens inside a loop, the error returns from the enclosing function. The CLI regression checks the returned values, call order and native allocation counts.
+
+Use `enabled and text.parse_int()? > 0` to skip parsing when disabled. Both `and` and `or` propagate errors only from operands they actually evaluate.
+
+Use `Some(Some(n)) if n > 0 -> n` to bind a value and then test it. Both CLI targets try arms in order. A mismatched constructor skips its guard, and a false guard allows later arms to match the same value. The guarded_patterns fixture traces these decisions. It also checks that `?` forwards the original error string across a function and that both success and error payloads survive extraction from temporary results.
+
+### Working with file paths
+
+In `./std/path`, `path_join(base: String, child: String) -> String`
+combines path components using the host's separators.
+`path_parent(path: String) -> Option<String>`, `path_filename(path: String) -> Option<String>`
+and `path_extension(path: String) -> Option<String>` return the requested
+component when present. `path_is_absolute(path: String) -> Bool` recognizes
+absolute host paths. These tools run in the interpreter. Pass the joined
+string to `io_read_text` or `io_write_text` to access the file.
+
+### Environment variables
+
+Import `env_get` from `./std/env`. Its signature is
+`env_get(name: String) -> Result<Option<String>, String>`. A missing variable
+returns `Ok(None)`, and an explicitly empty value returns `Ok(Some(""))`.
+Blank names and names containing `=` or NUL return `Err`. The default CLI
+runs this module in the interpreter.
+
+### Named pure functions across modules
+
+In the editor, rename an export from its declaration or a qualified call to
+update the local project. Rename an explicit import alias at its use to change
+only that file's spelling. Open buffers take precedence over their disk versions.
+
+For a local import such as `import "./math" as math use double as twice`,
+hover and go-to-definition on `twice(4)` and `math.double(4)` follow the same
+public function. Typing `math.do` narrows member completion to public names
+beginning with `do`. A parameter named `math` shadows the module within its
+scope.
+
+Editor diagnostics use the same language frontend as `corvid check`. For example, a program can call the standard clock tool in the interpreter and still type-check in the editor. Compiler warnings retain their warning severity.
+
+When a helper changes, rerun `corvid run`. The native executable cache follows direct and transitive Corvid imports. Restoring the same source graph can reuse its previous executable.
+
+`corvid fmt` uses four spaces per block and normalizes spacing around calls, type annotations and arithmetic. It formats application sources and tests, or accepts explicit filenames. `corvid fmt --check` reports formatting drift without writing. If a selected file has invalid syntax, Corvid reports its location before editing any file.
+
+From a new project's root, run `corvid check` to check `src/main.cor` and its imports. Use `corvid check path/to/file.cor` for a different entry point. New projects carry a local copy of the standard library. If the installation is missing modules, the CLI supplies the compiler's bundled set so the starter can read the UTC clock on its first run.
+
+Use `public fn double(n: Int) -> Int` to export a pure function. Both CLI targets run direct calls by qualified or imported name. In the interpreter, `callback = math.double` keeps the function's identity and signature, including when passed into another module or supplied to `List.map`. The function reference has no captured environment. The module chapter includes an example.
+
+### Capturing integers in native callbacks
+
+A module can accept a function parameter such as `transform: (Int) -> Int` or return an integer callback. Both CLI targets support named pure functions and arithmetic lambdas in these positions. A local captured by `fn (n) -> n + offset` keeps its value from creation even if the caller reassigns `offset`. The cross-module regression also calls a returned closure after its defining frame exits and checks native allocation balance. Float callbacks currently use the interpreter.
+
+Integer list mapping uses the same callback on both CLI targets. A named function or an integer lambda can be passed to `items.map(f)`. The result is a fresh list in input order. Empty inputs return an empty list without invoking the callback.
+
+### Shared list captures and predicates
+
+A callback returned from another module can index a captured `List<Int>` or call its `length()`. The callback shares the list with its caller and keeps it alive beyond the creating call. Integer and boolean captures keep the value at creation. The native compiler and interpreter accept integer callbacks returning `Bool` for `filter`, `any` and `all`. The integer form of `fold` accepts an initial accumulator and a two-argument callback. The lists chapter records signatures by example, short-circuit behavior and empty-input results.
+
+### Rebuilding a project offline
+
+Install a dependency with `corvid add package @example/math@1 --registry ./registry`.
+Import the exact version URI recorded in `Corvid.lock`. Keep the lockfile and
+the project's `target/cache/packages` directory when moving a build offline.
+With `CORVID_OFFLINE=1`, `corvid check` and `corvid build` can read locked
+package source from that cache. The compiler checks each digest before use.
+Use `corvid update @example/math` to select the latest matching version and
+replace its old lock entry. Update versioned import URIs in your source to match.
+
+### Sending sum values to typed routes
+
+For `route POST "/echo" body Status -> json Status`, Corvid decodes the
+request as a `Status`. The handler can simply `return body`. For a type
+with variants `Pending` and `Approved(approver: String)`, the response
+for `Approved("alice")` is
+`{"tag":"variant","type":"Status","variant":"Approved","fields":["alice"]}`.
+The response for `Pending` has `"variant":"Pending"` and `"fields":[]`.
+Send payload fields in declaration order. A wrong field count, wrong
+field type, or unknown variant produces HTTP 400 and `invalid_body`.
+Declare the type `public` to expose its variants and payload shapes in
+the service's OpenAPI document.
+
+A typed route can use `path.id` and fields such as `query.limit` together.
+The server decodes query text as UTF-8 and converts `+` to a space.
+Missing required query fields and invalid input return HTTP 400 with
+`invalid_query`. Malformed JSON returns `invalid_json`.
+
+### Querying saved records
+
+Import `db_query_rows` from `./std/db`. Its signature is
+`db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>`.
+Bind query parameters with the `db_param_*` constructors, check for an empty
+list and read columns by name with `json_get_string` or `json_get_int`.
+Use `db_execute` for writes. Keep a single connection for all statements
+in a transaction. Dropping its last handle rolls back uncommitted changes.
+The book's SQLite example builds a `Note` from a saved row.
+
+For a bounded `Stream<T>`, a full buffer makes the producer wait. When
+the last consumer releases the stream, a pending yield wakes and the
+producer exits. Ordinary streams release consumed chunks. Resumable
+prompt streams keep their delivery history for `resume_token`.
+
+### Outbound requests in a service
+
+Set the project's `[http] allow` list before calling `http_get` or
+`http_post_json` from a route. Use `try send_message(body) timeout 300`
+to give a call 300 milliseconds per attempt. The service returns HTTP
+504 with `handler_timeout` if the handler's deadline expires. The HTTP
+response envelope includes the measured `elapsed_ms` and `attempts`.
+For `try` on a stream, the first item must arrive within the deadline.
+Dropping the last consumer cancels the producer's outstanding work.
+
+### Running a service with access logs
+
+`corvid serve --access-log` writes a JSON record to standard error when each
+response is ready. The record contains the method, matched route template,
+status and elapsed milliseconds. Unmatched paths use a null route. The
+template keeps parameter values, query strings and cookies out of these logs.
+
+Ctrl+C starts graceful shutdown. Unix service managers can send SIGTERM.
+The server stops accepting connections and gives active requests up to 30
+seconds to finish.
+
+### Switching a typed prompt between model servers
+
+Set `CORVID_MODEL` to `ollama:local-model` or
+`openai-compat:http://127.0.0.1:8080/v1:local-model` to run the same
+unpinned prompt with a different provider. Replace the example model
+with the installed name. `corvid run` and `corvid serve` both use this
+setting. A record return type checks the model's response, including
+individual field types, before the calling agent receives it.
+
+### Read a model response as it arrives
+
+Declare a text prompt with `-> Stream<String>` and return it from a
+`json Stream<String>` route. The caller can read each text event before
+generation finishes. With an OpenAI-compatible chat server, Corvid asks
+for completion-token usage. A final usage report can exceed the prompt's
+`with max_tokens` limit even after some text has reached the caller.
+Handle the error event and treat the done event as successful completion.
+See the [worked streaming route](docs/book/11-prompts.md#serve-a-streamed-prompt).
+
+### Give a model a typed choice of actions
+
+An action such as `Add(amount: Int)` can carry a different argument list
+from `Finish`. Put those variants in a sum type and use it as a field in
+the prompt's response record. Corvid sends the choices to the provider
+and checks the selected variant and its arguments when the reply arrives.
+Use `match` to call an ordinary function for each choice. See the [agent
+chapter](docs/book/10-agents.md#let-a-model-choose-a-local-function).
+
+### Resume a bounded agent job
+
+Use `corvid jobs checkpoint resume --job JOB --json` to recover checkpoint
+payloads, the next sequence number and the remaining step and tool-call
+allowances from one snapshot. Pass that sequence to `jobs checkpoint add
+--step-sequence N` to save the result and charge usage together. Concurrent
+workers using the same sequence can commit it only once. See the [durable
+worker example](docs/book/10-agents.md#resume-a-worker-that-calls-local-functions).
+
+### Let a prompt call a Corvid function
+
+A prompt parameter such as `calculate: (Int, Int) -> Int` makes the
+supplied function available to the chat model as `calculate`. Pass the
+ordinary function by name, for example `answer(question, add)`. Its
+parameter names determine the argument keys and Corvid checks their types
+before running it. The prompt returns the model's final string. See the
+[complete function-calling example](docs/book/11-prompts.md#pass-a-function-to-a-prompt).
+
+### Recover a model conversation after a worker exits
+
+Run the agent with `corvid jobs run --source main.cor` against the same
+queue, source and provider configuration on each worker. For a prompt
+that takes a capture-free function, Corvid saves each completed result
+under the model's call ID. A replacement can finish the exchange after
+the lease expires. Allow a job step for each function result and one for
+the final answer. Inspect the results and remaining allowance with
+`corvid jobs checkpoint resume --job JOB --json`. See the
+[durable worker example](docs/book/10-agents.md#resume-a-worker-that-calls-local-functions).
+
+### Index and retrieve text with the standard library
+
+`rag_ingest(index_path, doc_id, source, text, chunk_chars)` returns
+`Result<Int, String>` with the stored chunk count. Reusing an ID replaces
+its contents atomically, including any embeddings. Empty text clears that
+document's searchable chunks. `rag_search(index_path, query, limit)`
+returns `Result<List<RagChunkEnvelope>, String>`. Use each hit's `source`,
+`start_char`, `end_char`, and `provenance_key` to cite the passage.
+See the [retrieval guide](docs/book/18-talking-to-the-outside-world.md#search-a-persistent-document-collection)
+for project configuration and an example.
+
+### Use image inputs and a scoped browser
+
+`io_read_image(path: String) -> Result<PromptImage, String>` loads a PNG
+or JPEG under the I/O root. A `PromptImage` argument attaches the image to
+a prompt that returns ordinary Corvid types, including records.
+[Image prompt example](docs/book/11-prompts.md#pass-a-local-image-to-a-prompt)
+
+Use `browser_open_scoped(width, height)` with a user-selected
+`CORVID_BROWSER_URL`. Call `browser_click(button_name)`,
+`browser_read_text(selector)`, and `browser_capture()` to interact with
+the page and obtain a screenshot path. Finish with `browser_close()`.
+[Browser session example](docs/book/18-talking-to-the-outside-world.md#run-a-scoped-browser-session)
+
+### Test an AI application offline
+
+Declare a `mock` with the same name and signature as a prompt to supply
+its answer during `corvid test`. The calling agent still executes. Use
+`test name from_trace "recording.jsonl":` to exercise the recorded model
+conversation instead. Each test and statistical repetition starts from
+its own recording cursor. For a whole-run replay, use `corvid replay
+recording.jsonl --source main.cor`. See the [worked offline test](docs/book/15-testing.md#mocks).
+
+### Compose a browser form
+
+Import `./std/ui` in a scaffolded project. A reusable function can return a
+`View`. Group a labeled `text_field` and a `submit` button with `search_form`.
+Use `text` for a paragraph, `disclosure` for expandable content, and `page`
+to render the document. A form submits its named fields as a GET request.
+See [Browser views](docs/book/19-browser-views.md) for a complete program.
+
+### Handle browser input in Corvid
+
+Build `src/events.cor` with `corvid build src/events.cor --target wasm` and
+render the page with `ui.interactive_page`. Inside `ui.int_state`, each
+`ui.action` names an agent that takes and returns an integer. For a live
+preview, `ui.text_state` calls a string-to-string agent as the user types.
+WebAssembly handlers can compare two strings with `==` and `!=`. See
+[Updating state with a Corvid handler](docs/book/19-browser-views.md#updating-state-with-a-corvid-handler).
+
+### Serve a form from Corvid
+
+Write `route GET "/" -> html:` and return the string from `ui.page`.
+Use `ui.query_form(path, controls)` with a trusted application route path.
+The receiving route can declare `query Search` using a public record from a
+shared module. Corvid parses its named fields before invoking the handler.
+An invalid field value returns HTTP 400. The route advertises `text/html`
+in OpenAPI. See [Serving a form and its result](docs/book/19-browser-views.md#serving-a-form-and-its-result).
+
+### Inspect a shared route record
+
+Run `corvid contract openapi src/main.cor --out -` or open the service's
+`/openapi.json`. Follow the route's schema reference to its fields, including
+records declared in another module. An imported name can be renamed in
+source. The published reference identifies the actual schema, including
+when two modules both export an `Item`. See [Serving a form and its result](docs/book/19-browser-views.md#serving-a-form-and-its-result).
+
+### Bind a browser form to a route
+
+Use `View(form_for("GET /search", request, "Search"))` for a route
+with a typed query. For mutations declare `route POST "/save" form Search -> html:`
+and use `View(form_for("POST /save", request, "Save"))`. Corvid checks the
+method, fixed path and initial record in the module that declares the server.
+Each scalar field supplies its own wire name. The handler receives the
+URL-decoded record in `body` after type and refinement checks. See
+[Serving a form and its result](docs/book/19-browser-views.md#serving-a-form-and-its-result).
+
+### Display a streaming model response
+
+Use `ui.stream_text("Answer", "/answer")` inside a page served by Corvid.
+The view reads text from a GET route that returns `Stream<String>`. Cancel
+stops the stream and preserves the partial answer. Start again issues a new
+request and replaces it. Navigating away closes the active request. See
+[Displaying a streamed answer](docs/book/19-browser-views.md#displaying-a-streamed-answer).
+
+### Package and run an interactive web app
+
+Use `ui.link(label, path)` to navigate to a trusted application path, including nested routes.
+Place browser event handlers in `src/events.cor`. Build with `corvid build src/main.cor --target web`
+and extract `target/web.tar` into a new directory. Run `corvid serve src/main.cor` there using the
+matching CLI. It serves the compiled event module and its WebAssembly companion from the app
+origin. See [Packaging an interactive application](docs/book/19-browser-views.md#packaging-an-interactive-application).
+
+### Python implementations of Corvid tools
+
+Use `@tool("name")` on a regular or asynchronous Python function to implement a Corvid tool of the same name. In a served app, return a dictionary for a Corvid record. A wrong field type or uncaught Python exception fails the current request. See [Calling Python from a Corvid service](docs/guides/ffi-python.md) for the data shapes and bundle layout.
+
+### Loading a Rust tool library
+
+A served application can load a platform-specific shared library through `--with-tools-cdylib`. Ship it beside the application bundle and match each Corvid tool name to an exported function. [Native tool arguments, ownership and errors](docs/guides/ffi-c-rust.md#loading-host-tools-into-a-corvid-service)
+
+A direct Python import accepts an `effects:` clause after the alias. Declare the member signature inside the import block to call it through that alias. Served applications can already call the library through a typed tool in `tools.py`.
+
+### Declaring a Python function signature
+
+```corvid
+import python "math" as numbers effects: pure:
+    fn gcd(left: Int, right: Int) -> Int
+```
+
+Use the Corvid names and types that describe the Python arguments and result. The function name matches the Python member. Each signature occupies its own indented line. A call through the alias is checked against that signature, including its result type. Run the program with `corvid run`. The interpreter loads the Python module and calls the named function with positional arguments. For synchronous Python functions, this needs no `tools.py` wrapper. An exception or incompatible result fails the call.
+
+A typed Python call carries the effects declared on its import. For example, if a lookup costs $0.30, calling it twice through a helper agent requires a budget of at least $0.60. The checker counts calls in the budget separately, even when their shared effect name appears only once in the agent's effect summary. A pure Corvid `fn` rejects the host call because the compiler cannot inspect its Python implementation.
+
+### Approving an imported Python function
+
+Use the import alias and the declared member in both statements, for example `approve numbers.gcd(a, b)` followed by `return numbers.gcd(a, b)`. The first statement evaluates the arguments for review. The second calls Python after acceptance with matching values. Another invocation requires another approval. Both statements must share the approval's lexical scope. [Python import example](docs/guides/ffi-python.md#direct-imports-in-an-interpreted-program)
+
+### Native interoperability
+
+Use `--with-tools-lib` at link time to embed a native tool in an executable. To call Corvid from another language, build a shared library with `--target cdylib --header`. Read the emitted header for the wrapper signature. Returned direct strings use `corvid_free_string`. JSON buffers from dynamic calls use `corvid_free_result`. Release observation handles with `corvid_observation_release`. [Native interop guide](docs/guides/ffi-c-rust.md)
+
+For a Node.js host, build with `--target wasm`, load the emitted bytes and supply the generated `adaptImports({ tools: ... })` adapter to `WebAssembly.instantiate`. Pass JavaScript BigInt for Corvid Int across a scalar host import. [Node.js host example](docs/internals/wasm-abi.md#calling-a-host-tool-from-nodejs)
+
+### Copying a list slice
+
+`items.slice(start, end)` returns a new list containing the elements from `start` up to `end` (exclusive). The interpreter clamps both bounds to the list and returns an empty list for a reversed range. Replacing an element in the new list leaves the source list's slots alone. The interpreter copies only the selected slots, so a short slice of a long list takes work proportional to the slice length.
+
+### Installing the Linux candidate on Debian 12
+
+The CLI loads Python 3.11 at startup. On Debian 12, install the shared runtime with `apt-get install libpython3.11` as root. This also supplies the Python standard library used by Corvid's Python imports.
+The same package is required on x64 and ARM64. If it is missing, the installer reports the package name before activating the candidate.
+
+On Windows x64, the tested candidate needs the directory containing CPython's `python3.dll` on `PATH`. With 64-bit CPython 3.14 available, a Corvid program can import Python's `math` module and call `gcd` through the interpreter.
+
+### Building an entry agent alongside HTTP routes
+
+A file can contain both `agent main()` and a `server` block. Use `corvid build src/main.cor --target server` for the HTTP wrapper that runs the native entry agent at `/`. Use `corvid serve src/main.cor` to run the routes declared in the file. Both commands check the route bodies.
+
+### Finding dependency notices in an installation
+
+Open `lib/corvid-rust-notices.txt` inside the Corvid release installation to find the Rust package versions, declared licenses and upstream notice files for that platform. The bundled editor extension keeps its JavaScript dependency licenses inside the VSIX.
+Some upstream notice files live in the dependency's Git repository. The Rust inventory includes those files with links to the exact revisions used by the release.
+
+After installation, run `corvid new hello-corvid`, enter the new directory,
+then run `corvid check` and `corvid run`. The starter uses the standard
+library to print a greeting and the current UTC time.
+
+### Combining route requirements
+
+Place `requires` after the response type and any `uses` clause. For example,
+`requires authenticated and role("reviewer") and permission("status.read")`
+requires a signed-in caller with both the role and the permission. Before
+the response arrow, a route can declare one `query` and one `body` or
+`form` in either order.
+
+When developing Corvid itself, a debug CLI built with a custom `CARGO_TARGET_DIR`
+can load the checkout's Python runtime for a project's `tools.py` without
+setting `PYTHONPATH`.
+
+### Declaring sign-in and external services
+
+Use an `identity` block to choose sign-in providers and define session,
+provisioning and role settings. For an invitation-only app, write
+`first_login: invited` and `tenant: from_invitation` under `provisioning:`.
+Use a `connector` block to declare HTTP operations. An operation that starts
+a remote job can describe its polling endpoint, terminal statuses, deadline
+and transitions in an `async` block. The [grammar reference](docs/reference/grammar.md)
+lists the accepted fields and their order.
+
+Run programs that call `browser_open_scoped` or `io_read_image` with
+`corvid run main.cor --target interp`. The Python build target now identifies
+these interpreter tools at the call site.
+
+The server integration fixture builds its shared library in its own target directory, including when the workspace uses an external `CARGO_TARGET_DIR`. Run `cargo test --locked -p corvid-cli --test serve_smoke` to exercise the installed tool bridge through the CLI server.
+
+An editor client stops `corvid-lsp` by sending a `shutdown` request, waiting for its response, then sending an `exit` notification. The server exits successfully even while the input pipe is open. Sending `exit` before an acknowledged shutdown gives exit status 1.
+
+If the Windows installer falls back to building from source and neither Cargo nor winget is available, it selects the Rust bootstrap executable for the detected Windows architecture.
+
+The Windows installer extracts downloaded archives into a fresh staging directory using the two-argument .NET ZIP API supported by Windows PowerShell 5.1. If Windows refuses to start the staged executable, the installer uses .NET to compute its SHA-256 and includes the digest in the launch error.
+
+Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.
+
+`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
+
+A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error. See the [module guide](docs/book/06-modules.md#reusing-a-named-function).
+
+The C runtime calls type-info destructors and trace markers synchronously. Tests can keep callback counters and recorded pointers thread-local so concurrent tests do not reset each other's observations.
+
+Use `ui.page` to render a list of typed views. The [static view reference](docs/book/19-browser-views.md#static-view-functions) records the signatures for text, labeled fields, submit buttons, both GET form helpers, disclosures, links and pages.
+
+The macOS Intel CLI and language server load the CPython 3.14 framework. The Apple Silicon binaries load CPython 3.15. Both use the framework in /Library/Frameworks. Windows x64 and ARM64 passed with matching-architecture CPython 3.14. The Debian 12 packages use libpython3.11.

@@ -32,7 +32,7 @@ pub enum PackageCommand {
     },
     /// Verify a local or self-hosted registry index and all referenced source artifacts.
     VerifyRegistry {
-        /// Registry index URL, local index.toml, or registry directory.
+        /// Registry index URL, local index.json, or registry directory.
         registry: String,
         /// Emit structured JSON.
         #[arg(long)]
@@ -54,7 +54,7 @@ pub enum PackageCommand {
         /// Semantic version, e.g. `1.2.3`.
         #[arg(long)]
         version: String,
-        /// Registry output directory. `index.toml` is created/updated here.
+        /// Registry output directory. `index.json` is created/updated here.
         #[arg(long, value_name = "DIR")]
         out: PathBuf,
         /// Artifact URL prefix: file:// or any http endpoint you run yourself.

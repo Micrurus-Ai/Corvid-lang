@@ -71,6 +71,8 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             // upload uses the route's explicit policy as its schema.
             let (media_type, schema) = if let Some(upload) = &route.upload {
                 ("multipart/form-data", schema_for_upload(upload))
+            } else if let Some(media_type) = route.request_media_type.as_deref() {
+                (media_type, schema_for_type_name(body))
             } else if body_type_has_upload(body, contract) {
                 ("multipart/form-data", schema_for_type_name(body))
             } else {
@@ -93,7 +95,7 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             json!({
                 "description": "Success",
                 "content": {
-                    "application/json": { "schema": schema_for_type_name(&route.response_type) }
+                    (route.response_media_type.as_deref().unwrap_or("application/json")): { "schema": schema_for_type_name(&route.response_type) }
                 }
             }),
         );
@@ -215,12 +217,31 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
 }
 
 fn schema_for_type(ty: &ContractType) -> Value {
+    if let Some(target) = &ty.alias_of {
+        return schema_for_type_name(target);
+    }
     if !ty.variants.is_empty() {
-        // A sum type projects to an enum of its variant names; a
-        // frontend reads the richer per-variant status/ui/payload from
-        // the application contract (51e).
-        let names: Vec<&str> = ty.variants.iter().map(|v| v.name.as_str()).collect();
-        return json!({ "type": "string", "enum": names });
+        let mut alternatives = Vec::with_capacity(ty.variants.len());
+        for variant in &ty.variants {
+            let count = variant.fields.len();
+            let mut fields = json!({"type": "array", "minItems": count, "maxItems": count});
+            let mut required = vec!["variant"];
+            if count > 0 {
+                fields["prefixItems"] = variant.fields.iter().map(schema_for_field).collect();
+                required.push("fields");
+            }
+            alternatives.push(json!({
+                "type": "object",
+                "required": required,
+                "properties": {
+                    "tag": {"const": "variant"},
+                    "type": {"const": ty.name},
+                    "variant": {"const": variant.name},
+                    "fields": fields
+                }
+            }));
+        }
+        return json!({"oneOf": alternatives});
     }
     let mut properties = Map::new();
     let mut required = Vec::new();
@@ -445,6 +466,7 @@ mod tests {
             generated_at: "now".into(),
             source_path: "app.cor".into(),
             types: vec![ContractType {
+                alias_of: None,
                 name: "RefundRequest".into(),
                 fields: vec![
                     ContractField {
@@ -478,6 +500,8 @@ mod tests {
                 body_type: Some("RefundRequest".into()),
                 upload: None,
                 approval: None,
+                request_media_type: None,
+                response_media_type: None,
                 response_type: "Answer".into(),
                 requires: vec!["issue_refund".into()],
                 pagination: None,
@@ -518,6 +542,7 @@ mod tests {
         use crate::app_contract::ContractVariant;
         let mut c = sample();
         c.types.push(ContractType {
+            alias_of: None,
             name: "RefundError".into(),
             fields: vec![],
             variants: vec![
@@ -559,6 +584,7 @@ mod tests {
         use crate::app_contract::ContractUpload;
         let mut c = sample();
         c.types.push(ContractType {
+            alias_of: None,
             name: "DocSubmission".into(),
             fields: vec![ContractField {
                 name: "file".into(),
@@ -585,6 +611,8 @@ mod tests {
             body_type: Some("DocSubmission".into()),
             upload: None,
             approval: None,
+            request_media_type: None,
+            response_media_type: None,
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,
@@ -618,6 +646,8 @@ mod tests {
                 retention_days: None,
             }),
             approval: None,
+            request_media_type: None,
+            response_media_type: None,
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,
@@ -637,6 +667,7 @@ mod tests {
         use crate::app_contract::{Pagination, PaginationStyle};
         let mut c = sample();
         c.types.push(ContractType {
+            alias_of: None,
             name: "Item".into(),
             fields: vec![ContractField {
                 name: "id".into(),
@@ -658,6 +689,8 @@ mod tests {
             body_type: None,
             upload: None,
             approval: None,
+            request_media_type: None,
+            response_media_type: None,
             response_type: "Page<Item>".into(),
             requires: vec![],
             pagination: Some(Pagination {
@@ -731,6 +764,8 @@ mod tests {
             body_type: None,
             upload: None,
             approval: None,
+            request_media_type: None,
+            response_media_type: None,
             response_type: "Answer".into(),
             requires: vec![],
             pagination: None,

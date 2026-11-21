@@ -177,6 +177,7 @@ pub(super) fn call_llm_once(
             combined
         };
     let req = LlmRequestRef {
+        tool_turn: None,
         prompt: prompt_name,
         model,
         rendered: &combined,

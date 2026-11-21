@@ -1,5 +1,5 @@
 use crate::position::byte_span_to_lsp_range;
-use corvid_driver::{compile_with_config_at_path, load_corvid_config_for};
+use corvid_driver::{analyze_with_config_at_path, load_corvid_config_for};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Url,
 };
@@ -26,19 +26,22 @@ pub fn analyze_document(snapshot: &DocumentSnapshot) -> AnalysisResult {
     } else {
         load_corvid_config_for(&path)
     };
-    let compiled = compile_with_config_at_path(&snapshot.text, &path, config.as_ref());
+    let compiled = analyze_with_config_at_path(&snapshot.text, &path, config.as_ref());
     let diagnostics = compiled
         .diagnostics
         .iter()
-        .map(|diagnostic| to_lsp_diagnostic(&snapshot.text, diagnostic))
+        .map(|diagnostic| to_lsp_diagnostic(&snapshot.text, diagnostic, DiagnosticSeverity::ERROR))
+        .chain(compiled.warnings.iter().map(|warning| {
+            to_lsp_diagnostic(&snapshot.text, warning, DiagnosticSeverity::WARNING)
+        }))
         .collect();
     AnalysisResult { diagnostics }
 }
 
-fn to_lsp_diagnostic(source: &str, diagnostic: &corvid_driver::Diagnostic) -> Diagnostic {
+fn to_lsp_diagnostic(source: &str, diagnostic: &corvid_driver::Diagnostic, severity: DiagnosticSeverity) -> Diagnostic {
     Diagnostic {
         range: byte_span_to_lsp_range(source, diagnostic.span.start, diagnostic.span.end),
-        severity: Some(DiagnosticSeverity::ERROR),
+        severity: Some(severity),
         code: stable_code(&diagnostic.message).map(NumberOrString::String),
         code_description: None,
         source: Some("corvid".to_string()),
@@ -53,14 +56,14 @@ fn to_lsp_diagnostic(source: &str, diagnostic: &corvid_driver::Diagnostic) -> Di
 }
 
 fn stable_code(message: &str) -> Option<String> {
-    message
-        .split_whitespace()
+    message.split_whitespace()
+        .map(|part| part.trim_matches([':', ',']))
         .find(|part| {
             part.len() == 5
-                && part.starts_with('E')
-                && part[1..].chars().all(|ch| ch.is_ascii_digit())
+                && part.starts_with(['E', 'W'])
+                && part[1..].bytes().all(|ch| ch.is_ascii_digit())
         })
-        .map(|part| part.trim_matches([':', ',']).to_string())
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -80,6 +83,17 @@ mod tests {
             "agent answer() -> Int:\n    return 42\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn accepts_native_clock_and_reports_scheduler_warning() {
+        let result = analyze_document(&snapshot(
+            "tool time_now_utc() -> Int\nagent main() -> Int:\n    return time_now_utc()\nschedule \"0 8 * * *\" zone \"UTC\" -> main()\n",
+        ));
+        assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+        let warning = &result.diagnostics[0];
+        assert_eq!(warning.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(warning.code, Some(NumberOrString::String("W0280".into())));
     }
 
     #[test]

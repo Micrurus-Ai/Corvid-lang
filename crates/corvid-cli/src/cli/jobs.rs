@@ -468,6 +468,9 @@ pub enum JobsCheckpointCommand {
         /// Redacted payload fingerprint.
         #[arg(long)]
         payload_fingerprint: Option<String>,
+        /// Commit one step at the expected next sequence and count a tool call for tool results.
+        #[arg(long)]
+        step_sequence: Option<u64>,
     },
     /// List durable checkpoints for a job.
     List {
@@ -486,6 +489,9 @@ pub enum JobsCheckpointCommand {
         /// Job id.
         #[arg(long)]
         job: String,
+        /// Emit the saved checkpoint payloads and remaining limits as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 

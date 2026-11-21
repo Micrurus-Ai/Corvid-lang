@@ -462,11 +462,23 @@ fn jobs_loop_limits_stop_over_budget_agent_jobs() {
     let stdout = String::from_utf8_lossy(&exceeded.stdout);
     assert!(stdout.contains("violated_bound_count: 4"), "{stdout}");
     assert!(stdout.contains("violated_bound: max_steps:3>2"), "{stdout}");
-    assert!(stdout.contains("violated_bound: max_wall_ms:1100>1000"), "{stdout}");
-    assert!(stdout.contains("violated_bound: max_spend_usd:0.210000>0.200000"), "{stdout}");
-    assert!(stdout.contains("violated_bound: max_tool_calls:2>1"), "{stdout}");
+    assert!(
+        stdout.contains("violated_bound: max_wall_ms:1100>1000"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("violated_bound: max_spend_usd:0.210000>0.200000"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("violated_bound: max_tool_calls:2>1"),
+        "{stdout}"
+    );
     assert!(stdout.contains("status: loop_budget_exceeded"), "{stdout}");
-    assert!(stdout.contains("failure_kind: loop_bound_exceeded"), "{stdout}");
+    assert!(
+        stdout.contains("failure_kind: loop_bound_exceeded"),
+        "{stdout}"
+    );
 
     let audit = Command::new(corvid_bin())
         .args([
@@ -487,12 +499,22 @@ fn jobs_loop_limits_stop_over_budget_agent_jobs() {
         String::from_utf8_lossy(&audit.stderr)
     );
     let stdout = String::from_utf8_lossy(&audit.stdout);
-    assert!(stdout.contains("event_kind: loop_bound_exceeded"), "{stdout}");
-    assert!(stdout.contains("status_after: loop_budget_exceeded"), "{stdout}");
+    assert!(
+        stdout.contains("event_kind: loop_bound_exceeded"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("status_after: loop_budget_exceeded"),
+        "{stdout}"
+    );
 
     let conn = Connection::open(&state).expect("open jobs db");
     let status: String = conn
-        .query_row("select status from queue_jobs where id = 'job_1'", [], |row| row.get(0))
+        .query_row(
+            "select status from queue_jobs where id = 'job_1'",
+            [],
+            |row| row.get(0),
+        )
         .expect("read status");
     assert_eq!(status, "loop_budget_exceeded");
 }
@@ -617,8 +639,14 @@ fn jobs_loop_stall_policy_escalates_with_audit() {
         String::from_utf8_lossy(&audit.stderr)
     );
     let stdout = String::from_utf8_lossy(&audit.stdout);
-    assert!(stdout.contains("event_kind: loop_stalled_escalate"), "{stdout}");
-    assert!(stdout.contains("status_after: loop_stall_escalated"), "{stdout}");
+    assert!(
+        stdout.contains("event_kind: loop_stalled_escalate"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("status_after: loop_stall_escalated"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -1276,5 +1304,88 @@ fn jobs_run_without_source_errors_with_helpful_message() {
     assert!(
         combined.contains("corvid jobs run-one"),
         "error message must point at the smoke-test affordance: {combined}"
+    );
+}
+#[test]
+fn resumed_checkpoint_preserves_step_and_tool_allowances() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("jobs.sqlite");
+    let run = |args: &[&str], success: bool| {
+        let output = Command::new(corvid_bin())
+            .arg("jobs")
+            .args(args)
+            .arg("--state")
+            .arg(&state)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), success, "{args:?}: {output:?}");
+        String::from_utf8(if success {
+            output.stdout
+        } else {
+            output.stderr
+        })
+        .unwrap()
+    };
+    run(&["enqueue", "--task", "sum", "--payload", "{}"], true);
+    run(
+        &[
+            "loop",
+            "limits",
+            "--job",
+            "job_1",
+            "--max-steps",
+            "2",
+            "--max-tool-calls",
+            "1",
+        ],
+        true,
+    );
+    let resume = || run(&["checkpoint", "resume", "--job", "job_1"], true);
+    let record = |kind, sequence, success| {
+        run(
+            &[
+                "checkpoint",
+                "add",
+                "--job",
+                "job_1",
+                "--label",
+                "sum",
+                "--kind",
+                kind,
+                "--payload",
+                "{\"total\":2}",
+                "--step-sequence",
+                sequence,
+            ],
+            success,
+        )
+    };
+    assert!(resume().contains("remaining_steps: 2"));
+    record("tool-result", "1", true);
+    assert!(record("tool-result", "1", false).contains("next sequence is 2"));
+    assert!(record("tool-result", "2", false).contains("max_tool_calls"));
+    let restored = resume();
+    for expected in [
+        "next_sequence: 2",
+        "remaining_steps: 1",
+        "remaining_tool_calls: 0",
+        "last_kind: tool_result",
+    ] {
+        assert!(restored.contains(expected), "{restored}");
+    }
+    let snapshot = run(&["checkpoint", "resume", "--job", "job_1", "--json"], true);
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(
+        snapshot["checkpoints"][0]["payload"],
+        serde_json::json!({"total":2})
+    );
+    assert_eq!(snapshot["remaining_steps"], 1);
+    assert_eq!(snapshot["remaining_tool_calls"], 0);
+    record("agent-step", "2", true);
+    assert!(record("agent-step", "3", false).contains("max_steps"));
+    let restored = resume();
+    assert!(
+        restored.contains("remaining_steps: 0") && restored.contains("next_sequence: 3"),
+        "{restored}"
     );
 }

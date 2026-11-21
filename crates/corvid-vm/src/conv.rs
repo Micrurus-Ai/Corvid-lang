@@ -291,7 +291,11 @@ pub fn json_to_value(
                 }),
             }
         }
-        (Type::Struct(def_id), J::Object(map)) => {
+        (
+            Type::Struct(def_id)
+            | Type::ImportedStruct(corvid_types::types::ImportedStructType { def_id, .. }),
+            J::Object(map),
+        ) => {
             let ir_type = types_by_id
                 .get(def_id)
                 .copied()
@@ -303,6 +307,16 @@ pub fn json_to_value(
             // and is what lets a tool/connector result carrying a typed
             // error variant round-trip through JSON.
             if !ir_type.variants.is_empty() {
+                for (key, required) in [("tag", "variant"), ("type", ir_type.name.as_str())] {
+                    if let Some(actual) = map.get(key) {
+                        if actual.as_str() != Some(required) {
+                            return Err(ConvError::TypeMismatch {
+                                expected: format!("{key} = `{required}`"),
+                                got: actual.to_string(),
+                            });
+                        }
+                    }
+                }
                 let variant_name = map
                     .get("variant")
                     .and_then(|v| v.as_str())
@@ -319,15 +333,25 @@ pub fn json_to_value(
                         expected: format!("a variant of `{}`", ir_type.name),
                         got: format!("unknown variant `{variant_name}`"),
                     })?;
-                let field_jsons = map
-                    .get("fields")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut fields = Vec::with_capacity(variant.fields.len());
-                for (i, field) in variant.fields.iter().enumerate() {
-                    let raw = field_jsons.get(i).cloned().unwrap_or(J::Null);
-                    fields.push(json_to_value(raw, &field.ty, types_by_id)?);
+                let payload = match map.get("fields") {
+                    Some(J::Array(items)) => items.as_slice(),
+                    None => &[],
+                    Some(other) => return Err(ConvError::TypeMismatch {
+                        expected: format!("an array of fields for `{variant_name}`"),
+                        got: json_kind(other).into(),
+                    }),
+                };
+                if payload.len() != variant.fields.len() {
+                    return Err(ConvError::TypeMismatch {
+                        expected: format!("{} fields for `{variant_name}`", variant.fields.len()),
+                        got: format!("{} fields", payload.len()),
+                    });
+                }
+                let mut fields = Vec::with_capacity(payload.len());
+                for (raw, field) in payload.iter().zip(&variant.fields) {
+                    let value = json_to_value(raw.clone(), &field.ty, types_by_id)?;
+                    check_field_refinement(variant_name, field, &value)?;
+                    fields.push(value);
                 }
                 return Ok(Value::Enum(crate::value::EnumValue::new(
                     ir_type.id,
@@ -649,7 +673,7 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
 /// its structural decode. Violations render actionably (field,
 /// value, refinement) because this exact string is what `with
 /// repair N` feeds back to the model.
-fn check_field_refinement(
+pub fn check_field_refinement(
     struct_name: &str,
     field: &corvid_ir::IrField,
     value: &Value,

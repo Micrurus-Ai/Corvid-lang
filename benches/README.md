@@ -5,6 +5,10 @@ This directory holds two kinds of benchmark artifacts:
 - canonical workflow fixtures under `../benchmarks/cases/`
 - runtime / workflow result archives under `results/`
 
+## Application workloads
+
+Use `analysis/application.py` for startup, compiler, interpreter collection, HTTP request, and streamed model measurements. The [performance guide](../docs/guides/performance.md) describes the command, workload sizes, and regression thresholds. It uses a loopback model provider and saves individual samples alongside each median.
+
 ## Same-session ratio protocol
 
 The memory-foundation close publishes **ratios**, not absolute timings.

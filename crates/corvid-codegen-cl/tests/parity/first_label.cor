@@ -1,0 +1,20 @@
+agent first_label(labels: List<String>) -> String:
+    return match labels.first():
+        Some(label) -> label
+        None -> "Untitled"
+
+agent decorate(label: String) -> String:
+    return label + "!"
+
+agent choose(label: Option<String>) -> String:
+    return match label:
+        None -> decorate("missing")
+        Some(value) -> decorate(value)
+
+agent main() -> Bool:
+    saved = first_label(["cor" + "vid", "second"])
+    empty = first_label([])
+    picked = choose(["fir" + "st"].first())
+    labels: List<String> = []
+    fallback = choose(labels.first())
+    return saved == "corvid" and empty == "Untitled" and picked == "first!" and fallback == "missing!"

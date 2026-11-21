@@ -139,6 +139,18 @@ impl HttpClient {
         Self::default()
     }
 
+    /// Apply the project policy to redirect destinations as well as the initial request.
+    pub(crate) fn with_egress_policy(policy: HttpEgressPolicy) -> Self {
+        let redirects = reqwest::redirect::Policy::custom(move |attempt| {
+            if policy.check(attempt.url().as_str()).is_err() {
+                return attempt.error("redirect destination rejected by project HTTP policy");
+            }
+            reqwest::redirect::Policy::limited(10).redirect(attempt)
+        });
+        Self::with_reqwest_client(reqwest::Client::builder().redirect(redirects)
+            .build().expect("reqwest client builds with project HTTP policy"))
+    }
+
     /// Construct an `HttpClient` backed by a caller-supplied
     /// `reqwest::Client`. Production code uses [`HttpClient::new`],
     /// which builds a default reqwest client with the standard
@@ -505,40 +517,12 @@ impl HttpEgressPolicy {
 /// have no host segment. Used by `HttpEgressPolicy::check` to
 /// drive both the SSRF check and the allowlist comparison.
 fn parse_host_lowercase(url: &str) -> Option<String> {
-    let lower = url.trim();
-    let after_scheme = if let Some(rest) = lower.strip_prefix("https://") {
-        rest
-    } else if let Some(rest) = lower.strip_prefix("http://") {
-        rest
-    } else {
+    let url = reqwest::Url::parse(url).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
         return None;
-    };
-    let authority = after_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(after_scheme);
-    // Authority may carry a port suffix (`host:port`) and
-    // `user:pass@host`; strip both.
-    let after_userinfo = authority.rsplit('@').next().unwrap_or(authority);
-    // IPv6 literal authority uses `[::1]:port` form — the
-    // brackets disambiguate the host from the port. Detect
-    // and unwrap the bracketed segment before splitting on
-    // `:`, otherwise the IPv6 colons cut the host short.
-    let host_only = if let Some(rest) = after_userinfo.strip_prefix('[') {
-        let close = rest.find(']')?;
-        rest[..close].to_ascii_lowercase()
-    } else {
-        after_userinfo
-            .split(':')
-            .next()
-            .unwrap_or(after_userinfo)
-            .to_ascii_lowercase()
-    };
-    if host_only.is_empty() {
-        None
-    } else {
-        Some(host_only)
     }
+    // Use the transport's normalized host for both IPv4 and IPv6 policy checks.
+    Some(url.host_str()?.trim_matches(['[', ']']).to_ascii_lowercase())
 }
 
 /// Classify a host string as one Corvid will refuse on SSRF

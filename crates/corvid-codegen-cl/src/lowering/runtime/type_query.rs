@@ -119,6 +119,12 @@ pub fn collect_list_element_types(ir: &IrFile) -> Vec<Type> {
 
     fn visit(ty: &Type, seen: &mut BTreeSet<Type>, order: &mut Vec<Type>) {
         match ty {
+            Type::Map(_, value) if crate::native_string_map(ty) => {
+                visit(value, seen, order);
+                if seen.insert(Type::String) {
+                    order.push(Type::String);
+                }
+            }
             Type::List(inner) => {
                 // Recurse first so inner list types get their
                 // typeinfo emitted BEFORE the outer list references
@@ -241,6 +247,9 @@ pub fn collect_option_types(ir: &IrFile) -> Vec<Type> {
 
     fn visit(ty: &Type, seen: &mut BTreeSet<Type>, order: &mut Vec<Type>) {
         match ty {
+            Type::Map(_, value) if crate::native_string_map(ty) => {
+                visit(&Type::Option(value.clone()), seen, order);
+            }
             Type::Option(inner) => {
                 visit(inner, seen, order);
                 if option_uses_wrapper(ty) && seen.insert(ty.clone()) {
@@ -501,6 +510,8 @@ pub fn emit_release(
 /// (12f), `List` (12g) — both will return true here.
 pub fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
+        Type::Function { .. } => crate::native_callback_type(ty),
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::String
         | Type::Struct(_)
         | Type::ImportedStruct(_)
@@ -518,7 +529,7 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
 
 pub fn is_native_value_type(ty: &Type) -> bool {
     match ty {
-        Type::Map(_, _) => false,
+        Type::Map(_, _) => crate::native_string_map(ty),
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
         Type::Option(_) => is_native_option_type(ty),

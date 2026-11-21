@@ -13,7 +13,7 @@
 - A single native binary (`corvid`).
 - The compiler emits native machine code via Cranelift.
 - Generated programs link a Rust-native runtime and run without any Python.
-- Python FFI is available via `import python "..."`, loaded lazily only when used.
+- A Corvid service can call Python libraries through typed tools implemented in `tools.py`.
 
 v1.0 is not an "evolved v0.1." The Python-transpile backend we shipped internally in v0.1 stays as `--target=python` for users who want it, but the default, the marketing, and the "this is Corvid" experience is the standalone native compiler.
 
@@ -71,7 +71,7 @@ Features that turn triers into production users.
 3. **Memory primitives** — `session`, `memory` as typed, SQLite-backed stores.
 4. **Error handling** — typed `Result` / `Option`; retry policies as syntax.
 5. **HITL beyond `approve`** — `ask(...)` for clarifications, `choose(...)` for options.
-6. **Python FFI via PyO3, effect-tagged at the import site** — `import python "lib" as x effects: network, spends` works from the interpreter. Untagged Python imports rejected by default; `effects: unsafe` exists as an opt-in escape hatch and is visually discouraged. TypeScript's `.d.ts` analog: the compiler trusts declared effects, so untagged Python usage cannot be introduced by accident.
+6. **Python interoperability** ? A served application can call synchronous and asynchronous Python tools. Python import declarations require an explicit effect list. The interpreter calls synchronous module members directly through declared signatures.
 
 ---
 

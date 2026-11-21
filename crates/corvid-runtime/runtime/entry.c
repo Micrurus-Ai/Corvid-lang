@@ -282,6 +282,15 @@ void corvid_print_string(void* descriptor) {
     fflush(stdout);
 }
 
+void corvid_missing_map_key(const intptr_t* key) {
+    fputs("corvid: compound assignment requires an existing map key: missing key `", stderr);
+    if (key[1] > 0) {
+        fwrite((const void*)key[0], 1, (size_t)key[1], stderr);
+    }
+    fputs("`\n", stderr);
+    exit(1);
+}
+
 long long corvid_bench_server_enabled(void) {
     const char* v = getenv("CORVID_BENCH_SERVER");
     return (v != NULL && strcmp(v, "1") == 0) ? 1 : 0;

@@ -16,7 +16,7 @@ use super::{
 use corvid_ir::IrFile;
 use corvid_runtime::{
     load_dotenv_walking, AnthropicAdapter, EnvVarMockAdapter, HttpEgressPolicy, IoToolPolicy,
-    OllamaAdapter, OpenAiAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
+    GeminiAdapter, OllamaAdapter, OpenAiAdapter, OpenAiCompatibleAdapter, RedactionSet, Runtime, StdinApprover, Tracer,
 };
 use corvid_vm::{InterpError, Value};
 use std::fmt;
@@ -63,7 +63,7 @@ impl fmt::Display for RunError {
             ),
             Self::NeedsArgs { agent, expected } => write!(
                 f,
-                "agent `{agent}` expects {expected} argument(s); `corvid run` cannot supply them yet — use a runner binary that calls `run_with_runtime` with arguments"
+                "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }
@@ -339,6 +339,11 @@ fn run_via_interpreter_tier(
     let mut builder = Runtime::builder()
         .approver(std::sync::Arc::new(StdinApprover::new()))
         .tracer(tracer);
+    #[cfg(feature = "python")]
+    if !ir.tools.is_empty() {
+        let tools = corvid_runtime::python_tools::install_python_tools(path)?;
+        builder = builder.tool_registry(tools);
+    }
 
     // Slice 33S1b: install the [io] root policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing
@@ -346,7 +351,8 @@ fn run_via_interpreter_tier(
     // every caller path through the configured root. CORVID_IO_ROOT
     // env override takes precedence over the corvid.toml value —
     // matches the existing env-override pattern for CORVID_MODEL.
-    builder = builder.io_policy(load_io_tool_policy(path));
+    builder = apply_project_storage(builder, path);
+    builder = corvid_runtime::browser::with_browser_tools(builder);
 
     // Slice 33S2b: install the [http] allow policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing
@@ -356,12 +362,6 @@ fn run_via_interpreter_tier(
     // the corvid.toml value — same env-override pattern as
     // CORVID_IO_ROOT / CORVID_MODEL.
     builder = builder.http_policy(load_http_egress_policy(path));
-
-    // Slice 46g: install the [rag] embedder when configured; the
-    // executing rag tools degrade to lexical search without one.
-    if let Some(embedder) = load_rag_embedder(path) {
-        builder = builder.rag_embedder(embedder);
-    }
 
     // Slice 46f: configured MCP servers (untrusted by default —
     // approval-gated through the StdinApprover installed above).
@@ -533,16 +533,11 @@ pub fn build_or_get_cached_native(
     tools_lib: Option<&Path>,
 ) -> anyhow::Result<CachedNativeBinary> {
     let cache_dir = native_cache::cache_dir_for(path);
-    // Tools-lib path participates in the cache key: if the user
-    // swaps between `--with-tools-lib A` and `--with-tools-lib B`,
-    // they get distinct cached binaries. Re-linking against the same
-    // lib re-uses. Users who modify A in place and keep the same
-    // path get stale cache — a `cargo clean` fixes it; a future
-    // future polish work could hash the lib contents.
     let tools_lib_str = tools_lib
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let key = native_cache::cache_key_with_tools(source, &tools_lib_str);
+    let key =
+        native_cache::cache_key_with_tools(source, &tools_lib_str, ir.import_fingerprint.as_ref());
     let cached = native_cache::cached_binary_path(&cache_dir, &key);
     if cached.exists() {
         return Ok(CachedNativeBinary {
@@ -552,16 +547,15 @@ pub fn build_or_get_cached_native(
     }
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| anyhow::anyhow!("create cache dir `{}`: {e}", cache_dir.display()))?;
-    // `build_native_to_disk` takes the final bin_path and derives parent
-    // + stem from it — passing `<cache_dir>/<key>` produces
-    // `<cache_dir>/<key>[.exe]` which is exactly where we want it.
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("program")
         .to_string();
     let module_name = format!("corvid_native_{key}");
-    let target_bin = cache_dir.join(&key);
+    // A concurrent runner must see either a complete executable or a miss.
+    let staging = tempfile::Builder::new().prefix(".build-").tempdir_in(&cache_dir)?;
+    let target_bin = staging.path().join(&key);
     // Forward the tools lib (if any) to the linker so
     // `__corvid_tool_<name>` symbols resolve against the user's
     // compiled `#[tool]` implementations.
@@ -573,10 +567,12 @@ pub fn build_or_get_cached_native(
         &extra_libs_owned,
     )
     .map_err(|e| anyhow::anyhow!("native codegen failed for `{stem}`: {e}"))?;
-    Ok(CachedNativeBinary {
-        path: produced,
-        from_cache: false,
-    })
+    let from_cache = match std::fs::rename(&produced, &cached) {
+        Ok(()) => false,
+        Err(_) if cached.is_file() => true,
+        Err(error) => return Err(error.into()),
+    };
+    Ok(CachedNativeBinary { path: cached, from_cache })
 }
 
 /// Pick a trace directory next to the source file's project root.
@@ -708,6 +704,18 @@ agent main() -> String:
             !is_missing_staticlib_error(&err),
             "codegen errors must propagate"
         );
+    }
+}
+
+/// Configure the storage root and embedding provider for application entry points.
+pub fn apply_project_storage(
+    builder: corvid_runtime::RuntimeBuilder,
+    path: &Path,
+) -> corvid_runtime::RuntimeBuilder {
+    let builder = builder.io_policy(load_io_tool_policy(path));
+    match load_rag_embedder(path) {
+        Some(embedder) => builder.rag_embedder(embedder),
+        None => builder,
     }
 }
 
@@ -1216,5 +1224,10 @@ pub fn apply_env_llm_wiring(
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
         builder = builder.llm(std::sync::Arc::new(OpenAiAdapter::new(key)));
     }
-    builder.llm(std::sync::Arc::new(OllamaAdapter::new()))
+    if let Ok(key) = std::env::var("GOOGLE_API_KEY").or_else(|_| std::env::var("GEMINI_API_KEY")) {
+        builder = builder.llm(std::sync::Arc::new(GeminiAdapter::new(key)));
+    }
+    let compat_key = std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default();
+    builder.llm(std::sync::Arc::new(OpenAiCompatibleAdapter::new(compat_key)))
+        .llm(std::sync::Arc::new(OllamaAdapter::new()))
 }

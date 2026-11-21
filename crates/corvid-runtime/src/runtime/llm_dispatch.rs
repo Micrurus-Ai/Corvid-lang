@@ -43,6 +43,19 @@ impl Runtime {
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
+        self.dispatch_tool(name, args, None).await
+    }
+
+    pub async fn call_imported_python(
+        &self, module: &str, member: &str, effects: &[String], args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let name = format!("python:{module}.{member}");
+        self.dispatch_tool(&name, args, Some((module, member, effects))).await
+    }
+
+    async fn dispatch_tool(
+        &self, name: &str, args: Vec<serde_json::Value>, python: Option<(&str, &str, &[String])>,
+    ) -> Result<serde_json::Value, RuntimeError> {
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
                 ts_ms: now_ms(),
@@ -62,10 +75,30 @@ impl Runtime {
             self.dispatch_stdlib_secret_tool(&args)
         } else if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)
+        } else if let Some((module, member, effects)) = python {
+            #[cfg(feature = "python")]
+            {
+                let policy = crate::PythonSandboxProfile::new(effects.iter().cloned());
+                let module = module.to_owned();
+                let member = member.to_owned();
+                let args = args.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::PythonRuntime::new().call_with_decoder(
+                        &module, &member, &args, &policy, crate::python_ffi::typed_python_result,
+                    )
+                }).await.map_err(|e| RuntimeError::ToolFailed { tool: name.into(), message: e.to_string() })?
+            }
+            #[cfg(not(feature = "python"))]
+            {
+                let _ = (module, member, effects);
+                Err(RuntimeError::ToolFailed { tool: name.into(), message: "this runtime was built without Python support".into() })
+            }
         } else if is_stdlib_cache_tool(name) {
             self.dispatch_stdlib_cache_tool(name, &args)
         } else if is_stdlib_io_tool(name) {
             self.dispatch_stdlib_io_tool(name, args.clone()).await
+        } else if let Some(result) = super::path::dispatch(&self.io, name, &args) {
+            result
         } else if is_stdlib_http_tool(name) {
             self.dispatch_stdlib_http_tool(name, args.clone()).await
         } else if is_stdlib_time_tool(name) {
@@ -359,34 +392,27 @@ impl Runtime {
                     Ok(c) => c,
                     Err(e) => return Ok(rag_err(e.to_string())),
                 };
-                let mut index = match crate::rag::RagSqliteIndex::open(&resolved) {
-                    Ok(i) => i,
-                    Err(e) => return Ok(rag_err(e.to_string())),
-                };
-                if let Err(e) = index.insert_document(&document) {
-                    return Ok(rag_err(e.to_string()));
-                }
-                if let Err(e) = index.insert_chunks(&chunks) {
-                    return Ok(rag_err(e.to_string()));
-                }
-                if let Some(embedder) = &self.rag_embedder {
-                    let texts: Vec<String> =
-                        chunks.iter().map(|c| c.text.clone()).collect();
+                let mut records = Vec::new();
+                if let Some(embedder) = self.rag_embedder.as_ref().filter(|_| !chunks.is_empty()) {
+                    let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
                     let vectors = match embedder.embed(&texts).await {
                         Ok(v) => v,
                         Err(e) => return Ok(rag_err(e.to_string())),
                     };
-                    let records: Vec<crate::rag::RagEmbeddingRecord> = chunks
-                        .iter()
-                        .zip(vectors)
-                        .map(|(c, v)| crate::rag::RagEmbeddingRecord {
-                            chunk_id: c.chunk_id.clone(),
-                            values: v.values,
-                        })
-                        .collect();
-                    if let Err(e) = index.insert_embedding_vectors(&records) {
-                        return Ok(rag_err(e.to_string()));
-                    }
+                    let vectors = match crate::rag::validate_embeddings(vectors, chunks.len()) {
+                        Ok(v) => v,
+                        Err(e) => return Ok(rag_err(e.to_string())),
+                    };
+                    records = chunks.iter().zip(vectors).map(|(chunk, vector)| crate::rag::RagEmbeddingRecord {
+                        chunk_id: chunk.chunk_id.clone(), values: vector.values,
+                    }).collect();
+                }
+                let mut index = match crate::rag::RagSqliteIndex::open(&resolved) {
+                    Ok(i) => i,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                if let Err(e) = index.replace_document(&document, &chunks, &records) {
+                    return Ok(rag_err(e.to_string()));
                 }
                 Ok(serde_json::json!({ "tag": "ok", "ok": chunks.len() as i64 }))
             }
@@ -419,48 +445,20 @@ impl Runtime {
                                 Ok(v) => v,
                                 Err(e) => return Ok(rag_err(e.to_string())),
                             };
-                        let Some(query_vec) = vectors.first() else {
-                            return Ok(rag_err("embedder returned no vector for the query"));
+                        let vectors = match crate::rag::validate_embeddings(vectors, 1) {
+                            Ok(v) => v,
+                            Err(e) => return Ok(rag_err(e.to_string())),
                         };
+                        let query_vec = &vectors[0];
                         match index.search_embeddings(&query_vec.values, limit as usize) {
                             Ok(hits) => hits.into_iter().map(|h| h.chunk).collect(),
                             Err(e) => return Ok(rag_err(e.to_string())),
                         }
                     } else {
-                        // Lexical fallback: score chunks by how
-                        // many query terms they contain (the raw
-                        // index method is a phrase LIKE — too
-                        // strict for multi-word queries).
-                        let mut scored: std::collections::HashMap<
-                            String,
-                            (usize, crate::rag::RagChunk),
-                        > = std::collections::HashMap::new();
-                        let fetch = ((limit as usize) * 8).clamp(16, 128);
-                        for term in query
-                            .split_whitespace()
-                            .filter(|t| t.chars().count() >= 2)
-                        {
-                            let found = match index.search_text(term, fetch) {
-                                Ok(c) => c,
-                                Err(e) => return Ok(rag_err(e.to_string())),
-                            };
-                            for chunk in found {
-                                scored
-                                    .entry(chunk.chunk_id.clone())
-                                    .and_modify(|(n, _)| *n += 1)
-                                    .or_insert((1, chunk));
-                            }
+                        match index.search_terms(query, limit as usize) {
+                            Ok(chunks) => chunks,
+                            Err(e) => return Ok(rag_err(e.to_string())),
                         }
-                        let mut ranked: Vec<(usize, crate::rag::RagChunk)> =
-                            scored.into_values().collect();
-                        ranked.sort_by(|a, b| {
-                            b.0.cmp(&a.0).then(a.1.chunk_id.cmp(&b.1.chunk_id))
-                        });
-                        ranked
-                            .into_iter()
-                            .take(limit as usize)
-                            .map(|(_, c)| c)
-                            .collect()
                     };
                 let items: Vec<serde_json::Value> =
                     chunks.iter().map(rag_chunk_envelope_json).collect();
@@ -495,6 +493,18 @@ impl Runtime {
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
         match name {
+            "io_read_image" => {
+                let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+                    tool: name.into(), message: "expected one String argument (path)".into(),
+                })?;
+                let Some(root) = self.io_policy.root_path() else {
+                    return Ok(stdlib_result_err("configure [io] root before reading an image"));
+                };
+                match crate::llm::PromptImage::read(&root.join(path), root).await {
+                    Ok(image) => Ok(stdlib_result_ok(serde_json::json!(image))),
+                    Err(e) => Ok(stdlib_result_err(e)),
+                }
+            }
             "io_read_text" => {
                 let path_arg = args
                     .first()
@@ -604,70 +614,33 @@ impl Runtime {
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
         use crate::http::HttpRequest;
-        match name {
-            "http_get" => {
-                let url_arg = args
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_get".to_string(),
-                        message: "expected one String argument (url)".to_string(),
-                    })?;
-                // Slice 47h: policy + transport failures are Err
-                // values; an error STATUS is still Ok (the request
-                // succeeded — inspect `status`).
-                if let Err(e) = self.http_policy.check(url_arg) {
-                    return Ok(stdlib_result_err(e));
-                }
-                let request = HttpRequest::get(url_arg.to_string())
-                    .effect_tag("std.http.request");
-                let response = match self.http.send(&request).await {
-                    Ok(r) => r,
-                    Err(e) => return Ok(stdlib_result_err(e)),
-                };
-                Ok(stdlib_result_ok(serde_json::json!({
-                    "status": response.status as i64,
-                    "body": response.body,
-                    "attempts": 1_i64,
-                    "elapsed_ms": 0_i64,
-                    "effect_meta": stdlib_http_effect_envelope(),
-                })))
-            }
+        let url = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+            tool: name.into(),
+            message: "expected a String URL".into(),
+        })?;
+        let request = match name {
+            "http_get" => HttpRequest::get(url.to_string()),
             "http_post_json" => {
-                let url_arg = args
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_post_json".to_string(),
-                        message: "expected (url: String, body: String) — url missing"
-                            .to_string(),
-                    })?;
-                let body_arg = args
-                    .get(1)
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_post_json".to_string(),
-                        message: "expected (url: String, body: String) — body missing"
-                            .to_string(),
-                    })?;
-                if let Err(e) = self.http_policy.check(url_arg) {
-                    return Ok(stdlib_result_err(e));
-                }
-                let request = HttpRequest::post_json(url_arg.to_string(), body_arg.to_string())
-                    .effect_tag("std.http.request");
-                let response = match self.http.send(&request).await {
-                    Ok(r) => r,
-                    Err(e) => return Ok(stdlib_result_err(e)),
-                };
-                Ok(stdlib_result_ok(serde_json::json!({
-                    "status": response.status as i64,
-                    "body": response.body,
-                    "attempts": 1_i64,
-                    "elapsed_ms": 0_i64,
-                    "effect_meta": stdlib_http_effect_envelope(),
-                })))
+                let body = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+                    tool: name.into(),
+                    message: "expected a String JSON body".into(),
+                })?;
+                HttpRequest::post_json(url.to_string(), body.to_string())
             }
-            other => Err(RuntimeError::UnknownTool(other.to_string())),
+            other => return Err(RuntimeError::UnknownTool(other.to_string())),
+        };
+        if let Err(error) = self.http_policy.check(url) {
+            return Ok(stdlib_result_err(error));
+        }
+        match self.http.send(&request.effect_tag("std.http.request")).await {
+            Ok(response) => Ok(stdlib_result_ok(serde_json::json!({
+                "status": response.status,
+                "body": response.body,
+                "attempts": response.attempts,
+                "elapsed_ms": response.elapsed_ms,
+                "effect_meta": stdlib_http_effect_envelope(),
+            }))),
+            Err(error) => Ok(stdlib_result_err(error)),
         }
     }
 
@@ -771,11 +744,38 @@ impl Runtime {
         sql: String,
         params: Vec<crate::db::DbValue>,
     ) -> Result<serde_json::Value, RuntimeError> {
+        self.query_db(handle, sql, params, "db_query", db_query_rows_to_envelope)
+    }
+
+    /// Read column values as JSON objects using SQLite column names as keys.
+    pub async fn db_query_rows_tool(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        self.query_db(handle, sql, params, "db_query_rows", |rows| {
+            serde_json::Value::Array(rows.rows.iter().map(|row| {
+                serde_json::Value::Object(row.iter().map(|(name, cell)| {
+                    (name.clone(), db_value_to_json_param(&cell.value))
+                }).collect())
+            }).collect())
+        })
+    }
+
+    fn query_db(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+        name: &str,
+        encode: fn(&crate::db::DbQueryRows) -> serde_json::Value,
+    ) -> Result<serde_json::Value, RuntimeError> {
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
                 ts_ms: now_ms(),
                 run_id: self.tracer.run_id().to_string(),
-                tool: "db_query".to_string(),
+                tool: name.to_string(),
                 args: vec![
                     serde_json::json!({
                         "tag": "db_handle_opaque_sentinel",
@@ -790,12 +790,12 @@ impl Runtime {
             });
         }
         let rows = self.db_registry.query(handle.handle_id, &sql, &params)?;
-        let payload = db_query_rows_to_envelope(&rows);
+        let payload = encode(&rows);
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolResult {
                 ts_ms: now_ms(),
                 run_id: self.tracer.run_id().to_string(),
-                tool: "db_query".to_string(),
+                tool: name.to_string(),
                 result: payload.clone(),
             });
         }
@@ -1053,7 +1053,7 @@ impl Runtime {
         use crate::llm::LlmStreamChunk;
         use futures::StreamExt;
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         if self.replay_source()?.is_some() {
             // Replay: substitute the whole recorded response, then
@@ -1118,8 +1118,10 @@ impl Runtime {
                 }
                 match inner.next().await {
                     Some(Ok(chunk)) => {
-                        text.push_str(&chunk.delta);
-                        bounds.push(text.len() as u64);
+                        if tracer.is_enabled() {
+                            text.push_str(&chunk.delta);
+                            bounds.push(text.len() as u64);
+                        }
                         if chunk.done {
                             finished = true;
                             if tracer.is_enabled() {
@@ -1180,7 +1182,7 @@ impl Runtime {
     /// Call an LLM. Falls back to `default_model` if `req.model` is empty.
     pub async fn call_llm(&self, mut req: LlmRequest) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         self.call_llm_ref(req.as_ref()).await
     }
@@ -1194,7 +1196,7 @@ impl Runtime {
         cacheable: bool,
     ) -> Result<LlmResponse, RuntimeError> {
         if req.model.is_empty() {
-            req.model = self.default_model.clone();
+            req.model = self.default_model().to_owned();
         }
         self.call_llm_ref_impl(req.as_ref(), None, cacheable).await
     }
@@ -1221,7 +1223,7 @@ impl Runtime {
         cacheable: bool,
     ) -> Result<LlmResponse, RuntimeError> {
         let req = if req.model.is_empty() {
-            req.with_model(&self.default_model)
+            req.with_model(self.default_model())
         } else {
             req
         };
@@ -1965,7 +1967,7 @@ fn stdlib_io_effect_envelope(
 /// `tools.call` path. Prevents the dispatch interception from
 /// stealing user tool names.
 fn is_stdlib_io_tool(name: &str) -> bool {
-    matches!(name, "io_read_text" | "io_write_text" | "io_list_dir")
+    matches!(name, "io_read_image" | "io_read_text" | "io_write_text" | "io_list_dir")
 }
 
 /// Slice 33S2a: exact-match gate for the stdlib HTTP tools.

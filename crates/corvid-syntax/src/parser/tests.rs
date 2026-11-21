@@ -815,6 +815,23 @@ prompt classify(ctx: String) -> String:
     // -------------------- imports --------------------
 
     #[test]
+    fn parses_python_function_signatures() {
+        let file = parse_file_src(r#"import python "math" as numbers effects: pure:
+    fn gcd(a: Int, b: Int) -> Int
+    fn sqrt(x: Float) -> Float
+
+agent main() -> Int:
+    return 7
+"#);
+        let Decl::Import(import) = &file.decls[0] else { panic!("expected import") };
+        assert_eq!(file.decls.len(), 2);
+        assert_eq!(import.python_functions.len(), 2);
+        assert_eq!(import.python_functions[0].name.name, "gcd");
+        assert_eq!(import.python_functions[0].params.len(), 2);
+        assert_eq!(import.python_functions[1].name.name, "sqrt");
+    }
+
+    #[test]
     fn parses_import_python() {
         let file = parse_file_src(r#"import python "anthropic" as anthropic effects: network"#);
         assert_eq!(file.decls.len(), 1);

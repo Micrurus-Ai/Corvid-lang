@@ -431,7 +431,13 @@ impl RuntimeBuilder {
         //   `write_text*`. Reads pass through. Trace emission uses
         //   `JsonlTraceWriter` directly and is unaffected.
         let mut llms = self.llms;
-        let mut http = self.http_client_override.unwrap_or_else(HttpClient::new);
+        let mut http = self.http_client_override.unwrap_or_else(|| {
+            if self.http_policy.allow_list().is_empty() {
+                HttpClient::new()
+            } else {
+                HttpClient::with_egress_policy(self.http_policy.clone())
+            }
+        });
         let mut stores = self.stores;
         let mut io = IoRuntime::new();
         let db_registry = DbHandleRegistry::new();

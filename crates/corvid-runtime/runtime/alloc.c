@@ -87,6 +87,7 @@ typedef struct corvid_typeinfo {
 #define CORVID_TI_CYCLIC_CAPABLE 0x01u
 #define CORVID_TI_HAS_WEAK_REFS 0x02u
 #define CORVID_TI_IS_LIST 0x04u
+#define CORVID_TI_GROWABLE_LIST 0x40u
 #define CORVID_TI_LINEAR_CAPABLE 0x08u
 #define CORVID_TI_REGION_ALLOCATABLE 0x10u
 #define CORVID_TI_REUSE_SHAPE_HINT 0x20u
@@ -250,6 +251,16 @@ void* corvid_alloc_typed(long long payload_bytes, const corvid_typeinfo* typeinf
         exit(1);
     }
 
+    /* Collect before linking the new block: its caller has not initialized
+     * its payload or acquired a root for it yet. */
+    corvid_allocs_since_gc++;
+
+    if (corvid_gc_trigger_threshold > 0
+        && corvid_allocs_since_gc >= corvid_gc_trigger_threshold) {
+        corvid_allocs_since_gc = 0;
+        corvid_gc();
+    }
+
     size_t total = CORVID_TRACKING_BYTES + CORVID_HEADER_BYTES + (size_t)payload_bytes;
     corvid_tracking_node* node = corvid_pool_take(payload_bytes, typeinfo);
     char* raw = (char*)node;
@@ -285,18 +296,15 @@ void* corvid_alloc_typed(long long payload_bytes, const corvid_typeinfo* typeinf
     }
 
     corvid_alloc_count++;
-    corvid_allocs_since_gc++;
-
-    if (corvid_gc_trigger_threshold > 0
-        && corvid_allocs_since_gc >= corvid_gc_trigger_threshold) {
-        corvid_allocs_since_gc = 0;
-        corvid_gc();
-    }
-
     return (void*)((char*)h + CORVID_HEADER_BYTES);
 }
 
+extern void corvid_list_free_storage(void* payload);
+
 void corvid_free_block(corvid_header* h) {
+    if (h->typeinfo && (h->typeinfo->flags & CORVID_TI_GROWABLE_LIST)) {
+        corvid_list_free_storage((char*)h + CORVID_HEADER_BYTES);
+    }
     corvid_tracking_node* node =
         (corvid_tracking_node*)((char*)h - CORVID_TRACKING_BYTES);
     if (node->prev != NULL) {

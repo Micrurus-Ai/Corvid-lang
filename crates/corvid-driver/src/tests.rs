@@ -1190,7 +1190,14 @@ agent main() -> Bool:
         let root = scaffold_new_in(tmp.path(), "my_bot").unwrap();
         crate::scaffold::write_python_tool_template(&root).unwrap();
         assert!(root.join("tools.py").exists());
-        assert!(root.join("src/python_tools_example.cor").exists());
+        let example = root.join("src/python_tools_example.cor");
+        assert!(example.is_file());
+        #[cfg(feature = "python")]
+        {
+            let status = run_with_target(&example, RunTarget::Auto, None, &["Hello".into()], None)
+                .expect("run the generated Python tool example");
+            assert_eq!(status, 0);
+        }
     }
 
     /// Slice 33S2b — `corvid new` must scaffold the two

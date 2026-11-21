@@ -634,6 +634,7 @@ mod cost;
 mod grounded;
 mod trust;
 
+pub(crate) use analyze::python_call_target;
 pub use analyze::{analyze_effects, AgentEffectSummary};
 pub use compose::{canonical_dimension_name, compose_dimension_public};
 use compose::{

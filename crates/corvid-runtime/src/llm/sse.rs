@@ -16,61 +16,39 @@ pub(super) fn response_lines(
     resp: reqwest::Response,
     adapter: &'static str,
 ) -> impl Stream<Item = Result<String, RuntimeError>> + Send + 'static {
-    let bytes = resp.bytes_stream();
-    futures::stream::unfold(
-        (Box::pin(bytes), String::new(), std::collections::VecDeque::<String>::new(), false),
-        move |(mut bytes, mut buffer, mut pending, mut done)| async move {
-            loop {
-                if let Some(line) = pending.pop_front() {
-                    return Some((Ok(line), (bytes, buffer, pending, done)));
-                }
-                if done {
-                    return None;
-                }
-                match bytes.next().await {
-                    Some(Ok(chunk)) => {
-                        match std::str::from_utf8(&chunk) {
-                            Ok(text) => buffer.push_str(text),
-                            Err(_) => {
-                                // Provider chunks can split UTF-8;
-                                // fall back to lossy for the tail.
-                                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                            }
-                        }
-                        while let Some(pos) = buffer.find('\n') {
-                            let line: String =
-                                buffer.drain(..=pos).collect::<String>();
-                            let line = line.trim_end_matches(['\n', '\r']).to_string();
-                            if !line.is_empty() {
-                                pending.push_back(line);
-                            }
-                        }
-                    }
-                    Some(Err(e)) => {
-                        done = true;
-                        return Some((
-                            Err(RuntimeError::AdapterFailed {
-                                adapter: adapter.into(),
-                                message: format!("stream read failed: {e}"),
-                            }),
-                            (bytes, buffer, pending, done),
-                        ));
-                    }
-                    None => {
-                        done = true;
-                        let tail = buffer.trim().to_string();
-                        buffer.clear();
-                        if !tail.is_empty() {
-                            pending.push_back(tail);
-                        }
-                    }
+    async_stream::try_stream! {
+        let mut bytes = resp.bytes_stream();
+        let mut pending = Vec::new();
+        while let Some(chunk) = bytes.next().await {
+            let chunk = chunk.map_err(|e| RuntimeError::AdapterFailed {
+                adapter: adapter.into(), message: format!("stream read failed: {e}"),
+            })?;
+            for part in chunk.split_inclusive(|byte| *byte == b'\n') {
+                pending.extend_from_slice(part);
+                if part.ends_with(b"\n") {
+                    let line = decode_line(std::mem::take(&mut pending), adapter)?;
+                    if !line.is_empty() { yield line; }
                 }
             }
-        },
-    )
+        }
+        if !pending.is_empty() {
+            yield decode_line(pending, adapter)?;
+        }
+    }
+}
+
+fn decode_line(mut bytes: Vec<u8>, adapter: &str) -> Result<String, RuntimeError> {
+    while matches!(bytes.last(), Some(b'\n' | b'\r')) {
+        bytes.pop();
+    }
+    String::from_utf8(bytes).map_err(|_| RuntimeError::AdapterFailed {
+        adapter: adapter.into(),
+        message: "invalid UTF-8 in provider stream".into(),
+    })
 }
 
 /// Strip an SSE `data: ` prefix, if present.
 pub(super) fn sse_data(line: &str) -> Option<&str> {
-    line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:"))
+    line.strip_prefix("data: ")
+        .or_else(|| line.strip_prefix("data:"))
 }

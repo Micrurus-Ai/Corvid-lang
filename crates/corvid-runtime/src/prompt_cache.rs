@@ -64,6 +64,7 @@ mod tests {
         let args = vec![json!("ord_42")];
         let schema = json!({"type": "string"});
         let req = LlmRequestRef {
+            tool_turn: None,
             prompt: "answer",
             model: "mock",
             rendered: "Answer ord_42",

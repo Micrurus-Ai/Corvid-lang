@@ -139,6 +139,8 @@ pub unsafe extern "C" fn corvid_call_agent(
     let outcome = call_agent(&agent_name, &args_json);
     if !out_observation_handle.is_null() {
         *out_observation_handle = outcome.observation_handle;
+    } else {
+        observation_handles::release_handle(outcome.observation_handle);
     }
     if let Some(approval) = &outcome.approval {
         if !out_approval.is_null() {
@@ -148,9 +150,8 @@ pub unsafe extern "C" fn corvid_call_agent(
     if let Some(result_json) = &outcome.result_json {
         if let Ok(c_result) = CString::new(result_json.as_str()) {
             let len = result_json.len();
-            let raw = c_result.into_raw();
             if !out_result.is_null() {
-                *out_result = raw;
+                *out_result = c_result.into_raw();
             }
             if !out_result_len.is_null() {
                 *out_result_len = len;

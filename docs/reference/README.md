@@ -5,6 +5,8 @@ shape, or invariant. Read top-to-bottom rarely.
 
 ## Language
 
+- [Functions and methods](functions.md) — builtin method signatures and public standard-library calls.
+
 - [Grammar](grammar.md) — formal EBNF derived from
   `crates/corvid-syntax/src/parser/`.
 - [Lexer rules](lexer-rules.md) — line continuation, brackets,

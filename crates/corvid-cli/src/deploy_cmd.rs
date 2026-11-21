@@ -20,6 +20,7 @@ struct DeploymentPlan<'a> {
     health_path: &'static str,
     readiness_path: &'static str,
     port: u16,
+    connector_mode: Option<&'a str>,
 }
 
 impl<'a> DeploymentPlan<'a> {
@@ -32,6 +33,7 @@ impl<'a> DeploymentPlan<'a> {
             health_path: "/healthz",
             readiness_path: "/readyz",
             port: 8000,
+            connector_mode: None,
         }
     }
 }
@@ -101,12 +103,12 @@ struct OciLabels<'a> {
     source_sha256: String,
 }
 
-pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> {
+pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>, mode: Option<&str>) -> Result<()> {
     let app_name = app
         .file_name()
         .and_then(|name| name.to_str())
         .context("app path must end in a valid directory name")?;
-    let plan = DeploymentPlan::new(app_name);
+    let plan = DeploymentPlan { connector_mode: mode, ..DeploymentPlan::new(app_name) };
     let source = app.join("src").join("main.cor");
     let source_bytes =
         fs::read(&source).with_context(|| format!("read app source `{}`", source.display()))?;
@@ -136,6 +138,18 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     })?;
     let signing_key = load_signing_key(&KeySource::Env(signing_key_raw))
         .map_err(|err| anyhow::anyhow!("load CORVID_DEPLOY_SIGNING_KEY: {err}"))?;
+
+    let config = corvid_driver::load_corvid_config_for(&source);
+    let source_text = std::str::from_utf8(&source_bytes).context("decode Corvid source")?;
+    let ir = corvid_driver::compile_to_ir_with_config_at_path(source_text, &source, config.as_ref())
+        .map_err(|errors| anyhow::anyhow!("{}", corvid_driver::render_all_pretty(&errors, &source, source_text)))?;
+    let selected_mode = crate::run_cmd::parse_connector_mode(mode)?;
+    for connector in &ir.connectors {
+        let selected = selected_mode.as_ref().context("connector applications require an explicit deploy package --mode mock|real|replay")?;
+        if !connector.modes.contains(selected) {
+            anyhow::bail!("connector `{}` does not declare the requested mode {selected:?}", connector.name);
+        }
+    }
 
     // 43O: chain anchor for the deploy attestation. When `--cdylib`
     // is provided, the SHA-256 of the cdylib's bytes goes into the
@@ -714,26 +728,13 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     // future deploy variant needs in-container codegen, the release
     // archive must ship the staticlib alongside the binary.
     //
-    // Slice 33Q5 (anonymous-2026-06-04 round-2 P3.b): the rendered
-    // Dockerfile's `ARG CORVID_VERSION=...` default is pinned to the
-    // nightly-channel tag that matches the rendering binary's SHA +
-    // date — `nightly-{CORVID_BUILD_DATE}-{CORVID_BUILD_SHA}` — so
-    // the built image's `corvid --version` reproduces the binary
-    // the package was generated against, AND the image's CMD
-    // subcommand (`serve`) is guaranteed to exist (the prior
-    // default `latest` resolved to v0.1.0 stable which lacked
-    // `serve` — the reviewer's literal report). When either env
-    // var is the documented "unknown" fallback (corvid was built
-    // outside a git checkout — see `crates/corvid-cli/build.rs`),
-    // the default falls back to the literal string `nightly` and
-    // the Dockerfile's URL-resolver block queries the GitHub API
-    // for the latest nightly tag (same logic install.sh uses).
-    // Operators can always override via
-    // `--build-arg CORVID_VERSION=<tag>` (e.g. `v0.1.0` or
-    // `nightly-2026-06-04-d23d381`).
+    // Hosted builds carry their release tag. Source builds use their nightly metadata.
+    let mode_env = plan.connector_mode.map(|mode| format!("ENV CORVID_CONNECTOR_MODE={mode}\n")).unwrap_or_default();
     let build_sha = env!("CORVID_BUILD_SHA");
     let build_date = env!("CORVID_BUILD_DATE");
-    let default_corvid_version = if build_sha == "unknown" || build_date == "unknown" {
+    let default_corvid_version = if let Some(tag) = option_env!("CORVID_RELEASE_TAG") {
+        tag.to_owned()
+    } else if build_sha == "unknown" || build_date == "unknown" {
         "nightly".to_string()
     } else {
         format!("nightly-{build_date}-{build_sha}")
@@ -760,7 +761,9 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     // root.
     let mut copy_lines = String::new();
     copy_lines.push_str("COPY src ./src\n");
-    copy_lines.push_str("COPY corvid.toml ./corvid.toml\n");
+    if app_root.join("corvid.toml").is_file() {
+        copy_lines.push_str("COPY corvid.toml ./corvid.toml\n");
+    }
     if app_root.join("tools.py").is_file() {
         copy_lines.push_str("COPY tools.py ./tools.py\n");
     }
@@ -777,26 +780,21 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     format!(
         r#"# syntax=docker/dockerfile:1
 #
-# CORVID_VERSION default: pinned to the rendering binary's nightly
-# tag (`nightly-<commit-date>-<short-sha>`) for reproducibility AND
-# CLI-surface stability. Override with `--build-arg
-# CORVID_VERSION=<tag>` to use a specific release (e.g. `v0.1.0`,
-# `nightly-2026-06-04-d23d381`), the literal string `latest` for
-# the latest stable, or `nightly` for the latest nightly via the
-# GitHub Releases API. See slice 33Q5 in
-# `crates/corvid-cli/src/deploy_cmd.rs::render_dockerfile` for the
-# rationale.
+# Hosted builds use the release that produced this CLI. Source builds use a nightly.
+# Override with `--build-arg CORVID_VERSION=<tag>` to select another release.
 ARG CORVID_VERSION={default_corvid_version}
 ARG CORVID_REPO=Micrurus-Ai/Corvid-lang
+ARG CORVID_DISTRIBUTION=corvid-installer
 
 FROM debian:bookworm-slim AS corvid-installer
 ARG CORVID_VERSION
 ARG CORVID_REPO
+ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
-    target=x86_64-unknown-linux-gnu; \
+    case "$TARGETARCH" in amd64) target=x86_64-unknown-linux-gnu ;; arm64) target=aarch64-unknown-linux-gnu ;; *) exit 1 ;; esac; \
     asset=corvid-${{target}}.tar.gz; \
     if [ "$CORVID_VERSION" = "latest" ]; then \
       url="https://github.com/${{CORVID_REPO}}/releases/latest/download/${{asset}}"; \
@@ -824,14 +822,33 @@ RUN set -eux; \
     mv "/opt/corvid-${{target}}" /opt/corvid; \
     test -x /opt/corvid/bin/corvid
 
-FROM gcr.io/distroless/cc-debian12
+FROM ${{CORVID_DISTRIBUTION}} AS corvid-distribution
+
+FROM debian:bookworm-slim AS python-runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libpython3.11 \
+ && cp -L /usr/lib/*-linux-gnu/libpython3.11.so.1.0 /libpython3.11.so.1.0
+# Older releases can omit the Python package or dependency inventory.
+RUN --mount=from=corvid-distribution,source=/opt/corvid,target=/distribution \
+    set -eu; mkdir /licenses /runtime-py; \
+    if [ -d /distribution/runtime-py/corvid_runtime ]; then \
+        cp -R /distribution/runtime-py/corvid_runtime /runtime-py/; \
+    fi; \
+    for file in /distribution/LICENSE* /distribution/lib/corvid-rust-notices.txt; do \
+        if [ -f "$file" ]; then cp "$file" /licenses/; fi; \
+    done
+
+FROM gcr.io/distroless/python3-debian12
+COPY --from=python-runtime /libpython3.11.so.1.0 /usr/lib/libpython3.11.so.1.0
+COPY --from=python-runtime /licenses/ /usr/share/doc/corvid/
+COPY --from=python-runtime /runtime-py/ /opt/corvid/runtime-py/
+ENV PYTHONPATH=/opt/corvid/runtime-py
 LABEL org.opencontainers.image.title="{app_name}"
 LABEL dev.corvid.app="{app_name}"
 ENV CORVID_HOME=/opt/corvid
-WORKDIR /app
+{mode_env}WORKDIR /app
 
-COPY --from=corvid-installer /opt/corvid/bin/corvid /usr/local/bin/corvid
-COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
+COPY --from=corvid-distribution /opt/corvid/bin/corvid /usr/local/bin/corvid
+COPY --from=corvid-distribution /opt/corvid/std /opt/corvid/std
 
 # User app sources. `src/` and `corvid.toml` are always emitted
 # because they are the structural minimum a `corvid new` app
@@ -841,7 +858,7 @@ COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
 {copy_block}
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD ["/usr/local/bin/corvid", "check", "{container_entrypoint}"]
+    CMD ["/usr/local/bin/corvid", "ready", "--port", "{port}"]
 ENTRYPOINT ["/usr/local/bin/corvid"]
 CMD ["serve", "{container_entrypoint}", "--listen", "0.0.0.0:{port}"]
 "#
@@ -1033,7 +1050,6 @@ fn render_compose(
 ) -> String {
     let app_name = plan.app_name;
     let port = plan.port;
-    let container_entrypoint = plan.container_entrypoint;
     format!(
         r#"services:
   {app_name}:
@@ -1051,7 +1067,7 @@ fn render_compose(
     volumes:
       - {app_name}-data:/data
     healthcheck:
-      test: ["CMD", "corvid", "check", "{container_entrypoint}"]
+      test: ["CMD", "/usr/local/bin/corvid", "ready", "--port", "{port}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1572,11 +1588,7 @@ mod tests {
             "Dockerfile must always emit `COPY src` — that's the \
              structural minimum of any Corvid app. got:\n{dockerfile}"
         );
-        assert!(
-            dockerfile.contains("COPY corvid.toml ./corvid.toml"),
-            "Dockerfile must always emit `COPY corvid.toml` — every \
-             Corvid app has one. got:\n{dockerfile}"
-        );
+        assert!(!dockerfile.contains("COPY corvid.toml"));
 
         // Optional COPYs MUST be absent when the source path doesn't
         // exist — the load-bearing 33Q4 assertion. If these fire,
@@ -1626,24 +1638,7 @@ mod tests {
         }
     }
 
-    /// 33Q5 acceptance — anonymous-2026-06-04 round-2 P3.b: the
-    /// rendered Dockerfile's `ARG CORVID_VERSION` default must be
-    /// the rendering binary's nightly-tag form
-    /// (`nightly-<commit-date>-<short-sha>`) so the built image's
-    /// `corvid --version` reproduces the binary the package was
-    /// generated against AND the image's `CMD` subcommand (`serve`)
-    /// is guaranteed present. Pre-33Q5 the default was `latest`,
-    /// which resolved to the latest stable (v0.1.0 today) — and
-    /// v0.1.0 lacked the `serve` subcommand, so the rendered image's
-    /// entrypoint was a command its own binary didn't have.
-    ///
-    /// The test reads the same compile-time env vars the renderer
-    /// reads (`CORVID_BUILD_SHA` + `CORVID_BUILD_DATE`, set by
-    /// `crates/corvid-cli/build.rs`) and asserts the constructed
-    /// default matches what `render_dockerfile` emits. If either
-    /// env is `unknown`, the expected default falls back to
-    /// `nightly` (the always-works literal that the URL-resolver's
-    /// API-query branch handles).
+    /// Pin hosted packages to their release and retain the source-build nightly fallback.
     #[test]
     fn deploy_dockerfile_pins_corvid_version_to_rendering_binary_sha() {
         let app_root = tempdir_with_all_optional_paths();
@@ -1652,7 +1647,9 @@ mod tests {
 
         let build_sha = env!("CORVID_BUILD_SHA");
         let build_date = env!("CORVID_BUILD_DATE");
-        let expected_default = if build_sha == "unknown" || build_date == "unknown" {
+        let expected_default = if let Some(tag) = option_env!("CORVID_RELEASE_TAG") {
+            tag.to_owned()
+        } else if build_sha == "unknown" || build_date == "unknown" {
             "nightly".to_string()
         } else {
             format!("nightly-{build_date}-{build_sha}")
@@ -1660,12 +1657,8 @@ mod tests {
         let expected_arg_line = format!("ARG CORVID_VERSION={expected_default}");
 
         assert!(
-            dockerfile.contains(&expected_arg_line),
-            "Dockerfile MUST default ARG CORVID_VERSION to the rendering \
-             binary's nightly tag (`{expected_default}`) so the built \
-             image reproduces the SHA + has the same CLI surface. \
-             Pre-33Q5 the default was `latest` which resolved to v0.1.0 \
-             stable (lacks `serve`). got Dockerfile:\n{dockerfile}"
+            dockerfile.lines().any(|line| line == expected_arg_line),
+            "Missing expected Dockerfile argument: {expected_arg_line}"
         );
 
         // The URL-resolver block MUST handle all three CORVID_VERSION
@@ -1752,7 +1745,7 @@ mod tests {
             std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", "0".repeat(64));
         }
 
-        let result = super::run_package(app_dir.path(), &out, None);
+        let result = super::run_package(app_dir.path(), &out, None, None);
 
         // Restore env BEFORE assertions.
         match prior {
@@ -1827,7 +1820,7 @@ mod tests {
             std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
         }
 
-        let result = super::run_package(app_dir.path(), &out, None);
+        let result = super::run_package(app_dir.path(), &out, None, None);
 
         // Restore prior env BEFORE assertions so a failing assertion
         // doesn't leak into other tests' environments.
@@ -1914,7 +1907,7 @@ mod tests {
             std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", "0".repeat(64));
         }
 
-        let result = super::run_package(app_dir.path(), &out, None);
+        let result = super::run_package(app_dir.path(), &out, None, None);
 
         match prior {
             Some(v) => unsafe { std::env::set_var("CORVID_DEPLOY_SIGNING_KEY", v) },
@@ -1989,7 +1982,7 @@ mod tests {
             std::env::remove_var("CORVID_DEPLOY_SIGNING_KEY");
         }
 
-        let result = super::run_package(app_dir.path(), &out, None);
+        let result = super::run_package(app_dir.path(), &out, None, None);
 
         if let Some(v) = prior_env {
             unsafe {

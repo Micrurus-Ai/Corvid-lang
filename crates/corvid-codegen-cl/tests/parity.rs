@@ -70,7 +70,12 @@ fn test_tools_lib_path() -> PathBuf {
     } else {
         "libcorvid_test_tools.a"
     };
-    let path = workspace_root.join("target").join("release").join(name);
+    // Cargo places the integration test in <profile>/deps. Prefer the
+    // sibling library built for this profile, including custom target dirs.
+    let path = std::env::current_exe().ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.join(name)))
+        .filter(|lib| lib.is_file())
+        .unwrap_or_else(|| workspace_root.join("target").join("release").join(name));
     // `corvid_test_tools.lib` already bundles `corvid-runtime` as a
     // transitive Rust dep (along with the C runtime objects); routing
     // the linker through this single Rust staticlib avoids the

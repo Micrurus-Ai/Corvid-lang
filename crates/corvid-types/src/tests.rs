@@ -32,6 +32,31 @@ fn checked_with_file(src: &str) -> (corvid_ast::File, corvid_resolve::Resolved, 
 }
 
 #[test]
+fn inline_result_uses_parameter_context_through_nested_constructors() {
+    let source = r#"
+agent consume(value: Result<Result<Int, String>, Bool>) -> Int:
+    return 1
+
+agent caller() -> Result<Int, Float>:
+    return Ok(consume(Ok(Err("missing"))))
+"#;
+    let checked = check(source);
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
+    for (literal, expected) in [
+        ("Err(\"missing\")", "Result<Int, String>"),
+        ("Ok(Err(\"missing\"))", "Result<Result<Int, String>, Bool>"),
+    ] {
+        let start = source.find(literal).unwrap();
+        let span = corvid_ast::Span::new(start, start + literal.len());
+        assert_eq!(checked.types[&span].display_name(), expected);
+    }
+    let invalid = check(&source.replace("Err(\"missing\")", "Err(true)"));
+    assert!(invalid.errors.iter().any(|e| {
+        matches!(e.kind, TypeErrorKind::TypeMismatch { .. })
+    }));
+}
+
+#[test]
 fn list_concat_typechecks_for_compatible_lists() {
     let src = r#"
 agent flags() -> List<String>:
@@ -1734,6 +1759,25 @@ agent ok(order: String) -> Job:
     );
     let c = check(&under);
     assert!(c.errors.is_empty(), "errors: {:?}", c.errors);
+}
+
+#[test]
+fn function_calling_prompt_reserves_a_bounded_conversation() {
+    let src = r#"effect model_call:
+    cost: $0.10
+
+fn double(n: Int) -> Int:
+    return n + n
+
+prompt solve(action: (Int) -> Int) -> String uses model_call:
+    "Compute the answer."
+
+@budget($0.50)
+agent main() -> String:
+    return solve(double)
+"#;
+    assert!(has_effect_violation(&check(src), "cost"));
+    assert!(check(&src.replace("$0.50", "$1.00")).errors.is_empty());
 }
 
 #[test]
@@ -6662,6 +6706,78 @@ agent f() -> Bool:
         "got: {:?}",
         checked.errors
     );
+}
+
+#[test]
+fn python_call_effects_follow_signatures_and_agent_calls() {
+    let src = r#"effect service_lookup:
+    cost: $0.30
+
+import python "catalog" as catalog effects: service_lookup:
+    fn lookup(key: String) -> String
+
+agent lookup_one() -> String:
+    return catalog.lookup("a")
+
+@budget($0.50)
+agent main() -> String:
+    return lookup_one() + lookup_one()
+
+fn bad() -> String:
+    return catalog.lookup("b")
+
+agent local(catalog: String) -> Int:
+    return catalog.length()
+"#;
+    let (file, resolved, checked) = checked_with_file(src);
+    assert!(resolved.errors.is_empty(), "{:?}", resolved.errors);
+    assert!(has_effect_violation(&checked, "cost"), "{:?}", checked.errors);
+    assert!(checked.errors.iter().any(|error| matches!(&error.kind,
+        TypeErrorKind::FnBodyNotPure { name, what } if name == "bad" && what.contains("catalog.lookup")
+    )));
+    let registry = crate::effects::EffectRegistry::from_decls(&[]);
+    for summary in crate::effects::analyze_effects(&file, &resolved, &registry) {
+        if summary.agent_name == "local" {
+            assert!(summary.inferred_effects.is_empty());
+        } else {
+            assert_eq!(summary.inferred_effects, ["service_lookup"]);
+        }
+    }
+    assert!(!has_effect_violation(&check(&src.replace("$0.50", "$0.60")), "cost"));
+}
+
+#[test]
+fn python_signature_checks_aliased_arguments_and_return_type() {
+    let checked = check(r#"
+import python "math" as numbers effects: pure:
+    fn gcd(left: Int, right: Int) -> Int
+
+agent main() -> String:
+    return numbers.gcd("18", 12)
+"#);
+    assert!(checked.errors.iter().any(|e| matches!(&e.kind,
+        TypeErrorKind::TypeMismatch { expected, got, context }
+        if expected == "Int" && got == "String" && context.contains("numbers.gcd")
+    )), "{:?}", checked.errors);
+    assert!(checked.errors.iter().any(|e| matches!(&e.kind,
+        TypeErrorKind::ReturnTypeMismatch { expected, got }
+        if expected == "String" && got == "Int"
+    )), "{:?}", checked.errors);
+}
+
+#[test]
+fn direct_python_call_reports_the_host_function() {
+    let checked = check(r#"
+import python "math" as numbers effects: pure
+
+agent main() -> Int:
+    return numbers.gcd(18, 12)
+"#);
+    assert!(checked.errors.iter().any(|error| matches!(
+        &error.kind,
+        TypeErrorKind::DirectPythonCallUnsupported { module, member }
+            if module == "math" && member == "gcd"
+    )), "{:?}", checked.errors);
 }
 
 #[test]

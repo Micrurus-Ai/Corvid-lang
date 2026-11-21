@@ -1,0 +1,26 @@
+type ParsedNumbers:
+    numbers: List<Int>
+    rejected: List<String>
+
+agent record_number(numbers: List<Int>, number: Int) -> Nothing:
+    numbers.append(number)
+
+agent parse_numbers(inputs: List<String>) -> ParsedNumbers:
+    numbers: List<Int> = []
+    rejected: List<String> = []
+    for text in inputs:
+        match text.parse_int():
+            Ok(number) -> record_number(numbers, number)
+            Err(_) -> rejected.append(text)
+    return ParsedNumbers(numbers, rejected)
+
+agent main() -> Bool:
+    empty = parse_numbers([])
+    no_entries = empty.numbers.length() == 0 and empty.rejected.length() == 0
+    bad = "ba" + "d"
+    result = parse_numbers([" 41 ", bad, "0", "", "-3", "9223372036854775808"])
+    numbers = [] + result.numbers + []
+    valid = numbers[0] == 41 and numbers[1] == 0 and numbers[2] == -3
+    invalid = result.rejected[0] == "bad" and result.rejected[1] == "" and result.rejected[2] == "9223372036854775808"
+    sizes = result.numbers.length() == 3 and result.rejected.length() == 3
+    return valid and invalid and sizes and no_entries

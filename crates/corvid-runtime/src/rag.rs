@@ -15,6 +15,32 @@ pub use types::{
     RagEmbeddingRecord, RagSearchHit,
 };
 
+pub(crate) fn validate_embeddings(
+    mut vectors: Vec<EmbeddingVector>,
+    count: usize,
+) -> Result<Vec<EmbeddingVector>, crate::errors::RuntimeError> {
+    if vectors.len() != count {
+        return Err(crate::errors::RuntimeError::Other(format!(
+            "expected {count} embedding vectors, received {}",
+            vectors.len()
+        )));
+    }
+    vectors.sort_by_key(|v| v.index);
+    let dimension = vectors.first().map_or(0, |v| v.values.len());
+    for (index, vector) in vectors.iter().enumerate() {
+        if vector.index != index
+            || dimension == 0
+            || vector.values.len() != dimension
+            || vector.values.iter().any(|n| !n.is_finite())
+        {
+            return Err(crate::errors::RuntimeError::Other(format!(
+                "invalid embedding vector at input {index}"
+            )));
+        }
+    }
+    Ok(vectors)
+}
+
 pub(super) fn stable_id(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -36,6 +62,59 @@ mod tests {
     use super::*;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn lexical_search_ranks_all_matching_chunks_before_applying_limit() {
+        let mut index = RagSqliteIndex::open_in_memory().unwrap();
+        for n in 0..141 {
+            let text = if n < 70 {
+                "blue"
+            } else if n < 140 {
+                "green"
+            } else {
+                "blue green"
+            };
+            let doc =
+                document_from_text(&format!("doc{n:03}"), "notes", "text/plain", text).unwrap();
+            index
+                .replace_document(&doc, &chunk_document(&doc, 40, 0).unwrap(), &[])
+                .unwrap();
+        }
+        assert_eq!(
+            index.search_terms("green blue", 1).unwrap()[0].text,
+            "blue green"
+        );
+        assert_eq!(index.search_terms("green blue", 150).unwrap().len(), 141);
+    }
+
+    #[test]
+    fn trimmed_chunks_advance_across_a_wide_gap() {
+        let doc = document_from_text("gap", "notes", "text/plain", "a     b").unwrap();
+        let chunks = chunk_document(&doc, 5, 1).unwrap();
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|c| (c.text.as_str(), c.start_char))
+                .collect::<Vec<_>>(),
+            [("a", 0), ("b", 6)]
+        );
+    }
+
+    #[test]
+    fn embedding_batches_keep_the_input_mapping_and_shape() {
+        let vector = |index, values| EmbeddingVector { index, values };
+        let ordered =
+            validate_embeddings(vec![vector(1, vec![2.0]), vector(0, vec![1.0])], 2).unwrap();
+        assert_eq!(ordered[0].values, [1.0]);
+        for invalid in [
+            vec![vector(0, vec![1.0])],
+            vec![vector(1, vec![1.0]), vector(1, vec![1.0])],
+            vec![vector(0, vec![1.0]), vector(1, vec![0.0, 1.0])],
+            vec![vector(0, vec![f32::INFINITY]), vector(1, vec![1.0])],
+        ] {
+            assert!(validate_embeddings(invalid, 2).is_err());
+        }
+    }
 
     #[test]
     fn chunk_document_preserves_provenance_windows() {

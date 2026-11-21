@@ -168,7 +168,9 @@ pub fn link_binary(
         } else if cfg!(target_os = "linux") {
             // Linux-specific libs rustls / reqwest pull in when the
             // platform crypto provider is active.
-            cmd.arg("-lutil");
+            // The CLI archive may include optional Python interop. Keep only
+            // sections reachable from this native program's entry points.
+            cmd.arg("-Wl,--gc-sections").arg("-lutil");
         }
     }
 

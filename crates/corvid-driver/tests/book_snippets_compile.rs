@@ -121,6 +121,9 @@ fn corvid_fences(markdown: &str) -> Vec<Fence> {
 #[test]
 fn every_corvid_block_in_guarded_chapters_compiles() {
     let root = repo_root();
+    // The examples use the scaffold layout: main.cor beside the std directory.
+    let entry = root.join("main.cor");
+    let compile = |source: &str| corvid_driver::compile_to_ir_with_config_at_path(source, &entry, None);
     let mut failures = Vec::new();
     for chapter in GUARDED_CHAPTERS {
         let path = root.join(chapter);
@@ -129,17 +132,15 @@ fn every_corvid_block_in_guarded_chapters_compiles() {
         for fence in corvid_fences(&text) {
             match fence.tag.as_str() {
                 "corvid" => {
-                    let compiled = corvid_driver::compile(&fence.body);
-                    if !compiled.ok() {
+                    if let Err(errors) = compile(&fence.body) {
                         failures.push(format!(
                             "{chapter}:{} — `corvid` block fails to compile:\n{:#?}",
-                            fence.start_line, compiled.diagnostics
+                            fence.start_line, errors
                         ));
                     }
                 }
                 "corvid-error" => {
-                    let compiled = corvid_driver::compile(&fence.body);
-                    if compiled.ok() {
+                    if compile(&fence.body).is_ok() {
                         failures.push(format!(
                             "{chapter}:{} — `corvid-error` block COMPILED CLEAN. \
                              The book claims this program does not compile; either \

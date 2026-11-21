@@ -27,7 +27,7 @@ This is the one thing Python + Pydantic AI structurally cannot provide.
 - **Standalone.** A single native binary. No Python, no other runtime, nothing else to install.
 - **Natively fast.** Source code is compiled ahead-of-time to machine code via Cranelift. Non-LLM code runs at roughly Rust speed.
 - **AI-native.** The language features (`agent`, `tool`, `prompt`, `approve`, `dangerous`) are built into the compiler, not bolted on as libraries.
-- **Python interop on demand.** Users who need a Python library write `import python "pandas" as pd` and the runtime loads CPython via a lazy FFI bridge. Users who don't write that never touch Python.
+- **Python interoperability.** A served project can register typed tools in `tools.py`. The interpreter also executes synchronous Python functions through typed import aliases.
 
 **What is NOT v1.0:**
 
@@ -274,7 +274,7 @@ It exposes:
 - **Approval flow** — `approve_gate` blocks a running agent until a response arrives via stdin prompt, programmatic hook, or (v0.3+) webhook resumption.
 - **Trace emission** — structured JSONL events (`target/trace/*.jsonl`) written without blocking agent execution.
 - **Memory primitives** — `session`, `memory` backed by SQLite (v0.3+).
-- **Python FFI** — an optional PyO3 bridge is compiled in. Cold on startup; lazy-loads CPython only if the program contains `import python "..."`. Users without Python imports never pay for Python.
+- **Python FFI** uses a feature-gated PyO3 bridge. The server loads Python implementations when it discovers a project tool module.
 
 ### Legacy Python runtime
 
@@ -310,7 +310,7 @@ corvid-runtime/src/interop/
 └── ffi.rs          # v0.3 — C ABI
 ```
 
-### User-facing import syntax
+### Proposed direct Python import syntax
 
 ```
 import python "anthropic" as anthropic

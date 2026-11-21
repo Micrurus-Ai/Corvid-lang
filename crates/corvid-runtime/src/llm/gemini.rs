@@ -92,10 +92,7 @@ impl LlmAdapter for GeminiAdapter {
                     req.messages
                         .iter()
                         .filter(|m| m.role != "system")
-                        .map(|m| {
-                            let role = if m.role == "assistant" { "model" } else { "user" };
-                            json!({"role": role, "parts": [{"text": m.content}]})
-                        })
+                        .map(message_json)
                         .collect(),
                 )
             };
@@ -169,10 +166,7 @@ impl LlmAdapter for GeminiAdapter {
                     req.messages
                         .iter()
                         .filter(|m| m.role != "system")
-                        .map(|m| {
-                            let role = if m.role == "assistant" { "model" } else { "user" };
-                            json!({"role": role, "parts": [{"text": m.content}]})
-                        })
+                        .map(message_json)
                         .collect(),
                 )
             };
@@ -313,6 +307,15 @@ fn extract_usage(parsed: &Value) -> TokenUsage {
         completion_tokens,
         total_tokens,
     }
+}
+
+fn message_json(m: &crate::llm::LlmMessage) -> serde_json::Value {
+    let role = if m.role == "assistant" { "model" } else { "user" };
+    let mut parts = vec![json!({"text":m.content})];
+    parts.extend(m.images.iter().map(|image| json!({
+        "inlineData":{"mimeType":image.media_type,"data":image.data_base64}
+    })));
+    json!({"role":role, "parts":parts})
 }
 
 #[cfg(test)]

@@ -13,16 +13,21 @@ use corvid_ir::{
 };
 
 /// Emit the full `IrFile` as a single Python module source string.
-pub fn emit(ir: &IrFile) -> String {
+pub fn emit(ir: &IrFile) -> Result<String, Vec<(corvid_ast::Span, String)>> {
+    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
+        return Err(vec![(tool.span, "typed Python imports".into())]);
+    }
     let mut cg = Codegen {
         out: Emitter::new(),
+        errors: Vec::new(),
     };
     cg.emit_module(ir);
-    cg.out.finish()
+    if cg.errors.is_empty() { Ok(cg.out.finish()) } else { Err(cg.errors) }
 }
 
 struct Codegen {
     out: Emitter,
+    errors: Vec<(corvid_ast::Span, String)>,
 }
 
 impl Codegen {
@@ -55,6 +60,10 @@ impl Codegen {
         self.out.writeln(
             "from corvid_runtime import tool_call, approve_gate, llm_call, register_tools, register_prompts",
         );
+        self.out.blank_line();
+        for line in include_str!("numeric.py").lines() {
+            self.out.writeln(line);
+        }
         self.out.blank_line();
         self.out.writeln("def __corvid_wrap_i64(value):");
         self.out.indent();
@@ -201,11 +210,7 @@ impl Codegen {
 
     fn emit_stmt(&mut self, s: &IrStmt) {
         match s {
-            IrStmt::Assign { .. } => {
-                self.out.writeln(
-                    "raise NotImplementedError(\"place assignment (x.field = v / xs[i] = v / +=) is interpreter-only in 45b\")",
-                );
-            }
+            IrStmt::Assign { span, .. } => self.errors.push((*span, "assign".into())),
             IrStmt::Let { name, value, .. } => {
                 self.out.write(&format!("{} = ", name));
                 self.emit_expr(value);
@@ -292,16 +297,8 @@ impl Codegen {
                 }
                 self.out.dedent();
             }
-            IrStmt::Parallel { .. } => {
-                self.out.writeln(
-                    "raise NotImplementedError(\"parallel blocks are interpreter-only in 46e\")",
-                );
-            }
-            IrStmt::Destructure { .. } => {
-                self.out.writeln(
-                    "raise NotImplementedError(\"destructuring is interpreter-only in 45n\")",
-                );
-            }
+            IrStmt::Parallel { span, .. } => self.errors.push((*span, "parallel".into())),
+            IrStmt::Destructure { span, .. } => self.errors.push((*span, "destructure".into())),
             IrStmt::Break { .. } => self.out.writeln("break"),
             IrStmt::Continue { .. } => self.out.writeln("continue"),
             IrStmt::Pass { .. } => self.out.writeln("pass"),
@@ -323,34 +320,22 @@ impl Codegen {
     fn emit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
             IrExprKind::Match { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"match is interpreter-only in 45i\"))",
-                );
+                self.errors.push((e.span, "match".into()));
             }
             IrExprKind::Lambda { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"lambdas are interpreter-only in 45j\"))",
-                );
+                self.errors.push((e.span, "lambdas".into()));
             }
             IrExprKind::StructLiteral { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"named struct literals are interpreter-only in 45n\"))",
-                );
+                self.errors.push((e.span, "named struct literals".into()));
             }
             IrExprKind::PageNew { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
-                );
+                self.errors.push((e.span, "Page<Item>".into()));
             }
             IrExprKind::MapLiteral { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",
-                );
+                self.errors.push((e.span, "Map<K, V>".into()));
             }
             IrExprKind::BuiltinMethod { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"builtin methods are interpreter-only in 45c\"))",
-                );
+                self.errors.push((e.span, "builtin methods".into()));
             }
             IrExprKind::Literal(lit) => self.emit_literal(lit),
             IrExprKind::Local { name, .. } => self.out.write(name),
@@ -359,7 +344,7 @@ impl Codegen {
                 kind,
                 callee_name,
                 args,
-            } => self.emit_call(kind, callee_name, args),
+            } => self.emit_call(kind, callee_name, args, e.span),
             IrExprKind::FieldAccess { target, field } => {
                 self.emit_expr(target);
                 self.out.write(&format!(".{}", field));
@@ -369,6 +354,30 @@ impl Codegen {
                 self.out.write("[");
                 self.emit_expr(index);
                 self.out.write("]");
+            }
+            IrExprKind::BinOp { op, left, right } if e.ty == corvid_types::Type::Float
+                && matches!(op, BinaryOp::Div | BinaryOp::Mod) => {
+                self.out.write(if *op == BinaryOp::Div { "__corvid_fdiv(" } else { "__corvid_frem(" });
+                self.emit_expr(left);
+                self.out.write(", ");
+                self.emit_expr(right);
+                self.out.write(")");
+            }
+            IrExprKind::BinOp { op, left, right } if e.ty == corvid_types::Type::Int
+                && matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) => {
+                self.out.write("__corvid_checked_i64(");
+                if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+                    self.out.write(if *op == BinaryOp::Div { "__corvid_div(" } else { "__corvid_rem(" });
+                    self.emit_expr(left);
+                    self.out.write(", ");
+                    self.emit_expr(right);
+                    self.out.write(")");
+                } else {
+                    self.emit_expr(left);
+                    self.out.write(&format!(" {} ", binary_op_str(*op)));
+                    self.emit_expr(right);
+                }
+                self.out.write(")");
             }
             IrExprKind::BinOp { op, left, right } => {
                 self.out.write("(");
@@ -382,6 +391,11 @@ impl Codegen {
                 self.emit_expr(left);
                 self.out.write(&format!(" {} ", binary_op_str(*op)));
                 self.emit_expr(right);
+                self.out.write(")");
+            }
+            IrExprKind::UnOp { op: UnaryOp::Neg, operand } if e.ty == corvid_types::Type::Int => {
+                self.out.write("__corvid_checked_i64(-");
+                self.emit_expr(operand);
                 self.out.write(")");
             }
             IrExprKind::UnOp { op, operand } => {
@@ -403,9 +417,7 @@ impl Codegen {
                 self.out.write("]");
             }
             IrExprKind::WeakNew { .. } | IrExprKind::WeakUpgrade { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Weak codegen lands in 17g-py\"))",
-                );
+                self.errors.push((e.span, "Weak".into()));
             }
             IrExprKind::StreamSplitBy { .. }
             | IrExprKind::StreamMerge { .. }
@@ -414,9 +426,7 @@ impl Codegen {
             | IrExprKind::ResumeStream { .. }
             | IrExprKind::Ask { .. }
             | IrExprKind::Choose { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"human-boundary codegen is interpreter-only\"))",
-                );
+                self.errors.push((e.span, "human-boundary".into()));
             }
             // Result/Option construction and `?` / `try-retry`
             // control flow are not implemented in the Python
@@ -428,26 +438,18 @@ impl Codegen {
             // generated source. The interpreter tier handles them
             // fully (Dev B's 18a-18c work).
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Result codegen is not implemented for Python yet\"))",
-                );
+                self.errors.push((e.span, "Result".into()));
             }
             IrExprKind::OptionSome { .. } | IrExprKind::OptionNone => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Option codegen is not implemented for Python yet\"))",
-                );
+                self.errors.push((e.span, "Option".into()));
             }
             IrExprKind::TryPropagate { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"`?` codegen is not implemented for Python yet\"))",
-                );
+                self.errors.push((e.span, "`?`".into()));
             }
             // trusted(expr) is compile-time only: transpile the inner.
             IrExprKind::TrustBoundary { inner } => self.emit_expr(inner),
             IrExprKind::TryRetry { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"`try ... retry` codegen is not implemented for Python yet\"))",
-                );
+                self.errors.push((e.span, "`try ... retry`".into()));
             }
             // `replay` expressions require runtime pattern-dispatch
             // over a recorded trace; the Python transpile tier has
@@ -458,24 +460,18 @@ impl Codegen {
             // refuses cleanly if a user tries to transpile a replay
             // program rather than silently evaluating only the else.
             IrExprKind::Replay { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"`replay` codegen is not implemented for Python yet\"))",
-                );
+                self.errors.push((e.span, "`replay`".into()));
             }
         }
     }
 
-    fn emit_call(&mut self, kind: &IrCallKind, name: &str, args: &[IrExpr]) {
+    fn emit_call(&mut self, kind: &IrCallKind, name: &str, args: &[IrExpr], span: corvid_ast::Span) {
         match kind {
             IrCallKind::EnumConstructor { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"sum-type variants are interpreter-only in 45h\"))",
-                );
+                self.errors.push((span, "sum-type variants".into()));
             }
             IrCallKind::ClosureLocal { .. } => {
-                self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"closure calls are interpreter-only in 45j\"))",
-                );
+                self.errors.push((span, "closure calls".into()));
             }
             IrCallKind::Tool { .. } => {
                 self.out
@@ -495,10 +491,7 @@ impl Codegen {
                 self.out.write(")");
             }
             IrCallKind::Fixture { .. } => {
-                self.out.write(&format!(
-                    "(_ for _ in ()).throw(NotImplementedError(\"test fixture `{}` is interpreter-only\"))",
-                    escape_string(name)
-                ));
+                self.errors.push((span, format!("test fixture {name}")));
             }
             IrCallKind::StructConstructor { .. } => {
                 // User-declared types are emitted as `@dataclass`es.

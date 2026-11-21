@@ -174,6 +174,9 @@ fn upper_camel(name: &str) -> String {
 }
 
 fn type_declaration(ty: &ContractType) -> String {
+    if let Some(target) = &ty.alias_of {
+        return format!("export type {} = {};\n", ty.name, ts_type(target));
+    }
     if !ty.variants.is_empty() {
         return sum_type_declaration(ty);
     }

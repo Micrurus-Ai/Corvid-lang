@@ -75,6 +75,7 @@ async fn replay_quarantines_llm_registry_direct_calls() {
     assert!(!runtime.replay_uses_live_llm());
 
     let req = LlmRequestRef {
+        tool_turn: None,
         prompt: "p",
         model: "mock-1",
         rendered: "Hello",
@@ -222,6 +223,7 @@ async fn differential_replay_does_not_quarantine_llm_registry() {
     assert!(!runtime.io().is_write_quarantined());
 
     let req = LlmRequestRef {
+        tool_turn: None,
         prompt: "p",
         model: "mock-1",
         rendered: "Hello",

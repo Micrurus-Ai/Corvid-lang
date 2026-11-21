@@ -1,0 +1,12 @@
+# A single isolated browser session per interpreter run. The host supplies
+# the start URL and Playwright installation. Capture paths refer to PNGs.
+public effect browser_interaction:
+    reversible: false
+
+public tool browser_open(width: Int, height: Int) -> Nothing uses browser_interaction
+# Keep page reads and actions on the configured start origin.
+public tool browser_open_scoped(width: Int, height: Int) -> Nothing uses browser_interaction
+public tool browser_read_text(selector: String) -> String uses browser_interaction
+public tool browser_click(button_name: String) -> Nothing uses browser_interaction
+public tool browser_capture() -> String uses browser_interaction
+public tool browser_close() -> Nothing uses browser_interaction

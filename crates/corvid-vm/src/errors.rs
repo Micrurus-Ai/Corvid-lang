@@ -23,6 +23,7 @@ impl InterpError {
 
 #[derive(Debug, Clone)]
 pub enum InterpErrorKind {
+    Timeout { milliseconds: u64 },
     /// A local was referenced that has no binding in the current env.
     /// Reaching this typically means the resolver / IR lowering are out
     /// of sync with the interpreter.
@@ -118,6 +119,7 @@ impl fmt::Display for InterpErrorKind {
             Self::ApprovalDenied(action) => {
                 write!(f, "approval denied for action `{action}`")
             }
+            Self::Timeout { milliseconds } => write!(f, "timed out after {milliseconds}ms"),
             Self::DispatchFailed(msg) => write!(f, "call dispatch failed: {msg}"),
             Self::Runtime(err) => write!(f, "{err}"),
             Self::Marshal(msg) => write!(f, "marshalling error: {msg}"),

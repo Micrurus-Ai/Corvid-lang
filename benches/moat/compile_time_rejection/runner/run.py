@@ -58,23 +58,23 @@ def discover_cases(cases_dir: Path) -> list[Path]:
     return sorted(p for p in cases_dir.iterdir() if p.is_dir())
 
 
-def run_corvid(case_dir: Path, expected_guarantee_id: str | None) -> tuple[str, str]:
+def run_corvid(case_dir: Path, expected_guarantee_id: str | None, binary: Path | None) -> tuple[str, str]:
     """Returns (verdict, note). verdict is 'rejected' / 'accepted' / 'error'."""
     corvid_src = case_dir / "corvid.cor"
     if not corvid_src.exists():
         return "error", "missing corvid.cor"
     proc = subprocess.run(
-        ["cargo", "run", "-q", "-p", "corvid-cli", "--", "check", str(corvid_src)],
+        ([str(binary)] if binary else ["cargo", "run", "--locked", "-q", "-p", "corvid-cli", "--"]) + ["check", str(corvid_src)],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode == 0:
         return "accepted", ""
     output = (proc.stdout or "") + (proc.stderr or "")
-    if expected_guarantee_id and expected_guarantee_id not in output:
+    if proc.returncode != 1 or not expected_guarantee_id or f"[guarantee: {expected_guarantee_id}]" not in output:
         return (
-            "rejected",
-            f"WARNING: rejected but did not mention expected guarantee_id "
+            "error",
+            f"Diagnostic mismatch: rejected but did not mention expected guarantee_id "
             f"`{expected_guarantee_id}`. Diagnostic surface may have drifted.",
         )
     return "rejected", ""
@@ -89,7 +89,7 @@ def run_python(case_dir: Path) -> tuple[str, str]:
     proc = subprocess.run(
         ["mypy", "--strict", str(py_src)],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     return ("accepted" if proc.returncode == 0 else "rejected"), ""
 
@@ -129,17 +129,17 @@ def run_typescript(case_dir: Path, tsc_bin: str | None) -> tuple[str, str]:
         [tsc_bin, "--strict", "--noEmit", "--skipLibCheck", "--target", "es2022",
          "--module", "esnext", "--moduleResolution", "bundler", str(ts_src)],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     return ("accepted" if proc.returncode == 0 else "rejected"), ""
 
 
-def run_case(case_dir: Path, tsc_bin: str | None) -> CaseResult:
+def run_case(case_dir: Path, tsc_bin: str | None, binary: Path | None) -> CaseResult:
     case_toml = case_dir / "case.toml"
     if not case_toml.exists():
         raise SystemExit(f"missing case.toml in {case_dir}")
     meta = tomllib.loads(case_toml.read_text(encoding="utf-8"))
-    expected_guarantee_id = meta.get("corvid_guarantee_id") or None
+    expected_guarantee_id = meta["expected"].get("corvid_guarantee_id") or None
 
     result = CaseResult(
         case_id=meta["id"],
@@ -152,7 +152,7 @@ def run_case(case_dir: Path, tsc_bin: str | None) -> CaseResult:
         },
     )
 
-    corvid_verdict, corvid_note = run_corvid(case_dir, expected_guarantee_id)
+    corvid_verdict, corvid_note = run_corvid(case_dir, expected_guarantee_id, binary)
     result.observed["corvid"] = corvid_verdict
     if corvid_note:
         result.notes.append(corvid_note)
@@ -234,6 +234,7 @@ def main() -> int:
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--json", type=Path, default=None,
                         help="Optional path to dump the structured per-case JSON")
+    parser.add_argument("--corvid-bin", type=Path, help="Use an already-built checkout binary")
     args = parser.parse_args()
 
     cases = discover_cases(args.cases_dir)
@@ -242,7 +243,7 @@ def main() -> int:
         return 1
 
     tsc_bin = find_tsc(args.cases_dir)
-    results = [run_case(c, tsc_bin) for c in cases]
+    results = [run_case(c, tsc_bin, args.corvid_bin) for c in cases]
 
     args.out.write_text(render_results_md(results), encoding="utf-8")
 

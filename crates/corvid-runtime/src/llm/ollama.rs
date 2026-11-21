@@ -110,7 +110,7 @@ impl LlmAdapter for OllamaAdapter {
                     serde_json::Value::Array(
                         req.messages
                             .iter()
-                            .map(|m| json!({"role": m.role, "content": m.content}))
+                            .map(message_json)
                             .collect(),
                     )
                 },
@@ -177,7 +177,7 @@ impl LlmAdapter for OllamaAdapter {
                     serde_json::Value::Array(
                         req.messages
                             .iter()
-                            .map(|m| json!({"role": m.role, "content": m.content}))
+                            .map(message_json)
                             .collect(),
                     )
                 },
@@ -290,6 +290,11 @@ fn extract_response(
     } else {
         Ok(LlmResponse::new(Value::String(content.to_string()), usage))
     }
+}
+
+fn message_json(m: &crate::llm::LlmMessage) -> serde_json::Value {
+    if m.images.is_empty() { return json!({"role":m.role,"content":m.content}); }
+    json!({"role":m.role,"content":m.content,"images":m.images.iter().map(|i| &i.data_base64).collect::<Vec<_>>()})
 }
 
 #[cfg(test)]

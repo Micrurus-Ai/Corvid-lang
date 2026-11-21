@@ -154,6 +154,7 @@ fn every_reference_app_produces_a_complete_deploy_package() {
         let status = Command::new(&corvid)
             .arg("deploy")
             .arg("package")
+            .args(["--mode", "mock"])
             .arg(&app_dir)
             .arg("--out")
             .arg(out_dir.path())

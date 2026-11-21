@@ -11,6 +11,7 @@
 mod effect_compose;
 #[path = "interp/expr.rs"]
 mod expr;
+mod form;
 #[path = "interp/grounding.rs"]
 mod grounding;
 #[path = "interp/prompt/mod.rs"]
@@ -146,6 +147,16 @@ struct Interpreter<'ir> {
     replay_cancel_after: Option<usize>,
 }
 
+// Dispatch before creating the future. A single async match reserves room
+// for its largest arm even when evaluating a literal deep in a call tree.
+macro_rules! boxed_branches {
+    ($value:expr, { $($pattern:pat $(if $guard:expr)? => $body:expr),+ $(,)? }) => {
+        match $value {
+            $($pattern $(if $guard)? => Box::pin(async move { $body }),)+
+        }
+    };
+}
+
 impl<'ir> Interpreter<'ir> {
     fn new(ir: &'ir IrFile, runtime: &'ir Runtime) -> Self {
         let types_by_id: HashMap<DefId, &IrType> = ir.types.iter().map(|t| (t.id, t)).collect();
@@ -188,7 +199,9 @@ impl<'ir> Interpreter<'ir> {
     }
 
     fn with_mocks(mut self) -> Self {
-        self.mock_tools = self.ir.mocks.iter().map(|m| (m.target_id, m)).collect();
+        if !self.runtime.has_replay_source() {
+            self.mock_tools = self.ir.mocks.iter().map(|m| (m.target_id, m)).collect();
+        }
         self
     }
 
@@ -210,6 +223,20 @@ impl<'ir> Interpreter<'ir> {
             self.stream_locals.remove(&p.local_id);
         }
         Ok(())
+    }
+
+    async fn eval_mock_body(
+        &self, mock: &'ir IrMock, name: &str, args: Vec<Value>, span: Span,
+    ) -> Result<Value, InterpError> {
+        let mut sub = Interpreter::new(self.ir, self.runtime);
+        sub.mock_tools = self.mock_tools.clone();
+        sub.bind_ir_params(name, &mock.params, args, span)?;
+        match sub.eval_block(&mock.body).await? {
+            Flow::Return(value) => Ok(value),
+            Flow::Normal => Ok(Value::Nothing),
+            Flow::Break | Flow::Continue => Err(InterpError::new(
+                InterpErrorKind::Other("loop control flow escaped mock body".into()), mock.span)),
+        }
     }
 
     fn bind_ir_params(
@@ -493,12 +520,14 @@ impl<'ir> Interpreter<'ir> {
             .is_some_and(|s| s.should_yield_on_boundary())
     }
 
-    #[async_recursion]
     // NOTE: `expr` is NOT tied to the `'ir` file lifetime — closure
     // bodies (slice 45j) live inside `Value::Closure` cells and are
     // evaluated through this same entry point.
-    async fn eval_expr(&mut self, expr: &IrExpr) -> Result<ExprFlow, InterpError> {
-        match &expr.kind {
+    fn eval_expr<'a>(
+        &'a mut self,
+        expr: &'a IrExpr,
+    ) -> futures::future::BoxFuture<'a, Result<ExprFlow, InterpError>> {
+        boxed_branches!(&expr.kind, {
             // Builtin methods (slice 45c) — one arm per
             // `BuiltinMethodKind`; the shared corvid_types table
             // guarantees the checker only let matching receivers
@@ -541,9 +570,9 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
                 Ok(ExprFlow::Value(eval_builtin_method(
-                    *kind, recv, arg_vals, expr.span,
+                    *kind, recv, arg_vals, expr.span, &self.types_by_id,
                 )?))
-            }
+            },
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),
 
             // Named struct literal (slice 45n): build the cell from
@@ -596,7 +625,7 @@ impl<'ir> Interpreter<'ir> {
                     type_name.clone(),
                     out,
                 )))
-            }
+            },
             // Lambda (slice 45j): evaluate to a closure that
             // snapshots the visible environment BY VALUE. Values
             // clone; heap cells share.
@@ -609,7 +638,7 @@ impl<'ir> Interpreter<'ir> {
                     (**body).clone(),
                     self.env.entries_snapshot(),
                 ))))
-            }
+            },
 
             IrExprKind::Local { local_id, .. } => self
                 .env
@@ -619,6 +648,27 @@ impl<'ir> Interpreter<'ir> {
                     InterpError::new(InterpErrorKind::UndefinedLocal(*local_id), expr.span)
                 }),
 
+            IrExprKind::Decl { def_id, .. } if self.agents_by_id.get(def_id).is_some_and(|f| f.pure_fn) => {
+                let f = self.agents_by_id[def_id];
+                // A declaration has no lexical captures. Forward through the
+                // ordinary call path so returns and typed errors keep their semantics.
+                let args = f.params.iter().map(|p| IrExpr {
+                    kind: IrExprKind::Local { local_id: p.local_id, name: p.name.clone() },
+                    ty: p.ty.clone(),
+                    span: p.span,
+                }).collect();
+                let call = IrExpr {
+                    kind: IrExprKind::Call {
+                        kind: IrCallKind::Agent { def_id: *def_id },
+                        callee_name: f.name.clone(),
+                        args,
+                    },
+                    ty: f.return_ty.clone(),
+                    span: expr.span,
+                };
+                let params = f.params.iter().map(|p| (p.local_id, p.name.clone())).collect();
+                Ok(ExprFlow::Value(Value::Closure(ClosureValue::new(params, call, Vec::new()))))
+            },
             IrExprKind::Decl { .. } => Err(InterpError::new(
                 InterpErrorKind::NotImplemented(
                     "bare top-level declaration reference (imports/functions)".into(),
@@ -633,7 +683,7 @@ impl<'ir> Interpreter<'ir> {
             } => {
                 self.eval_call(kind, callee_name, args, &expr.ty, expr.span)
                     .await
-            }
+            },
 
             IrExprKind::Ask { prompt, target_ty } => {
                 let prompt = match self.eval_expr(prompt).await?.into_value() {
@@ -663,7 +713,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 Ok(ExprFlow::Value(value))
-            }
+            },
 
             IrExprKind::Choose { options } => {
                 let options_value = match self.eval_expr(options).await?.into_value() {
@@ -695,7 +745,7 @@ impl<'ir> Interpreter<'ir> {
                     ));
                 };
                 Ok(ExprFlow::Value(value))
-            }
+            },
 
             IrExprKind::FieldAccess { target, field } => {
                 let t = match self.eval_expr(target).await?.into_value() {
@@ -729,7 +779,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::UnwrapGrounded { value } => {
                 let value = match self.eval_expr(value).await?.into_value() {
@@ -772,7 +822,7 @@ impl<'ir> Interpreter<'ir> {
                     // than a panic.
                     other => Ok(ExprFlow::Value(other)),
                 }
-            }
+            },
 
             IrExprKind::Index { target, index } => {
                 let t = match self.eval_expr(target).await?.into_value() {
@@ -811,7 +861,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::BinOp { op, left, right } => {
                 // Short-circuit `and` / `or`: evaluate the right operand
@@ -863,7 +913,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_binop(*op, l, r, expr.span, false)?))
-            }
+            },
 
             IrExprKind::WrappingBinOp { op, left, right } => {
                 let l = match self.eval_expr(left).await?.into_value() {
@@ -875,7 +925,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_binop(*op, l, r, expr.span, true)?))
-            }
+            },
 
             IrExprKind::UnOp { op, operand } => {
                 let v = match self.eval_expr(operand).await?.into_value() {
@@ -883,7 +933,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, false)?))
-            }
+            },
 
             IrExprKind::WrappingUnOp { op, operand } => {
                 let v = match self.eval_expr(operand).await?.into_value() {
@@ -891,7 +941,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(eval_unop(*op, v, expr.span, true)?))
-            }
+            },
 
             // `match` (45i): evaluate the scrutinee once, then try
             // each arm in order. Pattern bindings write into the flat
@@ -941,7 +991,7 @@ impl<'ir> Interpreter<'ir> {
                     ),
                     expr.span,
                 ))
-            }
+            },
             IrExprKind::MapLiteral { keys, values } => {
                 let mut entries = Vec::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values) {
@@ -959,7 +1009,7 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Map(crate::value::MapValue::new(
                     entries,
                 ))))
-            }
+            },
             IrExprKind::List { items } => {
                 let mut out = Vec::with_capacity(items.len());
                 for it in items {
@@ -969,7 +1019,7 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
                 Ok(ExprFlow::Value(Value::List(ListValue::new(out))))
-            }
+            },
 
             IrExprKind::WeakNew { strong } => {
                 let strong = match self.eval_expr(strong).await?.into_value() {
@@ -986,7 +1036,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 Ok(ExprFlow::Value(Value::Weak(weak)))
-            }
+            },
 
             IrExprKind::WeakUpgrade { weak } => {
                 let weak = match self.eval_expr(weak).await?.into_value() {
@@ -1008,7 +1058,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::StreamSplitBy { stream, key } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1018,7 +1068,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::split_by(stream, key, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamMerge { groups, policy } => {
                 let groups = match self.eval_expr(groups).await?.into_value() {
@@ -1028,7 +1078,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::merge(groups, *policy, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamOrderedBy { stream, policy } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1038,7 +1088,7 @@ impl<'ir> Interpreter<'ir> {
                 stream_ops::ordered_by(stream, *policy, expr.span)
                     .await
                     .map(ExprFlow::Value)
-            }
+            },
 
             IrExprKind::StreamResumeToken { stream } => {
                 let stream = match self.eval_expr(stream).await?.into_value() {
@@ -1063,7 +1113,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             IrExprKind::ResumeStream {
                 prompt_def_id,
@@ -1087,23 +1137,28 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
-            IrExprKind::ResultOk { inner } => {
+            IrExprKind::ResultOk { inner } | IrExprKind::ResultErr { inner } => {
                 let v = match self.eval_expr(inner).await?.into_value() {
                     Ok(v) => v,
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
-                Ok(ExprFlow::Value(Value::ResultOk(BoxedValue::new(v))))
-            }
-
-            IrExprKind::ResultErr { inner } => {
-                let v = match self.eval_expr(inner).await?.into_value() {
-                    Ok(v) => v,
-                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                let is_ok = matches!(expr.kind, IrExprKind::ResultOk { .. });
+                let payload_type = match &expr.ty {
+                    Type::Result(ok, err) => Some(if is_ok { ok.as_ref() } else { err.as_ref() }),
+                    _ => None,
                 };
-                Ok(ExprFlow::Value(Value::ResultErr(BoxedValue::new(v))))
-            }
+                let payload = BoxedValue::new(match (payload_type, v) {
+                    (Some(Type::Float), Value::Int(n)) => Value::Float(n as f64),
+                    (_, v) => v,
+                });
+                Ok(ExprFlow::Value(if is_ok {
+                    Value::ResultOk(payload)
+                } else {
+                    Value::ResultErr(payload)
+                }))
+            },
 
             IrExprKind::OptionSome { inner } => {
                 let v = match self.eval_expr(inner).await?.into_value() {
@@ -1111,7 +1166,7 @@ impl<'ir> Interpreter<'ir> {
                     Err(v) => return Ok(ExprFlow::Propagate(v)),
                 };
                 Ok(ExprFlow::Value(Value::OptionSome(BoxedValue::new(v))))
-            }
+            },
 
             IrExprKind::OptionNone => Ok(ExprFlow::Value(Value::OptionNone)),
 
@@ -1144,7 +1199,7 @@ impl<'ir> Interpreter<'ir> {
                     ],
                 );
                 Ok(ExprFlow::Value(Value::Struct(page)))
-            }
+            },
 
             IrExprKind::TryPropagate { inner } => {
                 let inner = match self.eval_expr(inner).await? {
@@ -1164,7 +1219,7 @@ impl<'ir> Interpreter<'ir> {
                         expr.span,
                     )),
                 }
-            }
+            },
 
             // trusted(expr) is a compile-time assertion; at runtime
             // it is the identity.
@@ -1186,28 +1241,25 @@ impl<'ir> Interpreter<'ir> {
                     // Per-attempt wall-clock bound (slice 50k):
                     // expiry counts as a retryable error, so
                     // `timeout` + `retry` compose naturally.
+                    let start_attempt = async {
+                        let value = self.eval_expr(body).await?;
+                        let first = match &value {
+                            ExprFlow::Value(Value::Stream(stream)) => stream.next_chunk().await,
+                            _ => None,
+                        };
+                        Ok((value, first))
+                    };
                     let attempt = match timeout_ms {
-                        Some(ms) => {
-                            match tokio::time::timeout(
-                                std::time::Duration::from_millis(ms),
-                                self.eval_expr(body),
-                            )
-                            .await
-                            {
-                                Ok(outcome) => outcome,
-                                Err(_elapsed) => Err(InterpError::new(
-                                    InterpErrorKind::Other(format!(
-                                        "timed out after {ms}ms"
-                                    )),
-                                    body.span,
-                                )),
-                            }
-                        }
-                        None => self.eval_expr(body).await,
+                        Some(ms) => tokio::time::timeout(
+                            std::time::Duration::from_millis(ms), start_attempt,
+                        ).await.unwrap_or_else(|_| Err(InterpError::new(
+                            InterpErrorKind::Timeout { milliseconds: ms }, body.span,
+                        ))),
+                        None => start_attempt.await,
                     };
                     match attempt {
-                        Ok(ExprFlow::Value(Value::Stream(stream))) => {
-                            match stream.next_chunk().await {
+                        Ok((ExprFlow::Value(Value::Stream(stream)), first)) => {
+                            match first {
                                 Some(Ok(chunk)) if stream_start_is_retryable(&chunk.value) => {
                                     if matches!(chunk.value, Value::OptionNone) {
                                         saw_option_retry = true;
@@ -1225,14 +1277,14 @@ impl<'ir> Interpreter<'ir> {
                                 None => return Ok(ExprFlow::Value(Value::Stream(stream))),
                             }
                         }
-                        Ok(ExprFlow::Value(Value::ResultErr(err))) => {
+                        Ok((ExprFlow::Value(Value::ResultErr(err)), _)) => {
                             last_result_err = Some(Value::ResultErr(err));
                         }
-                        Ok(ExprFlow::Value(Value::OptionNone)) => {
+                        Ok((ExprFlow::Value(Value::OptionNone), _)) => {
                             saw_option_retry = true;
                         }
-                        Ok(ExprFlow::Value(v)) => return Ok(ExprFlow::Value(v)),
-                        Ok(ExprFlow::Propagate(v)) => return Ok(ExprFlow::Propagate(v)),
+                        Ok((ExprFlow::Value(v), _)) => return Ok(ExprFlow::Value(v)),
+                        Ok((ExprFlow::Propagate(v), _)) => return Ok(ExprFlow::Propagate(v)),
                         Err(err) => last_runtime_error = Some(err),
                     }
                 }
@@ -1255,7 +1307,7 @@ impl<'ir> Interpreter<'ir> {
                 } else {
                     Ok(ExprFlow::Value(Value::Nothing))
                 }
-            }
+            },
 
             IrExprKind::Replay {
                 trace,
@@ -1264,8 +1316,8 @@ impl<'ir> Interpreter<'ir> {
             } => {
                 self.eval_replay_expr(trace, arms, else_body, expr.span)
                     .await
-            }
-        }
+            },
+        })
     }
 
     /// Apply a closure (slice 45j): install its captured
@@ -1558,6 +1610,14 @@ impl<'ir> Interpreter<'ir> {
                 let json_args: Vec<serde_json::Value> =
                     arg_values.iter().map(value_to_json).collect();
 
+                if tool.python_approval_required && !self.env.consume_python_approval(callee_name, &json_args) {
+                    return Err(InterpError::new(
+                        InterpErrorKind::Runtime(corvid_runtime::RuntimeError::ApprovalDenied {
+                            action: callee_name.into(),
+                        }), span,
+                    ));
+                }
+
                 // Runtime confidence gate: if the tool has
                 // `trust: autonomous_if_confident(T)` in its declared
                 // effects, check that composed input confidence >= T.
@@ -1687,20 +1747,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                     .await?
                 } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
-                    let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
-                    sub.bind_ir_params(callee_name, &mock.params, arg_values, span)?;
-                    sub.eval_block(&mock.body)
-                        .await
-                        .and_then(|flow| match flow {
-                            Flow::Return(value) => Ok(value),
-                            Flow::Normal => Ok(Value::Nothing),
-                            Flow::Break | Flow::Continue => Err(InterpError::new(
-                                InterpErrorKind::Other(
-                                    "loop control flow escaped mock body".into(),
-                                ),
-                                mock.span,
-                            )),
-                        })?
+                    self.eval_mock_body(mock, callee_name, arg_values, span).await?
                 } else if is_stdlib_db_tool(callee_name) {
                     // Phase 33S3b — typed-Value dispatch for the
                     // executing SQLite stdlib tools. `db_open`
@@ -1760,10 +1807,11 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )?
                 } else {
-                    let outcome = self
-                        .runtime
-                        .call_tool(callee_name, json_args)
-                        .await
+                    let outcome = if let Some((module, member)) = &tool.python {
+                        self.runtime.call_imported_python(module, member, &tool.effect_names, json_args).await
+                    } else {
+                        self.runtime.call_tool(callee_name, json_args).await
+                    }
                         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span));
                     // Circuit-breaker accounting (slice 50k): a
                     // runtime error or an Err-envelope result counts
@@ -1911,7 +1959,8 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                 })?;
-                let mut sub = Interpreter::new(self.ir, self.runtime).with_mocks();
+                let mut sub = Interpreter::new(self.ir, self.runtime);
+                sub.mock_tools = self.mock_tools.clone();
                 sub.bind_ir_params(callee_name, &fixture.params, arg_values, span)?;
                 sub.eval_block(&fixture.body)
                     .await
@@ -2002,7 +2051,7 @@ impl<'ir> Interpreter<'ir> {
             }
             // Closure call (slice 45j): `f(x)` where `f` is a
             // function-typed local holding a closure value.
-            IrCallKind::ClosureLocal { local_id } => {
+            IrCallKind::ClosureLocal { local_id, .. } => {
                 let callee = self.env.lookup(*local_id).ok_or_else(|| {
                     InterpError::new(InterpErrorKind::UndefinedLocal(*local_id), span)
                 })?;
@@ -2051,7 +2100,7 @@ impl<'ir> Interpreter<'ir> {
 // ============================================================================
 
 fn is_stdlib_db_tool(name: &str) -> bool {
-    matches!(name, "db_open" | "db_query" | "db_execute")
+    matches!(name, "db_open" | "db_query" | "db_query_rows" | "db_execute")
 }
 
 async fn dispatch_stdlib_db_tool(
@@ -2083,7 +2132,7 @@ async fn dispatch_stdlib_db_tool(
                 )))),
             }
         }
-        "db_query" | "db_execute" => {
+        "db_query" | "db_query_rows" | "db_execute" => {
             let handle = match arg_values.first() {
                 Some(Value::DbHandle(arc)) => arc.clone(),
                 _ => {
@@ -2119,6 +2168,8 @@ async fn dispatch_stdlib_db_tool(
             };
             let result_json = if callee_name == "db_query" {
                 runtime.db_query_tool(&handle, sql, params).await
+            } else if callee_name == "db_query_rows" {
+                runtime.db_query_rows_tool(&handle, sql, params).await
             } else {
                 runtime.db_execute_tool(&handle, sql, params).await
             };

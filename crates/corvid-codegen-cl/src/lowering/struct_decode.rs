@@ -79,6 +79,10 @@ fn emit_struct_decoder(
     runtime: &RuntimeFuncs,
     ir_type: &corvid_ir::IrType,
 ) -> Result<FuncId, CodegenError> {
+    if !ir_type.variants.is_empty() {
+        return Err(CodegenError::not_supported("sum types at a native JSON boundary", ir_type.span));
+    }
+
     // Reject any unsupported field type up-front with a clear
     // message. v1 only supports Int / Bool / Float / String fields,
     // matching the four scalar prompt bridges. Nested structs,

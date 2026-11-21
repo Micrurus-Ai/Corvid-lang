@@ -67,22 +67,7 @@ pub(crate) fn cmd_doctor() -> Result<u8> {
         }
     }
 
-    // Python (legacy `--target=python` users only)
-    let has_python = std::process::Command::new("python3")
-        .arg("--version")
-        .output()
-        .ok()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if has_python {
-        println!("  · python3 detected (legacy `--target=python` available)");
-    } else {
-        println!("  · python3 not detected (only needed for `--target=python`)");
-    }
-
-    println!();
-    println!("native `corvid run` works without Python. Configure CORVID_MODEL + the");
-    println!("matching API key and prompt-only programs run end-to-end.");
+    print_python_command_status();
     Ok(0)
 }
 
@@ -101,15 +86,13 @@ pub(crate) fn cmd_doctor_v2() -> Result<u8> {
     if command_succeeds("cargo", &["--version"]) {
         println!("  OK cargo detected");
     } else {
-        ok = false;
-        println!("  XX cargo not found in PATH");
+        println!("  .. cargo unavailable (used for source builds and native server wrappers)");
     }
 
     if command_succeeds("rustc", &["--version"]) {
         println!("  OK rustc detected");
     } else {
-        ok = false;
-        println!("  XX rustc not found in PATH");
+        println!("  .. rustc unavailable (used for source builds and native server wrappers)");
     }
 
     if command_output("rustup", &["target", "list", "--installed"])
@@ -205,20 +188,21 @@ pub(crate) fn cmd_doctor_v2() -> Result<u8> {
         None => println!("  .. no Corvid.lock found from cwd upward"),
     }
 
+    print_python_command_status();
+    Ok(if ok { 0 } else { 1 })
+}
+
+fn print_python_command_status() {
     let has_python =
         command_succeeds("python3", &["--version"]) || command_succeeds("python", &["--version"]);
-    println!(
-        "  .. {}",
-        if has_python {
-            "python detected (legacy --target=python available)"
-        } else {
-            "python not detected (only needed for --target=python)"
-        }
-    );
-
+    if has_python {
+        println!("  .. Python command available to run generated Python files");
+    } else {
+        println!("  .. Install a Python interpreter to run generated Python files");
+    }
+    println!("  .. This CLI uses the Python runtime library selected when it was built.");
     println!();
-    println!("native `corvid run` works without Python. Configure CORVID_MODEL + the matching API key and prompt-only programs run end-to-end.");
-    Ok(if ok { 0 } else { 1 })
+    println!("For model calls, configure CORVID_MODEL and the credentials for your provider.");
 }
 
 fn command_succeeds(program: &str, args: &[&str]) -> bool {

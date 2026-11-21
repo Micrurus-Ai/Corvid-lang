@@ -27,6 +27,34 @@ pub struct ApprovalQueueRuntime {
 
 impl ApprovalQueueRuntime {
     pub fn create(&self, input: ApprovalCreate) -> Result<ApprovalQueueRecord, RuntimeError> {
+        self.create_with_checkpoint(input, None)
+    }
+
+    /// A missing receipt for a committed decision is an unknown execution
+    /// outcome. It must never be interpreted as permission to retry.
+    pub fn execution_receipt(&self, id: &str) -> Result<Option<String>, RuntimeError> {
+        self.conn.lock().unwrap().query_row(
+            "select outcome from approval_execution_receipts where approval_id = ?1",
+            [id], |row| row.get(0)
+        ).optional().map_err(sqlite_error)
+    }
+
+    pub fn record_execution_receipt(&self, id: &str, outcome: &str) -> Result<(), RuntimeError> {
+        self.conn.lock().unwrap().execute(
+            "insert into approval_execution_receipts(approval_id, outcome) values (?1, ?2)",
+            params![id, outcome]
+        ).map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn checkpoint(&self, id: &str) -> Result<Option<String>, RuntimeError> {
+        self.conn.lock().unwrap().query_row(
+            "select checkpoint from approval_continuations where approval_id = ?1",
+            [id], |row| row.get(0)
+        ).optional().map_err(sqlite_error)
+    }
+
+    pub fn create_with_checkpoint(&self, input: ApprovalCreate, checkpoint: Option<&str>) -> Result<ApprovalQueueRecord, RuntimeError> {
         validate_create(&input)?;
         if input.tenant_id != input.contract.tenant_id {
             return Err(RuntimeError::Other(
@@ -100,6 +128,10 @@ impl ApprovalQueueRuntime {
             ],
         )
         .map_err(sqlite_error)?;
+        if let Some(checkpoint) = checkpoint {
+            tx.execute("insert into approval_continuations (approval_id, checkpoint) values (?1, ?2)",
+                params![input.id, checkpoint]).map_err(sqlite_error)?;
+        }
         insert_audit_tx(
             &tx,
             &input.id,
@@ -116,6 +148,12 @@ impl ApprovalQueueRuntime {
         drop(conn);
         self.get(&input.id)?
             .ok_or_else(|| RuntimeError::Other(format!("approval `{}` not found", input.id)))
+    }
+
+    pub fn check_readiness(&self) -> Result<(), RuntimeError> {
+        self.conn.lock().unwrap().query_row(
+            "select exists(select 1 from approval_queue limit 1)", [], |_| Ok(())
+        ).map_err(sqlite_error)
     }
 
     pub fn get(&self, id: &str) -> Result<Option<ApprovalQueueRecord>, RuntimeError> {
@@ -336,13 +374,18 @@ impl ApprovalQueueRuntime {
         authorize_approval_transition(&existing, actor, transition, at_ms)?;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(sqlite_error)?;
-        tx.execute(
+        let changed = tx.execute(
             "update approval_queue
              set status = ?4, approver_actor_id = ?3, updated_ms = ?5
              where id = ?1 and tenant_id = ?2 and status = 'pending'",
             params![id, tenant_id, actor.actor_id, status_after, at_ms as i64],
         )
         .map_err(sqlite_error)?;
+        if changed != 1 {
+            return Err(RuntimeError::Other(format!("approval `{id}` is no longer pending")));
+        }
+        tx.execute("delete from approval_continuations where approval_id = ?1", [id])
+            .map_err(sqlite_error)?;
         insert_audit_tx(
             &tx,
             id,
@@ -375,13 +418,18 @@ impl ApprovalQueueRuntime {
         let existing = self.require_pending(id, tenant_id)?;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(sqlite_error)?;
-        tx.execute(
+        let changed = tx.execute(
             "update approval_queue
              set status = 'expired', approver_actor_id = ?3, updated_ms = ?4
              where id = ?1 and tenant_id = ?2 and status = 'pending'",
             params![id, tenant_id, actor_id, at_ms as i64],
         )
         .map_err(sqlite_error)?;
+        if changed != 1 {
+            return Err(RuntimeError::Other(format!("approval `{id}` is no longer pending")));
+        }
+        tx.execute("delete from approval_continuations where approval_id = ?1", [id])
+            .map_err(sqlite_error)?;
         insert_audit_tx(
             &tx,
             id,

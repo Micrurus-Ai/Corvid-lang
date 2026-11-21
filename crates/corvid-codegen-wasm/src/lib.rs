@@ -76,6 +76,9 @@ pub fn emit_wasm_artifacts(
     ir: &IrFile,
     module_name: &str,
 ) -> Result<WasmArtifacts, WasmCodegenError> {
+    if ir.tools.iter().any(|tool| tool.python.is_some()) {
+        return Err(WasmCodegenError::unsupported("typed Python imports require the interpreter"));
+    }
     let scalar_agents = ir
         .agents
         .iter()
@@ -196,11 +199,15 @@ pub fn emit_wasm_artifacts(
         module.section(&data);
     }
 
+    let bytes = module.finish();
+    wasmparser::Validator::new().validate_all(&bytes).map_err(|err| {
+        WasmCodegenError::unsupported(format!("generated module failed validation: {err}"))
+    })?;
     companions::build_artifacts(
         module_name,
         &scalar_agents,
         &host_plan.imports,
-        module.finish(),
+        bytes,
     )
 }
 
@@ -679,7 +686,9 @@ fn compile_agent(
 ) -> Result<Function, WasmCodegenError> {
     let mut locals = LocalLayout::from_agent(agent)?;
     collect_block_locals(&agent.body, &mut locals)?;
-    let local_groups = locals.local_groups();
+    let mut local_groups = locals.local_groups();
+    local_groups.push((3, ValType::I64));
+    local_groups.push((5, ValType::I32));
     let mut function = Function::new(local_groups);
 
     emit_block(
@@ -819,6 +828,10 @@ impl LocalLayout {
             self.locals.push((format!("{name}{suffix}"), ty));
         }
         Ok(())
+    }
+
+    fn scratch_start(&self) -> u32 {
+        self.map.values().map(|slot| slot.start + slot.count).max().unwrap_or(0)
     }
 
     fn local_groups(&self) -> Vec<(u32, ValType)> {
@@ -1090,8 +1103,44 @@ fn emit_expr(
         },
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right } => {
             emit_expr(left, function, locals, agent_indices, host_plan, string_pool)?;
-            emit_expr(right, function, locals, agent_indices, host_plan, string_pool)?;
-            emit_binary(*op, &left.ty, function)?;
+            if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                if *op == BinaryOp::Or {
+                    function.instruction(&Instruction::I32Const(1));
+                    function.instruction(&Instruction::Else);
+                }
+                emit_expr(right, function, locals, agent_indices, host_plan, string_pool)?;
+                if *op == BinaryOp::And {
+                    function.instruction(&Instruction::Else);
+                    function.instruction(&Instruction::I32Const(0));
+                }
+                function.instruction(&Instruction::End);
+            } else {
+                let float = left.ty == Type::Float || right.ty == Type::Float;
+                if float && left.ty == Type::Int {
+                    function.instruction(&Instruction::F64ConvertI64S);
+                }
+                emit_expr(right, function, locals, agent_indices, host_plan, string_pool)?;
+                if float && right.ty == Type::Int {
+                    function.instruction(&Instruction::F64ConvertI64S);
+                }
+                if matches!(expr.kind, IrExprKind::BinOp { .. }) && !float && left.ty == Type::Int
+                    && matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) {
+                    emit_checked_integer(*op, function, locals.scratch_start());
+                } else if left.ty == Type::String && matches!(op, BinaryOp::Eq | BinaryOp::NotEq) {
+                    emit_string_equality(function, locals.scratch_start() + 3);
+                    if *op == BinaryOp::NotEq {
+                        function.instruction(&Instruction::I32Eqz);
+                    }
+                } else {
+                    emit_binary(*op, if float { &Type::Float } else { &left.ty }, function)?;
+                }
+            }
+        }
+        IrExprKind::UnOp { op: UnaryOp::Neg, operand } if operand.ty == Type::Int => {
+            function.instruction(&Instruction::I64Const(0));
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_checked_integer(BinaryOp::Sub, function, locals.scratch_start());
         }
         IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } => {
             emit_unary(*op, operand, function, locals, agent_indices, host_plan, string_pool)?;
@@ -1124,6 +1173,86 @@ fn emit_expr(
         }
     }
     Ok(())
+}
+
+/// Both operands have already been evaluated. Nested expressions may reuse
+/// these locals since parent operands remain on the value stack until here.
+fn emit_checked_integer(op: BinaryOp, function: &mut Function, left: u32) {
+    use Instruction::*;
+    let right = left + 1;
+    let result = left + 2;
+    let mut put = |instruction| { function.instruction(&instruction); };
+    put(LocalSet(right));
+    put(LocalTee(left));
+    put(LocalGet(right));
+    put(match op { BinaryOp::Add => I64Add, BinaryOp::Sub => I64Sub, _ => I64Mul });
+    put(LocalSet(result));
+    if op == BinaryOp::Mul {
+        // Avoid a division trap while checking the product by division.
+        put(LocalGet(left));
+        put(I64Eqz);
+        put(If(BlockType::Result(ValType::I32)));
+        put(I32Const(0));
+        put(Else);
+        put(LocalGet(left));
+        put(I64Const(-1));
+        put(I64Eq);
+        put(If(BlockType::Result(ValType::I32)));
+        put(LocalGet(right));
+        put(I64Const(i64::MIN));
+        put(I64Eq);
+        put(Else);
+        put(LocalGet(result));
+        put(LocalGet(left));
+        put(I64DivS);
+        put(LocalGet(right));
+        put(I64Ne);
+        put(End);
+        put(End);
+    } else {
+        // Addition overflows when both inputs differ in sign from the
+        // result. Subtraction overflows when the inputs differ in sign
+        // and the result differs in sign from the left input.
+        put(LocalGet(left));
+        put(LocalGet(result));
+        put(I64Xor);
+        put(LocalGet(right));
+        put(LocalGet(if op == BinaryOp::Add { result } else { left }));
+        put(I64Xor);
+        put(I64And);
+        put(I64Const(0));
+        put(I64LtS);
+    }
+    put(If(BlockType::Empty));
+    put(Unreachable);
+    put(End);
+    put(LocalGet(result));
+}
+
+/// Compare UTF-8 byte slices already evaluated on the operand stack.
+fn emit_string_equality(function: &mut Function, first: u32) {
+    use Instruction::*;
+    let left = first;
+    let remaining = first + 1;
+    let right = first + 2;
+    let right_len = first + 3;
+    let equal = first + 4;
+    let byte = wasm_encoder::MemArg { offset: 0, align: 0, memory_index: 0 };
+    for instruction in [
+        LocalSet(right_len), LocalSet(right), LocalSet(remaining), LocalSet(left),
+        LocalGet(remaining), LocalGet(right_len), I32Eq, LocalSet(equal),
+        Block(wasm_encoder::BlockType::Empty),
+        Loop(wasm_encoder::BlockType::Empty),
+        LocalGet(equal), I32Eqz, BrIf(1),
+        LocalGet(remaining), I32Eqz, BrIf(1),
+        LocalGet(remaining), I32Const(1), I32Sub, LocalSet(remaining),
+        LocalGet(left), LocalGet(remaining), I32Add, I32Load8U(byte),
+        LocalGet(right), LocalGet(remaining), I32Add, I32Load8U(byte),
+        I32Eq, LocalSet(equal), Br(0),
+        End, End, LocalGet(equal),
+    ] {
+        function.instruction(&instruction);
+    }
 }
 
 fn emit_binary(

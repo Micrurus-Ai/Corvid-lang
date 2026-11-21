@@ -68,7 +68,7 @@ impl<'ir> Interpreter<'ir> {
             Type::Stream(inner) => inner.as_ref(),
             other => other,
         };
-        let output_schema = Some(crate::schema::schema_for(result_ty, &self.types_by_id));
+        let output_schema = crate::schema::prompt_output_schema(result_ty, &self.types_by_id);
         let json_args: Vec<serde_json::Value> = arg_values.iter().map(value_to_json).collect();
 
         let mut requests = Vec::with_capacity(spec.models.len());
@@ -92,7 +92,7 @@ impl<'ir> Interpreter<'ir> {
                     args: json_args.clone(),
                     output_schema: output_schema.clone(),
                     sampling: self.resolve_sampling(prompt, &selected_model),
-            messages: super::render_messages(prompt, arg_values, &rendered),
+            messages: super::build_message_segments(prompt, arg_values, &rendered, span)?.flatten(),
                 },
             ));
         }
@@ -198,7 +198,7 @@ impl<'ir> Interpreter<'ir> {
                             args: json_args.clone(),
                             output_schema: output_schema.clone(),
                             sampling: self.resolve_sampling(prompt, &selected_model),
-            messages: super::render_messages(prompt, arg_values, &rendered),
+            messages: super::build_message_segments(prompt, arg_values, &rendered, span)?.flatten(),
                         },
                         prompt.cacheable,
                     )

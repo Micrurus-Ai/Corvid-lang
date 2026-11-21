@@ -1,0 +1,59 @@
+# Browser views compose through ordinary functions and lists.
+public type View:
+    html: String
+
+fn escaped(value: String) -> String:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+fn children(views: List<View>) -> String:
+    parts: List<String> = []
+    for item in views:
+        parts.append(item.html)
+    return parts.join("")
+
+public fn text(value: String) -> View:
+    return View("<p>" + escaped(value) + "</p>")
+
+public fn text_field(label: String, name: String, initial: String) -> View:
+    return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
+
+public fn submit(label: String) -> View:
+    return View("<button type=\"submit\">" + escaped(label) + "</button>")
+
+public fn search_form(controls: List<View>) -> View:
+    return View("<form method=\"get\">" + children(controls) + "</form>")
+
+public fn disclosure(label: String, content: List<View>) -> View:
+    return View("<details><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
+
+public fn page(title: String, content: List<View>) -> String:
+    return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title></head><body><main>" + children(content) + "</main></body></html>"
+
+public fn action(label: String, handler: String) -> View:
+    return View("<button type=\"button\" data-corvid-action=\"" + escaped(handler) + "\" disabled>" + escaped(label) + "</button>")
+
+public fn int_state(label: String, initial: Int, controls: List<View>) -> View:
+    return View("<fieldset data-corvid-state><legend>" + escaped(label) + "</legend><output>" + initial.to_string() + "</output>" + children(controls) + "<span role=\"alert\"></span></fieldset>")
+
+public fn interactive_page(title: String, content: List<View>) -> String:
+    loader = View("<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script>")
+    return page(title, content + [loader])
+
+public fn text_state(label: String, initial: String, handler: String) -> View:
+    field = "<label>" + escaped(label) + "<input type=\"text\" value=\"" + escaped(initial) + "\" data-corvid-input=\"" + escaped(handler) + "\" disabled></label>"
+    return View("<fieldset data-corvid-state>" + field + "<output></output><span role=\"alert\"></span></fieldset>")
+
+# Submit named controls to an application-relative GET route.
+public fn query_form(path: String, controls: List<View>) -> View:
+    return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
+
+# Display a user-started Stream<String> GET response from the current application.
+public fn stream_text(label: String, path: String) -> View:
+    controls = "<button type=\"button\" data-start disabled>Start</button><button type=\"button\" data-cancel disabled>Cancel</button>"
+    content = "<span role=\"status\">Ready</span><pre data-output></pre>"
+    widget = "<corvid-text-stream data-path=\"" + escaped(path) + "\"><fieldset><legend>" + escaped(label) + "</legend>" + controls + content + "</fieldset></corvid-text-stream>"
+    return View(widget + "<script type=\"module\" src=\"/.well-known/corvid/stream.js\"></script>")
+
+# Navigate to an application route. Supply a trusted path from the application.
+public fn link(label: String, path: String) -> View:
+    return View("<a href=\"" + escaped(path) + "\">" + escaped(label) + "</a>")

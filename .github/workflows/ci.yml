@@ -17,6 +17,18 @@ env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
 jobs:
+  minimum-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+      # A workspace build enables the CLI's Python feature on the driver, too.
+      - name: Check the standalone compiler driver without Python
+        run: cargo check --locked -p corvid-driver --no-default-features --lib
+      - run: cargo check --locked --workspace --all-targets
+
   workspace-tests:
     name: cargo test --workspace
     runs-on: ubuntu-latest
@@ -271,6 +283,9 @@ jobs:
 
       - name: Signed build claim-coverage refusal
         run: cargo test -p corvid-driver signed_claim_coverage -- --nocapture
+
+      - name: Check learner function reference
+        run: python3 scripts/update_function_reference.py --check
 
       - name: Core semantics registry + doc drift gate
         run: |

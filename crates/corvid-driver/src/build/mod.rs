@@ -25,8 +25,7 @@ pub use catalog_descriptor::build_catalog_descriptor_for_source;
 use catalog_descriptor::emit_catalog_descriptor;
 use claim_coverage::validate_signed_claim_coverage;
 use server_render::{
-    render_axum_server_source, render_server_cargo_toml, server_binary_name_for_package,
-    server_binary_path_for, server_package_name,
+    render_axum_server_source, render_server_cargo_toml, server_binary_path_for, server_package_name,
 };
 
 #[cfg(test)]
@@ -82,6 +81,14 @@ pub fn build_native_to_disk(
     source_path: &Path,
     extra_tool_libs: &[&Path],
 ) -> anyhow::Result<NativeBuildOutput> {
+    build_native_entry(source_path, extra_tool_libs, false)
+}
+
+fn build_native_entry(
+    source_path: &Path,
+    extra_tool_libs: &[&Path],
+    for_server_wrapper: bool,
+) -> anyhow::Result<NativeBuildOutput> {
     let source = std::fs::read_to_string(source_path)
         .map_err(|e| anyhow::anyhow!("cannot read `{}`: {}", source_path.display(), e))?;
 
@@ -92,7 +99,19 @@ pub fn build_native_to_disk(
             output_path: None,
             diagnostics,
         }),
-        Ok(ir) => {
+        Ok(mut ir) => {
+            if for_server_wrapper {
+                // The wrapper launches the CLI entry point. Synthetic handlers
+                // take HTTP context supplied only by the source-backed router.
+                let handlers: std::collections::HashSet<_> = ir
+                    .servers
+                    .iter()
+                    .flat_map(|server| &server.routes)
+                    .map(|route| (route.handler_agent.as_str(), route.span))
+                    .collect();
+                ir.agents
+                    .retain(|agent| !handlers.contains(&(agent.name.as_str(), agent.span)));
+            }
             let bin_dir = native_output_dir_for(source_path);
             let stem = source_path
                 .file_stem()
@@ -361,7 +380,7 @@ pub fn build_server_to_disk(
     source_path: &Path,
     extra_tool_libs: &[&Path],
 ) -> anyhow::Result<ServerBuildOutput> {
-    let native = build_native_to_disk(source_path, extra_tool_libs)?;
+    let native = build_native_entry(source_path, extra_tool_libs, true)?;
     let Some(handler_path) = native.output_path else {
         return Ok(ServerBuildOutput {
             source: native.source,
@@ -381,28 +400,37 @@ pub fn build_server_to_disk(
     let output_path = server_binary_path_for(&server_dir, stem);
     std::fs::create_dir_all(source_rs.parent().expect("server source dir"))?;
     std::fs::write(&source_rs, render_axum_server_source(&handler_path))?;
+    let package = server_package_name(stem);
     std::fs::write(
         server_dir.join("Cargo.toml"),
-        render_server_cargo_toml(&server_package_name(stem)),
+        render_server_cargo_toml(&package),
     )?;
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let status = std::process::Command::new(cargo)
+    let output = std::process::Command::new(cargo)
         .arg("build")
         .arg("--release")
+        .arg("--message-format=json-render-diagnostics")
         .arg("--manifest-path")
         .arg(server_dir.join("Cargo.toml"))
-        .status()
+        .stderr(std::process::Stdio::inherit())
+        .output()
         .map_err(|err| anyhow::anyhow!("failed to invoke cargo for server wrapper: {err}"))?;
-    if !status.success() {
+    if !output.status.success() {
         return Err(anyhow::anyhow!(
-            "server wrapper compilation failed with status {status}"
+            "server wrapper compilation failed with status {}", output.status
         ));
     }
-    let built = server_dir
-        .join("target")
-        .join("release")
-        .join(server_binary_name_for_package(&server_package_name(stem)));
+    // Cargo reports the effective output path, including custom target directories
+    // and target triples selected by the user's Cargo configuration.
+    let built = output.stdout.split(|&byte| byte == b'\n').find_map(|line| {
+        let message: serde_json::Value = serde_json::from_slice(line).ok()?;
+        if message["reason"] == "compiler-artifact" && message["target"]["name"] == package {
+            message["executable"].as_str().map(PathBuf::from)
+        } else {
+            None
+        }
+    }).ok_or_else(|| anyhow::anyhow!("Cargo did not report an executable for {package}"))?;
     std::fs::copy(&built, &output_path).map_err(|err| {
         anyhow::anyhow!(
             "failed to copy server wrapper `{}` to `{}`: {err}",
@@ -520,7 +548,7 @@ pub(super) fn server_output_dir_for(source_path: &Path) -> PathBuf {
 }
 
 
-pub(super) fn wasm_output_dir_for(source_path: &Path) -> PathBuf {
+pub fn wasm_output_dir_for(source_path: &Path) -> PathBuf {
     let mut ancestor: Option<&Path> = source_path.parent();
     while let Some(dir) = ancestor {
         if dir.file_name().map(|n| n == "src").unwrap_or(false) {

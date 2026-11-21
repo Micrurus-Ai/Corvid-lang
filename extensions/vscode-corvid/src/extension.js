@@ -70,7 +70,7 @@ async function startClient(context) {
     setStatus(event.newState);
   });
   setStatus(undefined, "starting");
-  context.subscriptions.push(client.start());
+  await client.start();
   outputChannel.appendLine(`[corvid] using language server: ${serverPath}`);
 }
 
@@ -92,6 +92,7 @@ function resolveServerPath(context) {
   const candidates = [
     configured,
     process.env.CORVID_LSP_PATH,
+    process.env.CORVID_HOME && path.join(process.env.CORVID_HOME, "bin", serverExecutable()),
     repoBinary(context, "debug"),
     repoBinary(context, "release"),
     "corvid-lsp",
@@ -105,9 +106,12 @@ function resolveServerPath(context) {
   return "corvid-lsp";
 }
 
+function serverExecutable() {
+  return process.platform === "win32" ? "corvid-lsp.exe" : "corvid-lsp";
+}
+
 function repoBinary(context, profile) {
-  const exe = process.platform === "win32" ? "corvid-lsp.exe" : "corvid-lsp";
-  return path.resolve(context.extensionPath, "..", "..", "target", profile, exe);
+  return path.resolve(context.extensionPath, "..", "..", "target", profile, serverExecutable());
 }
 
 function traceSetting() {

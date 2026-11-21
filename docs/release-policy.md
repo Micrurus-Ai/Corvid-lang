@@ -4,15 +4,20 @@ This policy defines how Corvid ships nightly, beta, and stable releases. It is a
 
 **Audience.** Two readers should be able to use this document without external context: a Corvid maintainer cutting a release, and a downstream developer or organization deciding whether to depend on Corvid for production. The first uses it as a checklist; the second uses it as the public contract for what changing-and-not-changing means at each channel.
 
-**Position.** The policy is intentionally narrow on what is promised and broad on what is enforced. Every rule below is paired with a CI gate, a CLI command, or a signed artifact field that catches violations before the release publishes — the [How this is enforced](#how-this-is-enforced) section at the end names each one.
+The channel requirements below describe the maintainer's release policy. The
+[release workflow](../.github/workflows/release.yml) builds the downloadable
+archives. The [verification section](#verification) describes the checks in the
+workflow and the additional checks maintainers perform separately.
+
+For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
 
 ## Channels
 
 ### Nightly
 
 - Purpose: expose the latest merged work to early adopters and CI consumers.
-- Version format: `0.0.0-nightly.YYYYMMDD+<short-sha>`.
-- Cadence: at most once per UTC day from `main`.
+- The hosted prerelease tag is `nightly-YYYY-MM-DD-<short-sha>`. For a local manifest, use a SemVer nightly prerelease such as `1.0.0-nightly.local`.
+- Pushes to `main` and manual workflow runs can build a nightly. Different commits on the same day have distinct tags.
 - Stability: no source or binary compatibility promise beyond the generated upgrade report.
 - Required artifacts: signed binary archive, `SHA256SUMS.txt`, release manifest, changelog fragment, and claim-audit report.
 - Promotion rule: a nightly can become a beta candidate only when all Phase 43 launch gates are green or explicitly non-scope.
@@ -76,7 +81,7 @@ A release is blocked when any of these are true:
 - signed artifact generation fails,
 - checksums or SBOM are missing,
 - `corvid claim audit` reports an aspirational launch claim,
-- `corvid upgrade --check` reports an unhandled weakening,
+- a comparison using `corvid upgrade check PATH --claims-current OLD.json --claims-target NEW.json` reports a removed or weakened guarantee,
 - generated docs drift from the guarantee registry,
 - migration execution or drift detection fails,
 - a security advisory marked release-blocking is open,
@@ -97,23 +102,47 @@ Stable release signoff requires:
 
 The same person may hold more than one role, but each role must be recorded in the release manifest.
 
-## How this is enforced
+## Verification
 
-Every rule above is paired with a machine-checked gate so a violation surfaces before the artifact ships, not after. The toolchain treats this section as the source of truth for what the release pipeline actually does.
-
-| Rule | Enforcement |
-|---|---|
-| Channel format + cadence | `corvid release <channel>` rejects malformed version strings and refuses to publish a second nightly per UTC day from the same commit. |
-| Required artifacts present | `corvid release` writes `release-manifest.json` with every required field; the publish step verifies the manifest before push. |
-| `SHA256SUMS.txt` covers every artifact | `corvid release` regenerates the file from the on-disk artifact set; mismatches fail the release. |
-| Signed binaries (DSSE attestation) | `corvid receipt verify-abi <artifact>` is run by CI against the published artifact set; an unverified attestation is a release blocker. |
-| SemVer covers the listed contracts | `corvid upgrade --check` consults the guarantee registry and refuses to advance the version when a stable contract has weakened. The breakage rule for each contract is encoded in the registry under `crates/corvid-guarantees/`. |
-| Breaking changes have an upgrade rule + migration note + accepted/rejected fixtures | `corvid claim audit` cross-references the migration directory; missing fixtures fail the audit. |
-| Release blockers | CI's release job fails closed when any of the listed conditions hold (missing artifacts, audit failures, open release-blocking advisories, migration drift). |
-| Key rotation | Release keys are pinned in the release manifest; the publisher rejects a manifest whose key id does not match the signing key. Rotation notes live alongside the previous and new keys in the receipts pipeline (see [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md)). |
-| Maintainer signoff | The release manifest carries one signoff field per role. The publisher refuses a stable release when any role is unfilled. |
-
-The point of this table is that *neither* the maintainer cutting a release *nor* the downstream developer reading the policy has to trust that someone is doing the right thing — the right thing is the only thing the tooling will let happen.
+- **Version and channels.** The release workflow derives the nightly tag from
+  the date and commit. It accepts `vMAJOR.MINOR.PATCH` for stable releases and
+  `vMAJOR.MINOR.PATCH-beta.N` for beta prereleases. Both tags must match the CLI
+  Cargo package version after removing the leading `v`. The archive check supplies the candidate download to the
+  production installer in a temporary directory. It checks the installed
+  version, calls Python, runs the starter project, then builds and serves a
+  web application. Uninstall must remove the package and preserve a user file. The publish
+  job waits for all platform archives. Manual workflow runs retain the verified
+  archives as workflow artifacts by default. Publishing a manual run requires
+  selecting the publish option.
+- **Project migration.** Run `corvid upgrade check PATH` to preview known source
+  and standard-library migrations. Review the report before using
+  `corvid upgrade apply PATH`. To compare guarantees between two applications,
+  supply their current and target claim manifests to the check command. Build
+  and test the application under the new CLI to find incompatibilities outside
+  those rules.
+- **Release records.** `corvid release build CHANNEL VERSION --out DIR` creates
+  local release artifacts. It validates the channel, version, and release signing
+  key before writing to the output directory. The hosted archive workflow also produces a
+  `SHA256SUMS.txt` artifact from the tested platform archives on build-only runs.
+  When publishing, it checks the downloaded archives against that file and
+  includes it with the downloads. To verify one archive locally, put it and
+  `SHA256SUMS.txt` in an empty directory and run `sha256sum --check --ignore-missing SHA256SUMS.txt`.
+  Each platform archive includes `lib/corvid-rust-notices.txt`. It records
+  the resolved Rust dependencies of the CLI, language server and native runtime,
+  their declared licenses, and notice text found in their Cargo packages.
+  When a Cargo package omits the upstream license file, the inventory can
+  include a checked-in copy from its exact source revision. Each such entry
+  links to that revision. Entries marked “No separate notice file found”
+  show the package authors when available. For MIT packages the inventory
+  includes the standard SPDX template. These entries still need attribution review.
+  The VSIX carries the editor dependencies' notices inside the extension.
+  Before a stable cut, maintainers must separately verify that the required
+  manifest, signatures, notices, SBOM and checksums cover the actual downloads.
+  The signed descriptor for an application cdylib attests that library.
+- **Review.** Maintainers record compatibility changes, migration instructions,
+  advisory review, beta feedback and signoff for the candidate. Archive build
+  success establishes that the exercised installation and application worked.
+  Stable promotion also requires the review and channel criteria above.
 
 ## See also
 

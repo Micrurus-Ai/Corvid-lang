@@ -187,18 +187,30 @@ impl<'a> Lexer<'a> {
         while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() {
             self.pos += 1;
         }
-        let is_float = self.pos + 1 < self.bytes.len()
+        let has_fraction = self.pos + 1 < self.bytes.len()
             && self.bytes[self.pos] == b'.'
             && self.bytes[self.pos + 1].is_ascii_digit();
-        if is_float {
+        if has_fraction {
             self.pos += 1; // consume dot
             while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_digit() {
                 self.pos += 1;
             }
+        }
+        let has_exponent = matches!(self.bytes.get(self.pos), Some(b'e' | b'E'));
+        if has_exponent {
+            self.pos += 1;
+            if matches!(self.bytes.get(self.pos), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            while self.bytes.get(self.pos).is_some_and(u8::is_ascii_digit) {
+                self.pos += 1;
+            }
+        }
+        if has_fraction || has_exponent {
             let text = &self.src[start..self.pos];
             match text.parse::<f64>() {
-                Ok(v) => self.emit(TokKind::Float(v), Span::new(start, self.pos)),
-                Err(_) => self.errors.push(LexError {
+                Ok(v) if v.is_finite() => self.emit(TokKind::Float(v), Span::new(start, self.pos)),
+                _ => self.errors.push(LexError {
                     kind: LexErrorKind::InvalidNumber(text.to_string()),
                     span: Span::new(start, self.pos),
                 }),

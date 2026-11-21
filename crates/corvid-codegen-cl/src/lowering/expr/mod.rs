@@ -2,7 +2,9 @@ use super::*;
 
 mod binop;
 mod constructors;
+mod callback;
 mod operand;
+pub(super) mod string_map;
 mod overflow;
 mod try_propagate;
 mod try_retry;
@@ -23,6 +25,122 @@ pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_r
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
 
+fn allocate_slots(
+    builder: &mut FunctionBuilder, module: &mut ObjectModule, runtime: &RuntimeFuncs,
+    element: &Type, capacity: ClValue, span: Span,
+) -> Result<ClValue, CodegenError> {
+    let info = runtime.list_typeinfos.get(element).ok_or_else(|| {
+        CodegenError::cranelift(format!("missing list element typeinfo for {}", element.display_name()), span)
+    })?;
+    let data = module.declare_data_in_func(*info, builder.func);
+    let addr = builder.ins().symbol_value(I64, data);
+    let alloc = module.declare_func_in_func(runtime.list_new, builder.func);
+    let call = builder.ins().call(alloc, &[capacity, addr]);
+    Ok(builder.inst_results(call)[0])
+}
+
+/// Each failed constructor branches to the next arm before reading its payload.
+fn match_pattern(
+    builder: &mut FunctionBuilder, runtime: &RuntimeFuncs, pattern: &corvid_ir::IrPattern,
+    ty: &Type, value: ClValue, miss: clir::Block,
+    env: &mut HashMap<LocalId, (Variable, clir::Type)>, span: Span,
+) -> Result<bool, CodegenError> {
+    use corvid_ir::IrPattern;
+    let (condition, payload) = match (pattern, ty) {
+        (IrPattern::Wildcard, _) => return Ok(false),
+        (IrPattern::Bind { local_id, .. }, _) => {
+            let layout = cl_type_for(ty, span)?;
+            let var = runtime.declare_variable(builder, layout);
+            builder.def_var(var, value);
+            env.insert(*local_id, (var, layout));
+            return Ok(false);
+        }
+        (IrPattern::Variant { owner, variant_index, args, .. }, _) => {
+            let variant = runtime.ir_types.get(owner).and_then(|t| t.variants.get(*variant_index as usize))
+                .filter(|v| v.fields.len() == args.len())
+                .ok_or_else(|| CodegenError::cranelift("invalid variant pattern layout", span))?;
+            let tag = builder.ins().load(I64, MemFlags::trusted(), value, 0);
+            let condition = builder.ins().icmp_imm(IntCC::Equal, tag, i64::from(*variant_index));
+            let matched = builder.create_block();
+            builder.ins().brif(condition, matched, &[], miss, &[]);
+            builder.switch_to_block(matched);
+            builder.seal_block(matched);
+            for (index, (arg, field)) in args.iter().zip(&variant.fields).enumerate() {
+                if matches!(arg, IrPattern::Wildcard) { continue; }
+                let offset = (index as i32 + 1) * STRUCT_FIELD_SLOT_BYTES;
+                let payload = builder.ins().load(cl_type_for(&field.ty, span)?, MemFlags::trusted(), value, offset);
+                match_pattern(builder, runtime, arg, &field.ty, payload, miss, env, span)?;
+            }
+            return Ok(true);
+        }
+        (IrPattern::None_, Type::Option(_)) => (builder.ins().icmp_imm(IntCC::Equal, value, 0), None),
+        (IrPattern::Some_(inner), Type::Option(t)) => {
+            let offset = option_uses_wrapper(ty).then_some(OPTION_PAYLOAD_OFFSET);
+            (builder.ins().icmp_imm(IntCC::NotEqual, value, 0), Some((inner, t, offset)))
+        }
+        (IrPattern::Ok_(inner), Type::Result(t, _)) | (IrPattern::Err_(inner), Type::Result(_, t)) => {
+            let tag = builder.ins().load(I64, MemFlags::trusted(), value, RESULT_TAG_OFFSET);
+            let test = if matches!(pattern, IrPattern::Ok_(_)) { IntCC::Equal } else { IntCC::NotEqual };
+            (builder.ins().icmp_imm(test, tag, RESULT_TAG_OK), Some((inner, t, Some(RESULT_PAYLOAD_OFFSET))))
+        }
+        _ => return Err(CodegenError::not_supported("this pattern requires the interpreter", span)),
+    };
+    let matched = builder.create_block();
+    builder.ins().brif(condition, matched, &[], miss, &[]);
+    builder.switch_to_block(matched);
+    builder.seal_block(matched);
+    if let Some((inner, t, offset)) = payload {
+        if !matches!(inner.as_ref(), IrPattern::Wildcard) {
+            let value = match offset {
+                Some(offset) => builder.ins().load(cl_type_for(t, span)?, MemFlags::trusted(), value, offset),
+                None => value,
+            };
+            match_pattern(builder, runtime, inner, t, value, miss, env, span)?;
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn checked_list_slot(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    list: ClValue,
+    index: ClValue,
+) -> ClValue {
+    let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
+    // Negative signed indices also exceed the length as unsigned integers.
+    let valid = builder.ins().icmp(IntCC::UnsignedLessThan, index, length);
+    let trap = builder.create_block();
+    let next = builder.create_block();
+    builder.ins().brif(valid, next, &[], trap, &[]);
+    builder.switch_to_block(trap);
+    builder.seal_block(trap);
+    let overflow = module.declare_func_in_func(runtime.overflow, builder.func);
+    builder.ins().call(overflow, &[]);
+    builder.ins().trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
+    builder.switch_to_block(next);
+    builder.seal_block(next);
+    let offset = builder.ins().imul_imm(index, 8);
+    let buffer = builder.ins().load(I64, MemFlags::trusted(), list, 8);
+    builder.ins().iadd(buffer, offset)
+}
+
+pub(super) fn record_field<'a>(runtime: &'a RuntimeFuncs, ty: &Type, name: &str, span: Span)
+    -> Result<(i32, &'a corvid_ir::IrField), CodegenError>
+{
+    let id = match ty {
+        Type::Struct(id) => *id,
+        Type::ImportedStruct(imported) => imported.def_id,
+        _ => return Err(CodegenError::cranelift("field access requires a record", span)),
+    };
+    let field = runtime.ir_types.get(&id).and_then(|record| {
+        record.fields.iter().enumerate().find(|(_, field)| field.name == name)
+    });
+    field.map(|(i, field)| (i as i32 * STRUCT_FIELD_SLOT_BYTES, field))
+        .ok_or_else(|| CodegenError::cranelift(format!("missing native layout for field `{name}`"), span))
+}
+
 pub(super) fn lower_expr(
     builder: &mut FunctionBuilder,
     expr: &IrExpr,
@@ -33,11 +151,73 @@ pub(super) fn lower_expr(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
+    if let Some((receiver, index)) = crate::native_string_map_lookup(expr) {
+        let (map, borrowed_map) = lower_container_maybe_borrowed(
+            builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+        )?;
+        let (key, borrowed_key) = lower_container_maybe_borrowed(
+            builder, index, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+        )?;
+        let slot = string_map::value_slot(builder, module, runtime, map, key);
+        let result = if matches!(expr.kind, IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::MapContainsKey, .. }) {
+            builder.ins().icmp_imm(IntCC::NotEqual, slot, 0)
+        } else {
+            string_map::load_value(builder, module, runtime, slot)
+        };
+        if !borrowed_key { emit_release(builder, module, runtime, key); }
+        if !borrowed_map { emit_release(builder, module, runtime, map); }
+        return Ok(result);
+    }
     match &expr.kind {
-        IrExprKind::Match { .. } => Err(CodegenError::not_supported(
-            "match is interpreter-only in 45i",
-            expr.span,
-        )),
+        IrExprKind::Match { scrutinee, arms } => {
+            if !crate::result_match::supports_match(&scrutinee.ty, arms)
+                || !(is_native_result_type(&scrutinee.ty) || is_native_option_type(&scrutinee.ty) || matches!(scrutinee.ty, Type::Struct(_) | Type::ImportedStruct(_))) {
+                return Err(CodegenError::not_supported("this match requires the interpreter", expr.span));
+            }
+            let (result, borrowed) = lower_container_maybe_borrowed(
+                builder, scrutinee, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let join = builder.create_block();
+            let ty = if expr.ty == Type::Nothing { I64 } else { cl_type_for(&expr.ty, expr.span)? };
+            let output = builder.append_block_param(join, ty);
+            for (arm_index, arm) in arms.iter().enumerate() {
+                let next = builder.create_block();
+                let mut arm_env = env.clone();
+                let can_miss = match_pattern(builder, runtime, &arm.pattern, &scrutinee.ty, result, next, &mut arm_env, arm.span)?;
+                let lower_operand = |builder: &mut FunctionBuilder, operand: &IrExpr, module: &mut ObjectModule| {
+                    let enclosing = runtime.in_match_operand.replace(true);
+                    let value = lower_expr(builder, operand, current_return_ty, &arm_env, scope_stack, func_ids_by_def, module, runtime);
+                    runtime.in_match_operand.set(enclosing);
+                    value
+                };
+                if let Some(guard) = &arm.guard {
+                    let test = lower_operand(builder, guard, module)?;
+                    let body = builder.create_block();
+                    builder.ins().brif(test, body, &[], next, &[]);
+                    builder.switch_to_block(body);
+                    builder.seal_block(body);
+                }
+                let value = lower_operand(builder, &arm.body, module)?;
+                builder.ins().jump(join, &[value.into()]);
+                if !can_miss && arm.guard.is_none() {
+                    break;
+                }
+                builder.switch_to_block(next);
+                builder.seal_block(next);
+                if arm_index + 1 == arms.len() {
+                    // Exhaustiveness is checked before lowering.
+                    builder.ins().trap(clir::TrapCode::unwrap_user(2));
+                }
+            }
+            builder.switch_to_block(join);
+            builder.seal_block(join);
+            if !borrowed {
+                emit_release(builder, module, runtime, result);
+            }
+            Ok(output)
+        }
+        IrExprKind::Lambda { .. } | IrExprKind::Decl { .. } if crate::native_callback_type(&expr.ty) =>
+            callback::create(builder, expr, env, func_ids_by_def, module, runtime),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
             "lambdas are interpreter-only in 45j",
             expr.span,
@@ -50,12 +230,220 @@ pub(super) fn lower_expr(
             "Page<Item> responses are interpreter-only in 52c-2 (served via corvid serve)",
             expr.span,
         )),
-        IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported(
-            "Map<K, V> is interpreter-only in 45g",
-            expr.span,
-        )),
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if crate::native_integer_list_transform(*kind, &receiver.ty, args) => {
+                let (list, borrowed_list) = lower_container_maybe_borrowed(
+                    builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                use corvid_types::BuiltinMethodKind::*;
+                let (helper, extra, callback_expr) = match kind {
+                    ListMap => (runtime.list_map_int, None, &args[0]),
+                    ListFilter => (runtime.list_filter_int, None, &args[0]),
+                    ListAny | ListAll => {
+                        let all = builder.ins().iconst(I64, i64::from(*kind == ListAll));
+                        (runtime.list_test_int, Some(all), &args[0])
+                    }
+                    ListFold => {
+                        let init = lower_expr(builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                        (runtime.list_fold_int, Some(init), &args[1])
+                    }
+                    _ => unreachable!(),
+                };
+                let (callback, borrowed_callback) = lower_container_maybe_borrowed(
+                    builder, callback_expr, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let info = runtime.list_typeinfos.get(&Type::Int).ok_or_else(||
+                    CodegenError::cranelift("missing integer list typeinfo", expr.span))?;
+                let info = module.declare_data_in_func(*info, builder.func);
+                let info = builder.ins().symbol_value(I64, info);
+                let target = builder.ins().load(I64, MemFlags::trusted(), callback, 0);
+                let helper = module.declare_func_in_func(helper, builder.func);
+                let mut operands = vec![list, callback, target, info];
+                operands.extend(extra);
+                let call = builder.ins().call(helper, &operands);
+                let output = builder.inst_results(call)[0];
+                if !borrowed_callback { emit_release(builder, module, runtime, callback); }
+                if !borrowed_list { emit_release(builder, module, runtime, list); }
+                Ok(output)
+            }
+        IrExprKind::BuiltinMethod { kind: kind @ (corvid_types::BuiltinMethodKind::MapLength
+            | corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues), receiver, .. }
+            if crate::native_string_map(&receiver.ty) => {
+                let (map, borrowed) = lower_container_maybe_borrowed(
+                    builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let slots = builder.ins().load(I64, MemFlags::trusted(), map, 0);
+                let len = builder.ins().ushr_imm(slots, 1);
+                let result = if *kind == corvid_types::BuiltinMethodKind::MapLength {
+                    len
+                } else {
+                    let values = *kind == corvid_types::BuiltinMethodKind::MapValues;
+                    let Type::List(element) = &expr.ty else { unreachable!() };
+                    string_map::snapshot(builder, module, runtime, map, len, values, element, expr.span)?
+                };
+                if !borrowed { emit_release(builder, module, runtime, map); }
+                Ok(result)
+            }
+        IrExprKind::BuiltinMethod { kind: kind @ (corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast), receiver, .. } => {
+            let Type::Option(element) = &expr.ty else { unreachable!() };
+            if !is_native_option_type(&expr.ty) {
+                return Err(CodegenError::not_supported("first or last with this element type", expr.span));
+            }
+            let (list, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let length = builder.ins().load(I64, MemFlags::trusted(), list, 0);
+            let present = builder.create_block();
+            let join = builder.create_block();
+            let output = builder.append_block_param(join, I64);
+            let none = builder.ins().iconst(I64, 0);
+            builder.ins().brif(length, present, &[], join, &[none.into()]);
+            builder.switch_to_block(present);
+            builder.seal_block(present);
+            let slots = builder.ins().load(I64, MemFlags::trusted(), list, 8);
+            let ty = cl_type_for(element, expr.span)?;
+            let slot = if *kind == corvid_types::BuiltinMethodKind::ListLast {
+                let index = builder.ins().iadd_imm(length, -1);
+                let offset = builder.ins().imul_imm(index, 8);
+                builder.ins().iadd(slots, offset)
+            } else {
+                slots
+            };
+            let item = builder.ins().load(ty, MemFlags::trusted(), slot, 0);
+            if is_refcounted_type(element) {
+                emit_retain(builder, module, runtime, item);
+            }
+            let some = if option_uses_wrapper(&expr.ty) {
+                emit_option_wrapper_value(builder, module, runtime, &expr.ty, item, element, expr.span)?
+            } else {
+                item
+            };
+            builder.ins().jump(join, &[some.into()]);
+            builder.switch_to_block(join);
+            builder.seal_block(join);
+            if !borrowed {
+                emit_release(builder, module, runtime, list);
+            }
+            Ok(output)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ListAppend, receiver, args } => {
+            let item = &args[0];
+            if !crate::native_list_append(&receiver.ty, &item.ty) {
+                return Err(CodegenError::not_supported("append with this element type", expr.span));
+            }
+            let (list, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let mut slot = lower_expr(builder, item, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            if matches!(&receiver.ty, Type::List(t) if **t == Type::Float) && item.ty == Type::Int {
+                slot = builder.ins().fcvt_from_sint(F64, slot);
+            }
+            slot = match builder.func.dfg.value_type(slot) {
+                I8 => builder.ins().uextend(I64, slot),
+                F64 => builder.ins().bitcast(I64, MemFlags::new(), slot),
+                _ => slot,
+            };
+            let append = module.declare_func_in_func(runtime.list_append, builder.func);
+            builder.ins().call(append, &[list, slot]);
+            if !borrowed {
+                emit_release(builder, module, runtime, list);
+            }
+            Ok(builder.ins().iconst(I64, 0))
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            overflow::convert_number(builder, module, *kind, input, expr.span)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_method(*kind) => {
+            use corvid_types::BuiltinMethodKind::*;
+            let outer_temporaries = runtime.return_temporaries.borrow().len();
+            let (text, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            if !borrowed {
+                runtime.return_temporaries.borrow_mut().push(text);
+            }
+            let mut operands = vec![text];
+            for arg in args {
+                let (value, borrowed) = lower_container_maybe_borrowed(
+                    builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                if !borrowed && is_refcounted_type(&arg.ty) {
+                    runtime.return_temporaries.borrow_mut().push(value);
+                }
+                operands.push(value);
+            }
+            if *kind == StringSplit {
+                let capacity = builder.ins().iconst(I64, 0);
+                operands.push(allocate_slots(builder, module, runtime, &Type::String, capacity, expr.span)?);
+            }
+            let method = match kind {
+                StringLength => runtime.string_char_len,
+                StringSubstring => runtime.string_substring,
+                StringToUpper => runtime.string_to_upper,
+                StringToLower => runtime.string_to_lower,
+                StringTrim => runtime.string_trim,
+                StringContains => runtime.string_contains,
+                StringStartsWith => runtime.string_starts_with,
+                StringEndsWith => runtime.string_ends_with,
+                StringReplace => runtime.string_replace,
+                StringSplit => runtime.string_split,
+                _ => unreachable!(),
+            };
+            let func = module.declare_func_in_func(method, builder.func);
+            let call = builder.ins().call(func, &operands);
+            let result = builder.inst_results(call)[0];
+            for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
+                emit_release(builder, module, runtime, value);
+            }
+            if *kind == StringSplit {
+                builder.ins().trapz(result, clir::TrapCode::unwrap_user(2));
+            }
+            Ok(result)
+        }
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ListLength
+                | corvid_types::BuiltinMethodKind::ResultIsOk
+                | corvid_types::BuiltinMethodKind::ResultIsErr),
+            receiver, ..
+        } => {
+            use corvid_types::BuiltinMethodKind::*;
+            let (container, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let value = match kind {
+                ListLength => builder.ins().load(I64, MemFlags::trusted(), container, 0),
+                _ => {
+                    let tag = builder.ins().load(I64, MemFlags::trusted(), container, RESULT_TAG_OFFSET);
+                    let expected = if *kind == ResultIsOk { RESULT_TAG_OK } else { RESULT_TAG_ERR };
+                    builder.ins().icmp_imm(IntCC::Equal, tag, expected)
+                }
+            };
+            if !borrowed {
+                emit_release(builder, module, runtime, container);
+            }
+            Ok(value)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::StringParseInt, receiver, .. } => {
+            let (text, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let zero = builder.ins().iconst(I64, 0);
+            let result = emit_result_wrapper_value(
+                builder, module, runtime, &expr.ty, zero, &Type::Int, RESULT_TAG_OK, expr.span,
+            )?;
+            let slot = builder.ins().iadd_imm(result, i64::from(RESULT_PAYLOAD_OFFSET));
+            let parse = module.declare_func_in_func(runtime.string_parse_int, builder.func);
+            let call = builder.ins().call(parse, &[text, slot]);
+            let tag = builder.inst_results(call)[0];
+            builder.ins().store(MemFlags::trusted(), tag, result, RESULT_TAG_OFFSET);
+            if !borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(result)
+        }
         IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
-            "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
+            "this builtin method requires the interpreter",
             expr.span,
         )),
         IrExprKind::Literal(IrLiteral::Int(n)) => Ok(builder.ins().iconst(I64, *n)),
@@ -87,7 +475,7 @@ pub(super) fn lower_expr(
             // insertion at non-last consuming uses instead of
             // retaining on every read ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the last use of a local
             // consumes the existing +1 directly.
-            if !runtime.dup_drop_enabled && is_refcounted_type(&expr.ty) {
+            if (!runtime.dup_drop_enabled || runtime.in_match_operand.get()) && is_refcounted_type(&expr.ty) {
                 emit_retain(builder, module, runtime, v);
             }
             Ok(v)
@@ -96,6 +484,15 @@ pub(super) fn lower_expr(
             "declaration reference (imports/functions as values)",
             expr.span,
         )),
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
+                builder, *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime, expr.span,
+            ),
+        IrExprKind::BinOp { left, .. } | IrExprKind::WrappingBinOp { left, .. }
+            if matches!(left.ty, Type::Struct(_) | Type::ImportedStruct(_)) =>
+                Err(CodegenError::not_supported("record ordering", expr.span)),
+        IrExprKind::BinOp { left, .. } | IrExprKind::WrappingBinOp { left, .. }
+            if matches!(left.ty, Type::Map(_, _)) => Err(CodegenError::not_supported("map comparison", expr.span)),
         IrExprKind::BinOp { op, left, right } => {
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 return lower_short_circuit(
@@ -110,6 +507,33 @@ pub(super) fn lower_expr(
                     module,
                     runtime,
                 );
+            }
+            if matches!(op, BinaryOp::Add) && matches!(expr.ty, Type::List(_)) {
+                if !crate::native_list_concat(left, right) {
+                    return Err(CodegenError::not_supported(
+                        "list concatenation with element conversion",
+                        expr.span,
+                    ));
+                }
+                let (a, a_borrowed) = lower_container_maybe_borrowed(
+                    builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let (b, b_borrowed) = lower_container_maybe_borrowed(
+                    builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let concat = module.declare_func_in_func(runtime.list_concat, builder.func);
+                let Type::List(elem_ty) = &expr.ty else { unreachable!() };
+                let info = module.declare_data_in_func(runtime.list_typeinfos[elem_ty.as_ref()], builder.func);
+                let info = builder.ins().symbol_value(I64, info);
+                let call = builder.ins().call(concat, &[a, b, info]);
+                let list = builder.inst_results(call)[0];
+                if !a_borrowed {
+                    emit_release(builder, module, runtime, a);
+                }
+                if !b_borrowed {
+                    emit_release(builder, module, runtime, b);
+                }
+                return Ok(list);
             }
             // String operands route through the String runtime helpers
             // and have their own ownership semantics (release inputs
@@ -191,15 +615,21 @@ pub(super) fn lower_expr(
             )
         }
         IrExprKind::Call { kind, callee_name, args } => match kind {
+            IrCallKind::ClosureLocal { local_id, signature } if crate::native_callback_type(signature) => {
+                let var = env.get(local_id).ok_or_else(|| CodegenError::cranelift("unbound callback", expr.span))?.0;
+                let handle = builder.use_var(var);
+                let mut operands = vec![handle];
+                for arg in args {
+                    operands.push(lower_expr(builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?);
+                }
+                let sig = builder.import_signature(callback::signature(module, args.len(), cl_type_for(&expr.ty, expr.span)?));
+                let address = builder.ins().load(I64, MemFlags::trusted(), handle, 0);
+                let call = builder.ins().call_indirect(sig, address, &operands);
+                Ok(builder.inst_results(call)[0])
+            }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(CodegenError::not_supported(
                     "closure calls are interpreter-only in 45j",
-                    expr.span,
-                ));
-            }
-            IrCallKind::EnumConstructor { .. } => {
-                return Err(CodegenError::not_supported(
-                    "sum-type variants are interpreter-only in 45h",
                     expr.span,
                 ));
             }
@@ -240,7 +670,9 @@ pub(super) fn lower_expr(
                         .unwrap_or(false);
                     let arg_is_bare_local =
                         matches!(&a.kind, IrExprKind::Local { .. });
-                    if is_ref && callee_borrowed && arg_is_bare_local {
+                    // The unified ownership pass gives every refcounted parameter
+                    // an owned slot. Borrow signatures apply to the legacy ABI.
+                    if !runtime.dup_drop_enabled && is_ref && callee_borrowed && arg_is_bare_local {
                         // Borrow path: read the Variable directly, no retain.
                         if let IrExprKind::Local { local_id, name } = &a.kind {
                             let (var, _ty) = env.get(local_id).ok_or_else(|| {
@@ -752,18 +1184,19 @@ pub(super) fn lower_expr(
                     expr.span,
                 )
             }
-            IrCallKind::StructConstructor { def_id } => {
-                let ir_type = runtime.ir_types.get(def_id).cloned().ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!("struct type `{callee_name}` metadata missing from ir_types"),
-                        expr.span,
-                    )
-                })?;
+            IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
+                let ty = runtime.ir_types.get(def_id).ok_or_else(||
+                    CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
+                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                    let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
+                        CodegenError::cranelift("unknown constructor tag", expr.span))?;
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                } else {
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                };
+                let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder,
-                    module,
-                    runtime,
-                    &ir_type,
+                    builder, module, runtime, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,
@@ -782,40 +1215,7 @@ pub(super) fn lower_expr(
             )),
         },
         IrExprKind::FieldAccess { target, field } => {
-            let def_id = match &target.ty {
-                Type::Struct(id) => *id,
-                // Imported structs key the same `ir_types` layout table;
-                // the type carries the cross-module-remapped DefId (set in
-                // corvid-ir lowering, slices G0-1 + the lower_expr remap),
-                // so the same field-offset machinery applies.
-                Type::ImportedStruct(imported) => imported.def_id,
-                other => {
-                    return Err(CodegenError::cranelift(
-                        format!(
-                            "field access target has non-struct type `{other:?}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"
-                        ),
-                        expr.span,
-                    ));
-                }
-            };
-            let ir_type = runtime.ir_types.get(&def_id).cloned().ok_or_else(|| {
-                CodegenError::cranelift(
-                    format!("struct metadata missing for field access to `{field}`"),
-                    expr.span,
-                )
-            })?;
-            let (i, field_meta) = ir_type
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, f)| &f.name == field)
-                .ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!("field `{field}` not found on struct `{}`", ir_type.name),
-                        expr.span,
-                    )
-                })?;
-            let offset = (i as i32) * STRUCT_FIELD_SLOT_BYTES;
+            let (offset, field_meta) = record_field(runtime, &target.ty, field, expr.span)?;
             let field_cl_ty = cl_type_for(&field_meta.ty, field_meta.span)?;
 
             // Borrow-at-use-site peephole: if the target is a bare
@@ -856,6 +1256,9 @@ pub(super) fn lower_expr(
             }
             Ok(field_val)
         }
+        IrExprKind::Index { target, .. } if matches!(target.ty, Type::Map(_, _)) => {
+            Err(CodegenError::not_supported("map indexing with these key and value types", expr.span))
+        }
         IrExprKind::Index { target, index } => {
             // Element type from the Index expression's annotated type
             // (the type checker attaches the element type).
@@ -882,39 +1285,7 @@ pub(super) fn lower_expr(
                 runtime,
             )?;
 
-            // Bounds check: trap if `idx_val >= length` or `idx_val < 0`.
-            let length = builder.ins().load(
-                I64,
-                cranelift_codegen::ir::MemFlags::trusted(),
-                list_ptr,
-                0,
-            );
-            let in_range_hi =
-                builder.ins().icmp(IntCC::SignedLessThan, idx_val, length);
-            let zero = builder.ins().iconst(I64, 0);
-            let in_range_lo =
-                builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx_val, zero);
-            let in_range = builder.ins().band(in_range_hi, in_range_lo);
-            let trap_block = builder.create_block();
-            let cont_block = builder.create_block();
-            builder
-                .ins()
-                .brif(in_range, cont_block, &[], trap_block, &[]);
-            builder.switch_to_block(trap_block);
-            builder.seal_block(trap_block);
-            let callee_ref =
-                module.declare_func_in_func(runtime.overflow, builder.func);
-            builder.ins().call(callee_ref, &[]);
-            builder
-                .ins()
-                .trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
-            builder.switch_to_block(cont_block);
-            builder.seal_block(cont_block);
-
-            // Element address = list_ptr + 8 + idx * 8.
-            let offset = builder.ins().imul_imm(idx_val, 8);
-            let base = builder.ins().iadd_imm(list_ptr, 8);
-            let elem_addr = builder.ins().iadd(base, offset);
+            let elem_addr = checked_list_slot(builder, module, runtime, list_ptr, idx_val);
             let elem_val = builder.ins().load(
                 elem_cl_ty,
                 cranelift_codegen::ir::MemFlags::trusted(),
@@ -938,56 +1309,25 @@ pub(super) fn lower_expr(
             }
             Ok(elem_val)
         }
+        IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
+            let Type::Map(_, element) = &expr.ty else { unreachable!() };
+            let capacity = builder.ins().iconst(I64, (keys.len() * 2) as i64);
+            let map = allocate_slots(builder, module, runtime, &Type::String, capacity, expr.span)?;
+            for (key, value) in keys.iter().zip(values) {
+                let key = lower_expr(builder, key, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                let item = lower_expr(builder, value, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                string_map::store(builder, module, runtime, map, key, item, element, None, value.span)?;
+            }
+            Ok(map)
+        }
+        IrExprKind::MapLiteral { .. } => Err(CodegenError::not_supported("map literal with these element types", expr.span)),
         IrExprKind::List { items } => {
-            // Element type taken from the List's annotated type.
-            let elem_ty = match &expr.ty {
-                Type::List(elem) => (**elem).clone(),
-                other => {
-                    return Err(CodegenError::cranelift(
-                        format!(
-                            "list literal has non-list type `{other:?}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"
-                        ),
-                        expr.span,
-                    ));
-                }
+            let Type::List(elem_ty) = &expr.ty else {
+                return Err(CodegenError::not_supported("list literal with this element type", expr.span));
             };
-            let _elem_refcounted = is_refcounted_type(&elem_ty);
-            // Allocation size: 8 (length) + 8 * N (elements).
-            let total_bytes = 8 + 8 * items.len() as i64;
-            let size_val = builder.ins().iconst(I64, total_bytes);
-            // Single typed allocator. The typeinfo block
-            // (pre-emitted in lower_file) carries destroy_fn
-            // (corvid_destroy_list for refcounted elements, NULL
-            // otherwise) and trace_fn (corvid_trace_list always).
-            let list_ti_id = runtime
-                .list_typeinfos
-                .get(&elem_ty)
-                .copied()
-                .ok_or_else(|| {
-                    CodegenError::cranelift(
-                        format!(
-                            "no typeinfo pre-emitted for List<{}> ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â collect_list_element_types missed this site",
-                            mangle_type_name(&elem_ty)
-                        ),
-                        expr.span,
-                    )
-                })?;
-            let list_ti_gv = module.declare_data_in_func(list_ti_id, builder.func);
-            let ti_addr = builder.ins().symbol_value(I64, list_ti_gv);
-            let alloc_ref =
-                module.declare_func_in_func(runtime.alloc_typed, builder.func);
-            let call = builder.ins().call(alloc_ref, &[size_val, ti_addr]);
-            let list_ptr = builder.inst_results(call)[0];
-            // Store length at offset 0.
-            let length_val = builder.ins().iconst(I64, items.len() as i64);
-            builder.ins().store(
-                cranelift_codegen::ir::MemFlags::trusted(),
-                length_val,
-                list_ptr,
-                0,
-            );
-            // Store each element at offset 8 + i * 8. The element's
-            // Owned +1 transfers into the list.
+            let count = builder.ins().iconst(I64, items.len() as i64);
+            let list_ptr = allocate_slots(builder, module, runtime, elem_ty, count, expr.span)?;
+            let slots = builder.ins().load(I64, MemFlags::trusted(), list_ptr, 8);
             for (i, item) in items.iter().enumerate() {
                 let item_val = lower_expr(
                     builder,
@@ -999,13 +1339,15 @@ pub(super) fn lower_expr(
                     module,
                     runtime,
                 )?;
-                let offset = 8 + (i as i32) * 8;
+                let offset = (i as i32) * 8;
                 builder.ins().store(
                     cranelift_codegen::ir::MemFlags::trusted(),
                     item_val,
-                    list_ptr,
+                    slots,
                     offset,
                 );
+                let initialized = builder.ins().iconst(I64, (i + 1) as i64);
+                builder.ins().store(MemFlags::trusted(), initialized, list_ptr, 0);
             }
             Ok(list_ptr)
         }

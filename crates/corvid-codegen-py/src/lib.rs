@@ -27,7 +27,7 @@ mod tests {
         let checked = typecheck(&file, &resolved);
         assert!(checked.errors.is_empty(), "typecheck: {:?}", checked.errors);
         let ir = lower(&file, &resolved, &checked);
-        emit(&ir)
+        emit(&ir).unwrap()
     }
 
     #[test]
@@ -215,7 +215,7 @@ agent calc() -> Int:
 ";
         let py = src_to_py(src);
         // Outer parens on the BinOp ensure correct precedence.
-        assert!(py.contains("return (1 + 2)"));
+        assert!(py.contains("return __corvid_checked_i64(1 + 2)"));
     }
 
     #[test]

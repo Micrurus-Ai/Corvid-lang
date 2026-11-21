@@ -11,7 +11,7 @@ struct UpgradeFinding {
     rule_id: &'static str,
     kind: &'static str,
     message: &'static str,
-    replacement: &'static str,
+    replacement: Option<&'static str>,
     occurrences: usize,
 }
 
@@ -19,7 +19,7 @@ struct RewriteRule {
     id: &'static str,
     kind: &'static str,
     from: &'static str,
-    to: &'static str,
+    to: Option<&'static str>,
     message: &'static str,
 }
 
@@ -28,42 +28,42 @@ const RULES: &[RewriteRule] = &[
         id: "syntax.pub_extern_agent_single_line",
         kind: "syntax",
         from: "pub extern \"c\"\nagent ",
-        to: "pub extern \"c\" agent ",
-        message: "`pub extern \"c\" agent` is the stable v1 spelling; split-line legacy form is migrated automatically",
+        to: Some("pub extern \"c\" agent "),
+        message: "Join the split-line export declaration into the single-line spelling.",
     },
     RewriteRule {
         id: "stdlib.llm_complete_to_agent_run",
         kind: "stdlib",
         from: "std.llm.complete(",
-        to: "std.agent.run(",
-        message: "`std.llm.complete` is replaced by the policy-aware `std.agent.run` entrypoint",
+        to: None,
+        message: "Review this legacy model call and express its inputs, return type and template in a Corvid prompt.",
     },
     RewriteRule {
         id: "stdlib.cache_get_or_create_to_remember",
         kind: "stdlib",
         from: "std.cache.get_or_create(",
-        to: "std.cache.remember(",
-        message: "`std.cache.get_or_create` is replaced by `std.cache.remember` with the same key/value contract",
+        to: None,
+        message: "Review the cache key, lifetime and storage requirements before porting this call.",
     },
     RewriteRule {
         id: "schema.migration_state_v1",
         kind: "schema",
         from: "\"schema\":\"corvid.migration_state.v0\"",
-        to: "\"schema\":\"corvid.migration_state.v1\"",
+        to: Some("\"schema\":\"corvid.migration_state.v1\""),
         message: "migration state files must declare the v1 schema before stable release tooling consumes them",
     },
     RewriteRule {
         id: "trace.format_v1",
         kind: "trace",
         from: "\"schema\":\"corvid.trace.v0\"",
-        to: "\"schema\":\"corvid.trace.v1\"",
+        to: Some("\"schema\":\"corvid.trace.v1\""),
         message: "trace envelopes must use the v1 trace schema for stable replay and claim audit",
     },
     RewriteRule {
         id: "connector.manifest_v1",
         kind: "connector",
         from: "\"manifest_version\":\"0.1\"",
-        to: "\"manifest_version\":\"1.0\"",
+        to: Some("\"manifest_version\":\"1.0\""),
         message: "connector manifests must use manifest_version 1.0 for stable scope, replay, and approval checks",
     },
 ];
@@ -74,7 +74,7 @@ pub fn run_check(
     claims_current: Option<&Path>,
     claims_target: Option<&Path>,
 ) -> Result<u8> {
-    let findings = collect_findings(root)?;
+    let findings = migrate_files(root, false)?;
 
     // 43Q: claim-regression check. When both `--claims-current`
     // and `--claims-target` are provided, compare the two claim
@@ -270,23 +270,7 @@ pub fn run_refresh_std(root: &Path) -> Result<u8> {
 }
 
 pub fn run_apply(root: &Path, json: bool) -> Result<u8> {
-    let mut findings = Vec::new();
-    for path in corvid_sources(root)? {
-        let original =
-            fs::read_to_string(&path).with_context(|| format!("read `{}`", path.display()))?;
-        let mut rewritten = original.clone();
-        for rule in RULES {
-            let occurrences = rewritten.matches(rule.from).count();
-            if occurrences == 0 {
-                continue;
-            }
-            findings.push(finding_for(&path, rule, occurrences));
-            rewritten = rewritten.replace(rule.from, rule.to);
-        }
-        if rewritten != original {
-            fs::write(&path, rewritten).with_context(|| format!("write `{}`", path.display()))?;
-        }
-    }
+    let findings = migrate_files(root, true)?;
     if json {
         println!(
             "{}",
@@ -295,19 +279,84 @@ pub fn run_apply(root: &Path, json: bool) -> Result<u8> {
     } else {
         render_findings(&findings);
     }
-    Ok(0)
+    Ok(u8::from(
+        findings.iter().any(|finding| finding.replacement.is_none()),
+    ))
 }
 
-fn collect_findings(root: &Path) -> Result<Vec<UpgradeFinding>> {
+fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
+    use corvid_syntax::TokKind;
+    use std::io::Write;
+
     let mut findings = Vec::new();
     for path in corvid_sources(root)? {
-        let source =
+        let is_source = path.extension().is_some_and(|ext| ext == "cor");
+        if !is_source && !path.extension().is_some_and(|ext| ext == "json") {
+            continue;
+        }
+        let original =
             fs::read_to_string(&path).with_context(|| format!("read `{}`", path.display()))?;
+        let mut edits = Vec::new();
+        let mut starts = Vec::new();
+        if is_source && (original.contains("pub extern") || original.contains("std.")) {
+            let tokens = corvid_syntax::lex(&original).map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot identify migration sites in `{}`; fix lexical errors first",
+                    path.display()
+                )
+            })?;
+            for (index, token) in tokens.iter().enumerate() {
+                let declaration = token.kind == TokKind::KwPub;
+                let std_name = matches!(&token.kind, TokKind::Ident(name) if name == "std");
+                let member = index > 0 && tokens[index - 1].kind == TokKind::Dot;
+                if declaration || (std_name && !member) {
+                    starts.push(token.span.start);
+                }
+            }
+        }
         for rule in RULES {
-            let occurrences = source.matches(rule.from).count();
+            let source_rule = matches!(rule.kind, "syntax" | "stdlib");
+            if is_source != source_rule {
+                continue;
+            }
+            let mut occurrences = 0;
+            let crlf;
+            let mut spellings = vec![rule.from];
+            if rule.from.contains('\n') {
+                crlf = rule.from.replace('\n', "\r\n");
+                spellings.push(&crlf);
+            }
+            for spelling in spellings {
+                for (offset, _) in original.match_indices(spelling) {
+                    if is_source && starts.binary_search(&offset).is_err() {
+                        continue;
+                    }
+                    occurrences += 1;
+                    if let Some(replacement) = rule.to {
+                        edits.push((offset..offset + spelling.len(), replacement));
+                    }
+                }
+            }
             if occurrences > 0 {
                 findings.push(finding_for(&path, rule, occurrences));
             }
+        }
+        if apply && !edits.is_empty() {
+            let mut rewritten = original;
+            edits.sort_by_key(|(range, _)| range.start);
+            for (range, replacement) in edits.into_iter().rev() {
+                rewritten.replace_range(range, replacement);
+            }
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+            temp.write_all(rewritten.as_bytes())?;
+            temp.as_file()
+                .set_permissions(fs::metadata(&path)?.permissions())?;
+            temp.persist(&path)
+                .with_context(|| format!("write `{}`", path.display()))?;
         }
     }
     Ok(findings)
@@ -328,7 +377,11 @@ fn collect_corvid_sources(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("read dir `{}`", dir.display()))? {
         let entry = entry.with_context(|| format!("read dir entry in `{}`", dir.display()))?;
         let path = entry.path();
-        if path.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_corvid_sources(&path, files)?;
         } else if path
             .extension()
@@ -361,7 +414,7 @@ fn render_findings(findings: &[UpgradeFinding]) {
             finding.kind,
             finding.rule_id,
             finding.occurrences,
-            finding.replacement
+            finding.replacement.unwrap_or("manual review")
         );
         println!("  {}", finding.message);
     }

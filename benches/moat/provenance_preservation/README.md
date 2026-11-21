@@ -1,25 +1,13 @@
 # Benchmark — provenance preservation rate
 
-For each multi-hop AI workflow under `chains/`, the runner asks: at
-the END of the workflow, can a downstream consumer recover the
-ORIGINAL source documents that contributed to the final answer?
-
-Corvid's `Grounded<T>` propagates provenance through every
-transformation by construction. LangChain / Vercel AI SDK return
-plain strings or untyped objects after the first transformation; the
-citation chain dissolves unless the developer manually threads it
-through every step.
-
-The headline number is the survival rate: **of N test chains, in
-how many can the final return value's type expose the source IDs
-without manual bookkeeping?**
+Each chain tests whether a downstream consumer can recover the retrieval sources behind a final answer. The Corvid probe compiles and executes the chain with one deterministic fixture document per retrieval endpoint. A retrieval name identifies that fixture. Multiple documents from the same endpoint are outside this measurement.
 
 ## What counts as preservation
 
 | Stack | Counts as preserved if... |
 |---|---|
 | **Corvid** | The final return type is `Grounded<T>` (or contains `Grounded<T>` in a typed field), AND the provenance chain reaches back to the original retrieval call. |
-| **Python + LangChain** | The final return value is a typed object whose schema declares a sources / source_documents field at the type level (not via dict access). The runner type-checks this with `mypy --strict`. |
+| **Python + LangChain** | The final return value is a typed object whose schema declares a sources / source_documents field at the type level (not via dict access). The runner inspects the declared return annotation. |
 | **TypeScript + Vercel AI SDK** | The final return type declares `sources: string[]` or equivalent at the TypeScript type level, AND the implementation populates it without manual threading from the original retrieval. |
 
 A field that exists "by convention" — e.g. `dict[str, object]` keys
@@ -67,10 +55,7 @@ typescript_baseline = "Vercel AI SDK streamObject + zod"
 
 The runner's classification per chain:
 
-- For Corvid: parse `corvid.cor`, locate the final return-type
-  declaration on the outer agent, assert it is `Grounded<T>` and
-  that there is a `provenance(...)` call accessible at the call
-  site.
+- For Corvid, compile the fixture and run its agent with offline tools and a deterministic model. Inspect the returned provenance for each expected retrieval name. A compile or execution error is recorded separately.
 - For Python: parse `python.py` for the final function's return-type
   annotation. If the annotation is a TypedDict / Pydantic model with
   a typed `sources` / `source_documents` field, score `preserved`.
@@ -79,8 +64,7 @@ The runner's classification per chain:
   type. If it has a `sources: string[]` field at the TS-type level,
   preserved. Otherwise lost.
 
-The runner is static-only — no LLM calls run. The point is the
-TYPE-LEVEL guarantee, not whether a particular runtime passes.
+The Python and TypeScript columns use static source inspection. No live model calls are required.
 
 ## How to add a chain
 

@@ -1,0 +1,17 @@
+agent display_name(names: Map<String, String>, id: String) -> String:
+    return match names.get(id):
+        Some(name) -> name
+        None -> "Unknown user"
+
+agent directory(key: String, name: String) -> Map<String, String>:
+    return {key: "old", "blank": "", key: name}
+
+agent main() -> Bool:
+    key = "user" + "-42"
+    name = display_name(directory(key, "A" + "da"), "user-" + "42")
+    names = directory(key, "Ada")
+    blank = display_name(names, "blank")
+    missing = display_name(names, "other")
+    empty: Map<String, String> = {}
+    empty_result = display_name(empty, key)
+    return name == "Ada" and blank == "" and missing == "Unknown user" and empty_result == missing

@@ -117,6 +117,14 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
         for route in &server.routes {
             let element = format!("route {} {}", route.method.as_str(), route.path);
 
+            if !caps.route_execution {
+                gaps.push(ClosureGap {
+                    element: element.clone(),
+                    missing_capability: "HTTP route execution".to_string(),
+                    provided_by: "52a",
+                });
+            }
+
             // Response boundary types.
             if !caps.streaming && type_mentions_stream(&route.response_ty) {
                 gaps.push(ClosureGap {
@@ -251,6 +259,7 @@ mod tests {
             path_params: vec![],
             query_ty: None,
             body_ty,
+            form_encoded: false,
             response_kind: RouteResponseKind::Json,
             response_ty,
             effect_names: vec![],
@@ -266,6 +275,7 @@ mod tests {
 
     fn ir_with(route: IrRoute, agents: Vec<IrAgent>) -> IrFile {
         IrFile {
+            import_fingerprint: None,
             imports: vec![],
             types: vec![],
             tools: vec![],
@@ -295,6 +305,15 @@ mod tests {
         let ir = ir_with(r, vec![handler_agent("h", false)]);
         let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
         assert!(gaps.is_empty(), "plain route should have no gaps: {gaps:?}");
+    }
+
+    #[test]
+    fn plain_route_requires_route_execution() {
+        let ir = ir_with(route(Type::String, None, "h"), vec![handler_agent("h", false)]);
+        let caps = RuntimeCapabilities { route_execution: false, ..RuntimeCapabilities::interpreter_tier() };
+        let gaps = check_contract_closure(&ir, caps);
+        assert_eq!(gaps.len(), 1);
+        assert!(gaps[0].message().contains("E5204"));
     }
 
     /// The streaming detection path: with the `streaming` capability

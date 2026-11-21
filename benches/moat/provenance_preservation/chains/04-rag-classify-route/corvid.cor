@@ -7,16 +7,16 @@ effect llm:
 tool retrieve(query: String) -> Grounded<String> uses retrieval
 
 prompt classify(doc: Grounded<String>) -> Grounded<String> uses llm:
-    "topic of: {doc}"
     cites doc strictly
+    "topic of: {doc}"
 
 prompt billing_specialist(doc: Grounded<String>) -> Grounded<String> uses llm:
-    "billing answer from: {doc}"
     cites doc strictly
+    "billing answer from: {doc}"
 
 prompt support_specialist(doc: Grounded<String>) -> Grounded<String> uses llm:
-    "support answer from: {doc}"
     cites doc strictly
+    "support answer from: {doc}"
 
 agent rag_classify_route(query: String) -> Grounded<String>:
     doc: Grounded<String> = retrieve(query)

@@ -5,6 +5,8 @@ pass; come back to specific chapters as reference later.
 
 ## Table of contents
 
+For quick lookups while reading, use the [function reference](../reference/functions.md) and [grammar reference](../reference/grammar.md).
+
 1. [Why Corvid](00-why-corvid.md) — the moat in three minutes.
 2. [Install](01-install.md) — get Corvid on your machine.
 3. [Quickstart](02-quickstart.md) — first program in five minutes.
@@ -24,6 +26,8 @@ pass; come back to specific chapters as reference later.
 16. [Testing](15-testing.md) — `test`, `eval`, `fixture`, `mock`.
 17. [Building and targets](16-building.md) — native, wasm, server, cdylib.
 18. [Replay](17-replay.md) — deterministic re-execution.
+19. [Talking to the outside world](18-talking-to-the-outside-world.md)
+20. [Browser views](19-browser-views.md)
 
 ## After the book
 

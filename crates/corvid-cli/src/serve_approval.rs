@@ -1,38 +1,6 @@
-//! `QueueApprover` — the approver `corvid serve` constructs when an
-//! approval-gated route is hit and no interactive approver is available.
-//!
-//! `corvid serve` (slice `35V2-P42-E0-serve-2`) constructs an
-//! interpreter `Runtime` for each request, but the runtime expects an
-//! `Approver` to decide every `approve` boundary synchronously.
-//! Slice `35V2-P42-E0-serve-4` shipped a `ProgrammaticApprover::
-//! always_no()` so dangerous writes deny-by-default and the route
-//! answers `403 approval_required`. That stance was safe but
-//! developer-unusable — every approval-gated request died at the gate.
-//!
-//! This module implements the **async-approval** model the slice spec
-//! at `ROADMAP.md` line ~2848 calls for: when an `approve` boundary
-//! fires, `QueueApprover` creates a pending entry in the existing
-//! `ApprovalQueueRuntime` flow (the same store the runtime / catalog
-//! ABI / audit-log surfaces already use) and surfaces the queued state
-//! to the HTTP layer via the new `RuntimeError::ApprovalQueued`
-//! variant. `serve_cmd::finish` then answers `202 Accepted` with the
-//! approval id so the client can poll `GET /__approvals/<id>` for the
-//! eventual decision.
-//!
-//! **Why `RuntimeError::ApprovalQueued` rather than a third
-//! `ApprovalDecision` variant.** The `Approver::approve` contract
-//! returns `Result<ApprovalDecision, RuntimeError>` where the `Ok`
-//! arm covers `Approve` / `Deny` — both *synchronous* decisions the
-//! agent uses to either proceed or fail-fast. A queued approval is
-//! neither: the agent must NOT proceed (no decision yet), but it
-//! also has not been denied. Modelling the suspend as an error
-//! variant keeps the trait shape stable for every existing impl
-//! (`StdinApprover`, `ProgrammaticApprover`, the future browser
-//! dialog approver) — none of those ever produce `ApprovalQueued`,
-//! so they need no change. The runtime's existing fast-fail-on-error
-//! plumbing carries the queued state up to the request boundary
-//! where `serve_cmd::finish` differentiates it from
-//! `ApprovalDenied`.
+//! Queue-backed HTTP approval boundaries. The server suspends a live agent
+//! with a one-shot decision channel per boundary. Callers using the queue
+//! without a suspension channel receive the queued ID as a runtime outcome.
 //!
 //! **Identity and policy are both explicit.** The verified route actor
 //! supplies `requested_by` and `tenant_id`; the compiled route supplies
@@ -87,9 +55,26 @@ pub struct QueueApprover {
     /// inside the same nanosecond is bounded above by `AtomicU64`'s
     /// monotonic step).
     next: AtomicU64,
+    checkpoint: Option<(String, String)>,
+    pauses: Option<tokio::sync::mpsc::UnboundedSender<ApprovalPause>>,
+}
+
+pub struct ApprovalPause {
+    pub id: String,
+    pub decision: tokio::sync::oneshot::Sender<ApprovalDecision>,
 }
 
 impl QueueApprover {
+    pub fn suspend_at_boundaries(mut self, pauses: tokio::sync::mpsc::UnboundedSender<ApprovalPause>) -> Self {
+        self.pauses = Some(pauses);
+        self
+    }
+
+    pub fn with_checkpoint(mut self, checkpoint: Option<(String, String)>) -> Self {
+        self.checkpoint = checkpoint;
+        self
+    }
+
     pub fn new(
         queue: Arc<ApprovalQueueRuntime>,
         requester: ApprovalRequester,
@@ -100,6 +85,8 @@ impl QueueApprover {
             requester,
             policy,
             next: AtomicU64::new(0),
+            pauses: None,
+            checkpoint: None,
         }
     }
 
@@ -130,7 +117,7 @@ impl Approver for QueueApprover {
                 tenant_id: self.requester.tenant_id.clone(),
                 requester_actor_id: self.requester.actor_id.clone(),
                 contract: ApprovalContractRecord {
-                    id: format!("serve:{label}"),
+                    id: format!("serve:{approval_id}"),
                     version: "v1".to_string(),
                     action: label.clone(),
                     target_kind: "http_route".to_string(),
@@ -147,8 +134,16 @@ impl Approver for QueueApprover {
                 risk_level: self.policy.risk_level.clone(),
                 trace_id: format!("serve-trace-{approval_id}"),
             };
-            match self.queue.create(create) {
-                Ok(_record) => Err(RuntimeError::ApprovalQueued { approval_id }),
+            let checkpoint = self.checkpoint.as_ref().filter(|(expected, _)| expected == label)
+                .map(|(_, key)| serde_json::json!({"version": 1, "key": key, "args": req.args}).to_string());
+            match self.queue.create_with_checkpoint(create, checkpoint.as_deref()) {
+                Ok(_) if self.pauses.is_some() => {
+                    let (decision, receive) = tokio::sync::oneshot::channel();
+                    self.pauses.as_ref().unwrap().send(ApprovalPause { id: approval_id, decision })
+                        .map_err(|_| RuntimeError::ApprovalFailed("request ended before review".into()))?;
+                    receive.await.map_err(|_| RuntimeError::ApprovalFailed("review was interrupted".into()))
+                }
+                Ok(_) => Err(RuntimeError::ApprovalQueued { approval_id }),
                 Err(e) => Err(RuntimeError::ApprovalFailed(format!(
                     "approval queue create failed: {e}"
                 ))),

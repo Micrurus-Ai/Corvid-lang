@@ -11,8 +11,8 @@ tool retrieve(query: String) -> Grounded<String> uses retrieval
 tool safety_filter(doc: Grounded<String>) -> Grounded<String>
 
 prompt summarise(doc: Grounded<String>) -> Grounded<String> uses llm:
-    "summarise: {doc}"
     cites doc strictly
+    "summarise: {doc}"
 
 agent rag_safety_filter(query: String) -> Grounded<String>:
     raw: Grounded<String> = retrieve(query)

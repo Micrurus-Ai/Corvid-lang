@@ -24,7 +24,7 @@
 | `corvid claim audit` walks this doc + refuses 0-exit on aspirational wording | `corvid claim audit --explain-failures` (43I `e5c7320` + 43T `f3a8d0d`) returns typed `ClaimFindingKind` + `suggested_fix` (`claim.audit_explain_failures_grounded` promoted to `RuntimeChecked`) |
 | Per-app `apps/<name>/CLAIM.md` matches the signed cdylib's `claim --explain` | `35V2-P42-G-LR-per-app-claim-files` + CI gate re-runs `corvid claim --explain` and diffs against the committed file |
 | Signed-attestation chain: deploy attestation = cdylib attestation envelope | 43O `7a2a42d` — `corvid deploy package`'s attestation references the same DSSE envelope `corvid claim --explain` consumes |
-| Reproducible build: second-host bit-identical artifact | 43R `0d2647c` + `reproducible-build.yml` + determinism patches (`e69fa85`, `85cf847`, `3f77ec1`) |
+| Reproducible build: second-host bit-identical artifact | 43R `0d2647c` + [reproducibility workflow](../../.github/workflows/reproducible-build.yml) + determinism patches (`e69fa85`, `85cf847`, `3f77ec1`) |
 | `corvid upgrade --check` rejects upgrades that weaken any guarantee | 43Q `14add6e` — promotes `upgrade.claim_regression_check` to `RuntimeChecked`, integration test exercises the rejection path |
 
 ## 1. Moat — safety-at-compile-time claims
@@ -103,12 +103,12 @@ Per-app benchmark comparisons in `benches/comparisons/<app>.md` (governance line
 
 | Claim | What it does | Grounded source | Closing slice |
 |---|---|---|---|
-| `corvid jobs explain` is `Grounded<T>` | Typed classifier over `job audit-event trail`; sources every assertion to an audit-event id | `Grounded<T>` `sources` array names every event id consulted | `35V2-P38-G-LR-corvid-jobs-explain-helper` |
-| `corvid release notes <prev> <new>` is `Grounded<T>` | Deterministic `git-log` + conventional-commit categorisation | `Grounded<T>` `sources` array names every commit id | `35V2-P43-T-LR-release-notes` |
-| `corvid claim audit --explain-failures` is `Grounded<T>` | Typed `ClaimFindingKind` + `suggested_fix` back-references inventory line | `Grounded<T>` sources name the inventory row | `35V2-P43-T-LR-claim-audit-explain-failures` |
-| `corvid app boot-summary` is `Grounded<T>` | Typed `BootSummary` over the app's ABI descriptor; every derived field carries a `BootSource` entry | `Grounded<T>` `sources` per derived field | `35V2-P42-H-LR-1-app-boot-summary` |
-| `corvid app adversarial-refresh` is `Grounded<T>` | Typed walker emitting one `AdversarialSuggestion` per `(surface, threat)` pair | `Grounded<T>` `sources` back-reference the descriptor field | `35V2-P42-H-LR-2-app-adversarial-refresh` |
-| `corvid app pr-describe` is `Grounded<T>` | Typed `PrDescription` with `Breaking` / `Additive` / `Informational` sections covering agents, tools, approvals, types, stores, claim guarantees | `Grounded<T>` `sources` back-reference the descriptor diff | `35V2-P42-H-LR-3-app-pr-describe` |
+| `corvid jobs explain` is `Grounded<T>` | Typed classifier over `job audit-event trail`; sources every assertion to an audit-event id | `Grounded<T>` `sources` array names every event id consulted | `35V2-P38-G-LR-corvid-jobs-explain-helper`; [implementation](../../crates/corvid-cli/src/jobs_explain_cmd.rs) |
+| `corvid release notes <prev> <new>` is `Grounded<T>` | Deterministic `git-log` + conventional-commit categorisation | `Grounded<T>` `sources` array names every commit id | `35V2-P43-T-LR-release-notes`; [implementation](../../crates/corvid-cli/src/release_cmd.rs) |
+| `corvid claim audit --explain-failures` is `Grounded<T>` | Typed `ClaimFindingKind` + `suggested_fix` back-references inventory line | `Grounded<T>` sources name the inventory row | `35V2-P43-T-LR-claim-audit-explain-failures`; [implementation](../../crates/corvid-cli/src/claim_cmd.rs) |
+| `corvid app boot-summary` is `Grounded<T>` | Typed `BootSummary` over the app's ABI descriptor; every derived field carries a `BootSource` entry | `Grounded<T>` `sources` per derived field | `35V2-P42-H-LR-1-app-boot-summary`; [implementation](../../crates/corvid-cli/src/app_cmd.rs) |
+| `corvid app adversarial-refresh` is `Grounded<T>` | Typed walker emitting one `AdversarialSuggestion` per `(surface, threat)` pair | `Grounded<T>` `sources` back-reference the descriptor field | `35V2-P42-H-LR-2-app-adversarial-refresh`; [implementation](../../crates/corvid-cli/src/app_cmd.rs) |
+| `corvid app pr-describe` is `Grounded<T>` | Typed `PrDescription` with `Breaking` / `Additive` / `Informational` sections covering agents, tools, approvals, types, stores, claim guarantees | `Grounded<T>` `sources` back-reference the descriptor diff | `35V2-P42-H-LR-3-app-pr-describe`; [implementation](../../crates/corvid-cli/src/app_cmd.rs) |
 | `corvid eval-drift` is `Grounded<T>` | AI-assisted drift attribution across `(model / prompt / retrieval-index / input)` | `Grounded<T>` `sources` carry `(trace_id, span_id)` pairs | Phase 40 — `corvid eval-drift` |
 | `corvid eval-from-feedback` is typed-fixture-shaped | AI-assisted eval fixture from `feedback JSON`, redacted via production policy | `corvid eval-from-feedback` emits a typed fixture file | Phase 40 |
 | `corvid connector drift-narrator` is `Grounded<T>` | Typed narration over `(mock ↔ real)` drift report | `Grounded<T>` `sources` per change | Phase 41 — `connector.drift_narration_grounded` |

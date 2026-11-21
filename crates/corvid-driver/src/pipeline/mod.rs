@@ -26,6 +26,7 @@ use crate::modules::{build_module_resolution, ModuleLoadError};
 
 mod abi;
 mod compile;
+mod contract_types;
 mod ir;
 
 pub use abi::{compile_to_abi_with_config, compile_to_application_contract_with_config};
@@ -37,6 +38,8 @@ pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config
 
 pub(crate) struct DriverTypecheck {
     pub(crate) checked: Checked,
+    schema_imports: HashMap<PathBuf, contract_types::Imports>,
+    import_fingerprint: Option<[u8; 32]>,
     pub(crate) modules: Option<ModuleResolution>,
     pub(crate) module_checked: HashMap<PathBuf, Checked>,
 }
@@ -53,21 +56,23 @@ pub(crate) fn typecheck_driver_file(
     config: Option<&CorvidConfig>,
 ) -> DriverTypecheckOutcome {
     if has_corvid_imports(file) {
-        let (modules, load_errors) = build_module_resolution(file, source_path);
+        let (modules, load_errors, fingerprint) = crate::modules::resolve_module_graph(file, source_path);
         let diagnostics = load_errors
             .into_iter()
             .flat_map(module_load_error_diagnostics)
             .collect::<Vec<_>>();
         let checked = typecheck_with_config_and_modules(file, resolved, config, &modules);
-        let (module_checked, module_diagnostics) =
+        let (module_checked, schema_imports, module_diagnostics) =
             typecheck_imported_modules(&modules, config);
         let mut diagnostics = diagnostics;
         diagnostics.extend(module_diagnostics);
         DriverTypecheckOutcome {
             result: DriverTypecheck {
                 checked,
+                import_fingerprint: Some(fingerprint),
                 modules: Some(modules),
                 module_checked,
+                schema_imports,
             },
             diagnostics,
         }
@@ -75,8 +80,10 @@ pub(crate) fn typecheck_driver_file(
         DriverTypecheckOutcome {
             result: DriverTypecheck {
                 checked: typecheck_with_config(file, resolved, config),
+                import_fingerprint: None,
                 modules: None,
                 module_checked: HashMap::new(),
+                schema_imports: HashMap::new(),
             },
             diagnostics: Vec::new(),
         }
@@ -88,7 +95,7 @@ pub(crate) fn lower_driver_file(
     resolved: &Resolved,
     typechecked: &DriverTypecheck,
 ) -> IrFile {
-    match &typechecked.modules {
+    let mut ir = match &typechecked.modules {
         Some(modules) => lower_with_modules(
             file,
             resolved,
@@ -97,13 +104,16 @@ pub(crate) fn lower_driver_file(
             &typechecked.module_checked,
         ),
         None => lower(file, resolved, &typechecked.checked),
-    }
+    };
+    ir.import_fingerprint = typechecked.import_fingerprint;
+    ir
 }
 
 fn typecheck_imported_modules(
     modules: &ModuleResolution,
     config: Option<&CorvidConfig>,
-) -> (HashMap<PathBuf, Checked>, Vec<Diagnostic>) {
+) -> (HashMap<PathBuf, Checked>, HashMap<PathBuf, contract_types::Imports>, Vec<Diagnostic>) {
+    let mut schema_imports = HashMap::new();
     let mut checked_by_path = HashMap::new();
     let mut diagnostics = Vec::new();
     let mut loaded = modules.all_modules.values().collect::<Vec<_>>();
@@ -118,6 +128,7 @@ fn typecheck_imported_modules(
                 .flat_map(module_load_error_diagnostics),
         );
         let checked = if has_corvid_imports(&module.file) {
+            schema_imports.insert(module.path.clone(), contract_types::Imports::from(&module_resolution));
             typecheck_with_config_and_modules(
                 &module.file,
                 &module.resolved,
@@ -139,7 +150,7 @@ fn typecheck_imported_modules(
         checked_by_path.insert(module.path.clone(), checked);
     }
 
-    (checked_by_path, diagnostics)
+    (checked_by_path, schema_imports, diagnostics)
 }
 
 fn has_corvid_imports(file: &File) -> bool {

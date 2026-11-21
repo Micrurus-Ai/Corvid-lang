@@ -51,6 +51,7 @@ use corvid_resolve::{
 use corvid_syntax::{lex, parse_file, LexError, ParseError};
 use corvid_types::{analyze_effects, EffectRegistry};
 use url::Url;
+use sha2::{Digest, Sha256};
 
 /// Error surfaced while loading / parsing / resolving a module
 /// imported from another `.cor` file. Collected rather than
@@ -270,7 +271,16 @@ pub fn build_module_resolution(
     root_file: &File,
     root_path: &Path,
 ) -> (ModuleResolution, Vec<ModuleLoadError>) {
-    let mut loaded: HashMap<PathBuf, File> = HashMap::new();
+    let (resolution, errors, _) = resolve_module_graph(root_file, root_path);
+    (resolution, errors)
+}
+
+pub(crate) fn resolve_module_graph(
+    root_file: &File,
+    root_path: &Path,
+) -> (ModuleResolution, Vec<ModuleLoadError>, [u8; 32]) {
+    let mut fingerprint = Sha256::new();
+    let mut loaded: HashMap<PathBuf, LoadedModule> = HashMap::new();
     let mut in_progress: Vec<PathBuf> = Vec::new();
     let mut errors: Vec<ModuleLoadError> = Vec::new();
 
@@ -299,6 +309,7 @@ pub fn build_module_resolution(
                 child.content_hash.as_ref(),
                 package_lock.as_ref(),
                 &mut loaded,
+                &mut fingerprint,
                 &mut in_progress,
                 &mut errors,
             ),
@@ -312,7 +323,8 @@ pub fn build_module_resolution(
     // on each module, not this function's error list — single-file
     // resolution errors are the `corvid-resolve` crate's concern.
     let mut resolved_map: HashMap<PathBuf, Arc<Resolved>> = HashMap::new();
-    for (path, file) in &loaded {
+    for (path, module) in &loaded {
+        let file = &module.file;
         resolved_map.insert(path.clone(), Arc::new(resolve(file)));
     }
 
@@ -321,7 +333,8 @@ pub fn build_module_resolution(
     // (for cycle detection + type-through resolution) but not
     // exposed under the root's alias namespace.
     let mut all_modules = HashMap::new();
-    for (path, file) in &loaded {
+    for (path, module) in &loaded {
+        let file = &module.file;
         let Some(resolved) = resolved_map.get(path) else {
             continue;
         };
@@ -390,6 +403,7 @@ pub fn build_module_resolution(
             all_modules,
         },
         errors,
+        fingerprint.finalize().into(),
     )
 }
 
@@ -642,6 +656,7 @@ fn load_target_bytes(
     target: &ImportTarget,
     requested_module: &str,
     expected_hash: Option<&ImportContentHash>,
+    package_cache: Option<&Path>,
 ) -> Result<Vec<u8>, ModuleLoadError> {
     match target {
         ImportTarget::Local(path) => match std::fs::read(path) {
@@ -666,12 +681,28 @@ fn load_target_bytes(
                     url: url.clone(),
                 });
             }
-            fetch_remote_bytes(url).map_err(|message| ModuleLoadError::RemoteFetchError {
+            let fetch_error = |message| ModuleLoadError::RemoteFetchError {
                 importing_file: importing_target.key(),
                 requested: requested_module.to_string(),
                 url: url.clone(),
                 message,
-            })
+            };
+            if let Some(cache) = package_cache {
+                match std::fs::read(cache) {
+                    Ok(bytes) => return Ok(bytes), // verified against the lock by dfs_collect
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(fetch_error(format!("cannot read cached artifact: {e}"))),
+                }
+                if url.starts_with("file://") {
+                    let path = Url::parse(url).ok().and_then(|u| u.to_file_path().ok())
+                        .ok_or_else(|| fetch_error("invalid file artifact URL".into()))?;
+                    return std::fs::read(path).map_err(|e| fetch_error(e.to_string()));
+                }
+            }
+            if crate::package_cache::offline() {
+                return Err(fetch_error("artifact unavailable offline (CORVID_OFFLINE=1)".into()));
+            }
+            fetch_remote_bytes(url).map_err(fetch_error)
         }
     }
 }
@@ -706,6 +737,12 @@ fn resolve_remote_url(base: &str, module: &str) -> Result<String, String> {
         .map_err(|err| err.to_string())
 }
 
+struct LoadedModule {
+    index: usize,
+    digest: String,
+    file: File,
+}
+
 /// Recursive DFS that loads the file at `target`, appends any
 /// errors to `errors`, and recurses into its own Corvid imports.
 /// Three-color cycle detection:
@@ -720,7 +757,8 @@ fn dfs_collect(
     requested_module: &str,
     expected_hash: Option<&ImportContentHash>,
     package_lock: Option<&PackageLockFile>,
-    loaded: &mut HashMap<PathBuf, File>,
+    loaded: &mut HashMap<PathBuf, LoadedModule>,
+    fingerprint: &mut Sha256,
     in_progress: &mut Vec<PathBuf>,
     errors: &mut Vec<ModuleLoadError>,
 ) {
@@ -741,65 +779,67 @@ fn dfs_collect(
         return;
     }
 
-    // Already fully loaded? Not a cycle, just a repeated visit
-    // (A imports B and C, both of which import D; D only loads
-    // once). Compare via `paths_equivalent` because `loaded`'s keys
-    // are canonicalized (see the `canonical` computation below) but
-    // `raw_key` here is not.
-    if loaded.keys().any(|p| paths_equivalent(p, &raw_key)) {
+    // Record every resolved edge in declaration order, including repeated
+    // visits. A lockfile can redirect an import to another loaded module.
+    let canonical = canonicalize_or_input(&raw_key);
+    let verify = |digest: &str| -> Result<(), ModuleLoadError> {
+        if let Some(pin) = expected_hash {
+            if digest != pin.hex {
+                return Err(ModuleLoadError::HashMismatch {
+                    importing_file: importing_target.key(),
+                    requested: requested_module.into(),
+                    resolved: canonical.clone(),
+                    expected: pin.hex.clone(),
+                    actual: digest.into(),
+                });
+            }
+        } else if let ImportTarget::Remote { url, .. } = &target {
+            return Err(ModuleLoadError::RemoteImportMissingHash {
+                importing_file: importing_target.key(), requested: requested_module.into(), url: url.clone(),
+            });
+        }
+        Ok(())
+    };
+    if let Some(module) = loaded.get(&canonical) {
+        if let Err(error) = verify(&module.digest) {
+            errors.push(error);
+            return;
+        }
+        fingerprint.update(b"ref");
+        fingerprint.update((module.index as u64).to_le_bytes());
         return;
     }
 
     // Load and verify the module source. Hash verification runs on
     // the exact bytes before parsing, so a pinned import cannot drift
     // into the compiler under a stale trust boundary.
-    let bytes = match load_target_bytes(importing_target, &target, requested_module, expected_hash) {
+    let cache = package_lock.filter(|_| requested_module.starts_with("corvid://"))
+        .and_then(|lock| lock.path.parent())
+        .zip(expected_hash)
+        .map(|(dir, hash)| crate::package_cache::artifact(dir, &hash.hex));
+    let bytes = match load_target_bytes(importing_target, &target, requested_module, expected_hash, cache.as_deref()) {
         Ok(bytes) => bytes,
         Err(error) => {
             errors.push(error);
             return;
         }
     };
-    // The file successfully loaded — now we can canonicalize the
-    // path (`canonicalize_or_input` requires the file to exist for
-    // it to actually resolve `..` and `.` segments and symlinks).
-    // Storing the canonical form as the `loaded` key is essential
-    // for cross-module call dispatch: `typecheck_imported_modules`
-    // (corvid-driver/src/pipeline/mod.rs) calls
-    // `build_module_resolution` AGAIN with each imported module's
-    // path as root, and that nested call canonicalizes its root.
-    // The `ImportedCallTarget.module_path` produced by the nested
-    // typecheck uses canonical paths; if the outer `all_modules`
-    // keys (and therefore `build_imported_def_ids`'s map keys)
-    // were non-canonical, the lookup at lowering time would miss
-    // and the call would fall back to its original (unmapped)
-    // `DefId`, producing `agent <name> is missing from the IR`
-    // errors at runtime.
-    //
-    // This is the bug that was making `rag_qa_bot` fail on Linux
-    // CI but pass on Windows — Linux's `canonicalize` aggressively
-    // resolves `..` segments while the Windows path comparison
-    // happens to match string-equal-with-`..` against the
-    // non-canonical key.
-    let canonical = canonicalize_or_input(&raw_key);
     let canonical_target = match &target {
         ImportTarget::Local(_) => ImportTarget::local(canonical.clone()),
         _ => target.clone(),
     };
 
-    if let Some(expected_hash) = expected_hash {
-        let actual = sha256_hex(&bytes);
-        if actual != expected_hash.hex {
-            errors.push(ModuleLoadError::HashMismatch {
-                importing_file: importing_target.key(),
-                requested: requested_module.to_string(),
-                resolved: canonical,
-                expected: expected_hash.hex.clone(),
-                actual,
-            });
-            return;
-        }
+    let digest = sha256_hex(&bytes);
+    if let Err(error) = verify(&digest) {
+        errors.push(error);
+        return;
     }
+    if let Some(path) = cache.filter(|p| !p.exists()) {
+        // Reading pinned code still works in a read-only checkout.
+        let _ = crate::package_cache::store(&path, &bytes);
+    }
+    fingerprint.update(b"module");
+    fingerprint.update(digest.as_bytes());
     let source = match String::from_utf8(bytes) {
         Ok(source) => source,
         Err(err) => {
@@ -846,6 +886,7 @@ fn dfs_collect(
                 child.content_hash.as_ref(),
                 package_lock,
                 loaded,
+                fingerprint,
                 in_progress,
                 errors,
             ),
@@ -855,7 +896,8 @@ fn dfs_collect(
     in_progress.pop();
 
     // Mark fully loaded under the canonical key.
-    loaded.insert(canonical, file);
+    fingerprint.update(b"end");
+    loaded.insert(canonical, LoadedModule { index: loaded.len(), digest, file });
 }
 
 /// Iterator over a file's Corvid imports (skipping Python imports).

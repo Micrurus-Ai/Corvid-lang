@@ -411,7 +411,7 @@ impl<'ir> Interpreter<'ir> {
             other => other,
         };
 
-        let output_schema = Some(crate::schema::schema_for(result_ty, &self.types_by_id));
+        let output_schema = crate::schema::prompt_output_schema(result_ty, &self.types_by_id);
         let sampling = self.resolve_sampling(prompt, selected_model.as_deref().unwrap_or(""));
         // Conversation history + context-window policy (46c): build
         // the segmented message form, then drop history OLDEST-FIRST
@@ -467,11 +467,12 @@ impl<'ir> Interpreter<'ir> {
             req.model.clone()
         };
         let start = std::time::Instant::now();
-        let resp = self
-            .runtime
-            .call_llm_cacheable(req, prompt.cacheable)
-            .await
-            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        let resp = if prompt.params.iter().any(|p| matches!(p.ty, Type::Function { .. })) {
+            self.call_with_functions(prompt, arg_values, &req, &actual_model, span).await?
+        } else {
+            self.runtime.call_llm_cacheable(req, prompt.cacheable).await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
+        };
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if self.should_yield_boundary() {
@@ -567,9 +568,9 @@ impl<'ir> Interpreter<'ir> {
                 model: actual_model.clone(),
                 rendered: retry_rendered.clone(),
                 args: arg_values.iter().map(value_to_json).collect(),
-                output_schema: Some(crate::schema::schema_for(result_ty, &self.types_by_id)),
+                output_schema: crate::schema::prompt_output_schema(result_ty, &self.types_by_id),
                 sampling: self.resolve_sampling(prompt, &actual_model),
-                messages: Vec::new(),
+                messages: super::build_message_segments(prompt, arg_values, &retry_rendered, span)?.flatten(),
             };
             let retry_resp = self
                 .runtime

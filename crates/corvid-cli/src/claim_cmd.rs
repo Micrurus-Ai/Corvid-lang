@@ -86,6 +86,7 @@ struct ClaimAuditFinding {
 #[derive(Debug, serde::Serialize)]
 struct ClaimAuditReport {
     inventory: String,
+    compiler_revision: &'static str,
     claim_count: usize,
     finding_count: usize,
     findings: Vec<ClaimAuditFinding>,
@@ -206,15 +207,18 @@ fn audit_claim_inventory(
 ) -> ClaimAuditReport {
     let mut claim_count = 0usize;
     let mut findings = Vec::new();
+    let mut claim_table = false;
     for (index, line) in text.lines().enumerate() {
         let trimmed = line.trim();
-        if !trimmed.starts_with('|')
-            || trimmed.contains("| Claim |")
-            || trimmed.contains("|---")
-            || trimmed.matches('|').count() < 3
-        {
+        if !trimmed.starts_with('|') {
+            claim_table = false;
             continue;
         }
+        if trimmed.starts_with("| Claim |") {
+            claim_table = true;
+            continue;
+        }
+        if !claim_table || trimmed.starts_with("|---") { continue; }
         let cells = trimmed
             .trim_matches('|')
             .split('|')
@@ -227,7 +231,9 @@ fn audit_claim_inventory(
         let claim = cells[0].to_string();
         let evidence = cells[1];
         let blocked = evidence.contains("blocked") || evidence.contains("non-scope");
-        let runnable = evidence.contains('`') || evidence.contains('[');
+        let runnable = cells[1..].iter().any(|cell| resolves_evidence(path, cell))
+            && cells[1..].iter().filter(|cell| cell.contains("]("))
+                .all(|cell| resolves_evidence(path, cell));
         let line_no = index + 1;
         if !blocked && !runnable {
             findings.push(make_finding(
@@ -246,12 +252,42 @@ fn audit_claim_inventory(
             ));
         }
     }
+    if claim_count == 0 {
+        findings.push(make_finding(1, "Inventory contains no claim rows".into(),
+            ClaimFindingKind::MissingEvidence, explain_failures));
+    }
     ClaimAuditReport {
+        compiler_revision: env!("CORVID_BUILD_SHA"),
         inventory: path.display().to_string(),
         claim_count,
         finding_count: findings.len(),
         findings,
     }
+}
+
+fn resolves_evidence(inventory: &Path, cell: &str) -> bool {
+    let directory = inventory.parent().unwrap_or(Path::new("."));
+    let links: Vec<_> = cell.split("](").skip(1).collect();
+    if !links.is_empty() {
+        return links.iter().all(|link| link.split_once(')').is_some_and(|(target, _)| {
+            let file = target.split('#').next().unwrap_or("");
+            !file.is_empty() && directory.join(file).is_file()
+        }));
+    }
+    cell.split('`').enumerate().any(|(index, token)| {
+        if index % 2 == 0 { return false; }
+        let mut words = token.split_whitespace();
+        match (words.next(), words.next()) {
+            (Some("cargo"), Some("test" | "run" | "build" | "check")) => true,
+            (Some("corvid"), Some(command)) => {
+                use clap::CommandFactory;
+                crate::cli::root::Cli::command().find_subcommand(command).is_some()
+            }
+            (Some(id), None) => Path::new(id).is_file() || directory.join(id).is_file()
+                || GUARANTEE_REGISTRY.iter().any(|row| row.id == id),
+            _ => false,
+        }
+    })
 }
 
 fn make_finding(
@@ -470,6 +506,15 @@ mod tests {
         file
     }
 
+    #[test]
+    fn empty_inventory_and_missing_link_fail_audit() {
+        for rows in [vec![], vec!["| Example | `cargo test` | [evidence](missing.rs) |"]] {
+            let inventory = write_inventory(&rows);
+            let text = std::fs::read_to_string(inventory.path()).unwrap();
+            assert_eq!(audit_claim_inventory(inventory.path(), &text, false).finding_count, 1);
+        }
+    }
+
     /// 43V: positive — `corvid claim audit` produces an empty
     /// findings list when every claim has a runnable command, a
     /// linked artifact, or an explicit blocked / non-scope
@@ -479,7 +524,7 @@ mod tests {
     fn audit_passes_when_every_claim_resolves() {
         let inventory = write_inventory(&[
             "| Compile-time approval gate | `cargo test -p corvid-types --lib approval` |",
-            "| Replay determinism | [Phase 21 corpus](../21-replay.md) |",
+            "| Replay determinism | `cargo test -p corvid-vm replay` |",
             "| WASM target shipped | blocked on browser e2e CI gap, see Phase 23 reopen |",
         ]);
         let text = std::fs::read_to_string(inventory.path()).unwrap();

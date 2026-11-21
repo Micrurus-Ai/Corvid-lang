@@ -71,7 +71,15 @@ Unicode; `split` with an empty separator traps at runtime (iterate
 with `for c in s` to walk characters); `substring` clamps
 out-of-range indices and returns `""` when `start >= end`.
 
+`String.length()` works on both CLI targets for stored strings and temporary expressions. For example, `("🐧" + "é").length()` returns `2`.
+
+Both targets also support `substring`, `to_upper` and `to_lower`, including inside match arms. Substring bounds are evaluated left to right. For example, `"A🐧B".substring(1, 2)` returns `"🐧"`. Case conversion can change length, as in `"ß".to_upper() == "SS"`.
+
+The interpreter and native CLI both support trimming, searching, splitting and replacing strings. Split keeps leading, adjacent and trailing empty fields. For example, `",a,,".split(",")` produces `["", "a", "", ""]`. Splitting empty input with a nonempty separator gives `[""]`. The search methods match literal text, and `replace` changes all non-overlapping matches.
+
 ## Numbers
+
+The native CLI and interpreter both support `Int.to_float()` and the four float-to-integer methods `to_int_truncated()`, `floor()`, `ceil()` and `round()`. Truncation rounds toward zero. Integer results must fit in a signed 64-bit value. For example, converting `9223372036854775808.0` to an integer raises an error, while `(-9223372036854775808.0).to_int_truncated()` succeeds.
 
 ```corvid
 agent ratio(n: Int) -> Float:
@@ -94,6 +102,11 @@ agent conversions() -> Result<String, String>:
     ratio = "2.5".parse_float()?           # Result<Float, String>
     return Ok(count_text)
 ```
+
+`String.parse_int()` works in both native and interpreted programs. It
+trims surrounding Unicode whitespace and accepts a signed decimal integer.
+Empty input, invalid digits, and values outside the signed 64-bit range
+return `Err` with the original input in the message.
 
 Float-to-string rendering always shows a decimal point or exponent
 (`42.0` renders as `"42.0"`, never `"42"`) so string output — which
@@ -125,13 +138,10 @@ under replay, and rejected inside `@deterministic` agents. See the
 [`std.time`](../reference/stdlib/time.md) and
 [`std.random`](../reference/stdlib/random.md) references.
 
-Integer overflow, division by zero, and modulo by zero are **checked
-in every build mode** and trap with a typed runtime error. There is
-deliberately no saturating or wrapping mode: silent saturation
-corrupts values that feed LLM calls, and a single arithmetic
-semantics keeps deterministic replay byte-identical across the
-interpreter and compiled tiers. `to_int_truncated()` follows the
-same rule: NaN or out-of-range Floats trap rather than wrapping.
+Ordinary integer arithmetic traps on overflow. Mark an agent with `@wrapping`
+to make integer addition, subtraction, multiplication and unary negation wrap
+at the signed 64-bit boundary. Division and modulo by zero still trap.
+`to_int_truncated()` also traps on NaN or an out-of-range float.
 
 ## Lists
 
@@ -150,6 +160,11 @@ agent first_of_three() -> Int:
 List literals, `Int` indexing, `+` concatenation of two lists, and
 `for … in` iteration are shipped. Out-of-range indexing traps at
 runtime with a typed error.
+
+Use `xs.append(item)` to grow a list in a loop. The operation updates the
+same list, so aliases see the new item. Native lists reserve more space as
+they grow; appending takes amortized constant time. Use `xs + ys` when you
+want a fresh list containing the elements of both inputs.
 
 Elements are assignable in place, including compound forms:
 
@@ -188,11 +203,28 @@ agent list_demo() -> Int:
 
 ```
 
+`slice(start, end)` copies the selected slots into an independent list. The end is exclusive, and reversed or empty ranges produce an empty list. In the interpreter, the copying cost grows with the number of selected elements.
+
+`first()` and `last()` return an `Option<T>` on both the native and interpreter targets for supported element types. For example, `[3, 0].last()` returns `Some(0)`. Both methods return `None` for an empty list. An extracted string remains usable after its list goes out of scope.
+
 `append`, `sort`, and `reverse` mutate the shared list in place and
 return `Nothing` (reference semantics — see the callout above).
 `sort` is only offered on `Int`/`Float`/`String` element types.
 `range(start, end)` is a builtin function producing a half-open
 `List<Int>`.
+
+Both CLI targets support `List<Int>.map` with an integer callback. For example, `[1, 2].map(fn (n) -> n + 3)` returns `[4, 5]`. The method applies the callback in list order, returns an independent list, and skips the callback on an empty list.
+
+On `List<Int>`, both targets also support the following calls.
+
+| Call | Result |
+|---|---|
+| `[3, 1, 4].filter(fn (n) -> n > 2)` | A new list containing `[3, 4]` in input order |
+| `[3, 1, 4].fold(0, fn (acc, n) -> acc * 10 + n)` | `314`, using each item from left to right |
+| `[3, 1, 4].any(fn (n) -> n == 1)` | `true`, stopping at the first match |
+| `[3, 1, 4].all(fn (n) -> n > 1)` | `false`, stopping at the first failed test |
+
+For an empty list, `filter` returns an empty list, `fold` returns its initial accumulator, `any` returns `false`, and `all` returns `true`. None of these calls invokes the callback on empty input.
 
 The lambda-taking methods take `fn (x) -> expr` lambdas and are
 fully checked — `filter`'s predicate must return `Bool`, `map`'s
@@ -217,7 +249,78 @@ agent transform(xs: List<Int>) -> Int:
     return add_base(ys.length() + zs.length())
 ```
 
+### Updating list items
+
+A numeric local accepts compound arithmetic such as `total *= 2` and `total -= 1`. The same operators work on numeric list items.
+
+Use `items[i] = value` to replace an item or `items[i] += amount` to add to a numeric item. Other variables referring to the same list see the update.
+
+```corvid
+agent main() -> Int:
+    scores = [4, 6]
+    scores[1] += 3
+    return scores[1]
+```
+
+This returns `9`. In `items[position()] += amount()`, Corvid calls `position()` first and `amount()` second, once each. It then checks the index and reads the current item, including any change made by `amount()`. The index must be at least zero and less than the list length at the time of the write. The native target supports one index on a local list. Nested indexed writes such as `rows[i][j] += 1` currently use the interpreter.
+
 ## Maps
+
+Both the native compiler and interpreter support creating a `Map<String, String>`, passing it to a function, returning it, and looking up a key with `names[id]` or `names.get(id)`. Both reads return `Option<String>`. The last value for a repeated key wins. A stored empty string produces `Some("")`, and an absent key produces `None`.
+
+```corvid
+agent display_name(names: Map<String, String>, id: String) -> String:
+    return match names[id]:
+        Some(name) -> name
+        None -> "Unknown user"
+```
+
+Assign to a key to insert or replace a value. A function that receives the map can update it, and every alias sees the change. A string you read before replacement keeps its original value.
+
+```corvid
+agent rename(names: Map<String, String>, id: String, name: String) -> Nothing:
+    names[id] = name
+
+agent main() -> String:
+    names: Map<String, String> = {}
+    names["owner"] = "Ada"
+    rename(names, "owner", "Grace")
+    return match names["owner"]:
+        Some(name) -> name
+        None -> "Unknown user"
+```
+
+This program returns `"Grace"` on both targets. Native keyed reads and writes take linear time in the worst case.
+
+For named counts, use `Map<String, Int>`. Indexing and `.get()` return `Option<Int>`, and `.values()` returns a `List<Int>` snapshot in insertion order. Both targets run this example and return `1`.
+
+```corvid
+agent main() -> Int:
+    counts: Map<String, Int> = {}
+    counts["files"] = 0
+    return match counts["files"]:
+        Some(n) -> n + 1
+        None -> -1
+```
+
+Native maps support string keys with string, integer or record values, and lists or options of those types. A lookup returns the stored type inside `Option`. A missing key returns `None` even when the stored type is itself optional. This program returns `"unset"` on both targets.
+
+```corvid
+agent describe(limit: Option<Int>) -> String:
+    return match limit:
+        Some(_) -> "set"
+        None -> "unset"
+
+agent main() -> String:
+    limits: Map<String, Option<Int>> = {"daily": None}
+    return match limits["daily"]:
+        Some(limit) -> describe(limit)
+        None -> "missing"
+```
+
+If a value is a list, retrieving it preserves its identity. Appending through the retrieved list updates the same list held by the map. A `values()` snapshot keeps the original records and lists alive when a key is overwritten. For `Map<String, Int>`, both targets support `+=`, `-=`, `*=`, `/=` and `%=`. In `counts[key()] += amount()` the key runs first, followed by the amount. The update reads the current counter after both calls. A missing key raises a runtime error. Use plain assignment to initialize it. Earlier lookups and value snapshots keep the previous integer. Other key or value types outside the native subset use the interpreter.
+
+For a string map, `length() -> Int` counts distinct keys and `contains_key(key: String) -> Bool` tests presence even if the stored value is empty. `keys() -> List<String>` and `values() -> List<String>` return snapshots in matching insertion order on both targets. An overwrite retains the key's original position. For example, `{"a": "old", "b": "", "a": "new"}.keys()` gives `["a", "b"]`, and its values are `["new", ""]`. Use `for key in names.keys():` to visit each snapshotted key once.
 
 Maps are Python-style literals with typed reads that can never
 throw a KeyError or hand back a silent zero-value (every block
@@ -281,8 +384,14 @@ x = find_positive(xs).unwrap_or(0)
 
 ## Result
 
-Construct with `Ok(x)` / `Err(e)`; the `?` operator propagates `Err`
-early:
+Construct a result with `Ok(x)` or `Err(e)`. Postfix `?` unwraps an
+`Ok` or returns the error from the enclosing function. Inside a loop,
+an error exits the whole function. In an expression such as
+`first() + text.parse_int()? + last()`, `first()` runs before the parse.
+If parsing fails, Corvid skips `last()` and releases the function's locals.
+In `enabled and text.parse_int()? > 0`, a false `enabled` skips the
+parse entirely. An `or` expression skips its right operand when its left
+operand is true.
 
 ```corvid
 agent check_amount(amount: Float) -> Result<Float, String>:
@@ -364,6 +473,25 @@ locals (`amount: final_amount` renames; `..` ignores the rest).
 Destructuring must be irrefutable: literal or nested patterns
 belong in `match`.
 
+### Updating a record
+
+Use a field name to update a record. Other variables referring to the same record see the change.
+
+```corvid
+type Counter:
+    value: Int
+    label: String
+
+agent main() -> Int:
+    counter = Counter(2, "draft")
+    alias = counter
+    counter.label = "ready"
+    counter.value += 3
+    return alias.value
+```
+
+This returns `5`. Updates can follow nested fields, as in `state.counter.value += step()`. Corvid evaluates `step()` once before reading the field for the addition. If the call replaces `state.counter`, the update applies to the replacement.
+
 ## Field refinements
 
 Record fields can declare VALUE constraints, not just shapes:
@@ -431,7 +559,45 @@ agent report(v: Verdict) -> String:
         Cleared(who) -> "cleared by " + who
 ```
 
+An imported function can return a sum value and another function can accept it. The interpreter and native CLI both preserve record payloads across those calls. Use the interpreter when the CLI entry point itself takes or returns a sum as JSON.
+
+Use `==` or `!=` to compare two values of the same record or sum type. For example, `Denied("policy", 42) == Denied("policy", 42)` is true, and `Pending != Approved("alice")` is true. Both CLI targets compare the active variant and its fields. List fields compare in order. String-keyed map fields compare by keys and values regardless of insertion order. A later comparison sees any mutations made through an alias.
+
+These operators also work directly on typed lists, string-keyed maps, options and results of supported types. Two separately constructed `Some(0)` values compare equal. An `Ok` value differs from an `Err` value, even if their payloads are equal.
+
+### Sum values in HTTP JSON
+
+A route can accept and return the same sum type directly.
+
+```corvid
+type Status:
+    | Pending
+    | Approved(approver: String)
+
+server status_api:
+    route POST "/echo" body Status -> json Status:
+        return body
+```
+
+Posting either of these JSON objects to `/echo` returns the same object.
+
+```json
+{"tag":"variant","type":"Status","variant":"Pending","fields":[]}
+```
+
+```json
+{"tag":"variant","type":"Status","variant":"Approved","fields":["alice"]}
+```
+
+Payload fields follow declaration order. When the request type is known,
+a client may omit `type` and `tag`. An empty variant may also omit `fields`.
+An unknown variant, conflicting type or tag, or incorrect payload receives
+HTTP 400 with the error code `invalid_body`. For a public sum type,
+`/openapi.json` describes each variant and its positional payload types.
+
 ## Generics
+
+For built-in collections, the element type follows the value through imports. If `items.labels()` returns `List<String>`, then `label = items.labels().last()` infers `Option<String>`, and `Some(s)` binds a string. The same method on `List<Int>` infers `Option<Int>`.
 
 > **Planned — post-v1.0.** User-declared generics need a
 > type-variable representation in the checker and monomorphization
@@ -496,3 +662,11 @@ with the rest of the surface.
 Function signatures, record fields, and effect rows always require
 explicit types — they're the boundaries where inference would be
 ambiguous and where you want a checker-readable contract.
+
+### Releasing a stream
+
+Consumers of a `Stream<T>` share the receiver. A producer can continue
+while another consumer holds a reference. Dropping the last receiver
+wakes a producer waiting to yield into a full buffer. Its next send
+ends the producer's yield loop. Resumable prompt streams keep delivered
+chunks for their resume token.

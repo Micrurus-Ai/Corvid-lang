@@ -25,6 +25,7 @@ type CostOptimisationReport:
 tool fetch_agent_traces(agent: String) -> List<Grounded<String>> uses lineage_read
 
 prompt suggest_optimisations(events: List<Grounded<String>>) -> Grounded<CostOptimisationReport> uses llm:
+    cites events strictly
     """
     You are a production cost analyst. Given the lineage events
     for one agent over a recent window, identify the top cost
@@ -33,7 +34,6 @@ prompt suggest_optimisations(events: List<Grounded<String>>) -> Grounded<CostOpt
     suggestion must cite the events that justify it; reject
     suggestions that cannot be backed by an event in the input.
     """
-    cites events strictly
 
 @budget($0.10)
 @min_confidence(0.7)

@@ -28,6 +28,9 @@ pub enum DeployCommand {
         /// digest manually.
         #[arg(long, value_name = "PATH")]
         cdylib: Option<PathBuf>,
+        /// Connector mode to configure in the generated image.
+        #[arg(long, value_parser = ["mock", "replay", "real"])]
+        mode: Option<String>,
     },
     /// Emit Docker Compose deployment artifacts.
     Compose {

@@ -36,11 +36,22 @@ corvid migrate up \
     --database  /var/lib/corvid/state_app.sqlite
 ```
 
-Executes pending SQL transactionally + records the applied state.
+Corvid commits pending SQL and its migration history in one SQLite transaction.
+Write migration files as SQL statements inside that transaction. Corvid owns
+the commit. On the first upgrade of an older database, pass its existing
+`--state` file so Corvid can import its history. Keep the database and state
+file together when upgrading from an older CLI.
+
+After commit, Corvid exports the history to `--state` as JSON. If that write
+fails, fix the path and repeat the same command. A retried `up` skips applied
+SQL. A retried `down` finishes the interrupted export and leaves the preceding
+migration in place. Use `migrate status` with the same database to inspect
+the committed history during recovery.
 
 ```sh
 corvid migrate down \
     --dir       examples/backend/state_app/migrations \
+    --down-dir  examples/backend/state_app/migrations/down \
     --state     /var/lib/corvid/migration_state \
     --database  /var/lib/corvid/state_app.sqlite
 ```
@@ -59,7 +70,7 @@ report without mutating state.
 migrations/
 ├── 0001_core_state.sql        # forward migration
 └── down/
-    └── 0001_core_state.down.sql   # paired rollback
+    └── 0001_core_state.sql.down.sql   # paired rollback
 ```
 
 The `examples/backend/state_app/migrations/0001_core_state.sql`
