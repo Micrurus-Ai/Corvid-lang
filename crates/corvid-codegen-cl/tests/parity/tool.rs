@@ -144,6 +144,21 @@ agent main() -> Int:
 }
 
 #[test]
+fn native_build_rejects_grounded_string_concat_in_either_order() {
+    for expression in [r#"g + " world""#, r#""hello " + g"#] {
+        let src = format!(
+            "effect retrieval:\n    data: grounded\n\n\
+             tool grounded_echo(s: String) -> Grounded<String> uses retrieval\n\n\
+             agent main() -> String:\n    g = grounded_echo(\"hello\")\n    return ({expression}).unwrap_discarding_sources()"
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let err = build_native_to_disk(&ir_of(&src), "concat", &tmp.path().join("prog"), &[])
+            .expect_err("unsupported grounded operation must be rejected before linking");
+        assert!(err.to_string().contains("grounded string concatenation"), "{err}");
+    }
+}
+
+#[test]
 #[ignore = "native-grounded-handles follow-up phase: grounded-refcounted-type \
             operator value-correctness is entangled with the native grounded \
             ownership model — routing the concat correctly produces the right \

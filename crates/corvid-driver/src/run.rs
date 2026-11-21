@@ -11,7 +11,7 @@
 use super::native_cache;
 use super::{
     compile_to_ir_with_config_at_path, load_corvid_config_for, load_corvid_config_with_path_for,
-    native_ability, render_all_pretty, run_ir_with_runtime, Diagnostic, NotNativeReason,
+    render_all_pretty, run_ir_with_runtime, Diagnostic,
 };
 use corvid_ir::IrFile;
 use corvid_runtime::{
@@ -157,23 +157,11 @@ pub fn run_with_target(
         }
     };
 
-    // Tool calls are native-able only when the caller supplied a
-    // tools staticlib. The `native_ability` scan reports ToolCall
-    // unconditionally (it doesn't know about the lib); the dispatcher
-    // here decides whether to treat that reason as a blocker. Other
-    // reasons (python imports, prompt calls) still block until their
-    // respective feature gaps.
-    let scan = native_ability(&ir);
-    let tools_satisfy = |r: &NotNativeReason| -> bool {
-        matches!(r, NotNativeReason::ToolCall { .. }) && tools_lib.is_some()
-    };
+    let scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
 
     match target {
         RunTarget::Native => match &scan {
             Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args),
-            Err(reason) if tools_satisfy(reason) => {
-                run_via_native_tier(path, &source, &ir, tools_lib, args)
-            }
             Err(reason) => {
                 eprintln!(
                     "error: `--target=native` refused: {reason}. Run without `--target` to fall back to the interpreter."
@@ -184,9 +172,6 @@ pub fn run_with_target(
         RunTarget::Interpreter => run_via_interpreter_tier(path, &ir, args, connector_mode),
         RunTarget::Auto => match &scan {
             Ok(()) => try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode),
-            Err(reason) if tools_satisfy(reason) => {
-                try_native_then_interpret(path, &source, &ir, tools_lib, args, connector_mode)
-            }
             Err(reason) => {
                 eprintln!("↻ running via interpreter: {reason}");
                 run_via_interpreter_tier(path, &ir, args, connector_mode)

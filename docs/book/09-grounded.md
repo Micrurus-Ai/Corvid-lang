@@ -89,6 +89,8 @@ agent main() -> Grounded<String>:
     │ Help: change the value to produce a `Grounded<String>`, or update the signature
 ```
 
+Adding a `Grounded<String>` and a `String` in either order runs in the interpreter so the combined value retains its provenance. Automatic execution selects that tier even when you supply a native tool library. A forced native run or build reports the unsupported concatenation.
+
 ## Strict mode: `@grounded_pure`
 
 By default, passing a `Grounded<String>` into a plain `String` slot

@@ -416,6 +416,10 @@ pub(super) fn lower_expr(
             expr.span,
         )),
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::requires_grounded_string_concat(*op, &left.ty, &right.ty) => {
+                Err(CodegenError::not_supported("grounded string concatenation requires the interpreter", expr.span))
+            }
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
                 builder, *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime, expr.span,
             ),

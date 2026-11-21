@@ -260,6 +260,17 @@ fn span_zero() -> corvid_ast::Span {
     corvid_ast::Span::new(0, 0)
 }
 
+/// Concatenating a grounded string needs ownership and provenance for the new value.
+pub fn requires_grounded_string_concat(
+    op: corvid_ast::BinaryOp,
+    left: &corvid_types::Type,
+    right: &corvid_types::Type,
+) -> bool {
+    use corvid_types::Type;
+    op == corvid_ast::BinaryOp::Add
+        && [left, right].iter().any(|ty| matches!(ty, Type::Grounded(inner) if **inner == Type::String))
+}
+
 /// Integer callbacks share one native ABI: environment handle followed by arguments.
 pub fn native_callback_type(ty: &corvid_types::Type) -> bool {
     use corvid_types::Type;
