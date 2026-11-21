@@ -119,6 +119,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Aligned Python-generated signed integer arithmetic with the interpreter. Checked 15 cases through the CLI and generated Python, including division above float precision, signed remainders, overflow, zero divisors and an ordinary float expression. The Python code generator and runtime suites passed.
   - [x] Verified 11 floating-point division and remainder cases with both the interpreter CLI and generated Python. The results agree on signed remainders, negative zero, infinities and NaN. See the [arithmetic rules](docs/book/05-types.md).
   - [x] Fixed generated Python modules containing a Corvid null escape. Built and imported an agent containing all six [string escapes](docs/book/04-syntax.md#expressions) and checked its exact return value, including a null followed by a digit.
+  - [x] Generated Python dictionaries for map literals with string, integer and boolean keys. Compared empty, nested and duplicate-key literals through the interpreter and a Python host. The [type guide](docs/book/05-types.md) records the remaining Python map limitations.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 

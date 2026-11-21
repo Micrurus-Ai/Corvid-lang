@@ -176,6 +176,16 @@ agent nop(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
+    fn emits_ordered_map_entries_with_computed_keys() {
+        let py = src_to_py(
+            r#"agent count(key: String) -> Map<String, Int>:
+    return {"first": 1, key: 2, "first": 3}
+"#,
+        );
+        assert!(py.contains(r#"return {"first": 1, key: 2, "first": 3}"#));
+    }
+
+    #[test]
     fn emits_import_passthrough() {
         let src = r#"import python "anthropic" as ant effects: network"#;
         let py = src_to_py(src);

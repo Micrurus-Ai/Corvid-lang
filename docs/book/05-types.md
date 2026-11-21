@@ -271,6 +271,12 @@ lists) with structural key equality and insertion-order iteration.
 `Map<String, V>` round-trips with JSON objects. Values with
 non-comparable types work as keys too (structural equality).
 
+When building for Python, a map literal with `String`, `Int` or `Bool` keys
+creates a Python dictionary. A Python caller can use the returned dictionary
+directly. Keys retain their first insertion position when a later entry
+replaces the value. Use the interpreter for structural keys, Corvid map
+methods, map mutation and lookups that need Corvid's `Option` semantics.
+
 For `Map<String, String>`, `length()` counts distinct keys.
 `contains_key(key)` also finds keys whose value is the empty string.
 `keys()` and `values()` produce new lists in first-insertion order.

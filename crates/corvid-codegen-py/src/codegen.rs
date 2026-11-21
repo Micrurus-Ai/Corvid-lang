@@ -318,6 +318,7 @@ impl Codegen {
     }
 
     fn emit_expr(&mut self, e: &IrExpr) {
+        use corvid_types::Type;
         match &e.kind {
             IrExprKind::Match { .. } => {
                 self.out.write(
@@ -339,9 +340,24 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
                 );
             }
+            IrExprKind::MapLiteral { keys, values }
+                if matches!(&e.ty, Type::Map(key, _)
+                    if matches!(key.as_ref(), Type::String | Type::Int | Type::Bool)) =>
+            {
+                self.out.write("{");
+                for (i, (key, value)) in keys.iter().zip(values).enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.emit_expr(key);
+                    self.out.write(": ");
+                    self.emit_expr(value);
+                }
+                self.out.write("}");
+            }
             IrExprKind::MapLiteral { .. } => {
                 self.out.write(
-                    "(_ for _ in ()).throw(NotImplementedError(\"Map<K, V> is interpreter-only in 45g\"))",
+                    "(_ for _ in ()).throw(NotImplementedError(\"Python map literals require String, Int or Bool keys\"))",
                 );
             }
             IrExprKind::BuiltinMethod { .. } => {
@@ -368,7 +384,6 @@ impl Codegen {
                 self.out.write("]");
             }
             IrExprKind::BinOp { op, left, right } => {
-                use corvid_types::Type;
                 let (prefix, separator) = match (&e.ty, op) {
                     (Type::Float, BinaryOp::Div) => ("__corvid_div_f64(", ", ".into()),
                     (Type::Float, BinaryOp::Mod) => ("__corvid_rem_f64(", ", ".into()),
