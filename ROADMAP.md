@@ -83,6 +83,16 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
   - Recorded a provider mock calling a Corvid function, checked the structured tool result and replayed the conversation with credentials removed. Source and trace-based tests passed in two fresh processes. Changing the prompt input failed the recorded test.
 
+### Building agents in Corvid
+
+Build on A01–A06 so a developer can grow a small terminal agent into a background service and an interactive application with the same agent logic.
+
+- [ ] A07. **Write a first agent.** Starting from the public guide, give an agent a task, typed tools and a stopping condition. Ask a new reader to identify what the model decides, what the program enforces and what happens if a tool fails. Document every new public function or grammar rule with a runnable example.
+- [ ] A08. **Reuse the agent across entry points.** Run the same agent from a CLI, a durable worker and a Corvid UI. Expose one existing application action to the agent. Verify the UI and agent share its handler, validation and permissions, and that changing the input type updates its tool description and identifies incompatible callers.
+- [ ] A09. **Hand work between a person and an agent.** Show completed and pending work in the UI. Pause a job at a defined checkpoint, report any in-flight work, let the user correct one result and revise the instruction, then resume. After a worker restart, verify the correction survives, completed actions are preserved and remaining work uses the new instruction. The application author chooses the task domain. [Frontend integration](docs/frontend-roadmap.md#ai-features-to-exercise-across-the-whole-application)
+- [ ] A10. **Explain and reproduce an agent run.** From a visible result, locate the model call, tool arguments and tool result that produced it. Turn a sanitized recording into a regression test that runs without provider credentials or external writes.
+- [ ] A11. **Compare developer experience.** Have independent developers build, interrupt, modify and debug the same agent in Corvid and idiomatic Python and TypeScript stacks. Use equivalent tools, model settings and persistence requirements. Record time to a working change, mistakes, help needed and which stack they would choose for their next agent.
+
 **5. Browser applications**
 
 - [x] F01. Render reusable views with state, events, forms and accessible controls. Exercise them in a browser through keyboard and pointer input.
