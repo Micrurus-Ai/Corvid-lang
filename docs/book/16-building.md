@@ -1,108 +1,66 @@
 # Building and targets
 
-## Execution tiers — what runs where
+## Running a program
 
-This table is the canonical statement of which language surface runs
-on which tier. The interpreter (`corvid run`) is the reference tier:
-everything runs there. Compiled tiers cover a growing subset and
-refuse LOUDLY — at build/transpile time with a structured diagnostic,
-never with silently degraded output — when a program uses a surface
-they don't carry yet.
-
-| surface | interpreter (`corvid run`) | native / cdylib / wasm | Python transpile (`--target=python`, legacy) |
-|---|---|---|---|
-| pure language core (types, control flow, arithmetic) | ✅ | ✅ | ✅ |
-| prompts / `call_llm` (traced, budgeted) | ✅ | ✅ (runtime built in) | ✅ (via `corvid-runtime` pip package) |
-| user tools | ✅ (auto-dispatch) | ✅ with `--with-tools-lib` staticlib | ✅ (`@tool` registrations) |
-| stdlib executing tools (io/http/db/json/time/random/rag/mcp) | ✅ full dispatch + policies + replay | ❌ refuses at build time (structured interpreter-only diagnostic) | ❌ refuses at transpile time (names the call + the tier that runs it) |
-| `match`, lambdas, maps, sum types, place assignment, `parallel` | ✅ | ❌ routes to interpreter via the tier-picker | partial |
-| `replay` / `ask` / `choose` / streams | ✅ | ❌ routes to interpreter | ❌ refuses |
-
-Batteries on compiled tiers are explicitly **post-v1.0**: the
-tier-picker's auto-fallback (running `corvid run` picks the
-interpreter automatically whenever a program uses an
-interpreter-only surface, and says so) is the designed mitigation,
-not a stopgap. A compiled tier never silently drops a stdlib call.
-
-## The four production targets
+`corvid run src/main.cor` selects an execution tier. It uses native compilation
+when the entry point and its calls fit the native CLI boundary. It can select the
+interpreter for programs that use executing standard-library tools, parallel
+work or other interpreter features. Force a tier when checking portability.
 
 ```sh
-corvid build src/main.cor                       # default today: python transpile (legacy)
-corvid build src/main.cor --target=native
-corvid build src/main.cor --target=wasm
-corvid build src/main.cor --target=server
-corvid build src/main.cor --target=cdylib
+corvid run src/main.cor --target interp
+corvid run src/main.cor --target native
 ```
 
-## Native
+The native CLI handles arithmetic, common list operations, string-keyed maps,
+supported Option and Result patterns and user-defined sum values within the
+program. It also supports a subset of callbacks and captured values. Native
+entry points have their own argument and result limits. A forced native run
+reports unsupported code. Browser handlers and exported library functions have
+separate type and host-call boundaries.
 
-A standalone binary you can drop on a server. Cranelift backend.
-Cross-compiles via the standard rustc/cargo toolchain.
+## Building an artifact
 
-```sh
-corvid build src/main.cor --target=native --optimize=release
-ls target/release/main          # the binary
+Run the command from the project root. `corvid check src/main.cor` checks the
+program. `corvid build` prints the paths it writes.
+
+| Target | Command | Output for the example |
+|---|---|---|
+| Python | `corvid build src/main.cor` | `target/py/main.py` |
+| Native executable | `corvid build src/main.cor --target native` | `target/bin/main` (`main.exe` on Windows) |
+| WebAssembly | `corvid build src/main.cor --target wasm` | `target/wasm/main.wasm`, JavaScript loader, TypeScript declarations and a manifest |
+| HTTP wrapper for a native entry agent | `corvid build src/main.cor --target server` | Server executable under `target/server/` and handler under `target/bin/` |
+| Portable web application | `corvid build src/main.cor --target web` | `target/web.tar` |
+| Shared library | `corvid build src/api.cor --target cdylib --header` | Platform shared library and C header under `target/release/` |
+| Static library | `corvid build src/api.cor --target staticlib --header` | Platform static library and C header under `target/release/` |
+
+Use `corvid serve src/main.cor` for a source application with typed `server`
+routes, forms and streaming handlers. Use the web target to distribute that
+application with its compiled browser handlers. The server build target wraps
+a native entry agent in an HTTP server and uses Cargo to build the wrapper.
+The wrapper forwards application requests to the compiled handler. Use `corvid serve` to dispatch requests to declared routes.
+
+## Libraries and host calls
+
+A library needs an exported entry point. Save this example as `src/api.cor`
+and use either library command in the table.
+
+```corvid
+pub extern "c"
+agent twice(value: Int) -> Int:
+    return value * 2
 ```
 
-## WASM
+Use `--with-tools-lib PATH` to link native tools. Use `--abi-descriptor` on a
+shared-library build for the ABI descriptor, or `--all-artifacts` for the
+descriptor and header. To sign a shared library, supply `--sign KEY_PATH`.
+Use `corvid build --help` for the options accepted by the installed version.
+See the [native interop guide](../guides/ffi-c-rust.md) for the C calling and
+ownership conventions.
 
-A WASM module for the browser, edge runtimes, or any wasmtime/
-wasmer host. Bare `(ptr, len)` UTF-8 ABI for strings; multi-value
-returns for struct returns.
+## Web application bundle
 
-```sh
-corvid build src/main.cor --target=wasm
-ls target/wasm32-unknown-unknown/release/main.wasm
-```
-
-The website's playground uses this target. Host-mediated for filesystem
-and network. See **[WASM target](/docs/wasm)**.
-
-## Server
-
-A rendered axum 0.7 backend binary with the full middleware pipeline
-(auth, rate-limit, tracing, CORS, compression, request logging),
-graceful shutdown, handler-isolation timeout, body-limit, and
-`/healthz`/`/readyz`/`/metrics` endpoints. Generated as a Cargo
-project; the user owns the project, Corvid owns the shape.
-
-```sh
-corvid build src/main.cor --target=server
-cd target/server
-cargo run                    # compiles to a production-shape binary
-```
-
-See **[Backend](/docs/backend)** for routes/middleware/etc.
-
-## cdylib
-
-A C-callable shared library. The signed-build path produces a
-DSSE-attested cdylib with embedded `CORVID_ABI_DESCRIPTOR` that
-`corvid-abi-verify` cross-checks against the source.
-
-```sh
-corvid build src/lib.cor --target=cdylib --sign
-ls target/cdylib/libmy_app.{so,dylib,dll}
-```
-
-For C consumers the C header is generated with:
-
-```sh
-corvid generate c-header src/lib.cor
-```
-
-See **[FFI: C/Rust](/docs/ffi-c)**.
-
-## Build flags
-
-| Flag | Purpose |
-|---|---|
-| `--target=<t>` | native \| wasm \| server \| cdylib |
-| `--optimize=<o>` | debug \| release |
-| `--sign` | produce a DSSE-signed artifact + receipts |
-| `--out-dir=<d>` | override default `target/` |
-| `--check-only` | typecheck without codegen (alias: `corvid check`) |
-| `--manifest=<f>` | use a non-default `corvid.toml` |
+Build a source-backed HTTP application and its compiled browser handlers with `corvid build src/main.cor --target web`. Extract `target/web.tar` and start the application with `corvid serve src/main.cor` from the extracted directory. See [Packaging an interactive application](19-browser-views.md#packaging-an-interactive-application) for the project layout and runtime requirements.
 
 ## Reproducible builds
 
@@ -112,8 +70,5 @@ sha256sum target/bin/main
 ```
 
 Build the same sources in a second project directory and compare the two hashes. Use the same Corvid compiler, runtime archive, target architecture and system linker for both builds. On Windows the executable is `target/bin/main.exe` and PowerShell's `Get-FileHash` computes its SHA-256.
-
-Phase 22's bundle format ships every reproducible build with a
-`MANIFEST.toml` of inputs (source SHAs, dep tree, toolchain).
 
 The Dockerfile generated by `corvid deploy package` selects the same release tag as the CLI that generated it. A CLI built from source uses its nightly tag when build metadata is available and the latest nightly otherwise. You can select a different release with `docker build --build-arg CORVID_VERSION=<tag>`.
