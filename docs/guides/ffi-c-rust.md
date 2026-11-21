@@ -94,12 +94,19 @@ what `corvid upgrade --check --claims-current <...> --claims-target
 
 ## Calling from C
 
-The `--header` flag generates a C header with the bare `(ptr, len)`
-struct + every `pub extern "c"` symbol. See
-[`docs/internals/effect-spec/abi.md`](../internals/effect-spec/abi.md)
-for the canonical ABI shape; the per-target memory-ownership
-contract is documented at
-[`docs/internals/wasm-abi.md`](../internals/wasm-abi.md).
+Build with `corvid build calc.cor --target cdylib --header`. On Windows, copy the DLL, its import library and its matching generated header to the consumer. Include `lib_calc.h` and link the host against `calc.lib`. An exported integer crosses the ABI by value. A string input is a borrowed UTF-8 string valid for the call. The generated signature specifies where the observation handle is returned.
+
+```c
+uint64_t observation = 0;
+const char *value = echo("hello", &observation);
+if (value) {
+    puts(value);
+    corvid_free_string(value);
+}
+corvid_observation_release(observation);
+```
+
+When using the dynamic catalog, check the status from `corvid_call_agent` before reading its output. An unknown agent returns `CORVID_CALL_AGENT_NOT_FOUND`; invalid JSON arguments return `CORVID_CALL_BAD_ARGS`.
 
 ## Calling from Rust
 

@@ -8080,3 +8080,7 @@ A served application can also implement a Corvid tool with a Rust shared library
 ### Calling an installed Python function
 
 Write `import python "math" as numbers effects: pure:` and indent a signature such as `fn gcd(left: Int, right: Int) -> Int` underneath it. Call `numbers.gcd(18, 12)` in an agent. The checker uses the declared parameters and return type. The interpreter copies arguments into Python, checks the returned value and reports Python exceptions at the call. Use `approve alias.member(args)` when the import declares an effect requiring approval. The Python interop guide includes both forms and explains packaging and replay.
+
+### Using Corvid from C and JavaScript
+
+Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C. Follow the generated parameter order, release returned strings with `corvid_free_string` and release observation handles with `corvid_observation_release`. For a JavaScript host, build with `--target wasm` and use the generated module's `adaptImports` to supply tool implementations. Corvid integers cross the Wasm boundary as JavaScript BigInt values. The C and Wasm ABI guides include host examples.
