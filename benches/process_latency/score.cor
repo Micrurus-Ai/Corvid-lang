@@ -1,0 +1,9 @@
+agent main(count: Int) -> Int:
+    total = 0
+    i = 0
+    while i < count:
+        score = 3 * (i % 257) + 5 * ((17 * i) % 257) + 7 * ((31 * i) % 257)
+        if score >= 2000:
+            total += score
+        i += 1
+    return total

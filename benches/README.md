@@ -7,6 +7,8 @@ This directory holds two kinds of benchmark artifacts:
 
 ## Same-session ratio protocol
 
+For a comparison of fresh command-line processes across native Corvid, CPython, Node.js and Rust, see the [batch scoring benchmark](process_latency/README.md). The protocol below covers the persistent AI workflow runners.
+
 The memory-foundation close publishes **ratios**, not absolute timings.
 
 Why:
