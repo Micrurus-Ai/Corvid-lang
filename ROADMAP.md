@@ -125,6 +125,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
+  - [x] Ran the local nightly release command with an ephemeral key and independently verified the Ed25519 signature, manifest payload, copied binary digest and checksum file. Updated the command help and [release policy](docs/release-policy.md#verification) to describe its outputs.
+  - [ ] Produce and verify a bill of materials for the distributed candidate. The local release command emits a signed CLI manifest, and the hosted archives carry Rust dependency notices.
+
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
   - [x] Added the pinned LCDF copyright statement and COPYING file to the PDF extraction dependency's notice entry. Verified both texts in the generated Windows x64 inventory. The glyph-data redistribution review remains open in the [release policy](docs/release-policy.md).
