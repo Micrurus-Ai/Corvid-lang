@@ -27,8 +27,7 @@ jobs:
       # GitHub-hosted ubuntu-latest runners ship with ~14 GB free on
       # the root partition. `cargo test --workspace --lib --tests`
       # builds ~80 debug test binaries; each links ~250 rlibs plus
-      # the corvid-runtime staticlib. Combined with the cache restore
-      # below, this has repeatedly exhausted the disk during link,
+      # the corvid-runtime staticlib. These builds have repeatedly exhausted the disk during link,
       # surfacing as `rust-lld` SIGBUS (signal 7, Bus error) inside
       # LLVM's own mmap-backed write path. The pre-installed Android
       # SDK, .NET, GHC/Haskell, and CodeQL tooling are not used by
@@ -57,15 +56,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo registry + target
+      - name: Cache downloaded Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-workspace-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-workspace-deps-
 
       - name: Build the runtime archive for native integration tests
         run: cargo build --locked -p corvid-runtime

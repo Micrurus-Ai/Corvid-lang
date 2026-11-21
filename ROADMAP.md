@@ -131,6 +131,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] The [Linux candidate jobs](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44888632949) built generated application images on x64 and ARM64. Both images ran the scaffolded Python tool and returned the expected string.
   - [x] Checked 25 ordered agent calls in both `and` and `or` chains through the interpreter and native CLI. Both skipped the final division by zero and preserved each call exactly once.
   - [x] Checked the Python build boundary for Result constructors. The interpreter returned `Ok(42)`; the generated Python module imported successfully and raised `NotImplementedError` when called. The [build guide](docs/book/16-building.md) describes how to check this from a host.
+  - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 

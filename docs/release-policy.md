@@ -16,7 +16,7 @@ Each platform archive carries the project `LICENSE` and a target-specific Rust d
 
 The Linux x64 and ARM64 archives target Debian 12 (Bookworm) with `libpython3.11`. The build runs on each native architecture. The workflow tests Linux packages in a fresh Debian 12 container. On each of the six platforms it passes the archive through the production installer, checks the language server, invokes a Python host tool and runs a starter. It then builds and extracts a web app, renames the source project, and requests the HTML, JSON and WebAssembly assets from the relocated server. Uninstall must preserve a user-created file.
 
-For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
+For compiler verification after switching source snapshots, use a fresh checkout with an empty Cargo target directory. The workspace CI job caches downloaded dependencies and builds the compiler and tests from the checked-out source. A reused Linux build accepted an imported agent call inside a pure function. Building the same source from an empty target correctly rejected it.
 
 ## Channels
 
@@ -113,7 +113,7 @@ The same person may hold more than one role, but each role must be recorded in t
 
 - **Version and channel.** The local `corvid release build CHANNEL VERSION --out DIR` command parses SemVer and checks the channel before creating its output directory. Stable takes a plain version such as `1.0.0`, beta takes a numbered prerelease such as `1.0.0-beta.2`, and nightly accepts a prerelease starting with `nightly.`. Publication cadence is a maintainer responsibility.
 - **Archive contents.** The hosted workflow checks version tags against the CLI package version, tests each candidate archive and computes its checksum. The local release command creates its own signed release record. Before publishing, verify that signatures and inventory cover the actual downloads.
-- **Local attestation.** `corvid release build` copies the running CLI. Its signed DSSE payload contains the exact bytes of `release-manifest.json`. Verify the Ed25519 signature with the expected release public key, then compare the copied binary's SHA-256 with `binary_sha256` in that manifest. This command does not generate a software bill of materials (SBOM). The hosted workflow generates the distributed candidate?s SBOM from the finished archive.
+- **Local attestation.** `corvid release build` copies the running CLI. Its signed DSSE payload contains the exact bytes of `release-manifest.json`. Verify the Ed25519 signature with the expected release public key, then compare the copied binary's SHA-256 with `binary_sha256` in that manifest. This command does not generate a software bill of materials (SBOM). The hosted workflow generates the candidate SBOM from the finished archive.
 - **Compatibility.** Run `corvid upgrade check PATH` and the application's tests with the candidate CLI. To compare embedded library guarantees, supply the two exported manifests using `--claims-current` and `--claims-target`. See the [migration guide](meta/upgrade-migrations.md#comparing-guarantees-across-library-versions).
 - **Maintainer review.** Record signoff, review open advisories and beta feedback, and check that changelog entries, upgrade instructions and key rotation records apply to this candidate.
 
