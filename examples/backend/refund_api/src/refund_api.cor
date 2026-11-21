@@ -1,3 +1,11 @@
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: fixed("refunds")
+    roles:
+        reviewer: "approvals.decide"
+
 type RefundRequest:
     order_id: String
     amount: Float
@@ -30,5 +38,6 @@ agent refund_status() -> RefundStatus:
 server refund_api:
     route GET "/status" -> json RefundStatus:
         return refund_status()
-    route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money:
+    @approval(role: "reviewer", risk: "financial_refund", data: "financial", expires_ms: 600000, max_cost_usd: $0.05, irreversible: true)
+    route POST "/refunds" body RefundRequest -> json RefundResponse uses transfer_money requires authenticated:
         return approve_refund(body)
