@@ -1146,6 +1146,23 @@ fn upgrade_command_reports_and_applies_source_stdlib_migrations() {
 }
 
 #[test]
+fn upgrade_apply_preserves_earlier_files_on_invalid_metadata() {
+    let dir = tempfile::tempdir().expect("create project");
+    let trace = dir.path().join("a.json");
+    let original = r#"{"schema":"corvid.trace.v0"}"#;
+    fs::write(&trace, original).unwrap();
+    fs::write(dir.path().join("z.json"), "{").unwrap();
+    let output = Command::new(corvid_bin())
+        .args(["upgrade", "apply"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(trace).unwrap(), original);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
 fn upgrade_command_migrates_schema_trace_and_connector_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let schema = temp.path().join("migration-state.json");

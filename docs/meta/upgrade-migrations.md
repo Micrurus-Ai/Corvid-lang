@@ -48,4 +48,4 @@ Schema, trace-format, and connector-manifest migrations use the same command fam
 - `trace.format_v1`: migrates trace envelopes from `corvid.trace.v0` to `corvid.trace.v1`.
 - `connector.manifest_v1`: migrates connector manifests from `manifest_version` `0.1` to `1.0`.
 
-The JSON rules match the top-level field and its string value. Spaces, indentation and line endings are preserved. For a trace, only the envelope version changes. A `schema` field inside the payload remains part of the application data. An invalid JSON object produces an error before that file is written.
+The JSON rules match the top-level field and its string value. Spaces, indentation and line endings are preserved. For a trace, only the envelope version changes. A `schema` field inside the payload remains part of the application data. Apply stages all mechanical edits before replacing any files. If a JSON object fails to parse, fix it and rerun the command. The original files stay intact. Each replacement is atomic. If a filesystem error interrupts replacement, rerun apply to finish the pending edits.

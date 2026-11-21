@@ -297,6 +297,7 @@ fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
     use std::io::Write;
 
     let mut findings = Vec::new();
+    let mut staged = Vec::new();
     for path in corvid_sources(root)? {
         let is_source = path.extension().is_some_and(|ext| ext == "cor");
         if !is_source && !path.extension().is_some_and(|ext| ext == "json") {
@@ -390,9 +391,12 @@ fn migrate_files(root: &Path, apply: bool) -> Result<Vec<UpgradeFinding>> {
             temp.write_all(rewritten.as_bytes())?;
             temp.as_file()
                 .set_permissions(fs::metadata(&path)?.permissions())?;
-            temp.persist(&path)
-                .with_context(|| format!("write `{}`", path.display()))?;
+            staged.push((temp.into_temp_path(), path));
         }
+    }
+    for (temp, path) in staged {
+        temp.persist(&path)
+            .with_context(|| format!("write `{}`", path.display()))?;
     }
     Ok(findings)
 }
