@@ -149,6 +149,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] The checker recognizes the `Grounded<T>` wrapper structurally. Ordinary record names such as `GroundedNote` can be returned without a retrieval effect.
   - [x] Raw host text cannot fill a grounded agent parameter through interpreter argument binding or native command-line arguments. An interpreter host can supply an existing grounded value. Native grounded returns still print normally.
   - [x] Checked Corvid helpers can derive a grounded return from a grounded parameter. The checker follows binding identity through branches, reassignment and loops, and checks grounded arguments when proving the source of a returned agent call. See the [grounded values guide](docs/book/09-grounded.md).
+  - [x] Native cache keys cover every compiled C runtime source and its list layout header, including ordered maps. Cargo and the cache share the runtime build inputs. See the [build guide](docs/book/16-building.md#running-a-program).
   - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.

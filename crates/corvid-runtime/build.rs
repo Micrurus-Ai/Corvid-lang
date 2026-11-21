@@ -16,24 +16,29 @@
 //! here so corvid-codegen-cl just links against corvid-runtime's
 //! staticlib (which already contains the C objects).
 
-fn main() {
-    let runtime_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime");
+// These are also inputs to the native executable cache in the driver.
+const C_SOURCES: &[&str] = &[
+    "alloc.c",
+    "strings.c",
+    "lists.c",
+    "ordered_map.c",
+    "entry.c",
+    "shim.c",
+    "weak.c",
+    "stack_maps.c",
+    "stack_maps_fallback.c",
+    "collector.c",
+    "verify.c",
+    "json.c",
+];
+const C_HEADERS: &[&str] = &["list_layout.h"];
 
+fn main() {
     let mut build = cc::Build::new();
-    build
-        .file(runtime_dir.join("alloc.c"))
-        .file(runtime_dir.join("strings.c"))
-        .file(runtime_dir.join("lists.c"))
-        .file(runtime_dir.join("ordered_map.c"))
-        .file(runtime_dir.join("entry.c"))
-        .file(runtime_dir.join("shim.c"))
-        .file(runtime_dir.join("weak.c"))
-        .file(runtime_dir.join("stack_maps.c"))
-        .file(runtime_dir.join("stack_maps_fallback.c"))
-        .file(runtime_dir.join("collector.c"))
-        .file(runtime_dir.join("verify.c"))
-        .file(runtime_dir.join("json.c"))
-        .opt_level(2);
+    for name in C_SOURCES {
+        build.file(std::path::Path::new("runtime").join(name));
+    }
+    build.opt_level(2);
 
     // C standard: C11 kept for designated initializers in static
     // typeinfo blocks (corvid_typeinfo_String in alloc.c).
@@ -45,42 +50,18 @@ fn main() {
 
     build.compile("corvid_c_runtime");
 
-    // Historically this script wrote `OUT_DIR/c_runtime_path.rs`
-    // containing `pub const C_RUNTIME_LIB_PATH: &str = "<absolute
-    // OUT_DIR>/libcorvid_c_runtime.a"`. That constant got embedded
-    // into the resulting binary's `.rodata` and broke bit-identical
-    // rebuilds: two builds with different `CARGO_TARGET_DIR`
-    // values (the `reproducible-build.yml` workflow uses
-    // `target-build-1` and `target-build-2` on purpose) ended up
-    // with two different absolute paths in their compiled output,
-    // differing by exactly one byte. `--remap-path-prefix` only
-    // remaps rustc's internal path tracking (debuginfo, error
-    // messages, `file!()` macro expansion) — it does NOT rewrite
-    // string literals in build-script-generated source files.
-    //
-    // The constant has been retired. Downstream consumers now
-    // either (a) hash the C source files via `include_bytes!` at
-    // their own compile time for cache-invalidation (e.g.
-    // `corvid-driver::native_cache`), or (b) discover the
-    // staticlib at runtime via `corvid-codegen-cl`'s
-    // `staticlib_discovery` walk-up (e.g.
-    // `corvid-codegen-cl/tests/ffi_bridge_smoke.rs`). Both
-    // patterns produce byte-identical binaries across
-    // `CARGO_TARGET_DIR` choices.
-
-    // Cargo rebuilds when any C source changes.
-    println!("cargo:rerun-if-changed=runtime/alloc.c");
-    println!("cargo:rerun-if-changed=runtime/strings.c");
-    println!("cargo:rerun-if-changed=runtime/list_layout.h");
-    println!("cargo:rerun-if-changed=runtime/lists.c");
-    println!("cargo:rerun-if-changed=runtime/ordered_map.c");
-    println!("cargo:rerun-if-changed=runtime/entry.c");
-    println!("cargo:rerun-if-changed=runtime/shim.c");
-    println!("cargo:rerun-if-changed=runtime/weak.c");
-    println!("cargo:rerun-if-changed=runtime/stack_maps.c");
-    println!("cargo:rerun-if-changed=runtime/stack_maps_fallback.c");
-    println!("cargo:rerun-if-changed=runtime/collector.c");
-    println!("cargo:rerun-if-changed=runtime/verify.c");
-    println!("cargo:rerun-if-changed=runtime/json.c");
+    // The generated expression embeds file contents only. The final
+    // executable must be reproducible across checkout and target directories.
+    let mut inputs = String::from("&[\n");
+    for name in C_SOURCES.iter().chain(C_HEADERS) {
+        println!("cargo:rerun-if-changed=runtime/{name}");
+        inputs.push_str(&format!(
+            "include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/runtime/{name}\")),\n"
+        ));
+    }
+    inputs.push(']');
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
+    std::fs::write(out.join("native_runtime_inputs.rs"), inputs)
+        .expect("write native cache inputs");
     println!("cargo:rerun-if-changed=build.rs");
 }

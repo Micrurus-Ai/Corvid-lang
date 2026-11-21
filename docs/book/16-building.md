@@ -19,6 +19,8 @@ entry points have their own argument and result limits. A forced native run
 reports unsupported code. Browser handlers and exported library functions have
 separate type and host-call boundaries.
 
+Native runs store compiled executables under `target/cache/native`. Repeating an unchanged run can reuse its executable. Changes to imported Corvid source, a linked tools library, or the C runtime sources and headers built into the CLI select a new cache entry. After rebuilding a development compiler with Rust-only code generation changes at the same package version, clear that project's native cache before comparing results.
+
 ## Building an artifact
 
 Run the command from the project root. `corvid check src/main.cor` checks the

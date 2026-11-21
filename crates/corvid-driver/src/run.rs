@@ -524,12 +524,7 @@ pub fn build_or_get_cached_native(
     tools_lib: Option<&Path>,
 ) -> anyhow::Result<CachedNativeBinary> {
     let cache_dir = native_cache::cache_dir_for(path);
-    // Tools-lib path participates in the cache key: if the user
-    // swaps between `--with-tools-lib A` and `--with-tools-lib B`,
-    // they get distinct cached binaries. Re-linking against the same
-    // lib re-uses. Users who modify A in place and keep the same
-    // path get stale cache — a `cargo clean` fixes it; a future
-    // future polish work could hash the lib contents.
+    // Both the path and contents of a tools library distinguish cached executables.
     let tools_lib_str = tools_lib
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
