@@ -1,68 +1,35 @@
-# Pre-phase stub — Native Grounded-Handle Representation
+# Native grounded values
 
-**Status:** STUB. Not yet started. Filed 2026-05-12 as the
-pre-phase placeholder for a follow-up phase split out of Provenance
-Propagation slice 5 (CTO decision — see
-`grounded-propagation-design.md`'s slice-5 entry).
+## Implemented behavior
 
-This is a stub, not a full pre-phase design. It records *why* the
-phase exists and *what the chat must settle*, so the work is queued
-as real and scoped rather than hand-waved. The full pre-phase chat
-happens in its own session before any code.
+Native strings use a reference-counted descriptor. Retrieval tools and grounded
+prompts attach source information to that descriptor. The ownership pass tracks
+`Grounded<String>` through local reads, operators and returns. The runtime
+removes uncaptured source information on final release or collector sweep.
 
----
+For string addition, the compiler tells the runtime which operands are grounded.
+The runtime builds a `Derived` entry named `add`, retains the input chains in
+operand order and takes the minimum confidence. A plain operand contributes an
+empty chain and confidence 1. The result owns a fresh descriptor. A C host can
+capture its sources before consuming the returned string. The handle owns a
+separate reference to the attestation until the host releases it.
 
-## Why this phase exists
+The native parity test `grounded_string_concat_native_matches_interpreter`
+checks computed strings and allocation balance. The shared-library test
+`cdylib_grounded_string_return_exposes_attestation_handle` retrieves the source
+names for a concatenation from two tools. Runtime tests cover nested joins,
+confidence, explicitly discarded sources and descriptor lifetime.
 
-Provenance Propagation made `Grounded<T>` contagious through
-operators across the typechecker, the IR, and the interpreter — the
-interpreter builds the byte-identical `Derived { op, inputs }`
-provenance tree (D3). Native codegen could not follow, because its
-grounded model is structurally degenerate:
+## Remaining representation work
 
-- A native `Grounded<T>` is a **bare machine value** of `T`. The
-  `corvid_grounded_attest_*` C-ABI functions take
-  `(value, source_name, confidence)` and return `value` unchanged
-  (`crates/corvid-runtime/src/catalog_c_api/grounded_bridge.rs`).
-- Provenance is registered into a **single process-global
-  "last scalar attestation" slot** (`set_last_scalar_attestation`).
-  There is no per-value provenance tracking.
+String concatenation covers one operator on one heap type. Scalar attestations
+use a thread-local last-value slot. Struct attestations use heap pointer keys.
+Future changes need to address overlapping scalar lifetimes, explicit host
+inputs, and other operators and containers. Shared or immortal string
+descriptors also need coverage when distinct retrievals return the same
+descriptor with different source information.
 
-This works for the narrow case it was built for — "a tool returns
-`Grounded<T>` → the agent returns it directly" — and nothing more.
-It cannot:
-
-- Track more than one live grounded value at a time.
-- Recover an operand's provenance chain at an operator site (the
-  operand is a bare value with no identity).
-- Build the `Derived` tree the contagion law (D3) requires for
-  byte-identical provenance across tiers.
-
-Provenance Propagation slice 5 shipped native **grounded-scalar
-value-correctness** (grounded Int/Bool/Float operators produce
-correct values, including under `@wrapping`). It could *not* cleanly
-ship grounded-**refcounted-type** value-correctness: routing a
-`Grounded<String> + String` concat correctly produces the right
-value but **leaks**, because the dataflow / dup-drop passes treat
-`Grounded<...>` as opaque (`ownership::is_refcounted` returns
-`false` for it — deliberately; making it see through `Grounded`
-double-frees). That is the same ownership-model entanglement this
-phase exists to untangle.
-
-So this phase ships two things native is missing:
-1. **Grounded-refcounted-type value-correctness** — `Grounded<String
-   / List / Struct>` operators produce correct, leak-free values.
-   The `#[ignore]`d `grounded_string_concat_native_matches_
-   interpreter` parity test in `corvid-codegen-cl` is the
-   executable spec; un-ignore it when this phase lands.
-2. **Provenance-correctness** — the `Derived` DAG, byte-identical
-   to the interpreter's.
-
-Both reduce to the same root: native grounded values need a real
-per-value ownership + provenance model instead of "bare value +
-single global attestation slot."
-
-## What the pre-phase chat must settle
+## Design questions
 
 1. **The native `Grounded<T>` representation.** Byte-identical
    `Derived` trees require grounded values to carry runtime
@@ -75,7 +42,7 @@ single global attestation slot."
    results, locals, returns, struct fields, the C-ABI boundary.
    Enumerate before scoping.
 3. **The C runtime + attestation store changes.** Replace the
-   single global "last scalar attestation" slot with real per-value
+   thread-local last scalar attestation slot with real per-value
    provenance; add a `Derived`-aware attestation entry point that
    takes operand identities + the operator label.
 4. **The Phase 22 FFI surface.** `pub extern "c"` agents return
@@ -92,13 +59,4 @@ single global attestation slot."
    interpreter ≡ native byte-for-byte on the `Derived` tree, not
    just the effect profile.
 
-## Where this sits
-
-Queued after Provenance Propagation closes. Not a launch blocker:
-the moat (`@grounded_pure`, compile-time) and the launch-critical
-interpreter contagion ship in Provenance Propagation. This phase
-makes native a *full* tier for the contagion law rather than a
-value-correct-but-provenance-degenerate one.
-
-ROADMAP entry to be added when Provenance Propagation closes
-(slice 11).
+The active release-readiness queue is in [ROADMAP.md](../../ROADMAP.md).
