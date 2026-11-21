@@ -113,6 +113,18 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 
 ## Developer preview and stable release
 
+### Application runtime speed
+
+Aim for a shorter wait for users on equivalent applications. Start measuring with the first packaged app and repeat after each runtime optimization. Use an idiomatic production TypeScript implementation as the first comparison. Keep validation, authorization, durability, rendered results, and cancellation behavior equivalent. Exercise these paths separately so a fast browser update cannot hide a slow save.
+
+| User action | Measure | Optimization to test |
+| --- | --- | --- |
+| Edit one record in a long list | Input to next visible update on a named phone, including slow interactions. Also measure first load on a cold cache. | Update only affected views and keep transient input state on the device. |
+| Save and reopen the record | Click to durable acknowledgement, then verify the value after restart. Record median and p95 latency under the same concurrent load. | Profile serialization, database operations and network round trips before changing the runtime. |
+| Request and cancel an AI suggestion | Time to first visible token, time to completion and time from cancel to upstream disconnect. | Stream directly and release abandoned work. Use the same deterministic streaming responder to isolate Corvid overhead, then report a separate real-provider run. |
+
+Use the same hardware, network conditions, payloads and database configuration. Separate cold and warm runs, interleave implementations, retain raw samples and report uncertainty. Pick a primary metric for each workload before timing it. Publish a speed advantage only for workloads where the improvement repeats and exceeds measurement noise. Track regressions and slower results alongside wins. [Benchmark protocol](../benches/README.md)
+
 Track the extensibility test alongside the general component work. Exercise both a browser-local operation and a server-backed operation through human and agent interfaces. Check typed context, concurrent edits and permission changes wherever they apply. [Research, prototype and acceptance tests](ai-operated-apps.md)
 
 Start testing accessibility, performance and browser behavior with the first prototype. Use the following criteria to decide what a release can promise.
