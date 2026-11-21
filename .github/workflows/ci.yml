@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -66,8 +67,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Build the runtime archive for native integration tests
+        run: cargo build --locked -p corvid-runtime
+
       - name: cargo check --workspace
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       # Enable coredumps + post-mortem backtrace capture for the
       # workspace test step. The `cdylib_catalog_demo_filter_host_narrows_catalog`
@@ -93,7 +97,7 @@ jobs:
         run: |
           ulimit -c unlimited
           set +e
-          cargo test --workspace --lib --tests 2>&1
+          cargo test --locked --workspace --lib --tests 2>&1
           EXIT=$?
           if [ $EXIT -ne 0 ]; then
             echo ""
