@@ -215,6 +215,14 @@ cargo test --locked --workspace --no-fail-fast
 cd runtime/python && python3 -m pytest
 ```
 
+To run native/interpreter parity on its own, build the mock tool archive from the same checkout. The native programs link the Corvid runtime bundled in that archive. An older copy can produce unresolved runtime symbols before any comparison runs.
+
+```sh
+cargo build --locked -p corvid-runtime
+cargo build --locked --release -p corvid-test-tools --target-dir target
+cargo test --locked -p corvid-codegen-cl --test parity
+```
+
 ### Git
 
 - Branch off `main`. One PR per phase (or sub-phase).
