@@ -90,7 +90,7 @@ def collect(target, output):
                         "Standard MIT template (SPDX license-list-data v3.25.0)",
                         Path(__file__).with_name("upstream-notices") / "spdx/MIT.txt",
                     )]
-            if commit == "8ea76f95eaed2de45c9337830f3fdd5c0a862292":
+            if pkg["name"] == "pdf-extract":
                 local = Path(__file__).with_name("upstream-notices")
                 pdfbox = "https://github.com/apache/pdfbox/blob/636c4ec790749eb8bc18496ba1be602b3e8a95a3"
                 adobe = "https://github.com/adobe-type-tools/agl-aglfn/blob/4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6"
