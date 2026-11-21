@@ -169,6 +169,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Verified the Windows x64 executable from [candidate 6ff347a4](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44890637390) against the baseline and repeat workload reports and its CycloneDX file entry. The downloaded ZIP and inventory matched their respective checksum manifests. All six package jobs and the checksum job passed. Publication was skipped.
 
+  - [x] Installed the bundled Python runtime from the Windows x64 6ff347a4 archive into a virtual environment. All 11 runtime tests passed against the installed package. The source wheel passed the same tests, and Python CI now runs them with isolated imports.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.

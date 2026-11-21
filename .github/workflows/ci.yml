@@ -548,6 +548,11 @@ jobs:
           key: ${{ runner.os }}-cargo-py-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-py-
 
+      - name: Test the installed Python runtime package
+        run: |
+          python -m pip install './runtime/python[dev]'
+          python -I -m pytest --import-mode=importlib -q runtime/python/tests
+
       # Phase 30-J slice gate: feature-gated Python integration tests
       # exercise scalar/list/dict round-trip, exception marshaling
       # with traceback preservation, python.call/result/error events,
