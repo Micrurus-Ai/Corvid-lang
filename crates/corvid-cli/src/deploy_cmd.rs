@@ -654,7 +654,7 @@ pub fn run_systemd(app: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 43N: distroless runtime base image. `gcr.io/distroless/cc-debian12`
+/// 43N: distroless runtime base image. `gcr.io/distroless/python3-debian12`
 /// includes libc + ca-certificates + the dynamic-linker but no shell,
 /// no package manager, no setuid binaries — every byte the runtime
 /// image carries is byte the runtime needs. The full distroless image
@@ -767,15 +767,17 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
 # Override with `--build-arg CORVID_VERSION=<tag>` to select another release.
 ARG CORVID_VERSION={default_corvid_version}
 ARG CORVID_REPO=Micrurus-Ai/Corvid-lang
+ARG CORVID_DISTRIBUTION=corvid-installer
 
 FROM debian:bookworm-slim AS corvid-installer
 ARG CORVID_VERSION
 ARG CORVID_REPO
+ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
-    target=x86_64-unknown-linux-gnu; \
+    case "$TARGETARCH" in amd64) target=x86_64-unknown-linux-gnu ;; arm64) target=aarch64-unknown-linux-gnu ;; *) exit 1 ;; esac; \
     asset=corvid-${{target}}.tar.gz; \
     if [ "$CORVID_VERSION" = "latest" ]; then \
       url="https://github.com/${{CORVID_REPO}}/releases/latest/download/${{asset}}"; \
@@ -803,14 +805,33 @@ RUN set -eux; \
     mv "/opt/corvid-${{target}}" /opt/corvid; \
     test -x /opt/corvid/bin/corvid
 
-FROM gcr.io/distroless/cc-debian12
+FROM ${{CORVID_DISTRIBUTION}} AS corvid-distribution
+
+FROM debian:bookworm-slim AS python-runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libpython3.11 \
+ && cp -L /usr/lib/*-linux-gnu/libpython3.11.so.1.0 /libpython3.11.so.1.0
+# Older releases can omit the Python package or dependency inventory.
+RUN --mount=from=corvid-distribution,source=/opt/corvid,target=/distribution \
+    set -eu; mkdir /licenses /runtime-py; \
+    if [ -d /distribution/runtime-py/corvid_runtime ]; then \
+        cp -R /distribution/runtime-py/corvid_runtime /runtime-py/; \
+    fi; \
+    for file in /distribution/LICENSE* /distribution/lib/corvid-rust-notices.txt; do \
+        if [ -f "$file" ]; then cp "$file" /licenses/; fi; \
+    done
+
+FROM gcr.io/distroless/python3-debian12
+COPY --from=python-runtime /libpython3.11.so.1.0 /usr/lib/libpython3.11.so.1.0
+COPY --from=python-runtime /licenses/ /usr/share/doc/corvid/
+COPY --from=python-runtime /runtime-py/ /opt/corvid/runtime-py/
+ENV PYTHONPATH=/opt/corvid/runtime-py
 LABEL org.opencontainers.image.title="{app_name}"
 LABEL dev.corvid.app="{app_name}"
 ENV CORVID_HOME=/opt/corvid
 WORKDIR /app
 
-COPY --from=corvid-installer /opt/corvid/bin/corvid /usr/local/bin/corvid
-COPY --from=corvid-installer /opt/corvid/std /opt/corvid/std
+COPY --from=corvid-distribution /opt/corvid/bin/corvid /usr/local/bin/corvid
+COPY --from=corvid-distribution /opt/corvid/std /opt/corvid/std
 
 # User app sources. `src/` and `corvid.toml` are always emitted
 # because they are the structural minimum a `corvid new` app

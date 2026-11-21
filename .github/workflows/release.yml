@@ -358,6 +358,30 @@ jobs:
             python install/test_release_archive.py "$archive" "$version"
           fi
 
+      - name: Run a Python tool in the generated application image
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/distribution/opt/corvid"
+          tar -xzf "dist/corvid-$TARGET.tar.gz" --strip-components=1 -C "$work/distribution/opt/corvid"
+          docker run --rm -v "$work:/work" -w /work debian:bookworm-slim sh -ec '
+            apt-get update -qq && apt-get install -y -qq libpython3.11 >/dev/null
+            export CORVID_HOME=/work/distribution/opt/corvid
+            export PATH="$CORVID_HOME/bin:$PATH"
+            corvid new --with-python-tools sample
+            export CORVID_DEPLOY_SIGNING_KEY=$(od -An -N32 -tx1 /dev/urandom | tr -d " \n")
+            corvid deploy package sample --out package
+          '
+          docker build --build-context candidate="$work/distribution" \
+            --build-arg CORVID_DISTRIBUTION=candidate -t corvid-app-test \
+            -f "$work/package/Dockerfile" "$work/sample"
+          actual=$(docker run --rm corvid-app-test run src/python_tools_example.cor hello)
+          test "$actual" = '"hello"'
+
       - name: Check native macOS installer upgrade, rollback and uninstall
         if: runner.os == 'macOS'
         run: python3 install/test_upgrade.py

@@ -126,6 +126,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Reconciled the secret-helper compile tests with the two-argument constructor. Executing tests checked program access, missing keys and trace redaction. The [guide example](docs/reference/stdlib/secrets.md) returned only the presence flag in both CLI runs.
   - [x] Verified string-list iteration during aliased writes through native and interpreter CLI runs. All six native reference-count baselines passed with the application runtime. The three-string loop allocated and freed both the source list and its snapshot.
   - [x] Verified the effect after a native list loop in all four tiers through the CLI. The classifier still flags a weakened native trust profile and the deliberate disagreement fixture still fails verification. The verifier now uses a discoverable native runtime archive before attempting a Cargo build.
+  - [x] Fixed the generated Dockerfile to supply the Debian Python shared library and bundled runtime and select the target CPU archive. The CLI packaging regression test passed. Linux candidate jobs now build the generated image and run a Python tool inside it.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
