@@ -121,6 +121,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Extended the function index with result and option constructors, weak references, pagination, stream resumption, interaction calls and explicit source removal from grounded values. Checked all twelve signatures through the CLI.
 
+  - [x] Downloaded all six [3a29a662 candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44880478367) and verified their SHA-256 digests against the workflow manifest. Each contained the source revision's project license and all 21 standard-library modules, and included both pinned LCDF notices in the PDF dependency entry. All six native installer-to-application jobs passed.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.

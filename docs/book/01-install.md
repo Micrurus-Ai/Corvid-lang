@@ -16,6 +16,8 @@ Run `corvid doctor` to check the installation and configuration. With a prebuilt
 
 For manual downloads from a release that includes `SHA256SUMS.txt`, compare your archive's SHA-256 with the line for its exact filename. On Linux use `sha256sum ARCHIVE`, on macOS use `shasum -a 256 ARCHIVE`, and in PowerShell use `Get-FileHash -Algorithm SHA256 -LiteralPath ARCHIVE`. Replace `ARCHIVE` with the downloaded filename.
 
+A candidate workflow run provides the platform archives and a separate `corvid-archive-checksums` artifact. Extract the GitHub artifact download before hashing the Corvid archive inside it. The Corvid archive contains its project license at `LICENSE`, its Rust dependency notices at `lib/corvid-rust-notices.txt`, and its standard library under `std/`.
+
 Unix (macOS + Linux):
 
 ```sh
