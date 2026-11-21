@@ -205,6 +205,7 @@ async fn if_non_bool_condition_is_defensive_runtime_error() {
         borrow_sig: None,
     };
     let ir = IrFile {
+        import_fingerprint: None,
         imports: vec![],
         types: vec![],
         tools: vec![],

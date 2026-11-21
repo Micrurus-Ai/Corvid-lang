@@ -6,6 +6,7 @@ use corvid_ast::Span;
 
 fn scalar_ir() -> IrFile {
     IrFile {
+        import_fingerprint: None,
         imports: vec![],
         types: vec![],
         tools: vec![],

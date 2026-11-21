@@ -34,9 +34,10 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 **2. Developer workflow**
 
-- [ ] D01. Create, run, check, format and test a multi-file project from a clean checkout. Invalid input must identify the source location and a fix.
+- [x] D01. Create, run, check, format and test a multi-file project from a clean checkout. Invalid input must identify the source location and a fix.
   - [x] Created a project and verified fmt, fmt --check, check, both run targets and test from a clean local clone with an imported helper. The formatter preserves token meaning and reports syntax errors before writing files.
   - [x] Imported parse, name and type errors identify the source module. A CLI regression verifies the offending line after a multibyte comment and both the declared and actual return types.
+  - [x] Native runs reused an unchanged executable and rebuilt after direct and nested module edits. Concurrent first runs both returned the expected result.
 - [ ] D02. Make editor navigation work across local Corvid modules. Check diagnostics, hover, completion, go-to-definition and rename on real Corvid source.
 - [ ] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
 - [ ] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.

@@ -685,3 +685,46 @@ fn imported_errors_use_the_offending_source() {
         }
     }
 }
+
+#[test]
+fn native_run_rebuilds_after_direct_and_transitive_import_edits() {
+    let tmp = tempdir().unwrap();
+    let main = tmp.path().join("main.cor");
+    let helper = tmp.path().join("helper.cor");
+    let math = tmp.path().join("math.cor");
+    std::fs::write(&main, "import \"./helper\" use compute\nagent main() -> Int:\n    return compute(4)\n").unwrap();
+    let original = "import \"./math\" use scale\npublic fn compute(n: Int) -> Int:\n    return scale(n) + 1\n";
+    std::fs::write(&helper, original).unwrap();
+    std::fs::write(&math, "public fn scale(n: Int) -> Int:\n    return n * 2\n").unwrap();
+    let start = || {
+        Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .args(["run", "--target", "native"])
+            .arg(&main)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let check = |child: std::process::Child, expected: &str| {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), expected);
+    };
+    for child in [start(), start()] {
+        check(child, "9");
+    }
+    let cache = tmp.path().join("target/cache/native");
+    let entries: Vec<_> = std::fs::read_dir(&cache).unwrap().map(Result::unwrap).collect();
+    assert_eq!(entries.len(), 1);
+    let binary = entries[0].path();
+    let built = binary.metadata().unwrap().modified().unwrap();
+    let run = |expected| check(start(), expected);
+    run("9");
+    assert_eq!(binary.metadata().unwrap().modified().unwrap(), built);
+    std::fs::write(&math, "public fn scale(n: Int) -> Int:\n    return n * 3\n").unwrap();
+    run("13");
+    std::fs::write(&helper, original.replace("+ 1", "+ 2")).unwrap();
+    run("14");
+    std::fs::write(&helper, original).unwrap();
+    run("13");
+}

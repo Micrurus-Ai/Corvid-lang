@@ -112,6 +112,7 @@ pub fn analyze(ir: IrFile) -> (IrFile, HashMap<DefId, AgentSummary>) {
     }
 
     let out = IrFile {
+        import_fingerprint: ir.import_fingerprint,
         imports: ir.imports,
         types: ir.types,
         tools: ir.tools,

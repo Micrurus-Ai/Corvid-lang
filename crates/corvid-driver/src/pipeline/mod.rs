@@ -38,6 +38,7 @@ pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config
 pub(crate) struct DriverTypecheck {
     pub(crate) checked: Checked,
     pub(crate) modules: Option<ModuleResolution>,
+    import_fingerprint: Option<[u8; 32]>,
     pub(crate) module_checked: HashMap<PathBuf, Checked>,
 }
 
@@ -53,7 +54,7 @@ pub(crate) fn typecheck_driver_file(
     config: Option<&CorvidConfig>,
 ) -> DriverTypecheckOutcome {
     if has_corvid_imports(file) {
-        let (modules, load_errors) = build_module_resolution(file, source_path);
+        let (modules, load_errors, digest) = crate::modules::resolve_module_graph(file, source_path);
         let diagnostics = load_errors
             .into_iter()
             .flat_map(module_load_error_diagnostics)
@@ -67,6 +68,7 @@ pub(crate) fn typecheck_driver_file(
             result: DriverTypecheck {
                 checked,
                 modules: Some(modules),
+                import_fingerprint: Some(digest),
                 module_checked,
             },
             diagnostics,
@@ -76,6 +78,7 @@ pub(crate) fn typecheck_driver_file(
             result: DriverTypecheck {
                 checked: typecheck_with_config(file, resolved, config),
                 modules: None,
+                import_fingerprint: None,
                 module_checked: HashMap::new(),
             },
             diagnostics: Vec::new(),
@@ -88,7 +91,7 @@ pub(crate) fn lower_driver_file(
     resolved: &Resolved,
     typechecked: &DriverTypecheck,
 ) -> IrFile {
-    match &typechecked.modules {
+    let mut ir = match &typechecked.modules {
         Some(modules) => lower_with_modules(
             file,
             resolved,
@@ -97,7 +100,9 @@ pub(crate) fn lower_driver_file(
             &typechecked.module_checked,
         ),
         None => lower(file, resolved, &typechecked.checked),
-    }
+    };
+    ir.import_fingerprint = typechecked.import_fingerprint;
+    ir
 }
 
 fn typecheck_imported_modules(

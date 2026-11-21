@@ -470,6 +470,7 @@ async fn stream_budget_termination_fires_before_over_budget_yield() {
         span: sp,
     };
     let ir = IrFile {
+        import_fingerprint: None,
         imports: vec![],
         types: vec![],
         tools: vec![],

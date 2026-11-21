@@ -31,11 +31,13 @@
 //! as much of the graph as possible so the user sees every
 //! problem in a single pass.
 
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(test)]
 use crate::import_integrity::sha256_hex;
 use crate::package_lock::{load_package_lock_for, PackageLockFile};
 use anyhow::{anyhow, Context, Result};
@@ -272,7 +274,22 @@ pub fn build_module_resolution(
     root_file: &File,
     root_path: &Path,
 ) -> (ModuleResolution, Vec<ModuleLoadError>) {
-    let mut loaded: HashMap<PathBuf, (File, Arc<String>)> = HashMap::new();
+    let (modules, errors, _) = resolve_module_graph(root_file, root_path);
+    (modules, errors)
+}
+
+struct LoadedModule {
+    file: File,
+    source: Arc<String>,
+    ordinal: usize,
+    digest: [u8; 32],
+}
+
+pub(crate) fn resolve_module_graph(root_file: &File, root_path: &Path)
+    -> (ModuleResolution, Vec<ModuleLoadError>, [u8; 32])
+{
+    let mut fingerprint = Sha256::new();
+    let mut loaded: HashMap<PathBuf, LoadedModule> = HashMap::new();
     let mut in_progress: Vec<PathBuf> = Vec::new();
     let mut errors: Vec<ModuleLoadError> = Vec::new();
 
@@ -301,6 +318,7 @@ pub fn build_module_resolution(
                 child.content_hash.as_ref(),
                 package_lock.as_ref(),
                 &mut loaded,
+                &mut fingerprint,
                 &mut in_progress,
                 &mut errors,
             ),
@@ -314,8 +332,8 @@ pub fn build_module_resolution(
     // on each module, not this function's error list — single-file
     // resolution errors are the `corvid-resolve` crate's concern.
     let mut resolved_map: HashMap<PathBuf, Arc<Resolved>> = HashMap::new();
-    for (path, (file, _)) in &loaded {
-        resolved_map.insert(path.clone(), Arc::new(resolve(file)));
+    for (path, module) in &loaded {
+        resolved_map.insert(path.clone(), Arc::new(resolve(&module.file)));
     }
 
     // Pass 3: package. Only the root's direct imports become
@@ -323,7 +341,8 @@ pub fn build_module_resolution(
     // (for cycle detection + type-through resolution) but not
     // exposed under the root's alias namespace.
     let mut all_modules = HashMap::new();
-    for (path, (file, source)) in &loaded {
+    for (path, module) in &loaded {
+        let LoadedModule { file, source, .. } = module;
         let Some(resolved) = resolved_map.get(path) else {
             continue;
         };
@@ -393,6 +412,7 @@ pub fn build_module_resolution(
             all_modules,
         },
         errors,
+        fingerprint.finalize().into(),
     )
 }
 
@@ -723,7 +743,8 @@ fn dfs_collect(
     requested_module: &str,
     expected_hash: Option<&ImportContentHash>,
     package_lock: Option<&PackageLockFile>,
-    loaded: &mut HashMap<PathBuf, (File, Arc<String>)>,
+    loaded: &mut HashMap<PathBuf, LoadedModule>,
+    fingerprint: &mut Sha256,
     in_progress: &mut Vec<PathBuf>,
     errors: &mut Vec<ModuleLoadError>,
 ) {
@@ -749,7 +770,22 @@ fn dfs_collect(
     // once). Compare via `paths_equivalent` because `loaded`'s keys
     // are canonicalized (see the `canonical` computation below) but
     // `raw_key` here is not.
-    if loaded.keys().any(|p| paths_equivalent(p, &raw_key)) {
+    if let Some((resolved, module)) = loaded.iter().find(|(p, _)| paths_equivalent(p, &raw_key)) {
+        // Refer to the first visit by traversal order, independent of checkout location.
+        fingerprint.update(b"ref");
+        fingerprint.update((module.ordinal as u64).to_le_bytes());
+        if let Some(pin) = expected_hash {
+            let actual = hex::encode(module.digest);
+            if actual != pin.hex {
+                errors.push(ModuleLoadError::HashMismatch {
+                    importing_file: importing_target.key(),
+                    requested: requested_module.to_string(),
+                    resolved: resolved.clone(),
+                    expected: pin.hex.clone(),
+                    actual,
+                });
+            }
+        }
         return;
     }
 
@@ -790,8 +826,9 @@ fn dfs_collect(
         _ => target.clone(),
     };
 
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
     if let Some(expected_hash) = expected_hash {
-        let actual = sha256_hex(&bytes);
+        let actual = hex::encode(digest);
         if actual != expected_hash.hex {
             errors.push(ModuleLoadError::HashMismatch {
                 importing_file: importing_target.key(),
@@ -803,6 +840,8 @@ fn dfs_collect(
             return;
         }
     }
+    fingerprint.update(b"source");
+    fingerprint.update(digest);
     let source = match String::from_utf8(bytes) {
         Ok(source) => Arc::new(source),
         Err(err) => {
@@ -851,6 +890,7 @@ fn dfs_collect(
                 child.content_hash.as_ref(),
                 package_lock,
                 loaded,
+                fingerprint,
                 in_progress,
                 errors,
             ),
@@ -860,7 +900,9 @@ fn dfs_collect(
     in_progress.pop();
 
     // Mark fully loaded under the canonical key.
-    loaded.insert(canonical, (file, source));
+    fingerprint.update(b"end");
+    let ordinal = loaded.len();
+    loaded.insert(canonical, LoadedModule { file, source, ordinal, digest });
 }
 
 /// Iterator over a file's Corvid imports (skipping Python imports).

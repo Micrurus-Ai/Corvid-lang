@@ -359,6 +359,7 @@ impl<'a> Lowerer<'a> {
         }
 
         IrFile {
+            import_fingerprint: None,
             imports,
             types,
             tools,

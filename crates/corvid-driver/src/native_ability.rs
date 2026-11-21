@@ -501,6 +501,7 @@ mod tests {
     fn stream_return_type_is_not_native() {
         let span = Span::new(0, 0);
         let ir = IrFile {
+            import_fingerprint: None,
             imports: vec![],
             types: vec![],
             tools: vec![],

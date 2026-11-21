@@ -7980,3 +7980,5 @@ After cloning a project, run `corvid check` to check the entry point and its imp
 ### Fixing a type error in an import
 
 Run `corvid check` from the project root. When an imported function declares `-> Int` and returns a string, the error points to the return statement in that module and names both types. Change the return expression to produce an integer, or change the declaration and its callers if the intended result is text.
+
+When you edit an imported module, run `corvid run --target native` again. Corvid checks direct and nested imports before reusing a compiled executable. You can leave the project cache in place between edits.

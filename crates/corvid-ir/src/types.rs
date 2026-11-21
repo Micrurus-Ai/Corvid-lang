@@ -12,6 +12,8 @@ use corvid_types::Type;
 /// A full `.cor` file in IR form.
 #[derive(Debug, Clone)]
 pub struct IrFile {
+    /// Digest of the resolved import graph used by the native executable cache.
+    pub import_fingerprint: Option<[u8; 32]>,
     pub imports: Vec<IrImport>,
     pub types: Vec<IrType>,
     pub tools: Vec<IrTool>,

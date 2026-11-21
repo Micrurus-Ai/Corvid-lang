@@ -266,6 +266,7 @@ mod tests {
 
     fn ir_with(route: IrRoute, agents: Vec<IrAgent>) -> IrFile {
         IrFile {
+            import_fingerprint: None,
             imports: vec![],
             types: vec![],
             tools: vec![],

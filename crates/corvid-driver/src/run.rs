@@ -547,7 +547,11 @@ pub fn build_or_get_cached_native(
     let tools_lib_str = tools_lib
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let key = native_cache::cache_key_with_tools(source, &tools_lib_str);
+    let base = native_cache::cache_key_with_tools(source, &tools_lib_str);
+    let key = match ir.import_fingerprint {
+        Some(digest) => format!("{base}-{}", hex::encode(digest)),
+        None => base,
+    };
     let cached = native_cache::cached_binary_path(&cache_dir, &key);
     if cached.exists() {
         return Ok(CachedNativeBinary {
@@ -557,16 +561,15 @@ pub fn build_or_get_cached_native(
     }
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| anyhow::anyhow!("create cache dir `{}`: {e}", cache_dir.display()))?;
-    // `build_native_to_disk` takes the final bin_path and derives parent
-    // + stem from it — passing `<cache_dir>/<key>` produces
-    // `<cache_dir>/<key>[.exe]` which is exactly where we want it.
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("program")
         .to_string();
     let module_name = format!("corvid_native_{key}");
-    let target_bin = cache_dir.join(&key);
+    // A concurrent runner must see either a complete executable or a miss.
+    let staging = tempfile::Builder::new().prefix(".build-").tempdir_in(&cache_dir)?;
+    let target_bin = staging.path().join(&key);
     // Forward the tools lib (if any) to the linker so
     // `__corvid_tool_<name>` symbols resolve against the user's
     // compiled `#[tool]` implementations.
@@ -578,10 +581,12 @@ pub fn build_or_get_cached_native(
         &extra_libs_owned,
     )
     .map_err(|e| anyhow::anyhow!("native codegen failed for `{stem}`: {e}"))?;
-    Ok(CachedNativeBinary {
-        path: produced,
-        from_cache: false,
-    })
+    let from_cache = match std::fs::rename(&produced, &cached) {
+        Ok(()) => false,
+        Err(_) if cached.is_file() => true,
+        Err(error) => return Err(error.into()),
+    };
+    Ok(CachedNativeBinary { path: cached, from_cache })
 }
 
 /// Pick a trace directory next to the source file's project root.
