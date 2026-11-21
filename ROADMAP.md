@@ -122,6 +122,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Verified 11 floating-point division and remainder cases with both the interpreter CLI and generated Python. The results agree on signed remainders, negative zero, infinities and NaN. See the [arithmetic rules](docs/book/05-types.md).
   - [x] Fixed generated Python modules containing a Corvid null escape. Built and imported an agent containing all six [string escapes](docs/book/04-syntax.md#expressions) and checked its exact return value, including a null followed by a digit.
   - [x] Generated Python dictionaries for map literals with string, integer and boolean keys. Compared empty, nested and duplicate-key literals through the interpreter and a Python host. The [type guide](docs/book/05-types.md) records the remaining Python map limitations.
+  - [x] Fixed a malformed local Git URL in the skill-source test on Unix. On Debian 12 the installed CLI added a skill from a branch and subdirectory under a path with a space, pinned it and checked the consumer project. See the [skill guide](docs/guides/capabilities.md).
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
