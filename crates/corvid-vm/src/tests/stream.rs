@@ -784,7 +784,8 @@ agent main() -> String:
     let err = run_agent(&ir, "main", vec![], &rt)
         .await
         .expect_err("the slow tool must time out");
-    let message = format!("{err:?}");
+    assert!(matches!(err.kind, InterpErrorKind::Timeout { milliseconds: 50 }));
+    let message = err.to_string();
     assert!(
         message.contains("timed out after 50ms"),
         "the error must name the bound: {message}"
@@ -910,4 +911,26 @@ agent main() -> String:
         .await
         .expect("a 0.97 score must pass a 0.9 guard");
     assert_eq!(value, Value::String(Arc::from("A clean, anonymous summary.")));
+}
+
+#[tokio::test]
+async fn first_chunk_deadline_cancels_the_producer_awaiting_its_tool() {
+    let ir = ir_of("tool slow() -> String\nagent chunks() -> Stream<String>:\n    yield slow()\nagent main() -> Stream<String>:\n    return try chunks() timeout 50\n");
+    let (dropped, observed) = tokio::sync::oneshot::channel::<()>();
+    let once = std::sync::Mutex::new(Some(dropped));
+    let rt = Runtime::builder().tool("slow", move |_| {
+        let guard = once.lock().unwrap().take().unwrap();
+        async move {
+            let _guard = guard;
+            std::future::pending().await
+        }
+    }).build();
+    let Value::Stream(stream) = run_agent(&ir, "main", vec![], &rt).await.unwrap() else {
+        panic!("expected a stream");
+    };
+    let err = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+        .await.expect("stream deadline was ignored").unwrap().unwrap_err();
+    assert!(matches!(err.kind, InterpErrorKind::Timeout { milliseconds: 50 }));
+    assert!(tokio::time::timeout(std::time::Duration::from_secs(1), observed)
+        .await.expect("producer kept running after its stream timed out").is_err());
 }

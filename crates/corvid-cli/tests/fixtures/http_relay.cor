@@ -1,0 +1,29 @@
+import "./std/http" use http_get, http_post_json
+import "./std/json" use json_object_new, json_object_set_string, json_object_finish, json_parse, json_get_int
+
+type Message:
+    text: String
+
+type Receipt:
+    id: Int
+    attempts: Int
+    elapsed_ms: Int
+
+agent deliver(message: Message) -> Result<Receipt, String>:
+    data = json_object_set_string(json_object_new(), "text", message.text)
+    response = http_post_json("http://upstream.test/messages", json_object_finish(data))?
+    parsed = json_parse(response.body)?
+    id = json_get_int(parsed, "id")?
+    return Ok(Receipt(id, response.attempts, response.elapsed_ms))
+
+agent wait_for_reply() -> Result<Int, String>:
+    response = http_get("http://upstream.test/wait")?
+    return Ok(response.status)
+
+server relay:
+    route POST "/messages" body Message -> json Result<Receipt, String>:
+        return deliver(body)
+    route GET "/deadline" -> json Result<Int, String>:
+        return try wait_for_reply() timeout 300
+    route GET "/wait" -> json Result<Int, String>:
+        return wait_for_reply()

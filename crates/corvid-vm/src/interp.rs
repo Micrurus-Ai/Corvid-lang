@@ -1207,28 +1207,25 @@ impl<'ir> Interpreter<'ir> {
                     // Per-attempt wall-clock bound (slice 50k):
                     // expiry counts as a retryable error, so
                     // `timeout` + `retry` compose naturally.
+                    let start_attempt = async {
+                        let value = self.eval_expr(body).await?;
+                        let first = match &value {
+                            ExprFlow::Value(Value::Stream(stream)) => stream.next_chunk().await,
+                            _ => None,
+                        };
+                        Ok((value, first))
+                    };
                     let attempt = match timeout_ms {
-                        Some(ms) => {
-                            match tokio::time::timeout(
-                                std::time::Duration::from_millis(ms),
-                                self.eval_expr(body),
-                            )
-                            .await
-                            {
-                                Ok(outcome) => outcome,
-                                Err(_elapsed) => Err(InterpError::new(
-                                    InterpErrorKind::Other(format!(
-                                        "timed out after {ms}ms"
-                                    )),
-                                    body.span,
-                                )),
-                            }
-                        }
-                        None => self.eval_expr(body).await,
+                        Some(ms) => tokio::time::timeout(
+                            std::time::Duration::from_millis(ms), start_attempt,
+                        ).await.unwrap_or_else(|_| Err(InterpError::new(
+                            InterpErrorKind::Timeout { milliseconds: ms }, body.span,
+                        ))),
+                        None => start_attempt.await,
                     };
                     match attempt {
-                        Ok(ExprFlow::Value(Value::Stream(stream))) => {
-                            match stream.next_chunk().await {
+                        Ok((ExprFlow::Value(Value::Stream(stream)), first)) => {
+                            match first {
                                 Some(Ok(chunk)) if stream_start_is_retryable(&chunk.value) => {
                                     if matches!(chunk.value, Value::OptionNone) {
                                         saw_option_retry = true;
@@ -1246,14 +1243,14 @@ impl<'ir> Interpreter<'ir> {
                                 None => return Ok(ExprFlow::Value(Value::Stream(stream))),
                             }
                         }
-                        Ok(ExprFlow::Value(Value::ResultErr(err))) => {
+                        Ok((ExprFlow::Value(Value::ResultErr(err)), _)) => {
                             last_result_err = Some(Value::ResultErr(err));
                         }
-                        Ok(ExprFlow::Value(Value::OptionNone)) => {
+                        Ok((ExprFlow::Value(Value::OptionNone), _)) => {
                             saw_option_retry = true;
                         }
-                        Ok(ExprFlow::Value(v)) => return Ok(ExprFlow::Value(v)),
-                        Ok(ExprFlow::Propagate(v)) => return Ok(ExprFlow::Propagate(v)),
+                        Ok((ExprFlow::Value(v), _)) => return Ok(ExprFlow::Value(v)),
+                        Ok((ExprFlow::Propagate(v), _)) => return Ok(ExprFlow::Propagate(v)),
                         Err(err) => last_runtime_error = Some(err),
                     }
                 }

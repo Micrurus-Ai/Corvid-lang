@@ -96,6 +96,7 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     io_policy: corvid_runtime::io::IoToolPolicy,
+    http_policy: corvid_runtime::http::HttpEgressPolicy,
     ir: IrFile,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
@@ -251,9 +252,11 @@ pub(crate) fn cmd_serve(
         host_tools.extend(register_cdylib_tool_handlers(&ir, cdylib_path)?);
     }
 
+    let http_policy = corvid_driver::load_http_egress_policy(file);
     let io_policy = corvid_driver::load_io_tool_policy(file);
     let runtime = corvid_driver::apply_env_llm_wiring(
         Runtime::builder()
+            .http_policy(http_policy.clone())
             .io_policy(io_policy.clone())
             // The process-wide runtime has no requester identity. Every
             // authenticated HTTP request installs its own contextual
@@ -335,6 +338,7 @@ pub(crate) fn cmd_serve(
 
     let state = Arc::new(ServeState {
         io_policy,
+        http_policy,
         ir,
         runtime,
         approval_queue,
@@ -1438,6 +1442,11 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind) ->
             axum::response::Html(html.to_string()).into_response()
         }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
+        Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {
+            (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
+                "error": "handler_timeout", "detail": e.kind.to_string()
+            }))).into_response()
+        }
         Err(RunError::Interp(e)) => {
             if let Some(approval_id) = approval_queued_id(&e.kind) {
                 let approval_id = approval_id.to_string();
@@ -1641,6 +1650,7 @@ async fn approve_approval(
     // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
     let bypass_runtime = Runtime::builder()
         .io_policy(state.io_policy.clone())
+        .http_policy(state.http_policy.clone())
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .tool_registry(state.host_tools.clone())
         .build();

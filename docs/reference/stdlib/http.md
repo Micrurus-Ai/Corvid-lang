@@ -222,3 +222,10 @@ loopback are still refused by the structural SSRF block.
 - `crates/corvid-driver/src/run.rs::load_http_egress_policy` —
   CLI loader: env > corvid.toml > unset.
 - `std/http.cor` — the tool declarations + envelope types.
+
+
+### Deadlines in a served route
+
+Add the destination host to `[http] allow` in the project manifest. Both `http_get` and `http_post_json` check redirect destinations against that policy. A successful response reports the transport's attempt count and elapsed milliseconds.
+
+`return try wait_for_reply() timeout 300` gives the call a 300 ms deadline. If it expires, the server returns HTTP 504 with error code `handler_timeout` and cancels the pending request. Closing the client connection also cancels an outstanding request. For a stream, the start deadline covers waiting for the first chunk.

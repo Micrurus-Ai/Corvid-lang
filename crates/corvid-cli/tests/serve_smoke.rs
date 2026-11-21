@@ -3132,3 +3132,144 @@ fn sqlite_service_transactions_survive_restart() {
     }
     db.execute_batch("ROLLBACK").unwrap();
 }
+
+#[test]
+fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("relay");
+    let created = Command::new(corvid_bin())
+        .current_dir(tmp.path())
+        .args(["new", "relay"])
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{created:?}");
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/http_relay.cor"),
+    )
+    .unwrap();
+    let manifest = project.join("corvid.toml");
+    let original = std::fs::read_to_string(&manifest).unwrap();
+    let configured = original.replace("allow = []", "allow = [\"upstream.test\"]");
+    assert_ne!(configured, original);
+    std::fs::write(&manifest, configured).unwrap();
+
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    let port = TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args([
+            "serve",
+            "src/main.cor",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .env("HTTP_PROXY", &proxy_url)
+        .env("http_proxy", &proxy_url)
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .env_remove("CORVID_HTTP_ALLOW")
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+
+    // A loopback HTTP proxy represents the project's allowlisted upstream.
+    // Deliver each accepted request to the test without external DNS or network.
+    proxy.set_nonblocking(true).unwrap();
+    let next = || {
+        let until = Instant::now() + Duration::from_secs(5);
+        let socket = loop {
+            match proxy.accept() {
+                Ok((socket, _)) => break socket,
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(err) => panic!("expected an upstream request: {err}"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            headers.push_str(&line);
+        }
+        (reader, headers)
+    };
+    let closed = |mut socket: BufReader<TcpStream>| {
+        let mut buf = [0; 1];
+        match socket.read(&mut buf) {
+            Ok(0) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            other => panic!("upstream connection remained open: {other:?}"),
+        }
+    };
+    std::thread::scope(|scope| {
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .write_all(b"GET /wait HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let (waiting, _) = next();
+        let post = scope.spawn(|| http_post(port, "/messages", r#"{"text":"hello"}"#).unwrap());
+        let (mut request, headers) = next();
+        assert!(headers.starts_with("POST http://upstream.test/messages "));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (key, v) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| v.trim().parse().unwrap())
+            })
+            .unwrap();
+        let mut payload = vec![0; length];
+        request.read_exact(&mut payload).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({"text":"hello"})
+        );
+        std::thread::sleep(Duration::from_millis(25));
+        request.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\n{\"id\":7}").unwrap();
+        let (status, body) = post.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        let receipt: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(receipt["ok"]["id"], 7);
+        assert_eq!(receipt["ok"]["attempts"], 1);
+        assert!(receipt["ok"]["elapsed_ms"].as_u64().unwrap() >= 20);
+
+        let deadline = scope.spawn(|| http_get(port, "/deadline").unwrap());
+        let (upstream, _) = next();
+        let (status, body) = deadline.join().unwrap();
+        assert_eq!(status, 504, "{body}");
+        assert!(body.contains("timed out after 300ms"), "{body}");
+        closed(upstream);
+
+        let redirected = scope.spawn(|| http_get(port, "/wait").unwrap());
+        let (mut redirected_request, _) = next();
+        redirected_request.get_mut().write_all(b"HTTP/1.1 302 Found\r\nLocation: http://other.test/messages\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        let (status, body) = redirected.join().unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["tag"],
+            "err"
+        );
+        drop(client);
+        closed(waiting);
+    });
+}

@@ -606,70 +606,33 @@ impl Runtime {
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
         use crate::http::HttpRequest;
-        match name {
-            "http_get" => {
-                let url_arg = args
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_get".to_string(),
-                        message: "expected one String argument (url)".to_string(),
-                    })?;
-                // Slice 47h: policy + transport failures are Err
-                // values; an error STATUS is still Ok (the request
-                // succeeded — inspect `status`).
-                if let Err(e) = self.http_policy.check(url_arg) {
-                    return Ok(stdlib_result_err(e));
-                }
-                let request = HttpRequest::get(url_arg.to_string())
-                    .effect_tag("std.http.request");
-                let response = match self.http.send(&request).await {
-                    Ok(r) => r,
-                    Err(e) => return Ok(stdlib_result_err(e)),
-                };
-                Ok(stdlib_result_ok(serde_json::json!({
-                    "status": response.status as i64,
-                    "body": response.body,
-                    "attempts": 1_i64,
-                    "elapsed_ms": 0_i64,
-                    "effect_meta": stdlib_http_effect_envelope(),
-                })))
-            }
+        let url = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+            tool: name.into(),
+            message: "expected a String URL".into(),
+        })?;
+        let request = match name {
+            "http_get" => HttpRequest::get(url.to_string()),
             "http_post_json" => {
-                let url_arg = args
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_post_json".to_string(),
-                        message: "expected (url: String, body: String) — url missing"
-                            .to_string(),
-                    })?;
-                let body_arg = args
-                    .get(1)
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| RuntimeError::ToolFailed {
-                        tool: "http_post_json".to_string(),
-                        message: "expected (url: String, body: String) — body missing"
-                            .to_string(),
-                    })?;
-                if let Err(e) = self.http_policy.check(url_arg) {
-                    return Ok(stdlib_result_err(e));
-                }
-                let request = HttpRequest::post_json(url_arg.to_string(), body_arg.to_string())
-                    .effect_tag("std.http.request");
-                let response = match self.http.send(&request).await {
-                    Ok(r) => r,
-                    Err(e) => return Ok(stdlib_result_err(e)),
-                };
-                Ok(stdlib_result_ok(serde_json::json!({
-                    "status": response.status as i64,
-                    "body": response.body,
-                    "attempts": 1_i64,
-                    "elapsed_ms": 0_i64,
-                    "effect_meta": stdlib_http_effect_envelope(),
-                })))
+                let body = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+                    tool: name.into(),
+                    message: "expected a String JSON body".into(),
+                })?;
+                HttpRequest::post_json(url.to_string(), body.to_string())
             }
-            other => Err(RuntimeError::UnknownTool(other.to_string())),
+            other => return Err(RuntimeError::UnknownTool(other.to_string())),
+        };
+        if let Err(error) = self.http_policy.check(url) {
+            return Ok(stdlib_result_err(error));
+        }
+        match self.http.send(&request.effect_tag("std.http.request")).await {
+            Ok(response) => Ok(stdlib_result_ok(serde_json::json!({
+                "status": response.status,
+                "body": response.body,
+                "attempts": response.attempts,
+                "elapsed_ms": response.elapsed_ms,
+                "effect_meta": stdlib_http_effect_envelope(),
+            }))),
+            Err(error) => Ok(stdlib_result_err(error)),
         }
     }
 
