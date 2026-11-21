@@ -662,6 +662,7 @@ fn escape_string(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\x00"),
             other => out.push(other),
         }
     }

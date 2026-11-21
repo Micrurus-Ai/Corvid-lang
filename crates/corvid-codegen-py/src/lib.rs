@@ -166,6 +166,16 @@ agent nop(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
+    fn emits_nul_without_consuming_the_following_digit() {
+        let py = src_to_py(
+            r#"agent main() -> String:
+    return "A\07B"
+"#,
+        );
+        assert!(py.contains(r#"return "A\x007B""#));
+    }
+
+    #[test]
     fn emits_import_passthrough() {
         let src = r#"import python "anthropic" as ant effects: network"#;
         let py = src_to_py(src);
