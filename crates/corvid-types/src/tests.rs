@@ -2672,6 +2672,18 @@ connector github:
 }
 
 #[test]
+fn grounded_prefix_is_valid_in_an_ordinary_record_name() {
+    let checked = check(r#"
+type GroundedNote:
+    title: String
+
+agent keep(note: GroundedNote) -> GroundedNote:
+    return note
+"#);
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
+}
+
+#[test]
 fn mutation_grounded_provenance_flows_through_prompts() {
     // Grounded input into a prompt should ground the prompt result.
     let c = check(MUTATION_PROVENANCE_BASE);

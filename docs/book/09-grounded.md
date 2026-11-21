@@ -22,6 +22,8 @@ This is how Corvid prevents "the model said X, and we treated X as
 fact": sourced data is a different type, and strict agents refuse to
 launder it away.
 
+A record named `GroundedNote` is an ordinary record. Write `Grounded<GroundedNote>` when a note must carry source information.
+
 ## How you produce a grounded value
 
 A tool whose effect carries `data: grounded` returns `Grounded<T>` —

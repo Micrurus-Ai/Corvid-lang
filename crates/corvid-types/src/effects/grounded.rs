@@ -41,8 +41,7 @@ pub fn check_grounded_returns(
         };
 
         // Check if the return type is Grounded<T>.
-        let return_type_name = format_type_ref(&agent.return_ty);
-        if !return_type_name.starts_with("Grounded") {
+        if !is_grounded_type_ref(&agent.return_ty) {
             continue;
         }
 
@@ -61,7 +60,7 @@ pub fn check_grounded_returns(
                     "agent `{}` returns `{}` but no provenance path from a `data: grounded` \
                      source feeds into the return value. Call a tool with `uses retrieval` \
                      and pass its result (directly or through a prompt) to the return.",
-                    agent.name.name, return_type_name,
+                    agent.name.name, format_type_ref(&agent.return_ty),
                 ),
             });
         }
@@ -176,8 +175,7 @@ fn expr_is_grounded(
                         corvid_resolve::DeclKind::Agent => {
                             // Check if the called agent returns Grounded<T>.
                             if let Some(agent) = find_agent(file, &entry.name) {
-                                let ret_name = format_type_ref(&agent.return_ty);
-                                if ret_name.starts_with("Grounded") {
+                                if is_grounded_type_ref(&agent.return_ty) {
                                     return true;
                                 }
                                 // Also check if the agent has grounded effects.
@@ -302,6 +300,11 @@ fn check_return_grounded(
         }
     }
     false
+}
+
+fn is_grounded_type_ref(ty: &corvid_ast::TypeRef) -> bool {
+    matches!(ty, corvid_ast::TypeRef::Generic { name, args, .. }
+        if name.name == "Grounded" && args.len() == 1)
 }
 
 fn format_type_ref(ty: &corvid_ast::TypeRef) -> String {

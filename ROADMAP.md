@@ -146,6 +146,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Verified the three default version labels in locally staged release manifests and compared nightly tagging with the hosted candidate workflow. The [release policy](docs/release-policy.md#verification) records how to identify a candidate in each workflow.
   - [x] The corpus CLI now reports completed comparisons when another program cannot be verified. Checked all three exit codes and the JSON output. On the 22-program corpus, 20 agreed, one deliberately diverged, and one was incomplete.
   - [x] Native grounded string addition now runs through the compiler with provenance and reference counting. Four-tier verification completed all 22 corpus programs, including `combined_all.cor`. Only the deliberate `tier_disagree.cor` fixture diverged.
+  - [x] The checker recognizes the `Grounded<T>` wrapper structurally. Ordinary record names such as `GroundedNote` can be returned without a retrieval effect.
   - [ ] The provenance checker rejects a helper returning `value + "!"` when its only source is a typed `Grounded<String>` parameter. Reconcile parameter provenance at checked Corvid calls and external boundaries.
   - Workspace CI builds from an empty Cargo target directory to avoid reusing a compiler from another revision.
   - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
