@@ -85,6 +85,21 @@ The `py_call_effect` row carries `trust: model_only` by default;
 declare the tool `dangerous` (and require `approve`) if the
 Python code does anything the operator should gate on.
 
+## Shipping a Python tool with a Corvid service
+
+Declare the return type in Corvid and register the implementation by name in the project's root `tools.py`. For a Corvid tool declared as `tool measure(value: String) -> Stats uses calculate`, where `Stats` has a field `largest: Int`, a synchronous implementation is:
+
+```python
+from math import gcd
+from corvid_runtime import tool
+
+@tool("measure")
+def measure(value):
+    return {"largest": gcd(18, int(value))}
+```
+
+`corvid build src/main.cor --target web` includes the root `tools.py`. Extract the archive and run `corvid serve src/main.cor` with a Python-enabled Corvid installation. Install any third-party Python packages on the destination host. The host owns the registered callable for the service lifetime. Each call exchanges values: a Python dictionary becomes a Corvid record after its fields have been checked. A mismatched field or a Python exception fails that request. The same server can handle another call afterward.
+
 ## Replay
 
 Python calls are recorded by the same lineage path LLM calls
