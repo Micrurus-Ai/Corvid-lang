@@ -11,6 +11,10 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
+      verify_performance:
+        description: Measure the Windows x64 application baseline and exercise native tool linking
+        type: boolean
+        default: false
       publish_release:
         description: Publish all candidate archives to GitHub Releases
         type: boolean
@@ -189,6 +193,60 @@ jobs:
               cargo build --release --locked --target "$RELEASE_TARGET" -p corvid-cli -p corvid-lsp
               python3 install/rust_notices.py "$RELEASE_TARGET" target/corvid-rust-notices.txt
             '
+
+      - name: Verify an executable linked to a Rust tool
+        if: inputs.verify_performance && matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $build = (Resolve-Path 'target/${{ matrix.target }}/release').Path
+          $cli = Join-Path $build 'corvid.exe'
+          $env:CORVID_RUNTIME_STATICLIB_OVERRIDE = Join-Path $build 'corvid_runtime.lib'
+          $project = New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP 'static-tool-check')
+          Set-Location $project.FullName
+          @'
+          #![no_std]
+          #[no_mangle]
+          pub extern "C" fn __corvid_tool_double(n: i64) -> i64 { n * 2 }
+          '@ | Set-Content double.rs
+          rustc --edition 2021 --crate-type lib --emit=obj -C panic=abort -O double.rs -o double.obj
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $lib = & $vswhere -latest -products '*' -find 'VC/Tools/MSVC/*/bin/Hostx64/x64/lib.exe' | Select-Object -First 1
+          & $lib /nologo /out:double.lib double.obj
+          @'
+          effect arithmetic:
+              cost: $0.0
+          tool double(n: Int) -> Int uses arithmetic
+          agent main() -> Int:
+              return double(21)
+          '@ | Set-Content main.cor
+          & $cli build main.cor --target native --with-tools-lib (Resolve-Path double.lib).Path
+          $consumer = New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP 'static-tool-consumer')
+          Copy-Item target/bin/main.exe $consumer.FullName
+          Set-Location $consumer.FullName
+          if ((& ./main.exe) -ne '42') { throw 'Linked tool returned an unexpected value' }
+
+      - name: Measure application release workloads twice
+        if: inputs.verify_performance && matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $build = (Resolve-Path 'target/${{ matrix.target }}/release').Path
+          $env:CORVID_RUNTIME_STATICLIB_OVERRIDE = Join-Path $build 'corvid_runtime.lib'
+          $cli = Join-Path $build 'corvid.exe'
+          python benches/analysis/application.py $cli --output baseline.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python benches/analysis/application.py $cli --output repeat.json
+
+      - name: Retain release workload samples
+        if: inputs.verify_performance && matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-profile-windows-x64
+          path: |
+            baseline.json
+            repeat.json
+          if-no-files-found: error
 
       - name: Collect Rust dependency notices
         if: runner.os != 'Linux'
