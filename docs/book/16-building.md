@@ -36,6 +36,8 @@ program. `corvid build` prints the paths it writes.
 | Shared library | `corvid build src/api.cor --target cdylib --header` | Platform shared library and C header under `target/release/` |
 | Static library | `corvid build src/api.cor --target staticlib --header` | Platform static library and C header under `target/release/` |
 
+The WebAssembly target produces a standard module that a browser or Node.js can instantiate. The generated JavaScript loader handles Corvid strings and host imports. Contributors can run `cargo test --locked -p corvid-codegen-wasm` to exercise the allocator, string ABI and interpreter parity with Wasmtime.
+
 Use `corvid serve src/main.cor` for a source application with typed `server`
 routes, forms and streaming handlers. Use the web target to distribute that
 application with its compiled browser handlers. The server build target wraps
