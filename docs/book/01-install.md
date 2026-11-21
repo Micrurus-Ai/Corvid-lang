@@ -61,7 +61,9 @@ for a pinned version use the requested tag. Run `corvid --version` afterward.
 
 The installer stages a candidate under `CORVID_HOME` and runs its version
 command before replacing package files. A failed download and source build
-leave the existing installation usable. Keep your own files outside the
+leave the existing installation usable. On Linux, if moving a staged package
+into place fails, the installer restores the previous files. After resolving
+the cause, rerun the same install command to retry. Keep your own files outside the
 package directories such as `bin`, `lib`, `src` and `std`.
 
 For an isolated installation, set `CORVID_HOME` to a dedicated directory,
