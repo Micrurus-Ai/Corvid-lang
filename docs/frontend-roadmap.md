@@ -4,13 +4,15 @@
 
 ## Starting point
 
+**Accepted product decisions.** Ordinary frontend development should be possible in a Corvid project with the standard toolchain. CSS, JavaScript packages and web components are optional interoperability paths. Use ordinary Corvid types and control flow, typed component inputs and events, and an explicit browser/server boundary. The first preview must support a storefront cart and cancellable search. Ease of reading, writing and debugging is a release criterion. The precise view syntax and default browser compilation target remain open. [Component design candidates and usability checks](frontend-component-design.md)
+
 Corvid already documents server-rendered HTML, typed forms and routes, browser-compiled handlers, streamed text and a web archive. The frontend-layout branch adds three layout functions and a shared integer control. Today's views carry HTML strings, and the shipped handler examples update integer or string values. These give us compatibility cases for a more general model. The checkboxes below track proposed work. [Browser guide](book/19-browser-views.md) · [View implementation](../std/ui.cor) · [Browser bindings](../crates/corvid-codegen-wasm/src/browser_controls.js)
 
 ## Design and implementation order
 
 ### 1. Settle the component and execution model
 
-- [ ] Write two short candidate programs side by side. A cart edits a list of line items and derives its total. A search field cancels an older request as the user types. Show who owns each value, where a handler runs and what happens on navigation.
+- [x] Draft cart and search behavior with two candidate view styles for developer review. [Read the examples](frontend-component-design.md)
 - [ ] Reuse ordinary functions, records, lists, variants and imports. Specify typed inputs, children, callbacks, component identity and cleanup. Give every proposed keyword a motivating example. Ask developers unfamiliar with the design to predict each program's behavior from its source.
 - [ ] Prototype one interactive component through the normal web build. Compare DOM updates compiled to JavaScript with Corvid's existing WebAssembly handler path on initial bytes, startup, event latency and diagnostic quality. Record the default target and how compute-heavy modules interoperate. Keep existing forms and pages running during migration.
 
