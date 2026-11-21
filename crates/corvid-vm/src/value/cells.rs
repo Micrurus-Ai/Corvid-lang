@@ -266,6 +266,15 @@ impl ListValue {
             .clone()
     }
 
+    pub(crate) fn slice(&self, start: i64, end: i64) -> Self {
+        let guard = self.0.items.lock().expect("list items lock poisoned");
+        let items = guard.as_ref().expect("list payload already freed");
+        let len = items.len() as i64;
+        let start = start.clamp(0, len) as usize;
+        let end = end.clamp(start as i64, len) as usize;
+        Self::new(items[start..end].iter().cloned())
+    }
+
     pub fn get(&self, idx: usize) -> Option<Value> {
         self.0
             .items

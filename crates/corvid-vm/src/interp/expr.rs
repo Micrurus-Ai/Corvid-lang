@@ -852,15 +852,9 @@ fn eval_list_method(
             })
         }
         ListSlice => {
-            let len = lv.len() as i64;
-            let start = want_int(&args[0], span)?.clamp(0, len) as usize;
-            let end = want_int(&args[1], span)?.clamp(0, len) as usize;
-            let items = if start >= end {
-                Vec::new()
-            } else {
-                lv.iter_cloned()[start..end].to_vec()
-            };
-            Ok(Value::List(crate::value::ListValue::new(items)))
+            let start = want_int(&args[0], span)?;
+            let end = want_int(&args[1], span)?;
+            Ok(Value::List(lv.slice(start, end)))
         }
         ListReverse => {
             lv.reverse_in_place();

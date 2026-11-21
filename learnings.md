@@ -8084,3 +8084,7 @@ Write `import python "math" as numbers effects: pure:` and indent a signature su
 ### Using Corvid from C and JavaScript
 
 Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C. Follow the generated parameter order, release returned strings with `corvid_free_string` and release observation handles with `corvid_observation_release`. For a JavaScript host, build with `--target wasm` and use the generated module's `adaptImports` to supply tool implementations. Corvid integers cross the Wasm boundary as JavaScript BigInt values. The C and Wasm ABI guides include host examples.
+
+### Slicing a list
+
+`items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.

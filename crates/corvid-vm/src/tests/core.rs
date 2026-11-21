@@ -373,3 +373,17 @@ async fn not_negates_bool() {
         Value::Bool(false)
     );
 }
+
+#[tokio::test]
+async fn slice_clamps_bounds_and_keeps_an_independent_list() {
+    let ir = ir_of(r#"
+agent main() -> List<Int>:
+    source = [4, 5, 6]
+    copy = source.slice(-100, 100)
+    source[0] = 7
+    copy[2] = 9
+    return copy + source.slice(2, 1) + source.slice(99, 100) + source.slice(2, 3)
+"#);
+    let value = run_agent(&ir, "main", vec![], &empty_runtime()).await.unwrap();
+    assert_eq!(value_to_json(&value), json!([4, 5, 9, 6]));
+}
