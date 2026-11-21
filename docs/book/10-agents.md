@@ -26,9 +26,17 @@ agent main(ticket: String) -> String:
 
 Open shelf 2 and choose **Suggest a title**. The task is to recommend a different book for that shelf. To run the exercise with repeatable answers, follow the [packaged reading-list trial](19-browser-views.md#try-a-typed-suggestion).
 
-Trace the first call to `recommend` in `suggest_title`. The model receives the saved title and chooses one of two typed actions. `Suggest(title)` finishes the request with a proposed title. `Lookup(number)` asks the program to read one title from its snapshot of the three shelves. The program passes that title into one final model call. The model has no write tool. The selected shelf stays attached to the proposal in Corvid code. [Runnable source](../../examples/reading_list/src/main.cor)
+The reading-list prototype expresses the model's task in three lines.
 
-Before running the trial, predict which component chooses the action, what happens if the model requests shelf 4, and when SQLite changes. Check your answers against `recommend_after_lookup`, `proposal` and the two POST routes. A missing shelf ends the request with an error. A second lookup also ends it. Each model call has a 30-second timeout. A valid title opens an editable preview, and submitting **Apply suggestion** reaches the same save handler as a manual edit.
+```text
+title = ask recommend(current_title)
+    allow lookup_shelf once
+    timeout 30 seconds
+```
+
+The model can suggest a title immediately or request one shelf title from the snapshot. A request for a missing shelf or a second lookup ends the operation with an error. Both model calls and the optional lookup share the same 30 seconds. A successful suggestion opens an editable preview. Choosing **Apply suggestion** saves it.
+
+This spelling currently works through the reading-list prototype generator. Its adapter binds `lookup_shelf` to `lookup(readings, shelf)`. The generated Corvid agent `ask_recommend` handles the first decision and `finish_recommendation` handles the decision after a lookup. From the repository root, run `python scripts/prototype_reading_list_ask.py --write` after editing the prototype. Run the same command without `--write` to check that the runnable example matches. [Prototype source](../../examples/reading_list/suggest_title.cor.in) ? [Runnable Corvid](../../examples/reading_list/src/main.cor)
 
 ## Annotations
 

@@ -33,20 +33,25 @@ fn proposal(shelf: Int, title: String) -> Result<Reading, String>:
     return Ok(Reading(shelf, title))
 
 # A request returns a preview. Only the /save route writes to the shelf.
+# Generated from suggest_title.cor.in by scripts/prototype_reading_list_ask.py
 agent suggest_title(selected_shelf: Int) -> Result<Reading, String>:
     readings = list_readings()?
     current_title = lookup(readings, selected_shelf)?
-    decision = try recommend(current_title, "No lookup yet") timeout 30000
-    title = match decision.action:
-        Suggest(title) -> Ok(title)
-        Lookup(shelf) -> recommend_after_lookup(current_title, lookup(readings, shelf)?)
+    title = try ask_recommend(current_title, readings) timeout 30000
     return proposal(selected_shelf, title?)
 
-agent recommend_after_lookup(current_title: String, shelf_title: String) -> Result<String, String>:
-    decision = try recommend(current_title, shelf_title) timeout 30000
+agent ask_recommend(current_title: String, readings: List<Reading>) -> Result<String, String>:
+    decision = recommend(current_title, "No lookup yet")
+    return match decision.action:
+        Suggest(title) -> Ok(title)
+        Lookup(shelf) -> finish_recommendation(current_title, lookup(readings, shelf)?)
+
+agent finish_recommendation(current_title: String, shelf_title: String) -> Result<String, String>:
+    decision = recommend(current_title, shelf_title)
     return match decision.action:
         Suggest(title) -> Ok(title)
         Lookup(_) -> Err("The model reached its lookup limit.")
+# End of generated suggestion agent
 
 fn suggestion_controls(shelf: String) -> View:
     controls = "<button type='button' id='suggest' value='" + shelf + "'>Suggest a title</button><button type='button' id='cancel' disabled>Cancel suggestion</button><p role='status' id='status'></p><div id='preview'></div>"
