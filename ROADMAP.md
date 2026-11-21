@@ -109,6 +109,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
+  - [x] Added the pinned LCDF copyright statement and COPYING file to the PDF extraction dependency's notice entry. Verified both texts in the generated Windows x64 inventory. The glyph-data redistribution review remains open in the [release policy](docs/release-policy.md).
 
 ## Verified task results
 

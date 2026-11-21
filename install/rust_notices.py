@@ -96,10 +96,13 @@ def collect(target, output):
                 adobe = "https://github.com/adobe-type-tools/agl-aglfn/blob/4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6"
                 fonts = "https://github.com/matplotlib/matplotlib/tree/be56634d682bed257cb941369d8d3600635ddadf/lib/matplotlib/mpl-data/fonts/pdfcorefonts"
                 line("Glyph mappings source: https://github.com/michal-h21/htfgen/blob/0d9e796ebe9d6f8978f7c069d4922278e8716a75/glyphlist-extended.txt")
-                line("Glyph mappings source: https://github.com/kohler/lcdf-typetools/blob/46fa0a9f2fe86fbd0eb11ac1fc83a1ad43a20615/texglyphlist.txt")
+                lcdf = "https://github.com/kohler/lcdf-typetools/blob/46fa0a9f2fe86fbd0eb11ac1fc83a1ad43a20615"
+                line(f"Glyph mappings source: {lcdf}/texglyphlist.txt")
                 line(f"Glyph mappings source: {pdfbox}/pdfbox/src/main/resources/org/apache/pdfbox/resources/glyphlist/additional.txt")
                 line("Core font metrics are compiled into Rust tables of character codes, widths and glyph names.")
                 notices.extend([
+                    (f"Package copyright and license section of {lcdf}/README", local / "lcdf-typetools/README-license.txt"),
+                    (f"{lcdf}/COPYING", local / "lcdf-typetools/COPYING"),
                     (f"Shared notice from {adobe}/glyphlist.txt and zapfdingbats.txt", local / "agl-aglfn/glyph-list-header.txt"),
                     (f"{fonts}/readme.txt", local / "pdfcorefonts/readme.txt"),
                     (f"Copyright and trademark lines from the 14 AFM files at {fonts}", local / "pdfcorefonts/font-notices.txt"),
