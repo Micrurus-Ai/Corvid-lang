@@ -4,7 +4,7 @@ This policy defines how Corvid ships nightly, beta, and stable releases. It is a
 
 **Audience.** Two readers should be able to use this document without external context: a Corvid maintainer cutting a release, and a downstream developer or organization deciding whether to depend on Corvid for production. The first uses it as a checklist; the second uses it as the public contract for what changing-and-not-changing means at each channel.
 
-**Position.** The policy is intentionally narrow on what is promised and broad on what is enforced. Every rule below is paired with a CI gate, a CLI command, or a signed artifact field that catches violations before the release publishes — the [How this is enforced](#how-this-is-enforced) section at the end names each one.
+The channel sections specify release requirements. The [verification section](#verification) describes the checks currently available to maintainers.
 
 ## Build a candidate on GitHub
 
@@ -107,23 +107,12 @@ Stable release signoff requires:
 
 The same person may hold more than one role, but each role must be recorded in the release manifest.
 
-## How this is enforced
+## Verification
 
-Every rule above is paired with a machine-checked gate so a violation surfaces before the artifact ships, not after. The toolchain treats this section as the source of truth for what the release pipeline actually does.
-
-| Rule | Enforcement |
-|---|---|
-| Channel format + cadence | `corvid release <channel>` rejects malformed version strings and refuses to publish a second nightly per UTC day from the same commit. |
-| Required artifacts present | `corvid release` writes `release-manifest.json` with every required field; the publish step verifies the manifest before push. |
-| `SHA256SUMS.txt` covers every artifact | `corvid release` regenerates the file from the on-disk artifact set; mismatches fail the release. |
-| Signed binaries (DSSE attestation) | `corvid receipt verify-abi <artifact>` is run by CI against the published artifact set; an unverified attestation is a release blocker. |
-| Comparing library guarantees | `corvid upgrade check PATH --claims-current CURRENT --claims-target TARGET` compares the guarantee IDs and enforcement classes exported by the two libraries. Source and API compatibility require their own checks. See the [migration guide](meta/upgrade-migrations.md#comparing-guarantees-across-library-versions). |
-| Breaking changes have an upgrade rule + migration note + accepted/rejected fixtures | `corvid claim audit` cross-references the migration directory; missing fixtures fail the audit. |
-| Release blockers | CI's release job fails closed when any of the listed conditions hold (missing artifacts, audit failures, open release-blocking advisories, migration drift). |
-| Key rotation | Release keys are pinned in the release manifest; the publisher rejects a manifest whose key id does not match the signing key. Rotation notes live alongside the previous and new keys in the receipts pipeline (see [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md)). |
-| Maintainer signoff | The release manifest carries one signoff field per role. The publisher refuses a stable release when any role is unfilled. |
-
-The point of this table is that *neither* the maintainer cutting a release *nor* the downstream developer reading the policy has to trust that someone is doing the right thing — the right thing is the only thing the tooling will let happen.
+- **Version and channel.** The local `corvid release build CHANNEL VERSION --out DIR` command parses SemVer and checks the channel before creating its output directory. Stable takes a plain version such as `1.0.0`, beta takes a numbered prerelease such as `1.0.0-beta.2`, and nightly accepts a prerelease starting with `nightly.`. Publication cadence is a maintainer responsibility.
+- **Archive contents.** The hosted workflow checks version tags against the CLI package version, tests each candidate archive and computes its checksum. The local release command creates its own signed release record. Before publishing, verify that signatures and inventory cover the actual downloads.
+- **Compatibility.** Run `corvid upgrade check PATH` and the application's tests with the candidate CLI. To compare embedded library guarantees, supply the two exported manifests using `--claims-current` and `--claims-target`. See the [migration guide](meta/upgrade-migrations.md#comparing-guarantees-across-library-versions).
+- **Maintainer review.** Record signoff, review open advisories and beta feedback, and check that changelog entries, upgrade instructions and key rotation records apply to this candidate.
 
 ## See also
 

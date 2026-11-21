@@ -107,6 +107,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Verified source and JSON migration checks through the CLI. Split-line exports migrate mechanically, including on CRLF files. Legacy model and cache calls are reported for manual review. Comments and string literals retain their original content. See the [migration guide](docs/meta/upgrade-migrations.md).
   - [x] Exported guarantee rows from a signed library through `claim --explain --json` with key and source verification. The upgrade command accepted identical manifests and reported removals with exit code 1. See the [comparison guide](docs/meta/upgrade-migrations.md#comparing-guarantees-across-library-versions).
   - [x] Rechecked the refund example through `corvid check` after declaring its requester identity, reviewer role, and approval limits.
+  - [x] Reconciled the [release policy](docs/release-policy.md#verification) with CLI and archive checks. The CLI rejected mismatched stable, beta and nightly versions before staging any files.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
