@@ -8044,3 +8044,7 @@ A prompt returning `String` produces text. A prompt returning a named record sen
 Declare a text-generating prompt as `-> Stream<String>` to consume its text incrementally. A route with the same return type forwards the chunks as server-sent events. Use `with max_tokens 200` for an output limit and `try answer(question) timeout 700 on error retry 2 times backoff linear 1` to retry a failed start. See the streaming route in `docs/book/11-prompts.md`.
 
 To let a model choose among a fixed set of actions, declare a sum type such as `Add(amount: Int) | Finish` and use it as a field of the prompt result. Corvid sends the variant names and positional payload types to the provider. Match the checked result, call your ordinary typed function with the bound arguments, and pass its result into the next prompt. A bounded `for` loop sets the maximum number of model decisions.
+
+### Checkpointing an agent step
+
+Use `corvid jobs checkpoint resume --job job_1 --json` to read the job's checkpoints, next sequence, and remaining step and tool allowances. To persist a tool result, pass that sequence to `corvid jobs checkpoint add --job job_1 --kind tool-result --label sum --payload '{"total":2}' --step-sequence 1`. Use the same `--state jobs.sqlite` for each process. A successful write saves the payload and charges the allowances in one transaction. If another worker already committed that sequence, read the resume state again to recover its result.

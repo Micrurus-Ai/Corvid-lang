@@ -91,21 +91,60 @@ impl DurableQueueRuntime {
         payload: Value,
         payload_fingerprint: Option<String>,
     ) -> Result<JobCheckpoint, RuntimeError> {
+        self.write_checkpoint(
+            job_id,
+            kind,
+            label.into(),
+            payload,
+            payload_fingerprint,
+            None,
+        )
+    }
+
+    pub fn record_step_checkpoint(
+        &self,
+        job_id: &str,
+        kind: JobCheckpointKind,
+        label: impl Into<String>,
+        payload: Value,
+        payload_fingerprint: Option<String>,
+        expected_sequence: u64,
+    ) -> Result<JobCheckpoint, RuntimeError> {
+        self.write_checkpoint(
+            job_id,
+            kind,
+            label.into(),
+            payload,
+            payload_fingerprint,
+            Some(expected_sequence),
+        )
+    }
+
+    fn write_checkpoint(
+        &self,
+        job_id: &str,
+        kind: JobCheckpointKind,
+        label: String,
+        payload: Value,
+        payload_fingerprint: Option<String>,
+        expected_sequence: Option<u64>,
+    ) -> Result<JobCheckpoint, RuntimeError> {
         if self.get(job_id)?.is_none() {
             return Err(RuntimeError::Other(format!(
                 "std.queue job `{job_id}` not found"
             )));
         }
-        let label = label.into();
         if label.trim().is_empty() {
             return Err(RuntimeError::Other(
                 "std.queue checkpoint label must not be empty".to_string(),
             ));
         }
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|err| {
-            RuntimeError::Other(format!("failed to start checkpoint transaction: {err}"))
-        })?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|err| {
+                RuntimeError::Other(format!("failed to start checkpoint transaction: {err}"))
+            })?;
         let sequence = tx
             .query_row(
                 "select coalesce(max(sequence), 0) + 1 from queue_job_checkpoints where job_id = ?1",
@@ -114,11 +153,27 @@ impl DurableQueueRuntime {
             )
             .map_err(|err| RuntimeError::Other(format!("failed to allocate checkpoint sequence: {err}")))?
             as u64;
+        let now = now_ms();
+        if let Some(expected) = expected_sequence {
+            if expected != sequence {
+                return Err(RuntimeError::Other(format!(
+                    "expected checkpoint {expected}, next sequence is {sequence}"
+                )));
+            }
+            let tool_calls = u64::from(kind == JobCheckpointKind::ToolResult);
+            let report =
+                Self::apply_loop_usage(&tx, job_id, 1, 0, 0.0, tool_calls, "checkpoint", now)?;
+            if !report.violated_bounds.is_empty() {
+                return Err(RuntimeError::Other(format!(
+                    "step exceeds loop limits: {}",
+                    report.violated_bounds.join(", ")
+                )));
+            }
+        }
         let id = format!("{job_id}:checkpoint:{sequence}");
         let payload_json = serde_json::to_string(&payload).map_err(|err| {
             RuntimeError::Other(format!("failed to serialize checkpoint payload: {err}"))
         })?;
-        let now = now_ms();
         tx.execute(
             "insert into queue_job_checkpoints
              (id, job_id, sequence, kind, label, payload_json, payload_fingerprint, created_ms)
@@ -150,7 +205,13 @@ impl DurableQueueRuntime {
     }
 
     pub fn list_checkpoints(&self, job_id: &str) -> Result<Vec<JobCheckpoint>, RuntimeError> {
-        let conn = self.conn.lock().unwrap();
+        Self::read_checkpoints(&self.conn.lock().unwrap(), job_id)
+    }
+
+    pub(super) fn read_checkpoints(
+        conn: &Connection,
+        job_id: &str,
+    ) -> Result<Vec<JobCheckpoint>, RuntimeError> {
         let mut stmt = conn
             .prepare(
                 "select id, job_id, sequence, kind, label, payload_json, payload_fingerprint, created_ms
@@ -170,10 +231,18 @@ impl DurableQueueRuntime {
     }
 
     pub fn resume_state(&self, job_id: &str) -> Result<JobResumeState, RuntimeError> {
-        let job = self
-            .get(job_id)?
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|err| {
+            RuntimeError::Other(format!("failed to start resume snapshot: {err}"))
+        })?;
+        let job = Self::read_job(&tx, job_id)?
             .ok_or_else(|| RuntimeError::Other(format!("std.queue job `{job_id}` not found")))?;
-        let checkpoints = self.list_checkpoints(job_id)?;
+        let checkpoints = Self::read_checkpoints(&tx, job_id)?;
+        let limits = Self::read_loop_limits(&tx, job_id)?;
+        let usage = Self::read_loop_usage(&tx, job_id)?;
+        tx.commit().map_err(|err| {
+            RuntimeError::Other(format!("failed to finish resume snapshot: {err}"))
+        })?;
         let last_checkpoint = checkpoints.last().cloned();
         let next_sequence = last_checkpoint
             .as_ref()
@@ -184,6 +253,8 @@ impl DurableQueueRuntime {
             checkpoints,
             last_checkpoint,
             next_sequence,
+            limits,
+            usage,
         })
     }
 }

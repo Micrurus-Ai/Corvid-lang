@@ -787,6 +787,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     label,
                     payload,
                     payload_fingerprint,
+                    step_sequence,
                 } => cmd_jobs_checkpoint_add(
                     &state,
                     &job,
@@ -794,12 +795,13 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     &label,
                     &payload,
                     payload_fingerprint,
+                    step_sequence,
                 ),
                 JobsCheckpointCommand::List { state, job } => {
                     cmd_jobs_checkpoint_list(&state, &job)
                 }
-                JobsCheckpointCommand::Resume { state, job } => {
-                    cmd_jobs_checkpoint_resume(&state, &job)
+                JobsCheckpointCommand::Resume { state, job, json } => {
+                    cmd_jobs_checkpoint_resume(&state, &job, json)
                 }
             },
             JobsCommand::Dlq { state } => cmd_jobs_dlq(&state),
