@@ -97,7 +97,7 @@ jobs:
         run: |
           ulimit -c unlimited
           set +e
-          cargo test --locked --workspace --lib --tests 2>&1
+          cargo test --locked --workspace --lib --tests --no-fail-fast 2>&1
           EXIT=$?
           if [ $EXIT -ne 0 ]; then
             echo ""

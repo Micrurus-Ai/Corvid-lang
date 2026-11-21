@@ -211,7 +211,7 @@ Add a complete example to the relevant book chapter or guide. Use a `corvid` cod
 ### Run the test suite
 
 ```bash
-cargo test --workspace
+cargo test --locked --workspace --no-fail-fast
 cd runtime/python && python3 -m pytest
 ```
 

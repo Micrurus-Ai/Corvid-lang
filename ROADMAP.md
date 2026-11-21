@@ -113,6 +113,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Fixed warning W0270 on agents that forward an existing stream. A CLI consumer received both yielded elements. A stream body containing only `pass` retained the warning.
   - [x] Reconciled six nested bundle fixtures with the previously verified bindings metadata change. All five Linux bundle verification scripts passed with the candidate CLI on Debian 12.
   - [x] Aligned Python-generated signed integer arithmetic with the interpreter. Checked 15 cases through the CLI and generated Python, including division above float precision, signed remainders, overflow, zero divisors and an ordinary float expression. The Python code generator and runtime suites passed.
+  - Workspace CI runs independent test targets after a test failure so the same revision can report multiple regressions. Any failed target still fails the job.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
