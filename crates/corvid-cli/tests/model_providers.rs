@@ -293,3 +293,122 @@ server stream_api:
     assert_eq!(probe.retries.load(Ordering::SeqCst), 2);
     provider.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typed_function_handles_model_actions_in_a_bounded_loop() {
+    use std::sync::atomic::AtomicUsize;
+
+    async fn next_action(
+        State(calls): State<Arc<AtomicUsize>>,
+        Json(request): Json<Value>,
+    ) -> Json<Value> {
+        calls.fetch_add(1, Ordering::SeqCst);
+        let input = request["messages"][0]["content"].as_str().unwrap();
+        let schema = &request["response_format"]["json_schema"]["schema"]["properties"];
+        let variants = schema["action"]["oneOf"].as_array().unwrap();
+        assert_eq!(variants[0]["properties"]["variant"]["const"], "Add");
+        assert_eq!(
+            variants[0]["properties"]["fields"]["prefixItems"][0]["type"],
+            "integer"
+        );
+        assert_eq!(variants[1]["properties"]["fields"]["maxItems"], 0);
+        let action = if input.contains("malformed") {
+            json!({"action":{"variant":"Add","fields":["two"]}})
+        } else if input.contains("invalid") {
+            json!({"action":{"variant":"Add","fields":[-2]}})
+        } else if input.contains("unknown") {
+            json!({"action":{"variant":"Erase","fields":[]}})
+        } else if input.contains("Task \"finish\"") && input.contains("total=2") {
+            json!({"action":{"variant":"Finish","fields":[]}})
+        } else {
+            json!({"action":{"variant":"Add","fields":[2]}})
+        };
+        Json(json!({"choices":[{"message":{"role":"assistant","content":action.to_string()}}]}))
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = format!(
+        "openai-compat:http://{}/v1:local-model",
+        listener.local_addr().unwrap()
+    );
+    let app = Router::new()
+        .route("/v1/chat/completions", post(next_action))
+        .with_state(calls.clone());
+    let server = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
+    let project = tempfile::tempdir().unwrap();
+    let source = r#"type Action:
+    | Add(amount: Int)
+    | Finish
+
+type Decision:
+    action: Action
+
+fn add(total: Int, amount: Int) -> Result<Int, String>:
+    if amount < 0:
+        return Err("negative amount")
+    return Ok(total + amount)
+
+prompt choose(task: String, total: Int) -> Decision:
+    "Task {task}, total={total}. Choose add or finish."
+
+agent run_actions(task: String) -> Result<Int, String>:
+    total = 0
+    for turn in [1, 2, 3]:
+        step = choose(task, total)
+        finished = match step.action:
+            Finish -> true
+            Add(_) -> false
+        if finished:
+            return Ok(total)
+        result = match step.action:
+            Add(amount) -> add(total, amount)
+            Finish -> Ok(total)
+        total = result?
+    return Err("step limit")
+
+agent main() -> String:
+    return match run_actions("SCENARIO"):
+        Ok(value) -> value.to_string()
+        Err(reason) -> reason
+"#;
+    for (task, expected, count) in [
+        ("finish", "2", 2),
+        ("forever", "step limit", 3),
+        ("invalid", "negative amount", 1),
+        ("unknown", "Erase", 1),
+        ("malformed", "Int", 1),
+    ] {
+        calls.store(0, Ordering::SeqCst);
+        std::fs::write(
+            project.path().join("main.cor"),
+            source.replace("SCENARIO", task),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .current_dir(project.path())
+            .args(["run", "--target", "interp", "main.cor"])
+            .env("CORVID_MODEL", &model)
+            .env("CORVID_TEST_MOCK_LLM", "0")
+            .env("OPENAI_COMPAT_API_KEY", "")
+            .env("NO_PROXY", "127.0.0.1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            !matches!(task, "malformed" | "unknown"),
+            "{task}: {output:?}"
+        );
+        let message = if output.status.success() {
+            &output.stdout
+        } else {
+            &output.stderr
+        };
+        assert!(
+            String::from_utf8_lossy(message).contains(expected),
+            "{task}: {output:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), count, "{task}");
+    }
+    server.abort();
+}

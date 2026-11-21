@@ -138,6 +138,36 @@ fn schema_for_inner(
                 return json!({ "type": "object" });
             };
             visiting.push(*def_id);
+            if !ir_type.variants.is_empty() {
+                let alternatives: Vec<_> = ir_type
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let payload: Vec<_> = variant
+                            .fields
+                            .iter()
+                            .map(|field| schema_for_inner(&field.ty, types_by_id, visiting))
+                            .collect();
+                        let mut fields = json!({
+                            "type": "array", "minItems": payload.len(), "maxItems": payload.len()
+                        });
+                        if !payload.is_empty() {
+                            fields["prefixItems"] = Value::Array(payload);
+                        }
+                        json!({
+                            "type": "object",
+                            "properties": {
+                                "variant": { "type": "string", "const": variant.name },
+                                "fields": fields
+                            },
+                            "required": ["variant", "fields"],
+                            "additionalProperties": false
+                        })
+                    })
+                    .collect();
+                visiting.pop();
+                return json!({ "oneOf": alternatives });
+            }
             let mut properties = serde_json::Map::new();
             let mut required = Vec::new();
             for field in &ir_type.fields {
