@@ -1,0 +1,16 @@
+import "./std/ui" as ui
+import "./std/ui" use View
+
+public fn shop_page(title: String, content: List<View>) -> String:
+    css = """body { margin: 0; color: #172923; background: #faf8f1; font: 1rem/1.55 system-ui,sans-serif }
+main { max-width: 54rem; margin: auto; padding: 1rem }
+h1 { font-family: Georgia,serif }
+ol { padding: 0; list-style-position: inside }
+li { background: white; border: 1px solid #64776a; border-radius: .4rem; padding: 1rem; margin-block: .75rem }
+label { margin-inline-end: 1rem }
+input { width: 3em; margin: .5rem }
+button, input, select { font: inherit; padding: .35rem }
+button { margin: .25rem }
+:focus-visible { outline: 3px solid #0958a4; outline-offset: 2px }
+@media (min-width: 42rem) { li { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem } }"""
+    return ui.styled_page("en", title, css, content)

@@ -1,0 +1,19 @@
+import "./std/ui" as ui
+import "./std/ui" use View
+
+public type Color:
+    shade: Int where between(0, 2)
+
+public fn color_name(color: Color) -> String:
+    if color.shade == 0:
+        return "Ocean"
+    if color.shade == 1:
+        return "Moss"
+    return "Clay"
+
+public fn ColorPicker(value: Color, change_path: String) -> View:
+    options: List<View> = []
+    for shade in [0, 1, 2]:
+        options.append(ui.option(shade.to_string(), color_name(Color(shade)), shade == value.shade))
+    control = ui.submit_on_change_select("Color", "shade", options)
+    return ui.post_form(change_path, [control, ui.submit("Apply color")])

@@ -16,6 +16,13 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execution-order) for sequencing across frontend, backend, agents and release work. This guide supplies the detailed frontend acceptance criteria.
 
+### Reuse and distribute a developer-authored component
+
+- [x] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
+- [ ] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
+
+The step 4 storefront imports the same local picker in the notebook and pencil modules. Both typed POST handlers rendered the selected shade from an extracted web package and rejected invalid values. Edge 158 passed keyboard selection on both screens with scripting enabled and disabled. [Example and test commands](book/19-browser-views.md#edit-a-keyed-cart-and-reuse-a-color-picker)
+
 ### Grow a simple app in the same codebase
 
 **Step 2 trial.** In the packaged reading list, a loopback provider requested shelf 1 and received its stored title on the second turn. The resulting preview contained an escaped, editable title and submitted to the existing save route. The HTTP trial checked the original row before applying and the updated row after restart. It recovered from invalid JSON and a wrong field type, rejected an invalid shelf and a repeated lookup, and observed the provider socket close on client disconnect. The cancellable preview currently uses inline JavaScript. The full packaged trial passed in Edge 158 with the local model responder, including cancellation, preview, apply and restart readback. The A07 new-reader explanation remains open. [First-agent exercise](book/10-agents.md#your-first-agent-in-the-reading-list)
@@ -93,6 +100,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 - [x] Draft cart and search behavior with two candidate view styles for developer review. [Read the examples](frontend-component-design.md)
 - [ ] Reuse ordinary functions, records, lists, variants and imports. Specify typed inputs, children, callbacks, component identity and cleanup. Give every proposed keyword a motivating example. Ask developers unfamiliar with the design to predict each program's behavior from its source.
 - [ ] Prototype one interactive component through the normal web build. Compare DOM updates compiled to JavaScript with Corvid's existing WebAssembly handler path on initial bytes, startup, event latency and diagnostic quality. Record the default target and how compute-heavy modules interoperate. Keep existing forms and pages running during migration.
+
+The [reading-list prototype](frontend-component-design.md#reading-list-prototype) compares both source forms and execution paths on one local action beside the existing server save. All four packages passed the save and restart checks. Edge measurements favor JavaScript for the small control on bytes, startup and event latency. The binding checker reports the callback line in either grammar. The decision awaits independent behavior predictions and timed edits in both forms.
 
 **Exit:** approve a small language specification, two readable source examples and an execution-target decision backed by the prototype.
 

@@ -29,14 +29,48 @@ public fn text_field(label: String, name: String, initial: String) -> View:
 public fn submit(label: String) -> View:
     return View("<button type=\"submit\">" + escaped(label) + "</button>")
 
+public fn post_form(path: String, controls: List<View>) -> View:
+    return View("<form method=\"post\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
+
+public fn option(value: String, label: String, selected: Bool) -> View:
+    attributes = ""
+    if selected:
+        attributes = " selected"
+    return View("<option value=\"" + escaped(value) + "\"" + attributes + ">" + escaped(label) + "</option>")
+
+# A change submits the surrounding native form once its event module attaches.
+public fn submit_on_change_select(label: String, name: String, options: List<View>) -> View:
+    return View("<label>" + escaped(label) + " <select name=\"" + escaped(name) + "\" data-corvid-submit-change>" + children(options) + "</select></label>")
+
+# Each direct child has a stable application key. Movement controls attach in place.
+public fn keyed_item(key: String, label: String, content: List<View>) -> View:
+    earlier = "<button type=\"button\" data-corvid-move=\"up\" hidden>Move " + escaped(label) + " earlier</button>"
+    later = "<button type=\"button\" data-corvid-move=\"down\" hidden>Move " + escaped(label) + " later</button>"
+    return View("<li data-corvid-key=\"" + escaped(key) + "\">" + children(content) + earlier + later + "</li>")
+
+public fn keyed_list(label: String, items: List<View>) -> View:
+    return View("<div data-corvid-list><ol aria-label=\"" + escaped(label) + "\">" + children(items) + "</ol><span role=\"status\"></span></div>")
+
+# A named native form control with an optional (Int) -> Int derived output.
+public fn quantity_field(label: String, name: String, initial: Int, handler: String, result_label: String, initial_result: Int) -> View:
+    field = "<label>" + escaped(label) + "<input type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]{1,2}\" maxlength=\"2\" required name=\"" + escaped(name) + "\" value=\"" + initial.to_string() + "\" data-corvid-quantity=\"" + escaped(handler) + "\"></label>"
+    return View("<div data-corvid-quantity-field>" + field + "<label hidden>" + escaped(result_label) + " <output>" + initial_result.to_string() + "</output></label><span role=\"alert\"></span></div>")
+
 public fn search_form(controls: List<View>) -> View:
     return View("<form method=\"get\">" + children(controls) + "</form>")
 
 public fn disclosure(label: String, content: List<View>) -> View:
     return View("<details><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
 
+fn document_page(html_attributes: String, title: String, head: String, content: List<View>) -> String:
+    return "<!doctype html><html" + html_attributes + "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title>" + head + "</head><body><main>" + children(content) + "</main></body></html>"
+
 public fn page(title: String, content: List<View>) -> String:
-    return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title></head><body><main>" + children(content) + "</main></body></html>"
+    return document_page("", title, "", content)
+
+# Supply application-authored CSS, just as for a literal style element.
+public fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String:
+    return document_page(" lang=\"" + escaped(language) + "\"", title, "<style>" + trusted_css + "</style>", content)
 
 public fn action(label: String, handler: String) -> View:
     return View("<button type=\"button\" data-corvid-action=\"" + escaped(handler) + "\" disabled>" + escaped(label) + "</button>")
@@ -51,9 +85,11 @@ public fn shared_int_state(name: String, label: String, initial: Int, controls: 
 public fn state_output(name: String, label: String) -> View:
     return View("<label>" + escaped(label) + " <output data-corvid-read=\"" + escaped(name) + "\"></output></label>")
 
+public fn event_module() -> View:
+    return View("<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script>")
+
 public fn interactive_page(title: String, content: List<View>) -> String:
-    loader = View("<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script>")
-    return page(title, content + [loader])
+    return page(title, content + [event_module()])
 
 public fn text_state(label: String, initial: String, handler: String) -> View:
     field = "<label>" + escaped(label) + "<input type=\"text\" value=\"" + escaped(initial) + "\" data-corvid-input=\"" + escaped(handler) + "\" disabled></label>"

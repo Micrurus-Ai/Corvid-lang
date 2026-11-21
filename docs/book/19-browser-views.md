@@ -117,6 +117,26 @@ Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an e
 
 The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.
 
+### Edit a keyed cart and reuse a color picker
+
+The [storefront](../../examples/storefront/src/main.cor) renders its catalog links, quantity inputs and checkout form on the server. The input name identifies the product in the submitted record. Its row key identifies the same product in the browser. Checkout computes the receipt from the two submitted quantities and the server's prices.
+
+After the event module attaches, each line total reads the current input value, including edits made while the module was loading. Use the move buttons, or press Alt+Up or Alt+Down in a quantity field. The move handler shifts the adjacent row so the active input stays attached. A status message gives the row's new position.
+
+The notebook and pencil screens each import `ColorPicker` and `Color` from [the same local module](../../examples/storefront/src/color_picker.cor). Each supplies an initial value and a form destination. For example, the notebook starts with `Color(0)` and calls `ColorPicker(value, "/notebook")`. With scripting enabled, the select's change event submits the form. **Apply color** submits it before enhancement. Each POST route decodes the selected shade into a `Color` and passes it to its screen handler. This example uses server-owned color previews and browser-local cart edits.
+
+From the repository root, run `python scripts/verify_storefront.py target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. Omit `--http-only` to run the keyboard and focus tests with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
+
+### Compare a local action with the save form
+
+The step 3 experiment adds **Read one page** beside the reading-list edit form. Its handler takes the displayed integer and returns the next value. **Save to shelf** submits a typed record to the server and updates SQLite. To build the experiment from the repository root, pass the path to your CLI executable and a new directory whose parent exists.
+
+```powershell
+python scripts/build_component_trial.py target/debug/corvid.exe target/pages-trial functions wasm
+```
+
+Extract the resulting web archive and migrate and serve it as in the reading-list example below. Open shelf 2, activate **Read one page**, and reload to see which value lasts. Use `indented` in place of `functions` to try the block grammar, or `js` in place of `wasm` to try the experimental JavaScript lowering. Each build needs its own output directory. The two small view files are inputs to the trial script. The ordinary CLI checks, tests and packages the generated Corvid project. [Source examples and measured sizes](../frontend-component-design.md#reading-list-prototype)
+
 ### Display state in more than one view
 
 `ui.shared_int_state(name, label, initial, controls)` creates an integer control with a page-wide name. Give each owner a unique name. `ui.state_output(name, label)` adds a labeled, read-only display anywhere on that page. It picks up the initial value when the browser handlers load and updates after each successful action. Reloading the page restores the initial value.

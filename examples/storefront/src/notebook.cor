@@ -1,0 +1,7 @@
+import "./layout" use shop_page
+import "./color_picker" use ColorPicker, Color, color_name
+import "./std/ui" as ui
+import "./std/ui" use View
+
+public fn notebook_cover(value: Color) -> String:
+    return shop_page("Notebook cover", [ui.link("Catalog", "/"), View("<h1>Notebook cover</h1>"), ui.text("Cover color: " + color_name(value)), ui.text("Selecting a color updates the preview."), ColorPicker(value, "/notebook"), ui.event_module()])
