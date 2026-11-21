@@ -1,0 +1,2 @@
+agent read_page(current: Int) -> Int:
+    return current + 1

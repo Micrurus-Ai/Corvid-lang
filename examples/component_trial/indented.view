@@ -1,0 +1,3 @@
+view:
+    int_state("Pages read this session", 0):
+        action("Read one page", read_page)

@@ -94,6 +94,8 @@ The existing `ui.agent_query_form` prototype emits discovery metadata for a read
 - [ ] Reuse ordinary functions, records, lists, variants and imports. Specify typed inputs, children, callbacks, component identity and cleanup. Give every proposed keyword a motivating example. Ask developers unfamiliar with the design to predict each program's behavior from its source.
 - [ ] Prototype one interactive component through the normal web build. Compare DOM updates compiled to JavaScript with Corvid's existing WebAssembly handler path on initial bytes, startup, event latency and diagnostic quality. Record the default target and how compute-heavy modules interoperate. Keep existing forms and pages running during migration.
 
+The [reading-list prototype](frontend-component-design.md#reading-list-prototype) compares both source forms and execution paths on one local action beside the existing server save. All four packages passed the save and restart checks. Edge measurements favor JavaScript for the small control on bytes, startup and event latency. The binding checker reports the callback line in either grammar. The decision awaits independent behavior predictions and timed edits in both forms.
+
 **Exit:** approve a small language specification, two readable source examples and an execution-target decision backed by the prototype.
 
 ### 2. Render, style and compose real components

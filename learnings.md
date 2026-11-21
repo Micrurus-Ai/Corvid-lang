@@ -2,6 +2,8 @@
 
 > A pragmatic guide to what you can write in Corvid today, how to run it, and where the edges are. Grows with every slice that adds a user-visible feature. Cross-references to the dev-log where decisions were made.
 
+The [reading-list component exercise](docs/book/19-browser-views.md#compare-a-local-action-with-the-save-form) builds a local page counter beside a server-owned save. A changed callback type points to the binding line in both candidate grammars. In the measured Edge trial, Enter advanced the local count and reloading reset it to zero in both grammars on both targets. The package verifier restarts each server after a malformed save and checks that the last valid title and the other two shelves survive.
+
 This is the "how to actually use Corvid" document. For the pitch, see [README.md](README.md). For the full feature roadmap, [FEATURES.md](FEATURES.md). For architecture, [ARCHITECTURE.md](ARCHITECTURE.md). For the build journal, [dev-log.md](dev-log.md).
 
 ---
