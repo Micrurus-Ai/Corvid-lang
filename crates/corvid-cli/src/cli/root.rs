@@ -745,6 +745,9 @@ pub enum Command {
         /// command transcripts read as `corvid claim --explain <cdylib>`.
         #[arg(long)]
         explain: bool,
+        /// Emit the binary's guarantee rows for use with `upgrade check`.
+        #[arg(long, requires = "explain")]
+        json: bool,
         /// Path to the cdylib `.so` / `.dll` / `.dylib`.
         cdylib: Option<PathBuf>,
         /// Optional ed25519 verifying key. When supplied, the claim

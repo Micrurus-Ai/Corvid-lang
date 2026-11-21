@@ -86,7 +86,7 @@ A release is blocked when any of these are true:
 - signed artifact generation fails,
 - checksums or SBOM are missing,
 - `corvid claim audit` reports an aspirational launch claim,
-- `corvid upgrade --check` reports an unhandled weakening,
+- a comparison using `corvid upgrade check PATH --claims-current CURRENT --claims-target TARGET` reports a removed or downgraded guarantee,
 - generated docs drift from the guarantee registry,
 - migration execution or drift detection fails,
 - a security advisory marked release-blocking is open,
@@ -117,7 +117,7 @@ Every rule above is paired with a machine-checked gate so a violation surfaces b
 | Required artifacts present | `corvid release` writes `release-manifest.json` with every required field; the publish step verifies the manifest before push. |
 | `SHA256SUMS.txt` covers every artifact | `corvid release` regenerates the file from the on-disk artifact set; mismatches fail the release. |
 | Signed binaries (DSSE attestation) | `corvid receipt verify-abi <artifact>` is run by CI against the published artifact set; an unverified attestation is a release blocker. |
-| SemVer covers the listed contracts | `corvid upgrade --check` consults the guarantee registry and refuses to advance the version when a stable contract has weakened. The breakage rule for each contract is encoded in the registry under `crates/corvid-guarantees/`. |
+| Comparing library guarantees | `corvid upgrade check PATH --claims-current CURRENT --claims-target TARGET` compares the guarantee IDs and enforcement classes exported by the two libraries. Source and API compatibility require their own checks. See the [migration guide](meta/upgrade-migrations.md#comparing-guarantees-across-library-versions). |
 | Breaking changes have an upgrade rule + migration note + accepted/rejected fixtures | `corvid claim audit` cross-references the migration directory; missing fixtures fail the audit. |
 | Release blockers | CI's release job fails closed when any of the listed conditions hold (missing artifacts, audit failures, open release-blocking advisories, migration drift). |
 | Key rotation | Release keys are pinned in the release manifest; the publisher rejects a manifest whose key id does not match the signing key. Rotation notes live alongside the previous and new keys in the receipts pipeline (see [`docs/operations/receipts-and-signing.md`](operations/receipts-and-signing.md)). |

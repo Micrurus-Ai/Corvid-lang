@@ -28,6 +28,18 @@ corvid upgrade check . --json > target/corvid-upgrade-report.json
 
 Exit code `0` means no known migration is pending. Exit code `1` means at least one migration is required. A stable release is blocked if a public breaking change exists without a corresponding `corvid upgrade` rule or explicit non-scope note in the migration guide.
 
+## Comparing guarantees across library versions
+
+Export each shared library's embedded guarantees, then compare them alongside the source migration scan. Substitute your platform's shared-library filenames.
+
+```sh
+corvid claim --explain --json ./current.so > current-claims.json
+corvid claim --explain --json ./candidate.so > candidate-claims.json
+corvid upgrade check src --claims-current current-claims.json --claims-target candidate-claims.json --json
+```
+
+The comparison reports removed guarantees and weaker enforcement classes. Exit code 1 indicates pending migrations or a regression. To verify the signature and corresponding source while exporting, supply `--key PUBLIC_KEY` and `--source SOURCE_FILE`. Check the export command's exit status before consuming its output.
+
 ## Schema, Trace, And Connector Manifests
 
 Schema, trace-format, and connector-manifest migrations use the same command family and report shape:

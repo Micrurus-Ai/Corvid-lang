@@ -450,6 +450,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
         Some(Command::Claim {
             command,
             explain,
+            json,
             cdylib,
             key,
             source,
@@ -466,6 +467,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                     claim_cmd::run_claim_explain(
                         &cdylib,
                         explain,
+                        json,
                         key.as_deref(),
                         source.as_deref(),
                     )
