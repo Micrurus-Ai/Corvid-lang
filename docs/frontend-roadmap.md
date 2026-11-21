@@ -14,6 +14,21 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## What to build first
 
+### Grow a simple app in the same codebase
+
+Judge language and grammar proposals by two questions. How much must a newcomer learn to ship the first useful version? Can that developer build a more ambitious version by extending the code they already understand?
+
+| Commitment | What the developer should experience |
+| --- | --- |
+| Invent new building blocks | Define an application-specific type, component and operation and compose them with ordinary Corvid code. |
+| Read a feature end to end | Follow a screen event to its handler and identify where data leaves the device, where a model is called and where a change becomes durable. |
+| Use application types with AI | Receive a model proposal in a developer-defined type. Validate, preview, edit, reject or apply it through the application's existing logic. |
+| Keep local interactions fast | Handle typing, dragging and preview on the device. Make the server boundary explicit when an edit needs shared state or authoritative validation. |
+
+- [ ] **First version.** In the first working application below, build a screen that lists, edits and saves records using ordinary Corvid. Start it and use it without model credentials or agent configuration.
+- [ ] **Later version.** Extend that same project with a model suggestion and an author-selected action that an authorized assistant can use. Reuse the original types, view components and save handler where their meaning still applies. Generate agent bindings from the exposed action. Exercise both UI and assistant invocation without screen scraping or a separately authored agent API.
+- [ ] **Review the change.** Give another developer the diff between versions. Ask them to trace one edit, identify new concepts and show which existing code they could reuse. Record any forced rewrite, duplicated domain rule or unnecessary setup as a design issue. Use the developer's own application domain for the independent trial.
+
 ### How developers should experience Corvid
 
 | Design goal | Trial for the first working application |
