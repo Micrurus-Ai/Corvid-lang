@@ -2863,3 +2863,108 @@ server notes:
         assert_eq!(content.as_object().unwrap().len(), 1);
     }
 }
+
+#[test]
+fn serve_round_trips_sum_variants_and_checks_payloads() {
+    use serde_json::{json, Value};
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(
+        &src,
+        r#"public type Status:
+    | Pending
+    | Approved(approver: String)
+
+type Search:
+    term: String
+    limit: Int where between(1, 20)
+
+type SearchReply:
+    owner: String
+    term: String
+    limit: Int
+
+server status_api:
+    route GET "/owners/{id}/search" query Search -> json SearchReply:
+        return SearchReply(path.id, query.term, query.limit)
+    route POST "/echo" body Status -> json Status:
+        return body
+"#,
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(dir.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let (status, reply) = http_get(port, "/openapi.json").unwrap();
+    assert_eq!(status, 200);
+    let spec: Value = serde_json::from_str(&reply).unwrap();
+    let variants = &spec["components"]["schemas"]["Status"]["oneOf"];
+    assert_eq!(variants[0]["properties"]["fields"]["maxItems"], 0);
+    assert_eq!(
+        variants[1]["properties"]["fields"]["prefixItems"][0]["type"],
+        "string"
+    );
+    for (variant, fields) in [("Pending", json!([])), ("Approved", json!(["alice"]))] {
+        let body = json!({"tag":"variant","type":"Status","variant":variant,"fields":fields});
+        let (status, reply) = http_post(port, "/echo", &body.to_string()).unwrap();
+        assert_eq!(status, 200, "{reply}");
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap(), body);
+    }
+    let (status, reply) =
+        http_get(port, "/owners/lee/search?term=caf%C3%A9+au+lait&limit=2").unwrap();
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap(),
+        json!({"owner":"lee","term":"caf\u{e9} au lait","limit":2})
+    );
+    for query in [
+        "term=valid",
+        "term=ok&limit=no",
+        "term=ok&limit=21",
+        "term=%FF&limit=2",
+        "term=%a&limit=2",
+    ] {
+        let (status, reply) = http_get(port, &format!("/owners/lee/search?{query}")).unwrap();
+        assert_eq!(status, 400, "{reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_query"
+        );
+    }
+    assert_eq!(http_get(port, "/missing").unwrap().0, 404);
+    assert_eq!(http_get(port, "/echo").unwrap().0, 405);
+    let (status, reply) = http_post(port, "/echo", "{").unwrap();
+    assert_eq!(status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap()["error"],
+        "invalid_json"
+    );
+    for invalid in [
+        json!({"variant":"Pending","fields":[3]}),
+        json!({"variant":"Pending","type":"Other"}),
+        json!({"variant":"Pending","tag":"none"}),
+        json!({"variant":"Pending","fields":false}),
+        json!({"variant":"Approved"}),
+        json!({"variant":"Approved","fields":[3]}),
+        json!({"variant":"Unknown"}),
+    ] {
+        let (status, reply) = http_post(port, "/echo", &invalid.to_string()).unwrap();
+        assert_eq!(status, 400, "{invalid} -> {reply}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reply).unwrap()["error"],
+            "invalid_body"
+        );
+    }
+}

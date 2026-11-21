@@ -48,7 +48,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 **3. Application services**
 
-- [ ] S01. Implement or verify typed request and response handling, routing, validation, configuration and errors in a running HTTP service.
+- [x] S01. Implement or verify typed request and response handling, routing, validation, configuration and errors in a running HTTP service.
+  - Live loopback requests exercised typed path and query input, range checks, UTF-8 decoding and sum-type JSON bodies. The service returned the declared response values and 400, 404 and 405 errors. OpenAPI describes positional variant payloads.
 - [ ] S02. Persist typed records across restart. Exercise migrations, transactions, rollback and concurrent requests through the standard library.
 - [ ] S03. Support outbound HTTP with structured data, timeouts and cancellation. Verify concurrency, streams, backpressure and resource cleanup when the caller disconnects.
 - [ ] S04. Verify session handling, secrets, scoped access, structured logs and graceful shutdown through service entry points.

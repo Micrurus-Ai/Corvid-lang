@@ -216,11 +216,27 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
 
 fn schema_for_type(ty: &ContractType) -> Value {
     if !ty.variants.is_empty() {
-        // A sum type projects to an enum of its variant names; a
-        // frontend reads the richer per-variant status/ui/payload from
-        // the application contract (51e).
-        let names: Vec<&str> = ty.variants.iter().map(|v| v.name.as_str()).collect();
-        return json!({ "type": "string", "enum": names });
+        let mut alternatives = Vec::with_capacity(ty.variants.len());
+        for variant in &ty.variants {
+            let count = variant.fields.len();
+            let mut fields = json!({"type": "array", "minItems": count, "maxItems": count});
+            let mut required = vec!["variant"];
+            if count > 0 {
+                fields["prefixItems"] = variant.fields.iter().map(schema_for_field).collect();
+                required.push("fields");
+            }
+            alternatives.push(json!({
+                "type": "object",
+                "required": required,
+                "properties": {
+                    "tag": {"const": "variant"},
+                    "type": {"const": ty.name},
+                    "variant": {"const": variant.name},
+                    "fields": fields
+                }
+            }));
+        }
+        return json!({"oneOf": alternatives});
     }
     let mut properties = Map::new();
     let mut required = Vec::new();

@@ -8006,3 +8006,19 @@ Import `env_get(name: String) -> Result<Option<String>, String>` from `"./std/en
 Use `corvid add package @example/math@1 --registry ../registry` to select a compatible version from a local `index.json`. Relative artifact paths resolve beside the index. Commit `Corvid.lock` with the project so its version and SHA-256 travel with the source. Run `corvid package verify-lock` to check the lockfile.
 
 After installation, `target/cache/packages/<sha256>.cor` contains the verified artifact. Set `CORVID_OFFLINE=1` to use it without contacting the registry. A locked local file can refill an empty cache while its original path is accessible. A mismatched digest stops compilation. After `corvid update @example/math`, change any version-specific import to the URI in the updated lock.
+
+### Typed HTTP query and body values
+
+```corvid
+type Search:
+    term: String
+    limit: Int where between(1, 20)
+
+server catalog:
+    route GET "/owners/{id}/search" query Search -> json Int:
+        return query.limit
+```
+
+Start the service with `corvid serve src/main.cor --listen 127.0.0.1:8080`. A request to `/owners/lee/search?term=caf%C3%A9+au+lait&limit=2` supplies `path.id`, a UTF-8 search term, and an integer limit. Missing fields, invalid escapes, and out-of-range values produce HTTP 400. An unknown route produces 404 and an unsupported method produces 405.
+
+For a sum type with variant `Approved(approver: String)`, a JSON body such as `{"variant":"Approved","fields":["alice"]}` supplies the positional payload. A variant without payloads can omit `fields`. When present, `tag` must be `"variant"` and `type` must name the declared sum. The server describes the alternatives, payload lengths and payload types at `/openapi.json`.

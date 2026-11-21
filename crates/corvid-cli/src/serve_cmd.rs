@@ -1322,24 +1322,21 @@ fn query_string_to_value(
         .get(def_id)
         .copied()
         .ok_or_else(|| "unknown query struct type".to_string())?;
-    let pairs: HashMap<String, String> = query
-        .split('&')
-        .filter(|s| !s.is_empty())
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            Some((
-                urldecode(k),
-                urldecode(v),
-            ))
-        })
-        .collect();
+    let mut pairs = HashMap::new();
+    for pair in query.split('&').filter(|s| !s.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        pairs.insert(urldecode(key)?, urldecode(value)?);
+    }
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
         let raw = pairs
             .get(&field.name)
             .cloned()
             .ok_or_else(|| format!("missing query param `{}`", field.name))?;
-        fields.push((field.name.clone(), coerce_str_to_value(&raw, &field.ty)?));
+        let value = coerce_str_to_value(&raw, &field.ty)?;
+        corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
+            .map_err(|error| error.to_string())?;
+        fields.push((field.name.clone(), value));
     }
     Ok(Value::Struct(corvid_driver::StructValue::new(
         ir_type.id,
@@ -1348,26 +1345,22 @@ fn query_string_to_value(
     )))
 }
 
-/// Minimal percent-decoding for query keys/values (slice 52a).
-fn urldecode(s: &str) -> String {
-    let bytes = s.replace('+', " ");
-    let mut out = String::with_capacity(bytes.len());
-    let mut chars = bytes.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hi = chars.next();
-            let lo = chars.next();
-            if let (Some(hi), Some(lo)) = (hi, lo) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
+/// Decode form-encoded query text as UTF-8 after expanding percent escapes.
+fn urldecode(s: &str) -> Result<String, String> {
+    let mut decoded = Vec::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'+' => decoded.push(b' '),
+            b'%' => {
+                let mut digit = || bytes.next().and_then(|b| char::from(b).to_digit(16))
+                    .ok_or_else(|| "invalid percent escape in query".to_string());
+                decoded.push((digit()? * 16 + digit()?) as u8);
             }
-        } else {
-            out.push(c);
+            other => decoded.push(other),
         }
     }
-    out
+    String::from_utf8(decoded).map_err(|_| "query parameter must be UTF-8".into())
 }
 
 /// If the dispatch outcome surfaced an `ApprovalQueued` from the
@@ -2271,8 +2264,8 @@ mod tests {
 
     #[test]
     fn urldecode_handles_percent_and_plus() {
-        assert_eq!(urldecode("a%20b+c"), "a b c");
-        assert_eq!(urldecode("plain"), "plain");
+        assert_eq!(urldecode("a%20b+c").unwrap(), "a b c");
+        assert_eq!(urldecode("plain").unwrap(), "plain");
     }
 
     #[test]
