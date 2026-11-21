@@ -70,3 +70,4 @@ venv/
 # TypeScript SDK local typecheck deps
 sdk/**/node_modules/
 /extensions/vscode-corvid/node_modules/
+/web/.wrangler/
