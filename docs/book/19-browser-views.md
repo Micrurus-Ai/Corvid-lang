@@ -208,7 +208,7 @@ From the repository root, run these commands in PowerShell with the Corvid CLI o
 
 ```powershell
 corvid new reading-list
-Copy-Item examples/reading_list/src/main.cor reading-list/src/main.cor
+Copy-Item examples/reading_list/src/*.cor reading-list/src
 Copy-Item examples/reading_list/migrations reading-list -Recurse
 cd reading-list
 corvid check
@@ -225,6 +225,24 @@ Open `http://127.0.0.1:8080/`. Tab to a shelf link and press Enter. Tab to the t
 The scaffold supplies `src/std` and a project-relative I/O root. The archive includes the SQL migration. Running it in the extracted directory creates and seeds the database there. Reuse that directory across restarts. No model setup is required.
 
 The [verification script](../../scripts/verify_reading_list.py) repeats the scaffold, package, migration and restart in fresh directories. With Python 3.12+, Python Playwright and its Chromium browser installed, run `python scripts/verify_reading_list.py path/to/corvid` from the repository root. It reports list and save navigation durations from the browser and separate HTTP save round trips. Use `--channel msedge` for installed Edge or `--http-only` for the server checks alone.
+
+### Search saved shelves
+
+Choose **Search shelves**, enter part of a title and press Enter. The resulting URL, such as `/search?term=ody`, opens directly with the saved matches. The native GET form works with scripting disabled. With scripting enabled, typing previews matches and submitting adds the query to browser history. Back and Forward restore the submitted term.
+
+Both routes call `find_titles`. The HTML route renders links on the server. The live preview calls `GET /search/results` and reads the Corvid `SearchResult` variant. `Matches` carries shelf numbers and titles. `Unavailable` lets the page offer another search after a database failure. Each edit aborts the preceding fetch. The callback checks its own signal after decoding the response so an obsolete search cannot replace newer links. Leaving the page aborts the pending request.
+
+The verification script changes the required save field from `title` to `book_title` in a disposable installation and restarts the server on the same port. It compares the OpenAPI schemas and submits the old fields. The replacement service returns HTTP 400 with `invalid_form` and identifies the missing field before the save handler runs. The full trial keeps the old form open in a browser. The HTTP-only trial sends its encoded fields directly.
+
+### Review edits to three shelves
+
+The archive includes a second entry point, `src/reviews.cor`, for a shared reading list. Run the verification script for a local exercise with seeded sessions and a loopback model. For a configured service, start `corvid serve src/reviews.cor` from the migrated package, with the identity provider and durable session store configured. Use this entry point alone for a shared database. The starter in `src/main.cor` deliberately permits anonymous manual saves for the local exercise.
+
+Choose **Suggest three titles** in a reviewer session. The review page shows each original title beside its editable replacement. Keep that page open, save a manual edit to shelf 2 in an editor session, then choose **Apply reviewed titles**. The receipt identifies each saved shelf and each shelf whose title changed during review.
+
+The server reads all three revisions in one query before calling the model. Migration `002_proposals.sql` adds revisions to existing shelves and stores the review key with each shelf's original revision. Applying a review checks the revisions, updates eligible titles and records the submitted titles and per-shelf outcomes in one SQLite write transaction. Resubmitting the same review returns the recorded outcomes. Starting another review generates a new key. The HTML receipt and typed JSON result both call `apply_result`.
+
+The packaged HTTP exercise discarded the committed response body, restarted the server and retried. Shelf 2 kept the manual edit, shelves 1 and 3 advanced once, and changing a submitted title on retry returned `KeyConflict`. The review and both apply routes require `shelves.review` at execution. Manual save requires `shelves.edit`. Migration `003_proposal_owner.sql` binds new previews to the verified actor ID. Older anonymous previews require a new review. The page sends the session's CSRF token with each form POST. The HTTP trial revoked the reviewer's role between preview and apply, observed HTTP 403 on both apply routes, and verified unchanged titles and revisions. A different reviewer presenting the key received `InvalidProposal`. Revoking the original reviewer's role also denied access to the saved receipt.
 
 ### Try a typed suggestion
 

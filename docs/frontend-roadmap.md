@@ -117,6 +117,8 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 ### 3. Make state, events and asynchronous work general
 
+**Step 5 checkpoint.** The packaged reading list passed HTTP checks for matching and empty searches, typed storage failure and recovery, and stale form rejection after a required field changed. A deterministic local model supplied an editable three-shelf preview. The apply handler saved two eligible edits, reported the intervening edit on shelf 2 and retained that outcome across restart and retry. Reusing the key with different input returned a typed conflict. The stream fixture released its SQLite lock when the client closed the response. The packaged review service checked current permissions before each POST. Both apply routes denied a revoked reviewer, and a different reviewer could not use the key. Live browser cancellation, history, navigation cleanup, the scoped review form and old-tab submission await a working browser driver. View choices are provisional pending step 3 feedback. [Reading-list exercise](book/19-browser-views.md#review-edits-to-three-shelves)
+
 - [ ] Route UI and assistant invocations through the same handler. Check authority at execution, capture the intended target across selection changes, and return typed failures for stale requests. Exercise retry of a server mutation after a lost response and verify that it applies once.
 
 - [ ] Support local and shared typed state, derived values, batched updates and predictable scheduling. Bind typed input, pointer, keyboard and composition events. Define event propagation, default actions and subscription cleanup.

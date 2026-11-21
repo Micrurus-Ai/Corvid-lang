@@ -3,12 +3,19 @@ import "./std/json" use json_get_int, json_get_string
 import "./std/ui" as ui
 import "./std/ui" use View
 
-type Selection:
+public type Selection:
     shelf: Int where between(1, 3)
 
-type Reading:
+public type Reading:
     shelf: Int where between(1, 3)
     title: String
+
+public type Search:
+    term: String
+
+public type SearchResult:
+    | Matches(readings: List<Reading>)
+    | Unavailable
 
 type Action:
     | Lookup(shelf: Int)
@@ -92,7 +99,7 @@ cancel.onclick = () => {
 </script>"""
     return View(controls + script)
 
-agent list_readings() -> Result<List<Reading>, String>:
+public agent list_readings() -> Result<List<Reading>, String>:
     db = db_open("reading.sqlite")?
     rows = db_query_rows(db, "SELECT shelf, title FROM shelves ORDER BY shelf", [])?
     readings: List<Reading> = []
@@ -102,12 +109,89 @@ agent list_readings() -> Result<List<Reading>, String>:
         readings.append(Reading(shelf, title))
     return Ok(readings)
 
-agent save(reading: Reading) -> Result<Reading, String>:
+public agent save(reading: Reading) -> Result<Reading, String>:
     db = db_open("reading.sqlite")?
-    result = db_execute(db, "UPDATE shelves SET title = ? WHERE shelf = ?", [db_param_text(reading.title), db_param_int(reading.shelf)])?
+    result = db_execute(db, "UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?", [db_param_text(reading.title), db_param_int(reading.shelf)])?
     if result.rows_affected != 1:
         return Err("Shelf was not found")
     return Ok(reading)
+
+fn matching_titles(readings: List<Reading>, term: String) -> SearchResult:
+    found: List<Reading> = []
+    needle = term.trim().to_lower()
+    for reading in readings:
+        if needle != "" and reading.title.to_lower().contains(needle):
+            found.append(reading)
+    return Matches(found)
+
+public agent find_titles(term: String) -> SearchResult:
+    return match list_readings():
+        Ok(saved) -> matching_titles(saved, term)
+        Err(_) -> Unavailable
+
+fn matches_view(found: List<Reading>, term: String) -> View:
+    if found.length() == 0 and term.trim() != "":
+        return ui.text("No matching titles.")
+    links: List<String> = []
+    for reading in found:
+        links.append(ui.link(reading.title, "/edit?shelf=" + reading.shelf.to_string()).html)
+    return View(links.join(" "))
+
+public agent search_page(term: String) -> String:
+    form = ui.query_form("/search", [ui.text_field("Find a title", "term", term), ui.submit("Search")])
+    results = match find_titles(term):
+        Matches(found) -> matches_view(found, term)
+        Unavailable -> ui.text("Search unavailable. Try again.")
+    script = """<script>
+const form = document.querySelector('form');
+const field = form.elements.term;
+const results = document.getElementById('matches');
+const message = document.querySelector('[role=status]');
+let pending;
+async function search() {
+    pending?.abort();
+    const request = new AbortController();
+    pending = request;
+    results.replaceChildren();
+    message.textContent = '';
+    if (!field.value.trim()) return;
+    message.textContent = 'Searching…';
+    try {
+        const params = new URLSearchParams({term: field.value});
+        const response = await fetch('/search/results?' + params, {signal: request.signal});
+        if (!response.ok) throw new Error();
+        const result = await response.json();
+        if (request.signal.aborted) return;
+        if (result.variant !== 'Matches') throw new Error();
+        for (const reading of result.fields[0]) {
+            const link = document.createElement('a');
+            link.href = '/edit?shelf=' + encodeURIComponent(reading.shelf);
+            link.textContent = reading.title;
+            results.append(link, ' ');
+        }
+        message.textContent = results.childElementCount ? '' : 'No matching titles.';
+    } catch {
+        if (!request.signal.aborted) message.textContent = 'Search unavailable. Try again.';
+    }
+}
+field.addEventListener('input', search);
+form.onsubmit = event => {
+    event.preventDefault();
+    const url = new URL(form.action);
+    url.search = new URLSearchParams({term: field.value});
+    if (location.href !== url.href) history.pushState(null, '', url);
+    search();
+};
+function restore() {
+    field.value = new URL(location.href).searchParams.get('term') || '';
+    search();
+    field.focus();
+}
+addEventListener('popstate', restore);
+addEventListener('pagehide', () => pending?.abort());
+addEventListener('pageshow', event => { if (event.persisted) restore(); });
+</script>"""
+    return ui.page("Search shelves", [form, View("<p role='status'></p><div id='matches'>" + results.html + "</div>"), ui.link("Reading list", "/"), View(script)])
 
 fn failure(message: String) -> String:
     return ui.page("Reading list unavailable", [ui.text(message), ui.link("Back to reading list", "/")])
@@ -127,6 +211,7 @@ fn screen(readings: List<Reading>, selected: Int, message: String) -> String:
             content.append(suggestion_controls(shelf))
         content.append(View("</li>"))
     content.append(View("</ul>"))
+    content.append(ui.link("Search shelves", "/search?term="))
     return ui.page("Reading list", content)
 
 agent show(selected: Int, message: String) -> String:
@@ -135,6 +220,12 @@ agent show(selected: Int, message: String) -> String:
         Err(reason) -> failure(reason)
 
 server library:
+    route GET "/search" query Search -> html:
+        return search_page(query.term)
+
+    route GET "/search/results" query Search -> json SearchResult:
+        return find_titles(query.term)
+
     route GET "/" -> html:
         return show(0, "")
 
@@ -155,4 +246,4 @@ test lists_shelves_in_order:
     page = screen([Reading(2, "A&B"), Reading(3, "Next")], 0, "")
     assert page.contains("Shelf 2: A&amp;B</a></li><li>")
     assert page.contains("Shelf 3: Next</a></li></ul>")
-    assert not page.contains("<form")
+    assert not page.contains("Save to shelf")
