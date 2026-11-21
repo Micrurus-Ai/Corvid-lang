@@ -22,7 +22,7 @@
 //!      — no LLM key required.
 //!
 //!   2. A paired `.cor` source under
-//!      `examples/observe_helpers/` documenting the
+//!      `examples/observability_prompts/` documenting the
 //!      `Grounded<T>`-shaped LLM-grounded version: typed effects,
 //!      `@budget`, the prompt's `cites strictly` clause, and the
 //!      `Grounded<…>` return type. Production deployments wire the

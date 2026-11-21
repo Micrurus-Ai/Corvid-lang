@@ -66,7 +66,7 @@ jobs:
         run: cargo check --locked --workspace --all-targets
 
       # Enable coredumps + post-mortem backtrace capture for the
-      # workspace test step. The `cdylib_catalog_demo_filter_host_narrows_catalog`
+      # workspace test step. The `shared_library_catalog_filter_host_narrows_catalog`
       # test was crashing silently on Linux — empty stdout, empty
       # stderr, signal-killed inside the loaded cdylib's
       # `grounded_tag → grounded_echo` Grounded<String> tool
@@ -400,7 +400,7 @@ jobs:
 
   phase23-browser-ci:
     # Phase 23-F: headless-Chromium end-to-end test of the
-    # examples/wasm_browser_demo. Wasmtime parity proves WASM-as-a-
+    # examples/browser_refund_approval. Wasmtime parity proves WASM-as-a-
     # runtime works; this job proves the generated ES loader, the
     # typed host capabilities, the approve/deny path, and the
     # schema-v2 trace events all still agree after any change to
@@ -427,11 +427,11 @@ jobs:
       - name: Build wasm artifacts
         run: |
           cargo run -q -p corvid-cli -- build \
-            examples/wasm_browser_demo/src/refund_gate.cor \
+            examples/browser_refund_approval/src/refund_gate.cor \
             --target=wasm
 
       - name: Verify wasm artifact shape
-        run: bash examples/wasm_browser_demo/verify.sh
+        run: bash examples/browser_refund_approval/verify.sh
 
       - name: Set up Node 20
         uses: actions/setup-node@v4
@@ -439,13 +439,13 @@ jobs:
           node-version: '20'
 
       - name: Install Playwright + browsers
-        working-directory: examples/wasm_browser_demo/test
+        working-directory: examples/browser_refund_approval/test
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
       - name: Run browser smoke test
-        working-directory: examples/wasm_browser_demo/test
+        working-directory: examples/browser_refund_approval/test
         run: npx playwright test
 
   browser-typechecker-wasm:
@@ -676,7 +676,7 @@ jobs:
 
   phase33-moat-replay-determinism:
     # Phase 33-N (replay determinism rate benchmark). Re-executes
-    # examples/refund_bot_demo N times against mocked tools + mocked
+    # examples/offline_refund_bot N times against mocked tools + mocked
     # LLM, normalizes ts_ms / run_id / rollout_default_seed value,
     # and pairwise byte-compares. Corvid is expected to score
     # determinism_rate == 1.0; the Python / TypeScript columns are

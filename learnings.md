@@ -424,7 +424,7 @@ corvid run refund_bot.cor                     # interpreter, fully native runtim
 corvid build --target=python refund_bot.cor   # generates .py you can run with the Python runtime
 ```
 
-The interpreter path has the full AI runtime (Anthropic + OpenAI adapters, approval flow, tracing, `.env` loading, secret redaction). See the demo: `cargo run -p refund_bot_demo`.
+The interpreter path has the full AI runtime (Anthropic + OpenAI adapters, approval flow, tracing, `.env` loading, secret redaction). See the demo: `cargo run -p offline_refund_bot`.
 
 ---
 
@@ -3194,7 +3194,7 @@ is necessary but not sufficient for deterministic replay.
 ## wasm browser demo
 
 A browser demo only proves deployment if it imports the generated loader and the
-generated WASM module. `examples/wasm_browser_demo` keeps that invariant: the
+generated WASM module. `examples/browser_refund_approval` keeps that invariant: the
 source is Corvid, the artifacts come from `corvid build --target=wasm`, and the
 page supplies the typed host object that the generated `.d.ts` describes.
 
@@ -3639,7 +3639,7 @@ run-started, and run-completed events were enough to prove the approval-gated
 moat without inventing a mock provider surface that this app does not need.
 
 For LLM-backed demos, wire every CLI execution surface that can call prompts to
-the same provider runtime. `local_model_demo` exposed that `corvid run` already
+the same provider runtime. `local_model_chat` exposed that `corvid run` already
 had env mock plus provider adapters, while `corvid test` and `corvid eval` still
 used bare runtimes. Once those shared the same mock surface, the Corvid tests,
 eval harness, and one-command run all exercised the same typed program without
@@ -3653,7 +3653,7 @@ that field to `null` kept replay deterministic while the model identity stayed
 covered by tests and real-provider docs.
 
 Provider-routing replay keeps the selected model name but not the catalog-only
-model version on the substitution events. `provider_routing_demo` showed that
+model version on the substitution events. `model_provider_routing` showed that
 plain replay compiles the source with the default replay runtime, which does not
 load the demo's `corvid.toml` model catalog. The route still selects
 `openai_fast`, `ollama_local`, or `anthropic_deep`, but `model_version` must be
@@ -6954,7 +6954,7 @@ What this is NOT:
   derived actors and authorization enforcement land in the auth
   slices. Route execution is proven; identity is not yet wired.
 
-The reference application `examples/reference_app/src/main.cor` is
+The reference application `examples/orders_api/src/main.cor` is
 the continuous Phase-52 fixture: it starts here exercising these
 three shapes and grows with every subsequent slice.
 

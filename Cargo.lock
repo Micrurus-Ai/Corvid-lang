@@ -3736,7 +3736,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "refund_bot_demo"
+name = "offline_refund_bot"
 version = "0.0.1"
 dependencies = [
  "anyhow",

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/examples/_bundle_demo_common.sh"
+source "$ROOT/examples/_bundle_verification.sh"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
   expect_fail_contains "BundleRebuildMismatch" \

@@ -2713,7 +2713,7 @@ server repo_api:
 /// The Phase 52 continuous reference application, served end to end.
 ///
 /// The locked phase rule says one file grows every slice and stays a
-/// forcing function — but nothing actually SERVED `examples/reference_app`,
+/// forcing function — but nothing actually SERVED `examples/orders_api`,
 /// so it silently stopped growing at 52c and the serve x connector gap
 /// slipped through (the 52h audit's finding #7). This test is the gate
 /// that rule needs: it serves the reference app in `mock` mode and drives
@@ -2725,7 +2725,7 @@ server repo_api:
 fn the_reference_application_serves_its_connector_route() {
     let main = repo_root()
         .join("examples")
-        .join("reference_app")
+        .join("orders_api")
         .join("src")
         .join("main.cor");
     assert!(main.exists(), "missing {}", main.display());

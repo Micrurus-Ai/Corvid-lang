@@ -391,7 +391,7 @@ fn cdylib_grounded_string_return_exposes_attestation_handle() {
         // own implementation matching the Rust tool's
         // return-the-input semantics. Same architectural shape
         // as the C-host integration in
-        // `examples/cdylib_catalog_demo/host_c/host.c`.
+        // `examples/shared_library_catalog/host_c/host.c`.
         type CorvidToolFn = unsafe extern "C" fn(
             args_json: *const c_char,
             args_len: usize,

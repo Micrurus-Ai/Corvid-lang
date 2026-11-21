@@ -1,10 +1,10 @@
 # Corvid run — refund_bot deterministic re-execution
 
-This stack invokes `cargo run -p refund_bot_demo` N times and asks
+This stack invokes `cargo run -p offline_refund_bot` N times and asks
 whether the resulting JSONL traces are byte-identical after the
 documented normalization rules (see `../../README.md`).
 
-The agent under test is `examples/refund_bot_demo/src/refund_bot.cor`.
+The agent under test is `examples/offline_refund_bot/src/refund_bot.cor`.
 Every run is invoked with the same input ticket, the same mocked
 tools, and the same `MockAdapter` LLM stub.
 
@@ -41,11 +41,11 @@ python run_corvid.py --n 20 --out _summary.json
 
 The script:
 
-1. Builds `refund_bot_demo` once (cargo build).
+1. Builds `offline_refund_bot` once (cargo build).
 2. Loops N times, each iteration:
-   - Invokes `cargo run -p refund_bot_demo` (release-quiet).
+   - Invokes `cargo run -p offline_refund_bot` (release-quiet).
    - Locates the new trace file under
-     `examples/refund_bot_demo/target/trace/`.
+     `examples/offline_refund_bot/target/trace/`.
    - Loads, normalizes, stores the canonical bytes.
 3. Computes pairwise byte-identity over all N(N-1)/2 pairs.
 4. Writes `_summary.json` with the determinism rate and (if any)

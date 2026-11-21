@@ -165,7 +165,7 @@ pub fn create_fixture() -> BundleFixture {
 
     let demo_source = workspace_root()
         .join("examples")
-        .join("cdylib_catalog_demo")
+        .join("shared_library_catalog")
         .join("src")
         .join("classify.cor");
     let source_path = src_dir.join("classify.cor");
@@ -308,7 +308,7 @@ pub fn create_linked_fixture() -> LinkedBundleFixture {
     let base_source = normalize_replayable_fixture_source(&fs::read_to_string(
         workspace_root()
             .join("examples")
-            .join("cdylib_catalog_demo")
+            .join("shared_library_catalog")
             .join("src")
             .join("classify.cor"),
     )
@@ -355,7 +355,7 @@ pub fn create_lineage_chain_fixture() -> LineageChainFixture {
     let base_source = normalize_replayable_fixture_source(&fs::read_to_string(
         workspace_root()
             .join("examples")
-            .join("cdylib_catalog_demo")
+            .join("shared_library_catalog")
             .join("src")
             .join("classify.cor"),
     )

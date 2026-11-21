@@ -2785,7 +2785,7 @@ its `501` branch — which existed only to decide which shapes were
 every route the contract advertises runs.
 
 Proven live against the new reference application
-`examples/reference_app/src/main.cor` — the **continuous Phase-52
+`examples/orders_api/src/main.cor` — the **continuous Phase-52
 fixture** that every subsequent slice extends. All three shapes return
 `200` with the handler's JSON; `limit=notanumber` and a missing `limit`
 both return `400` with a precise message. Gate green: workspace check
@@ -9274,7 +9274,7 @@ Validation:
 ## 2026-05-04 - Close 42H reference app hardening
 
 - Closed the reference app hardening pass for all six reference apps:
-  `refund_bot`, `local_model_demo`, `provider_routing_demo`, `rag_qa_bot`,
+  `refund_bot`, `local_model_chat`, `model_provider_routing`, `rag_qa_bot`,
   `support_escalation_bot`, and `code_review_agent`.
 - Each app now has deterministic seed data, mock/replay/real typed surfaces,
   replay invariant coverage, adversarial fixtures with registered guarantee
@@ -9327,9 +9327,9 @@ Validation:
 
 ---
 
-## 2026-05-04 - Slice 33K provider_routing_demo
+## 2026-05-04 - Slice 33K model_provider_routing
 
-- Added `examples/provider_routing_demo` as a one-command multi-provider LLM
+- Added `examples/model_provider_routing` as a one-command multi-provider LLM
   routing demo across OpenAI, Anthropic, and Ollama.
 - Added Corvid unit and integration tests, a source eval harness, deterministic
   seed prompts, and provider-specific replay fixtures for every route.
@@ -9338,15 +9338,15 @@ Validation:
   run, test, eval, and replay the provider routing demo.
 
 Validation:
-- `cargo run -q -p corvid-cli -- build` from `examples/provider_routing_demo`
-- `cargo run -q -p corvid-cli -- run` from `examples/provider_routing_demo`
+- `cargo run -q -p corvid-cli -- build` from `examples/model_provider_routing`
+- `cargo run -q -p corvid-cli -- run` from `examples/model_provider_routing`
   with `CORVID_TEST_MOCK_LLM=1`
-- `cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/unit.cor`
-- `cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/integration.cor`
-- `cargo run -q -p corvid-cli -- eval examples/provider_routing_demo/evals/provider_routing_demo.cor`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_openai.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_ollama.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_anthropic.jsonl`
+- `cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/unit.cor`
+- `cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/integration.cor`
+- `cargo run -q -p corvid-cli -- eval examples/model_provider_routing/evals/model_provider_routing.cor`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_openai.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_ollama.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_anthropic.jsonl`
 - `cargo test -p corvid-cli --test demo_project_defaults`
 - `cargo check --workspace`
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
@@ -9354,9 +9354,9 @@ Validation:
 
 ---
 
-## 2026-05-04 - Slice 33K local_model_demo
+## 2026-05-04 - Slice 33K local_model_chat
 
-- Added `examples/local_model_demo` as a one-command local LLM demo project.
+- Added `examples/local_model_chat` as a one-command local LLM demo project.
 - Wired `corvid run`, `corvid test`, and `corvid eval` to consume the shared
   env mock/provider runtime surface so the same Corvid program can run under
   mock, replay, or real Ollama configuration.
@@ -9367,13 +9367,13 @@ Validation:
   run, test, eval, and replay the local model demo.
 
 Validation:
-- `cargo run -q -p corvid-cli -- build` from `examples/local_model_demo`
-- `cargo run -q -p corvid-cli -- run` from `examples/local_model_demo` with
+- `cargo run -q -p corvid-cli -- build` from `examples/local_model_chat`
+- `cargo run -q -p corvid-cli -- run` from `examples/local_model_chat` with
   `CORVID_TEST_MOCK_LLM=1`
-- `cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/unit.cor`
-- `cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/integration.cor`
-- `cargo run -q -p corvid-cli -- eval examples/local_model_demo/evals/local_model_demo.cor`
-- `cargo run -q -p corvid-cli -- replay examples/local_model_demo/traces/local_model_demo_mock_chat.jsonl`
+- `cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/unit.cor`
+- `cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/integration.cor`
+- `cargo run -q -p corvid-cli -- eval examples/local_model_chat/evals/local_model_chat.cor`
+- `cargo run -q -p corvid-cli -- replay examples/local_model_chat/traces/local_model_chat_mock_chat.jsonl`
 - `cargo test -p corvid-cli --test demo_project_defaults`
 - `cargo check --workspace`
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
@@ -9685,7 +9685,7 @@ Next: Phase 10 — polish. Line numbers in error output already done. Remaining 
 - **Error codes assigned** across the compiler (E0001-E0003 lex, E0051-E0054 parse, E0101 effect, E0201-E0208 type, E0301-E0302 resolve). Stable, documentable, searchable.
 - **New command**: `corvid doctor` — detects Python 3.11+, `corvid-runtime`, `anthropic` (optional), and `CORVID_MODEL`. Tells the user exactly what to install.
 - **README rewritten** for a real audience: the "what makes it different" section, the install flow (3 commands), the architecture diagram, and links to ARCHITECTURE.md / FEATURES.md / dev-log.md.
-- **Runnable demo project** at `examples/refund_bot_demo/` with a `corvid.toml`, a `.cor` source, a `tools.py` with mocked tool impls + a fake LLM adapter. `corvid build src/refund_bot.cor && python3 tools.py` prints `refund_bot decided: should_refund=True reason='...'`.
+- **Runnable demo project** at `examples/offline_refund_bot/` with a `corvid.toml`, a `.cor` source, a `tools.py` with mocked tool impls + a fake LLM adapter. `corvid build src/refund_bot.cor && python3 tools.py` prints `refund_bot decided: should_refund=True reason='...'`.
 - **Real bug caught by the demo**: codegen was emitting `TOOLS` and `PROMPTS` dicts but never calling `register_tools`/`register_prompts`. One-line fix; the integration now works end-to-end. (Good reminder: integration tests that run generated code surface bugs unit tests miss.)
 - Tests: **134 Rust + 10 Python, all green.**
 
@@ -9821,9 +9821,9 @@ Next: resume Phase 11 slice 2 (native runtime wiring). The Phase 22 work stays o
 **`corvid-cli`**
 - `cmd_run` now dispatches to `run_native`. The `python3 target/py/...` shell-out is gone.
 
-**`examples/refund_bot_demo` becomes a workspace member**
-- New `Cargo.toml` + `runner/main.rs` — registers mock `get_order` / `issue_refund` tools, `ProgrammaticApprover::always_yes`, a `MockAdapter` returning a canned `Decision`, and runs the agent with a constructed `Ticket` struct. Trace file lands under `examples/refund_bot_demo/target/trace/run-*.jsonl`.
-- README updated: the native path (`cargo run -p refund_bot_demo`) is now the primary; the Python path stays documented as legacy.
+**`examples/offline_refund_bot` becomes a workspace member**
+- New `Cargo.toml` + `runner/main.rs` — registers mock `get_order` / `issue_refund` tools, `ProgrammaticApprover::always_yes`, a `MockAdapter` returning a canned `Decision`, and runs the agent with a constructed `Ticket` struct. Trace file lands under `examples/offline_refund_bot/target/trace/run-*.jsonl`.
+- README updated: the native path (`cargo run -p offline_refund_bot`) is now the primary; the Python path stays documented as legacy.
 
 ### Bug caught honestly during the slice
 
@@ -9851,9 +9851,9 @@ All green across the workspace:
 ### Verified end-to-end
 
 ```sh
-$ cargo run -p refund_bot_demo
+$ cargo run -p offline_refund_bot
 refund_bot decided: should_refund=true reason="user reported legitimate complaint"
-trace written under examples/refund_bot_demo/target/trace
+trace written under examples/offline_refund_bot/target/trace
 ```
 
 The trace file shows the expected event sequence: `run_started → tool_call(get_order) → tool_result → llm_call → llm_result → approval_request → approval_response(approved=true) → tool_call(issue_refund) → tool_result → run_completed(ok=true)`.
@@ -9939,7 +9939,7 @@ Slice 2b pre-phase chat. Topic: HTTP client, Anthropic adapter, `.env` loading, 
 
 ### Phase 11 done
 
-`corvid run examples/refund_bot_demo/src/refund_bot.cor` (or `cargo run -p refund_bot_demo`) works without Python. Real `claude-*` and `gpt-*` calls work given the matching API key. Trace events get scrubbed of secrets. The TS/`.d.ts` analogy holds: Corvid is a standalone language with first-class provider interop, not a wrapper around any one vendor.
+`corvid run examples/offline_refund_bot/src/refund_bot.cor` (or `cargo run -p offline_refund_bot`) works without Python. Real `claude-*` and `gpt-*` calls work given the matching API key. Trace events get scrubbed of secrets. The TS/`.d.ts` analogy holds: Corvid is a standalone language with first-class provider interop, not a wrapper around any one vendor.
 
 ### Next
 
@@ -13992,8 +13992,8 @@ of the earlier bundle command surface.
 
 Shipped:
 
-- public happy-path bundles in `examples/phase22_demo/` and
-  `examples/phase22_demo_base/`
+- public happy-path bundles in `examples/sentiment_classifier_bundle/` and
+  `examples/sentiment_classifier_bundle_base/`
 - five failing sibling bundles with typed failure assertions:
   `failing_hash`, `failing_signature`, `failing_rebuild`,
   `failing_lineage`, `failing_adversarial`
@@ -14021,7 +14021,7 @@ Validation:
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
   exits 1 only on `tier_disagree.cor` and
   `native_drops_effect.cor`
-- `examples/phase22_demo/verify.sh`
+- `examples/sentiment_classifier_bundle/verify.sh`
 - every failing bundle `verify.sh`
 
 Interpretation:
@@ -14656,7 +14656,7 @@ trace readers.
 
 ## 2026-04-25 - WASM browser approval demo
 
-Closed `23-D-browser-demo` with `examples/wasm_browser_demo`. The demo compiles
+Closed `23-D-browser-demo` with `examples/browser_refund_approval`. The demo compiles
 `src/refund_gate.cor` through `corvid build --target=wasm`, imports the
 generated ES loader from the browser page, supplies typed scalar prompt/tool/
 approval host capabilities, displays the dangerous-action approval decision,
@@ -15503,7 +15503,7 @@ not phase-level rollbacks.
 
 - Phase 23 → slice 23-F-browser-ci-headless. The wasmtime parity harness
   proves the WASM module runs as a runtime; it does not prove
-  `examples/wasm_browser_demo` survives a fresh checkout under a real
+  `examples/browser_refund_approval` survives a fresh checkout under a real
   browser. The slice asks for a headless-Chromium CI matrix entry that
   loads the demo, exercises typed prompt/tool/approval host capabilities
   from JS, and asserts schema-v2 trace events. Open until the CI job is
@@ -15647,8 +15647,8 @@ Validation:
 Validation:
 - `cargo test -p corvid-codegen-wasm --lib`
 - `cargo test -p corvid-cli --test build_wasm`
-- `examples/wasm_browser_demo/verify.ps1`
-- `npx playwright test` from `examples/wasm_browser_demo/test`
+- `examples/browser_refund_approval/verify.ps1`
+- `npx playwright test` from `examples/browser_refund_approval/test`
 - `cargo test -p corvid-cli --bin corvid`
 - `cargo check --workspace`
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
@@ -15779,8 +15779,8 @@ Validation:
 
 ## 2026-05-04 - Close 33K reference demo pack
 
-- Closed the six-demo reference pack: `refund_bot`, `local_model_demo`,
-  `provider_routing_demo`, `rag_qa_bot`, `support_escalation_bot`, and
+- Closed the six-demo reference pack: `refund_bot`, `local_model_chat`,
+  `model_provider_routing`, `rag_qa_bot`, `support_escalation_bot`, and
   `code_review_agent`.
 - Confirmed every demo has `corvid.toml`, `src/main.cor`, Corvid unit and
   integration tests, eval coverage, replay traces, deterministic seed data,
@@ -15831,7 +15831,7 @@ Validation:
 
 ---
 
-## 2026-05-04 - Slice 42H-local_model_demo hardening
+## 2026-05-04 - Slice 42H-local_model_chat hardening
 
 - Added deterministic `seed/data` fixtures, a `seed/traces` replay fixture,
   and explicit mock/replay/real `LocalChatTurn` entrypoints for the local model
@@ -15844,17 +15844,17 @@ Validation:
   into `demo-verify`.
 
 Validation:
-- `cargo run -q -p corvid-cli -- build` from `examples/local_model_demo`
+- `cargo run -q -p corvid-cli -- build` from `examples/local_model_chat`
   with mock Ollama env.
-- `cargo run -q -p corvid-cli -- run` from `examples/local_model_demo`
+- `cargo run -q -p corvid-cli -- run` from `examples/local_model_chat`
   with mock Ollama env.
-- `cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/unit.cor`
-- `cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/integration.cor`
-- `cargo run -q -p corvid-cli -- test examples/local_model_demo/tests/replay_invariant.cor`
+- `cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/unit.cor`
+- `cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/integration.cor`
+- `cargo run -q -p corvid-cli -- test examples/local_model_chat/tests/replay_invariant.cor`
 - `cargo test -p corvid-cli --test demo_project_defaults`
-- `cargo run -q -p corvid-cli -- eval examples/local_model_demo/evals/local_model_demo.cor`
-- `cargo run -q -p corvid-cli -- replay examples/local_model_demo/traces/local_model_demo_mock_chat.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/local_model_demo/seed/traces/local_model_demo_mock_chat.jsonl`
+- `cargo run -q -p corvid-cli -- eval examples/local_model_chat/evals/local_model_chat.cor`
+- `cargo run -q -p corvid-cli -- replay examples/local_model_chat/traces/local_model_chat_mock_chat.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/local_model_chat/seed/traces/local_model_chat_mock_chat.jsonl`
 - `cargo check --workspace`
 - `cargo test -p corvid-cli --lib`
   (structural baseline: no library targets found in package `corvid-cli`)
@@ -15863,11 +15863,11 @@ Validation:
   Windows native linker baseline: `__imp_GetUserNameExW`)
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
   (exit 2 with the established Windows `whoami` linker signature)
-- Credential-pattern scan over `examples/local_model_demo`
+- Credential-pattern scan over `examples/local_model_chat`
 
 ---
 
-## 2026-05-04 - Slice 42H-provider_routing_demo hardening
+## 2026-05-04 - Slice 42H-model_provider_routing hardening
 
 - Added deterministic provider route seed fixtures, mirrored seed replay
   traces, and explicit mock/replay/real `RoutedChatTurn` entrypoints for the
@@ -15881,21 +15881,21 @@ Validation:
   invariant and seed replay fixtures into `demo-verify`.
 
 Validation:
-- `cargo run -q -p corvid-cli -- build` from `examples/provider_routing_demo`
+- `cargo run -q -p corvid-cli -- build` from `examples/model_provider_routing`
   with mock routing env.
-- `cargo run -q -p corvid-cli -- run` from `examples/provider_routing_demo`
+- `cargo run -q -p corvid-cli -- run` from `examples/model_provider_routing`
   with mock routing env.
-- `cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/unit.cor`
-- `cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/integration.cor`
-- `cargo run -q -p corvid-cli -- test examples/provider_routing_demo/tests/replay_invariant.cor`
+- `cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/unit.cor`
+- `cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/integration.cor`
+- `cargo run -q -p corvid-cli -- test examples/model_provider_routing/tests/replay_invariant.cor`
 - `cargo test -p corvid-cli --test demo_project_defaults`
-- `cargo run -q -p corvid-cli -- eval examples/provider_routing_demo/evals/provider_routing_demo.cor`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_openai.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_ollama.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/traces/provider_routing_demo_anthropic.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_openai.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_ollama.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/provider_routing_demo/seed/traces/provider_routing_demo_anthropic.jsonl`
+- `cargo run -q -p corvid-cli -- eval examples/model_provider_routing/evals/model_provider_routing.cor`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_openai.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_ollama.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/traces/model_provider_routing_anthropic.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_openai.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_ollama.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_anthropic.jsonl`
 - `cargo check --workspace`
 - `cargo test -p corvid-cli --lib`
   (structural baseline: no library targets found in package `corvid-cli`)
@@ -15904,7 +15904,7 @@ Validation:
   Windows native linker baseline: `__imp_GetUserNameExW`)
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
   (exit 2 with the established Windows `whoami` linker signature)
-- Credential-pattern scan over `examples/provider_routing_demo`
+- Credential-pattern scan over `examples/model_provider_routing`
 
 ---
 

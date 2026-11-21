@@ -15,7 +15,7 @@ receipt_verify_key_path = "keys/verify.hex"
 bundle_id = "failing-hash"
 [[lineage.predecessors]]
 name = "base"
-path = "../phase22_demo_base"
+path = "../sentiment_classifier_bundle_base"
 relation = "parent"
 [[traces]]
 name = "safe"

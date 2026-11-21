@@ -902,7 +902,7 @@ server imports:
 **Contract Closure** keeps the advertised surface and the runtime from ever drifting: before `corvid serve` binds a listener it asserts a runtime execution path exists for every route the contract advertises. A route it cannot yet serve is a startup error (`E5204`), never a silent runtime `501`. That mechanism carried the runtime to completion — route execution, streaming, uploads, pagination, and now **authorization enforcement** all serve. A `requires authenticated|role|permission` route resolves the caller's session to a verified typed `actor` and enforces tenant + role + permission (and CSRF double-submit on mutations) *before* the handler or any effect runs; an unauthenticated request is a `401` and an under-privileged one a `403`.
 
 ```bash
-corvid serve examples/reference_app/src/main.cor   # path/query/body/stream/upload/page routes all execute
+corvid serve examples/orders_api/src/main.cor   # path/query/body/stream/upload/page routes all execute
 corvid serve secure_app.cor                        # STARTS — a `requires authenticated` route now serves
 curl -i secure_app/secret                          # 401: the session is resolved and enforced before the handler
 ```
@@ -1096,7 +1096,7 @@ Python runtime pieces are only needed when using the Python backend. Native and 
 cargo check --workspace
 cargo test --workspace
 cargo run -q -p corvid-cli -- tour --list
-cargo run -q -p corvid-cli -- check examples/refund_bot_demo/refund.cor
+cargo run -q -p corvid-cli -- check examples/offline_refund_bot/refund.cor
 ```
 
 If `cargo fmt --check` fails because `cargo-fmt` is not installed, install the Rust formatter for the active toolchain before treating formatting as validated.

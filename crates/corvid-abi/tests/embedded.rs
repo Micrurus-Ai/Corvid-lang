@@ -22,7 +22,7 @@ fn emit_catalog_descriptor() -> corvid_abi::CorvidAbi {
         &bundle.ir,
         &bundle.registry,
         &corvid_abi::EmitOptions {
-            source_path: "examples/cdylib_catalog_demo/src/classify.cor",
+            source_path: "examples/shared_library_catalog/src/classify.cor",
             source_text: SOURCE,
             compiler_version: "0.6.0-phase22",
             generated_at: FIXED_GENERATED_AT,

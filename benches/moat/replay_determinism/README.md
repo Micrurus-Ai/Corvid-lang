@@ -67,7 +67,7 @@ the determinism rate drops. That's the signal we want.
 runs/
 ├── corvid/
 │   ├── README.md         — what this stack runs
-│   └── run_corvid.py     — invokes `cargo run -p refund_bot_demo` N times
+│   └── run_corvid.py     — invokes `cargo run -p offline_refund_bot` N times
 ├── python/
 │   └── README.md         — bounty-open: idiomatic LangChain equivalent wanted
 └── typescript/
@@ -149,7 +149,7 @@ particular config), the published numbers update accordingly.
 
 Initial commit ships:
 
-- Corvid run with N=20 against `examples/refund_bot_demo`.
+- Corvid run with N=20 against `examples/offline_refund_bot`.
 - Python and TypeScript slots stubbed with bounty-open READMEs.
 - Drift-gated CI job over the Corvid column.
 

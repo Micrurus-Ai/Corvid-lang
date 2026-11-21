@@ -33,7 +33,7 @@ examples/**/*.lib -text
 examples/**/*.dylib -text
 examples/**/verify.sh        text eol=lf
 examples/**/corvid-bundle.toml text eol=lf
-examples/_bundle_demo_common.sh text eol=lf
+examples/_bundle_verification.sh text eol=lf
 
 # Lock LF on Corvid source files and recorded traces. Prompt
 # templates inside a `.cor` source are rendered verbatim into the
