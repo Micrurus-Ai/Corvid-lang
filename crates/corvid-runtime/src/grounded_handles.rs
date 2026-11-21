@@ -22,7 +22,7 @@ pub struct GroundedAttestation {
 impl GroundedAttestation {
     pub fn source_names(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for entry in &self.provenance.entries {
+        for entry in self.provenance.walk() {
             if !matches!(entry.kind, crate::provenance::ProvenanceKind::Retrieval) {
                 continue;
             }

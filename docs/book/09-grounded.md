@@ -91,6 +91,8 @@ agent main() -> Grounded<String>:
 
 Adding a `Grounded<String>` and a `String` in either order runs in the interpreter so the combined value retains its provenance. Automatic execution selects that tier even when you supply a native tool library. A forced native run or build reports the unsupported concatenation.
 
+When a host calls `corvid_grounded_sources` on a handle with derived provenance, it receives retrieval names from the operands in left-to-right order. For example, if the left operand came from `catalog` and the right came from both `catalog` and `inventory`, the result lists `catalog` and `inventory` once each.
+
 ## Strict mode: `@grounded_pure`
 
 By default, passing a `Grounded<String>` into a plain `String` slot

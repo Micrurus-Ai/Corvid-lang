@@ -246,3 +246,41 @@ pub unsafe extern "C" fn corvid_grounded_capture_string_handle(value: CorvidStri
 pub extern "C" fn corvid_grounded_capture_struct_handle(value: i64) -> u64 {
     grounded_handles::register_handle_for_pointer(value as usize)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grounded_handles::{
+        make_attestation, register_handle_for_last_scalar, release_handle,
+        set_last_scalar_attestation,
+    };
+    use crate::provenance::ProvenanceChain;
+
+    #[test]
+    fn derived_handle_reports_nested_retrievals_in_operand_order() {
+        let first = ProvenanceChain::with_retrieval("catalog", 1);
+        let mut second = ProvenanceChain::with_retrieval("inventory", 2);
+        second.add_prompt_transform("summarize", 3);
+        let nested = ProvenanceChain::derived("add", vec![first.clone(), second], 0);
+        let chain = ProvenanceChain::derived("add", vec![ProvenanceChain::new(), nested, first], 0);
+        assert!(chain.has_retrieval());
+        assert!(chain.has_source("inventory"));
+        assert!(!chain.has_source("absent"));
+        set_last_scalar_attestation(make_attestation(chain, 0.75));
+        let handle = register_handle_for_last_scalar();
+        let mut names = [std::ptr::null(); 2];
+        // SAFETY: the output array has room for both pointers, which the bridge
+        // keeps valid until the next transient-string call on this thread.
+        unsafe {
+            assert_eq!(
+                corvid_grounded_sources(handle, names.as_mut_ptr(), names.len()),
+                2
+            );
+            assert_eq!(
+                names.map(|name| CStr::from_ptr(name).to_bytes()),
+                [b"catalog".as_slice(), b"inventory"]
+            );
+        }
+        assert!(release_handle(handle));
+    }
+}
