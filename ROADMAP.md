@@ -104,6 +104,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [ ] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
   - [x] The integrated Linux checkout passed the locked workspace library and integration suite in a clean build directory (194 test groups, 3,225 passed, zero failed, seven ignored). This run covers the integrated source snapshot, including the imported-function purity regression.
   - [x] Reconciled the [build guide](docs/book/16-building.md) with CLI target names and flags. A fresh Windows project returned 42 on both interpreter and native runs and produced the documented Python, Wasm, native, shared-library and static-library artifacts.
+  - [x] Verified source and JSON migration checks through the CLI. Split-line exports migrate mechanically, including on CRLF files. Legacy model and cache calls are reported for manual review. Comments and string literals retain their original content. See the [migration guide](docs/meta/upgrade-migrations.md).
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.
