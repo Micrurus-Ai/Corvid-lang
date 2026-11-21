@@ -71,7 +71,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - The default CLI passed a function directly into a prompt, validated batched named arguments and returned matching call IDs. A replacement job worker resumed the saved result and finished with one tool charge. All five local model-provider integration tests passed.
 - [x] A04. Build retrieval with document ingestion, embeddings, indexing, queries and source references using the standard library.
   - Separate CLI runs verified that embedding and SQLite failures preserve the previous document. A served route returned the replacement passage with its source, character offsets and provenance key. Lexical search ranked all 141 matching chunks before applying the result limit.
-- [ ] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
+- [x] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
+  - A new project sent a confined PNG to two local provider protocols and received a typed caption. Invalid input and a path outside the root failed before model dispatch.
+  - A headless browser clicked, read the new text, captured the page for a prompt, closed and reopened with fresh state. Direct navigation and an HTTP redirect to a second origin failed without contacting the destination.
 - [ ] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.
 
 **5. Browser applications**

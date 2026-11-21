@@ -21,6 +21,12 @@ use corvid_ir::{IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrStmt};
 /// stdlib tool without updating this list fails CI.
 pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     // std/io
+    "browser_open_scoped",
+    "browser_click",
+    "browser_read_text",
+    "browser_capture",
+    "browser_close",
+    "io_read_image",
     "io_read_text",
     "io_write_text",
     "io_list_dir",

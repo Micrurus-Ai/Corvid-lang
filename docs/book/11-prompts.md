@@ -313,3 +313,40 @@ agent main() -> String:
 Select a Chat Completions provider with function calling enabled and run the file with `corvid run`. The provider sees a function named `calculate` with integer arguments named `left` and `right`. Corvid checks every call in a batch before invoking the supplied functions, then returns each result with its original call ID. The prompt returns the provider's final text. A conversation allows up to eight function calls and reserves a final model turn.
 
 Durable jobs use capture-free functions for this form. Once a worker checkpoints a tool result, its replacement can reuse that result when continuing the conversation. If your function changes an external system, give that operation an idempotency key to handle interruption between the external write and the checkpoint.
+
+### Passing an image to a prompt
+
+```corvid
+import "./std/io" use PromptImage, io_read_image
+
+type Caption:
+    label: String
+
+prompt describe(photo: PromptImage) -> Caption:
+    "Describe {photo} in one sentence."
+
+agent caption_file(path: String) -> Result<String, String>:
+    photo = io_read_image(path)?
+    caption = describe(photo)
+    return Ok(caption.label)
+```
+
+Configure the project's I/O root and select a model that accepts images. Paths passed to `io_read_image` resolve under that root. Corvid checks the file signature for PNG or JPEG and accepts up to 8 MiB per file. The provider receives the image as a media part in the user message.
+
+### Reading a page selected by the user
+
+```corvid
+import "./std/browser" use browser_open_scoped, browser_click, browser_read_text, browser_capture, browser_close
+
+agent main() -> String:
+    browser_open_scoped(800, 600)
+    browser_click("Update")
+    status = browser_read_text("#status")
+    browser_capture()
+    browser_close()
+    return status
+```
+
+Set `CORVID_BROWSER_URL` to the page to open, then execute the program with `corvid run`. The example expects a button named Update and a status element with ID `status`. The host supplies Python with Playwright and a Chromium browser. Select the Python executable with `CORVID_BROWSER_PYTHON` and the Chromium channel with `CORVID_BROWSER_CHANNEL` (Edge by default on Windows).
+
+The viewport width and height each accept 100 to 4096 pixels. Clicking uses the button's accessible name. Reading uses a CSS selector. The scoped session blocks cross-origin HTTP requests, HTTP redirects and WebSockets. `browser_capture()` returns the PNG path. Set `CORVID_BROWSER_EVIDENCE_DIR` inside the I/O root to pass captures to `io_read_image`. Closing the session discards its browser context. Opening another starts with fresh page state.

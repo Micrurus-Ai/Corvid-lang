@@ -462,6 +462,18 @@ impl Runtime {
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
         match name {
+            "io_read_image" => {
+                let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
+                    tool: name.into(), message: "expected one String argument (path)".into(),
+                })?;
+                let Some(root) = self.io_policy.root_path() else {
+                    return Ok(stdlib_result_err("configure [io] root before reading an image"));
+                };
+                match crate::llm::PromptImage::read(&root.join(path), root).await {
+                    Ok(image) => Ok(stdlib_result_ok(serde_json::json!(image))),
+                    Err(e) => Ok(stdlib_result_err(e)),
+                }
+            }
             "io_read_text" => {
                 let path_arg = args
                     .first()
@@ -1922,7 +1934,7 @@ fn stdlib_io_effect_envelope(
 /// `tools.call` path. Prevents the dispatch interception from
 /// stealing user tool names.
 fn is_stdlib_io_tool(name: &str) -> bool {
-    matches!(name, "io_read_text" | "io_write_text" | "io_list_dir")
+    matches!(name, "io_read_image" | "io_read_text" | "io_write_text" | "io_list_dir")
 }
 
 /// Slice 33S2a: exact-match gate for the stdlib HTTP tools.

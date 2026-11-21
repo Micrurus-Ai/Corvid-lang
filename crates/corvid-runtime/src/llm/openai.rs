@@ -186,7 +186,7 @@ pub(super) fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
         Value::Array(
             req.messages
                 .iter()
-                .map(|m| json!({"role": m.role, "content": m.content}))
+                .map(message_json)
                 .collect(),
         )
     };
@@ -290,6 +290,15 @@ pub(crate) fn extract_usage(parsed: &Value) -> TokenUsage {
     }
 }
 
+fn message_json(m: &crate::llm::LlmMessage) -> serde_json::Value {
+    if m.images.is_empty() { return json!({"role":m.role,"content":m.content}); }
+    let mut parts = vec![json!({"type":"text","text":m.content})];
+    parts.extend(m.images.iter().map(|image| json!({"type":"image_url","image_url":{
+        "url":format!("data:{};base64,{}", image.media_type, image.data_base64)
+    }})));
+    json!({"role":m.role,"content":parts})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,10 +329,12 @@ mod tests {
             sampling: Default::default(),
             messages: vec![
                 crate::llm::LlmMessage {
+                    images: Vec::new(),
                     role: "system".into(),
                     content: "Be terse.".into(),
                 },
                 crate::llm::LlmMessage {
+                    images: Vec::new(),
                     role: "user".into(),
                     content: "hi".into(),
                 },

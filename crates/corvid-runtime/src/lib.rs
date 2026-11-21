@@ -63,6 +63,7 @@ pub mod ffi_bridge;
 pub mod grounded_handles;
 pub mod human;
 pub mod http;
+pub mod browser;
 pub mod io;
 pub mod json;
 pub mod jwt_verify;

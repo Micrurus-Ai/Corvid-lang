@@ -11,6 +11,11 @@ public type FileReadEnvelope:
     bytes: Int
     effect_meta: EffectEnvelope
 
+# Image bytes carried by a prompt's user message.
+public type PromptImage:
+    media_type: String
+    data_base64: String
+
 public type FileWriteEnvelope:
     path_value: String
     bytes: Int
@@ -82,3 +87,5 @@ public effect io_list:
 public tool io_read_text(path: String) -> Result<FileReadEnvelope, String> uses io_read
 public tool io_write_text(path: String, content: String) -> Result<FileWriteEnvelope, String> uses io_write
 public tool io_list_dir(path: String) -> Result<List<DirectoryEntryEnvelope>, String> uses io_list
+
+public tool io_read_image(path: String) -> Result<PromptImage, String> uses io_read

@@ -352,6 +352,7 @@ fn run_via_interpreter_tier(
     // env override takes precedence over the corvid.toml value —
     // matches the existing env-override pattern for CORVID_MODEL.
     builder = builder.io_policy(load_io_tool_policy(path));
+    builder = corvid_runtime::browser::with_browser_tools(builder);
 
     // Slice 33S2b: install the [http] allow policy parsed from
     // corvid.toml (33S0) onto the runtime so the executing

@@ -8054,3 +8054,7 @@ Declare a prompt parameter such as `calculate: (Int, Int) -> Int` and pass a fun
 ### Updating a searchable document
 
 Import `rag_ingest`, `rag_search` and `RagChunkEnvelope` from `"./std/rag"`. Call `rag_ingest("index.sqlite", "guide", "guide.txt", text, 800)` whenever the guide changes. Reusing the document ID replaces its passages together, so you can retry a failed update. To retrieve up to three passages, call `rag_search("index.sqlite", question, 3)`. Each hit includes the original text, source and character offsets for displaying a citation. A server route can open the same index and use the project's configured embedder.
+
+### Working with images and browser sessions
+
+Use `io_read_image(path)?` from `./std/io` to get a `PromptImage`. Pass it as a typed prompt argument. In a local CLI program, `browser_open_scoped(width, height)` opens the host-selected start page. Use `browser_click(button_name)`, `browser_read_text(selector)` and `browser_capture()` to interact with it. Finish with `browser_close()`. The image prompt and browser examples in `docs/book/11-prompts.md` show the imports, host setup and return values.

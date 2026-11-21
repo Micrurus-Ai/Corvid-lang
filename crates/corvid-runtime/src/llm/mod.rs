@@ -72,7 +72,11 @@ impl SamplingParams {
 pub struct LlmMessage {
     pub role: String,
     pub content: String,
+    pub images: Vec<PromptImage>,
 }
+
+mod image;
+pub use image::PromptImage;
 
 /// Request handed to an adapter.
 #[derive(Debug, Clone)]
