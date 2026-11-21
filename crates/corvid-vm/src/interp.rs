@@ -11,6 +11,8 @@
 mod effect_compose;
 #[path = "interp/expr.rs"]
 mod expr;
+#[path = "interp/form.rs"]
+mod form;
 #[path = "interp/grounding.rs"]
 mod grounding;
 #[path = "interp/prompt/mod.rs"]
@@ -557,7 +559,7 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
                 Ok(ExprFlow::Value(eval_builtin_method(
-                    *kind, recv, arg_vals, expr.span,
+                    *kind, recv, arg_vals, expr.span, &self.types_by_id,
                 )?))
             }
             IrExprKind::Literal(lit) => Ok(ExprFlow::Value(eval_literal(lit))),

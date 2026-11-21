@@ -509,6 +509,7 @@ impl<'a> Lowerer<'a> {
                 .collect(),
             query_ty: r.query_ty.as_ref().map(|t| self.type_ref_to_type(t)),
             body_ty: r.body_ty.as_ref().map(|t| self.type_ref_to_type(t)),
+            form_encoded: r.form_encoded,
             response_kind: r.response.kind,
             response_ty: self.type_ref_to_type(&r.response.ty),
             effect_names: r
@@ -1809,6 +1810,13 @@ impl<'a> Lowerer<'a> {
                     return IrExprKind::PageNew {
                         items: Box::new(items),
                         next_cursor: Box::new(next_cursor),
+                    };
+                }
+                Some(Binding::BuiltIn(BuiltIn::FormFor)) if args.len() == 3 => {
+                    return IrExprKind::BuiltinMethod {
+                        kind: corvid_types::BuiltinMethodKind::RouteForm,
+                        receiver: Box::new(self.lower_expr(&args[0])),
+                        args: args[1..].iter().map(|arg| self.lower_expr(arg)).collect(),
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::Range)) => {

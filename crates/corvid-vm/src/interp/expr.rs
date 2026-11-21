@@ -455,6 +455,7 @@ pub(super) fn eval_builtin_method(
     recv: Value,
     mut args: Vec<Value>,
     span: Span,
+    types: &std::collections::HashMap<corvid_resolve::DefId, &corvid_ir::IrType>,
 ) -> Result<Value, InterpError> {
     use corvid_types::BuiltinMethodKind::*;
 
@@ -730,6 +731,11 @@ pub(super) fn eval_builtin_method(
             ),
             span,
         )),
+        RouteForm => {
+            let target = want_string(&recv, span)?;
+            let label = want_string(&args[1], span)?;
+            super::form::render(&target, &args[0], &label, types, span)
+        }
         RangeIntList => {
             let start = want_int(&recv, span)?;
             let end = want_int(&args[0], span)?;

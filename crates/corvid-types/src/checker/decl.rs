@@ -715,6 +715,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(body_ty) = &route.body_ty {
             let ty = self.type_ref_to_type(body_ty);
+            if route.form_encoded {
+                self.check_form_record(&ty, body_ty.span());
+            }
             self.bind_route_local_by_name(&route.body, "body", ty);
         }
 

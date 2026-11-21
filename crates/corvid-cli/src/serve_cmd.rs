@@ -428,6 +428,7 @@ pub(crate) fn cmd_serve(
                 .map(|a| a.params.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default();
             let meta = Arc::new(RouteMeta {
+                form_encoded: route.form_encoded,
                 response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
                 path_params: route
@@ -678,6 +679,7 @@ fn declared_identity(source: &str) -> Option<corvid_ast::IdentityDecl> {
 /// Per-route metadata captured for the general request handler
 /// (slice 52a).
 struct RouteMeta {
+    form_encoded: bool,
     response_kind: RouteResponseKind,
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
@@ -1163,7 +1165,7 @@ async fn run_route(
 
     // Query string → the declared query struct value.
     let query_value = match &meta.query_ty {
-        Some(ty) => match query_string_to_value(&raw_query, ty, &types_by_id) {
+        Some(ty) => match urlencoded_record(&raw_query, ty, &types_by_id, "query") {
             Ok(v) => Some(v),
             Err(e) => return bad_request("invalid_query", &e),
         },
@@ -1174,6 +1176,27 @@ async fn run_route(
     // is parsed from the multipart request (slice 52c-2); every other
     // body type is typed JSON.
     let body_value = match &meta.body_ty {
+        Some(ty) if meta.form_encoded => {
+            let media_type = headers.get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split(';').next())
+                .unwrap_or("").trim();
+            if !media_type.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+                return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(serde_json::json!({
+                    "error": "unsupported_media_type", "detail": "expected application/x-www-form-urlencoded"
+                }))).into_response();
+            }
+            let RouteRequestBody::Buffered(bytes) = body else {
+                return internal_error("request_body_mode_mismatch", "form requires a buffered body");
+            };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                return bad_request("invalid_form", "form body must be UTF-8");
+            };
+            match urlencoded_record(text, ty, &types_by_id, "form") {
+                Ok(value) => Some(value),
+                Err(err) => return bad_request("invalid_form", &err),
+            }
+        }
         Some(Type::Upload(_)) => {
             let Some(policy) = &meta.upload_policy else {
                 return internal_error(
@@ -1385,20 +1408,23 @@ async fn parse_multipart_upload(
 
 /// Parse a URL query string (`a=1&b=x`) into the declared query struct
 /// value, coercing each field from its string form (slice 52a).
-fn query_string_to_value(
-    query: &str,
+fn urlencoded_record(
+    encoded: &str,
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
+    source: &str,
 ) -> Result<Value, String> {
-    let Type::Struct(def_id) = ty else {
-        return Err("query type must be a struct".to_string());
+    let def_id = match ty {
+        Type::Struct(id) => id,
+        Type::ImportedStruct(record) => &record.def_id,
+        _ => return Err(format!("{source} type must be a struct")),
     };
     let ir_type = types_by_id
         .get(def_id)
         .copied()
-        .ok_or_else(|| "unknown query struct type".to_string())?;
+        .ok_or_else(|| format!("unknown {source} struct type"))?;
     let mut pairs = HashMap::new();
-    for pair in query.split('&').filter(|s| !s.is_empty()) {
+    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         pairs.insert(urldecode(key)?, urldecode(value)?);
     }
@@ -1407,10 +1433,10 @@ fn query_string_to_value(
         let raw = pairs
             .get(&field.name)
             .cloned()
-            .ok_or_else(|| format!("missing query param `{}`", field.name))?;
+            .ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
         let value = coerce_str_to_value(&raw, &field.ty)?;
         corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
-            .map_err(|error| error.to_string())?;
+            .map_err(|err| err.to_string())?;
         fields.push((field.name.clone(), value));
     }
     Ok(Value::Struct(corvid_driver::StructValue::new(
@@ -2379,7 +2405,7 @@ mod tests {
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
         let value =
-            query_string_to_value("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id)
+            urlencoded_record("limit=10&q=widgets", &Type::Struct(DefId(9)), &types_by_id, "query")
                 .expect("coerces");
         let Value::Struct(s) = value else {
             panic!("expected struct")
@@ -2404,6 +2430,6 @@ mod tests {
         };
         let mut types_by_id: HashMap<DefId, &IrType> = HashMap::new();
         types_by_id.insert(DefId(9), &ty);
-        assert!(query_string_to_value("", &Type::Struct(DefId(9)), &types_by_id).is_err());
+        assert!(urlencoded_record("", &Type::Struct(DefId(9)), &types_by_id, "query").is_err());
     }
 }

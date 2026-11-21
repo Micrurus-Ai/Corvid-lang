@@ -169,6 +169,7 @@ pub enum TypeErrorKind {
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
+    InvalidForm { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
     /// 52g): a non-absolute `base_url`, a malformed reliability value, a
@@ -623,6 +624,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { path, message } => {
                 format!("invalid approval policy on route `{path}`: {message}")
             }
+            Self::InvalidForm { message } => format!("invalid form: {message}"),
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
             }
@@ -1199,6 +1201,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { .. } => Some(
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
+            Self::InvalidForm { .. } => None,
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),

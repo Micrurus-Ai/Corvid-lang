@@ -302,6 +302,8 @@ pub struct ContractRoute {
     pub query_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_media_type: Option<String>,
     /// Explicit multipart policy for a direct `Upload<Format>` route
     /// body. Its maximum is source-declared and enforced by the live
     /// boundary; it is never supplied by a runtime constant.
@@ -876,6 +878,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .collect(),
         query_type: r.query_ty.as_ref().map(type_ref_name),
         body_type: r.body_ty.as_ref().map(type_ref_name),
+        request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
         upload: r
             .body_ty
             .as_ref()

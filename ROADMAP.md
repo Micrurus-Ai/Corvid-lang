@@ -81,7 +81,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
 - [x] F01. Render reusable views with state, events, forms and accessible controls. Exercise them in a browser through keyboard and pointer input.
   - The packaged page and its compiled handlers passed pointer, keyboard and text-input checks in Edge.
-- [ ] F02. Link frontend actions to typed backend handlers. Changing a shared record must identify affected callers at compile time.
+- [x] F02. Link frontend actions to typed backend handlers. Changing a shared record must identify affected callers at compile time.
+  - Submitted GET and POST forms in Edge using a shared imported record, followed its OpenAPI reference, and verified its field names. A renamed field failed checking. Malformed input, a failed refinement and JSON sent to the form route all preserved the previous saved value.
 - [ ] F03. Deliver streamed AI results in the UI with loading, cancellation, error and reconnect behavior. Verify navigation, asset builds and a production frontend bundle.
 
 **6. Interoperability, performance and distribution**

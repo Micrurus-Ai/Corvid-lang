@@ -204,6 +204,7 @@ impl<'a> Parser<'a> {
         let path_params = parse_route_path_params(&path, path_span);
         let mut query_ty = None;
         let mut body_ty = None;
+        let mut form_encoded = false;
         loop {
             if self.peek_ident_is("query") {
                 self.bump();
@@ -219,13 +220,14 @@ impl<'a> Parser<'a> {
                 query_ty = Some(self.parse_type_ref()?);
                 continue;
             }
-            if self.peek_ident_is("body") {
+            if self.peek_ident_is("body") || self.peek_ident_is("form") {
+                form_encoded = self.peek_ident_is("form");
                 self.bump();
                 if body_ty.is_some() {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: "duplicate `body` route clause".into(),
-                            expected: "at most one `body Type` clause".into(),
+                            expected: "one request payload, `body Type` or `form Type`".into(),
                         },
                         span: self.peek_span(),
                     });
@@ -275,6 +277,7 @@ impl<'a> Parser<'a> {
             path_params,
             query_ty,
             body_ty,
+            form_encoded,
             upload,
             approval,
             response,

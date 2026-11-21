@@ -71,6 +71,8 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             // upload uses the route's explicit policy as its schema.
             let (media_type, schema) = if let Some(upload) = &route.upload {
                 ("multipart/form-data", schema_for_upload(upload))
+            } else if let Some(media_type) = route.request_media_type.as_deref() {
+                (media_type, schema_for_type_name(body))
             } else if body_type_has_upload(body, contract) {
                 ("multipart/form-data", schema_for_type_name(body))
             } else {
@@ -494,6 +496,7 @@ mod tests {
                 body_type: Some("RefundRequest".into()),
                 upload: None,
                 approval: None,
+                request_media_type: None,
                 response_type: "Answer".into(),
                 response_media_type: None,
                 requires: vec!["issue_refund".into()],
@@ -602,6 +605,7 @@ mod tests {
             body_type: Some("DocSubmission".into()),
             upload: None,
             approval: None,
+            request_media_type: None,
             response_type: "Answer".into(),
             response_media_type: None,
             requires: vec![],
@@ -636,6 +640,7 @@ mod tests {
                 retention_days: None,
             }),
             approval: None,
+            request_media_type: None,
             response_type: "Answer".into(),
             response_media_type: None,
             requires: vec![],
@@ -677,6 +682,7 @@ mod tests {
             body_type: None,
             upload: None,
             approval: None,
+            request_media_type: None,
             response_type: "Page<Item>".into(),
             response_media_type: None,
             requires: vec![],
@@ -751,6 +757,7 @@ mod tests {
             body_type: None,
             upload: None,
             approval: None,
+            request_media_type: None,
             response_type: "Answer".into(),
             response_media_type: None,
             requires: vec![],

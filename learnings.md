@@ -8062,3 +8062,7 @@ Use `io_read_image(path)?` from `./std/io` to get a `PromptImage`. Pass it as a 
 ### Testing a prompt offline
 
 Declare a `mock` with the prompt's name, parameters and return type to give ordinary `test` declarations a predictable answer. For a recorded interaction, use `test uses_recording from_trace "recording.jsonl":` and call the application in the test body. Corvid reads the recording relative to the source file. A recorded function call includes the chosen function, its arguments and the result returned to the model. Each repetition of an assertion starts with its own replay cursor. The testing chapter shows how to record and run both kinds of tests without credentials.
+
+### Binding a browser form to its handler
+
+Use `form_for("GET /search", request, "Search")` for a route declared with `query Search`, or `form_for("POST /save", request, "Save")` for a route declared with `form Search`. Both forms derive their field names from the record and return an HTML string. Wrap it in `View(...)` to compose it with other controls. The GET handler reads `query`. The POST handler reads `body`. The server converts the submitted strings and checks field refinements before running the handler. The example in `docs/book/19-browser-views.md` uses one imported record for both forms.

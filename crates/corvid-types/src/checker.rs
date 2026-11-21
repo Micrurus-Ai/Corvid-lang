@@ -360,6 +360,7 @@ fn typecheck_with_everything(
 }
 
 struct Checker<'a> {
+    file: &'a File,
     symbols: &'a SymbolTable,
     bindings: &'a HashMap<Span, Binding>,
     types: HashMap<Span, Type>,
@@ -707,6 +708,7 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             tools_by_id: tools,
+            file,
             operations_by_id: operations,
             prompts_by_id: prompts,
             agents_by_id: agents,
@@ -871,6 +873,7 @@ mod case;
 mod decl;
 mod decl_eval;
 mod decl_extern_c;
+mod form;
 mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;

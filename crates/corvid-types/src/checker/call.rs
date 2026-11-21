@@ -476,6 +476,7 @@ impl<'a> Checker<'a> {
                 };
                 Type::Option(Box::new(final_inner_ty))
             }
+            BuiltIn::FormFor => self.check_form_for(name, args),
             BuiltIn::Range => {
                 if args.len() != 2 {
                     self.errors.push(TypeError::new(

@@ -384,6 +384,8 @@ pub struct HttpRouteDecl {
     pub query_ty: Option<TypeRef>,
     #[serde(default)]
     pub body_ty: Option<TypeRef>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub form_encoded: bool,
     /// Explicit multipart boundary policy for a direct
     /// `body Upload<Format>` route. Upload routes must declare this
     /// policy; the runtime never invents a hidden size limit.

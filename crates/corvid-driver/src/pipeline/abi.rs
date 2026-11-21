@@ -118,6 +118,10 @@ pub fn compile_to_application_contract_with_config(
         .collect::<Vec<_>>();
     let effect_registry =
         corvid_types::EffectRegistry::from_decls_with_config(&effect_decls, config);
+    let mut file = file;
+    if let Some(graph) = &outcome.result.modules {
+        super::contract_types::include_exchange_types(&mut file, graph, &outcome.result.schema_imports);
+    }
     Ok(corvid_abi::app_contract::emit_application_contract(
         &file,
         &resolved,

@@ -146,6 +146,7 @@ pub struct IrRoute {
     pub query_ty: Option<Type>,
     /// Resolved type of the `body` binding, when the route declares one.
     pub body_ty: Option<Type>,
+    pub form_encoded: bool,
     pub response_kind: RouteResponseKind,
     pub response_ty: Type,
     /// Names of the effects the route's handler declares (`uses ...`).

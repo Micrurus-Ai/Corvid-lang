@@ -251,6 +251,8 @@ pub enum BuiltinMethodKind {
     /// through the BuiltinMethod IR with `start` as the receiver so
     /// no new IR variant is needed.
     RangeIntList,
+    /// `form_for(target: String, initial: Record, submit_label: String) -> String`
+    RouteForm,
 
     // ----- HTTP-boundary uploads (slice 52c-2) --------------------
     //

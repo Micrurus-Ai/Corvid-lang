@@ -3158,7 +3158,7 @@ fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
 
     let proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
-    let port = TcpListener::bind(("127.0.0.1", 0))
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
         .unwrap()
         .local_addr()
         .unwrap()
@@ -3281,7 +3281,7 @@ fn sigterm_drains_an_inflight_route_before_exiting() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("main.cor");
     std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
-    let port = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
     let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
         .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
     let mut guard = ServedApp(child);
@@ -3351,4 +3351,77 @@ server app:
     let events: Vec<serde_json::Value> = log.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
     assert!(events.iter().any(|e| e["event"] == "http_request" && e["method"] == "GET" && e["route"] == "/configuration/:id" && e["status"] == 200 && e["elapsed_ms"].is_u64()), "{log}");
     assert!(events.iter().any(|e| e["status"] == 404 && e["route"].is_null()), "{log}");
+}
+
+#[tokio::test]
+async fn serve_validates_an_imported_form_record_and_advertises_its_schema() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("filter.cor"),
+        "public type Filter:
+    term: String
+    limit: Int where between(1, 5)
+",
+    )
+    .unwrap();
+    let source = project.path().join("main.cor");
+    std::fs::write(
+        &source,
+        r#"import "./filter" use Filter as Query
+server forms:
+    route POST "/apply" form Query -> html:
+        return body.term
+"#,
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let child = Command::new(corvid_bin())
+        .args(["serve"])
+        .arg(&source)
+        .args(["--listen", &format!("127.0.0.1:{port}")])
+        .current_dir(project.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{port}");
+    let spec: serde_json::Value = client
+        .get(format!("{base}/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let media = "application/x-www-form-urlencoded";
+    let reference = spec["paths"]["/apply"]["post"]["requestBody"]["content"][media]["schema"]
+        ["$ref"]
+        .as_str()
+        .unwrap();
+    let fields = &spec.pointer(reference.strip_prefix('#').unwrap()).unwrap()["properties"];
+    assert_eq!(fields["term"]["type"], "string");
+    assert_eq!(fields["limit"]["type"], "integer");
+    for (content_type, data, status) in [
+        (media, "term=milk+%26+tea&limit=2", 200),
+        (media, "term=x&limit=6", 400),
+        (media, "term=x&limit=no", 400),
+        ("application/json", "{}", 415),
+    ] {
+        let response = client
+            .post(format!("{base}/apply"))
+            .header("Content-Type", content_type)
+            .body(data)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), status);
+        if status == 200 {
+            assert_eq!(response.text().await.unwrap(), "milk & tea");
+        }
+    }
 }

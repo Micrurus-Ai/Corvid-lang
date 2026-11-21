@@ -650,7 +650,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn imported_decl<'a>(module: &'a ResolvedModule, def_id: DefId) -> Option<&'a Decl> {
+pub(super) fn imported_decl<'a>(module: &'a ResolvedModule, def_id: DefId) -> Option<&'a Decl> {
     module.file.decls.iter().find(|decl| {
         let name = match decl {
             Decl::Type(decl) => &decl.name.name,

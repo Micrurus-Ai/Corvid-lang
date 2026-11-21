@@ -136,3 +136,47 @@ fn web_bundle_compiles_events_and_preserves_the_previous_build_on_handler_errors
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("return type mismatch"));
     assert_eq!(fs::read(output).unwrap(), original);
 }
+
+#[test]
+fn bound_form_uses_the_route_record_and_reports_stale_bindings() {
+    let project = tempfile::tempdir().unwrap();
+    let source = r#"
+type Filter:
+    term: String
+    ratio: Float
+    enabled: Bool
+
+server app:
+    route POST "/save" form Filter -> html:
+        return body.term
+
+test initial_controls:
+    form = form_for("POST /save", Filter("<milk>", 1.25, false), "Save & close")
+    assert form.contains("value=\"&lt;milk&gt;\"")
+    assert form.contains("step=\"any\" name=\"ratio\"")
+    assert form.contains("<option selected>false</option>")
+    assert form.contains("Save &amp; close")
+"#;
+    let run = |cmd, program: &str| {
+        fs::write(project.path().join("main.cor"), program).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .current_dir(project.path())
+            .args([cmd, "main.cor"])
+            .output()
+            .unwrap()
+    };
+    let success = run("test", source);
+    assert!(success.status.success(), "{success:?}");
+    for (before, after, message) in [
+        ("POST /save", "POST /stale", "no declared route"),
+        ("form Filter", "body Filter", "POST form Record"),
+        ("form Filter", "form String", "expected a record"),
+        ("ratio: Float", "ratio: List<Float>", "field `ratio`"),
+    ] {
+        let bad = run("check", &source.replace(before, after));
+        assert!(
+            !bad.status.success() && String::from_utf8_lossy(&bad.stderr).contains(message),
+            "{bad:?}"
+        );
+    }
+}
