@@ -4,6 +4,8 @@ After verifying each completed roadmap task, commit its implementation, tests an
 
 ## Active task queue
 
+The [general-purpose browser frontend roadmap](docs/frontend-roadmap.md) tracks component design, browser platform coverage, tooling and developer-preview criteria.
+
 This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.
 
 Work through the first open item in order. Inspect its behavior, implement or reconcile the code, exercise the normal CLI or application entry point, and update the learning guide, grammar or function reference. Commit and push each verified task.
