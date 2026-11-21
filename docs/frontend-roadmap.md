@@ -29,9 +29,13 @@ Judge language and grammar proposals by two questions. How much must a newcomer 
 | Use application types with AI | Receive a model proposal in a developer-defined type. Validate, preview, edit, reject or apply it through the application's existing logic. |
 | Keep local interactions fast | Handle typing, dragging and preview on the device. Make the server boundary explicit when an edit needs shared state or authoritative validation. |
 
-- [ ] **First version.** In the first working application below, build a screen that lists, edits and saves records using ordinary Corvid. Start it and use it without model credentials or agent configuration.
+- [x] **First version.** In the first working application below, build a screen that lists, edits and saves records using ordinary Corvid. Start it and use it without model credentials or agent configuration.
 - [ ] **Later version.** Extend that same project with a model suggestion and an author-selected action that an authorized assistant can use. Reuse the original types, view components and save handler where their meaning still applies. Generate agent bindings from the exposed action. Exercise both UI and assistant invocation without screen scraping or a separately authored agent API.
 - [ ] **Review the change.** Give another developer the diff between versions. Ask them to trace one edit, identify new concepts and show which existing code they could reuse. Record any forced rewrite, duplicated domain rule or unnecessary setup as a design issue. Use the developer's own application domain for the independent trial.
+
+**First-version trial, November 21, 2026.** The [reading list](book/19-browser-views.md#package-and-restart-a-reading-list) started with `corvid new`. Setup required copying the application entry point and migration into the scaffold, extracting the web archive, then applying its migration from the extracted directory. The generated form exposes both fields, including the destination shelf number. No browser-side code or model configuration was needed to serve the form.
+
+A Windows loopback trial with the existing Corvid 0.0.1 debug CLI (4e3ba2b0) saved five successive titles on shelf 2, rejected a malformed integer with HTTP 400, and read the last title and both untouched shelves from a replacement server. The five POST round trips took 26.42, 23.78, 40.61, 21.04 and 22.70 ms (median 23.78 ms), timed from the Python HTTP request through reading the full HTML response, including the SQLite write and list readback. A separate five-run Edge trial (158.0.4370.33) used keyboard navigation to edit and save a shelf. Median list navigation was 25.50 ms, save navigation was 49.10 ms and HTTP save time was 31.63 ms on loopback. After restart, all three shelves matched their expected values. The application test passed through `corvid test`. Rebuilding the Rust browser-view suite exhausted the available disk space.
 
 ### How developers should experience Corvid
 

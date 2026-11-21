@@ -180,6 +180,32 @@ The separate preview route accepts the same record as JSON. Posting `{"term":"me
 
 Open `/openapi.json` on the running service to inspect the form's contract. In this example, the query and POST body both reference the `Search` schema, whose properties are `term` (string) and `limit` (integer). Use `corvid contract openapi src/main.cor --out -` to inspect the same schema before starting the server. Imported records keep their nested field definitions and field constraints. Follow the emitted schema reference when different modules declare the same type name.
 
+## Package and restart a reading list
+
+The [reading list](../../examples/reading_list/src/main.cor) renders three shelves from SQLite. Select a shelf to open the typed `Reading` form. The submitted shelf number chooses the row to update. The POST handler binds the title and shelf as SQL parameters, then lists the stored rows again.
+
+From the repository root, run these commands in PowerShell with the Corvid CLI on your path. Use new directories for the project and extracted package.
+
+```powershell
+corvid new reading-list
+Copy-Item examples/reading_list/src/main.cor reading-list/src/main.cor
+Copy-Item examples/reading_list/migrations reading-list -Recurse
+cd reading-list
+corvid check
+corvid build src/main.cor --target web
+mkdir installed
+tar -xf target/web.tar -C installed
+cd installed
+corvid migrate up --dir migrations --database reading.sqlite
+corvid serve src/main.cor --listen 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/`. Tab to a shelf link and press Enter. Tab to the title, replace it, and activate **Save to shelf**. Stop the server with Ctrl+C and repeat the serve command from the same directory. Open the list again to read the saved title.
+
+The scaffold supplies `src/std` and a project-relative I/O root. The archive includes the SQL migration. Running it in the extracted directory creates and seeds the database there. Reuse that directory across restarts. No model setup is required.
+
+The [verification script](../../scripts/verify_reading_list.py) repeats the scaffold, package, migration and restart in fresh directories. With Python 3.12+, Python Playwright and its Chromium browser installed, run `python scripts/verify_reading_list.py path/to/corvid` from the repository root. It reports list and save navigation durations from the browser and separate HTTP save round trips. Use `--channel msedge` for installed Edge or `--http-only` for the server checks alone.
+
 ## Displaying a streamed answer
 
 ```corvid-fragment

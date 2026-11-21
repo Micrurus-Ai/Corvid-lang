@@ -1,0 +1,70 @@
+import "./std/db" use db_open, db_execute, db_query_rows, db_param_text, db_param_int
+import "./std/json" use json_get_int, json_get_string
+import "./std/ui" as ui
+import "./std/ui" use View
+
+type Selection:
+    shelf: Int where between(1, 3)
+
+type Reading:
+    shelf: Int where between(1, 3)
+    title: String
+
+agent list_readings() -> Result<List<Reading>, String>:
+    db = db_open("reading.sqlite")?
+    rows = db_query_rows(db, "SELECT shelf, title FROM shelves ORDER BY shelf", [])?
+    readings: List<Reading> = []
+    for row in rows:
+        shelf = json_get_int(row, "shelf")?
+        title = json_get_string(row, "title")?
+        readings.append(Reading(shelf, title))
+    return Ok(readings)
+
+agent save(reading: Reading) -> Result<Reading, String>:
+    db = db_open("reading.sqlite")?
+    result = db_execute(db, "UPDATE shelves SET title = ? WHERE shelf = ?", [db_param_text(reading.title), db_param_int(reading.shelf)])?
+    if result.rows_affected != 1:
+        return Err("Shelf was not found")
+    return Ok(reading)
+
+fn failure(message: String) -> String:
+    return ui.page("Reading list unavailable", [ui.text(message), ui.link("Back to reading list", "/")])
+
+fn screen(readings: List<Reading>, selected: Int, message: String) -> String:
+    content: List<View> = [View("<h1>Reading list</h1>")]
+    if message != "":
+        content.append(ui.text(message))
+    content.append(View("<ul>"))
+    for reading in readings:
+        shelf = reading.shelf.to_string()
+        title = reading.title
+        link = ui.link("Shelf " + shelf + ": " + title, "/edit?shelf=" + shelf)
+        content.append(View("<li>" + link.html))
+        if selected == reading.shelf:
+            content.append(View(form_for("POST /save", reading, "Save to shelf")))
+        content.append(View("</li>"))
+    content.append(View("</ul>"))
+    return ui.page("Reading list", content)
+
+agent show(selected: Int, message: String) -> String:
+    return match list_readings():
+        Ok(readings) -> screen(readings, selected, message)
+        Err(reason) -> failure(reason)
+
+server library:
+    route GET "/" -> html:
+        return show(0, "")
+
+    route GET "/edit" query Selection -> html:
+        return show(query.shelf, "")
+
+    route POST "/save" form Reading -> html:
+        return match save(body):
+            Ok(reading) -> show(reading.shelf, "Saved")
+            Err(reason) -> failure(reason)
+
+test lists_shelves_in_order:
+    page = screen([Reading(2, "A&B"), Reading(3, "Next")], 0, "")
+    assert page.contains("Shelf 2: A&amp;B</a></li><li>")
+    assert page.contains("Shelf 3: Next</a></li></ul>")
+    assert not page.contains("<form")

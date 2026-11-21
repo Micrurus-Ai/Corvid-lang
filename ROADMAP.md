@@ -24,6 +24,8 @@ Start at step 1. This table orders the team's remaining implementation and evalu
 | 12 | Prepare the stable release candidate (R03) and make a separate publication decision. | Verify the final revision's packages, notices, install guide, learning references and upgrade commitments. Resolve the outstanding PDF glyph redistribution review before distribution. |
 | 13 | Follow up on adoption. | At the planned 30-day follow-up, record voluntary repeat use, referrals, reasons for switching and missing capabilities. Use observed friction to order the next cycle. |
 
+**Step 1 complete.** The [reading-list trial](docs/book/19-browser-views.md#package-and-restart-a-reading-list) passed clean scaffold, web packaging, typed form submission and restart readback without provider configuration. The verified keyboard workflow and local HTTP and browser timings are recorded in the [first-version trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase).
+
 Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
 
 Use the [simple-to-advanced application trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase) when reviewing changes to the full-stack language and grammar.
