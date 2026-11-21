@@ -96,6 +96,7 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     io_policy: corvid_runtime::io::IoToolPolicy,
+    rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
     ir: IrFile,
     runtime: Runtime,
@@ -255,8 +256,13 @@ pub(crate) fn cmd_serve(
 
     let http_policy = corvid_driver::load_http_egress_policy(file);
     let io_policy = corvid_driver::load_io_tool_policy(file);
+    let rag_embedder = corvid_driver::load_rag_embedder(file);
+    let mut builder = Runtime::builder();
+    if let Some(embedder) = rag_embedder.clone() {
+        builder = builder.rag_embedder(embedder);
+    }
     let runtime = corvid_driver::apply_env_llm_wiring(
-        Runtime::builder()
+        builder
             .http_policy(http_policy.clone())
             .io_policy(io_policy.clone())
             // The process-wide runtime has no requester identity. Every
@@ -339,6 +345,7 @@ pub(crate) fn cmd_serve(
 
     let state = Arc::new(ServeState {
         io_policy,
+        rag_embedder,
         http_policy,
         ir,
         runtime,
@@ -1708,7 +1715,11 @@ async fn approve_approval(
     // same `--with-tools-cdylib` / `tools.py` handlers as the
     // original request. Pre-33Q1a this was an empty default
     // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
-    let bypass_runtime = Runtime::builder()
+    let mut builder = Runtime::builder();
+    if let Some(embedder) = state.rag_embedder.clone() {
+        builder = builder.rag_embedder(embedder);
+    }
+    let bypass_runtime = builder
         .io_policy(state.io_policy.clone())
         .http_policy(state.http_policy.clone())
         .approver(Arc::new(ProgrammaticApprover::always_yes()))

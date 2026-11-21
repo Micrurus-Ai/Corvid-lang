@@ -361,34 +361,27 @@ impl Runtime {
                     Ok(c) => c,
                     Err(e) => return Ok(rag_err(e.to_string())),
                 };
-                let mut index = match crate::rag::RagSqliteIndex::open(&resolved) {
-                    Ok(i) => i,
-                    Err(e) => return Ok(rag_err(e.to_string())),
-                };
-                if let Err(e) = index.insert_document(&document) {
-                    return Ok(rag_err(e.to_string()));
-                }
-                if let Err(e) = index.insert_chunks(&chunks) {
-                    return Ok(rag_err(e.to_string()));
-                }
-                if let Some(embedder) = &self.rag_embedder {
-                    let texts: Vec<String> =
-                        chunks.iter().map(|c| c.text.clone()).collect();
+                let mut records = Vec::new();
+                if let Some(embedder) = self.rag_embedder.as_ref().filter(|_| !chunks.is_empty()) {
+                    let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
                     let vectors = match embedder.embed(&texts).await {
                         Ok(v) => v,
                         Err(e) => return Ok(rag_err(e.to_string())),
                     };
-                    let records: Vec<crate::rag::RagEmbeddingRecord> = chunks
-                        .iter()
-                        .zip(vectors)
-                        .map(|(c, v)| crate::rag::RagEmbeddingRecord {
-                            chunk_id: c.chunk_id.clone(),
-                            values: v.values,
-                        })
-                        .collect();
-                    if let Err(e) = index.insert_embedding_vectors(&records) {
-                        return Ok(rag_err(e.to_string()));
-                    }
+                    let vectors = match crate::rag::validate_embeddings(vectors, chunks.len()) {
+                        Ok(v) => v,
+                        Err(e) => return Ok(rag_err(e.to_string())),
+                    };
+                    records = chunks.iter().zip(vectors).map(|(chunk, vector)| crate::rag::RagEmbeddingRecord {
+                        chunk_id: chunk.chunk_id.clone(), values: vector.values,
+                    }).collect();
+                }
+                let mut index = match crate::rag::RagSqliteIndex::open(&resolved) {
+                    Ok(i) => i,
+                    Err(e) => return Ok(rag_err(e.to_string())),
+                };
+                if let Err(e) = index.replace_document(&document, &chunks, &records) {
+                    return Ok(rag_err(e.to_string()));
                 }
                 Ok(serde_json::json!({ "tag": "ok", "ok": chunks.len() as i64 }))
             }
@@ -421,48 +414,20 @@ impl Runtime {
                                 Ok(v) => v,
                                 Err(e) => return Ok(rag_err(e.to_string())),
                             };
-                        let Some(query_vec) = vectors.first() else {
-                            return Ok(rag_err("embedder returned no vector for the query"));
+                        let vectors = match crate::rag::validate_embeddings(vectors, 1) {
+                            Ok(v) => v,
+                            Err(e) => return Ok(rag_err(e.to_string())),
                         };
+                        let query_vec = &vectors[0];
                         match index.search_embeddings(&query_vec.values, limit as usize) {
                             Ok(hits) => hits.into_iter().map(|h| h.chunk).collect(),
                             Err(e) => return Ok(rag_err(e.to_string())),
                         }
                     } else {
-                        // Lexical fallback: score chunks by how
-                        // many query terms they contain (the raw
-                        // index method is a phrase LIKE — too
-                        // strict for multi-word queries).
-                        let mut scored: std::collections::HashMap<
-                            String,
-                            (usize, crate::rag::RagChunk),
-                        > = std::collections::HashMap::new();
-                        let fetch = ((limit as usize) * 8).clamp(16, 128);
-                        for term in query
-                            .split_whitespace()
-                            .filter(|t| t.chars().count() >= 2)
-                        {
-                            let found = match index.search_text(term, fetch) {
-                                Ok(c) => c,
-                                Err(e) => return Ok(rag_err(e.to_string())),
-                            };
-                            for chunk in found {
-                                scored
-                                    .entry(chunk.chunk_id.clone())
-                                    .and_modify(|(n, _)| *n += 1)
-                                    .or_insert((1, chunk));
-                            }
+                        match index.search_terms(query, limit as usize) {
+                            Ok(chunks) => chunks,
+                            Err(e) => return Ok(rag_err(e.to_string())),
                         }
-                        let mut ranked: Vec<(usize, crate::rag::RagChunk)> =
-                            scored.into_values().collect();
-                        ranked.sort_by(|a, b| {
-                            b.0.cmp(&a.0).then(a.1.chunk_id.cmp(&b.1.chunk_id))
-                        });
-                        ranked
-                            .into_iter()
-                            .take(limit as usize)
-                            .map(|(_, c)| c)
-                            .collect()
                     };
                 let items: Vec<serde_json::Value> =
                     chunks.iter().map(rag_chunk_envelope_json).collect();
