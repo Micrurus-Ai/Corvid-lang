@@ -228,3 +228,7 @@ Metadata pages show:
 The page is intentionally generated from compiler facts rather than handwritten
 README claims. If a package changes its effects, approval boundary, grounding,
 or replay contract, the metadata page changes with the source.
+
+## Finding a package
+
+The catalog prototype at `/packages` accepts package names and task descriptions. For example, search for **expand details**, open **@corvid/ui**, and activate **Details** with the keyboard. Each entry shows the version, source, example, and import. Use the displayed add command to generate the lock entry before running the example. The editor command **Corvid: Add Package Import** reads the same catalog. [Run the catalog locally](../../web/README.md#package-discovery)

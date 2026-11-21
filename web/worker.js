@@ -13,6 +13,8 @@
 // Bind a custom domain in the Cloudflare dashboard (Workers & Pages -> your
 // worker -> Triggers -> Custom Domains) so the apex (e.g. corvid.sh) routes here.
 
+import { catalog } from "./catalog.mjs";
+
 const REPO   = 'Micrurus-Ai/Corvid-lang';
 const BRANCH = 'main';
 
@@ -30,6 +32,8 @@ export default {
         const url = new URL(request.url);
         const ua  = request.headers.get('user-agent') || '';
         const path = url.pathname.replace(/\/+$/, '') || '/';
+
+        if (path === "/packages" || path.startsWith("/packages/")) return catalog(url);
 
         // Explicit script paths
         if (path === '/install.sh')  return proxyScript(SH_URL, 'text/x-shellscript');
@@ -176,6 +180,9 @@ const LANDING_HTML = `<!doctype html>
 
   <h2>Pin a specific version</h2>
   <pre style="background:#11141a;border:1px solid #2a2e35;border-radius:8px;padding:16px;">CORVID_VERSION=v0.1.0 curl -fsSL https://corvid.sh | sh</pre>
+
+  <h2>Packages</h2>
+  <p><a href="/packages">Search Corvid packages</a></p>
 
   <h2>Source</h2>
   <ul>
