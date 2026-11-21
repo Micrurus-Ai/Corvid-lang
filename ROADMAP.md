@@ -4,7 +4,7 @@ After verifying each completed roadmap task, commit its implementation, tests an
 
 ## Active task queue
 
-The [general-purpose browser frontend roadmap](docs/frontend-roadmap.md) tracks component design, browser platform coverage, tooling and developer-preview criteria.
+The [general-purpose browser frontend roadmap](docs/frontend-roadmap.md) tracks components, browser support, tooling and preview criteria. Its [shared action milestone](docs/frontend-roadmap.md#one-action-for-the-user-and-the-assistant) covers how a developer can connect their own application behavior to both the interface and an authorized assistant.
 
 This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.
 

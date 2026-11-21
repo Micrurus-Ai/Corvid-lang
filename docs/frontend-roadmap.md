@@ -14,6 +14,17 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## Design and implementation order
 
+### One action for the user and the assistant
+
+A music player developer writes `pause_song` once. Clicking **Pause**, using the keyboard, or asking an authorized assistant to pause should call that same function. The developer can keep `delete_playlist` available only in the human interface. The player is an example. Any developer should be able to introduce an action with their own name, types and behavior.
+
+The existing `ui.agent_query_form` prototype emits discovery metadata for a read-only GET form. Discovery and invocation of arbitrary developer-defined actions are planned work. Start the following prototype alongside component design, before settling the syntax.
+
+- [ ] **Write and bind.** In an ordinary project, define a local action and bind it to a keyboard-accessible control. Let the author explicitly expose it to an assistant and choose which context fields the assistant receives. Derive the input and result schemas from Corvid types.
+- [ ] **Exercise both paths.** Verify that the button and a compatible assistant produce the same state change through one handler. Hide playlist deletion from assistant discovery and verify that a direct assistant request for it also fails. Repeat after renaming or moving the visible button.
+- [ ] **Try a server-owned action.** Keep the same action contract and component binding. Make the network boundary, pending state and possible failure visible in source. Test a permission change between discovery and invocation and a retry after a lost response.
+- [ ] **Teach and generalize.** Record the working syntax and functions in the learning guide and reference. Have another developer use them for an unfamiliar action in a fresh project without editing Corvid itself. Check whether they can predict where it runs and who may invoke it by reading the source.
+
 ### 1. Settle the component and execution model
 
 - [x] Draft cart and search behavior with two candidate view styles for developer review. [Read the examples](frontend-component-design.md)
