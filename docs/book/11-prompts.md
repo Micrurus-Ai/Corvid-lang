@@ -296,3 +296,20 @@ server answers:
 ```
 
 With an OpenAI-compatible streaming provider, the client can consume server-sent events while generation continues. The 700 ms deadline applies to starting each attempt and receiving the first chunk. A setup error can trigger a retry. A provider disconnect after text has been delivered ends that stream with an error. Closing the consumer connection cancels the pending generation. Corvid estimates token use as text arrives and checks the provider's final completion-token count against `max_tokens`.
+
+### Passing a Corvid function to a prompt
+
+```corvid
+fn add(left: Int, right: Int) -> Int:
+    return left + right
+
+prompt answer(question: String, calculate: (Int, Int) -> Int) -> String:
+    "{question}"
+
+agent main() -> String:
+    return answer("What is 17 plus 25?", add)
+```
+
+Select a Chat Completions provider with function calling enabled and run the file with `corvid run`. The provider sees a function named `calculate` with integer arguments named `left` and `right`. Corvid checks every call in a batch before invoking the supplied functions, then returns each result with its original call ID. The prompt returns the provider's final text. A conversation allows up to eight function calls and reserves a final model turn.
+
+Durable jobs use capture-free functions for this form. Once a worker checkpoints a tool result, its replacement can reuse that result when continuing the conversation. If your function changes an external system, give that operation an idempotency key to handle interruption between the external write and the checkpoint.

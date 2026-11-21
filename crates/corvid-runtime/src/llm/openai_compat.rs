@@ -57,6 +57,8 @@ impl LlmAdapter for OpenAiCompatibleAdapter {
         "openai-compat"
     }
 
+    fn supports_tool_turns(&self) -> bool { true }
+
     fn handles(&self, model: &str) -> bool {
         model.starts_with(OPENAI_COMPAT_MODEL_PREFIX)
     }
@@ -125,6 +127,11 @@ impl LlmAdapter for OpenAiCompatibleAdapter {
 
             // Reuse the OpenAI extractor — same response shape by
             // definition for any compatible server.
+            if req.tool_turn.is_some() {
+                if let Some(message) = super::openai::tool_call_message(&parsed)? {
+                    return Ok(LlmResponse::new(message, super::openai::extract_usage(&parsed)));
+                }
+            }
             extract_response_compat(&parsed, req.output_schema.is_some())
         })
     }

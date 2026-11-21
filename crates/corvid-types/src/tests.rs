@@ -1737,6 +1737,25 @@ agent ok(order: String) -> Job:
 }
 
 #[test]
+fn function_calling_prompt_reserves_a_bounded_conversation() {
+    let src = r#"effect model_call:
+    cost: $0.10
+
+fn double(n: Int) -> Int:
+    return n + n
+
+prompt solve(action: (Int) -> Int) -> String uses model_call:
+    "Compute the answer."
+
+@budget($0.50)
+agent main() -> String:
+    return solve(double)
+"#;
+    assert!(has_effect_violation(&check(src), "cost"));
+    assert!(check(&src.replace("$0.50", "$1.00")).errors.is_empty());
+}
+
+#[test]
 fn repair_attempts_multiply_worst_case_cost_for_budgets() {
     // `with repair 2` can re-ask twice: a $0.30 prompt's worst case
     // is $0.90, so a $0.50 budget must reject it. Without this the

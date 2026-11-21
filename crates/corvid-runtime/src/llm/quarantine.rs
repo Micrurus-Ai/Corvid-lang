@@ -89,6 +89,7 @@ mod tests {
 
     fn dummy_req<'a>() -> LlmRequestRef<'a> {
         LlmRequestRef {
+            tool_turn: None,
             prompt: "test_prompt",
             model: "mock-1",
             rendered: "Hello",
@@ -174,6 +175,7 @@ mod tests {
         // quarantined `first` model wrap). Calling the registry with
         // model `late` exercises the late adapter directly.
         let req = LlmRequestRef {
+            tool_turn: None,
             prompt: "p",
             model: "late",
             rendered: "x",

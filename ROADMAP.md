@@ -65,9 +65,10 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - The same Corvid CLI program ran against local Ollama and OpenAI-compatible protocol responders. Both preserved role messages, returned text and a typed record, and rejected malformed JSON and an incorrect field type.
 - [x] A02. Stream model output to a consumer. Verify incremental chunks, cancellation, timeouts, retries and usage accounting.
   - A live HTTP consumer received UTF-8 text while the local model provider held its next chunk. Disconnecting cancelled generation. The CLI integration test covered a first-chunk deadline, retry after HTTP 503, a truncated stream and a provider-reported token count over budget.
-- [ ] A03. Use ordinary typed functions as tools. Exercise argument checking, multi-step agent execution, tool errors, bounded execution and resumable state.
+- [x] A03. Use ordinary typed functions as tools. Exercise argument checking, multi-step agent execution, tool errors, bounded execution and resumable state.
   - [x] A CLI agent matched a typed action, called a Corvid function, passed its result into the next prompt and stopped within three model calls. The test covered invalid argument types, unknown actions, function errors and exhaustion of the step limit.
   - [x] CLI workers restored checkpoint payloads and remaining allowances across processes. Two workers attempting the same sequence committed one result and charged one step and one tool call. All 14 jobs integration tests passed.
+  - The default CLI passed a function directly into a prompt, validated batched named arguments and returned matching call IDs. A replacement job worker resumed the saved result and finished with one tool charge. All five local model-provider integration tests passed.
 - [ ] A04. Build retrieval with document ingestion, embeddings, indexing, queries and source references using the standard library.
 - [ ] A05. Support multimodal inputs and scoped computer interaction. Verify file and image inputs, action results and clean termination of a user-directed session.
 - [ ] A06. Make AI programs testable. Verify provider mocks, structured traces, replay and deterministic application tests without live credentials.

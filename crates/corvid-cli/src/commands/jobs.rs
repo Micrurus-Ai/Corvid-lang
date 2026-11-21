@@ -144,7 +144,10 @@ pub(crate) fn cmd_jobs_run(
         })?;
 
     let queue = Arc::new(DurableQueueRuntime::open(state)?);
-    let runtime_handle = Arc::new(Runtime::builder().build());
+    let builder = Runtime::builder()
+        .io_policy(corvid_driver::load_io_tool_policy(source_path))
+        .http_policy(corvid_driver::load_http_egress_policy(source_path));
+    let runtime_handle = Arc::new(corvid_driver::apply_env_llm_wiring(builder).build());
     // Slice 52h-2: hand the executor the durable queue so a verified
     // provider protocol invoked inside a job persists its intent (and
     // every transition) as that job's checkpoints.

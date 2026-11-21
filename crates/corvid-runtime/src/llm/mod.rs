@@ -106,11 +106,21 @@ pub struct LlmRequest {
     pub messages: Vec<LlmMessage>,
 }
 
+/// Native function definitions and the completed exchanges in a tool conversation.
+#[derive(Debug, Default)]
+pub struct ToolTurn {
+    pub definitions: Vec<serde_json::Value>,
+    pub history: Vec<serde_json::Value>,
+    /// The next turn must produce the final answer within the remaining allowance.
+    pub final_answer_only: bool,
+}
+
 /// Borrowed request shape for hot paths that already hold prompt/model/rendered
 /// as borrowed strings and do not need to allocate an owned wrapper just to
 /// cross the runtime boundary.
 #[derive(Debug, Clone, Copy)]
 pub struct LlmRequestRef<'a> {
+    pub tool_turn: Option<&'a ToolTurn>,
     pub prompt: &'a str,
     pub model: &'a str,
     pub rendered: &'a str,
@@ -123,6 +133,7 @@ pub struct LlmRequestRef<'a> {
 impl LlmRequest {
     pub fn as_ref(&self) -> LlmRequestRef<'_> {
         LlmRequestRef {
+            tool_turn: None,
             prompt: &self.prompt,
             model: &self.model,
             rendered: &self.rendered,
@@ -218,7 +229,7 @@ impl LlmResponse {
 /// Token counts for a single LLM call. Filled in by adapters from the
 /// provider's response (every major API returns these). Zeros mean
 /// "the provider didn't report" (e.g., older endpoints, mocks).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -254,6 +265,7 @@ pub struct LlmCallOutcome {
 
 /// Trait every LLM adapter implements.
 pub trait LlmAdapter: Send + Sync {
+    fn supports_tool_turns(&self) -> bool { false }
     /// Adapter identifier used for diagnostics and tracing.
     fn name(&self) -> &str;
 
@@ -393,6 +405,12 @@ impl LlmRegistry {
             .ok_or_else(|| RuntimeError::NoAdapter(model.to_string()))?
             .clone();
         let adapter_name = adapter.name().to_string();
+        if req.tool_turn.is_some() && !adapter.supports_tool_turns() {
+            return Err(RuntimeError::AdapterFailed {
+                adapter: adapter_name,
+                message: "this adapter does not support native function calls".into(),
+            });
+        }
         match adapter.call(req).await {
             Ok(response) => {
                 self.record_success(&adapter_name);

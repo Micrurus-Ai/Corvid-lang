@@ -2,6 +2,8 @@ use super::{ExprFlow, Interpreter};
 
 mod adversarial;
 mod cost;
+mod journal;
+mod tools;
 mod route_dispatch;
 mod voting;
 use crate::errors::{InterpError, InterpErrorKind};

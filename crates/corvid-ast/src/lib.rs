@@ -214,3 +214,6 @@ mod tests {
         assert_eq!(op, decoded);
     }
 }
+
+/// Maximum number of function invocations during a single model conversation.
+pub const MAX_PROMPT_TOOL_CALLS: usize = 8;

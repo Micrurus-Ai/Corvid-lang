@@ -53,6 +53,8 @@ impl LlmAdapter for OpenAiAdapter {
         "openai"
     }
 
+    fn supports_tool_turns(&self) -> bool { true }
+
     fn handles(&self, model: &str) -> bool {
         model.starts_with("gpt-")
             || model.starts_with("o1-")
@@ -116,6 +118,11 @@ impl LlmAdapter for OpenAiAdapter {
                     message: format!("response body is not JSON: {e} (body: {body_text})"),
                 }
             })?;
+            if req.tool_turn.is_some() {
+                if let Some(message) = super::openai::tool_call_message(&parsed)? {
+                    return Ok(LlmResponse::new(message, super::openai::extract_usage(&parsed)));
+                }
+            }
             extract_response(&parsed, req.output_schema.is_some())
         })
     }
@@ -187,6 +194,11 @@ pub(super) fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
         "model": req.model,
         "messages": messages,
     });
+    if let Some(turn) = req.tool_turn {
+        body["tools"] = json!(turn.definitions);
+        if turn.final_answer_only { body["tool_choice"] = json!("none"); }
+        body["messages"].as_array_mut().unwrap().extend(turn.history.iter().cloned());
+    }
     if let Some(t) = req.sampling.temperature {
         body["temperature"] = json!(t);
     }
@@ -209,6 +221,17 @@ pub(super) fn build_request_body(req: &LlmRequestRef<'_>) -> Value {
     }
 
     body
+}
+
+pub(super) fn tool_call_message(parsed: &Value) -> Result<Option<Value>, RuntimeError> {
+    let message = &parsed["choices"][0]["message"];
+    let calls = &message["tool_calls"];
+    if calls.is_null() { return Ok(None); }
+    let calls = calls.as_array().ok_or_else(|| RuntimeError::AdapterFailed {
+        adapter: "chat-completions".into(), message: "tool_calls must be an array".into(),
+    })?;
+    if calls.is_empty() { return Ok(None); }
+    Ok(Some(json!({"role": "assistant", "content": message["content"], "tool_calls": calls})))
 }
 
 fn extract_response(parsed: &Value, expect_structured: bool) -> Result<LlmResponse, RuntimeError> {

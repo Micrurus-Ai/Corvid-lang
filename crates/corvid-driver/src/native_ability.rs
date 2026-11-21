@@ -52,6 +52,7 @@ pub enum NotNativeReason {
     PlaceAssignmentNotNative,
     UnsupportedEquality,
     CallbackNotNative,
+    PromptToolsRequireInterpreter,
     UnsupportedMap,
     UnsupportedMatch,
     /// Builtin methods on built-in receiver types (`String.length()`
@@ -93,6 +94,7 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
+            Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
@@ -349,6 +351,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, types: &[corvid_ir::IrType
                     return Err(NotNativeReason::ToolCall {
                         name: callee_name.clone(),
                     })
+                }
+                IrCallKind::Prompt { .. } if args.iter().any(|arg| matches!(arg.ty, Type::Function { .. })) => {
+                    return Err(NotNativeReason::PromptToolsRequireInterpreter);
                 }
                 IrCallKind::Prompt { .. } => {
                     // Prompt calls compile and run natively. No extra

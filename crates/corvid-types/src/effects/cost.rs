@@ -901,6 +901,12 @@ fn effect_node_for_prompt(
         .collect();
     let profile = registry.compose(&effect_names);
     let mut costs = numeric_dimensions_from_profile(&profile);
+    if prompt.params.iter().any(|p| matches!(p.ty, corvid_ast::TypeRef::Function { .. })) {
+        // Each tool call can require another provider turn before the final response.
+        for value in costs.values_mut() {
+            *value *= (1 + corvid_ast::MAX_PROMPT_TOOL_CALLS) as f64;
+        }
+    }
     // Structured-output auto-repair (`with repair N`) may re-ask
     // the model up to N extra times, and every attempt spends real
     // cost/tokens/latency — the interpreter accumulates the failed

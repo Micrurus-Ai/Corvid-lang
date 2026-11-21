@@ -412,3 +412,257 @@ agent main() -> String:
     }
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_tool_calls_use_corvid_signatures_and_return_matching_ids() {
+    use std::sync::atomic::AtomicUsize;
+    async fn chat(State(count): State<Arc<AtomicUsize>>, Json(req): Json<Value>) -> Json<Value> {
+        let n = count.fetch_add(1, Ordering::SeqCst);
+        let tool = &req["tools"][0]["function"];
+        assert_eq!(tool["name"], "calculate");
+        assert_eq!(tool["parameters"]["properties"]["left"]["type"], "integer");
+        assert_eq!(tool["parameters"]["required"], json!(["left", "right"]));
+        let history = req["messages"].as_array().unwrap();
+        let mode = history[0]["content"].as_str().unwrap();
+        let message = if n == 0 || mode.contains("forever") {
+            let name = if mode.contains("unknown") {
+                "other"
+            } else {
+                "calculate"
+            };
+            let left = if mode.contains("invalid") {
+                json!("two")
+            } else {
+                json!(2)
+            };
+            let call = json!({"id":format!("call_{n}"),"type":"function","function":{
+                "name":name, "arguments":json!({"right":3,"left":left}).to_string()
+            }});
+            let mut batch = vec![call.clone()];
+            if mode.contains("duplicate") {
+                batch.push(call);
+            }
+            if mode.contains("batch") {
+                let mut second = batch[0].clone();
+                second["function"]["arguments"] = json!(r#"{"left":6,"right":7}"#);
+                second["id"] = json!("call_second");
+                batch.push(second);
+            }
+            json!({"role":"assistant","content":null,"tool_calls":batch})
+        } else {
+            assert_eq!(history[1]["tool_calls"][0]["id"], "call_0");
+            assert_eq!(
+                history[2],
+                json!({"role":"tool","tool_call_id":"call_0","content":"5"})
+            );
+            if mode.contains("batch") {
+                assert_eq!(
+                    history[3],
+                    json!({"role":"tool","tool_call_id":"call_second","content":"13"})
+                );
+            }
+            json!({"role":"assistant","content":"the answer is five"})
+        };
+        Json(json!({"choices":[{"message":message}]}))
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = format!(
+        "openai-compat:http://{}/v1:local-model",
+        listener.local_addr().unwrap()
+    );
+    let app = Router::new()
+        .route("/v1/chat/completions", post(chat))
+        .with_state(calls.clone());
+    let server = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    for (mode, expected, requests) in [
+        ("normal", "the answer is five", 2),
+        ("batch", "the answer is five", 2),
+        ("duplicate", "repeated function call", 1),
+        ("invalid", "calculate.left", 1),
+        ("unknown", "unknown prompt function", 1),
+        ("forever", "limit of 8", 9),
+    ] {
+        calls.store(0, Ordering::SeqCst);
+        let source = r#"fn add(left: Int, right: Int) -> Int:
+    return left + right
+
+prompt answer(question: String, calculate: (Int, Int) -> Int) -> String:
+    "{question}"
+
+agent main() -> String:
+    return answer("SCENARIO", add)
+"#
+        .replace("SCENARIO", mode);
+        std::fs::write(dir.path().join("main.cor"), source).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .current_dir(dir.path())
+            .args(["run", "main.cor"])
+            .env("CORVID_MODEL", &model)
+            .env("CORVID_TEST_MOCK_LLM", "0")
+            .env("OPENAI_COMPAT_API_KEY", "")
+            .env("NO_PROXY", "127.0.0.1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.success(),
+            matches!(mode, "normal" | "batch"),
+            "{mode}: {result:?}"
+        );
+        let text = if result.status.success() {
+            &result.stdout
+        } else {
+            &result.stderr
+        };
+        assert!(
+            String::from_utf8_lossy(text).contains(expected),
+            "{mode}: {result:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), requests);
+    }
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_worker_resumes_tool_result_after_process_exit() {
+    use std::{process::Stdio, sync::atomic::AtomicUsize, time::Duration};
+    #[derive(Default)]
+    struct Probe {
+        first_turns: AtomicUsize,
+        followups: AtomicUsize,
+        waiting: tokio::sync::Notify,
+    }
+    async fn chat(State(probe): State<Arc<Probe>>, Json(req): Json<Value>) -> Json<Value> {
+        let messages = req["messages"].as_array().unwrap();
+        let response = if messages.len() == 1 {
+            probe.first_turns.fetch_add(1, Ordering::SeqCst);
+            json!({"role":"assistant","tool_calls":[{"id":"add-123","type":"function",
+                "function":{"name":"calculate","arguments":"{\"n\":21}"}}]})
+        } else {
+            assert_eq!(req["tool_choice"], "none");
+            assert_eq!(
+                messages[2],
+                json!({"role":"tool","content":"42","tool_call_id":"add-123"})
+            );
+            if probe.followups.fetch_add(1, Ordering::SeqCst) == 0 {
+                probe.waiting.notify_one();
+                std::future::pending::<()>().await;
+            }
+            json!({"role":"assistant","content":"forty-two"})
+        };
+        Json(json!({"choices":[{"message":response}]}))
+    }
+    let probe = Arc::new(Probe::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = format!(
+        "openai-compat:http://{}/v1:local-model",
+        listener.local_addr().unwrap()
+    );
+    let app = Router::new()
+        .route("/v1/chat/completions", post(chat))
+        .with_state(probe.clone());
+    let provider = tokio::spawn(async { axum::serve(listener, app).await.unwrap() });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("main.cor"),
+        r#"fn twice(n: Int) -> Int:
+    return n + n
+
+prompt solve(calculate: (Int) -> Int) -> String:
+    "Double 21."
+
+agent main() -> String:
+    return solve(twice)
+"#,
+    )
+    .unwrap();
+    let jobs = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_corvid"));
+        command
+            .current_dir(dir.path())
+            .arg("jobs")
+            .args(args)
+            .args(["--state", "queue.sqlite"])
+            .env("CORVID_MODEL", &model)
+            .env("CORVID_TEST_MOCK_LLM", "0")
+            .env("OPENAI_COMPAT_API_KEY", "")
+            .env("NO_PROXY", "127.0.0.1");
+        command
+    };
+    for args in [
+        vec!["enqueue", "--task", "main", "--payload", "[]"],
+        vec![
+            "loop",
+            "limits",
+            "--job",
+            "job_1",
+            "--max-steps",
+            "2",
+            "--max-tool-calls",
+            "1",
+        ],
+    ] {
+        let output = jobs(&args).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    struct Worker(std::process::Child);
+    impl Drop for Worker {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let worker = || {
+        Worker(
+            jobs(&[
+                "run",
+                "--source",
+                "main.cor",
+                "--workers",
+                "1",
+                "--lease-ttl-ms",
+                "200",
+                "--idle-poll-ms",
+                "20",
+            ])
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+        )
+    };
+    let snapshot = || {
+        let output = jobs(&["checkpoint", "resume", "--job", "job_1", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let first = worker();
+    tokio::time::timeout(Duration::from_secs(20), probe.waiting.notified())
+        .await
+        .expect("worker never sent its tool result");
+    drop(first);
+    let saved = snapshot();
+    assert_eq!(saved["remaining_tool_calls"], 0);
+    assert_eq!(saved["remaining_steps"], 1);
+    assert_eq!(
+        saved["checkpoints"][0]["payload"]["result"]["content"],
+        "42"
+    );
+    let _second = worker();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let saved = snapshot();
+        if saved["status"] == "succeeded" {
+            assert_eq!(saved["remaining_steps"], 0);
+            assert_eq!(saved["checkpoints"][1]["payload"]["response"], "forty-two");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{saved}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(probe.first_turns.load(Ordering::SeqCst), 1);
+    assert_eq!(probe.followups.load(Ordering::SeqCst), 2);
+    provider.abort();
+}

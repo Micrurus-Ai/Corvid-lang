@@ -467,11 +467,12 @@ impl<'ir> Interpreter<'ir> {
             req.model.clone()
         };
         let start = std::time::Instant::now();
-        let resp = self
-            .runtime
-            .call_llm_cacheable(req, prompt.cacheable)
-            .await
-            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        let resp = if prompt.params.iter().any(|p| matches!(p.ty, Type::Function { .. })) {
+            self.call_with_functions(prompt, arg_values, &req, &actual_model, span).await?
+        } else {
+            self.runtime.call_llm_cacheable(req, prompt.cacheable).await
+                .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?
+        };
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if self.should_yield_boundary() {
