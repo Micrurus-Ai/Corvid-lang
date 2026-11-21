@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.error import URLError
@@ -127,10 +128,30 @@ def exercise_installation(root, expected_version, work):
     if version.split()[:2] != ["corvid", expected_version]:
         raise RuntimeError(f"Expected {expected_version}, got {version}")
     run("new", "--with-python-tools", "python-notes")
+    python_project = work / "python-notes"
     message = "Hello from Corvid"
-    echoed = run("run", "src/python_tools_example.cor", message, cwd=work / "python-notes")
+    echoed = run("run", "src/python_tools_example.cor", message, cwd=python_project)
     if json.loads(echoed) != message:
         raise RuntimeError(f"The generated Python tool returned {echoed!r}")
+    (python_project / "src/numbers_example.cor").write_text(
+        "agent twice(value: Int) -> Int:\n    return value * 2\n\n"
+        "agent remainder(value: Float) -> Float:\n    return value % 2.0\n",
+        encoding="utf-8",
+    )
+    run("build", "src/numbers_example.cor", "--target", "python", cwd=python_project)
+    # Isolated mode ensures a checkout or a user-installed runtime cannot satisfy the import.
+    host = """import sys
+sys.path[:0] = sys.argv[1:]
+from corvid_runtime import run_sync
+from numbers_example import twice, remainder
+print(run_sync(twice, 21), run_sync(remainder, -7.5))
+"""
+    values = subprocess.check_output(
+        [sys.executable, "-I", "-c", host, str(root / "runtime-py"), str(python_project / "target/py")],
+        cwd=python_project, env=env, text=True,
+    ).strip()
+    if values != "42 -1.5":
+        raise RuntimeError(f"Python host received unexpected agent results: {values!r}")
     run("new", "notes")
     project = work / "notes"
     run("check", cwd=project)

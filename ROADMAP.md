@@ -134,6 +134,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Exercised starter trace replay through the production installer in clean Debian 12. The installed candidate reproduced the original greeting and timestamp, served the relocated web application and uninstalled successfully. The candidate test now checks this replay on each platform.
 
+  - [x] Verified a Python host running generated agents against the installed 05c20e08 Linux x64 candidate on Debian 12. The package test now compiles the agents, loads the bundled runtime and checks integer and signed floating-point results in an isolated Python process.
+
   - [x] The guide test ran all eleven runnable examples through the built CLI, including both typed Python import examples. Two explicitly skipped fragments were outside the check.
 
 ## Verified task results
