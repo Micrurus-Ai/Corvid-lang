@@ -209,6 +209,9 @@ An `and` chain stops at the first false value. An `or` chain stops at the
 first true value. Calls and `?` expressions in the skipped operands do
 not run.
 
+For example, `divisor != 0 and total / divisor > 2` checks the divisor
+before dividing. With a zero divisor, the expression returns `false`.
+
 Double-quoted strings support `\n` for newline, `\r` for carriage return,
 `\t` for tab, `\\` for a backslash, `\"` for a double quote and `\0` for
 a null character. In `"A\07B"`, the null character is followed by the

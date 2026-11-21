@@ -364,6 +364,34 @@ async fn logical_ops_short_circuit_semantics() {
 }
 
 #[tokio::test]
+async fn boolean_chains_call_each_operand_in_order_until_the_result_is_known() {
+    for (operator, stop) in [("and", false), ("or", true)] {
+        let mut terms: Vec<_> = (0..24)
+            .map(|index| format!("mark(trace, {index}, {})", !stop))
+            .collect();
+        terms.push(format!("mark(trace, 24, {stop})"));
+        terms.push("(1 / 0 == 0)".to_owned());
+        let chain = terms.join(&format!(" {operator} "));
+        let source = format!(
+            "agent mark(trace: List<Int>, index: Int, flag: Bool) -> Bool:
+    trace.append(index)
+    return flag
+
+agent main() -> List<Int>:
+    trace: List<Int> = []
+    result = {chain}
+    if result == {stop}:
+        return trace
+    return []
+"
+        );
+        let ir = ir_of(&source);
+        let value = run_agent(&ir, "main", vec![], &empty_runtime()).await.unwrap();
+        assert_eq!(value_to_json(&value), json!((0..25).collect::<Vec<_>>()));
+    }
+}
+
+#[tokio::test]
 async fn not_negates_bool() {
     let src = "agent nope(b: Bool) -> Bool:\n    return not b\n";
     let ir = ir_of(src);
