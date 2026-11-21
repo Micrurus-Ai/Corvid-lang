@@ -52,6 +52,8 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## Developer preview and stable release
 
+Track AI operation alongside the general component work. The calendar milestone exercises one shared action through human and agent interfaces, with typed context, concurrent edits and permission changes. [Research, prototype and acceptance tests](ai-operated-apps.md)
+
 Start testing accessibility, performance and browser behavior with the first prototype. Use the following criteria to decide what a release can promise.
 
 | Decision | Acceptance criteria |

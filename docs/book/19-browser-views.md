@@ -27,6 +27,14 @@ The field keeps its current text as you type. Press Enter in the field or click 
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
+For an opt-in, read-only search that a compatible browser agent can discover, use `ui.agent_query_form(name, description, path, controls)`. Supply a stable unique tool name, an author-written description, and a trusted read-only GET path. The visible form and the agent use the same named fields. The user submits the form. On browsers without declarative WebMCP, the form works as a normal GET form. The server remains responsible for authorizing the request.
+
+```corvid-fragment
+fn calendar_search() -> View:
+    day = ui.text_field("Day", "day", "")
+    return ui.agent_query_form("find_slots", "Find available calendar slots for a day", "/slots", [day, ui.submit("Find slots")])
+```
+
 ## Static view functions
 
 Use layout functions to arrange any list of views. `ui.stack(content)` places children vertically. `ui.row(content)` places children horizontally and wraps to another line when needed. `ui.grid(content)` fits as many equal-width columns as the container allows, aiming for a minimum of 16rem per column. A narrower container gets a single column. All three preserve the order of their children and use a 1rem gap.

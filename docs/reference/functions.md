@@ -395,5 +395,6 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn interactive_page(title: String, content: List<View>) -> String`
 - `fn text_state(label: String, initial: String, handler: String) -> View`
 - `fn query_form(path: String, controls: List<View>) -> View`
+- `fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn link(label: String, path: String) -> View`
 - `fn stream_text(label: String, path: String) -> View`

@@ -63,6 +63,11 @@ public fn text_state(label: String, initial: String, handler: String) -> View:
 public fn query_form(path: String, controls: List<View>) -> View:
     return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
 
+# Opt a read-only application query into declarative WebMCP discovery.
+public fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View:
+    attributes = " toolname=\"" + escaped(name) + "\" tooldescription=\"" + escaped(description) + "\""
+    return View("<form method=\"get\" action=\"" + escaped(path) + "\"" + attributes + ">" + children(controls) + "</form>")
+
 # Navigate to an application route. Supply a trusted path from the application.
 public fn link(label: String, path: String) -> View:
     return View("<a href=\"" + escaped(path) + "\">" + escaped(label) + "</a>")
