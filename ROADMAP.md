@@ -394,7 +394,7 @@ Ariadne multi-line error rendering. Error codes. README. Offline demo.
 **v0.1 complete. 134 Rust + 10 Python tests green.**
 
 ### Phase 11 — Interpreter + native runtime ✅
-Tree-walking interpreter (`corvid-vm`), async end-to-end. Native runtime (`corvid-runtime`) with `ToolRegistry`, `Approver` trait, `MockAdapter`, `AnthropicAdapter`, `OpenAiAdapter`, JSONL tracing with secret redaction, `.env` loading via `dotenvy`. `corvid run` dispatches natively — no Python on the path. Done-when met: refund_bot demo runs end-to-end with Python uninstalled; `cargo run -p openai_hello` / `anthropic_hello` make real provider calls. Test count grew from 134 (v0.1) to ~219 across the workspace.
+Tree-walking interpreter (`corvid-vm`), async end-to-end. Native runtime (`corvid-runtime`) with `ToolRegistry`, `Approver` trait, `MockAdapter`, `AnthropicAdapter`, `OpenAiAdapter`, JSONL tracing with secret redaction, `.env` loading via `dotenvy`. `corvid run` dispatches natively — no Python on the path. Done-when met: refund_bot demo runs end-to-end with Python uninstalled; `cargo run -p openai_structured_output` / `anthropic_structured_output` make real provider calls. Test count grew from 134 (v0.1) to ~219 across the workspace.
 
 Carry-overs explicitly tracked elsewhere:
 - Proc-macro `#[tool]` + `corvid run` user-tool loading → Phase 14

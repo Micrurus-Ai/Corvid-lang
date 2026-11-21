@@ -32,8 +32,8 @@ members = [
     "crates/corvid-shadow-daemon",
     "crates/corvid-lsp",
     "examples/offline_refund_bot",
-    "examples/openai_hello",
-    "examples/anthropic_hello",
+    "examples/openai_structured_output",
+    "examples/anthropic_structured_output",
     "benches/moat/time_to_audit/corpus_gen",
 ]
 

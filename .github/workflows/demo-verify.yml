@@ -281,12 +281,12 @@ jobs:
           cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_ollama.jsonl
           cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_anthropic.jsonl
 
-      - name: rag_qa_bot build
-        working-directory: examples/rag_qa_bot
+      - name: Knowledge base assistant build
+        working-directory: examples/knowledge_base_assistant
         run: cargo run -q -p corvid-cli -- build
 
-      - name: rag_qa_bot run
-        working-directory: examples/rag_qa_bot
+      - name: Knowledge base assistant run
+        working-directory: examples/knowledge_base_assistant
         env:
           CORVID_TEST_MOCK_TOOLS: '{"retrieve_context":["Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves."]}'
           CORVID_TEST_MOCK_LLM: "1"
@@ -294,29 +294,29 @@ jobs:
           CORVID_MODEL: mock-1
         run: cargo run -q -p corvid-cli -- run
 
-      - name: rag_qa_bot tests
+      - name: Knowledge base assistant tests
         env:
           CORVID_TEST_MOCK_TOOLS: '{"retrieve_context":["Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves."]}'
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: Refunds over one hundred dollars require approval before money moves.
           CORVID_MODEL: mock-1
         run: |
-          cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/unit.cor
-          cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/integration.cor
-          cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/replay_invariant.cor
+          cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/unit.cor
+          cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/integration.cor
+          cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/replay_invariant.cor
 
-      - name: rag_qa_bot eval
+      - name: Knowledge base assistant eval
         env:
           CORVID_TEST_MOCK_TOOLS: '{"retrieve_context":["Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves."]}'
           CORVID_TEST_MOCK_LLM: "1"
           CORVID_TEST_MOCK_LLM_RESPONSE: Refunds over one hundred dollars require approval before money moves.
           CORVID_MODEL: mock-1
-        run: cargo run -q -p corvid-cli -- eval examples/rag_qa_bot/evals/rag_qa_bot.cor
+        run: cargo run -q -p corvid-cli -- eval examples/knowledge_base_assistant/evals/rag_qa_bot.cor
 
-      - name: rag_qa_bot replay
+      - name: Knowledge base assistant replay
         run: |
-          cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/traces/rag_qa_bot_refund_policy.jsonl
-          cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/seed/traces/rag_qa_bot_refund_policy.jsonl
+          cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl
+          cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/seed/traces/rag_qa_bot_refund_policy.jsonl
 
       - name: support_escalation_bot build
         working-directory: examples/support_escalation_bot

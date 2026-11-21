@@ -272,7 +272,7 @@ fn rag_qa_bot_adversarial_cases_carry_registered_guarantee_ids() {
     let repo = repo_root();
     let adversarial_dir = repo
         .join("examples")
-        .join("rag_qa_bot")
+        .join("knowledge_base_assistant")
         .join("tests")
         .join("adversarial");
     for case in [
@@ -539,7 +539,7 @@ fn model_provider_routing_replay_fixtures_are_deterministic() {
 
 #[test]
 fn rag_qa_bot_runs_with_mock_retrieval_and_llm() {
-    let app = repo_root().join("examples").join("rag_qa_bot");
+    let app = repo_root().join("examples").join("knowledge_base_assistant");
 
     let out = Command::new(corvid_bin())
         .arg("run")
@@ -563,7 +563,7 @@ fn rag_qa_bot_runs_with_mock_retrieval_and_llm() {
 #[test]
 fn rag_qa_bot_corvid_tests_pass_with_mock_retrieval_and_llm() {
     let repo = repo_root();
-    let app = repo.join("examples").join("rag_qa_bot");
+    let app = repo.join("examples").join("knowledge_base_assistant");
 
     for suite in ["unit.cor", "integration.cor"] {
         let out = Command::new(corvid_bin())
@@ -592,7 +592,7 @@ fn rag_qa_bot_eval_harness_passes_with_mock_retrieval_and_llm() {
     let repo = repo_root();
     let eval = repo
         .join("examples")
-        .join("rag_qa_bot")
+        .join("knowledge_base_assistant")
         .join("evals")
         .join("rag_qa_bot.cor");
     let out = Command::new(corvid_bin())
@@ -621,7 +621,7 @@ fn rag_qa_bot_replay_fixture_is_deterministic() {
     let repo = repo_root();
     let trace = repo
         .join("examples")
-        .join("rag_qa_bot")
+        .join("knowledge_base_assistant")
         .join("traces")
         .join("rag_qa_bot_refund_policy.jsonl");
     let out = Command::new(corvid_bin())

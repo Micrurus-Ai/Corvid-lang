@@ -1,13 +1,13 @@
 [package]
-name = "openai_hello"
+name = "anthropic_structured_output"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Minimal real-network OpenAI demo: a single prompt call returning a typed Greeting."
+description = "Minimal real-network Anthropic demo: a single prompt call returning a typed Greeting."
 publish = false
 
 [[bin]]
-name = "openai_hello"
+name = "anthropic_structured_output"
 path = "runner/main.rs"
 
 [dependencies]

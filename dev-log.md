@@ -9904,8 +9904,8 @@ Slice 2b pre-phase chat. Topic: HTTP client, Anthropic adapter, `.env` loading, 
 - `cmd_doctor` rewritten. Loads `.env` so it sees what programs would. Reports: `.env` path / absent, `CORVID_MODEL` value or hint, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` set/unset, model-prefix vs key cross-check (warns if `CORVID_MODEL=claude-*` but no Anthropic key, etc.), Python presence as legacy-only note.
 
 **Demos** (workspace members)
-- `examples/openai_hello/` — `Greeting { salutation, target }` returned by a real `gpt-4o-mini` call.
-- `examples/anthropic_hello/` — same shape, Claude-haiku default.
+- `examples/openai_structured_output/` — `Greeting { salutation, target }` returned by a real `gpt-4o-mini` call.
+- `examples/anthropic_structured_output/` — same shape, Claude-haiku default.
 - Both register their own tracer with redaction.
 
 **Mock-HTTP integration tests**
@@ -9933,7 +9933,7 @@ Slice 2b pre-phase chat. Topic: HTTP client, Anthropic adapter, `.env` loading, 
 
 ### Honest scope check
 
-- **No real-network test in the suite.** A `#[ignore]`d test per adapter was in the brief; we omitted it because `wiremock` already covers wire-format correctness, and an `#[ignore]`d test that nobody runs is documentation pretending to be a test. We rely on the demos (`cargo run -p openai_hello` / `anthropic_hello`) for real-network verification.
+- **No real-network test in the suite.** A `#[ignore]`d test per adapter was in the brief; we omitted it because `wiremock` already covers wire-format correctness, and an `#[ignore]`d test that nobody runs is documentation pretending to be a test. We rely on the demos (`cargo run -p openai_structured_output` / `anthropic_structured_output`) for real-network verification.
 - **`with_redaction` clone-ordering caveat** is documented in code: callers must apply it before sharing the `Tracer` handle, otherwise the redaction-aware sibling has no file backing. The `RuntimeBuilder` path in `run_native` orders this correctly. Acceptable for slice 2b; revisit if it bites a real user.
 - **Retries / circuit breakers** belong to Phase 20 (typed `Result` + retry policies). A 401 / 429 / 5xx today returns `RuntimeError::AdapterFailed` and the agent aborts. That's the correct behaviour for now.
 
@@ -15721,7 +15721,7 @@ Validation:
 
 ## 2026-05-04 - Slice 33K-rag_qa_bot reference demo
 
-- Added the `examples/rag_qa_bot` reference demo with a grounded retrieval
+- Added the `examples/knowledge_base_assistant` reference demo with a grounded retrieval
   tool, source-preserving answer shape, deterministic knowledge-base fixtures,
   Corvid unit/integration tests, eval coverage, and a replay trace.
 - Wired env-backed mock tool responses into CLI run/test/eval paths so the
@@ -15922,17 +15922,17 @@ Validation:
   fixture into `demo-verify`.
 
 Validation:
-- `cargo run -q -p corvid-cli -- build` from `examples/rag_qa_bot` with mock
+- `cargo run -q -p corvid-cli -- build` from `examples/knowledge_base_assistant` with mock
   retrieval and LLM env.
-- `cargo run -q -p corvid-cli -- run` from `examples/rag_qa_bot` with mock
+- `cargo run -q -p corvid-cli -- run` from `examples/knowledge_base_assistant` with mock
   retrieval and LLM env.
-- `cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/unit.cor`
-- `cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/integration.cor`
-- `cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/replay_invariant.cor`
+- `cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/unit.cor`
+- `cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/integration.cor`
+- `cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/replay_invariant.cor`
 - `cargo test -p corvid-cli --test demo_project_defaults`
-- `cargo run -q -p corvid-cli -- eval examples/rag_qa_bot/evals/rag_qa_bot.cor`
-- `cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/traces/rag_qa_bot_refund_policy.jsonl`
-- `cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/seed/traces/rag_qa_bot_refund_policy.jsonl`
+- `cargo run -q -p corvid-cli -- eval examples/knowledge_base_assistant/evals/rag_qa_bot.cor`
+- `cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl`
+- `cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/seed/traces/rag_qa_bot_refund_policy.jsonl`
 - `cargo check --workspace`
 - `cargo test -p corvid-cli --lib`
   (structural baseline: no library targets found in package `corvid-cli`)
@@ -15941,7 +15941,7 @@ Validation:
   Windows native linker baseline: `__imp_GetUserNameExW`)
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`
   (exit 2 with the established Windows `whoami` linker signature)
-- Credential-pattern scan over `examples/rag_qa_bot`
+- Credential-pattern scan over `examples/knowledge_base_assistant`
 
 ---
 

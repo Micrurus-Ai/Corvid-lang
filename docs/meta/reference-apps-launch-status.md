@@ -5,15 +5,15 @@ This index tracks the launch demo apps Corvid intends to ship.
 ## Shipped in-repo demos
 
 - Refund bot:
-  [`examples/offline_refund_bot`](../examples/offline_refund_bot)
-- WASM browser demo:
-  [`examples/browser_refund_approval`](../examples/browser_refund_approval)
-- OpenAI hello:
-  [`examples/openai_hello`](../examples/openai_hello)
-- Anthropic hello:
-  [`examples/anthropic_hello`](../examples/anthropic_hello)
-- cdylib catalog demo:
-  [`examples/shared_library_catalog`](../examples/shared_library_catalog)
+  [`examples/offline_refund_bot`](../../examples/offline_refund_bot)
+- Browser refund approval:
+  [`examples/browser_refund_approval`](../../examples/browser_refund_approval)
+- OpenAI structured output:
+  [`examples/openai_structured_output`](../../examples/openai_structured_output)
+- Anthropic structured output:
+  [`examples/anthropic_structured_output`](../../examples/anthropic_structured_output)
+- Shared library catalog:
+  [`examples/shared_library_catalog`](../../examples/shared_library_catalog)
 
 ## Still blocked for full Phase 33 close
 

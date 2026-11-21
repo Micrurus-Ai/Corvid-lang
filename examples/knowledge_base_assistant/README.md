@@ -1,4 +1,4 @@
-# RAG QA Bot
+# Knowledge Base Assistant
 
 Grounded retrieval-augmented Q&A over a small committed knowledge base.
 
@@ -43,12 +43,12 @@ From the repository root:
 set CORVID_TEST_MOCK_TOOLS={"retrieve_context":["Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves."]}
 set CORVID_TEST_MOCK_LLM=1
 set CORVID_TEST_MOCK_LLM_RESPONSE=Refunds over one hundred dollars require approval before money moves.
-cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/unit.cor
-cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/integration.cor
-cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/replay_invariant.cor
-cargo run -q -p corvid-cli -- eval examples/rag_qa_bot/evals/rag_qa_bot.cor
-cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/traces/rag_qa_bot_refund_policy.jsonl
-cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/seed/traces/rag_qa_bot_refund_policy.jsonl
+cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/unit.cor
+cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/integration.cor
+cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/replay_invariant.cor
+cargo run -q -p corvid-cli -- eval examples/knowledge_base_assistant/evals/rag_qa_bot.cor
+cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl
+cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/seed/traces/rag_qa_bot_refund_policy.jsonl
 ```
 
 ## How To Modify

@@ -1,32 +1,33 @@
-//! Minimal Anthropic demo. Calls a real `claude-*` model and returns a
-//! typed `Greeting` struct.
+//! Minimal OpenAI demo. Calls a real `gpt-4o-mini` (or whatever
+//! `CORVID_MODEL` is set to) and returns a typed `Greeting` struct.
 //!
 //! Usage:
 //!
 //! ```sh
-//! export ANTHROPIC_API_KEY=sk-ant-...
-//! export CORVID_MODEL=claude-haiku-4-5-20251001
-//! cargo run -p anthropic_hello
+//! export OPENAI_API_KEY=sk-...
+//! export CORVID_MODEL=gpt-4o-mini
+//! cargo run -p openai_structured_output
 //! ```
+//!
+//! Or put the same vars in `.env` at the repo root.
 
 use std::sync::Arc;
 
 use corvid_driver::{
-    fresh_run_id, load_dotenv_walking, AnthropicAdapter, RedactionSet, Runtime, Tracer, Value,
+    fresh_run_id, load_dotenv_walking, OpenAiAdapter, RedactionSet, Runtime, Tracer, Value,
 };
 
-const SOURCE_REL: &str = "examples/anthropic_hello/src/hello.cor";
+const SOURCE_REL: &str = "examples/openai_structured_output/src/greeting.cor";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let _ = load_dotenv_walking(&cwd);
 
-    let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-        anyhow::anyhow!("set ANTHROPIC_API_KEY in your environment or in .env")
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        anyhow::anyhow!("set OPENAI_API_KEY in your environment or in .env")
     })?;
-    let model = std::env::var("CORVID_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".into());
+    let model = std::env::var("CORVID_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into());
 
     let source_path = locate_source(SOURCE_REL)?;
     let trace_dir = source_path
@@ -35,11 +36,11 @@ async fn main() -> anyhow::Result<()> {
         .map(|p| p.join("target").join("trace"))
         .unwrap_or_else(|| std::path::PathBuf::from("target/trace"));
 
-    let tracer =
-        Tracer::open(&trace_dir, fresh_run_id()).with_redaction(RedactionSet::from_env());
+    let tracer = Tracer::open(&trace_dir, fresh_run_id())
+        .with_redaction(RedactionSet::from_env());
 
     let runtime = Runtime::builder()
-        .llm(Arc::new(AnthropicAdapter::new(api_key)))
+        .llm(Arc::new(OpenAiAdapter::new(api_key)))
         .default_model(&model)
         .tracer(tracer)
         .build();

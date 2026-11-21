@@ -8,9 +8,9 @@ program.
 Local smoke measurements should focus on:
 
 - `corvid run` with `CORVID_TEST_MOCK_TOOLS` and `CORVID_TEST_MOCK_LLM=1`
-- `corvid test examples/rag_qa_bot/tests/unit.cor`
-- `corvid eval examples/rag_qa_bot/evals/rag_qa_bot.cor`
-- `corvid replay examples/rag_qa_bot/traces/rag_qa_bot_refund_policy.jsonl`
+- `corvid test examples/knowledge_base_assistant/tests/unit.cor`
+- `corvid eval examples/knowledge_base_assistant/evals/rag_qa_bot.cor`
+- `corvid replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl`
 
 Real embedder latency depends on provider, document count, chunk size, and
 whether embeddings are already cached. Keep provider latency and quality notes

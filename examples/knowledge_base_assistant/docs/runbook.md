@@ -6,7 +6,7 @@ model mode is explicitly opt-in.
 
 ## Deploy
 
-1. Clone the repository and enter `examples/rag_qa_bot`.
+1. Clone the repository and enter `examples/knowledge_base_assistant`.
 2. Keep real mode disabled for first boot:
 
    ```text
@@ -33,12 +33,12 @@ model mode is explicitly opt-in.
 6. Run the local hardening checks from the repository root:
 
    ```text
-   cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/unit.cor
-   cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/integration.cor
-   cargo run -q -p corvid-cli -- test examples/rag_qa_bot/tests/replay_invariant.cor
-   cargo run -q -p corvid-cli -- eval examples/rag_qa_bot/evals/rag_qa_bot.cor
-   cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/traces/rag_qa_bot_refund_policy.jsonl
-   cargo run -q -p corvid-cli -- replay examples/rag_qa_bot/seed/traces/rag_qa_bot_refund_policy.jsonl
+   cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/unit.cor
+   cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/integration.cor
+   cargo run -q -p corvid-cli -- test examples/knowledge_base_assistant/tests/replay_invariant.cor
+   cargo run -q -p corvid-cli -- eval examples/knowledge_base_assistant/evals/rag_qa_bot.cor
+   cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl
+   cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/seed/traces/rag_qa_bot_refund_policy.jsonl
    ```
 
 7. For real mode, configure every variable in `docs/real-providers.md` from an
@@ -120,6 +120,6 @@ model mode is explicitly opt-in.
 - `cargo test -p corvid-cli --test demo_project_defaults` passes.
 - `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` returns the
   established platform baseline.
-- The credential-pattern scan over `examples/rag_qa_bot` returns no matches.
+- The credential-pattern scan over `examples/knowledge_base_assistant` returns no matches.
 - `CORVID_RUN_REAL=1` is absent from default CI.
 - Plain replay is run with provider env cleared.
