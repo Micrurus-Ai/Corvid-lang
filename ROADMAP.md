@@ -115,6 +115,9 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Updated the [grammar reference](docs/reference/grammar.md) and parser examples for typed Python imports, import constraints, route contracts, identity and connectors. The CLI checked both orderings of a query plus form payload.
   - [x] Added the pinned LCDF copyright statement and COPYING file to the PDF extraction dependency's notice entry. Verified both texts in the generated Windows x64 inventory. The glyph-data redistribution review remains open in the [release policy](docs/release-policy.md).
 
+  - [x] Verified the [quickstart](docs/book/02-quickstart.md) in a fresh project. The starter replayed the same clock value, the file example returned its typed result, and the prompt made one request with the interpolated input to a local provider.
+  - [x] Ran the collection examples on both CLI tiers and verified the interpreter-specific Python snippets through IR lowering. All three book snippet checks passed.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.

@@ -137,6 +137,14 @@ fn every_corvid_block_in_guarded_chapters_compiles() {
                         ));
                     }
                 }
+                "corvid interp" => {
+                    if let Err(diagnostics) = corvid_driver::compile_to_ir(&fence.body) {
+                        failures.push(format!(
+                            "{chapter}:{} interpreter example failed to lower:\n{diagnostics:#?}",
+                            fence.start_line
+                        ));
+                    }
+                }
                 "corvid-error" => {
                     let compiled = corvid_driver::compile(&fence.body);
                     if compiled.ok() {

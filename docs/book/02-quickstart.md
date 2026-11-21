@@ -1,14 +1,6 @@
 # Quickstart
 
-## Goal
-
-Five minutes from zero to a Corvid program that calls an LLM, refuses to
-compile when you remove a safety check, and produces a deterministic
-replay you can show your team.
-
-Every `corvid`-tagged code block in this chapter compiles through the
-real driver in CI, and the deliberately-failing block is CI-pinned to
-keep failing (`crates/corvid-driver/tests/book_snippets_compile.rs`).
+Run a Corvid application, replay its first result, then write a typed model call and read a file through the standard library. You can complete the starter, replay and file examples offline.
 
 ## Step 1 — Make a project
 
@@ -17,17 +9,7 @@ corvid new hello-corvid
 cd hello-corvid
 ```
 
-This creates:
-
-```text
-hello-corvid/
-├── corvid.toml         # project manifest + [io]/[http] security boundaries
-├── .gitignore
-├── src/
-│   ├── main.cor        # entry point (greets the caller)
-│   └── std/            # vendored stdlib modules (io, http, db, json, …)
-└── tools.py            # generated with --with-python-tools
-```
+The project manifest is `corvid.toml`. Your entry point is `src/main.cor`, and the standard library lives under `src/std/`. Use `corvid new --with-python-tools` if your project also needs a Python tool module.
 
 `corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
 
@@ -36,9 +18,25 @@ boundaries from day one: `[io] root = "."` confines file access to the
 project directory, and `[http] allow = []` fails HTTP egress closed
 until you name trusted hosts.
 
+Check and run the starter before editing it.
+
+```sh
+corvid check
+corvid run
+corvid trace list
+```
+
+The starter greets you with the current UTC time. Copy the JSONL path from the last column of the trace list and pass it to replay while the original source is still in place. Replace `TRACE_PATH` below with that path.
+
+```sh
+corvid replay TRACE_PATH --source src/main.cor
+```
+
+The replay prints the greeting with the **same timestamp**. It reads the clock result recorded by the first run.
+
 ## Step 2 — Write the entry point
 
-The scaffold's starter program is a one-line echo tool. Replace
+Replace
 `src/main.cor` with an LLM-backed program:
 
 ```corvid
@@ -55,8 +53,6 @@ agent main() -> String:
     return summarize(article)
 ```
 
-What's happening:
-
 - `effect llm_call` declares a named effect with three dimensions: cost,
   latency, confidence. Every prompt that uses this effect inherits these
   bounds.
@@ -65,16 +61,18 @@ What's happening:
   return type is `String`, its effect row says it uses `llm_call`.
 - `agent main` is the program entry. Agents compose prompts and tools.
 
-## Step 3 — Run it
+## Step 3 — Run the prompt
+
+Select your provider and model through `CORVID_MODEL` and configure its credential in the environment. For an OpenAI-compatible local server, use `CORVID_MODEL=openai-compat:http://127.0.0.1:PORT/v1:MODEL`, replacing `PORT` and `MODEL` with the server's values. To check the program offline, use `corvid check src/main.cor`.
 
 ```sh
-corvid run src/main.cor
+corvid run src/main.cor --target interp
 ```
 
-You should see something like:
+The interpreter displays the generated text with its source information. The text depends on the model's response.
 
 ```text
-The compiler is the AI's first line of defense.
+Grounded("The compiler can track what an AI application does.", sources: [])
 ```
 
 ## Step 4 — Read a real file (the executing-I/O surface)
@@ -91,10 +89,10 @@ Path traversal (`..` escapes) is refused at the runtime boundary.
 Create a small data file:
 
 ```sh
-echo "Corvid ships a typed effect system." > note.txt
+printf '%s' 'Corvid ships a typed effect system.' > note.txt
 ```
 
-Edit `src/main.cor` to read it:
+In PowerShell use `Set-Content -NoNewline note.txt 'Corvid ships a typed effect system.'`. Edit `src/main.cor` to read it:
 
 ```corvid
 import "./std/io" use io_read_text
@@ -113,7 +111,7 @@ corvid run src/main.cor
 Output:
 
 ```text
-Corvid ships a typed effect system.
+Ok("Corvid ships a typed effect system.")
 ```
 
 What you just got, with zero glue:
@@ -186,11 +184,6 @@ The compiler refuses:
 1 error(s) found.
 ```
 
-This is the load-bearing claim: a dangerous tool call without `approve`
-does not compile. Not "produces a runtime warning." Not "fails a lint."
-Does not compile. (The failing block above is itself compiled in CI and
-pinned to keep failing with exactly this error class.)
-
 ## Step 6 — Add `approve`, watch it pass
 
 ```corvid
@@ -224,23 +217,6 @@ corvid check src/main.cor
 ok: src/main.cor — no errors
 ```
 
-## Step 7 — Replay it
+The last command typechecks the refund example. To execute it you would also need a registered implementation for the refund tool.
 
-Every Corvid run records a deterministic trace:
-
-```sh
-corvid trace list
-corvid replay <trace-id>
-```
-
-Replay re-executes the recorded LLM responses and tool calls without
-hitting the network. The replay output is byte-identical to the original.
-This is what makes "what changed?" answerable in seconds when a model
-upgrade lands.
-
-## What you just shipped
-
-In five minutes you wrote a program where the compiler enforced an
-approval policy that a static analyzer in any other language would have
-caught — at best — as a code smell. Now read **[The Moat](/docs/the-moat)**
-to understand why this is the load-bearing thing the language does.
+To build a browser interface for a Corvid service, continue with [Browser views](19-browser-views.md).

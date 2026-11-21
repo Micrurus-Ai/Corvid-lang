@@ -569,12 +569,14 @@ Here the caller must supply an index below the list length. To check both bounds
 Both CLI targets accept a named integer function or a closure as a callback on a `List<Int>`.
 
 ```corvid
-values = [3, 1, 4]
-doubled = values.map(fn (n) -> n * 2)
-large = values.filter(fn (n) -> n >= 3)
-total = values.fold(0, fn (acc, n) -> acc + n)
-positive = values.all(fn (n) -> n > 0)
-has_four = values.any(fn (n) -> n == 4)
+agent main() -> Int:
+    values = [3, 1, 4]
+    doubled = values.map(fn (n) -> n * 2)
+    large = values.filter(fn (n) -> n >= 3)
+    total = values.fold(0, fn (acc, n) -> acc + n)
+    positive = values.all(fn (n) -> n > 0)
+    has_four = values.any(fn (n) -> n == 4)
+    return total
 ```
 
 Here `doubled` is `[6, 2, 8]`, `large` is `[3, 4]`, and `total` is `8`. Both predicates return true. Callbacks visit elements in order. An empty list yields an empty map or filter result and the initial fold value. `any` stops at the first true result and returns false on an empty list. `all` stops at the first false result and returns true on an empty list.
@@ -604,11 +606,13 @@ Construct the cases with `Empty` or `Found(Entry(7, "found"), 8)`. The guard see
 Use `==` and `!=` to compare records and collections by their current contents. Lists compare elements in order. String-keyed maps compare keys and values regardless of insertion order. Options, results and sum types compare the case first and then its payload. Two independently created records can compare equal, including recursive records that link back to themselves.
 
 ```corvid
-first = {"a": 0, "b": 2}
-second = {"b": 2, "a": 0}
-same = first == second
-second["a"] = 1
-changed = first != second
+agent main() -> Bool:
+    first = {"a": 0, "b": 2}
+    second = {"b": 2, "a": 0}
+    same = first == second
+    second["a"] = 1
+    changed = first != second
+    return same and changed
 ```
 
 Both `same` and `changed` are true. A comparison observes values at the time it runs. Assigning a collection to another variable still shares that collection.

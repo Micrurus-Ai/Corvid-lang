@@ -2,7 +2,7 @@
 
 ## Direct imports in an interpreted program
 
-```corvid
+```corvid interp
 import python "math" as numbers effects: pure:
     fn gcd(left: Int, right: Int) -> Int
 
@@ -12,7 +12,7 @@ agent main() -> Int:
 
 Run `corvid run main.cor` with a Python-enabled CLI and a compatible Python installation. The example prints `6`. Direct imports currently run on the interpreter target. Native compilation, WebAssembly and Python source generation report this target limitation. Install third-party modules on the deployment machine in the embedded interpreter's import path. Direct imports use synchronous Python functions. Values cross the boundary by copying, and Corvid checks the returned data against the declared type. A Python exception includes the function name and traceback. The import effect list applies to each member. To deploy your own Python module, install it or include its directory on the embedded interpreter's `PYTHONPATH`. Replay can supply the recorded result even when the module is absent. For an operation whose declared trust level requires approval, use the imported function's qualified name.
 
-```corvid
+```corvid interp
 effect reviewed:
     trust: human_required
 
