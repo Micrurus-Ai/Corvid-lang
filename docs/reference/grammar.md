@@ -98,7 +98,9 @@ import_item       ::= IDENT ('as' IDENT)?
 
 ```ebnf
 type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
+                    | 'choice' IDENT ':' INDENT choice_variant+ DEDENT
                     | 'type' IDENT '=' type_alias_body NEWLINE
+choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
 
 # A type declaration is a record (field lines) XOR a sum (variant
 # lines) — mixing is a parse error. Unit variants (`| Pending`) are

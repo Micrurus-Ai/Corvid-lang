@@ -28,7 +28,7 @@ Open shelf 2 and choose **Suggest a title**. The task is to recommend a differen
 
 Trace the first call to `recommend` in `suggest_title`. The model receives the saved title and chooses one of two typed actions. `Suggest(title)` finishes the request with a proposed title. `Lookup(number)` asks the program to read one title from its snapshot of the three shelves. The program passes that title into one final model call. The model has no write tool. The selected shelf stays attached to the proposal in Corvid code. [Runnable source](../../examples/reading_list/src/main.cor)
 
-Before running the trial, predict which component chooses the action, what happens if the model requests shelf 4, and when SQLite changes. Check your answers against `finish_after_lookup`, `proposal` and the two POST routes. A missing shelf ends the request with an error. A second lookup also ends it. Each model call has a 30-second timeout. A valid title opens an editable preview, and submitting **Apply suggestion** reaches the same save handler as a manual edit.
+Before running the trial, predict which component chooses the action, what happens if the model requests shelf 4, and when SQLite changes. Check your answers against `recommend_after_lookup`, `proposal` and the two POST routes. A missing shelf ends the request with an error. A second lookup also ends it. Each model call has a 30-second timeout. A valid title opens an editable preview, and submitting **Apply suggestion** reaches the same save handler as a manual edit.
 
 ## Annotations
 

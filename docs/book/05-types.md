@@ -1,5 +1,16 @@
 # Types
 
+Use `choice` when a value can take one of several forms. Give each option its own indented line. An option can carry named data.
+
+```corvid
+choice Action:
+    Lookup(shelf: Int)
+    Suggest(title: String)
+```
+
+For example, `Lookup(2)` carries a shelf number. `Suggest("Persuasion")` carries a title. Use `match` to handle the options. Existing sum types declared with `type` and `|` use the same constructors and matching rules.
+
+
 Every fenced code block marked `corvid` compiles through the real
 driver in CI. Blocks under a **Planned** marker show designed syntax
 that is not yet implemented — each names the roadmap slice that

@@ -10,9 +10,9 @@ type Reading:
     shelf: Int where between(1, 3)
     title: String
 
-type Action:
-    | Lookup(shelf: Int)
-    | Suggest(title: String)
+choice Action:
+    Lookup(shelf: Int)
+    Suggest(title: String)
 
 type Decision:
     action: Action
@@ -36,16 +36,16 @@ fn proposal(shelf: Int, title: String) -> Result<Reading, String>:
 agent suggest_title(selected_shelf: Int) -> Result<Reading, String>:
     readings = list_readings()?
     current_title = lookup(readings, selected_shelf)?
-    first_choice = try recommend(current_title, "No lookup yet") timeout 30000
-    return match first_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title)
-        Lookup(requested_shelf) -> finish_after_lookup(readings, requested_shelf, current_title, selected_shelf)
+    decision = try recommend(current_title, "No lookup yet") timeout 30000
+    title = match decision.action:
+        Suggest(title) -> Ok(title)
+        Lookup(shelf) -> recommend_after_lookup(current_title, lookup(readings, shelf)?)
+    return proposal(selected_shelf, title?)
 
-agent finish_after_lookup(readings: List<Reading>, requested_shelf: Int, current_title: String, selected_shelf: Int) -> Result<Reading, String>:
-    requested_title = lookup(readings, requested_shelf)?
-    final_choice = try recommend(current_title, requested_title) timeout 30000
-    return match final_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title)
+agent recommend_after_lookup(current_title: String, shelf_title: String) -> Result<String, String>:
+    decision = try recommend(current_title, shelf_title) timeout 30000
+    return match decision.action:
+        Suggest(title) -> Ok(title)
         Lookup(_) -> Err("The model reached its lookup limit.")
 
 fn suggestion_controls(shelf: String) -> View:
