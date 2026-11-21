@@ -77,7 +77,7 @@
       "properties": {
         "corvid.catalog.url": {
           "type": "string",
-          "default": "https://corvid.sh/packages/catalog.json",
+          "default": "https://corvid-installer.ssebowadisan1.workers.dev/packages/catalog.json",
           "scope": "machine",
           "description": "Package catalog endpoint used by Add Package Import."
         },
