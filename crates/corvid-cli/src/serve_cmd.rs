@@ -95,6 +95,7 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    io_policy: corvid_runtime::io::IoToolPolicy,
     ir: IrFile,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
@@ -250,8 +251,10 @@ pub(crate) fn cmd_serve(
         host_tools.extend(register_cdylib_tool_handlers(&ir, cdylib_path)?);
     }
 
+    let io_policy = corvid_driver::load_io_tool_policy(file);
     let runtime = corvid_driver::apply_env_llm_wiring(
         Runtime::builder()
+            .io_policy(io_policy.clone())
             // The process-wide runtime has no requester identity. Every
             // authenticated HTTP request installs its own contextual
             // QueueApprover below; any accidental non-request path fails
@@ -331,6 +334,7 @@ pub(crate) fn cmd_serve(
         .context("serialize live Corvid OpenAPI contract")?;
 
     let state = Arc::new(ServeState {
+        io_policy,
         ir,
         runtime,
         approval_queue,
@@ -1636,6 +1640,7 @@ async fn approve_approval(
     // original request. Pre-33Q1a this was an empty default
     // registry, which is the bug anonymous-2026-06-04 P1.1 hit.
     let bypass_runtime = Runtime::builder()
+        .io_policy(state.io_policy.clone())
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .tool_registry(state.host_tools.clone())
         .build();

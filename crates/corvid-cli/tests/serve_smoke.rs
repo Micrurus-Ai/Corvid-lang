@@ -2968,3 +2968,140 @@ server status_api:
         );
     }
 }
+
+#[test]
+fn sqlite_service_transactions_survive_restart() {
+    use serde_json::{json, Value};
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("notes");
+    let run = |dir: &std::path::Path, args: &[&str]| {
+        let result = Command::new(corvid_bin())
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+    };
+    run(temp.path(), &["new", "notes"]);
+    std::fs::write(
+        project.join("src/main.cor"),
+        include_str!("fixtures/sqlite_service.cor"),
+    )
+    .unwrap();
+    std::fs::create_dir(project.join("schema")).unwrap();
+    std::fs::write(project.join("schema/001_notes.sql"), "CREATE TABLE notes(name TEXT PRIMARY KEY, text TEXT NOT NULL); CREATE TABLE writes(name TEXT NOT NULL);").unwrap();
+    run(
+        &project,
+        &[
+            "migrate",
+            "up",
+            "--dir",
+            "schema",
+            "--database",
+            "notes.sqlite",
+        ],
+    );
+    let start = || {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let child = Command::new(corvid_bin())
+            .current_dir(&project)
+            .args([
+                "serve",
+                "src/main.cor",
+                "--listen",
+                &format!("127.0.0.1:{port}"),
+            ])
+            .env_remove("CORVID_IO_ROOT")
+            .spawn()
+            .unwrap();
+        let guard = ServedApp(child);
+        assert!(wait_until_ready(port));
+        (guard, port)
+    };
+    let (guard, port) = start();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..4)
+            .map(|i| {
+                scope.spawn(move || {
+                    let note = json!({"name": format!("n{i}"), "text": format!("note {i}")});
+                    let (status, body) = http_post(port, "/notes", &note.to_string()).unwrap();
+                    assert_eq!(status, 200, "{body}");
+                    assert_eq!(
+                        serde_json::from_str::<Value>(&body).unwrap()["ok"],
+                        note,
+                        "{body}"
+                    );
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    let (_, duplicate) =
+        http_post(port, "/notes", r#"{"name":"n0","text":"replacement"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&duplicate).unwrap()["tag"],
+        "err",
+        "{duplicate}"
+    );
+    let (_, recovery) =
+        http_post(port, "/notes", r#"{"name":"next","text":"after rollback"}"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&recovery).unwrap()["tag"],
+        "ok",
+        "{recovery}"
+    );
+    drop(guard);
+    std::fs::write(
+        project.join("schema/002_index.sql"),
+        "CREATE INDEX ix_notes ON notes(text);",
+    )
+    .unwrap();
+    let next = project.join("schema/003_extend.sql");
+    std::fs::write(
+        &next,
+        "ALTER TABLE nonexistent ADD COLUMN revision INTEGER;",
+    )
+    .unwrap();
+    let migrate = [
+        "migrate",
+        "up",
+        "--dir",
+        "schema",
+        "--database",
+        "notes.sqlite",
+    ];
+    let failed = Command::new(corvid_bin())
+        .current_dir(&project)
+        .args(migrate)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success(), "{failed:?}");
+    std::fs::write(
+        &next,
+        "ALTER TABLE notes ADD COLUMN revision INTEGER DEFAULT 1;",
+    )
+    .unwrap();
+    run(&project, &migrate);
+    run(&project, &migrate);
+    let (_guard, port) = start();
+    for i in 0..4 {
+        let (status, body) = http_get(port, &format!("/notes/n{i}")).unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["ok"]["text"],
+            format!("note {i}"),
+            "{body}"
+        );
+    }
+    let db = rusqlite::Connection::open(project.join("notes.sqlite")).unwrap();
+    let writes: i64 = db
+        .query_row("SELECT count(*) FROM writes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(writes, 5);
+}

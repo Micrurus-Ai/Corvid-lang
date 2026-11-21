@@ -489,3 +489,62 @@ fn migrate_subcommands_accept_dry_run_shape() {
         assert!(stdout.contains("state_updated: false"), "{stdout}");
     }
 }
+
+#[test]
+fn retries_recover_committed_migrations_after_snapshot_write_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |action: &str| {
+        let mut cmd = Command::new(corvid_bin());
+        cmd.current_dir(dir.path()).args(["migrate", action, "--dir", ".", "--database", "db.sqlite", "--state", "history.json"]);
+        if action == "down" {
+            cmd.args(["--down-dir", "down"]);
+        }
+        cmd.output().unwrap()
+    };
+    let ok = |action| {
+        let out = run(action);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let write = |name, sql| std::fs::write(dir.path().join(name), sql).unwrap();
+    write("001.sql", "CREATE TABLE first(id INTEGER)");
+    write("002_bad.sql", "CREATE TABLE partial(id INTEGER); COMMIT;");
+    assert!(!run("up").status.success());
+    let database = dir.path().join("db.sqlite");
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    let table_count = |name: &str| -> i64 {
+        conn.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?1",
+            [name], |row| row.get(0)).unwrap()
+    };
+    assert_eq!(table_count("partial"), 0);
+    std::fs::remove_file(dir.path().join("002_bad.sql")).unwrap();
+    ok("up");
+    let mirror = dir.path().join("history.json");
+    // Simulate upgrading an existing database with only the legacy JSON history.
+    conn.execute("DROP TABLE _corvid_migration_history", []).unwrap();
+    ok("up");
+    std::fs::remove_file(&mirror).unwrap();
+    std::fs::create_dir(&mirror).unwrap();
+    write("002.sql", "CREATE TABLE second(id INTEGER)");
+    assert!(!run("up").status.success());
+    assert!(ok("status").contains("applied_count: 2"));
+    std::fs::remove_dir(&mirror).unwrap();
+    ok("up");
+
+    std::fs::create_dir(dir.path().join("down")).unwrap();
+    write("down/001.sql.down.sql", "DROP TABLE first");
+    write("down/002.sql.down.sql", "DROP TABLE second");
+    std::fs::remove_file(&mirror).unwrap();
+    std::fs::create_dir(&mirror).unwrap();
+    assert!(!run("down").status.success());
+    assert!(ok("status").contains("applied_count: 1"));
+    assert_eq!(table_count("second"), 0);
+    assert_eq!(table_count("first"), 1);
+    std::fs::remove_dir(&mirror).unwrap();
+    assert!(ok("down").contains("recovered_rollback"));
+    let snapshot: serde_json::Value = serde_json::from_slice(&std::fs::read(&mirror).unwrap()).unwrap();
+    assert_eq!(snapshot["migrations"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["migrations"][0]["name"], "001.sql");
+    ok("down");
+    assert!(ok("status").contains("applied_count: 0"));
+}

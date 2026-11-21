@@ -1,12 +1,12 @@
 # `std.db` — Executing SQLite surface
 
-> **Status:** Phase 33S3 (closed 2026-06-09). Three tools execute
+> **Status:** Phase 33S3 (closed 2026-06-09). Four tools execute
 > real SQLite operations against rusqlite; three RuntimeChecked
 > guarantees + the existing `io_source.fs_path_confinement`
 > guarantee (reused via `IoToolPolicy`) govern their behavior.
 > Earlier slices shipped envelope types only; 33S3 promotes the
 > SQLite path to executing. Since the stdlib Result-envelope
-> migration, all three tools return `Result<_, String>` —
+> migration, all four tools return `Result<_, String>` —
 > recoverable failures are Err values. The Postgres path remains
 > envelope-only — `std.db`'s Postgres types are still the
 > boundary between your agent and a tool wrapper.
@@ -33,7 +33,7 @@ SQL error, a binding failure, or a policy refusal is an
 `match` to recover. Malformed argument shapes are compile-time
 errors, not runtime conditions.
 
-## The three tools
+## SQLite tools
 
 ### `db_open(path: String) -> Result<DbHandle, String> uses db_egress_open`
 
@@ -60,6 +60,10 @@ there is no SQL interpolation path. Returns `Ok` of one
 `DbResult` envelope per row; an SQL or binding error is `Err`.
 
 `db_egress_read` is reversible: reads don't modify state.
+
+### `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String> uses db_egress_read`
+
+Returns one JSON object per result row, keyed by the SQLite column names. Give columns distinct aliases in joins. A query with no matches returns an empty list. Use `json_get_string` or `json_get_int` to decode a column when constructing a typed record. Bind request values with `db_param_text` and `db_param_int`. Both query tools accept read-only statements.
 
 ### `db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<DbResult, String> uses db_egress_write`
 
@@ -97,12 +101,7 @@ fabricates a `DbHandle`. That makes "you cannot fabricate a
 SQLite connection in user code" a **load-bearing language
 property** rather than a documentation claim.
 
-The handle is refcounted via `Arc`. Multiple agents can hold
-the same handle (clones share the same Arc + the same backing
-`rusqlite::Connection`). The underlying connection lives until
-the registry drops; a follow-up slice will wire a
-runtime-callback closer for early release when the last
-`Arc::drop` fires.
+Copies of a handle share one SQLite connection. Releasing the last copy closes the connection and rolls back any uncommitted transaction.
 
 ## The `DbParam` parameter type
 
@@ -215,7 +214,7 @@ row events).
 
 ## Determinism
 
-All three tools are non-deterministic. The checker rejects
+All four tools are non-deterministic. The checker rejects
 calls inside a `@deterministic` body — this is the existing
 `decl_replayability.rs::is_deterministic_compatible` rule
 that treats every tool call as non-deterministic by

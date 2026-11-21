@@ -335,3 +335,4 @@ public effect db_egress_write:
 public tool db_open(path: String) -> Result<DbHandle, String> uses db_egress_open
 public tool db_query(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<DbResult>, String> uses db_egress_read
 public tool db_execute(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<DbResult, String> uses db_egress_write
+public tool db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String> uses db_egress_read

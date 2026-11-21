@@ -2072,7 +2072,7 @@ impl<'ir> Interpreter<'ir> {
 // ============================================================================
 
 fn is_stdlib_db_tool(name: &str) -> bool {
-    matches!(name, "db_open" | "db_query" | "db_execute")
+    matches!(name, "db_open" | "db_query" | "db_query_rows" | "db_execute")
 }
 
 async fn dispatch_stdlib_db_tool(
@@ -2104,7 +2104,7 @@ async fn dispatch_stdlib_db_tool(
                 )))),
             }
         }
-        "db_query" | "db_execute" => {
+        "db_query" | "db_query_rows" | "db_execute" => {
             let handle = match arg_values.first() {
                 Some(Value::DbHandle(arc)) => arc.clone(),
                 _ => {
@@ -2140,6 +2140,8 @@ async fn dispatch_stdlib_db_tool(
             };
             let result_json = if callee_name == "db_query" {
                 runtime.db_query_tool(&handle, sql, params).await
+            } else if callee_name == "db_query_rows" {
+                runtime.db_query_rows_tool(&handle, sql, params).await
             } else {
                 runtime.db_execute_tool(&handle, sql, params).await
             };

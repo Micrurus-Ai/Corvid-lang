@@ -8022,3 +8022,9 @@ server catalog:
 Start the service with `corvid serve src/main.cor --listen 127.0.0.1:8080`. A request to `/owners/lee/search?term=caf%C3%A9+au+lait&limit=2` supplies `path.id`, a UTF-8 search term, and an integer limit. Missing fields, invalid escapes, and out-of-range values produce HTTP 400. An unknown route produces 404 and an unsupported method produces 405.
 
 For a sum type with variant `Approved(approver: String)`, a JSON body such as `{"variant":"Approved","fields":["alice"]}` supplies the positional payload. A variant without payloads can omit `fields`. When present, `tag` must be `"variant"` and `type` must name the declared sum. The server describes the alternatives, payload lengths and payload types at `/openapi.json`.
+
+### Reading typed records from SQLite
+
+Import `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>` from `"./std/db"`. Each row is a JSON object. For example, `json_get_string(rows[0], "text")?` reads a selected text column after you check that the list contains a row.
+
+Use the same `DbHandle` for `BEGIN IMMEDIATE`, parameterized writes, and `COMMIT`. When an agent returns early with `?` and its last handle goes out of scope, SQLite rolls back the pending transaction. Set `[io] root` in the project manifest to give a served app access to its database directory. Run `corvid migrate up --dir schema --database notes.sqlite` from the project to apply schema changes.

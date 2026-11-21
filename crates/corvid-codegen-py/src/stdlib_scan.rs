@@ -36,6 +36,7 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     // std/db
     "db_open",
     "db_query",
+    "db_query_rows",
     "db_execute",
     // std/json
     "json_parse",

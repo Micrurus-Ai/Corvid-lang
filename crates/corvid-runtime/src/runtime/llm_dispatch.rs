@@ -773,11 +773,38 @@ impl Runtime {
         sql: String,
         params: Vec<crate::db::DbValue>,
     ) -> Result<serde_json::Value, RuntimeError> {
+        self.query_db(handle, sql, params, "db_query", db_query_rows_to_envelope)
+    }
+
+    /// Read column values as JSON objects using SQLite column names as keys.
+    pub async fn db_query_rows_tool(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        self.query_db(handle, sql, params, "db_query_rows", |rows| {
+            serde_json::Value::Array(rows.rows.iter().map(|row| {
+                serde_json::Value::Object(row.iter().map(|(name, cell)| {
+                    (name.clone(), db_value_to_json_param(&cell.value))
+                }).collect())
+            }).collect())
+        })
+    }
+
+    fn query_db(
+        &self,
+        handle: &std::sync::Arc<crate::db::DbHandleInner>,
+        sql: String,
+        params: Vec<crate::db::DbValue>,
+        name: &str,
+        encode: fn(&crate::db::DbQueryRows) -> serde_json::Value,
+    ) -> Result<serde_json::Value, RuntimeError> {
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
                 ts_ms: now_ms(),
                 run_id: self.tracer.run_id().to_string(),
-                tool: "db_query".to_string(),
+                tool: name.to_string(),
                 args: vec![
                     serde_json::json!({
                         "tag": "db_handle_opaque_sentinel",
@@ -792,12 +819,12 @@ impl Runtime {
             });
         }
         let rows = self.db_registry.query(handle.handle_id, &sql, &params)?;
-        let payload = db_query_rows_to_envelope(&rows);
+        let payload = encode(&rows);
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolResult {
                 ts_ms: now_ms(),
                 run_id: self.tracer.run_id().to_string(),
-                tool: "db_query".to_string(),
+                tool: name.to_string(),
                 result: payload.clone(),
             });
         }
