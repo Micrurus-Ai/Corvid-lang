@@ -40,6 +40,32 @@ application with its compiled browser handlers. The server build target wraps
 a native entry agent in an HTTP server and uses Cargo to build the wrapper.
 The wrapper forwards application requests to the compiled entry agent. A file can also declare HTTP routes. The compiler checks those routes before building the entry agent. Cargo can use a shared compilation cache through `CARGO_TARGET_DIR`. Corvid copies the finished wrapper into the application's `target/server/` directory. Use `corvid serve` to dispatch requests to declared routes.
 
+## Calling a compiled agent from Python
+
+Save this agent in `src/main.cor` and run `corvid build src/main.cor --target python` from the project root.
+
+```corvid
+agent twice(value: Int) -> Int:
+    return value * 2
+```
+
+The build creates an importable Python module. To call it, save the following as `call_agent.py` in the project root. Set `CORVID_HOME` to your Corvid installation directory so Python can find the bundled runtime.
+
+```python
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(os.environ["CORVID_HOME"]) / "runtime-py"))
+
+from corvid_runtime import run_sync
+from target.py.main import twice
+
+print(run_sync(twice, 21))
+```
+
+Run `python call_agent.py` with Python 3.11 or later. It prints `42`. In an existing async function, import `run` from `corvid_runtime` and use `await run(twice, 21)`.
+
 ## Libraries and host calls
 
 A library needs an exported entry point. Save this example as `src/api.cor`
