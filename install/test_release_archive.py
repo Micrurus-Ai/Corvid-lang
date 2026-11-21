@@ -38,7 +38,7 @@ function git { throw 'Candidate archive installation attempted a source fallback
 & $env:CORVID_TEST_INSTALLER @args
 """, encoding="utf-8")
         env["CORVID_TEST_INSTALLER"] = str(scripts / "install.ps1")
-        command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", wrapper]
+        command = ["powershell", "-NoProfile", "-File", wrapper]
         uninstall = "-Uninstall"
     else:
         commands = work / "commands"
@@ -137,6 +137,14 @@ def exercise_installation(root, expected_version, work):
     greeting = json.loads(run("run", cwd=project))
     if not greeting.startswith("Hello, Corvid! It is "):
         raise RuntimeError(f"Unexpected first-project output: {greeting!r}")
+    traces = list((project / "target/trace").glob("*.jsonl"))
+    if len(traces) != 1:
+        raise RuntimeError(f"Expected one starter trace, found {len(traces)}")
+    replay = run("replay", traces[0], "--source", "src/main.cor", cwd=project)
+    result_prefix = "replay completed: agent `main` -> "
+    results = [line[len(result_prefix):] for line in replay.splitlines() if line.startswith(result_prefix)]
+    if len(results) != 1 or json.loads(results[0]) != greeting:
+        raise RuntimeError(f"Starter replay did not reproduce {greeting!r}: {replay}")
     if (project / "src/std/ui.cor").read_bytes() != (root / "std/ui.cor").read_bytes():
         raise RuntimeError("The project scaffold did not copy the archive's UI library")
     (project / "src/main.cor").write_text(

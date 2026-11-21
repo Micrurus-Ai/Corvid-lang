@@ -107,6 +107,8 @@ corvid check
 corvid run
 ```
 
+The greeting includes the current UTC time. To confirm replay works in your installation, run `corvid trace list`, copy the JSONL path for that run, and run `corvid replay TRACE_PATH --source src/main.cor` with that path. The replay should print the original timestamp.
+
 ## Editor setup
 
 The Corvid LSP ships in the same binary. Pick your editor:

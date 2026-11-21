@@ -101,6 +101,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [ ] R01. Verify supported OS installers, version reporting, upgrade, rollback and uninstall. Build and run a frontend/backend application from a clean installation.
   - [x] The [six native candidate packages](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44825954720) passed the installer-to-application check. The install guide records their tested Python runtimes.
   - [ ] The Windows x64 archive from be524e1f matched its workflow checksum. On this host Defender event 1121 blocked the staged executable at its version check (rule C1DB55AB-C21A-4637-BB3F-A12568109D35, executable SHA-256 `53264307be045efffae7d945470887b83c5ef218bbb068462dda2f02e6e7bb33`). Administrator review and successful installation under that policy remain pending.
+  - [ ] The checksum-verified Windows x64 candidate from 3a29a662 also stopped at the staged version check under the device's existing policy. Defender recorded event 1121 for rule C1DB55AB-C21A-4637-BB3F-A12568109D35 and the installer reported executable SHA-256 `efbabddf9f70c53dbbc025ce1c1327070d63fd7ad06c158ed22c53b2fdc9986f`. This is the same managed-device review as above.
 - [ ] R02. Reconcile backend support, language versioning, compatibility policy and migration instructions with the shipped behavior. Run the workspace suite and platform checks.
   - [x] The integrated Linux checkout passed the locked workspace library and integration suite in a clean build directory (194 test groups, 3,225 passed, zero failed, seven ignored). This run covers the integrated source snapshot, including the imported-function purity regression.
   - [x] Reconciled the [build guide](docs/book/16-building.md) with CLI target names and flags. A fresh Windows project returned 42 on both interpreter and native runs and produced the documented Python, Wasm, native, shared-library and static-library artifacts.
@@ -123,6 +124,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Extended the function index with result and option constructors, weak references, pagination, stream resumption, interaction calls and explicit source removal from grounded values. Checked all twelve signatures through the CLI.
 
   - [x] Downloaded all six [3a29a662 candidate archives](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44880478367) and verified their SHA-256 digests against the workflow manifest. Each contained the source revision's project license and all 21 standard-library modules, and included both pinned LCDF notices in the PDF dependency entry. All six native installer-to-application jobs passed.
+
+  - [x] Exercised starter trace replay through the production installer in clean Debian 12. The installed candidate reproduced the original greeting and timestamp, served the relocated web application and uninstalled successfully. The candidate test now checks this replay on each platform.
 
 ## Verified task results
 
