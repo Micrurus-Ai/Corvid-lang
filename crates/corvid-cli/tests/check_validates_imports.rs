@@ -545,3 +545,119 @@ agent main() -> Bool:
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
+
+#[test]
+fn propagation_releases_values_live_in_enclosing_scopes() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent read(text: String) -> Result<Int, String>:
+    saved = text + "!"
+    if text.length() > 0:
+        number = text.parse_int()?
+        return Ok(number + saved.length())
+    return Ok(0)
+
+agent piece(text: String, item: Option<Int>) -> Option<String>:
+    saved = text + "!"
+    n = item?
+    return Some(saved.substring(0, n))
+
+agent read_rows(rows: List<String>) -> Result<String, String>:
+    label = "sc" + "ore"
+    for row in rows:
+        if row == "skip":
+            continue
+        if row == "stop":
+            break
+        count = row.parse_int()?
+        if count > 0:
+            return Ok(label)
+    return Ok("empty")
+
+agent mark(trace: List<Int>, n: Int) -> Int:
+    trace.append(n)
+    return n
+
+agent total(trace: List<Int>, text: String) -> Result<Int, String>:
+    saved = text + "!"
+    return Ok(mark(trace, 1) + text.parse_int()? + mark(trace, 2) + saved.length())
+
+agent lazy(text: String, fallback: String, enabled: Bool) -> Result<Bool, String>:
+    saved = text + "!"
+    required = enabled and text.parse_int()? > 0
+    optional = enabled or fallback.parse_int()? == 0
+    return Ok(required and optional and saved.length() > 0)
+
+agent main() -> Bool:
+    failed = read("bad").is_err()
+    recovered = match read("3"):
+        Ok(n) -> n == 5
+        Err(_) -> false
+    missing = piece("foo", None) == None
+    found = match piece("foo", Some(2)):
+        Some(s) -> s == "fo"
+        None -> false
+    bad_row = read_rows(["0", "bad"]).is_err()
+    exhausted = read_rows([]).is_ok() and read_rows(["0"]).is_ok()
+    stopped_rows = read_rows(["skip", "stop", "bad"]).is_ok()
+    good_row = match read_rows(["0", "1"]):
+        Ok(s) -> s == "score"
+        Err(_) -> false
+    trace: List<Int> = []
+    stopped = total(trace, "bad").is_err()
+    sum = match total(trace, "5"):
+        Ok(n) -> n == 10
+        Err(_) -> false
+    order = trace.length() == 3 and trace[0] == 1 and trace[1] == 1 and trace[2] == 2
+    yes: Result<Bool, String> = Ok(true)
+    no: Result<Bool, String> = Ok(false)
+    lazy_paths = lazy("bad", "0", true).is_err() and lazy("1", "bad", false).is_err() and lazy("1", "bad", true) == yes and lazy("bad", "0", false) == no
+    return failed and recovered and missing and found and bad_row and good_row and exhausted and stopped_rows and stopped and sum and order and lazy_paths
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}
+
+#[test]
+fn propagation_in_loop_conditions_and_collection_updates() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    std::fs::write(&main, r#"
+agent key(trace: List<Int>) -> String:
+    trace.append(3)
+    return "ke" + "y"
+
+agent index(trace: List<Int>) -> Int:
+    trace.append(2)
+    return 0
+
+agent process(rows: List<String>, rhs: String, trace: List<Int>, slots: List<Int>) -> Result<Int, String>:
+    saved = "lo" + "cal"
+    i = 0
+    while rows[i].parse_int()? > 0:
+        trace.append(1)
+        i += 1
+        continue
+    slots[index(trace)] = rhs.parse_int()?
+    values = {key(trace): rows[0].parse_int()?}
+    return Ok(slots[0] + values.length() + saved.length())
+
+agent counted(trace: List<Int>, text: String) -> Result<Int, String>:
+    values = {key(trace): 1, key(trace): text.parse_int()?}
+    values[key(trace)] = text.parse_int()?
+    return Ok(values.length())
+
+agent main() -> Bool:
+    trace: List<Int> = []
+    slots = [9]
+    loop_failed = process(["1", "bad"], "4", trace, slots).is_err()
+    write_failed = process(["0"], "bad", trace, slots).is_err() and slots[0] == 9
+    success = process(["1", "0"], "4", trace, slots)
+    expected: Result<Int, String> = Ok(10)
+    ordered = trace == [1, 2, 1, 2, 3]
+    bad_map = counted(trace, "bad").is_err()
+    good_map = counted(trace, "5").is_ok()
+    return ordered and loop_failed and write_failed and success == expected and bad_map and good_map and trace.length() == 10
+"#).unwrap();
+    assert_both_targets_without_leaks(&main);
+}

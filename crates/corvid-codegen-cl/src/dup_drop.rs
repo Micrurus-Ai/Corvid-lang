@@ -52,6 +52,8 @@ use std::collections::BTreeMap;
 
 use crate::dataflow::{analyze_agent, BranchDrops, IrNavStep, IrPath, OwnershipPlan};
 
+mod propagation;
+
 /// Public entry: clone `agent` and return a new agent with
 /// `IrStmt::Dup` and `IrStmt::Drop` inserted per the ownership plan.
 ///
@@ -69,22 +71,26 @@ pub fn insert_dup_drop(agent: &IrAgent) -> IrAgent {
     {
         return agent.clone();
     }
-    let (_cfg, plan) = analyze_agent(agent);
-    apply_plan(agent, &plan)
+    let (expanded, next) = expand_propagation(agent);
+    let (_cfg, plan) = analyze_agent(&expanded);
+    apply_plan_owned(expanded, &plan, next)
+}
+
+pub(crate) fn expand_propagation(agent: &IrAgent) -> (IrAgent, u32) {
+    let mut expanded = agent.clone();
+    let mut next = next_local_id(agent);
+    propagation::expand_block(&mut expanded.body, &agent.return_ty, &mut next);
+    (expanded, next)
 }
 
 /// Apply a pre-computed plan to a clone of `agent`. Split out from
 /// `insert_dup_drop` so tests can inject hand-built plans for edge
 /// cases the analyzer doesn't generate naturally.
 pub fn apply_plan(agent: &IrAgent, plan: &OwnershipPlan) -> IrAgent {
-    let mut out = agent.clone();
+    apply_plan_owned(agent.clone(), plan, next_local_id(agent))
+}
 
-    // Fresh-LocalId allocator for synthetic-Let hoisting. Scan the
-    // agent to find the max LocalId in use across params + all Let /
-    // For / Dup / Drop statements, then allocate fresh IDs starting
-    // from max+1. Bumping guarantees the hoisted `tmp` never aliases
-    // any user-visible local.
-    let mut next_local = next_local_id(agent);
+fn apply_plan_owned(mut out: IrAgent, plan: &OwnershipPlan, mut next_local: u32) -> IrAgent {
 
     // Group insertions by IR-tree position. Each map is
     //   IrPath (without the trailing Stmt step) → Vec<(stmt_idx, IrStmt)>
@@ -128,7 +134,7 @@ pub fn apply_plan(agent: &IrAgent, plan: &OwnershipPlan) -> IrAgent {
             //     synthetic `Let tmp = <expr>; Drop <locals>; Return tmp`.
             //     The Drops then land after the expr has evaluated
             //     but before the return instruction fires.
-            let target_block = find_block(&agent.body, &parent);
+            let target_block = find_block(&out.body, &parent);
             let return_expr = target_block
                 .and_then(|b| b.stmts.get(idx))
                 .and_then(|s| match s {
@@ -800,7 +806,7 @@ fn insert_drops_at_block_tail(
     let ret_pos = block
         .stmts
         .iter()
-        .rposition(|s| matches!(s, IrStmt::Return { .. }));
+        .rposition(|s| matches!(s, IrStmt::Return { .. } | IrStmt::Continue { .. } | IrStmt::Break { .. }));
     let insert_at = ret_pos.unwrap_or(block.stmts.len());
     let mut at = insert_at;
     for &l in locals {

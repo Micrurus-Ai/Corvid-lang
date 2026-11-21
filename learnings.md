@@ -7958,3 +7958,15 @@ Integer arithmetic is checked by default. The smallest `Int` divided by `-1` ove
 `to_upper()` and `to_lower()` use Unicode case mapping, which can change the length. `trim()` removes surrounding Unicode whitespace. `contains(needle)`, `starts_with(prefix)` and `ends_with(suffix)` compare exact text and accept an empty pattern. `replace(old, new)` replaces every match. An empty `old` inserts `new` at each scalar boundary.
 
 `"a,,b,".split(",")` returns `["a", "", "b", ""]`. Splitting requires a nonempty separator. `" 42 ".parse_int()` returns `Ok(42)`. Invalid text returns `Err`. Use `is_ok()` or `is_err()` to inspect the result, or use `?` to forward the error.
+
+### Returning early with `?`
+
+In an agent returning a `Result`, `text.parse_int()?` produces the parsed integer on success. On failure, it immediately returns the error from the agent. An `Option`-returning agent can use the same syntax to return `None` when an input is absent.
+
+```corvid
+agent replace_first(items: List<Int>, text: String) -> Result<Int, String>:
+    items[0] = text.parse_int()?
+    return Ok(items[0])
+```
+
+For a nonempty list, a successful parse updates the first item. If parsing fails, the assignment never writes to the list. Expressions before `?` keep their side effects. Later operands run only if evaluation reaches them. A skipped operand of `and` or `or` cannot propagate an error. Owned local values and temporaries are released when execution leaves their scope.

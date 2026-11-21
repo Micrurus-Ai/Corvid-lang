@@ -274,7 +274,8 @@ pub fn lower_file(
             define_agent(module, &transformed, func_id, &func_ids_by_def, &runtime)?;
         } else {
             runtime.prompt_pins.clear();
-            define_agent(module, agent, func_id, &func_ids_by_def, &runtime)?;
+            let (expanded, _) = crate::dup_drop::expand_propagation(agent);
+            define_agent(module, &expanded, func_id, &func_ids_by_def, &runtime)?;
         }
     }
 

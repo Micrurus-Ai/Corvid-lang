@@ -26,10 +26,11 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Native integer list callbacks for map, filter, fold, any and all passed the cross-module CLI test, including empty inputs, ordered evaluation and short-circuiting.
   - [x] Both CLI targets constructed and matched imported sum values with record payloads. A guarded arm returned the original record, and native allocations balanced in both ownership modes.
 - [x] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
-- [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
+- [x] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
   - [x] Compare records, lists, string maps, options, results and sum variants by their contents on both CLI targets. Include aliases, mutations, independent recursive records and owned payloads.
   - [x] Both CLI targets checked Float rounding and conversion limits, including halfway cases, loss of integer precision, NaN, infinity, and signed division overflow at the minimum Int.
   - [x] Both CLI targets agree on Unicode scalar lengths and substring bounds, case mapping, trimming, search, replacement and splitting, including empty patterns and separators. Native allocation counts balanced in both ownership modes.
+  - [x] Option and Result propagation releases owned values across nested scopes, loop conditions, short-circuit expressions and collection updates. Both CLI targets preserved operand order and both native ownership modes balanced allocations.
 
 **2. Developer workflow**
 
