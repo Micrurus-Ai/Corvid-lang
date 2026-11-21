@@ -60,6 +60,7 @@ mod observe_helpers_cmd;
 mod ops_cmd;
 mod package_cmd;
 mod project_source;
+mod fmt_cmd;
 mod receipt_cache;
 mod receipt_cmd;
 mod release_cmd;

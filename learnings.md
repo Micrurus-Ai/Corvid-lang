@@ -7970,3 +7970,9 @@ agent replace_first(items: List<Int>, text: String) -> Result<Int, String>:
 ```
 
 For a nonempty list, a successful parse updates the first item. If parsing fails, the assignment never writes to the list. Expressions before `?` keep their side effects. Later operands run only if evaluation reaches them. A skipped operand of `and` or `or` cannot propagate an error. Owned local values and temporaries are released when execution leaves their scope.
+
+### Formatting a project
+
+Run `corvid fmt` from the project root to format Corvid files under `src/` and `tests/`. To format one file, use `corvid fmt src/main.cor`. Use `corvid fmt --check` in CI. It lists files that need formatting and exits with status 1 when it finds differences. It returns 0 when the files already match.
+
+After cloning a project, run `corvid check` to check the entry point and its imports, `corvid run` to execute it, and `corvid test tests/math.cor` to run tests in that file.

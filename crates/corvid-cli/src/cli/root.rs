@@ -85,6 +85,13 @@ pub enum Command {
     },
     /// Type-check a source file or the current project's src/main.cor.
     Check { file: Option<PathBuf> },
+    /// Format Corvid source files. Defaults to project sources and tests.
+    Fmt {
+        /// Report files that need formatting and leave them untouched.
+        #[arg(long)]
+        check: bool,
+        files: Vec<PathBuf>,
+    },
     /// Add a capability to this project: a skill (an effect-audited
     /// vendored package), an MCP server, or a connector.
     #[command(subcommand)]
