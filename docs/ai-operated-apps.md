@@ -1,6 +1,6 @@
 # Applications people and AI can operate together
 
-**Research and design, November 2026.** Let a developer express “move this meeting” once. The calendar screen, keyboard shortcut and a delegated assistant invoke the same application operation. The assistant can discover it without reading pixels. The person can see what changed, keep working, and take over at any point.
+**Research and design, November 2026.** Every Corvid application should be able to offer an assistant the actions its author chooses. Developers define domain types and operations in ordinary project code. A screen, keyboard shortcut and delegated assistant can invoke the same operation. The application controls what context is visible and where the action executes. A local-only action should work within a local session without publishing a network endpoint. Server-owned actions use the application's existing authorization boundary.
 
 ## What existing systems give us
 
@@ -22,7 +22,9 @@ Corvid can already consume tools from other MCP servers. Publishing selected act
 
 **Make recovery ordinary.** A move preview returns old and proposed times plus affected attendees. Applying it checks current authorization, revision and availability in one transaction. Bind retries to an idempotency key scoped to the caller and operation. Return a typed conflict when a precondition changes. Mark reversibility per operation; sending invitations can have external effects even if the calendar entry can be moved back. Record a redacted trace of who requested the change and what committed. Replay for debugging must leave external effects disabled.
 
-## Calendar acceptance test
+## Worked example of the general action contract
+
+The calendar exercises selection, concurrent writes and external effects. Its meeting types, scheduling rules and action names belong entirely to the application. The language supplies typed inputs and outcomes, explicit exposure, execution location and change notification.
 
 | Step | Expected behavior |
 | --- | --- |
@@ -35,9 +37,9 @@ Corvid can already consume tools from other MCP servers. Publishing selected act
 ## Delivery order
 
 1. **Discover a form.** The branch implements `ui.agent_query_form` for author-selected GET routes. It emits declarative WebMCP metadata and uses ordinary user submission. Check the live discovery and fill flow with a compatible agent/browser before advertising interoperability. [Learning guide](book/19-browser-views.md)
-2. **Define a single typed action.** Prototype discovery for a typed `find_slots` handler with shared input and result schemas. Use the existing type checker and route representation. Compare an explicit opt-in on an existing handler with a separate declaration for readability. Keep the official grammar unchanged until one compiles and passes the learning tests.
+2. **Define a typed action contract.** Derive discovery from author-defined input and result types. Bind a browser-local handler or an existing server operation to that contract. Compare an explicit opt-in on an existing handler with a separate declaration for readability. Keep the official grammar unchanged until one compiles and passes the learning tests.
 3. **Share context and changes.** Implement scoped selection, stable IDs, revocation and versioned outcomes. Exercise the calendar test against a redesigned UI. Preserve normal mobile and keyboard behavior with the adapter disabled.
 4. **Ship one delegated write.** Implement preview, apply, authorization recheck, conflict handling, duplicate suppression and redacted replay together. Test user and agent calls against the same server handler.
 5. **Add remote operation.** Publish a scoped MCP adapter after the in-app contract is stable. Test with a real host, an expired session and a read-only identity. Document the supported protocol and browser versions.
 
-Measure setup effort and duplicated declarations, success after a UI redesign, recovery from conflicts, keyboard completion, and correctness after permission changes. Compare agent latency and completion against a screenshot-driven baseline on the same calendar tasks before making speed or reliability claims.
+Repeat the contract tests with an independently authored operation in a fresh project. Measure setup effort and duplicated declarations, success after a UI redesign, recovery from conflicts, keyboard completion, and correctness after permission changes. Compare agent latency and completion on identical tasks before making performance claims.

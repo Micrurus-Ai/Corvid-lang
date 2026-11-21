@@ -4,6 +4,10 @@
 
 ## Starting point
 
+**Full-stack language commitment.** Every Corvid application should be able to define its own data types, components, screens, state, persistence, server operations and optional AI behavior in Corvid. The author chooses which layers the application needs. A local editor can keep an operation on device. A networked application can run its authoritative operation on the server. Both should be able to expose selected actions to an assistant using the same types and handlers their UI uses. Existing libraries and services remain available by choice.
+
+**Extensibility test.** Starting from an ordinary project, an independent developer defines a domain type and an operation the Corvid team has never seen. They connect it to their own component, choose what an assistant may see and invoke, and build with the standard CLI. This must work without a change to the compiler, a domain plugin, a second agent-specific handler or an application template. The sample applications below exercise these capabilities.
+
 **Accepted product decisions.** Ordinary frontend development should be possible in a Corvid project with the standard toolchain. CSS, JavaScript packages and web components are optional interoperability paths. Use ordinary Corvid types and control flow, typed component inputs and events, and an explicit browser/server boundary. The first preview must support a storefront cart and cancellable search. Ease of reading, writing and debugging is a release criterion. The precise view syntax and default browser compilation target remain open. [Component design candidates and usability checks](frontend-component-design.md)
 
 Corvid already documents server-rendered HTML, typed forms and routes, browser-compiled handlers, streamed text and a web archive. The frontend-layout branch adds three layout functions and a shared integer control. Today's views carry HTML strings, and the shipped handler examples update integer or string values. These give us compatibility cases for a more general model. The checkboxes below track proposed work. [Browser guide](book/19-browser-views.md) · [View implementation](../std/ui.cor) · [Browser bindings](../crates/corvid-codegen-wasm/src/browser_controls.js)
@@ -52,7 +56,7 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## Developer preview and stable release
 
-Track AI operation alongside the general component work. The calendar milestone exercises one shared action through human and agent interfaces, with typed context, concurrent edits and permission changes. [Research, prototype and acceptance tests](ai-operated-apps.md)
+Track the extensibility test alongside the general component work. Exercise both a browser-local operation and a server-backed operation through human and agent interfaces. Check typed context, concurrent edits and permission changes wherever they apply. [Research, prototype and acceptance tests](ai-operated-apps.md)
 
 Start testing accessibility, performance and browser behavior with the first prototype. Use the following criteria to decide what a release can promise.
 
