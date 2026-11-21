@@ -1,23 +1,47 @@
-//! Build script for `corvid-codegen-cl`.
-//!
-//! Historically this script emitted `CORVID_STATICLIB_DIR=<absolute
-//! target dir path>` as a compile-time env var so that `link.rs` and
-//! `cdylib.rs` could find the `corvid-runtime` staticlib via
-//! `env!()`. That worked for dev workflows but baked an absolute
-//! path into the binary's read-only data section, which:
-//!
-//! 1. broke bit-identical rebuilds with different `CARGO_TARGET_DIR`
-//!    values — the reproducible-build CI workflow uses two separate
-//!    target dirs on purpose and would observe a SHA-256 mismatch
-//!    from the embedded path alone (the
-//!    `deploy.reproducible_build` runtime-checked guarantee), and
-//! 2. shipped a developer's host path into release binaries.
-//!
-//! The staticlib path is now resolved at runtime via
-//! `staticlib_discovery::discover_staticlib`. This build script
-//! intentionally emits nothing host-dependent — it only declares
-//! its own rerun dependency.
+//! Identify the native backend that produced a cached executable.
 
-fn main() {
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+
+fn collect_sources(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            collect_sources(&path, files)?;
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    // Watching the directory also covers files added or removed after a build.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=build.rs");
+    let mut files = vec![PathBuf::from("Cargo.toml"), PathBuf::from("build.rs")];
+    collect_sources(Path::new("src"), &mut files)?;
+    files.sort();
+
+    let mut hash = Sha256::new();
+    hash.update(std::env::var("TARGET").expect("Cargo target triple"));
+    for file in files {
+        // Only crate-relative paths enter the digest.
+        let path = file
+            .to_str()
+            .expect("UTF-8 backend source path")
+            .replace('\\', "/");
+        let bytes = std::fs::read(file)?;
+        hash.update((path.len() as u64).to_le_bytes());
+        hash.update(path.as_bytes());
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+    println!(
+        "cargo:rustc-env=CORVID_NATIVE_BACKEND_ID={:x}",
+        hash.finalize()
+    );
+    Ok(())
 }

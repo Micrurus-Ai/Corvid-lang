@@ -35,6 +35,9 @@ tempfile = "3"
 # we depend on it explicitly so the lowering path can reach it.
 serde_json    = { workspace = true }
 
+[build-dependencies]
+sha2 = "0.10"
+
 [dev-dependencies]
 corvid-syntax = { workspace = true }
 corvid-vm     = { workspace = true }

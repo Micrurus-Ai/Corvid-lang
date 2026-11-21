@@ -798,6 +798,7 @@ dependencies = [
  "criterion",
  "libloading",
  "serde_json",
+ "sha2 0.10.9",
  "target-lexicon 0.13.5",
  "tempfile",
  "tokio",
