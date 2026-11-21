@@ -4,6 +4,28 @@ After verifying each completed roadmap task, commit its implementation, tests an
 
 ## Active task queue
 
+### Remaining work in execution order
+
+Start at step 1. This table orders the team's remaining implementation and evaluation work. Developers adopting Corvid can start directly with a large project. The sections below retain individual task IDs, checkboxes and verification history. Use their checkboxes to track completion. Earlier phase plans and launch notes provide historical context.
+
+| Order | Work | Finish when |
+| ---: | --- | --- |
+| 1 | Package one editable full-stack application using today's documented Corvid. | A clean project lists, edits and saves a typed record through a keyboard-accessible screen. The packaged app reads it back after restart and works without model credentials. Record setup friction and baseline browser and save latency. |
+| 2 | Extend the same app with a typed model suggestion. Exercise the first-agent guide (A07). | A developer can preview and apply a suggestion through the existing handler, recover from malformed output, cancel the request and explain the model's tools and stopping condition. |
+| 3 | Settle the component, action and execution model with a working prototype. | Compare the candidate grammars and JavaScript/WebAssembly paths on the same interaction. Choose the design using reader predictions, binding diagnostics and browser measurements. Specify local and server-owned actions. |
+| 4 | Implement composable views, styling, accessibility and client state. | The responsive cart supports keyboard input, keyed edits and focus preservation. Native navigation and forms work before interactive code loads. |
+| 5 | Connect async UI, server actions and storage. | Search cancellation, history, stream cleanup, typed failures, conflict-aware proposals, scoped authorization and idempotent retries pass end to end. Exercise an old browser tab across a contract change. |
+| 6 | Share actions between people and assistants (A08). | One handler works from the UI, CLI and worker where applicable. Verify discovery with a compatible assistant, permission changes, private actions, stable identity after a redesign and ordinary use with the adapter absent. |
+| 7 | Implement human–agent handoff and durable AI work (A09). | Pause, correct, revise and resume a job across a worker restart. Verify operation budgets, source revisions, and cancellation versus continuing background work in the UI. |
+| 8 | Complete cross-layer debugging and replay (A10). | A developer traces a visible result to its model call and turns it into a sanitized regression test with external writes disabled. |
+| 9 | Extend platform and ecosystem access. | Exercise browser APIs, workers, offline storage, JS package and custom-element interoperability. Verify the optional scoped remote MCP adapter against the established action contract. |
+| 10 | Finish authoring, deployment and runtime-performance work. | Verify edit/rebuild/debug, editor diagnostics, asset packaging and upgrades from a clean install. Compare equivalent production apps on browser interaction, durable saves and AI streaming. Repeat accessibility and compatibility checks across supported browsers. |
+| 11 | Run the independent build and comparison trials (A12, then A11). | A team starts a large modular app or agent directly. Complete the independent full-stack AI app trial and teammate handoff. Compare readability, change time and debugging with equivalent Python and TypeScript workflows. Fix recurring blockers and repeat affected journeys. |
+| 12 | Prepare the stable release candidate (R03) and make a separate publication decision. | Verify the final revision's packages, notices, install guide, learning references and upgrade commitments. Resolve the outstanding PDF glyph redistribution review before distribution. |
+| 13 | Follow up on adoption. | At the planned 30-day follow-up, record voluntary repeat use, referrals, reasons for switching and missing capabilities. Use observed friction to order the next cycle. |
+
+Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
+
 Use the [simple-to-advanced application trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase) when reviewing changes to the full-stack language and grammar.
 
 For full-stack frontend work, [build and package one application first](docs/frontend-roadmap.md#what-to-build-first), reusing the services, AI and browser capabilities recorded below. The independent application trial determines when the full-stack AI development claim is ready.
@@ -12,7 +34,7 @@ The [general-purpose browser frontend roadmap](docs/frontend-roadmap.md) tracks 
 
 This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.
 
-Work through the first open item in order. Inspect its behavior, implement or reconcile the code, exercise the normal CLI or application entry point, and update the learning guide, grammar or function reference. Commit and push each verified task.
+Use the execution table above to select the next unfinished step. Inspect its behavior, implement or reconcile the code, exercise the normal CLI or application entry point, and update the learning guide, grammar or function reference. Commit and push each verified task.
 
 **1. General language foundations**
 

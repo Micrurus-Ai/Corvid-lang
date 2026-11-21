@@ -36,6 +36,8 @@ The calendar exercises selection, concurrent writes and external effects. Its me
 
 ## Delivery order
 
+The steps below cover the action integration specifically. Use the [project execution order](../ROADMAP.md#remaining-work-in-execution-order) to schedule them alongside the component model, persistence and runtime work.
+
 1. **Discover a form.** The branch implements `ui.agent_query_form` for author-selected GET routes. It emits declarative WebMCP metadata and uses ordinary user submission. Check the live discovery and fill flow with a compatible agent/browser before advertising interoperability. [Learning guide](book/19-browser-views.md)
 2. **Define a typed action contract.** Derive discovery from author-defined input and result types. Bind a browser-local handler or an existing server operation to that contract. Compare an explicit opt-in on an existing handler with a separate declaration for readability. Keep the official grammar unchanged until one compiles and passes the learning tests.
 3. **Share context and changes.** Implement scoped selection, stable IDs, revocation and versioned outcomes. Exercise the calendar test against a redesigned UI. Preserve normal mobile and keyboard behavior with the adapter disabled.

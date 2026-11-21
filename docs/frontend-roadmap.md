@@ -14,6 +14,8 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 ## What to build first
 
+Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execution-order) for sequencing across frontend, backend, agents and release work. This guide supplies the detailed frontend acceptance criteria.
+
 ### Grow a simple app in the same codebase
 
 Developers choose their starting architecture. The growth trial below checks one path. A team building a large product can start the independent full-stack trial directly with its intended modules, UI, server, storage and AI workflows. For a headless agent, use the [large-project agent trial](../ROADMAP.md#building-agents-in-corvid). The delivery order describes how the Corvid team verifies the language.
