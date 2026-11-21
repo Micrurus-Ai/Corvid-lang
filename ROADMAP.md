@@ -4,6 +4,8 @@ After verifying each completed roadmap task, commit its implementation, tests an
 
 ## Active task queue
 
+For full-stack frontend work, [build and package one application first](docs/frontend-roadmap.md#what-to-build-first), reusing the services, AI and browser capabilities recorded below. The independent application trial determines when the full-stack AI development claim is ready.
+
 The [general-purpose browser frontend roadmap](docs/frontend-roadmap.md) tracks components, browser support, tooling and preview criteria. Its [shared action milestone](docs/frontend-roadmap.md#one-action-for-the-user-and-the-assistant) covers how a developer can connect their own application behavior to both the interface and an authorized assistant.
 
 This queue follows the first general-purpose AI application release from language foundations through distribution. Each checkbox tracks the outcome on this branch. Earlier local implementation notes and historical phase checklists can guide the work.

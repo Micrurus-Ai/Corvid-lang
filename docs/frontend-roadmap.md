@@ -12,7 +12,21 @@
 
 Corvid already documents server-rendered HTML, typed forms and routes, browser-compiled handlers, streamed text and a web archive. The frontend-layout branch adds three layout functions and a shared integer control. Today's views carry HTML strings, and the shipped handler examples update integer or string values. These give us compatibility cases for a more general model. The checkboxes below track proposed work. [Browser guide](book/19-browser-views.md) · [View implementation](../std/ui.cor) · [Browser bindings](../crates/corvid-codegen-wasm/src/browser_controls.js)
 
+## What to build first
+
+Use one small application to integrate the stack early. The [main roadmap](../ROADMAP.md) already records typed HTTP routes and SQLite persistence (S01–S02), scoped sessions (S04), typed model results and streaming (A01–A02), and browser forms and packaged handlers (F01–F03). Those checks used specific runtimes and providers. Reuse those paths and test them together through the public tooling.
+
+| Order | Deliverable | Decision it enables |
+| --- | --- | --- |
+| First working application | Start with `corvid new`. Build a keyboard-accessible screen that edits a typed record, saves it, reloads it after a server restart, and requests a typed model suggestion. Let the user apply the suggestion through an ordinary action. Run from the packaged build. Exercise malformed model output and a canceled request. | Identify where developers still need glue code, undocumented setup or a second application language. Put each gap in the work areas below. |
+| Component and action prototype | Compare the two candidate component styles on that application. Bind a developer-defined action once, test it from the UI and a compatible assistant, and report binding errors at their Corvid source line. Include a local-only action. | Choose syntax and execution target after measuring readability, edit-to-result time and browser cost. |
+| Independent full-stack trial | A developer outside the language team chooses a different app, builds it from the book and deploys it. Exercise its UI, authenticated server operation, persistent data, real model call and authorized assistant action in the same deployment. Retain deterministic provider tests for repeatable development. | Make this a condition for claiming that developers can ship a full-stack AI-native web application in Corvid. Record the Corvid version, external services and every manual workaround. |
+
+Bring a minimal edit, rebuild, debug and package workflow into the first application. Expand browser API coverage, advanced offline features and package interoperability as separate deliverables. Core preview usability can be tested while a browser-specific assistant adapter is still experimental. Feature-detect that adapter and keep ordinary interaction usable when it is absent. [Web Platform Baseline](https://web.dev/baseline) · [Chrome WebMCP](https://developer.chrome.com/docs/ai/webmcp)
+
 ## Design and implementation order
+
+The numbered sections group related engineering work. Use the delivery order above to choose the tasks needed for each working application.
 
 ### One action for the user and the assistant
 
@@ -87,7 +101,7 @@ Start testing accessibility, performance and browser behavior with the first pro
 | Shared-action preview | An independent developer adds a new action in a fresh project. A keyboard user and a compatible assistant invoke it through one handler. A second action stays private to the human interface. Record the tested browser and assistant versions. |
 | Browser compatibility | Run core journeys in Chromium, Firefox and WebKit, plus real mobile checks for touch and text input. Track optional capabilities individually. Use Baseline and relevant Web Platform Tests to inform the support matrix. [Baseline](https://web.dev/baseline) · [Web Platform Tests](https://web-platform-tests.org/) |
 | Accessibility | Check keyboard interaction, focus order, screen-reader announcements, zoom, reduced motion and native control semantics in representative applications. Track applicable WCAG 2.2 AA criteria. [WCAG 2.2](https://www.w3.org/TR/WCAG22/) |
-| Performance | Set budgets from representative workloads on a named midrange mobile device. Track shipped bytes, time to first usable interaction, input latency during large-list edits and memory after repeated navigation. Compare equivalent production builds and publish the workload and raw measurements. |
-| Stable release | A responsive storefront, an offline editor and a streaming AI workspace pass their documented journeys outside the language team. Publish compatibility and upgrade commitments for components, browser bindings and packages. |
+| Performance | On a named midrange phone, compare equivalent production builds for transferred bytes, input latency, layout shifts and memory after repeated navigation. Report model time separately from UI work. Once field traffic is sufficient, track LCP, INP and CLS at the 75th percentile by mobile and desktop. [Core Web Vitals](https://web.dev/articles/vitals) |
+| Stable release | Complete the independent full-stack trial. Use the storefront, offline editor and streaming workspace to cover capabilities the chosen app does not exercise. Publish compatibility and upgrade commitments for components, browser bindings and packages. |
 
-**First deliverable:** review the cart and cancellable search drafts alongside the proposed action binding. Ask a developer to identify which handler runs, where it runs and what the assistant may invoke. Use their feedback and the prototype to settle the grammar. Keep one existing `std/ui` page running through the same CLI.
+**First task:** take the smallest editable record through the first working application above using today's documented syntax. Keep an existing `std/ui` page working through the same CLI. Use the first point of friction to guide the component prototype.
