@@ -19,13 +19,20 @@ use std::path::Path;
 /// rendered against the original source.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
+    /// Imported source and path when the span belongs to another module.
+    pub origin: Option<(std::path::PathBuf, std::sync::Arc<String>)>,
     pub span: Span,
     pub message: String,
     pub hint: Option<String>,
 }
 
 impl Diagnostic {
+    pub(crate) fn location<'a>(&'a self, path: &'a Path, source: &'a str) -> (&'a Path, &'a str) {
+        self.origin.as_ref().map_or((path, source), |(p, s)| (p.as_path(), s.as_str()))
+    }
+
     pub fn render(&self, source_path: &Path, source: &str) -> String {
+        let (source_path, source) = self.location(source_path, source);
         let (line, col) = line_col_of(source, self.span.start);
         let mut out = format!(
             "{}:{}:{}: error: {}",
@@ -45,6 +52,7 @@ impl Diagnostic {
 impl From<LexError> for Diagnostic {
     fn from(e: LexError) -> Self {
         Diagnostic {
+            origin: None,
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
@@ -55,6 +63,7 @@ impl From<LexError> for Diagnostic {
 impl From<ParseError> for Diagnostic {
     fn from(e: ParseError) -> Self {
         Diagnostic {
+            origin: None,
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
@@ -65,6 +74,7 @@ impl From<ParseError> for Diagnostic {
 impl From<ResolveError> for Diagnostic {
     fn from(e: ResolveError) -> Self {
         Diagnostic {
+            origin: None,
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
@@ -77,6 +87,7 @@ impl From<TypeError> for Diagnostic {
         let hint = e.hint();
         let message = e.message();
         Diagnostic {
+            origin: None,
             span: e.span,
             message,
             hint,
@@ -87,6 +98,7 @@ impl From<TypeError> for Diagnostic {
 impl From<TypeWarning> for Diagnostic {
     fn from(w: TypeWarning) -> Self {
         Diagnostic {
+            origin: None,
             span: w.span,
             message: w.kind.message(),
             hint: w.kind.hint(),

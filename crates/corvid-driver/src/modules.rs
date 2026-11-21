@@ -72,11 +72,13 @@ pub enum ModuleLoadError {
     },
     /// Lexing the imported file produced errors.
     LexError {
+        source: Arc<String>,
         path: PathBuf,
         errors: Vec<LexError>,
     },
     /// Parsing the imported file produced errors.
     ParseErrors {
+        source: Arc<String>,
         path: PathBuf,
         errors: Vec<ParseError>,
     },
@@ -270,7 +272,7 @@ pub fn build_module_resolution(
     root_file: &File,
     root_path: &Path,
 ) -> (ModuleResolution, Vec<ModuleLoadError>) {
-    let mut loaded: HashMap<PathBuf, File> = HashMap::new();
+    let mut loaded: HashMap<PathBuf, (File, Arc<String>)> = HashMap::new();
     let mut in_progress: Vec<PathBuf> = Vec::new();
     let mut errors: Vec<ModuleLoadError> = Vec::new();
 
@@ -312,7 +314,7 @@ pub fn build_module_resolution(
     // on each module, not this function's error list — single-file
     // resolution errors are the `corvid-resolve` crate's concern.
     let mut resolved_map: HashMap<PathBuf, Arc<Resolved>> = HashMap::new();
-    for (path, file) in &loaded {
+    for (path, (file, _)) in &loaded {
         resolved_map.insert(path.clone(), Arc::new(resolve(file)));
     }
 
@@ -321,7 +323,7 @@ pub fn build_module_resolution(
     // (for cycle detection + type-through resolution) but not
     // exposed under the root's alias namespace.
     let mut all_modules = HashMap::new();
-    for (path, file) in &loaded {
+    for (path, (file, source)) in &loaded {
         let Some(resolved) = resolved_map.get(path) else {
             continue;
         };
@@ -330,6 +332,7 @@ pub fn build_module_resolution(
         all_modules.insert(
             path.clone(),
             ResolvedModule {
+                source: source.clone(),
                 path: path.clone(),
                 resolved: resolved.clone(),
                 file: Arc::new(file.clone()),
@@ -720,7 +723,7 @@ fn dfs_collect(
     requested_module: &str,
     expected_hash: Option<&ImportContentHash>,
     package_lock: Option<&PackageLockFile>,
-    loaded: &mut HashMap<PathBuf, File>,
+    loaded: &mut HashMap<PathBuf, (File, Arc<String>)>,
     in_progress: &mut Vec<PathBuf>,
     errors: &mut Vec<ModuleLoadError>,
 ) {
@@ -801,7 +804,7 @@ fn dfs_collect(
         }
     }
     let source = match String::from_utf8(bytes) {
-        Ok(source) => source,
+        Ok(source) => Arc::new(source),
         Err(err) => {
             errors.push(ModuleLoadError::ReadError {
                 path: canonical,
@@ -816,6 +819,7 @@ fn dfs_collect(
         Ok(t) => t,
         Err(e) => {
             errors.push(ModuleLoadError::LexError {
+                source: source.clone(),
                 path: canonical,
                 errors: e,
             });
@@ -825,6 +829,7 @@ fn dfs_collect(
     let (file, parse_errors) = parse_file(&tokens);
     if !parse_errors.is_empty() {
         errors.push(ModuleLoadError::ParseErrors {
+            source: source.clone(),
             path: canonical.clone(),
             errors: parse_errors,
         });
@@ -855,7 +860,7 @@ fn dfs_collect(
     in_progress.pop();
 
     // Mark fully loaded under the canonical key.
-    loaded.insert(canonical, file);
+    loaded.insert(canonical, (file, source));
 }
 
 /// Iterator over a file's Corvid imports (skipping Python imports).

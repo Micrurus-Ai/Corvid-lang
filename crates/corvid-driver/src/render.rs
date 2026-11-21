@@ -31,8 +31,12 @@ pub fn render_pretty_with_severity(
     source: &str,
     severity: Severity,
 ) -> String {
+    let (source_path, source) = diag.location(source_path, source);
     let filename = source_path.display().to_string();
-    let span = diag.span.start..diag.span.end.max(diag.span.start + 1);
+    // The lexer reports bytes, while ariadne positions labels by character.
+    let char_offset = |byte| source.char_indices().take_while(|(i, _)| *i < byte).count();
+    let start = char_offset(diag.span.start);
+    let span = start..char_offset(diag.span.end).max(start);
 
     let code = detect_error_code(&diag.message);
     let with_color = std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal();
@@ -188,6 +192,7 @@ fn detect_error_code(msg: &str) -> &'static str {
 /// ariadne duplicates the message if we pass the full text, so we keep
 /// the headline short and put detail on the label and help lines.
 fn short_headline(msg: &str) -> String {
+    if msg.contains("type mismatch") { return msg.to_owned(); }
     // Strip anything after a colon so the headline stays tight.
     if let Some(idx) = msg.find(':') {
         if idx < 80 {
@@ -279,6 +284,7 @@ mod tests {
         // therefore emit plain text — no `\x1b[` escape sequences — even
         // though `Color::Red` is configured for the report kind.
         let diag = Diagnostic {
+            origin: None,
             span: Span::new(0, 5),
             message: "type mismatch in agent `main`: Int vs String".to_string(),
             hint: Some("rebind one operand to match the other".to_string()),

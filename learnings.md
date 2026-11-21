@@ -7976,3 +7976,7 @@ For a nonempty list, a successful parse updates the first item. If parsing fails
 Run `corvid fmt` from the project root to format Corvid files under `src/` and `tests/`. To format one file, use `corvid fmt src/main.cor`. Use `corvid fmt --check` in CI. It lists files that need formatting and exits with status 1 when it finds differences. It returns 0 when the files already match.
 
 After cloning a project, run `corvid check` to check the entry point and its imports, `corvid run` to execute it, and `corvid test tests/math.cor` to run tests in that file.
+
+### Fixing a type error in an import
+
+Run `corvid check` from the project root. When an imported function declares `-> Int` and returns a string, the error points to the return statement in that module and names both types. Change the return expression to produce an integer, or change the declaration and its callers if the intended result is text.

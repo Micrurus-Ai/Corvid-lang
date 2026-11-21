@@ -125,6 +125,7 @@ fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
     Some(
         hits.into_iter()
             .map(|hit| Diagnostic {
+                origin: None,
                 span: hit.span,
                 message: format!(
                     "stdlib tool `{}` cannot be transpiled to Python — the transpile tier has no stdlib dispatch, so the generated code would fail at runtime far from this call",

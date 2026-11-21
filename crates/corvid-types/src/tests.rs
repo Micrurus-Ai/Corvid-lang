@@ -6559,6 +6559,7 @@ fn fake_module_resolution(
     let exports = corvid_resolve::collect_public_exports(&file, &resolved);
     let path = PathBuf::from(format!("/fake/{alias}.cor"));
     let module = corvid_resolve::ResolvedModule {
+        source: Arc::new(src.clone()),
         path: path.clone(),
         resolved: Arc::new(resolved),
         file: Arc::new(file),
@@ -7075,6 +7076,7 @@ fn module_resolution_from_source(
     let exports = collect_public_exports(&file, &resolved);
     let path = PathBuf::from(format!("/fake/{alias}.cor"));
     let module = corvid_resolve::ResolvedModule {
+        source: Arc::new(source.to_owned()),
         path: path.clone(),
         resolved: Arc::new(resolved),
         file: Arc::new(file),

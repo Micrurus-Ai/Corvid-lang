@@ -661,3 +661,27 @@ agent main() -> Bool:
 "#).unwrap();
     assert_both_targets_without_leaks(&main);
 }
+
+#[test]
+fn imported_errors_use_the_offending_source() {
+    let dir = tempdir().unwrap();
+    let main = dir.path().join("main.cor");
+    let helper = dir.path().join("helper.cor");
+    std::fs::write(&main, "import \"./helper\" as h\nagent main() -> Int:\n    return h.value()\n").unwrap();
+    for (broken, details) in [
+        ("    return \"broken\"", &["declared `Int`", "returns `String`"][..]),
+        ("    return (\"broken\"", &[][..]),
+        ("    return missing", &["missing"][..]),
+    ] {
+        std::fs::write(&helper, format!("# \u{1F427}\npublic fn value() -> Int:\n{broken}\n")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_corvid")).arg("check").arg(&main).output().unwrap();
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && text.contains("helper.cor:"), "{text}");
+        for detail in details {
+            assert!(text.contains(detail), "{text}");
+        }
+        if !details.is_empty() {
+            assert!(text.contains("helper.cor:3:") && text.contains(broken.trim()), "{text}");
+        }
+    }
+}

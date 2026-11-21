@@ -110,6 +110,10 @@ fn typecheck_imported_modules(
     loaded.sort_by(|a, b| a.path.cmp(&b.path));
 
     for module in loaded {
+        diagnostics.extend(module.resolved.errors.iter().cloned().map(|err| Diagnostic {
+            origin: Some((module.path.clone(), module.source.clone())),
+            ..Diagnostic::from(err)
+        }));
         let (module_resolution, load_errors) =
             build_module_resolution(&module.file, &module.path);
         diagnostics.extend(
@@ -129,11 +133,7 @@ fn typecheck_imported_modules(
         };
         diagnostics.extend(checked.errors.iter().cloned().map(|err| {
             let mut diagnostic = Diagnostic::from(err);
-            diagnostic.message = format!(
-                "in imported module `{}`: {}",
-                module.path.display(),
-                diagnostic.message
-            );
+            diagnostic.origin = Some((module.path.clone(), module.source.clone()));
             diagnostic
         }));
         checked_by_path.insert(module.path.clone(), checked);
@@ -163,6 +163,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             resolved,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "import `{requested}` from `{}` could not be found at `{}`",
@@ -172,32 +173,23 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             hint: Some("check the import path relative to the importing `.cor` file".into()),
         }],
         ModuleLoadError::ReadError { path, message } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!("failed to read imported module `{}`: {message}", path.display()),
             hint: None,
         }],
-        ModuleLoadError::LexError { path, errors } => errors
+        ModuleLoadError::LexError { path, source, errors } => errors
             .into_iter()
             .map(|err| Diagnostic {
-                span: top,
-                message: format!(
-                    "imported module `{}` failed to lex: {}",
-                    path.display(),
-                    err.kind
-                ),
-                hint: None,
+                origin: Some((path.clone(), source.clone())),
+                ..Diagnostic::from(err)
             })
             .collect(),
-        ModuleLoadError::ParseErrors { path, errors } => errors
+        ModuleLoadError::ParseErrors { path, source, errors } => errors
             .into_iter()
             .map(|err| Diagnostic {
-                span: top,
-                message: format!(
-                    "imported module `{}` failed to parse: {}",
-                    path.display(),
-                    err.kind
-                ),
-                hint: None,
+                origin: Some((path.clone(), source.clone())),
+                ..Diagnostic::from(err)
             })
             .collect(),
         ModuleLoadError::HashMismatch {
@@ -207,6 +199,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             expected,
             actual,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "import `{requested}` from `{}` failed content-hash verification at `{}`",
@@ -222,6 +215,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             url,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "remote import `{requested}` from `{}` is missing a content hash",
@@ -237,6 +231,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             url,
             message,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "failed to fetch remote import `{requested}` from `{}`",
@@ -248,6 +243,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             importing_file,
             requested,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "package import `{requested}` from `{}` is not locked",
@@ -263,6 +259,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             message,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "failed to read package lock `{requested}` for `{}`",
@@ -275,6 +272,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             requested,
             lockfile,
         } => vec![Diagnostic {
+            origin: None,
             span: top,
             message: format!(
                 "package import `{requested}` from `{}` is missing from the lockfile",
@@ -294,6 +292,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 .collect::<Vec<_>>()
                 .join(" -> ");
             vec![Diagnostic {
+                origin: None,
                 span: top,
                 message: format!("cyclic Corvid import graph: {path}"),
                 hint: Some(

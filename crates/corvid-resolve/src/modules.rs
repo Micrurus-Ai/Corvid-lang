@@ -63,6 +63,8 @@ pub struct DeclExport {
 /// public symbols, keyed by name for O(1) qualified-name lookup.
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
+    /// Source snapshot whose byte offsets are used in this module.
+    pub source: Arc<String>,
     /// Canonical path of the imported file on disk.
     pub path: PathBuf,
     /// Resolver output for the imported file. Held behind `Arc` so
