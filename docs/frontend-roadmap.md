@@ -16,6 +16,11 @@ Corvid already documents server-rendered HTML, typed forms and routes, browser-c
 
 Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execution-order) for sequencing across frontend, backend, agents and release work. This guide supplies the detailed frontend acceptance criteria.
 
+### Reuse and distribute a developer-authored component
+
+- [ ] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
+- [ ] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
+
 ### Grow a simple app in the same codebase
 
 **Step 2 trial.** In the packaged reading list, a loopback provider requested shelf 1 and received its stored title on the second turn. The resulting preview contained an escaped, editable title and submitted to the existing save route. The HTTP trial checked the original row before applying and the updated row after restart. It recovered from invalid JSON and a wrong field type, rejected an invalid shelf and a repeated lookup, and observed the provider socket close on client disconnect. The cancellable preview currently uses inline JavaScript. The full packaged trial passed in Edge 158 with the local model responder, including cancellation, preview, apply and restart readback. The A07 new-reader explanation remains open. [First-agent exercise](book/10-agents.md#your-first-agent-in-the-reading-list)
