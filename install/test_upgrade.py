@@ -176,10 +176,24 @@ mkdir "$7"''',
         assert (root / "lib/custom").read_text() == "keep"
 
     package("v2")
+    # A failed activation must restore the original files with their Unix metadata.
+    # In particular, copying file contents back can sever a developer's hard link.
+    if os.name == "posix":
+        original = root / "std/version"
+        original.chmod(0o640)
+        alias = work / "installed-version"
+        os.link(original, alias)
+        shortcut = root / "std/current"
+        shortcut.symlink_to("version")
     env["FAIL_SWITCH"] = "1"
     run(False)
     check_version("v1")
     del env["FAIL_SWITCH"]
+    if os.name == "posix":
+        assert original.stat().st_mode & 0o7777 == 0o640
+        assert original.samefile(alias)
+        assert shortcut.readlink() == Path("version")
+        assert shortcut.samefile(original)
 
     if WINDOWS:
         invalid = b"invalid executable"
