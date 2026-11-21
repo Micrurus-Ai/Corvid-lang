@@ -162,6 +162,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Verified MCP registration and regeneration with an absolute Windows script path containing spaces. The saved TOML preserved both arguments, and the regenerated wrapper called the local tool successfully.
 
+  - [x] Checked generated MCP parameters for overlapping Corvid names. The local tool received distinct values under `item-id`, `item_id` and `item_id_2` after regenerating the wrapper and running its caller.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.

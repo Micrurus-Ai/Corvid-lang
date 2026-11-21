@@ -103,7 +103,7 @@ public agent search_issues(limit: Int, query: String) -> Result<String, String>:
 
 Run `corvid check src/mcp/github.cor` from the project root to check the generated module against the bundled standard library.
 
-A tool can declare a field named `args`. Pass it as an ordinary typed parameter. The wrapper sends the value under the original JSON field name.
+A tool can declare a field named `args`. Pass it as an ordinary typed parameter. The wrapper sends the value under the original JSON field name. If multiple fields map to the same Corvid parameter name, later parameters receive numbered suffixes. For example, `item-id` and `item_id` become `item_id` and `item_id__2`. The tool receives both original JSON keys.
 
 Servers are **untrusted by default** — every call through the
 generated wrappers stays approval-gated until you add

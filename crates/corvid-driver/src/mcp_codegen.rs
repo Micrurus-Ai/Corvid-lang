@@ -110,6 +110,7 @@ fn typed_params(schema: &serde_json::Value) -> Option<Vec<(String, String, Param
         return Some(Vec::new());
     }
     let mut params = Vec::new();
+    let mut occurrences = std::collections::HashMap::new();
     for (key, prop) in properties {
         let kind = match prop.get("type").and_then(|t| t.as_str())? {
             "string" => ParamKind::String,
@@ -118,7 +119,15 @@ fn typed_params(schema: &serde_json::Value) -> Option<Vec<(String, String, Param
             "boolean" => ParamKind::Bool,
             _ => return None,
         };
-        params.push((key.clone(), sanitize_ident(key), kind));
+        let mut ident = sanitize_ident(key);
+        let count = occurrences.entry(ident.clone()).or_insert(0usize);
+        *count += 1;
+        if *count > 1 {
+            // sanitize_ident collapses repeated underscores, so this suffix
+            // cannot collide with another field's original sanitized name.
+            ident.push_str(&format!("__{count}"));
+        }
+        params.push((key.clone(), ident, kind));
     }
     Some(params)
 }
@@ -269,7 +278,12 @@ mod tests {
             "search-issues",
             serde_json::json!({
                 "type": "object",
-                "properties": {"args": {"type": "integer"}, "query": {"type": "string"}},
+                "properties": {
+                    "args": {"type": "integer"},
+                    "item-id": {"type": "integer"},
+                    "item_id": {"type": "string"},
+                    "item_id_2": {"type": "boolean"}
+                },
             }),
         )];
         let module = generate_mcp_module("github", &tools);
