@@ -439,7 +439,7 @@ struct Checker<'a> {
     /// forever without this.
     alias_depth: usize,
     in_test_body: bool,
-    saw_yield: bool,
+    saw_stream_output: bool,
 
     /// Approvals visible at the current point. Represented as a flat
     /// stack that is truncated back to its parent's length when a block
@@ -727,7 +727,7 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             alias_depth: 0,
             in_test_body: false,
-            saw_yield: false,
+            saw_stream_output: false,
             approvals: Vec::new(),
             approvals_seen_in_agent: Vec::new(),
             effect_frontier: EffectFrontier::default(),

@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
         let declared_ret = self.type_ref_to_type(&a.return_ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret.clone()));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         // Reset the body-wide approve audit log; restore on exit.
         // This is what lets the dangerous-call diagnostic
         // discriminate `approval.token_lexical_only` (an approve
@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
 
         self.check_block(&a.body);
 
-        if matches!(declared_ret, Type::Stream(_)) && !self.saw_yield {
+        if matches!(declared_ret, Type::Stream(_)) && !self.saw_stream_output {
             self.warnings.push(TypeWarning::new(
                 TypeWarningKind::StreamReturnWithoutYield {
                     agent: a.name.name.clone(),
@@ -144,7 +144,7 @@ impl<'a> Checker<'a> {
 
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
         self.approvals_seen_in_agent = prev_approvals_seen;
         // (Locals leak between agents in our single-scope model; harmless
         //  since each agent binds its params fresh at the start.)
@@ -773,7 +773,7 @@ impl<'a> Checker<'a> {
         let declared_ret = self.type_ref_to_type(&route.response.ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         self.check_block(&route.body);
         let reaches_approval = block_reaches_approval(
             &route.body,
@@ -786,7 +786,7 @@ impl<'a> Checker<'a> {
 
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
 
         if reaches_approval
             && !route

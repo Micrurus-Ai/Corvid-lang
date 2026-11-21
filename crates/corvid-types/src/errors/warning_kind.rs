@@ -48,7 +48,7 @@ impl TypeWarningKind {
                 format!("cost analysis warning in agent `{agent}`: {message}")
             }
             Self::StreamReturnWithoutYield { agent } => {
-                format!("W0270: agent `{agent}` declares `Stream<T>` return but never yields")
+                format!("W0270: agent `{agent}` declares `Stream<T>` return but never yields a value or returns a stream")
             }
             Self::ReplayUnreachableArm {
                 pattern,
@@ -92,7 +92,7 @@ impl TypeWarningKind {
                 "use a statically bounded loop or inspect `:cost <agent>` for the partial tree".into(),
             ),
             Self::StreamReturnWithoutYield { .. } => Some(
-                "either add at least one `yield` or change the return type to a non-stream value".into(),
+                "yield an element, return a stream, or change the declared return type".into(),
             ),
             Self::ReplayUnreachableArm { .. } => Some(
                 "remove the duplicate arm or make its pattern distinct (different prompt / tool / label)".into(),

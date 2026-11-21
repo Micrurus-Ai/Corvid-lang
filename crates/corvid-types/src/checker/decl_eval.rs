@@ -27,12 +27,12 @@ impl<'a> Checker<'a> {
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, false);
         let prev_in_test = std::mem::replace(&mut self.in_test_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         self.check_block(&f.body);
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
         self.in_test_body = prev_in_test;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
     }
 
     pub(super) fn check_mock(&mut self, m: &MockDecl) {
@@ -124,13 +124,13 @@ impl<'a> Checker<'a> {
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, false);
         let prev_in_test = std::mem::replace(&mut self.in_test_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         self.resolve_effect_row_in_mock(&m.effect_row);
         self.check_block(&m.body);
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
         self.in_test_body = prev_in_test;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
     }
 
     fn resolve_effect_row_in_mock(&mut self, row: &corvid_ast::EffectRow) {
@@ -149,14 +149,14 @@ impl<'a> Checker<'a> {
     fn check_assertion_decl(&mut self, body: &Block, assertions: &[EvalAssert]) {
         let prev_ret = self.current_return.take();
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, false);
-        let prev_saw_yield = self.saw_yield;
+        let prev_saw_stream_output = self.saw_stream_output;
         self.check_block(body);
         for assertion in assertions {
             self.check_eval_assert(assertion);
         }
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
     }
 
     fn check_eval_assert(&mut self, assertion: &EvalAssert) {

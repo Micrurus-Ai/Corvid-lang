@@ -18,11 +18,11 @@ impl<'a> Checker<'a> {
         let declared_ret = self.type_ref_to_type(&f.return_ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret));
         let prev_in_agent = std::mem::replace(&mut self.in_agent_body, true);
-        let prev_saw_yield = std::mem::replace(&mut self.saw_yield, false);
+        let prev_saw_stream_output = std::mem::replace(&mut self.saw_stream_output, false);
         self.check_block(&f.body);
         self.current_return = prev_ret;
         self.in_agent_body = prev_in_agent;
-        self.saw_yield = prev_saw_yield;
+        self.saw_stream_output = prev_saw_stream_output;
 
         self.walk_fn_purity_block(&f.name.name, &f.body);
     }

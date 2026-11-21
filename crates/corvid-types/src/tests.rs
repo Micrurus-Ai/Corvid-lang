@@ -3509,6 +3509,15 @@ agent first(xs: Stream<String>) -> String:
 }
 
 #[test]
+fn forwarded_stream_has_no_missing_yield_warning() {
+    let c = check("agent forward(items: Stream<Int>) -> Stream<Int>:\n    return items\n");
+    assert!(c.errors.is_empty(), "{:?}", c.errors);
+    assert!(!c.warnings.iter().any(|warning| matches!(
+        warning.kind, TypeWarningKind::StreamReturnWithoutYield { .. }
+    )));
+}
+
+#[test]
 fn stream_return_without_yield_warns() {
     let src = "\
 agent idle() -> Stream<String>:

@@ -109,6 +109,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Rechecked the refund example through `corvid check` after declaring its requester identity, reviewer role, and approval limits.
   - [x] Reconciled the [release policy](docs/release-policy.md#verification) with CLI and archive checks. The CLI rejected mismatched stable, beta and nightly versions before staging any files.
   - [x] Fixed native server wrapper builds for projects with typed HTTP routes and shared Cargo target directories. All five server integration tests passed on Windows, including the shared application and refund example that failed in the prior workspace run.
+  - [x] Fixed warning W0270 on agents that forward an existing stream. A CLI consumer received both yielded elements. A stream body containing only `pass` retained the warning.
 - [ ] R03. Verify production builds and release packaging, dependency notices, reference coverage and the install-to-first-application guide. Prepare a release candidate for a separate publication decision.
 
   - [x] Indexed the type checker's built-in method signatures and all 209 public standard-library calls in the [learner function reference](docs/reference/functions.md). CI checks the index against source declarations.

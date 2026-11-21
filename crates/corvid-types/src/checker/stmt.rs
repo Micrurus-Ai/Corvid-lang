@@ -94,6 +94,8 @@ impl<'a> Checker<'a> {
                             },
                             *span,
                         ));
+                    } else if matches!((&got, &expected), (Type::Stream(_), Type::Stream(_))) {
+                        self.saw_stream_output = true;
                     }
                     if let Some(e) = value {
                         self.record_if_grounded_coercion(&got, &expected, e.span());
@@ -158,7 +160,7 @@ impl<'a> Checker<'a> {
                 }
                 match self.current_return.clone() {
                     Some(Type::Stream(inner)) => {
-                        self.saw_yield = true;
+                        self.saw_stream_output = true;
                         if !yielded.is_assignable_to(&inner) {
                             self.errors.push(TypeError::new(
                                 TypeErrorKind::YieldReturnTypeMismatch {
