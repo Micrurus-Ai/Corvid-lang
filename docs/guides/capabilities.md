@@ -101,6 +101,8 @@ public agent search_issues(limit: Int, query: String) -> Result<String, String>:
 
 Run `corvid check src/mcp/github.cor` from the project root to check the generated module against the bundled standard library.
 
+A tool can declare a field named `args`. Pass it as an ordinary typed parameter. The wrapper sends the value under the original JSON field name.
+
 Servers are **untrusted by default** — every call through the
 generated wrappers stays approval-gated until you add
 `trust = "autonomous"` after review. Schemas outside the typed v1

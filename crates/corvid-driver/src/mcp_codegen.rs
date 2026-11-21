@@ -162,15 +162,21 @@ pub fn generate_mcp_module(server_name: &str, tools: &[McpToolDescriptor]) -> St
                 out.push_str(&format!(
                     "public agent {agent_name}({signature}) -> Result<String, String>:\n"
                 ));
-                out.push_str("    args = json_object_new()\n");
+                // Sanitized parameter names never end with an underscore.
+                let builder = if params.iter().any(|(_, name, _)| name == "args") {
+                    "args_"
+                } else {
+                    "args"
+                };
+                out.push_str(&format!("    {builder} = json_object_new()\n"));
                 for (key, ident, kind) in &params {
                     out.push_str(&format!(
-                        "    args = {}(args, \"{key}\", {ident})\n",
+                        "    {builder} = {}({builder}, \"{key}\", {ident})\n",
                         kind.setter()
                     ));
                 }
                 out.push_str(&format!(
-                    "    return mcp_call(\"{server_name}\", \"{}\", json_object_finish(args))\n",
+                    "    return mcp_call(\"{server_name}\", \"{}\", json_object_finish({builder}))\n",
                     tool.name
                 ));
             }
@@ -263,7 +269,7 @@ mod tests {
             "search-issues",
             serde_json::json!({
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {"args": {"type": "integer"}, "query": {"type": "string"}},
             }),
         )];
         let module = generate_mcp_module("github", &tools);

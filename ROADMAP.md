@@ -158,6 +158,8 @@ Work through the first open item in order. Inspect its behavior, implement or re
 
   - [x] Checked all twelve runnable guide examples in a freshly scaffolded project, including the [MCP wrapper](docs/guides/capabilities.md) with its standard-library imports. The guide test uses the same project layout.
 
+  - [x] Fixed the generated MCP wrapper for a tool with an integer field called `args`. A fresh project discovered the tool, checked the module and received both original field values from a local echo server.
+
 ## Verified task results
 
 - [x] Fixed a misleading failed doctor check after installing a prebuilt CLI on a machine without Rust. Verified exit 0 both with and without cargo and rustc. An invalid timeout still returned exit 1 and redacted its value in both environments.
