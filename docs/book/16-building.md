@@ -107,16 +107,11 @@ See **[FFI: C/Rust](/docs/ffi-c)**.
 ## Reproducible builds
 
 ```sh
-corvid build src/main.cor --target=native --reproducible
+corvid build src/main.cor --target=native
+sha256sum target/bin/main
 ```
 
-Pins the timestamp, embedded paths, and codegen-RNG seed for
-byte-stable outputs. Verifies via:
-
-```sh
-sha256sum target/release/main
-# expect: matches the published hash for this version
-```
+Build the same sources in a second project directory and compare the two hashes. Use the same Corvid compiler, runtime archive, target architecture and system linker for both builds. On Windows the executable is `target/bin/main.exe` and PowerShell's `Get-FileHash` computes its SHA-256.
 
 Phase 22's bundle format ships every reproducible build with a
 `MANIFEST.toml` of inputs (source SHAs, dep tree, toolchain).

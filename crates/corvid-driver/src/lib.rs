@@ -20,6 +20,7 @@ pub mod skills;
 pub mod proof_replay;
 mod import_integrity;
 mod package_conflicts;
+mod package_cache;
 mod package_lock;
 mod package_manifest;
 mod package_metadata;

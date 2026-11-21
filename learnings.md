@@ -8000,3 +8000,9 @@ Import the following tools from `"./std/path"`. They use the host operating syst
 | `path_is_absolute(path: String) -> Bool` | Tests whether the path is absolute on this host. |
 
 Import `env_get(name: String) -> Result<Option<String>, String>` from `"./std/env"`. An absent variable returns `Ok(None)`. An explicitly empty variable returns `Ok(Some(""))`. Blank names and names containing `=` or NUL return `Err`. Use `env_get("APP_MODE")?` to propagate the error and match on the returned option. A default `corvid run` uses the interpreter for these tools.
+
+### Rebuilding a project with a local registry
+
+Use `corvid add package @example/math@1 --registry ../registry` to select a compatible version from a local `index.json`. Relative artifact paths resolve beside the index. Commit `Corvid.lock` with the project so its version and SHA-256 travel with the source. Run `corvid package verify-lock` to check the lockfile.
+
+After installation, `target/cache/packages/<sha256>.cor` contains the verified artifact. Set `CORVID_OFFLINE=1` to use it without contacting the registry. A locked local file can refill an empty cache while its original path is accessible. A mismatched digest stops compilation. After `corvid update @example/math`, change any version-specific import to the URI in the updated lock.

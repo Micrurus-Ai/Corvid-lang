@@ -666,6 +666,7 @@ fn load_target_bytes(
     target: &ImportTarget,
     requested_module: &str,
     expected_hash: Option<&ImportContentHash>,
+    package_cache: Option<&Path>,
 ) -> Result<Vec<u8>, ModuleLoadError> {
     match target {
         ImportTarget::Local(path) => match std::fs::read(path) {
@@ -690,12 +691,28 @@ fn load_target_bytes(
                     url: url.clone(),
                 });
             }
-            fetch_remote_bytes(url).map_err(|message| ModuleLoadError::RemoteFetchError {
+            let fetch_error = |message| ModuleLoadError::RemoteFetchError {
                 importing_file: importing_target.key(),
                 requested: requested_module.to_string(),
                 url: url.clone(),
                 message,
-            })
+            };
+            if let Some(cache) = package_cache {
+                match std::fs::read(cache) {
+                    Ok(bytes) => return Ok(bytes), // verified against the lock by dfs_collect
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(fetch_error(format!("cannot read cached artifact: {e}"))),
+                }
+                if url.starts_with("file://") {
+                    let path = Url::parse(url).ok().and_then(|u| u.to_file_path().ok())
+                        .ok_or_else(|| fetch_error("invalid file artifact URL".into()))?;
+                    return std::fs::read(path).map_err(|e| fetch_error(e.to_string()));
+                }
+            }
+            if crate::package_cache::offline() {
+                return Err(fetch_error("artifact unavailable offline (CORVID_OFFLINE=1)".into()));
+            }
+            fetch_remote_bytes(url).map_err(fetch_error)
         }
     }
 }
@@ -794,12 +811,16 @@ fn dfs_collect(
     // Load and verify the module source. Hash verification runs on
     // the exact bytes before parsing, so a pinned import cannot drift
     // into the compiler under a stale trust boundary.
+    let cache = package_lock.filter(|_| requested_module.starts_with("corvid://"))
+        .and_then(|lock| lock.path.parent())
+        .zip(expected_hash)
+        .map(|(dir, pin)| crate::package_cache::artifact(dir, &pin.hex));
     let buffer = match &target {
         ImportTarget::Local(path) => open_source(path),
         _ => None,
     };
     let bytes = match buffer.map(Ok).unwrap_or_else(|| {
-        load_target_bytes(importing_target, &target, requested_module, expected_hash)
+        load_target_bytes(importing_target, &target, requested_module, expected_hash, cache.as_deref())
     }) {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -847,6 +868,10 @@ fn dfs_collect(
             });
             return;
         }
+    }
+    if let Some(path) = cache.filter(|p| !p.exists()) {
+        // A read-only cache can still consume a verified source.
+        let _ = crate::package_cache::store(&path, &bytes);
     }
     fingerprint.update(b"source");
     fingerprint.update(digest);

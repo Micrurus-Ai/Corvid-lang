@@ -41,8 +41,10 @@ Work through the first open item in order. Inspect its behavior, implement or re
 - [x] D02. Make editor navigation work across local Corvid modules. Check diagnostics, hover, completion, go-to-definition and rename on real Corvid source.
   - A three-file project exercised hover, definition, completion, workspace rename and diagnostics through the language server over stdio. Changing an unsaved helper signature updated its caller, and fixing a helper cleared its error.
 - [x] D03. Exercise the standard library for files, paths, time, environment, JSON and collections from real applications on the documented targets.
-  - A freshly scaffolded application read missing, empty and present environment variables, joined Unicode path components, wrote and parsed JSON, listed files and round-tripped a timestamp. The default CLI ran the workflow on the interpreter. Collection behavior on both targets is covered by G01?G08.
-- [ ] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.
+  - A freshly scaffolded application read missing, empty and present environment variables, joined Unicode path components, wrote and parsed JSON, listed files and round-tripped a timestamp. The default CLI ran the workflow on the interpreter. Collection behavior on both targets is covered by G01 through G08.
+- [x] D04. Verify reproducible builds and dependency resolution on a clean machine, including local dependencies, conflicting versions and offline rebuilds from cache.
+  - [x] Two fresh Windows project directories produced identical native executables. A local registry test restored a missing cache entry, ran offline after disconnecting the registry, rejected changed bytes, updated a version and detected a conflicting lock.
+  - [x] A fresh Debian container with networking disabled rebuilt the compiler using cached Rust dependencies. The offline package test passed and two separately built native programs both printed 12 and had SHA-256 `77dc307e1244195191d870e2bdacbf907d6fc991da49cd77a6910931342369dc`.
 
 **3. Application services**
 
