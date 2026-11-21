@@ -56,12 +56,9 @@ impl Codegen {
             "from corvid_runtime import tool_call, approve_gate, llm_call, register_tools, register_prompts",
         );
         self.out.blank_line();
-        self.out.writeln("def __corvid_wrap_i64(value):");
-        self.out.indent();
-        self.out.writeln("value &= (1 << 64) - 1");
-        self.out
-            .writeln("return value - (1 << 64) if value >= (1 << 63) else value");
-        self.out.dedent();
+        for line in include_str!("integer_helpers.py").lines() {
+            self.out.writeln(line);
+        }
         self.out.blank_line();
     }
 
@@ -371,9 +368,18 @@ impl Codegen {
                 self.out.write("]");
             }
             IrExprKind::BinOp { op, left, right } => {
-                self.out.write("(");
+                let integer = e.ty == corvid_types::Type::Int;
+                let (prefix, separator) = match (integer, op) {
+                    (true, BinaryOp::Div) => ("__corvid_div_i64(", ", ".into()),
+                    (true, BinaryOp::Mod) => ("__corvid_rem_i64(", ", ".into()),
+                    (true, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) => {
+                        ("__corvid_checked_i64(", format!(" {} ", binary_op_str(*op)))
+                    }
+                    _ => ("(", format!(" {} ", binary_op_str(*op))),
+                };
+                self.out.write(prefix);
                 self.emit_expr(left);
-                self.out.write(&format!(" {} ", binary_op_str(*op)));
+                self.out.write(&separator);
                 self.emit_expr(right);
                 self.out.write(")");
             }
@@ -385,8 +391,15 @@ impl Codegen {
                 self.out.write(")");
             }
             IrExprKind::UnOp { op, operand } => {
+                let checked_neg = *op == UnaryOp::Neg && e.ty == corvid_types::Type::Int;
+                if checked_neg {
+                    self.out.write("__corvid_checked_i64(");
+                }
                 self.out.write(unary_op_str(*op));
                 self.emit_expr(operand);
+                if checked_neg {
+                    self.out.write(")");
+                }
             }
             IrExprKind::WrappingUnOp { op, operand } => {
                 self.out.write("__corvid_wrap_i64(");

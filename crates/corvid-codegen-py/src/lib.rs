@@ -208,14 +208,25 @@ agent flags() -> Bool:
     }
 
     #[test]
-    fn emits_binop_with_parens() {
+    fn emits_checked_integer_arithmetic() {
         let src = "\
 agent calc() -> Int:
     return 1 + 2
+
+agent divide(x: Int, y: Int) -> Int:
+    return x / y
+
+agent remainder(x: Int, y: Int) -> Int:
+    return x % y
+
+agent negate(x: Int) -> Int:
+    return -x
 ";
         let py = src_to_py(src);
-        // Outer parens on the BinOp ensure correct precedence.
-        assert!(py.contains("return (1 + 2)"));
+        assert!(py.contains("return __corvid_checked_i64(1 + 2)"));
+        assert!(py.contains("return __corvid_div_i64(x, y)"));
+        assert!(py.contains("return __corvid_rem_i64(x, y)"));
+        assert!(py.contains("return __corvid_checked_i64(-x)"));
     }
 
     #[test]
