@@ -29,6 +29,18 @@ Use `ui.query_form(path, controls)` to submit named fields to an application rou
 
 ## Static view functions
 
+Use layout functions to arrange any list of views. `ui.stack(content)` places children vertically. `ui.row(content)` places children horizontally and wraps to another line when needed. `ui.grid(content)` fits as many equal-width columns as the container allows, aiming for a minimum of 16rem per column. A narrower container gets a single column. All three preserve the order of their children and use a 1rem gap.
+
+For example, a project board can use the same column function for each status.
+
+```corvid-fragment
+fn column(name: String, tasks: List<View>) -> View:
+    return ui.stack([ui.text(name)] + tasks)
+
+fn board() -> View:
+    return ui.grid([column("Planned", [ui.text("Design navigation")]), column("Done", [ui.text("Create project")])])
+```
+
 Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fragment in its `html: String` field.
 
 | Function | Result |

@@ -14,6 +14,15 @@ fn children(views: List<View>) -> String:
 public fn text(value: String) -> View:
     return View("<p>" + escaped(value) + "</p>")
 
+public fn stack(content: List<View>) -> View:
+    return View("<div style=\"display:flex;flex-direction:column;gap:1rem\">" + children(content) + "</div>")
+
+public fn row(content: List<View>) -> View:
+    return View("<div style=\"display:flex;flex-wrap:wrap;align-items:center;gap:1rem\">" + children(content) + "</div>")
+
+public fn grid(content: List<View>) -> View:
+    return View("<div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem\">" + children(content) + "</div>")
+
 public fn text_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
 

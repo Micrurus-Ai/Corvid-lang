@@ -380,6 +380,9 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 ### [std/ui](../../std/ui.cor)
 
 - `fn text(value: String) -> View`
+- `fn stack(content: List<View>) -> View`
+- `fn row(content: List<View>) -> View`
+- `fn grid(content: List<View>) -> View`
 - `fn text_field(label: String, name: String, initial: String) -> View`
 - `fn submit(label: String) -> View`
 - `fn search_form(controls: List<View>) -> View`
