@@ -7889,3 +7889,18 @@ public agent add_offset(offset: Int) -> (Int) -> Int:
 ```
 
 With this function in a module imported as `ops`, write `add_three = ops.add_offset(3)`. Calling `add_three(4)` returns `7` on both CLI targets. Integer captures keep their value at creation. A captured `List<Int>` stays alive and reflects updates made through another reference to the same list.
+
+### Transforming an integer list
+
+Both CLI targets accept a named integer function or a closure as a callback on a `List<Int>`.
+
+```corvid
+values = [3, 1, 4]
+doubled = values.map(fn (n) -> n * 2)
+large = values.filter(fn (n) -> n >= 3)
+total = values.fold(0, fn (acc, n) -> acc + n)
+positive = values.all(fn (n) -> n > 0)
+has_four = values.any(fn (n) -> n == 4)
+```
+
+Here `doubled` is `[6, 2, 8]`, `large` is `[3, 4]`, and `total` is `8`. Both predicates return true. Callbacks visit elements in order. An empty list yields an empty map or filter result and the initial fold value. `any` stops at the first true result and returns false on an empty list. `all` stops at the first false result and returns true on an empty list.

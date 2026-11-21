@@ -23,6 +23,7 @@ Work through the first open item in order. Inspect its behavior, implement or re
   - [x] Interpreter: pass local, qualified and renamed pure functions as callbacks across modules. The CLI checks incompatible callback signatures.
   - [x] Native and interpreter CLI targets: pass a named integer function through an import, call a returned closure, capture scalars before rebinding, and keep shared and temporary integer lists alive.
   - [x] In both targets, imported functions returning integer and string lists infer the corresponding option payload through the same last() method.
+  - [x] Native integer list callbacks for map, filter, fold, any and all passed the cross-module CLI test, including empty inputs, ordered evaluation and short-circuiting.
 - [ ] G07. Resolve public functions through nested relative imports. Diagnose private calls, cross-module argument errors, name collisions and import cycles.
 - [ ] G08. Stabilize core value behavior. Specify and test Unicode, numeric overflow and conversion, equality, aliasing, scope exit and cleanup on failure.
 

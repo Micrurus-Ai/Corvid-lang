@@ -176,11 +176,29 @@ agent main() -> Bool:
     c = other(5)
     d = ops.apply(6, ops.twice)
     items = [1, 2]
+    mapped = items.map(add)
+    empty: List<Int> = []
+    empty_result = empty.map(ops.twice)
+    source_preserved = items[0] == 1 and items[1] == 2
     read = ops.reader(items, 4)
     items[0] = 10
     items.append(30)
+    shared = read(0) == 17 and read(2) == 37
     temporary = ops.reader([8], 2)
-    return read(0) == 17 and temporary(0) == 11 and a == 7 and b == 4 and c == 43 and d == 12
+    kept = temporary(0) == 11
+    enabled = true
+    predicate: (Int) -> Bool = fn (n) -> enabled and n >= items[0]
+    enabled = false
+    selected = [11, 2, 10, 1].filter(predicate)
+    filtered = selected.length() == 2 and selected[0] == 11 and selected[1] == 10
+    total = selected.fold(0, fn (acc, n) -> acc * 10 + n)
+    has = [0, 5].any(fn (i) -> items[i] == 10)
+    every = [0, 5].all(fn (i) -> items[i] < 0)
+    vacuous = empty.all(predicate) and not empty.any(predicate)
+    reduced = total == 120 and empty.fold(17, fn (a, b) -> a + b) == 17
+    checks = has and not every and vacuous and reduced
+    untouched = checks and source_preserved and filtered and shared and kept and mapped[0] == 4 and mapped[1] == 5
+    return untouched and empty_result.length() == 0 and a == 7 and b == 4 and c == 43 and d == 12
 "#).unwrap();
 
     assert_both_targets_without_leaks(&main);

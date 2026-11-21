@@ -94,6 +94,54 @@ void corvid_list_append(corvid_list* list, int64_t slot) {
     list->data[list->length++] = slot;
 }
 
+corvid_list* corvid_list_map_int(corvid_list* source, void* closure,
+                                 int64_t (*apply)(void*, int64_t),
+                                 const struct corvid_typeinfo* info) {
+    corvid_list* out = corvid_list_snapshot(source, info);
+    const int64_t count = out->length;
+    for (int64_t i = 0; i < count; ++i) {
+        out->data[i] = apply(closure, out->data[i]);
+    }
+    return out;
+}
+
+corvid_list* corvid_list_filter_int(corvid_list* source, void* closure,
+                                    uint8_t (*accept)(void*, int64_t),
+                                    const struct corvid_typeinfo* info) {
+    corvid_list* out = corvid_list_snapshot(source, info);
+    int64_t kept = 0;
+    for (int64_t i = 0; i < out->length; ++i) {
+        const int64_t item = out->data[i];
+        if (accept(closure, item)) out->data[kept++] = item;
+    }
+    out->length = kept;
+    return out;
+}
+
+int64_t corvid_list_fold_int(corvid_list* source, void* closure,
+                             int64_t (*step)(void*, int64_t, int64_t),
+                             const struct corvid_typeinfo* info, int64_t acc) {
+    corvid_list* items = corvid_list_snapshot(source, info);
+    for (int64_t i = 0; i < items->length; ++i) {
+        acc = step(closure, acc, items->data[i]);
+    }
+    corvid_release(items);
+    return acc;
+}
+
+uint8_t corvid_list_test_int(corvid_list* source, void* closure,
+                             uint8_t (*test)(void*, int64_t),
+                             const struct corvid_typeinfo* info, int64_t all) {
+    corvid_list* items = corvid_list_snapshot(source, info);
+    uint8_t result = (uint8_t)all;
+    for (int64_t i = 0; i < items->length; ++i) {
+        result = test(closure, items->data[i]);
+        if (result != all) break;
+    }
+    corvid_release(items);
+    return result;
+}
+
 /* Shared destroy — installed on every refcounted-element list's typeinfo.
  * Walks the length prefix and releases each element. corvid_release
  * then frees the list's own block after this returns.

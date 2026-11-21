@@ -323,6 +323,11 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type) -> Result<(), NotNativeRea
             scan_expr(receiver, current_return_ty)?;
             scan_expr(&args[0], current_return_ty)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) => {
+            scan_expr(receiver, current_return_ty)?;
+            args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty))
+        }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {

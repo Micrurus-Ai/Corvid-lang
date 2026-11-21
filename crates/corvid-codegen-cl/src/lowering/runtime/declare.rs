@@ -33,6 +33,9 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         module.declare_function(name, Linkage::Import, &sig)
             .map_err(|error| CodegenError::cranelift(format!("declare {name}: {error}"), Span::new(0, 0)))
     };
+    let list_map_int = declare("corvid_list_map_int", 4, true)?;
+    let list_filter_int = declare("corvid_list_filter_int", 4, true)?;
+    let list_fold_int = declare("corvid_list_fold_int", 5, true)?;
     let list_snapshot = declare("corvid_list_snapshot", 2, true)?;
     let list_new = declare("corvid_list_new", 2, true)?;
     let list_bounds_error = declare("corvid_list_bounds_error", 2, false)?;
@@ -42,6 +45,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let map_require_int = declare("corvid_ordered_map_require_int", 2, true)?;
     let map_find = declare("corvid_ordered_map_find", 2, true)?;
     let map_snapshot = declare("corvid_ordered_map_snapshot", 3, true)?;
+    let mut test_sig = module.make_signature();
+    test_sig.params.resize(5, AbiParam::new(I64));
+    test_sig.returns.push(AbiParam::new(I8));
+    let list_test_int = module.declare_function("corvid_list_test_int", Linkage::Import, &test_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare list any/all: {e}"), Span::new(0, 0)))?;
     let mut eq_sig = module.make_signature();
     eq_sig.params.push(AbiParam::new(I64));
     eq_sig.params.push(AbiParam::new(I64));
@@ -1170,6 +1178,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
+        list_map_int, list_filter_int, list_fold_int, list_test_int,
         list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,

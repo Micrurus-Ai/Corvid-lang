@@ -151,6 +151,42 @@ pub(super) fn lower_expr(
             }
             Ok(map)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if crate::native_integer_list_transform(*kind, &receiver.ty, args) => {
+                let (list, borrowed_list) = lower_container_maybe_borrowed(
+                    builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                use corvid_types::BuiltinMethodKind::*;
+                let (helper, extra, callback_expr) = match kind {
+                    ListMap => (runtime.list_map_int, None, &args[0]),
+                    ListFilter => (runtime.list_filter_int, None, &args[0]),
+                    ListAny | ListAll => {
+                        let all = builder.ins().iconst(I64, i64::from(*kind == ListAll));
+                        (runtime.list_test_int, Some(all), &args[0])
+                    }
+                    ListFold => {
+                        let init = lower_expr(builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                        (runtime.list_fold_int, Some(init), &args[1])
+                    }
+                    _ => unreachable!(),
+                };
+                let (callback, borrowed_callback) = lower_container_maybe_borrowed(
+                    builder, callback_expr, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let info = runtime.list_typeinfos.get(&Type::Int).ok_or_else(||
+                    CodegenError::cranelift("missing integer list typeinfo", expr.span))?;
+                let info = module.declare_data_in_func(*info, builder.func);
+                let info = builder.ins().symbol_value(I64, info);
+                let target = builder.ins().load(I64, MemFlags::trusted(), callback, 0);
+                let helper = module.declare_func_in_func(helper, builder.func);
+                let mut operands = vec![list, callback, target, info];
+                operands.extend(extra);
+                let call = builder.ins().call(helper, &operands);
+                let output = builder.inst_results(call)[0];
+                if !borrowed_callback { emit_release(builder, module, runtime, callback); }
+                if !borrowed_list { emit_release(builder, module, runtime, list); }
+                Ok(output)
+            }
         IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_string_map(&receiver.ty) => {
             use corvid_types::BuiltinMethodKind::*;
             let (map, borrowed) = lower_container_maybe_borrowed(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;

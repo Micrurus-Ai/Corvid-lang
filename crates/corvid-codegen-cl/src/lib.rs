@@ -310,3 +310,19 @@ pub fn native_lambda_locals(body: &corvid_ir::IrExpr) -> Option<Vec<(corvid_reso
     collect(body, &mut locals)?;
     Some(locals)
 }
+
+pub fn native_integer_list_transform(
+    method: corvid_types::BuiltinMethodKind, receiver: &corvid_types::Type, args: &[corvid_ir::IrExpr],
+) -> bool {
+    use corvid_types::{BuiltinMethodKind, Type};
+    let (callback, arity, result) = match (method, args) {
+        (BuiltinMethodKind::ListMap, [f]) => (f, 1, Type::Int),
+        (BuiltinMethodKind::ListFilter | BuiltinMethodKind::ListAny | BuiltinMethodKind::ListAll, [f]) => (f, 1, Type::Bool),
+        (BuiltinMethodKind::ListFold, [init, f]) if init.ty == Type::Int => (f, 2, Type::Int),
+        _ => return false,
+    };
+    matches!(receiver, Type::List(element) if **element == Type::Int)
+        && native_callback_type(&callback.ty)
+        && matches!(&callback.ty, Type::Function { params, ret, .. }
+            if params.len() == arity && **ret == result)
+}
