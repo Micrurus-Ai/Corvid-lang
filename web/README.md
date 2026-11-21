@@ -76,3 +76,9 @@ Pages can do path-based redirects but not User-Agent-based content negotiation. 
 ## Cost
 
 Cloudflare Workers free tier: 100,000 requests/day. A install pipe is one request. You'd need >100k installs/day before paying anything, and even then it's $5/month for 10M.
+
+## Package discovery
+
+Search the [live package catalog](https://corvid-installer.ssebowadisan1.workers.dev/packages) by package name or task. The same catalog runs at `/packages` on the local Worker. Each detail page has a source link, tested CLI version, example, and import. The initial entry exposes a versioned snapshot of Corvid's UI module. Its native disclosure preview renders the example's HTML. Search metadata is curated in `catalog.mjs`. The Worker and development CLI share the release index at `crates/corvid-driver/src/package_registry/catalog.json`.
+
+The editor reads the same entries at `/packages/catalog.json`. The existing CLI reads the registry at `/packages/index.json`. Development runs lock exact-version imports automatically. Set `CORVID_PACKAGE_REGISTRY` to your local registry URL when testing. During local development set the VS Code user setting `corvid.catalog.url` to `http://localhost:8787/packages/catalog.json` and run **Corvid: Add Package Import** in a Corvid file.

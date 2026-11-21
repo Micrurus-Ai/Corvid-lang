@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const {addPackageImport} = require("./catalog");
 const vscode = require("vscode");
 const {
   LanguageClient,
@@ -20,6 +21,7 @@ async function activate(context) {
   context.subscriptions.push(outputChannel, statusItem);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("corvid.addPackageImport", addPackageImport),
     vscode.commands.registerCommand("corvid.restartLanguageServer", async () => {
       await restartClient(context);
     }),

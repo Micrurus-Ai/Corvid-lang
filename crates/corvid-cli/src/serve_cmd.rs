@@ -414,6 +414,12 @@ pub(crate) fn cmd_serve(
                 async move { ([(axum::http::header::CONTENT_TYPE, mime)], bytes) }
             }));
         }
+    } else if !state.ir.servers.iter().flat_map(|s| &s.routes)
+        .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
+        app = app.route("/target/wasm/events.js", on(MethodFilter::GET, || async {
+            ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                corvid_driver::FORM_CONTROLS_JS)
+        }));
     }
 
     // Slice 52a: register EVERY declared route and execute its body via

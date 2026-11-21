@@ -11,8 +11,8 @@ exercise every shipped invention end-to-end:
   bounds and human approval.
 - `code_review_agent.cor` — code-review agent with effect rows on
   filesystem and version-control reads.
-- `provider_routing_demo.cor` — typed model substrate routing.
-- `local_model_demo.cor` — local model via the model substrate.
+- `model_provider_routing.cor` — typed model substrate routing.
+- `local_model_chat.cor` — local model via the model substrate.
 
 ## How to run
 
@@ -32,8 +32,8 @@ Each example has tests, evals, traces, and benchmark notes.
 | rag_qa_bot | Grounded<T>, citation, retrieval effect |
 | support_escalation_bot | loop bounds, await_approval, durable jobs |
 | code_review_agent | filesystem effect, multi-prompt composition |
-| provider_routing_demo | model substrate, swap_model eval |
-| local_model_demo | local model substrate, no-network compile |
+| model_provider_routing | model substrate, swap_model eval |
+| local_model_chat | local model substrate, no-network compile |
 
 ## The benchmark archives
 

@@ -27,7 +27,27 @@ The field keeps its current text as you type. Press Enter in the field or click 
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
+For an opt-in, read-only search that a compatible browser agent can discover, use `ui.agent_query_form(name, description, path, controls)`. Supply a stable unique tool name, an author-written description, and a trusted read-only GET path. The visible form and the agent use the same named fields. The user submits the form. On browsers without declarative WebMCP, the form works as a normal GET form. The server remains responsible for authorizing the request.
+
+```corvid-fragment
+fn calendar_search() -> View:
+    day = ui.text_field("Day", "day", "")
+    return ui.agent_query_form("find_slots", "Find available calendar slots for a day", "/slots", [day, ui.submit("Find slots")])
+```
+
 ## Static view functions
+
+Use layout functions to arrange any list of views. `ui.stack(content)` places children vertically. `ui.row(content)` places children horizontally and wraps to another line when needed. `ui.grid(content)` fits as many equal-width columns as the container allows, aiming for a minimum of 16rem per column. A narrower container gets a single column. All three preserve the order of their children and use a 1rem gap.
+
+For example, a project board can use the same column function for each status.
+
+```corvid-fragment
+fn column(name: String, tasks: List<View>) -> View:
+    return ui.stack([ui.text(name)] + tasks)
+
+fn board() -> View:
+    return ui.grid([column("Planned", [ui.text("Design navigation")]), column("Done", [ui.text("Create project")])])
+```
 
 Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fragment in its `html: String` field.
 
@@ -97,6 +117,40 @@ Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an e
 
 The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.
 
+### Edit a keyed cart and reuse a color picker
+
+The [storefront](../../examples/storefront/src/main.cor) renders its catalog links, quantity inputs and checkout form on the server. The input name identifies the product in the submitted record. Its row key identifies the same product in the browser. Checkout computes the receipt from the two submitted quantities and the server's prices.
+
+After the event module attaches, each line total reads the current input value, including edits made while the module was loading. Use the move buttons, or press Alt+Up or Alt+Down in a quantity field. The move handler shifts the adjacent row so the active input stays attached. A status message gives the row's new position.
+
+The notebook and pencil screens each import `ColorPicker` and `Color` from [the same local module](../../examples/storefront/src/color_picker.cor). Each supplies an initial value and a form destination. For example, the notebook starts with `Color(0)` and calls `ColorPicker(value, "/notebook")`. With scripting enabled, the select's change event submits the form. **Apply color** submits it before enhancement. Each POST route decodes the selected shade into a `Color` and passes it to its screen handler. This example uses server-owned color previews and browser-local cart edits.
+
+From the repository root, run `python scripts/verify_storefront.py target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. Omit `--http-only` to run the keyboard and focus tests with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
+
+### Compare a local action with the save form
+
+The step 3 experiment adds **Read one page** beside the reading-list edit form. Its handler takes the displayed integer and returns the next value. **Save to shelf** submits a typed record to the server and updates SQLite. To build the experiment from the repository root, pass the path to your CLI executable and a new directory whose parent exists.
+
+```powershell
+python scripts/build_component_trial.py target/debug/corvid.exe target/pages-trial functions wasm
+```
+
+Extract the resulting web archive and migrate and serve it as in the reading-list example below. Open shelf 2, activate **Read one page**, and reload to see which value lasts. Use `indented` in place of `functions` to try the block grammar, or `js` in place of `wasm` to try the experimental JavaScript lowering. Each build needs its own output directory. The two small view files are inputs to the trial script. The ordinary CLI checks, tests and packages the generated Corvid project. [Source examples and measured sizes](../frontend-component-design.md#reading-list-prototype)
+
+### Display state in more than one view
+
+`ui.shared_int_state(name, label, initial, controls)` creates an integer control with a page-wide name. Give each owner a unique name. `ui.state_output(name, label)` adds a labeled, read-only display anywhere on that page. It picks up the initial value when the browser handlers load and updates after each successful action. Reloading the page restores the initial value.
+
+For example, place the quantity control in a product card and the item count in a header. Use the `increment` browser handler shown above.
+
+```corvid-fragment
+server shop:
+    route GET "/" -> html:
+        header = ui.state_output("items", "Cart items")
+        quantity = ui.shared_int_state("items", "Quantity", 0, [ui.action("Add one", "increment")])
+        return ui.interactive_page("Shop", [header, quantity])
+```
+
 ## Serving a form and its result
 
 A route declared with `-> html` returns a Corvid `String`. The server sends it as an HTML document. Use a typed query record to validate submitted values before the result page renders.
@@ -145,6 +199,38 @@ The save example uses a public route. Cookie-authenticated mutations also requir
 The separate preview route accepts the same record as JSON. Posting `{"term":"meeting","limit":2}` to `/preview` returns its rendered page.
 
 Open `/openapi.json` on the running service to inspect the form's contract. In this example, the query and POST body both reference the `Search` schema, whose properties are `term` (string) and `limit` (integer). Use `corvid contract openapi src/main.cor --out -` to inspect the same schema before starting the server. Imported records keep their nested field definitions and field constraints. Follow the emitted schema reference when different modules declare the same type name.
+
+## Package and restart a reading list
+
+The [reading list](../../examples/reading_list/src/main.cor) renders three shelves from SQLite. Select a shelf to open the typed `Reading` form. The submitted shelf number chooses the row to update. The POST handler binds the title and shelf as SQL parameters, then lists the stored rows again.
+
+From the repository root, run these commands in PowerShell with the Corvid CLI on your path. Use new directories for the project and extracted package.
+
+```powershell
+corvid new reading-list
+Copy-Item examples/reading_list/src/main.cor reading-list/src/main.cor
+Copy-Item examples/reading_list/migrations reading-list -Recurse
+cd reading-list
+corvid check
+corvid build src/main.cor --target web
+mkdir installed
+tar -xf target/web.tar -C installed
+cd installed
+corvid migrate up --dir migrations --database reading.sqlite
+corvid serve src/main.cor --listen 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/`. Tab to a shelf link and press Enter. Tab to the title, replace it, and activate **Save to shelf**. Stop the server with Ctrl+C and repeat the serve command from the same directory. Open the list again to read the saved title.
+
+The scaffold supplies `src/std` and a project-relative I/O root. The archive includes the SQL migration. Running it in the extracted directory creates and seeds the database there. Reuse that directory across restarts. No model setup is required.
+
+The [verification script](../../scripts/verify_reading_list.py) repeats the scaffold, package, migration and restart in fresh directories. With Python 3.12+, Python Playwright and its Chromium browser installed, run `python scripts/verify_reading_list.py path/to/corvid` from the repository root. It reports list and save navigation durations from the browser and separate HTTP save round trips. Use `--channel msedge` for installed Edge or `--http-only` for the server checks alone.
+
+### Try a typed suggestion
+
+Run the verification script above for a credential-free exercise. Its loopback Chat Completions fixture can return a typed action, produce malformed output, or hold a request open until the client cancels. To choose your own titles interactively, start a local OpenAI-compatible model that supports structured output. Set `CORVID_MODEL` to `openai-compat:http://127.0.0.1:8080/v1:local-model` before starting the packaged server, substituting your local port and model name.
+
+Open a shelf and choose **Suggest a title**. The original edit form stays available while the request runs. Cancel a pending request with **Cancel suggestion**. After a malformed response, choose **Suggest a title** again. On success, review the second form, edit the proposed title if desired, and choose **Apply suggestion**. Returning to the list without submitting discards the preview. Follow the decision from the typed prompt to the save handler in the [first-agent exercise](10-agents.md#your-first-agent-in-the-reading-list).
 
 ## Displaying a streamed answer
 
@@ -198,3 +284,40 @@ agent increment(current: Int) -> Int:
 Run `corvid build src/main.cor --target web` from the project root. The build checks the staged application, compiles the browser handler, and writes `target/web.tar`. Extract the archive into an empty directory. From that directory, set the model configuration and run `corvid serve src/main.cor` with the matching Corvid CLI. Open the root page and follow **Open workspace** to use the counter and the streamed answer.
 
 The archive includes Corvid and Python source files under `src/`, the project manifest and lockfile when present, root `tools.py` when present, SQL files under `migrations/`, and the compiled JavaScript and WebAssembly pair when `src/events.cor` exists. The CLI supplies the streaming module. Supply external providers, runtime credentials, host dependencies and application data in the destination environment.
+
+## A component with named state (prototype)
+
+Each copy of a component owns its state. In this example both buttons update the same count. Mounting a second counter gives it its own count. Reloading starts each counter at zero.
+
+```text
+component ReadingCounter:
+    state pages_read: Int = 0
+
+    text("Pages read this session: {pages_read}")
+
+    button("Read one page") on click:
+        pages_read = pages_read + 1
+
+    button("Read two pages") on click:
+        pages_read = pages_read + 2
+```
+
+Read the declaration as a name, a type, and a starting value. The braces in the text display the current value. Each assignment runs when its button is activated, including by keyboard. To change how much a button adds, edit the number on its assignment line.
+
+The prototype supports one nonnegative integer initializer, one labeled output ending in the state reference, and one or more buttons that add a nonnegative integer literal. It generates an ordinary Corvid view and typed browser handlers, then uses Corvid's web packager. The generated host composes two instances using ordinary function calls. The click handlers run locally. AI action exposure is a separate design decision.
+
+From the repository root, use a new output directory and the path to your built CLI (shown here for Windows).
+
+```shell
+python scripts/prototype_named_state.py examples/named_state/reading_counter.view counter-app --cli target/debug/corvid.exe
+```
+
+The package is written to `counter-app/target/web.tar`. With Python Playwright and Edge installed, run `python scripts/verify_named_state.py target/debug/corvid.exe` to exercise the packaged page. [Editable example](../../examples/named_state/reading_counter.view)
+
+### Navigation and visibility design
+
+For future component examples, use a link when the reader chooses a destination, as in `link("Reading history", to: ReadingHistory)`. Use an ordinary `if` around content that appears conditionally. Reserve `open ReadingHistory` for navigation initiated by code and `on open:` for work that should run once when a component instance first appears. These are design directions for a future navigation example. The counter prototype implements named state, text, buttons and click handlers.
+
+### Sharing a component with another app
+
+Use `import "std:ui" as ui` inside a component that will be published. The compiler supplies the standard library even after the component moves to a registry. Export the component and its input type with `public`. The consuming screen can pass a typed value and its own form action. On an interactive page, standard change-submit selects work without a custom browser module. [Publisher exercise](../reference/package-imports.md#publishing-a-component-with-standard-library-dependencies)

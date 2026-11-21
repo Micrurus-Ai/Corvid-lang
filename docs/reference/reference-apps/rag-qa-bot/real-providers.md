@@ -13,7 +13,7 @@ OPENAI_API_KEY=<redacted-openai-key>
 CORVID_RAG_EMBEDDER=openai:text-embedding-3-small
 ```
 
-The committed demo keeps embeddings in `examples/rag_qa_bot/seed/embeddings.json`
+The committed demo keeps embeddings in `examples/knowledge_base_assistant/seed/embeddings.json`
 for offline tests. Real mode should rebuild embeddings from `seed/kb/` before a
 live run, then record any provider trace through the redaction pipeline before
 promotion.

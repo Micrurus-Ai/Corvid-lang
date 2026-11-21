@@ -81,7 +81,7 @@ fn bundle_diff_audit_explain_and_report_emit_structured_output() {
 }
 
 #[test]
-fn committed_phase22_demo_bundle_script_passes_on_linux() {
+fn committed_sentiment_classifier_bundle_script_passes_on_linux() {
     if !cfg!(target_os = "linux") {
         eprintln!("skipping Linux-only committed bundle script test on non-Linux host");
         return;
@@ -89,13 +89,13 @@ fn committed_phase22_demo_bundle_script_passes_on_linux() {
 
     let root = workspace_root();
     let output = Command::new("bash")
-        .arg(root.join("examples").join("phase22_demo").join("verify.sh"))
+        .arg(root.join("examples").join("sentiment_classifier_bundle").join("verify.sh"))
         .current_dir(&root)
         .output()
-        .expect("run phase22 demo verify.sh");
+        .expect("run sentiment classifier bundle verification");
     assert!(
         output.status.success(),
-        "phase22 demo verify.sh failed: stdout={} stderr={}",
+        "sentiment classifier bundle verification failed: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

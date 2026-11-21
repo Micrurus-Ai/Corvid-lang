@@ -1,0 +1,5 @@
+public agent notebook_cents(quantity: Int) -> Int:
+    return quantity * 450
+
+public agent pencil_cents(quantity: Int) -> Int:
+    return quantity * 125

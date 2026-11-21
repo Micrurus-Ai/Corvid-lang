@@ -199,7 +199,7 @@ pip install -e './runtime/python[dev]' # only needed for --target=python work
 ### Run the offline demo
 
 ```bash
-cd examples/refund_bot_demo
+cd examples/offline_refund_bot
 cargo run --manifest-path ../../Cargo.toml --bin corvid -- build src/refund_bot.cor
 python3 tools.py
 ```

@@ -1,0 +1,52 @@
+import "./layout" use shop_page
+import "./std/ui" as ui
+import "./std/ui" use View
+import "./events" use notebook_cents, pencil_cents
+import "./color_picker" use Color
+import "./notebook" use notebook_cover
+import "./pencil" use pencil_finish
+
+type Quantities:
+    notebook: Int where between(0, 99)
+    pencil: Int where between(0, 99)
+
+fn cart_line(key: String, name: String, price: Int, handler: String) -> View:
+    quantity = ui.quantity_field(name + " quantity", key, 1, handler, "Line total (cents)", price)
+    return ui.keyed_item(key, name, [ui.text(name + " · " + price.to_string() + " cents each"), quantity])
+
+fn cart() -> String:
+    lines = [cart_line("notebook", "Notebook", 450, "notebook_cents"), cart_line("pencil", "Pencil", 125, "pencil_cents")]
+    checkout = ui.post_form("/checkout", [ui.keyed_list("Cart items", lines), ui.submit("Checkout")])
+    return shop_page("Shopping cart", [ui.link("Catalog", "/"), View("<h1>Shopping cart</h1>"), ui.text("Enter 0 to skip an item. Use Alt + Up or Down in a row to change its position when move controls appear."), checkout, ui.event_module()])
+
+agent receipt(quantities: Quantities) -> String:
+    total = notebook_cents(quantities.notebook) + pencil_cents(quantities.pencil)
+    return shop_page("Checkout summary", [View("<h1>Checkout summary</h1>"), ui.text("Notebooks: " + quantities.notebook.to_string()), ui.text("Pencils: " + quantities.pencil.to_string()), ui.text("Total: " + total.to_string() + " cents"), ui.link("Catalog", "/")])
+
+server shop:
+    route GET "/" -> html:
+        return shop_page("Catalog", [View("<h1>Catalog</h1>"), ui.link("Open cart", "/cart"), ui.grid([ui.link("Notebook · 450 cents", "/notebook"), ui.link("Pencil · 125 cents", "/pencil")])])
+
+    route GET "/notebook" -> html:
+        return notebook_cover(Color(0))
+
+    route POST "/notebook" form Color -> html:
+        return notebook_cover(body)
+
+    route GET "/pencil" -> html:
+        return pencil_finish(Color(2))
+
+    route POST "/pencil" form Color -> html:
+        return pencil_finish(body)
+
+    route GET "/cart" -> html:
+        return cart()
+
+    route POST "/checkout" form Quantities -> html:
+        return receipt(body)
+
+test cart_has_keyed_native_fields:
+    page = cart()
+    assert page.contains("data-corvid-key=\"notebook\"")
+    assert page.contains("name=\"pencil\"")
+    assert page.contains("action=\"/checkout\"")

@@ -13,7 +13,7 @@ fn sample_descriptor() -> CorvidAbi {
     CorvidAbi {
         corvid_abi_version: 1,
         compiler_version: "0.0.1-test".to_string(),
-        source_path: "examples/cdylib_catalog_demo/src/classify.cor".to_string(),
+        source_path: "examples/shared_library_catalog/src/classify.cor".to_string(),
         generated_at: "2026-04-22T00:00:00Z".to_string(),
         agents: vec![
             AbiAgent {

@@ -22,6 +22,22 @@ agent main(ticket: String) -> String:
     return summary
 ```
 
+## Your first agent in the reading list
+
+Open shelf 2 and choose **Suggest a title**. The task is to recommend a different book for that shelf. To run the exercise with repeatable answers, follow the [packaged reading-list trial](19-browser-views.md#try-a-typed-suggestion).
+
+The reading-list prototype expresses the model's task in three lines.
+
+```text
+title = ask recommend(current_title)
+    allow lookup_shelf once
+    timeout 30 seconds
+```
+
+The model can suggest a title immediately or request one shelf title from the snapshot. A request for a missing shelf or a second lookup ends the operation with an error. Both model calls and the optional lookup share the same 30 seconds. A successful suggestion opens an editable preview. Choosing **Apply suggestion** saves it.
+
+This spelling currently works through the reading-list prototype generator. Its adapter binds `lookup_shelf` to `lookup(readings, shelf)`. The generated Corvid agent `ask_recommend` handles the first decision and `finish_recommendation` handles the decision after a lookup. From the repository root, run `python scripts/prototype_reading_list_ask.py --write` after editing the prototype. Run the same command without `--write` to check that the runnable example matches. [Prototype source](../../examples/reading_list/suggest_title.cor.in) ? [Runnable Corvid](../../examples/reading_list/src/main.cor)
+
 ## Annotations
 
 Annotation arguments are dimensional constraint values —

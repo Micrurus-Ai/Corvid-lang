@@ -35,3 +35,5 @@ npm run verify
 
 The verification script validates extension JSON files and checks the JavaScript
 entrypoint syntax without requiring a packaged `.vsix`.
+
+**Corvid: Add Package Import** searches the package catalog by name or task and inserts the selected import in the current Corvid file. Run the project to resolve and lock the inserted import. For a local catalog also set `CORVID_PACKAGE_REGISTRY` to its registry index when running the CLI. Set `corvid.catalog.url` in user settings to use a local catalog during development.

@@ -154,11 +154,11 @@ A submission can also add a 4th, 5th, … reference app under
 `apps/<name>/` with all three stacks implementing the same
 intended behaviour. The runner picks it up automatically.
 
-### `benches/moat/replay_determinism/` — deterministic re-execution of `refund_bot_demo`
+### `benches/moat/replay_determinism/` — deterministic re-execution of `offline_refund_bot`
 
 Current published numbers:
 
-- Corvid (`cargo run -p refund_bot_demo`, N=20, normalized): **all pairs byte-identical**.
+- Corvid (`cargo run -p offline_refund_bot`, N=20, normalized): **all pairs byte-identical**.
 - Python (LangChain + LangSmith): **bounty-open** — no `_summary.json` yet.
 - TypeScript (Vercel AI SDK + OTEL): **bounty-open** — no `_summary.json` yet.
 

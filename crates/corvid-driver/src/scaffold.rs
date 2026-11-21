@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-const BUNDLED_STD: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled_std.rs"));
+pub(crate) const BUNDLED_STD: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled_std.rs"));
 
 /// Scaffold a new Corvid project at `<name>/` under the current directory.
 pub fn scaffold_new(name: &str) -> anyhow::Result<PathBuf> {

@@ -2,9 +2,19 @@
 
 > A pragmatic guide to what you can write in Corvid today, how to run it, and where the edges are. Grows with every slice that adds a user-visible feature. Cross-references to the dev-log where decisions were made.
 
+The storefront uses stable product keys for cart rows and native field names for checkout. Its packaged form returned 5,525 cents for 12 notebooks and one pencil. Two screen modules imported the same picker. Both rejected a `String` input during checking, accepted a Moss selection through their typed POST routes and returned HTTP 400 for a nonnumeric or out-of-range shade. [Cart and picker walkthrough](docs/book/19-browser-views.md#edit-a-keyed-cart-and-reuse-a-color-picker)
+
+The [reading-list component exercise](docs/book/19-browser-views.md#compare-a-local-action-with-the-save-form) builds a local page counter beside a server-owned save. A changed callback type points to the binding line in both candidate grammars. In the measured Edge trial, Enter advanced the local count and reloading reset it to zero in both grammars on both targets. The package verifier restarts each server after a malformed save and checks that the last valid title and the other two shelves survive.
+
 This is the "how to actually use Corvid" document. For the pitch, see [README.md](README.md). For the full feature roadmap, [FEATURES.md](FEATURES.md). For architecture, [ARCHITECTURE.md](ARCHITECTURE.md). For the build journal, [dev-log.md](dev-log.md).
 
 ---
+
+## Saving a typed form in a packaged app
+
+For a model-assisted edit, keep the selected shelf in the request and ask the model for a typed action. The reading list allows one shelf lookup before it requires a proposed title. A successful proposal populates another ordinary save form. In the packaged HTTP trial, malformed replies and cancellation left the stored title intact, and the applied title survived restart. [Try the suggestion](docs/book/19-browser-views.md#try-a-typed-suggestion)
+
+Build the reading list from a fresh scaffold to get the standard library that ships with the CLI. Its `form_for("POST /save", reading, "Save to shelf")` call generates labeled fields from the same record that the route receives as `body`. A parameterized SQLite update saves the edit. Run the migration in the unpacked app directory so the CLI and server open the same database. The packaged HTTP trial recovered the saved title in a new server process. [Build and run the reading list](docs/book/19-browser-views.md#package-and-restart-a-reading-list)
 
 ## Updating lists and records
 
@@ -424,7 +434,7 @@ corvid run refund_bot.cor                     # interpreter, fully native runtim
 corvid build --target=python refund_bot.cor   # generates .py you can run with the Python runtime
 ```
 
-The interpreter path has the full AI runtime (Anthropic + OpenAI adapters, approval flow, tracing, `.env` loading, secret redaction). See the demo: `cargo run -p refund_bot_demo`.
+The interpreter path has the full AI runtime (Anthropic + OpenAI adapters, approval flow, tracing, `.env` loading, secret redaction). See the demo: `cargo run -p offline_refund_bot`.
 
 ---
 
@@ -3194,7 +3204,7 @@ is necessary but not sufficient for deterministic replay.
 ## wasm browser demo
 
 A browser demo only proves deployment if it imports the generated loader and the
-generated WASM module. `examples/wasm_browser_demo` keeps that invariant: the
+generated WASM module. `examples/browser_refund_approval` keeps that invariant: the
 source is Corvid, the artifacts come from `corvid build --target=wasm`, and the
 page supplies the typed host object that the generated `.d.ts` describes.
 
@@ -3639,7 +3649,7 @@ run-started, and run-completed events were enough to prove the approval-gated
 moat without inventing a mock provider surface that this app does not need.
 
 For LLM-backed demos, wire every CLI execution surface that can call prompts to
-the same provider runtime. `local_model_demo` exposed that `corvid run` already
+the same provider runtime. `local_model_chat` exposed that `corvid run` already
 had env mock plus provider adapters, while `corvid test` and `corvid eval` still
 used bare runtimes. Once those shared the same mock surface, the Corvid tests,
 eval harness, and one-command run all exercised the same typed program without
@@ -3653,7 +3663,7 @@ that field to `null` kept replay deterministic while the model identity stayed
 covered by tests and real-provider docs.
 
 Provider-routing replay keeps the selected model name but not the catalog-only
-model version on the substitution events. `provider_routing_demo` showed that
+model version on the substitution events. `model_provider_routing` showed that
 plain replay compiles the source with the default replay runtime, which does not
 load the demo's `corvid.toml` model catalog. The route still selects
 `openai_fast`, `ollama_local`, or `anthropic_deep`, but `model_version` must be
@@ -6954,7 +6964,7 @@ What this is NOT:
   derived actors and authorization enforcement land in the auth
   slices. Route execution is proven; identity is not yet wired.
 
-The reference application `examples/reference_app/src/main.cor` is
+The reference application `examples/orders_api/src/main.cor` is
 the continuous Phase-52 fixture: it starts here exercising these
 three shapes and grows with every subsequent slice.
 
@@ -8088,3 +8098,5 @@ Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C
 ### Slicing a list
 
 `items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.
+
+The named-state component prototype gives a mounted view its own integer, lets multiple buttons update it, and displays the result. The browser exercise covers two instances, pointer and keyboard activation, and reload. [Grammar, working example and build instructions](docs/book/19-browser-views.md#a-component-with-named-state-prototype)

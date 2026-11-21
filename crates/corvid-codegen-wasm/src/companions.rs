@@ -311,6 +311,9 @@ fn emit_js_loader(
             let names = serde_json::to_string(&names).expect("serialize handler names");
             out.push_str(&format!("const {name} = new Set({names});\n"));
         }
+        out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
+        out.push_str(crate::FORM_CONTROLS_JS);
+        out.push_str("}\n");
         out.push_str(include_str!("browser_controls.js"));
     }
     Ok(out)

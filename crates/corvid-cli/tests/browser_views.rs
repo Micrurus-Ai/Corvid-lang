@@ -19,6 +19,10 @@ test escapes_fields:
 test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
+
+test agent_query_uses_the_same_form:
+    form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
+    assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
 "#;
     fs::write(&main, source).unwrap();
     let run = |cmd| {
@@ -30,7 +34,7 @@ test preserves_child_order:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("2 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("3 passed"),
         "{good:?}"
     );
     fs::write(main, source.replace("ui.text(\"second\")", "\"second\"")).unwrap();

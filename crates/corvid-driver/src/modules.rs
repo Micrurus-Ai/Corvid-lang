@@ -142,6 +142,7 @@ pub struct NamedModuleSemanticSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ImportTarget {
+    Standard(&'static str),
     Local(PathBuf),
     Remote { url: String, key: PathBuf },
 }
@@ -166,6 +167,7 @@ impl ImportTarget {
 
     fn key(&self) -> PathBuf {
         match self {
+            Self::Standard(name) => Path::new("<corvid:std>").join(name),
             Self::Local(path) => path.clone(),
             Self::Remote { key, .. } => key.clone(),
         }
@@ -296,7 +298,9 @@ pub(crate) fn resolve_module_graph(root_file: &File, root_path: &Path, open_sour
     // Pass 1: DFS over the import graph. The root file is already
     // parsed; we DFS into its children.
     let root_canonical = canonicalize_or_input(root_path);
-    let root_target = ImportTarget::local(root_canonical.clone());
+    let root_target = crate::scaffold::BUNDLED_STD.iter()
+        .find(|(name, _)| root_path == Path::new("<corvid:std>").join(name))
+        .map_or_else(|| ImportTarget::local(root_canonical.clone()), |(name, _)| ImportTarget::Standard(name));
     let package_lock = match load_package_lock_for(root_path) {
         Ok(lock) => lock,
         Err(message) => {
@@ -607,8 +611,12 @@ fn resolve_child_target(
     import: &corvid_ast::ImportDecl,
     package_lock: Option<&PackageLockFile>,
 ) -> Result<ResolvedImportTarget, ModuleLoadError> {
+    if let Some(module) = import.module.strip_prefix("std:") {
+        return standard_target(parent, import, module);
+    }
     match import.source {
         ImportSource::Corvid => match parent {
+            ImportTarget::Standard(_) => standard_target(parent, import, import.module.trim_start_matches("./")),
             ImportTarget::Local(path) => {
                 Ok(ResolvedImportTarget {
                     target: ImportTarget::local(resolve_import_path(path, &import.module)),
@@ -661,6 +669,24 @@ fn resolve_child_target(
     }
 }
 
+/// Standard imports resolve against the distribution that compiles the program.
+fn standard_target(parent: &ImportTarget, import: &corvid_ast::ImportDecl, module: &str)
+    -> Result<ResolvedImportTarget, ModuleLoadError>
+{
+    let module = module.strip_suffix(".cor").unwrap_or(module);
+    let (name, _) = crate::scaffold::BUNDLED_STD.iter()
+        .find(|(name, _)| name.strip_suffix(".cor") == Some(module))
+        .ok_or_else(|| ModuleLoadError::FileNotFound {
+            importing_file: parent.key(),
+            requested: import.module.clone(),
+            resolved: Path::new("<corvid:std>").join(format!("{module}.cor")),
+        })?;
+    Ok(ResolvedImportTarget {
+        target: ImportTarget::Standard(name),
+        content_hash: import.content_hash.clone(),
+    })
+}
+
 fn load_target_bytes(
     importing_target: &ImportTarget,
     target: &ImportTarget,
@@ -669,6 +695,8 @@ fn load_target_bytes(
     package_cache: Option<&Path>,
 ) -> Result<Vec<u8>, ModuleLoadError> {
     match target {
+        ImportTarget::Standard(name) => Ok(crate::scaffold::BUNDLED_STD.iter()
+            .find(|(file, _)| file == name).expect("validated standard module").1.to_vec()),
         ImportTarget::Local(path) => match std::fs::read(path) {
             Ok(bytes) => Ok(bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

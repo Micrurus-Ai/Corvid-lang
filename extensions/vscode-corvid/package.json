@@ -60,6 +60,10 @@
     ],
     "commands": [
       {
+        "command": "corvid.addPackageImport",
+        "title": "Corvid: Add Package Import"
+      },
+      {
         "command": "corvid.restartLanguageServer",
         "title": "Corvid: Restart Language Server"
       },
@@ -71,6 +75,12 @@
     "configuration": {
       "title": "Corvid",
       "properties": {
+        "corvid.catalog.url": {
+          "type": "string",
+          "default": "https://corvid-installer.ssebowadisan1.workers.dev/packages/catalog.json",
+          "scope": "machine",
+          "description": "Package catalog endpoint used by Add Package Import."
+        },
         "corvid.lsp.path": {
           "type": "string",
           "default": "",

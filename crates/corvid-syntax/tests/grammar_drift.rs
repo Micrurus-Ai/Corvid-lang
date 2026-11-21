@@ -292,6 +292,7 @@ import python "mylib" as ml effects: network:
     fn lookup(key: String) -> List<String>
 "#,
     ),
+    ("choice_declaration", "public choice Action:\n    Lookup(shelf: Int)\n    Stop\n"),
     (
         "record_types_and_stores",
         r#"type User:
@@ -673,6 +674,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("import_item", "imports"),
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
+    ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
     ("type_ref", "record_types_and_stores"),
     ("type_args", "record_types_and_stores"),

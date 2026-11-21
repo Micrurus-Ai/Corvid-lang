@@ -13,7 +13,7 @@ use corvid_types::typecheck;
 use corvid_vm::{build_struct, run_agent, InterpErrorKind, Value};
 use serde_json::json;
 
-const REFUND_BOT_SRC: &str = include_str!("../../../examples/refund_bot_demo/src/refund_bot.cor");
+const REFUND_BOT_SRC: &str = include_str!("../../../examples/offline_refund_bot/src/refund_bot.cor");
 
 fn ir_of(src: &str) -> corvid_ir::IrFile {
     let tokens = lex(src).expect("lex");

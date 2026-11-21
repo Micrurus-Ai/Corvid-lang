@@ -10,6 +10,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_type_decl(
         &mut self,
         visibility: Visibility,
+        choice: bool,
     ) -> Result<TypeDecl, ParseError> {
         let start = self.peek_span();
         self.bump(); // type
@@ -17,7 +18,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident()?;
 
         // Type alias (slice 45n): `type CustomerId = String`.
-        if matches!(self.peek(), TokKind::Assign) {
+        if !choice && matches!(self.peek(), TokKind::Assign) {
             self.bump(); // =
             let target = self.parse_type_ref()?;
             let end = self.prev_span();
@@ -53,8 +54,8 @@ impl<'a> Parser<'a> {
             // Sum-type variant line (slice 45h): `| Name` or
             // `| Name(field: Type, ...)`, optionally preceded by
             // `@status(code)` / `@ui(...)` variant attributes (51e).
-            if matches!(self.peek(), TokKind::Pipe) || self.variant_attrs_precede_pipe() {
-                match self.parse_sum_variant() {
+            if choice || matches!(self.peek(), TokKind::Pipe) || self.variant_attrs_precede_pipe() {
+                match self.parse_sum_variant(choice) {
                     Ok(v) => variants.push(v),
                     Err(e) => {
                         self.errors.push(e);
@@ -139,7 +140,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_sum_variant(&mut self) -> Result<corvid_ast::SumVariant, ParseError> {
+    fn parse_sum_variant(&mut self, choice: bool) -> Result<corvid_ast::SumVariant, ParseError> {
         let start = self.peek_span();
         let mut status = None;
         let mut ui = Vec::new();
@@ -212,7 +213,9 @@ impl<'a> Parser<'a> {
             }
             self.skip_newlines();
         }
-        self.expect(TokKind::Pipe, "`|` before a sum-type variant")?;
+        if !choice {
+            self.expect(TokKind::Pipe, "`|` before a sum-type variant")?;
+        }
         let (name, name_span) = self.expect_ident()?;
         let mut fields = Vec::new();
         if matches!(self.peek(), TokKind::LParen) {

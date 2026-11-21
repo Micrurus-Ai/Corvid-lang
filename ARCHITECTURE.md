@@ -102,7 +102,7 @@ corvid/
 │   ├── hello.cor
 │   ├── refund_bot.cor
 │   ├── approve_demo.cor
-│   └── refund_bot_demo/     # runnable offline demo
+│   └── offline_refund_bot/     # runnable offline demo
 │
 ├── tests/
 │   ├── parse/

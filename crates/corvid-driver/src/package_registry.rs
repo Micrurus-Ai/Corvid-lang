@@ -17,6 +17,17 @@ use crate::import_integrity::sha256_hex;
 #[cfg(test)]
 use crate::package_version::parse_package_spec;
 
+mod auto;
+pub(crate) use auto::resolve_missing_for_run;
+
+fn mutation_lock(project: &Path) -> Result<fd_lock::RwLock<std::fs::File>> {
+    let dir = project.join("target/cache/packages");
+    std::fs::create_dir_all(&dir)?;
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true)
+        .truncate(false).open(dir.join("mutation.lock"))?;
+    Ok(fd_lock::RwLock::new(file))
+}
+
 mod add;
 pub use add::add_package;
 #[cfg(test)]
@@ -164,6 +175,9 @@ struct RegistryPackage {
 }
 
 fn load_registry_index(location: &str) -> Result<RegistryIndex> {
+    if location == "corvid:catalog" {
+        return Ok(serde_json::from_str(include_str!("package_registry/catalog.json"))?);
+    }
     let source = if location.starts_with("http://") || location.starts_with("https://") {
         let bytes = fetch_bytes(location)
             .with_context(|| format!("failed to fetch registry index `{location}`"))?;

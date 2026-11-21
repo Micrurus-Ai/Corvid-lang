@@ -130,7 +130,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "anthropic_hello"
+name = "anthropic_structured_output"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -876,6 +876,7 @@ dependencies = [
  "corvid-types",
  "corvid-vm",
  "ed25519-dalek",
+ "fd-lock",
  "hex",
  "reqwest",
  "semver",
@@ -2933,7 +2934,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
-name = "openai_hello"
+name = "openai_structured_output"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -3736,7 +3737,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "refund_bot_demo"
+name = "offline_refund_bot"
 version = "0.0.1"
 dependencies = [
  "anyhow",

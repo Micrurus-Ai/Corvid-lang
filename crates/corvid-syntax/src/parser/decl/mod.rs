@@ -53,6 +53,7 @@ impl<'a> Parser<'a> {
                 | TokKind::KwModel
                 | TokKind::KwFn
                 | TokKind::At => {}
+                TokKind::Ident(word) if word == "choice" => {}
                 other => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
@@ -68,7 +69,8 @@ impl<'a> Parser<'a> {
 
         match self.peek() {
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
-            TokKind::KwType => self.parse_type_decl(visibility).map(Decl::Type),
+            TokKind::KwType => self.parse_type_decl(visibility, false).map(Decl::Type),
+            TokKind::Ident(word) if word == "choice" => self.parse_type_decl(visibility, true).map(Decl::Type),
             TokKind::KwSession => self
                 .parse_store_decl(StoreKind::Session, visibility)
                 .map(Decl::Store),

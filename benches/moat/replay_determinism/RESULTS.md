@@ -4,7 +4,7 @@
 
 ## Headline numbers
 
-- Corvid (`cargo run -p refund_bot_demo`): **190/190 byte-identical pairs** (rate = 1.000, N = 20)
+- Corvid (`cargo run -p offline_refund_bot`): **190/190 byte-identical pairs** (rate = 1.000, N = 20)
 - Python (LangChain + LangSmith): **bounty-open** (no `_summary.json`)
 - TypeScript (Vercel AI SDK + OTEL): **bounty-open** (no `_summary.json`)
 

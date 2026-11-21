@@ -1,5 +1,5 @@
 bundle_schema_version = 1
-name = "phase22-demo-base"
+name = "sentiment-classifier-bundle-base"
 target_triple = "x86_64-unknown-linux-gnu"
 primary_source = "src/classify.cor"
 tools_staticlib_path = "artifacts/libcorvid_test_tools.a"
@@ -12,7 +12,7 @@ receipt_envelope_path = "keys/receipt.envelope.json"
 receipt_verify_key_path = "keys/verify.hex"
 
 [lineage]
-bundle_id = "phase22-demo-base"
+bundle_id = "sentiment-classifier-bundle-base"
 [[traces]]
 name = "safe"
 path = "traces/safe.jsonl"

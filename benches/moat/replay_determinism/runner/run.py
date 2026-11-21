@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 STACKS = [
-    ("corvid", "Corvid (`cargo run -p refund_bot_demo`)"),
+    ("corvid", "Corvid (`cargo run -p offline_refund_bot`)"),
     ("python", "Python (LangChain + LangSmith)"),
     ("typescript", "TypeScript (Vercel AI SDK + OTEL)"),
 ]
