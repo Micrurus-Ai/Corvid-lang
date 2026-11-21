@@ -180,6 +180,7 @@ pub unsafe extern "C" fn corvid_grounded_attest_bool(
 
 extern "C" {
     fn corvid_init_grounded_string_cleanup(forget: extern "C" fn(*mut std::ffi::c_void));
+    fn corvid_string_concat(left: CorvidString, right: CorvidString) -> CorvidString;
     fn corvid_track_grounded_string(value: CorvidString);
 }
 
@@ -196,13 +197,43 @@ pub unsafe extern "C" fn corvid_grounded_attest_string(
     let source = read_corvid_string(source_name);
     let chain =
         crate::provenance::ProvenanceChain::with_retrieval(&source, crate::tracing::now_ms());
+    attach_string_attestation(value, grounded_handles::make_attestation(chain, confidence));
+    value
+}
+
+unsafe fn attach_string_attestation(
+    value: CorvidString,
+    attestation: std::sync::Arc<grounded_handles::GroundedAttestation>,
+) {
     static INIT_CLEANUP: std::sync::Once = std::sync::Once::new();
     INIT_CLEANUP.call_once(|| corvid_init_grounded_string_cleanup(forget_grounded_pointer));
     corvid_track_grounded_string(value);
-    grounded_handles::attach_pointer_attestation(
-        value.descriptor_key(),
-        grounded_handles::make_attestation(chain, confidence),
-    );
+    grounded_handles::attach_pointer_attestation(value.descriptor_key(), attestation);
+}
+
+/// Join two borrowed strings. Bit 0 identifies a grounded left operand and
+/// bit 1 a grounded right operand. Success returns an owned descriptor.
+/// Invalid flags or a missing required attestation return a null descriptor.
+///
+/// # Safety
+/// Both arguments must be live native string descriptors.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_grounded_string_concat(
+    left: CorvidString,
+    right: CorvidString,
+    grounded_mask: u8,
+) -> CorvidString {
+    if !(1..=3).contains(&grounded_mask) {
+        return CorvidString::null();
+    }
+    let Some(attestation) = grounded_handles::derive_string_add(
+        (grounded_mask & 1 != 0).then_some(left.descriptor_key()),
+        (grounded_mask & 2 != 0).then_some(right.descriptor_key()),
+    ) else {
+        return CorvidString::null();
+    };
+    let value = corvid_string_concat(left, right);
+    attach_string_attestation(value, attestation);
     value
 }
 

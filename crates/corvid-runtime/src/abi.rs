@@ -290,6 +290,10 @@ unsafe impl Send for CorvidString {}
 unsafe impl Sync for CorvidString {}
 
 impl CorvidString {
+    pub(crate) fn null() -> Self {
+        Self { descriptor: std::ptr::null(), _marker: PhantomData }
+    }
+
     /// Read the bytes backing this string as a slice. Valid for as
     /// long as the caller holds a reference that prevents the refcount
     /// from dropping to zero.
