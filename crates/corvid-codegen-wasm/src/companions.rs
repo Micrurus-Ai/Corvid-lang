@@ -304,12 +304,33 @@ fn emit_js_loader(
     out.push_str("}\n");
     if module_name == "events" {
         for (name, ty) in [("intStateHandlers", Type::Int), ("textStateHandlers", Type::String)] {
-            let names: Vec<_> = agents.iter()
+            let bindings: Vec<_> = agents.iter()
                 .filter(|agent| agent.params.len() == 1 && agent.params[0].ty == ty && agent.return_ty == ty)
-                .map(|agent| agent.name.as_str())
+                .map(|agent| {
+                    let param = agent.params[0].name.as_str();
+                    // Counter buttons own their argument. Text controls accept a named field.
+                    let properties = if ty == Type::String {
+                        serde_json::json!({(param): {"type": "string", "pattern": "^[^\r\n]*$"}})
+                    } else {
+                        serde_json::json!({})
+                    };
+                    let mut input = serde_json::json!({
+                        "type": "object", "properties": properties, "additionalProperties": false
+                    });
+                    if ty == Type::String {
+                        input["required"] = serde_json::json!([param]);
+                    }
+                    // The JS loader preserves i64 precision by returning decimal text.
+                    let output = if ty == Type::Int {
+                        serde_json::json!({"type": "string", "pattern": "^-?(0|[1-9][0-9]*)$"})
+                    } else {
+                        serde_json::json!({"type": "string"})
+                    };
+                    (&agent.name, serde_json::json!({"inputSchema": input, "outputSchema": output}))
+                })
                 .collect();
-            let names = serde_json::to_string(&names).expect("serialize handler names");
-            out.push_str(&format!("const {name} = new Set({names});\n"));
+            let bindings = serde_json::to_string(&bindings).expect("serialize control bindings");
+            out.push_str(&format!("const {name} = new Map({bindings});\n"));
         }
         out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
         out.push_str(crate::FORM_CONTROLS_JS);

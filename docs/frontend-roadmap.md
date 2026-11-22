@@ -90,6 +90,8 @@ A music player developer writes `pause_song` once. Clicking **Pause**, using the
 
 The existing `ui.agent_query_form` prototype emits discovery metadata for a read-only GET form. Discovery and invocation of arbitrary developer-defined actions are planned work. Start the following prototype alongside component design, before settling the syntax.
 
+**A08 prototype, November 22, 2026.** The CLI and durable worker agreed on the reading count. A changed signature updated the generated public application contract and identified the stale CLI caller. The reading list also names its existing apply form `apply_reviewed_titles`. In the packaged HTTP trial, revoking access after fetching that form returned HTTP 403 on submit. Restoring access, dropping the response and retrying after restart preserved the shelf revisions. The web build now derives the local input and result schemas for integer counters and single-line text handlers. A Node recording adapter executed the packaged Wasm and rejected invalid arguments and a disabled control. The recording adapter also invoked the renamed and reordered button from a rebuilt package using the original tool name. Reset remained available through its click callback and absent from the registry. A live assistant used Chrome WebMCP discovery to record a page in both the original and rebuilt layouts. Direct private reset and disabled actions were refused. Keyboard use passed without the adapter. A revoked reviewer saw permission denied through the same form; retry with restored access preserved the concurrent edit. The independent developer exercise remains open.
+
 - [ ] **Write and bind.** In an ordinary project, define a local action and bind it to a keyboard-accessible control. Let the author explicitly expose it to an assistant and choose which context fields the assistant receives. Derive the input and result schemas from Corvid types.
 - [ ] **Exercise both paths.** Verify that the button and a compatible assistant produce the same state change through one handler. Hide playlist deletion from assistant discovery and verify that a direct assistant request for it also fails. Repeat after renaming or moving the visible button.
 - [ ] **Try a server-owned action.** Keep the same action contract and component binding. Make the network boundary, pending state and possible failure visible in source. Test a permission change between discovery and invocation and a retry after a lost response.
@@ -119,6 +121,8 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 ### 3. Make state, events and asynchronous work general
 
+**Step 5 checkpoint.** The packaged reading list passed HTTP checks for matching and empty searches, typed storage failure and recovery, and stale form rejection after a required field changed. A deterministic local model supplied an editable three-shelf preview. The apply handler saved two eligible edits, reported the intervening edit on shelf 2 and retained that outcome across restart and retry. Reusing the key with different input returned a typed conflict. The stream fixture released its SQLite lock when the client closed the response. The packaged review service checked current permissions before each POST. Both apply routes denied a revoked reviewer, and a different reviewer could not use the key. Edge 158 verified cancellation, history, navigation cleanup, the scoped review form and old-tab submission. View choices are provisional pending step 3 feedback. [Reading-list exercise](book/19-browser-views.md#review-edits-to-three-shelves)
+
 - [ ] Route UI and assistant invocations through the same handler. Check authority at execution, capture the intended target across selection changes, and return typed failures for stale requests. Exercise retry of a server mutation after a lost response and verify that it applies once.
 
 - [ ] Support local and shared typed state, derived values, batched updates and predictable scheduling. Bind typed input, pointer, keyboard and composition events. Define event propagation, default actions and subscription cleanup.
@@ -129,7 +133,7 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 ### 4. Open the browser platform and ecosystem
 
-- [ ] Generate discoverable schemas from explicitly exposed action types. Test discovery and invocation with a compatible browser assistant. Verify the same UI works with the adapter absent and that direct requests for an unexposed action are refused.
+- [x] Generate discoverable schemas from explicitly exposed action types. Test discovery and invocation with a compatible browser assistant. Verify the same UI works with the adapter absent and that direct requests for an unexposed action are refused.
 
 - [ ] Design typed bindings for DOM and browser APIs using Web IDL where applicable. Cover promises, callbacks, events, nullable values, typed arrays, exceptions and object lifetime. Offer an explicit interop declaration for platform extensions. [Web IDL](https://webidl.spec.whatwg.org/)
 - [ ] Import JavaScript modules and custom elements, and export a Corvid component for another app to embed. Specify package resolution, versions, browser/server compatibility and source locations for interop errors.
@@ -178,12 +182,16 @@ Start testing accessibility, performance and browser behavior with the first pro
 
 - [ ] Connect the UI to the same agent used by the CLI and worker. From the progress view, let a person pause, correct a result, revise the task and resume. Use the main roadmap's handoff and replay scenarios as the acceptance tests. [Building agents in Corvid](../ROADMAP.md#building-agents-in-corvid)
 
+The [shelf extraction exercise](book/19-browser-views.md#pause-and-revise-a-shelf-extraction) passed the packaged HTTP and worker restart trial with a loopback model. The browser check for search cancellation, handoff controls and recovery after closing the progress view still needs a runner with browser launch access.
+
 The main roadmap records runtime work on streams, durable jobs, budgets, provenance and replay. Track the remaining user-facing behaviors during the independent app trials.
 
 - [ ] Close a view-owned search and verify cancellation. Close a view observing a saved job, reopen it after a worker restart, and recover progress under the same user account.
 - [ ] Follow a model-extracted field from its visible value to the source revision. Correct the field manually and check that the UI distinguishes the correction from the original extraction.
 - [ ] Give parallel work and retries one operation budget. Show completed and skipped work, the reason it stopped, and whether cost is estimated or provider-reported.
 - [ ] Turn a reported UI interaction into a sanitized regression test. Reproduce the visible outcome using recorded model data with external writes disabled.
+
+The [reading-list replay exercise](book/19-browser-views.md#trace-a-suggestion-and-replay-its-preview) passed the packaged HTTP and offline regression checks. The test reproduced the selected shelf and escaped suggestion, detected changed model input and rejected an unexpected save. Opening the trace disclosure and promoting a browser-observed preview remain pending on a browser-enabled runner.
 
 ### Will developers choose Corvid again?
 

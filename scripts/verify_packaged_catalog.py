@@ -3,12 +3,69 @@ import argparse
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
+import tarfile
 from tempfile import TemporaryDirectory
 import time
 import zipfile
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
+
+
+def verify_reader_app(cli, project, env):
+    main = project / "src/main.cor"
+    imported = main.read_text(encoding="utf-8")
+    main.write_text(imported + """
+import "std:ui" as controls
+import "std:ui" use View
+
+server reader:
+    route GET "/" -> html:
+        record = controls.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to the reading count.")
+        counter = controls.int_state("Pages read", 0, [record])
+        return controls.interactive_page("Reader", [View(main()), counter])
+""", encoding="utf-8")
+    (project / "src/events.cor").write_text(
+        "public agent read_page(current: Int) -> Int:\n    return current + 1\n", encoding="utf-8")
+    subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, env=env, check=True)
+    installed = project.parent / "reader-web"
+    with tarfile.open(project / "target/web.tar") as archive:
+        archive.extractall(installed, filter="data")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = subprocess.Popen([cli, "serve", "src/main.cor", "--listen", f"127.0.0.1:{port}"],
+                              cwd=installed, env=env)
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel="msedge", args=["--enable-experimental-web-platform-features"])
+            page = browser.new_page()
+            for _ in range(100):
+                if server.poll() is not None:
+                    raise RuntimeError(f"Reader exited with {server.returncode}")
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            page.goto(f"http://127.0.0.1:{port}")
+            page.get_by_text("Details", exact=True).click()
+            expect(page.get_by_text("Hello", exact=True)).to_be_visible()
+            page.get_by_role("button", name="Read one page").press("Enter")
+            expect(page.locator("output")).to_have_text("1")
+            page.evaluate("""async () => {
+                const context = document.modelContext;
+                const [tool] = await context.getTools();
+                if (tool?.name !== "record_page_read") throw Error("Reading action missing");
+                await context.executeTool(tool, {});
+            }""")
+            expect(page.locator("output")).to_have_text("2")
+            browser.close()
+    finally:
+        if server.poll() is None:
+            server.terminate()
+        server.wait(timeout=15)
 
 
 def verify(archive, editor):
@@ -26,6 +83,7 @@ def verify(archive, editor):
         subprocess.run([cli, "new", "reader"], cwd=root, env=env, check=True)
         project = root / "reader"
         main = project / "src/main.cor"
+        assert list((project / "src").iterdir()) == [main]
         main.write_text('agent main() -> String:\n    return ui.disclosure("Details", [ui.text("Hello")]).html\n')
         profile = root / "profile"
         args = ["--user-data-dir=" + str(profile), "--extensions-dir=" + str(root / "extensions")]
@@ -78,6 +136,7 @@ def verify(archive, editor):
         result = subprocess.check_output([cli, "run", "src/main.cor"], cwd=project, env=env, text=True)
         assert json.loads(result.strip()) == "<details><summary>Details</summary><p>Hello</p></details>"
         assert "corvid://@corvid/ui" in (project / "Corvid.lock").read_text()
+        verify_reader_app(cli, project, env)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+import "./events" use read_page
+
+agent main(current: Int) -> Int:
+    return read_page(current)

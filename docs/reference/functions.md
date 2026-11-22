@@ -396,13 +396,17 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn page(title: String, content: List<View>) -> String`
 - `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String`
 - `fn action(label: String, handler: String) -> View`
+- `fn assistant_action(label: String, handler: String, name: String, description: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`
 - `fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View`
 - `fn state_output(name: String, label: String) -> View`
 - `fn event_module() -> View`
 - `fn interactive_page(title: String, content: List<View>) -> String`
 - `fn text_state(label: String, initial: String, handler: String) -> View`
+- `fn assistant_text_state(label: String, initial: String, handler: String, name: String, description: String) -> View`
 - `fn query_form(path: String, controls: List<View>) -> View`
 - `fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn link(label: String, path: String) -> View`
 - `fn stream_text(label: String, path: String) -> View`
+
+`assistant_action` opts an integer-state button into WebMCP. Use a unique tool name per page. `assistant_text_state` exposes a single-line text control. Its tool requires one string field named for the handler parameter and returns the handler's string result.

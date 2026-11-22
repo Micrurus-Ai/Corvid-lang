@@ -105,7 +105,30 @@ def check_picker_inputs(cli, project):
             path.write_text(original, encoding="utf-8")
 
 
-def verify(cli, channel, http_only, work_dir):
+def check_rebuild(cli, project, installed, rebuilt):
+    old_wasm = (installed / "target/wasm/events.wasm").read_bytes()
+    for name in ("events.cor", "main.cor"):
+        source = project / "src" / name
+        source.write_text(source.read_text(encoding="utf-8").replace("450", "475"), encoding="utf-8")
+    subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
+    with tarfile.open(project / "target/web.tar") as archive:
+        archive.extractall(rebuilt, filter="data")
+    with serve(cli, rebuilt, os.environ.copy()) as url:
+        cart = read(url + "/cart")
+        assert "475 cents each" in cart and 'src="/target/wasm/events.js"' in cart
+        assert "Total: 5825 cents" in read(url + "/checkout", b"notebook=12&pencil=1")
+        for name, mime in (("events.js", "text/javascript"), ("events.wasm", "application/wasm")):
+            path = "target/wasm/" + name
+            with urlopen(f"{url}/{path}", timeout=5) as response:
+                assert response.headers.get_content_type() == mime
+                asset = response.read()
+            assert asset and asset == (rebuilt / path).read_bytes()
+            if name == "events.wasm":
+                assert asset != old_wasm
+    print("Rebuilt notebook price, checkout and served JS/Wasm assets passed")
+
+
+def verify(cli, channel, http_only, work_dir, engine="chromium"):
     if work_dir is not None:
         work_dir.mkdir(parents=True, exist_ok=False)
     with (nullcontext(work_dir) if work_dir is not None else TemporaryDirectory()) as tmp:
@@ -119,6 +142,7 @@ def verify(cli, channel, http_only, work_dir):
         installed = root / "installed"
         with tarfile.open(project / "target/web.tar") as archive:
             archive.extractall(installed, filter="data")
+        check_rebuild(cli, project, installed, root / "rebuilt")
         with serve(cli, installed, os.environ.copy()) as url:
             assert 'href="/cart"' in read(url)
             assert 'action="/checkout"' in read(url + "/cart")
@@ -139,16 +163,16 @@ def verify(cli, channel, http_only, work_dir):
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as playwright:
-                run_browser(playwright, url, channel)
+                run_browser(playwright, url, channel, engine)
 
 
-def run_browser(playwright, url, channel):
-    browser = playwright.chromium.launch(channel=channel)
+def run_browser(playwright, url, channel, engine="chromium"):
+    browser = getattr(playwright, engine).launch(channel=channel)
     try:
         for width in (320, 960):
             for enhanced in (False, True):
                 trial(browser, url, width, enhanced)
-                print(f"{browser.version}, {width}px, scripting={enhanced}: passed")
+                print(f"{engine} {browser.version}, {width}px, scripting={enhanced}: passed")
         for enhanced in (False, True):
             picker_trial(browser, url, enhanced)
             print(f"Both ColorPicker screens, scripting={enhanced}: passed")
@@ -159,8 +183,12 @@ def run_browser(playwright, url, channel):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cli", type=Path)
-    parser.add_argument("--channel", default="msedge")
+    parser.add_argument("--browser", choices=("chromium", "firefox", "webkit"))
+    parser.add_argument("--channel", help="Chromium distribution (defaults to Edge when --browser is omitted)")
     parser.add_argument("--http-only", action="store_true")
     parser.add_argument("--work-dir", type=Path, help="keep the scaffold and extracted archive in a new directory")
     args = parser.parse_args()
-    verify(args.cli.resolve(), args.channel, args.http_only, args.work_dir)
+    if args.channel and args.browser in ("firefox", "webkit"):
+        parser.error("--channel requires a Chromium browser")
+    channel = args.channel or ("msedge" if args.browser is None else None)
+    verify(args.cli.resolve(), channel, args.http_only, args.work_dir, args.browser or "chromium")

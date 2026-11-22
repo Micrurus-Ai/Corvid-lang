@@ -55,10 +55,16 @@ async function bindStateControls() {
         alert.textContent = "Expected a Corvid handler " + name + "(String) -> String.";
         continue;
       }
+      const invoke = value => {
+        const result = handlers[name](value);
+        input.value = value;
+        output.value = result;
+        alert.textContent = "";
+        return result;
+      };
       const update = () => {
         try {
-          output.value = handlers[name](input.value);
-          alert.textContent = "";
+          invoke(input.value);
         } catch (error) {
           alert.textContent = "Corvid handler " + name + " failed: " + error.message;
         }
@@ -66,6 +72,16 @@ async function bindStateControls() {
       input.addEventListener("input", update);
       update();
       input.disabled = false;
+      if (!input.dataset.corvidTool) continue;
+      const schemas = textStateHandlers.get(name);
+      registerControlTool(input, panel, schemas, alert, args => {
+        const [field] = schemas.inputSchema.required;
+        if (Object.keys(args).length !== 1 || !Object.hasOwn(args, field) ||
+            typeof args[field] !== "string" || /[\r\n]/.test(args[field])) {
+          throw new Error("Expected one single-line text field: " + field);
+        }
+        return invoke(args[field]);
+      });
       continue;
     }
     let value = BigInt(output.value);
@@ -79,17 +95,53 @@ async function bindStateControls() {
         alert.textContent = "Expected a Corvid handler " + name + "(Int) -> Int.";
         continue;
       }
+      const invoke = () => {
+        if (button.matches(":disabled") || !button.isConnected ||
+            button.closest("fieldset[data-corvid-state]") !== panel) {
+          throw new Error("Action is unavailable.");
+        }
+        value = handlers[name](value);
+        output.value = value.toString();
+        for (const mirror of mirrors) mirror.value = output.value;
+        alert.textContent = "";
+        return output.value;
+      };
       button.addEventListener("click", () => {
         try {
-          value = handlers[name](value);
-          output.value = value.toString();
-          for (const mirror of mirrors) mirror.value = output.value;
+          invoke();
         } catch (error) {
           alert.textContent = "Corvid handler " + name + " failed: " + error.message;
         }
       });
       button.disabled = false;
+      if (!button.dataset.corvidTool) continue;
+      registerControlTool(button, panel, intStateHandlers.get(name), alert, args => {
+        if (Object.keys(args).length) throw new Error("Expected no action arguments.");
+        return invoke();
+      });
     }
+  }
+}
+
+async function registerControlTool(control, panel, schemas, alert, invoke) {
+  const tool = control.dataset.corvidTool;
+  if (!tool || !document.modelContext?.registerTool) return;
+  try {
+    await document.modelContext.registerTool({
+      name: tool,
+      description: control.dataset.corvidDescription,
+      ...schemas,
+      execute(args) {
+        if (!control.isConnected || control.matches(":disabled") ||
+            control.closest("fieldset[data-corvid-state]") !== panel || control.dataset.corvidTool !== tool) {
+          throw new Error("Action is unavailable.");
+        }
+        if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Expected an object.");
+        return invoke(args);
+      },
+    });
+  } catch (error) {
+    alert.textContent = "Could not register assistant action " + tool + ": " + error.message;
   }
 }
 

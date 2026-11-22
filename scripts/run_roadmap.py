@@ -23,7 +23,7 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
-def run(review_pending=False):
+def run(review_pending=False, retry_blocked=False):
     if git("branch", "--show-current") != BRANCH:
         raise SystemExit(f"Run in the dedicated {BRANCH} checkout.")
     state = Path(git("rev-parse", "--absolute-git-dir")) / "corvid-roadmap"
@@ -50,13 +50,19 @@ def run(review_pending=False):
     trailers = git("log", "--format=%(trailers:key=Corvid-Roadmap-Step,valueonly)").splitlines()
     pending = set(git("log", "--format=%(trailers:key=Corvid-Roadmap-Feedback,valueonly)").split())
     pending.difference_update(trailers)
+    blocked = set(git("log", "--format=%(trailers:key=Corvid-Roadmap-Blocked,valueonly)").split())
+    blocked.difference_update(trailers)
     for number, task, acceptance in steps:
+        if number in blocked and not retry_blocked:
+            print(f"Step {number} remains blocked. Use --retry-blocked when ready.", flush=True)
+            continue
         if number in trailers or (number in pending and not review_pending):
             continue
         note = state / f"step-{number}.json"
         while True:
             head = git("rev-parse", "HEAD")
             previous = note.read_text(encoding="utf-8") if note.exists() else ""
+            print(f"Working on step {number}: {task}", flush=True)
             prompt = f"""Implement step {number} in ROADMAP.md: {task}
 Acceptance: {acceptance}
 Read the linked detailed roadmap. Work only on this step in this dedicated
@@ -69,6 +75,10 @@ list exactly the project-relative files to stage, including deletions. Return
 continue with concrete progress if more development fits a later pass. Return
 blocked for external dependencies and state precisely what is missing. Do not
 invent user studies, authorizations, benchmarks or independent results.
+Unresolved technical checkpoints: {sorted(blocked - {number})}. Read their ROADMAP.md
+entries before starting. Only proceed with independent work. If a required result
+is missing, record the dependency in ROADMAP.md and return blocked. Never infer
+release readiness or adoption results from incomplete steps.
 Earlier steps awaiting external feedback: {sorted(pending)}. Proceed with independent
 engineering work. Keep design choices provisional where feedback is pending.
 If all feasible engineering and tests for this step are verified and only
@@ -93,29 +103,36 @@ Previous pass: {previous}"""
             print(f"Step {number}: {report['status']} - {report['summary']}", flush=True)
             if git("rev-parse", "HEAD") != head:
                 raise SystemExit("Checkout changed during development; inspect before resuming.")
-            if report["status"] == "blocked":
-                raise SystemExit(2)
             if report["status"] == "continue":
                 continue
             if not report["verification"].strip() or not report["files"]:
                 raise SystemExit("Missing verification or deliverables.")
             feedback = report["status"] == "awaiting_feedback"
-            if feedback and "ROADMAP.md" not in report["files"]:
+            deferred = report["status"] == "blocked"
+            if (feedback or deferred) and "ROADMAP.md" not in report["files"]:
                 raise SystemExit("Record outstanding feedback in ROADMAP.md.")
             git("--literal-pathspecs", "add", "--", *report["files"])
             git("diff", "--cached", "--check")
             marker = "Corvid-Roadmap-Feedback" if feedback else "Corvid-Roadmap-Step"
             verb = "Checkpoint" if feedback else "Complete"
+            if deferred:
+                marker, verb = "Corvid-Roadmap-Blocked", "Checkpoint"
             git("commit", "-m", f"{verb} roadmap step {number}: {task.rstrip('.')}",
                 "-m", report["verification"], "-m", f"{marker}: {number}")
             git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
             if git("ls-remote", "origin", f"refs/heads/{BRANCH}").split()[0] != git("rev-parse", "HEAD"):
                 raise SystemExit("Remote commit verification failed.")
+            if deferred:
+                blocked.add(number)
+            else:
+                blocked.discard(number)
             if feedback:
                 pending.add(number)
             else:
                 pending.discard(number)
             break
+    if blocked:
+        print("Technical checkpoints open:", ", ".join(sorted(blocked, key=int)))
     if pending:
         print("External feedback outstanding for steps:", ", ".join(sorted(pending, key=int)))
 
@@ -123,4 +140,6 @@ Previous pass: {previous}"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review-pending", action="store_true", help="revisit feedback checkpoints when results are available")
-    run(parser.parse_args().review_pending)
+    parser.add_argument("--retry-blocked", action="store_true", help="retry open technical checkpoints")
+    args = parser.parse_args()
+    run(args.review_pending, args.retry_blocked)

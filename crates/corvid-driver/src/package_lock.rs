@@ -96,6 +96,18 @@ pub(crate) fn load_package_lock_for(root_path: &Path) -> Result<Option<PackageLo
     Ok(Some(PackageLockFile { path, lock }))
 }
 
+/// Relative cache paths for the validated content digests in this project's lock.
+pub fn locked_artifact_paths(project: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let path = lock_path_for_project(project);
+    let lock = load_or_empty_at(&path).map_err(anyhow::Error::msg)?;
+    let mut paths = std::collections::BTreeSet::new();
+    for entry in lock.package {
+        validate_entry(&entry, &path).map_err(anyhow::Error::msg)?;
+        paths.insert(crate::package_cache::artifact(Path::new(""), &entry.sha256));
+    }
+    Ok(paths.into_iter().collect())
+}
+
 fn find_package_lock_path(root_path: &Path) -> Option<PathBuf> {
     let mut cursor = if root_path.is_dir() {
         root_path.to_path_buf()

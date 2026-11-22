@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -20,6 +21,12 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
     for name in ["corvid.toml", "Corvid.lock", "tools.py"] {
         if root.join(name).is_file() {
             files.push(name.into());
+        }
+    }
+    let locked = corvid_driver::locked_artifact_paths(root)?;
+    for relative in &locked {
+        if root.join(relative).try_exists()? {
+            files.push(relative.clone());
         }
     }
     for relative in &files {
@@ -66,7 +73,19 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
             files.push(asset.strip_prefix(stage.path())?.to_owned());
         }
     }
+    // Compilation can populate the staged cache when a locked package is first fetched.
+    for relative in locked {
+        let path = stage.path().join(&relative);
+        if path.try_exists()? {
+            let digest = hex::encode(Sha256::digest(fs::read(&path)?));
+            if relative.file_stem().and_then(|s| s.to_str()) != Some(digest.as_str()) {
+                bail!("locked package digest mismatch for {}", relative.display());
+            }
+            files.push(relative);
+        }
+    }
     files.sort();
+    files.dedup();
     let target = root.join("target");
     fs::create_dir_all(&target)?;
     let output = target.join("web.tar");

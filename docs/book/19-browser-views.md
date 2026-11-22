@@ -115,6 +115,27 @@ Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an e
 | `text_state(label: String, initial: String, handler: String) -> View` | Calls a `(String) -> String` handler on initial load and on each input event. |
 | `interactive_page(title: String, content: List<View>) -> String` | Renders the page and loads its compiled browser handlers. |
 
+For a browser-local reading counter, place this control inside `ui.int_state` on an interactive page:
+
+```corvid
+record = ui.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to this session's reading count.")
+```
+
+The visible label can change independently of the tool name. The binding takes the current count from its owning control and invokes the compiled `read_page(Int) -> Int` handler. An assistant supplies an empty object. The returned decimal string preserves the full Corvid integer. A second button created with `ui.action` stays available to keyboard and pointer users. Tool registration uses the browser's optional WebMCP interface. [Reading counter](../../examples/reading_list/src/progress.cor) · [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
+
+To let an assistant edit a single-line reading note, put this handler in `src/events.cor`:
+
+```corvid
+public agent edit_note(note: String) -> String:
+    return note
+```
+
+Place `ui.assistant_text_state("Reading note", "", "edit_note", "update_reading_note", "Edit the reading note.")` on an interactive page. Typing into the field or calling `update_reading_note` with `{"note":"Chapter two"}` passes the text to the same handler. The compiled signature supplies the required field name and string result schema. The counter instead owns its input and publishes a decimal-string result schema.
+
+With Node 22.7 or newer on the path, run `python scripts/verify_shared_actions.py target/debug/corvid.exe --package-only` to check the CLI, durable worker and extracted archive. From the extracted project, `corvid jobs enqueue --task read_page --payload '[40]'` queues the call. `corvid jobs run --source src/events.cor --max-runtime-ms 1500` executes it. Inspect the returned job ID with `corvid jobs inspect --job <id>` to see the result type and fingerprint. The full trial requires Playwright and a browser with WebMCP discovery and execution enabled.
+
+The shelf-review example exposes `apply_reviewed_titles` on the proposal form. The user confirms the three edited titles and the form posts to `/proposals/apply`. The server checks the session, reviewer permission and proposal owner on submission. Retrying the same edits with the same proposal key returns the recorded outcome. Run `python scripts/verify_reading_list.py target/debug/corvid.exe --http-only` for the packaged permission and retry checks. On a WebMCP-enabled browser, the trial option `--webmcp --channel chrome` exercises discovery, fills the form through the discovered tool and confirms submission through the visible button. It checks the reply and shelf state after revocation and after access is restored. Chrome 157 passed the packaged trial. Keep the registered form available until its tool reply is delivered. The example guards duplicate submissions and renders the reply in a separate status region because altering or removing the form during execution can cancel the browser's pending reply.
+
 The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.
 
 ### Edit a keyed cart and reuse a color picker
@@ -127,6 +148,10 @@ The notebook and pencil screens each import `ColorPicker` and `Color` from [the 
 
 From the repository root, run `python scripts/verify_storefront.py target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. Omit `--http-only` to run the keyboard and focus tests with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
 
+The verifier edits the notebook price in the scaffold, rebuilds it and serves the two extracted archives separately. Twelve notebooks and one pencil total 5,525 cents in the original and 5,825 cents after the edit. It fetches the rebuilt JavaScript and Wasm over HTTP and checks their content types and bytes. To repeat the same keyboard journey with installed Playwright engines, run the command once each with `--browser chromium`, `--browser firefox` and `--browser webkit` in place of `--http-only`.
+
+To exercise editor feedback, open `src/notebook.cor` with the Corvid language server. Change the first argument of `ColorPicker(value, "/notebook")` to `"Moss"`. In the stdio trial the server reported that the argument required `Color` and received `String` on line 7. Restoring `value` cleared the diagnostic before saving.
+
 ### Compare a local action with the save form
 
 The step 3 experiment adds **Read one page** beside the reading-list edit form. Its handler takes the displayed integer and returns the next value. **Save to shelf** submits a typed record to the server and updates SQLite. To build the experiment from the repository root, pass the path to your CLI executable and a new directory whose parent exists.
@@ -136,6 +161,12 @@ python scripts/build_component_trial.py target/debug/corvid.exe target/pages-tri
 ```
 
 Extract the resulting web archive and migrate and serve it as in the reading-list example below. Open shelf 2, activate **Read one page**, and reload to see which value lasts. Use `indented` in place of `functions` to try the block grammar, or `js` in place of `wasm` to try the experimental JavaScript lowering. Each build needs its own output directory. The two small view files are inputs to the trial script. The ordinary CLI checks, tests and packages the generated Corvid project. [Source examples and measured sizes](../frontend-component-design.md#reading-list-prototype)
+
+### Install the picker in a second app
+
+Run `python scripts/verify_picker_package.py target/debug/corvid.exe --work-dir target/picker-trial` from the repository root on Windows. Choose a new directory for each run. The trial signs the storefront's original picker, publishes it into a local directory, runs `corvid new palette`, then installs `@trial/color-picker@1.0.0`. The [palette app](../../examples/palette/src/main.cor) imports the versioned package and declares its own typed POST route.
+
+The picker imports the compiler's bundled UI module with `import "std:ui" as ui`. The trial disconnects the registry after verifying the lock and cached source, then checks, tests, packages and serves the palette offline. The extracted web archive includes the locked package. Selecting Moss posts the typed shade to the palette's route and shows the updated selection.
 
 ### Display state in more than one view
 
@@ -208,7 +239,7 @@ From the repository root, run these commands in PowerShell with the Corvid CLI o
 
 ```powershell
 corvid new reading-list
-Copy-Item examples/reading_list/src/main.cor reading-list/src/main.cor
+Copy-Item examples/reading_list/src/*.cor reading-list/src
 Copy-Item examples/reading_list/migrations reading-list -Recurse
 cd reading-list
 corvid check
@@ -226,11 +257,65 @@ The compiler supplies the standard modules and the scaffold configures a project
 
 The [verification script](../../scripts/verify_reading_list.py) repeats the scaffold, package, migration and restart in fresh directories. With Python 3.12+, Python Playwright and its Chromium browser installed, run `python scripts/verify_reading_list.py path/to/corvid` from the repository root. It reports list and save navigation durations from the browser and separate HTTP save round trips. Use `--channel msedge` for installed Edge or `--http-only` for the server checks alone.
 
+### Search saved shelves
+
+Choose **Search shelves**, enter part of a title and press Enter. The resulting URL, such as `/search?term=ody`, opens directly with the saved matches. The native GET form works with scripting disabled. With scripting enabled, typing previews matches and submitting adds the query to browser history. Back and Forward restore the submitted term.
+
+Both routes call `find_titles`. The HTML route renders links on the server. The live preview calls `GET /search/results` and reads the Corvid `SearchResult` variant. `Matches` carries shelf numbers and titles. `Unavailable` lets the page offer another search after a database failure. Each edit aborts the preceding fetch. The callback checks its own signal after decoding the response so an obsolete search cannot replace newer links. Leaving the page aborts the pending request.
+
+The verification script changes the required save field from `title` to `book_title` in a disposable installation and restarts the server on the same port. It compares the OpenAPI schemas and submits the old fields. The replacement service returns HTTP 400 with `invalid_form` and identifies the missing field before the save handler runs. The full trial keeps the old form open in a browser. The HTTP-only trial sends its encoded fields directly.
+
+### Review edits to three shelves
+
+The archive includes a second entry point, `src/reviews.cor`, for a shared reading list. Run the verification script for a local exercise with seeded sessions and a loopback model. For a configured service, start `corvid serve src/reviews.cor` from the migrated package, with the identity provider and durable session store configured. Use this entry point alone for a shared database. The starter in `src/main.cor` deliberately permits anonymous manual saves for the local exercise.
+
+Choose **Suggest three titles** in a reviewer session. The review page shows each original title beside its editable replacement. Keep that page open, save a manual edit to shelf 2 in an editor session, then choose **Apply reviewed titles**. The receipt identifies each saved shelf and each shelf whose title changed during review.
+
+The server reads all three revisions in one query before calling the model. Migration `002_proposals.sql` adds revisions to existing shelves and stores the review key with each shelf's original revision. Applying a review checks the revisions, updates eligible titles and records the submitted titles and per-shelf outcomes in one SQLite write transaction. Resubmitting the same review returns the recorded outcomes. Starting another review generates a new key. The HTML receipt and typed JSON result both call `apply_result`.
+
+The packaged HTTP exercise discarded the committed response body, restarted the server and retried. Shelf 2 kept the manual edit, shelves 1 and 3 advanced once, and changing a submitted title on retry returned `KeyConflict`. The review and both apply routes require `shelves.review` at execution. Manual save requires `shelves.edit`. Migration `003_proposal_owner.sql` binds new previews to the verified actor ID. Older anonymous previews require a new review. The page sends the session's CSRF token with each form POST. The HTTP trial revoked the reviewer's role between preview and apply, observed HTTP 403 on both apply routes, and verified unchanged titles and revisions. A different reviewer presenting the key received `InvalidProposal`. Revoking the original reviewer's role also denied access to the saved receipt.
+
+### Pause and revise a shelf extraction
+
+From **Shelf extraction progress** in a reviewer session, enter a field to extract from each title and a maximum number of model operations. Starting the job saves all three source titles and their revisions in one transaction. The progress page shows the latest job for the signed-in reviewer. Use **Refresh progress** to read the next checkpoint.
+
+From the same migrated package directory, configure a loopback model and run the worker in a second terminal. The schedule gives the worker one extraction opportunity per minute. To process one shelf immediately, run the CLI entry point once.
+
+```sh
+corvid schedule run --source src/extract.cor --workers 1
+# One shelf through the CLI
+corvid run --target interp src/extract.cor
+```
+
+Choose **Pause** while a shelf is in flight. A reserved extraction can finish, and each new worker checks the pause before reserving a shelf. Refresh after the current extraction finishes. Enter a correction for the completed shelf and a revised instruction, then choose **Save revision**. Restart the worker from the same directory and choose **Resume**. The page keeps the original model field, instruction and source revision beside the human correction. Remaining shelves use the revised instruction. Closing the progress page leaves the saved job available to its worker.
+
+Each attempt reserves one operation before the prompt runs. Concurrent workers and retries use the same counter. A worker that loses its 45-second reservation cannot overwrite a later result. Recovery spends another operation if one remains. An exhausted budget marks remaining shelves as skipped. The optional per-operation price displays an estimate in millionths of a US dollar. Provider billing is unavailable for this prompt.
+
+The packaged HTTP trial used two operations across three shelves. It verified a paused worker restart, a source edit after extraction, the saved correction and a skipped shelf. A separate job retried an empty result through the CLI and exhausted the same job budget. Browser verification of the close-and-reopen workflow is pending.
+
 ### Try a typed suggestion
 
 Run the verification script above for a credential-free exercise. Its loopback Chat Completions fixture can return a typed action, produce malformed output, or hold a request open until the client cancels. To choose your own titles interactively, start a local OpenAI-compatible model that supports structured output. Set `CORVID_MODEL` to `openai-compat:http://127.0.0.1:8080/v1:local-model` before starting the packaged server, substituting your local port and model name.
 
 Open a shelf and choose **Suggest a title**. The original edit form stays available while the request runs. Cancel a pending request with **Cancel suggestion**. After a malformed response, choose **Suggest a title** again. On success, review the second form, edit the proposed title if desired, and choose **Apply suggestion**. Returning to the list without submitting discards the preview. Follow the decision from the typed prompt to the save handler in the [first-agent exercise](10-agents.md#your-first-agent-in-the-reading-list).
+
+### Trace a suggestion and replay its preview
+
+Open **Suggestion trace** beneath the proposed title. For a two-call suggestion, the first `recommend` chose `Lookup`. The trace shows the shelf number, the title read from the request's snapshot and the final `Suggest` result. A direct suggestion skips the lookup. The disclosure belongs to that preview, so two open tabs can be inspected separately.
+
+To make a regression from a successful suggestion, save the HTML response body for that one `POST /suggest` request from the browser's Network panel as `preview.html`. Keep the raw response local because the form and trace contain the original titles. From the repository root, run the following commands with your scaffolded project in `reading-list` and a new output directory named `regression`.
+
+```powershell
+python scripts/promote_reading_suggestion.py preview.html regression
+Copy-Item regression/suggestion.jsonl reading-list/src
+Get-Content reading-list/src/main.cor,regression/suggestion-test.cor -Encoding utf8 | Set-Content reading-list/src/suggestion-test.cor -Encoding utf8
+cd reading-list
+corvid test src/suggestion-test.cor
+```
+
+The exporter keeps the recorded action sequence, shelf arguments, title equality and HTML-escaping cases. It substitutes example text for the titles. The generated test supplies an in-memory shelf snapshot and runs the same suggestion agent and form renderer as the HTTP route. Corvid's `from_trace` runtime matches the prompt inputs, supplies the recorded decisions and quarantines external writes. Inspect the assertions for the selected shelf, escaped title, save action and lookup branch.
+
+The packaged HTTP trial generated this test from a two-call response and ran it after shutting down the loopback model. Changing the second prompt's context failed the regression. Adding a call to the save handler also failed, and every shelf retained its title and revision. Run `python scripts/verify_reading_list.py path/to/corvid --http-only --work-dir reading-trial` to retain the generated fixture and suite for inspection.
 
 ## Displaying a streamed answer
 

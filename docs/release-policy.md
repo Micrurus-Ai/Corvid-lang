@@ -75,6 +75,8 @@ Patch releases may add diagnostics, tighten security checks, and fix runtime beh
 
 Every public feature must declare one of these classes in its docs or generated manifest before a stable release.
 
+For R03, component syntax, browser action bindings and installed UI packages still await a stable compatibility commitment. Before extending SemVer coverage to them, record which existing components and bindings survive a toolchain upgrade, how a stale browser tab behaves across a contract change, and whether a clean consumer can install and upgrade a package with its dependencies. Tie each commitment and any required migration to the tested versions. The browser, package and clean-install results are tracked in [roadmap steps 7–11](../ROADMAP.md#remaining-work-in-execution-order). The [frontend release criteria](frontend-roadmap.md#developer-preview-and-stable-release) also require the independent full-stack trial.
+
 ## Breaking Change Rules
 
 A change is breaking when it removes syntax, changes a public type, weakens a guarantee, changes a serialized schema without migration tooling, changes a stable CLI flag, or changes deploy artifact layout in a way that invalidates existing automation.
