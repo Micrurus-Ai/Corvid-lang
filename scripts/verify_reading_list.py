@@ -1,5 +1,6 @@
 """Exercise a newly packaged reading list and measure its loopback interactions."""
 import argparse
+from promote_reading_suggestion import SYSTEM, promote, user_message
 from contextlib import closing, contextmanager, nullcontext
 from html import escape
 from html.parser import HTMLParser
@@ -234,7 +235,7 @@ class PreviewForm(HTMLParser):
             self.fields[attrs["name"]] = attrs["value"]
 
 
-def check_suggestions(url, provider, original, channel, http_only):
+def check_suggestions(url, provider, original, channel, http_only, regression_dir):
     def suggest():
         return read(url + "/suggest", b"shelf=2")
 
@@ -269,7 +270,15 @@ def check_suggestions(url, provider, original, channel, http_only):
     second = provider.requests.get(timeout=2)
     variants = first["response_format"]["json_schema"]["schema"]["properties"]["action"]["oneOf"]
     assert [v["properties"]["variant"]["const"] for v in variants] == ["Lookup", "Suggest"]
-    assert "The Odyssey" in second["messages"][-1]["content"]
+    for request, context in [(first, "No lookup yet"), (second, "The Odyssey")]:
+        assert request["messages"] == [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": user_message(original, context)}]
+    assert "Call 1 returned Lookup(1). Lookup returned: The Odyssey" in preview
+    promote(preview, regression_dir)
+    for file in regression_dir.iterdir():
+        sanitized = file.read_text(encoding="utf-8")
+        assert all(secret not in sanitized for secret in [original, "The Odyssey", title])
     assert "Shelf 2: " + escape(original) in read(url)
 
     provider.outputs.put(None)
@@ -297,10 +306,15 @@ def check_suggestions(url, provider, original, channel, http_only):
             provider.outputs.put("{")
             start.click()
             expect(page.get_by_role("status")).to_contain_text("Suggestion failed")
+            provider.outputs.put(action("Lookup", 1))
             provider.outputs.put(action("Suggest", title))
             start.click()
             draft = page.locator("#preview").get_by_label("title", exact=True)
             expect(draft).to_have_value(title)
+            page.get_by_text("Suggestion trace", exact=True).click()
+            expect(page.get_by_text("Call 1 returned Lookup(1). Lookup returned: The Odyssey",
+                                    exact=True)).to_be_visible()
+            expect(page.get_by_text("recommend returned Suggest: " + title, exact=True)).to_be_visible()
             assert "Shelf 2: " + escape(original) in read(url)
             title += " edited"
             draft.fill(title)
@@ -579,7 +593,7 @@ def verify(args):
         args.work_dir.mkdir(parents=True, exist_ok=False)
     workspace = nullcontext(args.work_dir) if args.work_dir else TemporaryDirectory()
     with workspace as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()
         project = root / "reading-list"
         subprocess.run([cli, "new", project.name], cwd=root, env=env, check=True)
         shutil.copyfile(example / "src/main.cor", project / "src/main.cor")
@@ -612,7 +626,7 @@ def verify(args):
                              CORVID_MODEL=f"openai-compat:http://127.0.0.1:{provider.server_port}/v1:local-model")
             try:
                 with serve(cli, installed, local_env) as url:
-                    title = check_suggestions(url, provider, title, args.channel, args.http_only)
+                    title = check_suggestions(url, provider, title, args.channel, args.http_only, root / "regression")
                 with serve(cli, installed, env) as url:
                     result = read(url)
                     for label in ["Shelf 1: The Odyssey", "Shelf 2: " + escape(title),
@@ -630,6 +644,39 @@ def verify(args):
                 check_batch(cli, installed, local_env, provider, args.channel, args.http_only, args.webmcp)
             finally:
                 provider.shutdown()
+        check_replay(cli, project, installed, root / "regression", env)
+
+
+def check_replay(cli, project, installed, regression, env):
+    source = (project / "src/main.cor").read_text(encoding="utf-8")
+    test = (regression / "suggestion-test.cor").read_text(encoding="utf-8")
+    suite = project / "src/suggestion-test.cor"
+    shutil.copyfile(regression / "suggestion.jsonl", suite.with_name("suggestion.jsonl"))
+    suite.write_text(source + test, encoding="utf-8")
+    subprocess.run([cli, "test", suite], cwd=installed, env=env, check=True)
+
+    with closing(sqlite3.connect(installed / "reading.sqlite")) as db:
+        def shelves():
+            return db.execute("SELECT * FROM shelves ORDER BY shelf").fetchall()
+
+        before = shelves()
+        probe = suite.with_name("replay-probe.cor")
+        try:
+            for changed in [
+                source.replace('recommend(current_title, requested_title)',
+                               'recommend(current_title, "different context")'),
+                source.replace('    first_choice = try recommend',
+                               '    saved = save(Reading(selected_shelf, "unexpected write"))?\n'
+                               '    first_choice = try recommend'),
+            ]:
+                probe.write_text(changed + test, encoding="utf-8")
+                result = subprocess.run([cli, "test", probe], cwd=installed, env=env,
+                                        capture_output=True, text=True)
+                assert result.returncode and "FAIL recorded_suggestion" in result.stdout, result
+                assert shelves() == before
+        finally:
+            probe.unlink(missing_ok=True)
+    print("Changed model context and an unexpected save failed replay. All shelf revisions matched.")
 
 
 if __name__ == "__main__":

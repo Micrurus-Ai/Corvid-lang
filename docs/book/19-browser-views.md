@@ -289,6 +289,24 @@ Run the verification script above for a credential-free exercise. Its loopback C
 
 Open a shelf and choose **Suggest a title**. The original edit form stays available while the request runs. Cancel a pending request with **Cancel suggestion**. After a malformed response, choose **Suggest a title** again. On success, review the second form, edit the proposed title if desired, and choose **Apply suggestion**. Returning to the list without submitting discards the preview. Follow the decision from the typed prompt to the save handler in the [first-agent exercise](10-agents.md#your-first-agent-in-the-reading-list).
 
+### Trace a suggestion and replay its preview
+
+Open **Suggestion trace** beneath the proposed title. For a two-call suggestion, the first `recommend` chose `Lookup`. The trace shows the shelf number, the title read from the request's snapshot and the final `Suggest` result. A direct suggestion skips the lookup. The disclosure belongs to that preview, so two open tabs can be inspected separately.
+
+To make a regression from a successful suggestion, save the HTML response body for that one `POST /suggest` request from the browser's Network panel as `preview.html`. Keep the raw response local because the form and trace contain the original titles. From the repository root, run the following commands with your scaffolded project in `reading-list` and a new output directory named `regression`.
+
+```powershell
+python scripts/promote_reading_suggestion.py preview.html regression
+Copy-Item regression/suggestion.jsonl reading-list/src
+Get-Content reading-list/src/main.cor,regression/suggestion-test.cor -Encoding utf8 | Set-Content reading-list/src/suggestion-test.cor -Encoding utf8
+cd reading-list
+corvid test src/suggestion-test.cor
+```
+
+The exporter keeps the recorded action sequence, shelf arguments, title equality and HTML-escaping cases. It substitutes example text for the titles. The generated test supplies an in-memory shelf snapshot and runs the same suggestion agent and form renderer as the HTTP route. Corvid's `from_trace` runtime matches the prompt inputs, supplies the recorded decisions and quarantines external writes. Inspect the assertions for the selected shelf, escaped title, save action and lookup branch.
+
+The packaged HTTP trial generated this test from a two-call response and ran it after shutting down the loopback model. Changing the second prompt's context failed the regression. Adding a call to the save handler also failed, and every shelf retained its title and revision. Run `python scripts/verify_reading_list.py path/to/corvid --http-only --work-dir reading-trial` to retain the generated fixture and suite for inspection.
+
 ## Displaying a streamed answer
 
 ```corvid-fragment

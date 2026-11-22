@@ -189,6 +189,8 @@ The main roadmap records runtime work on streams, durable jobs, budgets, provena
 - [ ] Give parallel work and retries one operation budget. Show completed and skipped work, the reason it stopped, and whether cost is estimated or provider-reported.
 - [ ] Turn a reported UI interaction into a sanitized regression test. Reproduce the visible outcome using recorded model data with external writes disabled.
 
+The [reading-list replay exercise](book/19-browser-views.md#trace-a-suggestion-and-replay-its-preview) passed the packaged HTTP and offline regression checks. The test reproduced the selected shelf and escaped suggestion, detected changed model input and rejected an unexpected save. Opening the trace disclosure and promoting a browser-observed preview remain pending on a browser-enabled runner.
+
 ### Will developers choose Corvid again?
 
 Use the independent app trial and the existing friends-and-family round to learn where developers reach for another stack. Record these outcomes separately from release engineering checks. Choosing an existing package through supported interop is a successful outcome when the developer keeps building their application in Corvid.

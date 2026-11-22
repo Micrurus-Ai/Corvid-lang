@@ -34,26 +34,35 @@ fn lookup(readings: List<Reading>, shelf: Int) -> Result<String, String>:
             return Ok(reading.title)
     return Err("The requested shelf was not found.")
 
-fn proposal(shelf: Int, title: String) -> Result<Reading, String>:
+fn proposal(shelf: Int, title: String, current: String, lookup_shelf: Int, context: String) -> Result<String, String>:
     if title.trim() == "":
         return Err("The suggested title was empty.")
-    return Ok(Reading(shelf, title))
+    form = form_for("POST /save", Reading(shelf, title), "Apply suggestion")
+    trace = ui.text("recommend selected title: " + current).html
+    if lookup_shelf != 0:
+        trace = trace + ui.text("Call 1 returned Lookup(" + lookup_shelf.to_string() + "). Lookup returned: " + context).html
+        trace = trace + ui.text("Call 2 used that lookup result.").html
+    trace = trace + ui.text("recommend returned Suggest: " + title).html
+    return Ok(form + "<details data-lookup-shelf='" + lookup_shelf.to_string() + "'><summary>Suggestion trace</summary>" + trace + "</details>")
 
-# A request returns a preview. Only the /save route writes to the shelf.
-agent suggest_title(selected_shelf: Int) -> Result<Reading, String>:
-    readings = list_readings()?
+# The route reads the shelf snapshot once. Replay supplies its own snapshot.
+agent suggest_title(readings: List<Reading>, selected_shelf: Int) -> Result<String, String>:
     current_title = lookup(readings, selected_shelf)?
     first_choice = try recommend(current_title, "No lookup yet") timeout 30000
     return match first_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title)
+        Suggest(title) -> proposal(selected_shelf, title, current_title, 0, "")
         Lookup(requested_shelf) -> finish_after_lookup(readings, requested_shelf, current_title, selected_shelf)
 
-agent finish_after_lookup(readings: List<Reading>, requested_shelf: Int, current_title: String, selected_shelf: Int) -> Result<Reading, String>:
+agent finish_after_lookup(readings: List<Reading>, requested_shelf: Int, current_title: String, selected_shelf: Int) -> Result<String, String>:
     requested_title = lookup(readings, requested_shelf)?
     final_choice = try recommend(current_title, requested_title) timeout 30000
     return match final_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title)
+        Suggest(title) -> proposal(selected_shelf, title, current_title, requested_shelf, requested_title)
         Lookup(_) -> Err("The model reached its lookup limit.")
+
+agent suggest_from_shelves(selected_shelf: Int) -> Result<String, String>:
+    readings = list_readings()?
+    return suggest_title(readings, selected_shelf)
 
 fn suggestion_controls(shelf: String) -> View:
     controls = "<button type='button' id='suggest' value='" + shelf + "'>Suggest a title</button><button type='button' id='cancel' disabled>Cancel suggestion</button><p role='status' id='status'></p><div id='preview'></div>"
@@ -70,7 +79,7 @@ start.onclick = async () => {
     cancel.disabled = false;
     cancel.focus();
     preview.replaceChildren();
-    status.textContent = 'Requesting a title…';
+    status.textContent = 'Requesting a titleâ€¦';
     try {
         const response = await fetch('/suggest', {
             method: 'POST', body: new URLSearchParams({shelf: start.value}), signal: request.signal
@@ -155,7 +164,7 @@ async function search() {
     results.replaceChildren();
     message.textContent = '';
     if (!field.value.trim()) return;
-    message.textContent = 'Searching…';
+    message.textContent = 'Searchingâ€¦';
     try {
         const params = new URLSearchParams({term: field.value});
         const response = await fetch('/search/results?' + params, {signal: request.signal});
@@ -233,8 +242,8 @@ server library:
         return show(query.shelf, "")
 
     route POST "/suggest" form Selection -> html:
-        return match suggest_title(body.shelf):
-            Ok(reading) -> form_for("POST /save", reading, "Apply suggestion")
+        return match suggest_from_shelves(body.shelf):
+            Ok(html) -> html
             Err(reason) -> ui.text(reason).html
 
     route POST "/save" form Reading -> html:
