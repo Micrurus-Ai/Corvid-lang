@@ -148,6 +148,10 @@ The notebook and pencil screens each import `ColorPicker` and `Color` from [the 
 
 From the repository root, run `python scripts/verify_storefront.py target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. Omit `--http-only` to run the keyboard and focus tests with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
 
+The verifier edits the notebook price in the scaffold, rebuilds it and serves the two extracted archives separately. Twelve notebooks and one pencil total 5,525 cents in the original and 5,825 cents after the edit. It fetches the rebuilt JavaScript and Wasm over HTTP and checks their content types and bytes. To repeat the same keyboard journey with installed Playwright engines, run the command once each with `--browser chromium`, `--browser firefox` and `--browser webkit` in place of `--http-only`.
+
+To exercise editor feedback, open `src/notebook.cor` with the Corvid language server. Change the first argument of `ColorPicker(value, "/notebook")` to `"Moss"`. In the stdio trial the server reported that the argument required `Color` and received `String` on line 7. Restoring `value` cleared the diagnostic before saving.
+
 ### Compare a local action with the save form
 
 The step 3 experiment adds **Read one page** beside the reading-list edit form. Its handler takes the displayed integer and returns the next value. **Save to shelf** submits a typed record to the server and updates SQLite. To build the experiment from the repository root, pass the path to your CLI executable and a new directory whose parent exists.
