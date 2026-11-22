@@ -137,6 +137,7 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 - [ ] Design typed bindings for DOM and browser APIs using Web IDL where applicable. Cover promises, callbacks, events, nullable values, typed arrays, exceptions and object lifetime. Offer an explicit interop declaration for platform extensions. [Web IDL](https://webidl.spec.whatwg.org/)
 - [ ] Import JavaScript modules and custom elements, and export a Corvid component for another app to embed. Specify package resolution, versions, browser/server compatibility and source locations for interop errors.
+  The [booking example](../examples/booking/src/pickers.cor) consumes a pinned JavaScript custom element through a standard form field. Typed module imports and exporting Corvid components to JavaScript remain open.
 - [ ] Exercise files and clipboard with permissions, IndexedDB storage, workers and transferable data, canvas graphics, audio/media and capability detection. Add offline caching and version updates. Document a fallback when a capability is unavailable.
 
 **Exit:** build an offline drawing editor in Corvid that handles pointer input, moves work off the UI thread, persists a drawing and restores it after reload. Separately, consume a third-party custom element and embed a Corvid component in a JavaScript host.

@@ -384,8 +384,11 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn row(content: List<View>) -> View`
 - `fn grid(content: List<View>) -> View`
 - `fn text_field(label: String, name: String, initial: String) -> View`
+- `fn date_field(label: String, name: String, initial: String) -> View`
+- `fn bind_field(field: View, component: View) -> View`
 - `fn submit(label: String) -> View`
 - `fn post_form(path: String, controls: List<View>) -> View`
+- `fn agent_post_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn option(value: String, label: String, selected: Bool) -> View`
 - `fn submit_on_change_select(label: String, name: String, options: List<View>) -> View`
 - `fn keyed_item(key: String, label: String, content: List<View>) -> View`

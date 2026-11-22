@@ -1,0 +1,10 @@
+import "std:ui" as ui
+import "std:ui" use View
+
+public fn native_picker(initial: String) -> View:
+    return ui.date_field("Booking date", "date", initial)
+
+public fn calendar_picker(initial: String) -> View:
+    module = "<script type='module' src='https://cdn.jsdelivr.net/npm/cally@0.9.2/dist/cally.js' integrity='sha384-u4A+Reqm96p98u0/soe8JHDNHuyIZjXjSIBcq9nF4OBeCLHmSiOKT3MPGnyElqMa' crossorigin='anonymous'></script>"
+    calendar = View("<calendar-date aria-label='Choose a date'><calendar-month></calendar-month></calendar-date>")
+    return View(module + ui.bind_field(native_picker(initial), calendar).html)

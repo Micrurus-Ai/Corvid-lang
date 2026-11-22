@@ -1,0 +1,45 @@
+import "./pickers" use calendar_picker as picker
+import "std:ui" as ui
+import "std:db" use db_open, db_execute, db_query_rows, db_param_text
+import "std:json" use json_get_string
+
+type Booking:
+    date: String
+
+agent open_bookings() -> Result<DbHandle, String>:
+    db = db_open("booking.sqlite")?
+    db_execute(db, "CREATE TABLE IF NOT EXISTS booking (id INTEGER PRIMARY KEY, date TEXT NOT NULL)", [])?
+    return Ok(db)
+
+agent booking_date() -> Result<String, String>:
+    db = open_bookings()?
+    rows = db_query_rows(db, "SELECT date FROM booking WHERE id = 1", [])?
+    if rows.length() == 0:
+        return Ok("")
+    return json_get_string(rows[0], "date")
+
+agent save_booking(booking: Booking) -> Result<String, String>:
+    db = open_bookings()?
+    date = db_param_text(booking.date)
+    check_date = "SELECT 1 WHERE strftime('%Y-%m-%d', ?, '+0 days') = ? AND substr(?, 1, 4) != '0000'"
+    valid = db_query_rows(db, check_date, [date, date, date])?
+    if valid.length() == 0:
+        return Err("Enter a valid booking date.")
+    db_execute(db, "INSERT INTO booking VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET date = excluded.date", [db_param_text(booking.date)])?
+    return Ok("Booked for " + booking.date)
+
+fn booking_page(date: String) -> String:
+    controls = [picker(date), ui.submit("Book date")]
+    form = ui.agent_post_form("book_date", "Save the chosen booking date.", "/book", controls)
+    return ui.interactive_page("Booking", [form])
+
+server booking_app:
+    route GET "/" -> html:
+        return match booking_date():
+            Ok(date) -> booking_page(date)
+            Err(message) -> ui.page("Booking", [ui.text(message)])
+
+    route POST "/book" form Booking -> html:
+        return match save_booking(body):
+            Ok(receipt) -> ui.page("Booking saved", [ui.text(receipt)])
+            Err(message) -> ui.page("Booking unavailable", [ui.text(message)])

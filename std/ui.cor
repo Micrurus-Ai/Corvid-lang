@@ -26,11 +26,23 @@ public fn grid(content: List<View>) -> View:
 public fn text_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
 
+public fn date_field(label: String, name: String, initial: String) -> View:
+    return View("<label>" + escaped(label) + "<input type=\"date\" required name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
+
+# Pair one native field with a custom element that has a value property and a change event.
+public fn bind_field(field: View, component: View) -> View:
+    return View("<div data-corvid-bind-field>" + field.html + "<div hidden data-corvid-component>" + component.html + "</div></div>")
+
 public fn submit(label: String) -> View:
     return View("<button type=\"submit\">" + escaped(label) + "</button>")
 
 public fn post_form(path: String, controls: List<View>) -> View:
     return View("<form method=\"post\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
+
+# Expose a form with a text or HTML receipt to assistants. The person confirms submission in the browser.
+public fn agent_post_form(name: String, description: String, path: String, controls: List<View>) -> View:
+    attributes = " toolname=\"" + escaped(name) + "\" tooldescription=\"" + escaped(description) + "\""
+    return View("<form method=\"post\" action=\"" + escaped(path) + "\"" + attributes + " data-corvid-receipt>" + children(controls) + "<output role='status'></output></form>")
 
 public fn option(value: String, label: String, selected: Bool) -> View:
     attributes = ""

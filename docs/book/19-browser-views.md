@@ -406,3 +406,17 @@ For future component examples, use a link when the reader chooses a destination,
 ### Sharing a component with another app
 
 Use `import "std:ui" as ui` inside a component that will be published. The compiler supplies the standard library even after the component moves to a registry. Export the component and its input type with `public`. The consuming screen can pass a typed value and its own form action. On an interactive page, standard change-submit selects work without a custom browser module. [Publisher exercise](../reference/package-imports.md#publishing-a-component-with-standard-library-dependencies)
+
+### Use a browser calendar in a Corvid form
+
+The booking screen imports its picker on one line.
+
+```corvid
+import "./pickers" use calendar_picker as picker
+```
+
+Change `calendar_picker` to `native_picker` to use the browser's date control. Both pickers take the saved date and return a view. The server receives the same `Booking` value and checks the date before writing to SQLite. [Booking application](../../examples/booking/src/main.cor)
+
+Use `ui.date_field(label, name, initial)` for a required date input. On an interactive page, `ui.bind_field(field, component)` connects that input to a custom element with a string `value` property and a `change` event. The example loads a pinned Cally module with an integrity hash. The native input remains usable if the download fails. [Picker definitions](../../examples/booking/src/pickers.cor)
+
+Wrap the picker and submit button in `ui.agent_post_form(name, description, path, controls)` to expose the form in a WebMCP-capable browser. Chrome derives the tool argument from the named field. The person can review the filled date and submit it. The tool receives the server's receipt. Run `python scripts/verify_booking.py target/debug/corvid.exe --channel chrome` with Python Playwright, Chrome and network access to the calendar module. [Browser trial](../../scripts/verify_booking.py)
