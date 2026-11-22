@@ -166,10 +166,10 @@ print(run_sync(twice, 21), run_sync(remainder, -7.5))
     results = [line[len(result_prefix):] for line in replay.splitlines() if line.startswith(result_prefix)]
     if len(results) != 1 or json.loads(results[0]) != greeting:
         raise RuntimeError(f"Starter replay did not reproduce {greeting!r}: {replay}")
-    if (project / "src/std/ui.cor").read_bytes() != (root / "std/ui.cor").read_bytes():
-        raise RuntimeError("The project scaffold did not copy the archive's UI library")
+    if sorted(p.name for p in (project / "src").iterdir()) != ["main.cor"]:
+        raise RuntimeError("Expected a starter with only src/main.cor")
     (project / "src/main.cor").write_text(
-        'import "./std/ui" as ui\n\n'
+        'import "std:ui" as ui\n\n'
         'server notes:\n'
         '    route GET "/" -> html:\n'
         '        return ui.page("Notes", [ui.link("Open workspace", "/workspace")])\n'

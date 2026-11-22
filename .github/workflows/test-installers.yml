@@ -140,9 +140,9 @@ jobs:
           corvid new testproj
           test -f testproj/corvid.toml
           test -f testproj/src/main.cor
-          # std/ should have been vendored from $CORVID_HOME/std
-          test -d testproj/std
+          test ! -e testproj/src/std
           cd testproj
+          corvid check
           corvid doctor || true   # doctor is informational, not a gate
 
   smoke-matrix:
