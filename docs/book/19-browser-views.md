@@ -150,6 +150,8 @@ From the repository root, run `python scripts/verify_storefront.py target/debug/
 
 The verifier edits the notebook price in the scaffold, rebuilds it and serves the two extracted archives separately. Twelve notebooks and one pencil total 5,525 cents in the original and 5,825 cents after the edit. It fetches the rebuilt JavaScript and Wasm over HTTP and checks their content types and bytes. To repeat the same keyboard journey with installed Playwright engines, run the command once each with `--browser chromium`, `--browser firefox` and `--browser webkit` in place of `--http-only`.
 
+To check a shared edit across both screens, add `--lsp target/debug/corvid-lsp.exe` to the storefront trial command. The trial opens both callers and the picker over stdio. Go to Definition at either call opens the declaration in `color_picker.cor`. The trial changes `change_path` from `String` to `Int` and converts it back to a string inside the picker body. The component stays well typed, and both callers report the incompatible destination on the binding line. Restoring the original buffer clears both errors without saving.
+
 To exercise editor feedback, open `src/notebook.cor` with the Corvid language server. Change the first argument of `ColorPicker(value, "/notebook")` to `"Moss"`. In the stdio trial the server reported that the argument required `Color` and received `String` on line 7. Restoring `value` cleared the diagnostic before saving.
 
 ### Compare a local action with the save form
