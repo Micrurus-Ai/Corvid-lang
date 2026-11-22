@@ -59,6 +59,8 @@ Set `CORVID_VERSION` to the release tag you want and rerun the same installer.
 Use an earlier tag to roll back. Both the download and the source fallback
 for a pinned version use the requested tag. Run `corvid --version` afterward.
 
+From the project directory, run `corvid upgrade check .` with the newly installed CLI to scan for known migrations, then run the application's tests. For a project that embeds Corvid libraries, the migration guide also shows how to compare the guarantees in two versions. [Upgrade and migration guide](../meta/upgrade-migrations.md)
+
 The installer stages a candidate under `CORVID_HOME` and runs its version
 command before replacing package files. A failed download and source build
 leave the existing installation usable. On Linux, if moving a staged package
@@ -91,17 +93,7 @@ corvid --version
 corvid doctor
 ```
 
-`corvid doctor` checks:
-
-- A C toolchain is installed (the codegen path needs `cc`).
-- A WASM toolchain is installed (only required if you target WASM).
-- An LLM provider key is configured (only required for prompts that call
-  hosted models).
-- Replay storage is writable.
-- Approval configuration is well-formed.
-
-If `corvid doctor` reports anything red, fix it before going further.
-Every check has a one-line "how to fix" hint inline.
+`corvid doctor` reports on the Rust and Wasm toolchains, model and approval configuration, Python runtime and replay storage. The starter below runs without model credentials. On a fresh project, the first traced run creates the trace directory.
 
 Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a standalone file, pass its path explicitly. If either project file is missing, the CLI identifies the missing manifest or entry file.
 

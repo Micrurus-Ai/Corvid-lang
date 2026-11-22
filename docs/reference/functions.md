@@ -385,18 +385,28 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn grid(content: List<View>) -> View`
 - `fn text_field(label: String, name: String, initial: String) -> View`
 - `fn submit(label: String) -> View`
+- `fn post_form(path: String, controls: List<View>) -> View`
+- `fn option(value: String, label: String, selected: Bool) -> View`
+- `fn submit_on_change_select(label: String, name: String, options: List<View>) -> View`
+- `fn keyed_item(key: String, label: String, content: List<View>) -> View`
+- `fn keyed_list(label: String, items: List<View>) -> View`
+- `fn quantity_field(label: String, name: String, initial: Int, handler: String, result_label: String, initial_result: Int) -> View`
 - `fn search_form(controls: List<View>) -> View`
 - `fn disclosure(label: String, content: List<View>) -> View`
 - `fn page(title: String, content: List<View>) -> String`
+- `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String`
 - `fn action(label: String, handler: String) -> View`
-- `fn assistant_action(label: String, handler: String, name: String, description: String) -> View` opts an integer-state button into WebMCP. Use a unique tool name per page.
-- `fn assistant_text_state(label: String, initial: String, handler: String, name: String, description: String) -> View` exposes a single-line text control. Its tool requires one string field named for the handler parameter and returns the handler's string result.
+- `fn assistant_action(label: String, handler: String, name: String, description: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`
 - `fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View`
 - `fn state_output(name: String, label: String) -> View`
+- `fn event_module() -> View`
 - `fn interactive_page(title: String, content: List<View>) -> String`
 - `fn text_state(label: String, initial: String, handler: String) -> View`
+- `fn assistant_text_state(label: String, initial: String, handler: String, name: String, description: String) -> View`
 - `fn query_form(path: String, controls: List<View>) -> View`
 - `fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn link(label: String, path: String) -> View`
 - `fn stream_text(label: String, path: String) -> View`
+
+`assistant_action` opts an integer-state button into WebMCP. Use a unique tool name per page. `assistant_text_state` exposes a single-line text control. Its tool requires one string field named for the handler parameter and returns the handler's string result.

@@ -64,6 +64,11 @@ def render():
             for call in calls:
                 signature = " ".join(call.rstrip(":").split())
                 lines.append(f"- `{signature}`")
+            if path == "std/ui.cor":
+                lines.extend(["", "`assistant_action` opts an integer-state button into WebMCP. "
+                              "Use a unique tool name per page. `assistant_text_state` exposes a "
+                              "single-line text control. Its tool requires one string field named "
+                              "for the handler parameter and returns the handler's string result."])
     return "\n".join(lines) + "\n"
 
 

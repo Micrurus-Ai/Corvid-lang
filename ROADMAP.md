@@ -50,6 +50,12 @@ A12 still needs an outside team's own modular app and a second contributor's sha
 
 After A12, A11 needs independent observations on the same agent in Corvid, Python and TypeScript, including readability predictions, change and debugging times, mistakes and help. Those observations will identify which blockers recur and which journeys to repeat after a fix.
 
+**Step 12 blocked. Publication decision: hold distribution.** The local Windows x64 notice generator ran against the working lockfile. The `pdf-extract 0.12.1` entry contained all seven pinned notice texts byte for byte. Distribution still needs a documented redistribution determination covering both the LCDF TeX glyph table and the htfgen modifications embedded in the generated mappings. [Review evidence](docs/release-policy.md#build-a-candidate-on-github)
+
+The learner reference was missing eight public UI helpers. The refreshed index passes the CI drift check. Final verification still needs six packages from the revision selected after steps 7–11, with their checksums, inventories and native install-to-first-app results. Step 7's browser handoff, step 8's browser replay, step 9's package and interoperability trials, step 10's upgrade, browser and performance checks, and step 11's independent A12 and A11 trials remain open. The component and binding choices also await the reader feedback in steps 2–3. Historical archive results below apply to their named revisions. A separate maintainer publication decision follows final verification and glyph review.
+
+The Windows x64 checkout CLI passed the install guide's doctor, scaffold, check, run and trace replay commands. The greeting retained its original timestamp. The fresh scaffold passed the migration scan and all three CLI upgrade-assist tests passed. [Install guide](docs/book/01-install.md#verify-the-install)
+
 Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
 
 Use the [simple-to-advanced application trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase) when reviewing changes to the full-stack language and grammar.
