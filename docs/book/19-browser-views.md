@@ -315,7 +315,7 @@ corvid test src/suggestion-test.cor
 
 The exporter keeps the recorded action sequence, shelf arguments, title equality and HTML-escaping cases. It substitutes example text for the titles. The generated test supplies an in-memory shelf snapshot and runs the same suggestion agent and form renderer as the HTTP route. Corvid's `from_trace` runtime matches the prompt inputs, supplies the recorded decisions and quarantines external writes. Inspect the assertions for the selected shelf, escaped title, save action and lookup branch.
 
-The packaged HTTP trial generated this test from a two-call response and ran it after shutting down the loopback model. Changing the second prompt's context failed the regression. Adding a call to the save handler also failed, and every shelf retained its title and revision. Run `python scripts/verify_reading_list.py path/to/corvid --http-only --work-dir reading-trial` to retain the generated fixture and suite for inspection.
+The browser trial captures the response to the click that displayed the trace. It generates the regression from that response and runs it after shutting down the loopback model. Run `python scripts/verify_reading_list.py path/to/corvid --channel chrome --work-dir browser-trial` to keep the files. Changing the second prompt's context failed the regression. Adding a call to the save handler also failed, and every shelf retained its title and revision. Run `python scripts/verify_reading_list.py path/to/corvid --http-only --work-dir reading-trial` to retain the generated fixture and suite for inspection.
 
 ## Displaying a streamed answer
 
