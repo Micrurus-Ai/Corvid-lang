@@ -141,14 +141,14 @@ pub fn generate_mcp_module(server_name: &str, tools: &[McpToolDescriptor]) -> St
          # changes with `corvid mcp regen {server_name}`. Calls go through the\n\
          # governed `mcp_call`: untrusted servers stay approval-gated, every call\n\
          # is traced and replay-substituted.\n\n\
-         import \"../std/mcp\" use mcp_call\n"
+         import \"std:mcp\" use mcp_call\n"
     ));
     let uses_builder = tools
         .iter()
         .any(|t| typed_params(&t.input_schema).is_some_and(|p| !p.is_empty()));
     if uses_builder {
         out.push_str(
-            "import \"../std/json\" use json_object_new, json_object_set_string, \
+            "import \"std:json\" use json_object_new, json_object_set_string, \
              json_object_set_int, json_object_set_float, json_object_set_bool, \
              json_object_finish\n",
         );
@@ -287,7 +287,11 @@ mod tests {
             }),
         )];
         let module = generate_mcp_module("github", &tools);
-        let compiled = crate::compile(&module);
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("src/mcp/github.cor");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &module).unwrap();
+        let compiled = crate::compile_with_config_at_path(&module, &path, None);
         assert!(
             compiled.ok(),
             "generated module must compile: {:?}\n{module}",

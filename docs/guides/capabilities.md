@@ -91,8 +91,8 @@ concatenation):
 
 ```corvid
 # GENERATED — regenerate with `corvid mcp regen github`.
-import "../std/mcp" use mcp_call
-import "../std/json" use json_object_new, json_object_set_string, json_object_set_int, json_object_finish
+import "std:mcp" use mcp_call
+import "std:json" use json_object_new, json_object_set_string, json_object_set_int, json_object_finish
 
 public agent search_issues(limit: Int, query: String) -> Result<String, String>:
     args = json_object_new()
