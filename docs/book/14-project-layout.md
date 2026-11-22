@@ -69,6 +69,16 @@ src/
 Each file is a module. Cross-file references go through `import`. See
 **[Modules and imports](/docs/modules)**.
 
+### Start a team project and hand it over
+
+Choose the app and its first end-to-end task before scaffolding. Start directly with the modules your contributors will own. Put the shared request and result types in one module, give model-driven work a typed tool interface, and put durable reads and writes behind the persistence module. For a full-stack app, connect the screen to the authenticated server handler and expose the chosen operation to the assistant with the same permission checks. Keep a deterministic model response for repeatable tests.
+
+Give a teammate the project revision, toolchain version, documented setup and one shared-type change. From a clean checkout, have them trace the screen event to the model input and the durable write before running the app. After the change, have them use the diagnostics to find affected callers, run the application tests, rebuild the package and verify the saved value after restart. Record their predictions, the first failing command, any help they needed and the time until the packaged workflow passes.
+
+During the full-stack trial, have the teammate diagnose a reported problem, upgrade the toolchain and deploy the change in the team's authorized environment. In that deployment, exercise the UI, authenticated operation, durable write, real model call and authorized assistant action together. Record the revision, toolchain and service versions, manual workarounds and any private setup instructions the teammate needed.
+
+For the subsequent Python and TypeScript comparison, carry over the team's actual task, tool schemas, model settings, starting records and durability requirements. In each stack, interrupt the same operation, predict what survived, then verify it after restart. Use the same change and reported fault. Record prediction errors, elapsed change and debugging times, documentation lookups, interventions and each contributor's stack preference with their reason. If a blocker recurs, retain the failing task and repeat it with a fresh contributor after the fix. [Independent trial criteria](../frontend-roadmap.md#how-developers-should-experience-corvid)
+
 ## Conventions
 
 - Snake_case for filenames (`refund_logic.cor`, not `RefundLogic.cor`).
