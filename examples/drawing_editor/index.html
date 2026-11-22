@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel sketchbook</title>
+<style>
+  body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; font: 1rem system-ui; }
+  canvas { width: 100%; image-rendering: pixelated; outline: 1px solid #63716a;
+           background: #fff; touch-action: none; }
+</style>
+<main>
+  <h1>Pixel sketchbook</h1>
+  <p role="status">Loading drawing tools…</p>
+  <canvas width="96" height="64" aria-label="Drawing surface"></canvas>
+</main>
+<script type="module" src="./editor.js"></script>
+</html>

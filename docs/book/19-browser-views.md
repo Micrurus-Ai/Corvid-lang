@@ -441,3 +441,18 @@ customElements.define("reading-counter", ReadingCounter);
 Place `<reading-counter></reading-counter>` wherever the control belongs. Each instance owns its shadow DOM and count. Moving an instance preserves its state. Reloading creates fresh instances. The host serves static files over HTTP, including the generated JavaScript and WebAssembly. It needs no running Corvid service. [Complete HTML host](../../examples/embedded_counter/index.html)
 
 The exporter renders trusted component markup at build time. The generated events module provides `componentElement(html)`, which returns a custom element class and binds Corvid state controls when an instance first connects. This example covers locally managed state and keyboard actions. To run the browser trial with Python Playwright and Chrome, use `python scripts/verify_embedded_counter.py target/debug/corvid.exe`.
+
+## Draw pixel strokes in a worker
+
+From `examples/drawing_editor`, build the stroke module and serve the example on loopback.
+
+```sh
+corvid check src/stroke.cor
+corvid build src/stroke.cor --target wasm
+node --test --test-isolation=none test/stroke.test.mjs
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/` and drag across the canvas when “Drag to draw” appears. A tap should paint one cell. The page maps pointer coordinates onto a 96 × 64 grid and captures the pointer until the stroke ends. The module worker loads the generated Wasm wrapper, calls Corvid to interpolate the cells between consecutive positions, and transfers a typed array back to the canvas.
+
+The Node test runs the same module in a worker thread with a local file loader and checks the returned cells. The drawing currently lives in the open page. Reload clears it.
