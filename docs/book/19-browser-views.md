@@ -166,7 +166,9 @@ Extract the resulting web archive and migrate and serve it as in the reading-lis
 
 Run `python scripts/verify_picker_package.py target/debug/corvid.exe --work-dir target/picker-trial` from the repository root on Windows. Choose a new directory for each run. The trial signs the storefront's original picker, publishes it into a local directory, runs `corvid new palette`, then installs `@trial/color-picker@1.0.0`. The [palette app](../../examples/palette/src/main.cor) imports the versioned package and declares its own typed POST route.
 
-The picker imports the compiler's bundled UI module with `import "std:ui" as ui`. The trial disconnects the registry after verifying the lock and cached source, then checks, tests, packages and serves the palette offline. The extracted web archive includes the locked package. Selecting Moss posts the typed shade to the palette's route and shows the updated selection.
+The picker imports the compiler's bundled UI module with `import "std:ui" as ui`. The trial disconnects the registry after verifying the lock and cached source, then checks, tests, packages and serves the palette offline. The extracted web archive includes the locked package. The picker arranges the select and submit button with `ui.row`. The extracted app serves their wrapping flex layout and the standard change-event module. The HTTP trial submits `shade=1` and checks that Moss is selected, then submits `shade=3` and checks for HTTP 400. The compiler check passes a string to the installed picker and verifies that the diagnostic points to the binding line in the palette source.
+
+On a runner with Playwright and Edge, add `--browser-channel msedge` to the trial command. It checks the computed wrapping style, tabs to the select and chooses Moss with the arrow key. With scripting disabled, it tabs to Apply color and presses Enter. Both paths should post the same shade. The HTTP and diagnostic checks passed locally. The browser run stopped at Playwright import on this runner.
 
 ### Display state in more than one view
 
