@@ -75,7 +75,13 @@ pub(crate) fn build_artifacts(
     Ok(WasmArtifacts {
         wasm,
         js_loader: emit_js_loader(module_name, agents, imports)?,
-        ts_types: emit_ts_types(agents, imports)?,
+        ts_types: {
+            let mut types = emit_ts_types(agents, imports)?;
+            if module_name == "events" {
+                types.push_str("export function componentElement(html: string): CustomElementConstructor;\n");
+            }
+            types
+        },
         manifest_json: emit_manifest(module_name, agents, imports)?,
     })
 }

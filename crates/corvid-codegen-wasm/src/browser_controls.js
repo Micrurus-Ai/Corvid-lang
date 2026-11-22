@@ -5,11 +5,25 @@ if (typeof document !== "undefined" && Array.from(
   bindStateControls();
 }
 
-async function bindStateControls() {
-  for (const region of document.querySelectorAll("[data-corvid-list]")) bindKeyedList(region);
-  const panels = document.querySelectorAll("fieldset[data-corvid-state]");
+// Each host decides the tag name and can mount the class more than once.
+export function componentElement(html) {
+  return class extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      const root = this.attachShadow({ mode: "open" });
+      const content = document.createElement("div");
+      content.innerHTML = html;
+      root.append(content);
+      bindStateControls(content);
+    }
+  };
+}
+
+async function bindStateControls(root = document) {
+  for (const region of root.querySelectorAll("[data-corvid-list]")) bindKeyedList(region);
+  const panels = root.querySelectorAll("fieldset[data-corvid-state]");
   const readers = new Map();
-  for (const output of document.querySelectorAll("output[data-corvid-read]")) {
+  for (const output of root.querySelectorAll("output[data-corvid-read]")) {
     const name = output.dataset.corvidRead;
     if (!readers.has(name)) readers.set(name, []);
     readers.get(name).push(output);
@@ -18,12 +32,12 @@ async function bindStateControls() {
   try {
     handlers = await instantiate();
   } catch (error) {
-    for (const alert of document.querySelectorAll("fieldset[data-corvid-state] > [role=alert], [data-corvid-quantity-field] > [role=alert]")) {
+    for (const alert of root.querySelectorAll("fieldset[data-corvid-state] > [role=alert], [data-corvid-quantity-field] > [role=alert]")) {
       alert.textContent = "Could not load Corvid event handlers: " + error.message;
     }
     return;
   }
-  for (const field of document.querySelectorAll("[data-corvid-quantity-field]")) {
+  for (const field of root.querySelectorAll("[data-corvid-quantity-field]")) {
     const input = field.querySelector("input");
     const output = field.querySelector("output");
     const alert = field.querySelector("[role=alert]");
@@ -162,7 +176,7 @@ function bindKeyedList(region) {
     const neighbor = up ? row.previousElementSibling : row.nextElementSibling;
     if (neighbor) {
       // Detach only the unfocused sibling, including when a pointer triggers the move.
-      if (neighbor.contains(document.activeElement)) {
+      if (neighbor.contains(region.getRootNode().activeElement)) {
         list.insertBefore(row, up ? neighbor : neighbor.nextElementSibling);
       } else {
         list.insertBefore(neighbor, up ? row.nextElementSibling : row);

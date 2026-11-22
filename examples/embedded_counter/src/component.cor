@@ -1,0 +1,5 @@
+import "std:ui" as ui
+
+agent main() -> String:
+    buttons = [ui.action("Read one page", "read_page")]
+    return ui.int_state("Pages read", 0, buttons).html

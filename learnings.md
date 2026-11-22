@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A JavaScript app can import a Corvid counter as a custom element. Its view renders at build time, its Corvid event handler runs as WebAssembly, and each instance owns its state. The host registers the exported class with the browser's `customElements.define`. [Export and use a Corvid component](docs/book/19-browser-views.md#embed-a-corvid-counter-in-a-javascript-app)
+
 Use `ui.date_field` for a native booking date, `ui.bind_field` to synchronize a custom calendar, and `ui.agent_post_form` to let an assistant fill the same form for confirmation. Replacing the picker changes one import. The booking handler and the assistant's date argument stay the same. [Booking walkthrough](docs/book/19-browser-views.md#use-a-browser-calendar-in-a-corvid-form)
 
 The [install guide](docs/book/01-install.md#verify-the-install) can be rehearsed with a checkout build while candidate packages are pending. On Windows x64 the CLI built from `d85dca57` with the working lockfile scaffolded and ran the greeting without model credentials. Replay reproduced the original UTC timestamp and `corvid upgrade check . --json` returned an empty list for the fresh scaffold. Upgrading an existing installation still needs the receipt-replacement check in step 10.

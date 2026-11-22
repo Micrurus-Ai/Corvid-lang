@@ -420,3 +420,24 @@ Change `calendar_picker` to `native_picker` to use the browser's date control. B
 Use `ui.date_field(label, name, initial)` for a required date input. On an interactive page, `ui.bind_field(field, component)` connects that input to a custom element with a string `value` property and a `change` event. The example loads a pinned Cally module with an integrity hash. The native input remains usable if the download fails. [Picker definitions](../../examples/booking/src/pickers.cor)
 
 Wrap the picker and submit button in `ui.agent_post_form(name, description, path, controls)` to expose the form in a WebMCP-capable browser. Chrome derives the tool argument from the named field. The person can review the filled date and submit it. The tool receives the server's receipt. Run `python scripts/verify_booking.py target/debug/corvid.exe --channel chrome` with Python Playwright, Chrome and network access to the calendar module. [Browser trial](../../scripts/verify_booking.py)
+
+### Embed a Corvid counter in a JavaScript app
+
+Write the initial view in `src/component.cor`. Its entry agent returns the HTML from ordinary Corvid view helpers. Put browser handlers in `src/events.cor`. In the [reading counter](../../examples/embedded_counter/src/component.cor), the button calls a Corvid handler that adds one to the current count.
+
+From the checkout root, export the component with a CLI built from this branch:
+
+```shell
+python scripts/export_browser_component.py examples/embedded_counter --cli target/debug/corvid.exe
+```
+
+Copy the resulting `target/wasm/` directory into your site's static assets, for example at `./widgets/counter/`. Register its default export once in your JavaScript entry module:
+
+```js
+import ReadingCounter from "./widgets/counter/index.js";
+customElements.define("reading-counter", ReadingCounter);
+```
+
+Place `<reading-counter></reading-counter>` wherever the control belongs. Each instance owns its shadow DOM and count. Moving an instance preserves its state. Reloading creates fresh instances. The host serves static files over HTTP, including the generated JavaScript and WebAssembly. It needs no running Corvid service. [Complete HTML host](../../examples/embedded_counter/index.html)
+
+The exporter renders trusted component markup at build time. The generated events module provides `componentElement(html)`, which returns a custom element class and binds Corvid state controls when an instance first connects. This example covers locally managed state and keyboard actions. To run the browser trial with Python Playwright and Chrome, use `python scripts/verify_embedded_counter.py target/debug/corvid.exe`.

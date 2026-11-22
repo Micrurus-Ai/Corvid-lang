@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Reading sessions</title>
+<h1>Reading sessions</h1>
+<section aria-label="Morning"><h2>Morning</h2><reading-counter></reading-counter></section>
+<section aria-label="Evening"><h2>Evening</h2><reading-counter></reading-counter></section>
+<script type="module">
+  import ReadingCounter from "./target/wasm/index.js";
+  customElements.define("reading-counter", ReadingCounter);
+</script>
+</html>
