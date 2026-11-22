@@ -27,7 +27,7 @@ def lower(path):
         return match.groups()
 
     (name,) = take(rf"component ({NAME}):", "component Name:")
-    state, initial = take(rf"    state ({NAME}): Int = (0|[1-9][0-9]*)", "named Int state")
+    state, initial = take(rf"    state ({NAME})(?:: Int)? = (0|[1-9][0-9]*)", "named Int state")
     if int(initial) > 2**63 - 1:
         raise ValueError(f"{path}: initial value exceeds Int range")
     (display,) = take(rf"    text\(({LABEL})\)", "text ending with the state placeholder")
@@ -43,8 +43,8 @@ def lower(path):
         if not inline:
             take("        on click:", "on click:")
             indent += "    "
-        (step,) = take(rf"{indent}{state} = {state} \+ (0|[1-9][0-9]*)",
-                       f"{state} = {state} + a nonnegative Int literal")
+        (step,) = take(rf"{indent}{state} (?:\+=|= {state} \+) (0|[1-9][0-9]*)",
+                       f"{state} += a nonnegative Int literal")
         if int(step) > 2**63 - 1:
             raise ValueError(f"{path}: increment exceeds Int range")
         handler = f"update_{state}_{len(actions) + 1}"

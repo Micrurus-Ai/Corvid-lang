@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+In a named-state component, `state pages_read = 0` infers an integer for each mounted instance. A button can update it with `pages_read += 1`. In the reading-list agent prototype, `allow lookup_shelf once` permits one lookup and `within 30 seconds` bounds the complete recommendation. A `BookSuggestion` is a preview. **Apply suggestion** writes it to the shelf. [Agent](docs/book/10-agents.md#your-first-agent-in-the-reading-list) and [component](docs/book/19-browser-views.md#a-component-with-named-state-prototype)
+
 A JavaScript app can import a Corvid counter as a custom element. Its view renders at build time, its Corvid event handler runs as WebAssembly, and each instance owns its state. The host registers the exported class with the browser's `customElements.define`. [Export and use a Corvid component](docs/book/19-browser-views.md#embed-a-corvid-counter-in-a-javascript-app)
 
 Use `ui.date_field` for a native booking date, `ui.bind_field` to synchronize a custom calendar, and `ui.agent_post_form` to let an assistant fill the same form for confirmation. Replacing the picker changes one import. The booking handler and the assistant's date argument stay the same. [Booking walkthrough](docs/book/19-browser-views.md#use-a-browser-calendar-in-a-corvid-form)

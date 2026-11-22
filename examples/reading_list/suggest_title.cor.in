@@ -1,7 +1,6 @@
-agent suggest_title(selected_shelf: Int) -> Result<Reading, String>:
-    readings = list_readings()?
-    current_title = lookup(readings, selected_shelf)?
-    title = ask recommend(current_title)
+agent suggest_title(shelf: Shelf) -> BookSuggestion:
+    title = ask recommend(shelf.title)
         allow lookup_shelf once
-        timeout 30 seconds
-    return proposal(selected_shelf, title?)
+        within 30 seconds
+
+    return BookSuggestion(shelf, title)

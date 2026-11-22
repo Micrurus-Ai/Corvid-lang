@@ -376,18 +376,18 @@ Each copy of a component owns its state. In this example both buttons update the
 
 ```text
 component ReadingCounter:
-    state pages_read: Int = 0
+    state pages_read = 0
 
     text("Pages read this session: {pages_read}")
 
     button("Read one page") on click:
-        pages_read = pages_read + 1
+        pages_read += 1
 
     button("Read two pages") on click:
-        pages_read = pages_read + 2
+        pages_read += 2
 ```
 
-Read the declaration as a name, a type, and a starting value. The braces in the text display the current value. Each assignment runs when its button is activated, including by keyboard. To change how much a button adds, edit the number on its assignment line.
+The initializer `0` gives the state its integer type. You can also write `state pages_read: Int = 0`. The braces in the text display the current value. Each assignment runs when its button is activated, including by keyboard. To count five pages per click, change the label to `Read five pages` and the assignment to `pages_read += 5`.
 
 The prototype supports one nonnegative integer initializer, one labeled output ending in the state reference, and one or more buttons that add a nonnegative integer literal. It generates an ordinary Corvid view and typed browser handlers, then uses Corvid's web packager. The generated host composes two instances using ordinary function calls. The click handlers run locally. AI action exposure is a separate design decision.
 

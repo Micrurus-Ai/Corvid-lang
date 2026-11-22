@@ -45,24 +45,55 @@ fn proposal(shelf: Int, title: String, current: String, lookup_shelf: Int, conte
     trace = trace + ui.text("recommend returned Suggest: " + title).html
     return Ok(form + "<details data-lookup-shelf='" + lookup_shelf.to_string() + "'><summary>Suggestion trace</summary>" + trace + "</details>")
 
-# The route reads the shelf snapshot once. Replay supplies its own snapshot.
-agent suggest_title(readings: List<Reading>, selected_shelf: Int) -> Result<String, String>:
-    current_title = lookup(readings, selected_shelf)?
-    first_choice = try recommend(current_title, "No lookup yet") timeout 30000
-    return match first_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title, current_title, 0, "")
-        Lookup(requested_shelf) -> finish_after_lookup(readings, requested_shelf, current_title, selected_shelf)
+# Generated from suggest_title.cor.in by scripts/prototype_reading_list_ask.py
+type Shelf:
+    number: Int
+    title: String
+    readings: List<Reading>
 
-agent finish_after_lookup(readings: List<Reading>, requested_shelf: Int, current_title: String, selected_shelf: Int) -> Result<String, String>:
-    requested_title = lookup(readings, requested_shelf)?
-    final_choice = try recommend(current_title, requested_title) timeout 30000
+type BookSuggestion:
+    shelf: Shelf
+    title: String
+
+type Recommendation:
+    suggestion: BookSuggestion
+    lookup_shelf: Int
+    context: String
+
+agent suggest_title(shelf: Shelf) -> Result<BookSuggestion, String>:
+    result = recommend_with_trace(shelf)?
+    return Ok(result.suggestion)
+
+agent recommend_with_trace(shelf: Shelf) -> Result<Recommendation, String>:
+    return try ask_recommend(shelf) timeout 30000
+
+agent ask_recommend(shelf: Shelf) -> Result<Recommendation, String>:
+    first_choice = recommend(shelf.title, "No lookup yet")
+    return match first_choice.action:
+        Suggest(title) -> suggestion_result(shelf, title, 0, "")
+        Lookup(number) -> finish_recommendation(shelf, number)
+
+agent finish_recommendation(shelf: Shelf, number: Int) -> Result<Recommendation, String>:
+    context = lookup(shelf.readings, number)?
+    final_choice = recommend(shelf.title, context)
     return match final_choice.action:
-        Suggest(title) -> proposal(selected_shelf, title, current_title, requested_shelf, requested_title)
+        Suggest(title) -> suggestion_result(shelf, title, number, context)
         Lookup(_) -> Err("The model reached its lookup limit.")
+
+fn suggestion_result(shelf: Shelf, title: String, number: Int, context: String) -> Result<Recommendation, String>:
+    if title.trim() == "":
+        return Err("The suggested title was empty.")
+    return Ok(Recommendation(BookSuggestion(shelf, title), number, context))
+# End of generated suggestion agent
+
+agent preview_suggestion(readings: List<Reading>, selected_shelf: Int) -> Result<String, String>:
+    current = lookup(readings, selected_shelf)?
+    result = recommend_with_trace(Shelf(selected_shelf, current, readings))?
+    return proposal(selected_shelf, result.suggestion.title, current, result.lookup_shelf, result.context)
 
 agent suggest_from_shelves(selected_shelf: Int) -> Result<String, String>:
     readings = list_readings()?
-    return suggest_title(readings, selected_shelf)
+    return preview_suggestion(readings, selected_shelf)
 
 fn suggestion_controls(shelf: String) -> View:
     controls = "<button type='button' id='suggest' value='" + shelf + "'>Suggest a title</button><button type='button' id='cancel' disabled>Cancel suggestion</button><p role='status' id='status'></p><div id='preview'></div>"

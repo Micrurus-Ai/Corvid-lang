@@ -105,7 +105,7 @@ def promote(html, directory):
 
     event("schema_header", version=2, writer="corvid-vm", commit_sha=None, source_path=None)
     event("seed_read", purpose="rollout_default_seed", value=0)
-    event("run_started", agent="suggest_title", args=[
+    event("run_started", agent="preview_suggestion", args=[
         [{"shelf": i, "title": name} for i, name in shelves.items()], selected])
     context = "No lookup yet"
     if lookup:
@@ -122,7 +122,7 @@ def promote(html, directory):
     test = f"""
 test recorded_suggestion from_trace "suggestion.jsonl":
     readings = [{readings}]
-    result = suggest_title(readings, {selected})
+    result = preview_suggestion(readings, {selected})
     html = match result:
         Ok(preview) -> preview
         Err(reason) -> reason
@@ -130,6 +130,14 @@ test recorded_suggestion from_trace "suggestion.jsonl":
     assert html.contains({expected_shelf})
     assert html.contains({expected_title})
     assert html.contains("data-lookup-shelf='{lookup}'")
+
+test typed_book_suggestion from_trace "suggestion.jsonl":
+    shelf = Shelf({selected}, {json.dumps(current)}, [{readings}])
+    result = suggest_title(shelf)
+    matches = match result:
+        Ok(book) -> book.shelf.number == {selected} and book.title == {json.dumps(title)}
+        Err(reason) -> false
+    assert matches
 """
     directory.mkdir(parents=True, exist_ok=False)
     (directory / "suggestion.jsonl").write_text(fixture, encoding="utf-8")

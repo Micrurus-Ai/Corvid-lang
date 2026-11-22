@@ -21,8 +21,12 @@ def verify(cli, channel):
         nested.write_text(VIEW.read_text().replace(
             ") on click:\n        ", "):\n        on click:\n            "))
         assert lower(nested) == lower(VIEW)
+        legacy = root / "legacy.view"
+        legacy.write_text(VIEW.read_text().replace("state pages_read =", "state pages_read: Int =")
+                          .replace("pages_read +=", "pages_read = pages_read +"))
+        assert lower(legacy) == lower(VIEW)
         invalid = root / "invalid.view"
-        invalid.write_text(VIEW.read_text().replace("pages_read + 2", "unknown + 2"))
+        invalid.write_text(VIEW.read_text().replace("pages_read += 2", "unknown += 2"))
         try:
             lower(invalid)
         except ValueError as error:

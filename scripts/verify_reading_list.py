@@ -218,6 +218,44 @@ def action(name, value):
     return json.dumps({"action": {"variant": name, "fields": [value]}})
 
 
+def check_ask_deadline(cli, installed, env, provider):
+    from prototype_reading_list_ask import EXAMPLE, expand
+
+    author = (EXAMPLE / "suggest_title.cor.in").read_text(encoding="utf-8")
+    original = (installed / "src/main.cor").read_text(encoding="utf-8")
+    assert expand(author) in original
+    shorter = expand(author.replace("within 30 seconds", "within 2 seconds"))
+    probe = installed / "src/deadline.cor"
+    probe.write_text(original.replace(expand(author), shorter), encoding="utf-8")
+    provider.waiting.clear()
+    provider.closed.clear()
+
+    def delay_first_answer():
+        provider.requests.get(timeout=5)
+        time.sleep(1.3)
+        provider.outputs.put(action("Lookup", 1))
+        provider.outputs.put(None)
+
+    with serve(cli, installed, env, source="src/deadline.cor") as url:
+        answer = Thread(target=delay_first_answer)
+        answer.start()
+        start = time.monotonic()
+        try:
+            read(url + "/suggest", b"shelf=2")
+        except HTTPError as error:
+            assert error.code == 504, (error.code, error.read())
+        else:
+            raise AssertionError("Suggestion exceeded its shared deadline")
+        elapsed = time.monotonic() - start
+        answer.join()
+        assert provider.waiting.is_set() and provider.closed.wait(2)
+        provider.requests.get(timeout=2)
+        provider.waiting.clear()
+        provider.closed.clear()
+        assert elapsed < 3.2, f"Second model call received a fresh deadline: {elapsed:.2f}s"
+        print(f"Two model calls shared the deadline and the second was cancelled after {elapsed:.2f}s.")
+
+
 class PreviewForm(HTMLParser):
     def __init__(self, html):
         super().__init__()
@@ -633,6 +671,7 @@ def verify(args):
             local_env = dict(env, CORVID_TEST_MOCK_LLM="0", NO_PROXY="127.0.0.1",
                              CORVID_MODEL=f"openai-compat:http://127.0.0.1:{provider.server_port}/v1:local-model")
             try:
+                check_ask_deadline(cli, installed, local_env, provider)
                 with serve(cli, installed, local_env) as url:
                     title = check_suggestions(url, provider, title, args.channel, args.http_only, root / "regression")
                 with serve(cli, installed, env) as url:
@@ -671,11 +710,11 @@ def check_replay(cli, project, installed, regression, env):
         probe = suite.with_name("replay-probe.cor")
         try:
             for changed in [
-                source.replace('recommend(current_title, requested_title)',
-                               'recommend(current_title, "different context")'),
-                source.replace('    first_choice = try recommend',
-                               '    saved = save(Reading(selected_shelf, "unexpected write"))?\n'
-                               '    first_choice = try recommend'),
+                source.replace('recommend(shelf.title, context)',
+                               'recommend(shelf.title, "different context")'),
+                source.replace('    first_choice = recommend',
+                               '    saved = save(Reading(shelf.number, "unexpected write"))?\n'
+                               '    first_choice = recommend'),
             ]:
                 probe.write_text(changed + test, encoding="utf-8")
                 result = subprocess.run([cli, "test", probe], cwd=installed, env=env,

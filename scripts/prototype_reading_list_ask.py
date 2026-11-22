@@ -10,35 +10,58 @@ END = "# End of generated suggestion agent"
 
 
 def expand(source):
-    # The prototype adapter binds lookup_shelf to lookup(readings, shelf).
-    form = re.compile(
-        r"^    title = ask recommend\(current_title\)\n"
+    # This application binds one prompt and one read-only lookup over a shelf snapshot.
+    form = re.fullmatch(
+        r"agent suggest_title\(shelf: Shelf\) -> BookSuggestion:\n"
+        r"    ([A-Za-z_][A-Za-z_0-9]*) = ask recommend\(shelf\.title\)\n"
         r"        allow lookup_shelf once\n"
-        r"        timeout ([1-9][0-9]*) seconds$", re.MULTILINE
-    )
-    matches = list(form.finditer(source))
-    if len(matches) != 1:
-        raise ValueError("Expected one reading-list ask with one lookup and a deadline.")
-    match = matches[0]
-    milliseconds = int(match[1]) * 1000
+        r"        (?:within|timeout) ([1-9][0-9]*) seconds\n+"
+        r"    return BookSuggestion\(shelf, \1\)\n?", source)
+    if not form:
+        raise ValueError("Expected a shelf suggestion with one permitted lookup and a deadline.")
+    milliseconds = int(form[2]) * 1000
     if milliseconds > 2**64 - 1:
         raise ValueError("Deadline exceeds Corvid's millisecond range.")
-    invocation = f"    title = try ask_recommend(current_title, readings) timeout {milliseconds}"
-    agent = source[:match.start()] + invocation + source[match.end():]
-    helpers = """
-agent ask_recommend(current_title: String, readings: List<Reading>) -> Result<String, String>:
-    decision = recommend(current_title, "No lookup yet")
-    return match decision.action:
-        Suggest(title) -> Ok(title)
-        Lookup(shelf) -> finish_recommendation(current_title, lookup(readings, shelf)?)
+    return START + f"""
+type Shelf:
+    number: Int
+    title: String
+    readings: List<Reading>
 
-agent finish_recommendation(current_title: String, shelf_title: String) -> Result<String, String>:
-    decision = recommend(current_title, shelf_title)
-    return match decision.action:
-        Suggest(title) -> Ok(title)
+type BookSuggestion:
+    shelf: Shelf
+    title: String
+
+type Recommendation:
+    suggestion: BookSuggestion
+    lookup_shelf: Int
+    context: String
+
+agent suggest_title(shelf: Shelf) -> Result<BookSuggestion, String>:
+    result = recommend_with_trace(shelf)?
+    return Ok(result.suggestion)
+
+agent recommend_with_trace(shelf: Shelf) -> Result<Recommendation, String>:
+    return try ask_recommend(shelf) timeout {milliseconds}
+
+agent ask_recommend(shelf: Shelf) -> Result<Recommendation, String>:
+    first_choice = recommend(shelf.title, "No lookup yet")
+    return match first_choice.action:
+        Suggest(title) -> suggestion_result(shelf, title, 0, "")
+        Lookup(number) -> finish_recommendation(shelf, number)
+
+agent finish_recommendation(shelf: Shelf, number: Int) -> Result<Recommendation, String>:
+    context = lookup(shelf.readings, number)?
+    final_choice = recommend(shelf.title, context)
+    return match final_choice.action:
+        Suggest(title) -> suggestion_result(shelf, title, number, context)
         Lookup(_) -> Err("The model reached its lookup limit.")
-"""
-    return START + "\n" + agent.rstrip() + "\n" + helpers + END
+
+fn suggestion_result(shelf: Shelf, title: String, number: Int, context: String) -> Result<Recommendation, String>:
+    if title.trim() == "":
+        return Err("The suggested title was empty.")
+    return Ok(Recommendation(BookSuggestion(shelf, title), number, context))
+""" + END
 
 
 def main():
