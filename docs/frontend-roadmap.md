@@ -135,7 +135,7 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 ### 4. Open the browser platform and ecosystem
 
-**Scoped action discovery.** The packaged reading-list HTTP trial verified discovery for one actor-owned proposal. The UI and context route render the same named form. Only the UI populates its shelf titles. The context route checks current permission, and a peer reviewer cannot discover the action using the owner's key. The MCP transport and host comparison remain open. [Review exercise](book/19-browser-views.md#review-edits-to-three-shelves)
+**Scoped action discovery.** The packaged reading-list HTTP trial verified discovery for one actor-owned proposal. The UI and context route render the same named form. Only the UI populates its shelf titles. The context route checks current permission, and a peer reviewer cannot discover the action using the owner's key. Python MCP SDK 1.30.0 discovered the form-derived tool over loopback HTTP and invoked the typed apply route. An expired or read-only session was refused. The client recovered the same two saves and one conflict after an app and adapter restart, and a changed retry returned KeyConflict. [Review exercise](book/19-browser-views.md#review-edits-to-three-shelves)
 
 - [x] Generate discoverable schemas from explicitly exposed action types. Test discovery and invocation with a compatible browser assistant. Verify the same UI works with the adapter absent and that direct requests for an unexposed action are refused.
 

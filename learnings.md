@@ -8109,7 +8109,7 @@ Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C
 
 ### Discovering a reviewed action
 
-In the reading-list example, keep the proposal key from the user's review and pass it to `POST /proposals/context` with the reviewer's authenticated session and CSRF token. Read the named form for that proposal. Requesting another preview would create a different proposal. The packaged HTTP exercise checks the field names, owner, permission and session expiry. [Review exercise](docs/book/19-browser-views.md#review-edits-to-three-shelves)
+In the reading-list example, keep the proposal key from the user's review and pass it to `POST /proposals/context` with the reviewer's authenticated session and CSRF token. Read the named form for that proposal. Requesting another preview would create a different proposal. The optional MCP adapter binds that key at startup and uses the caller's session for every discovery and apply request. Supply only the three edited titles as tool arguments. The SDK trial recovered the same shelf outcomes after restart and received KeyConflict for a changed retry. [Review exercise](docs/book/19-browser-views.md#review-edits-to-three-shelves)
 
 ### Slicing a list
 
