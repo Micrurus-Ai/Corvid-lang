@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from verify_reading_list import read, serve
+from storefront_editor import check_editor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,7 +129,7 @@ def check_rebuild(cli, project, installed, rebuilt):
     print("Rebuilt notebook price, checkout and served JS/Wasm assets passed")
 
 
-def verify(cli, channel, http_only, work_dir, engine="chromium"):
+def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
     if work_dir is not None:
         work_dir.mkdir(parents=True, exist_ok=False)
     with (nullcontext(work_dir) if work_dir is not None else TemporaryDirectory()) as tmp:
@@ -136,6 +137,8 @@ def verify(cli, channel, http_only, work_dir, engine="chromium"):
         subprocess.run([cli, "new", "storefront"], cwd=root, check=True)
         project = root / "storefront"
         shutil.copytree(ROOT / "examples/storefront/src", project / "src", dirs_exist_ok=True)
+        if lsp is not None:
+            check_editor(lsp, project)
         check_picker_inputs(cli, project)
         for args in (["check"], ["test", "src/main.cor"], ["build", "src/main.cor", "--target", "web"]):
             subprocess.run([cli, *args], cwd=project, check=True)
@@ -186,9 +189,11 @@ if __name__ == "__main__":
     parser.add_argument("--browser", choices=("chromium", "firefox", "webkit"))
     parser.add_argument("--channel", help="Chromium distribution (defaults to Edge when --browser is omitted)")
     parser.add_argument("--http-only", action="store_true")
+    parser.add_argument("--lsp", type=Path, help="also exercise editor navigation and unsaved diagnostics")
     parser.add_argument("--work-dir", type=Path, help="keep the scaffold and extracted archive in a new directory")
     args = parser.parse_args()
     if args.channel and args.browser in ("firefox", "webkit"):
         parser.error("--channel requires a Chromium browser")
     channel = args.channel or ("msedge" if args.browser is None else None)
-    verify(args.cli.resolve(), channel, args.http_only, args.work_dir, args.browser or "chromium")
+    verify(args.cli.resolve(), channel, args.http_only, args.work_dir, args.browser or "chromium",
+           args.lsp.resolve() if args.lsp else None)

@@ -1,0 +1,15 @@
+# On a pixel grid, visit one cell per step along the longer axis.
+agent steps(dx: Int, dy: Int) -> Int:
+    if dx < 0:
+        dx = 0 - dx
+    if dy < 0:
+        dy = 0 - dy
+    if dx > dy:
+        return dx
+    return dy
+
+agent coordinate(start: Int, end: Int, step: Int, count: Int) -> Int:
+    if count == 0:
+        return start
+    # Grid coordinates are nonnegative. Round ties toward the larger cell.
+    return (start * (count - step) + end * step + count / 2) / count

@@ -36,3 +36,11 @@ Reply privately to the person who invited you. A few lines are enough.
 4. Which docs, people, or AI tools helped? What would you change first?
 
 If you are happy for us to ask in 30 days what you chose for your next feature, add “follow-up welcome.” Sharing source code is optional.
+
+## At the 30-day follow-up
+
+If you opted in, a short private reply about what happened since the trial is enough.
+
+1. What was the next feature or project you worked on? Which stack did you actually use, and why? If you had no new work, say so.
+2. Did a missing capability or a difficult step affect that choice? What were you trying to do, and how did you get past it, switch stacks or stop?
+3. Did you recommend Corvid to anyone on your own initiative? You can describe the recommendation without naming the person. With their consent, we can also record whether they installed Corvid and what they built independently.

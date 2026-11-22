@@ -2,6 +2,8 @@
 
 In a named-state component, `state pages_read = 0` infers an integer for each mounted instance. A button can update it with `pages_read += 1`. In the reading-list agent prototype, `allow lookup_shelf once` permits one lookup and `within 30 seconds` bounds the complete recommendation. A `BookSuggestion` is a preview. **Apply suggestion** writes it to the shelf. [Agent](docs/book/10-agents.md#your-first-agent-in-the-reading-list) and [component](docs/book/19-browser-views.md#a-component-with-named-state-prototype)
 
+The first-app preview guide asks participants to opt in to a 30-day follow-up. The June CLI trial documents a requested retry after fixes. Voluntary repeat use still needs a participant’s account of the stack they chose for their next feature or project. Record “no new work” when a participant says so and “no response” only when a documented follow-up went unanswered during its reporting window. [Follow-up questions](docs/external-trials/first-app-preview-guide.md#at-the-30-day-follow-up)
+
 A JavaScript app can import a Corvid counter as a custom element. Its view renders at build time, its Corvid event handler runs as WebAssembly, and each instance owns its state. The host registers the exported class with the browser's `customElements.define`. [Export and use a Corvid component](docs/book/19-browser-views.md#embed-a-corvid-counter-in-a-javascript-app)
 
 Use `ui.date_field` for a native booking date, `ui.bind_field` to synchronize a custom calendar, and `ui.agent_post_form` to let an assistant fill the same form for confirmation. Replacing the picker changes one import. The booking handler and the assistant's date argument stay the same. [Booking walkthrough](docs/book/19-browser-views.md#use-a-browser-calendar-in-a-corvid-form)
@@ -8108,6 +8110,10 @@ Write `import python "math" as numbers effects: pure:` and indent a signature su
 ### Using Corvid from C and JavaScript
 
 Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C. Follow the generated parameter order, release returned strings with `corvid_free_string` and release observation handles with `corvid_observation_release`. For a JavaScript host, build with `--target wasm` and use the generated module's `adaptImports` to supply tool implementations. Corvid integers cross the Wasm boundary as JavaScript BigInt values. The C and Wasm ABI guides include host examples.
+
+### Discovering a reviewed action
+
+In the reading-list example, keep the proposal key from the user's review and pass it to `POST /proposals/context` with the reviewer's authenticated session and CSRF token. Read the named form for that proposal. Requesting another preview would create a different proposal. The optional MCP adapter binds that key at startup and uses the caller's session for every discovery and apply request. Supply only the three edited titles as tool arguments. The SDK trial recovered the same shelf outcomes after restart and received KeyConflict for a changed retry. [Review exercise](docs/book/19-browser-views.md#review-edits-to-three-shelves)
 
 ### Slicing a list
 

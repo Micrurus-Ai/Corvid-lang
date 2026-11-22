@@ -108,6 +108,19 @@ agent review_three(owner: String) -> Result<String, String>:
         revision = json_get_int(row, "revision")?
         db_execute(db, "INSERT INTO proposal_items(proposal_key, shelf, base_revision, owner) VALUES (?, ?, ?, ?)", [db_param_text(key), db_param_int(shelf), db_param_int(revision), db_param_text(owner)])?
     db_execute(db, "COMMIT", [])?
+    return Ok(review_form(key, titles, first, second, third))
+
+type ProposalContext:
+    proposal_key: String
+
+agent discover_review(context: ProposalContext, owner: String) -> Result<String, String>:
+    db = db_open("reading.sqlite")?
+    rows = db_query_rows(db, "SELECT shelf FROM proposal_items WHERE proposal_key = ? AND owner = ? ORDER BY shelf", [db_param_text(context.proposal_key), db_param_text(owner)])?
+    if rows.length() != 3:
+        return Ok(ui.page("Review unavailable", []))
+    return Ok(review_form(context.proposal_key, Titles("", "", ""), "", "", ""))
+
+fn review_form(key: String, titles: Titles, first: String, second: String, third: String) -> String:
     controls = [
         View("<form method='post' action='/proposals/apply' toolname='apply_reviewed_titles' tooldescription='Apply the three reviewed shelf titles after confirmation.'>"),
         View("<input type='hidden' name='proposal_key' value='" + key + "'>"),
@@ -118,7 +131,7 @@ agent review_three(owner: String) -> Result<String, String>:
         View("</form>"),
         ui.link("Review another proposal", "/")
     ]
-    return Ok(ui.page("Review three shelves", controls))
+    return ui.page("Review three shelves", controls)
 
 agent apply_three(edit: ApplyTitles, owner: String) -> Result<ApplyResult, String>:
     titles = [edit.first, edit.second, edit.third]
@@ -211,6 +224,11 @@ server reviews:
 
     route POST "/proposals/review" -> html requires permission("shelves.review"):
         return match review_three(actor.id):
+            Ok(html) -> html
+            Err(reason) -> failure(reason)
+
+    route POST "/proposals/context" form ProposalContext -> html requires permission("shelves.review"):
+        return match discover_review(body, actor.id):
             Ok(html) -> html
             Err(reason) -> failure(reason)
 

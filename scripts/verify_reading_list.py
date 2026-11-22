@@ -370,7 +370,7 @@ def check_suggestions(url, provider, original, channel, http_only, regression_di
     return title
 
 
-def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False):
+def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False, remote_mcp=False):
     proposed = {"first": "North & South", "second": "Emma", "third": "The Moonstone"}
     database = installed / "reading.sqlite"
 
@@ -442,6 +442,25 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         for current, _ in before:
             assert escape(current) in review
         endpoint = url + "/proposals/apply-result"
+        # Discovery must be read-only and must not consume another model response.
+        context_url = url + "/proposals/context"
+        context_body = urlencode({"proposal_key": form.fields["proposal_key"]}).encode()
+        scoped = post(context_url, context_body, reviewer)
+        discovered = PreviewForm(scoped)
+        assert (discovered.tool, discovered.action) == (form.tool, form.action)
+        assert discovered.fields == {name: value if name == "proposal_key" else ""
+                                     for name, value in form.fields.items()}
+        for title in [*proposed.values(), *(current for current, _ in before)]:
+            assert escape(title) not in scoped
+        for context, identity in [(b"proposal_key=missing", reviewer), (context_body, peer)]:
+            assert PreviewForm(post(context_url, context, identity)).action is None
+        reader = session(auth, "read-only")
+        expired = session(auth, "expired")
+        set_role(auth, "expired", "reviewer", True)
+        with closing(sqlite3.connect(auth)) as db, db:
+            db.execute("UPDATE auth_sessions SET expires_ms = 2 WHERE actor_id = 'expired'")
+        refused(context_url, context_body, expired, 401)
+        refused(context_url, context_body, reader, 403)
         fields = form.fields
         assert json.loads(post(endpoint, urlencode(dict(fields, proposal_key="missing")).encode(), reviewer))["variant"] == "InvalidProposal"
         assert json.loads(post(endpoint, urlencode(dict(fields, third=" ")).encode(), reviewer))["variant"] == "InvalidProposal"
@@ -450,6 +469,7 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         payload = urlencode(fields).encode()
         assert json.loads(post(endpoint, payload, peer))["variant"] == "InvalidProposal"
         set_role(auth, "reviewer", "reviewer", False)
+        refused(context_url, context_body, reviewer, 403)
         for path in (form.action, "/proposals/apply-result"):
             refused(url + path, payload, {}, 401)
             refused(url + path, payload, reviewer, 403)
@@ -459,8 +479,13 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         refused(url + "/save", b"shelf=2&title=Manual", reviewer, 403)
         post(url + "/save", b"shelf=2&title=Manual", editor)
         # Commit the operation, then discard the response before consuming its outcome.
-        with urlopen(Request(url + form.action, data=payload, headers=reviewer), timeout=10) as response:
-            assert response.status == 200
+        if remote_mcp:
+            from check_review_mcp import exercise
+            exercise(url, form, reviewer, peer, expired, reader,
+                     lambda enabled: set_role(auth, "reviewer", "reviewer", enabled))
+        else:
+            with urlopen(Request(url + form.action, data=payload, headers=reviewer), timeout=10) as response:
+                assert response.status == 200
         committed = [(fields["first"], before[0][1] + 1),
                      ("Manual", before[1][1] + 1), (proposed["third"], before[2][1] + 1)]
         assert shelves() == committed
@@ -468,6 +493,8 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         endpoint = url + "/proposals/apply-result"
         receipt = json.loads(post(endpoint, payload, reviewer))
         assert receipt["variant"] == "Reviewed"
+        if remote_mcp:
+            exercise(url, form, reviewer, peer, expired, reader, receipt=receipt)
         outcomes, = receipt["fields"]
         assert [(item["variant"], item["fields"]) for item in outcomes] == [
             ("SavedShelf", [1]), ("ChangedShelf", [2]), ("SavedShelf", [3])]
@@ -688,7 +715,8 @@ def verify(args):
                         browser = playwright.chromium.launch(channel=args.channel)
                         check_contract_change(cli, installed, env, browser.new_page())
                         browser.close()
-                check_batch(cli, installed, local_env, provider, args.channel, args.http_only, args.webmcp)
+                check_batch(cli, installed, local_env, provider, args.channel, args.http_only,
+                            args.webmcp, args.remote_mcp)
             finally:
                 provider.shutdown()
         check_replay(cli, project, installed, root / "regression", env)
@@ -731,6 +759,7 @@ if __name__ == "__main__":
     parser.add_argument("cli", type=Path)
     parser.add_argument("--work-dir", type=Path, help="create and retain the trial in this new directory")
     parser.add_argument("--channel", help="Playwright Chromium channel, e.g. msedge")
+    parser.add_argument("--remote-mcp", action="store_true", help="exercise the scoped HTTP adapter with the MCP SDK")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--http-only", action="store_true", help="skip the keyboard and browser timings")
     mode.add_argument("--webmcp", action="store_true", help="also discover and invoke the reviewed apply form")

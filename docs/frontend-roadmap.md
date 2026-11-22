@@ -19,11 +19,13 @@ Follow the [ordered implementation queue](../ROADMAP.md#remaining-work-in-execut
 ### Reuse and distribute a developer-authored component
 
 - [x] **Step 4. Reuse inside one app.** Define a local `ColorPicker` with a typed `Color` input and a change event carrying the selected `Color`. Import it on two screens, each with its own value and handler. Verify that a keyboard selection updates the consuming screen. Local reuse requires only an import.
-- [x] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
+- [ ] **Step 9. Share across apps.** Publish the step 4 picker as a versioned package to a test registry using Corvid's existing package workflow. Install and import it in a clean second app. Build and run that app using only the installed dependency. Verify its styling, keyboard interaction and typed change event without copying source files or manually connecting browser handlers. Pass an incompatible value and check that the compiler identifies the binding in the consuming app. [Package workflow](reference/package-imports.md)
 
 The step 4 storefront imports the same local picker in the notebook and pencil modules. Both typed POST handlers rendered the selected shade from an extracted web package and rejected invalid values. Edge 158 passed keyboard selection on both screens with scripting enabled and disabled. [Example and test commands](book/19-browser-views.md#edit-a-keyed-cart-and-reuse-a-color-picker)
 
-The signed storefront picker ran in a separate theme editor. Its native select worked with the keyboard with scripting enabled and disabled. An incompatible input failed type checking in the consumer. The Windows preview also passed live catalog discovery from an installed VSIX on a fresh runner without a source checkout. [Picker exercise](../scripts/verify_published_picker.py) ? [Installed preview test](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44959552181/job/137021872305)
+The [clean palette installation](../scripts/verify_picker_package.py) passed lock verification, offline check, test and web build after disconnecting its file registry. The extracted app served the picker layout and change-event module, accepted Moss and rejected an invalid shade. The checker located an incompatible picker argument in the consumer. Computed style and keyboard use in this installation await a working browser runner.
+
+The signed storefront picker previously ran in a separate theme editor. Its native select worked with the keyboard with scripting enabled and disabled. An incompatible input failed type checking in the consumer. The Windows preview also passed live catalog discovery from an installed VSIX on a fresh runner without a source checkout. [Picker exercise](../scripts/verify_published_picker.py) ? [Installed preview test](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/44959552181/job/137021872305)
 
 ### Grow a simple app in the same codebase
 
@@ -133,12 +135,15 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 
 ### 4. Open the browser platform and ecosystem
 
+**Scoped action discovery.** The packaged reading-list HTTP trial verified discovery for one actor-owned proposal. The UI and context route render the same named form. Only the UI populates its shelf titles. The context route checks current permission, and a peer reviewer cannot discover the action using the owner's key. Python MCP SDK 1.30.0 discovered the form-derived tool over loopback HTTP and invoked the typed apply route. An expired or read-only session was refused. The client recovered the same two saves and one conflict after an app and adapter restart, and a changed retry returned KeyConflict. [Review exercise](book/19-browser-views.md#review-edits-to-three-shelves)
+
 - [x] Generate discoverable schemas from explicitly exposed action types. Test discovery and invocation with a compatible browser assistant. Verify the same UI works with the adapter absent and that direct requests for an unexposed action are refused.
 
 - [ ] Design typed bindings for DOM and browser APIs using Web IDL where applicable. Cover promises, callbacks, events, nullable values, typed arrays, exceptions and object lifetime. Offer an explicit interop declaration for platform extensions. [Web IDL](https://webidl.spec.whatwg.org/)
 - [ ] Import JavaScript modules and custom elements, and export a Corvid component for another app to embed. Specify package resolution, versions, browser/server compatibility and source locations for interop errors.
   The [booking example](../examples/booking/src/pickers.cor) consumes a pinned JavaScript custom element through a standard form field. The [embedded counter](book/19-browser-views.md#embed-a-corvid-counter-in-a-javascript-app) exports a Corvid state control to a JavaScript host. General typed module imports and interop diagnostics remain open.
 - [ ] Exercise files and clipboard with permissions, IndexedDB storage, workers and transferable data, canvas graphics, audio/media and capability detection. Add offline caching and version updates. Document a fallback when a capability is unavailable.
+  The [drawing editor exercise](book/19-browser-views.md#draw-pixel-strokes-in-a-worker) saves worker-rendered cells to IndexedDB and caches the application shell, worker and Wasm. Five Node tests passed, including overlapping writes across two connections in an in-memory database and retrieval of built files through the cache handler. The [browser trial](../scripts/verify_drawing_editor.py) still needs to verify pointer input, restored pixels and offline editing after the server stops.
 
 **Exit:** build an offline drawing editor in Corvid that handles pointer input, moves work off the UI thread, persists a drawing and restores it after reload. Separately, consume a third-party custom element and embed a Corvid component in a JavaScript host.
 

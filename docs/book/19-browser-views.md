@@ -150,6 +150,8 @@ From the repository root, run `python scripts/verify_storefront.py target/debug/
 
 The verifier edits the notebook price in the scaffold, rebuilds it and serves the two extracted archives separately. Twelve notebooks and one pencil total 5,525 cents in the original and 5,825 cents after the edit. It fetches the rebuilt JavaScript and Wasm over HTTP and checks their content types and bytes. To repeat the same keyboard journey with installed Playwright engines, run the command once each with `--browser chromium`, `--browser firefox` and `--browser webkit` in place of `--http-only`.
 
+To check a shared edit across both screens, add `--lsp target/debug/corvid-lsp.exe` to the storefront trial command. The trial opens both callers and the picker over stdio. Go to Definition at either call opens the declaration in `color_picker.cor`. The trial changes `change_path` from `String` to `Int` and converts it back to a string inside the picker body. The component stays well typed, and both callers report the incompatible destination on the binding line. Restoring the original buffer clears both errors without saving.
+
 To exercise editor feedback, open `src/notebook.cor` with the Corvid language server. Change the first argument of `ColorPicker(value, "/notebook")` to `"Moss"`. In the stdio trial the server reported that the argument required `Color` and received `String` on line 7. Restoring `value` cleared the diagnostic before saving.
 
 ### Compare a local action with the save form
@@ -166,7 +168,9 @@ Extract the resulting web archive and migrate and serve it as in the reading-lis
 
 Run `python scripts/verify_picker_package.py target/debug/corvid.exe --work-dir target/picker-trial` from the repository root on Windows. Choose a new directory for each run. The trial signs the storefront's original picker, publishes it into a local directory, runs `corvid new palette`, then installs `@trial/color-picker@1.0.0`. The [palette app](../../examples/palette/src/main.cor) imports the versioned package and declares its own typed POST route.
 
-The picker imports the compiler's bundled UI module with `import "std:ui" as ui`. The trial disconnects the registry after verifying the lock and cached source, then checks, tests, packages and serves the palette offline. The extracted web archive includes the locked package. Selecting Moss posts the typed shade to the palette's route and shows the updated selection.
+The picker imports the compiler's bundled UI module with `import "std:ui" as ui`. The trial disconnects the registry after verifying the lock and cached source, then checks, tests, packages and serves the palette offline. The extracted web archive includes the locked package. The picker arranges the select and submit button with `ui.row`. The extracted app serves their wrapping flex layout and the standard change-event module. The HTTP trial submits `shade=1` and checks that Moss is selected, then submits `shade=3` and checks for HTTP 400. The compiler check passes a string to the installed picker and verifies that the diagnostic points to the binding line in the palette source.
+
+On a runner with Playwright and Edge, add `--browser-channel msedge` to the trial command. It checks the computed wrapping style, tabs to the select and chooses Moss with the arrow key. With scripting disabled, it tabs to Apply color and presses Enter. Both paths should post the same shade. The HTTP and diagnostic checks passed locally. The browser run stopped at Playwright import on this runner.
 
 ### Display state in more than one view
 
@@ -268,6 +272,10 @@ The verification script changes the required save field from `title` to `book_ti
 ### Review edits to three shelves
 
 The archive includes a second entry point, `src/reviews.cor`, for a shared reading list. Run the verification script for a local exercise with seeded sessions and a loopback model. For a configured service, start `corvid serve src/reviews.cor` from the migrated package, with the identity provider and durable session store configured. Use this entry point alone for a shared database. The starter in `src/main.cor` deliberately permits anonymous manual saves for the local exercise.
+
+To discover the action for an existing proposal, POST its `proposal_key` as a form field to `/proposals/context` with the reviewer's session cookie and CSRF header. An owner with current review permission receives the same `apply_reviewed_titles` form with three empty title fields. Discovery keeps the key bound to that proposal and leaves the titles and revisions in storage. A peer reviewer gets a page without the form. An expired session receives HTTP 401 and loss of review permission produces HTTP 403. To expose this proposal to a local MCP host, run `python scripts/reading_review_mcp.py --app-port PORT` and enter its key at the prompt. Configure the printed loopback endpoint with the calling reviewer's session cookie and CSRF header. The adapter binds the proposal when it starts. It discovers the three editable string fields from the named form and rechecks discovery before each call. Have the host show the three edits for confirmation before submitting them. The tool returns the typed receipt from `/proposals/apply-result` as JSON text.
+
+To exercise the adapter in a disposable installation, install `mcp==1.30.0` in a Python environment and run `python scripts/verify_reading_list.py PATH_TO_CORVID --http-only --remote-mcp`. The SDK client negotiated protocol version 2025-06-18. The packaged trial exercised revocation after discovery, a concurrent shelf edit and retry after restarting both processes.
 
 Choose **Suggest three titles** in a reviewer session. The review page shows each original title beside its editable replacement. Keep that page open, save a manual edit to shelf 2 in an editor session, then choose **Apply reviewed titles**. The receipt identifies each saved shelf and each shelf whose title changed during review.
 
@@ -441,3 +449,23 @@ customElements.define("reading-counter", ReadingCounter);
 Place `<reading-counter></reading-counter>` wherever the control belongs. Each instance owns its shadow DOM and count. Moving an instance preserves its state. Reloading creates fresh instances. The host serves static files over HTTP, including the generated JavaScript and WebAssembly. It needs no running Corvid service. [Complete HTML host](../../examples/embedded_counter/index.html)
 
 The exporter renders trusted component markup at build time. The generated events module provides `componentElement(html)`, which returns a custom element class and binds Corvid state controls when an instance first connects. This example covers locally managed state and keyboard actions. To run the browser trial with Python Playwright and Chrome, use `python scripts/verify_embedded_counter.py target/debug/corvid.exe`.
+
+## Draw pixel strokes in a worker
+
+From `examples/drawing_editor`, build the stroke module and serve the example on loopback.
+
+```sh
+corvid check src/stroke.cor
+corvid build src/stroke.cor --target wasm
+npm ci
+npm test
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/` and drag across the canvas when “Drag to draw” appears. A tap should paint one cell. The page maps pointer coordinates onto a 96 × 64 grid and captures the pointer until the stroke ends. The module worker loads the generated Wasm wrapper, calls Corvid to interpolate the cells between consecutive positions, and transfers a typed array back to the canvas.
+
+Wait for “Drawing saved.” before reloading. Each worker response writes its painted coordinates to IndexedDB in one transaction. Repainting the same cell reuses its key, so two tabs can add strokes without overwriting each other's saved marks. The editor loads the keys before enabling pointer input. If storage is unavailable, you can still draw for the current session.
+
+To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
+
+The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
