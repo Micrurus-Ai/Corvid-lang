@@ -69,7 +69,8 @@ server reader:
 
 
 def verify(archive, editor):
-    with TemporaryDirectory() as tmp:
+    # Windows Crashpad can briefly retain its report after the editor exits.
+    with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         root = Path(tmp)
         with zipfile.ZipFile(archive) as package:
             package.extractall(root / "install")
@@ -128,11 +129,14 @@ def verify(archive, editor):
                         break
                     time.sleep(0.25)
                 assert "corvid://@corvid/ui" in main.read_text(), main.read_text()
+                page.keyboard.press("Control+Shift+w")
                 browser.close()
         finally:
-            if app.poll() is None:
+            try:
+                app.wait(timeout=5)
+            except subprocess.TimeoutExpired:
                 app.terminate()
-            app.wait(timeout=30)
+                app.wait(timeout=30)
         result = subprocess.check_output([cli, "run", "src/main.cor"], cwd=project, env=env, text=True)
         assert json.loads(result.strip()) == "<details><summary>Details</summary><p>Hello</p></details>"
         assert "corvid://@corvid/ui" in (project / "Corvid.lock").read_text()
