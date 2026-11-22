@@ -180,6 +180,8 @@ Start testing accessibility, performance and browser behavior with the first pro
 
 - [ ] Connect the UI to the same agent used by the CLI and worker. From the progress view, let a person pause, correct a result, revise the task and resume. Use the main roadmap's handoff and replay scenarios as the acceptance tests. [Building agents in Corvid](../ROADMAP.md#building-agents-in-corvid)
 
+The [shelf extraction exercise](book/19-browser-views.md#pause-and-revise-a-shelf-extraction) passed the packaged HTTP and worker restart trial with a loopback model. The browser check for search cancellation, handoff controls and recovery after closing the progress view still needs a runner with browser launch access.
+
 The main roadmap records runtime work on streams, durable jobs, budgets, provenance and replay. Track the remaining user-facing behaviors during the independent app trials.
 
 - [ ] Close a view-owned search and verify cancellation. Close a view observing a saved job, reopen it after a worker restart, and recover progress under the same user account.

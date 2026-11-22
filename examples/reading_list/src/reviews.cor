@@ -3,6 +3,7 @@ import "./std/json" use json_get_int, json_get_string
 import "./std/ui" as ui
 import "./std/ui" use View
 
+import "./handoff" use ExtractionRequest, Checkpoint, Revision, start_extraction, checkpoint, revise, work_response, work_screen
 import "./main" use Reading, Selection, Search, SearchResult, find_titles, list_readings, save, search_page
 
 identity readers:
@@ -161,6 +162,7 @@ fn failure(message: String) -> String:
 
 agent review_screen(selected: Int) -> Result<String, String>:
     content = [
+        ui.link("Shelf extraction progress", "/work"),
         ui.link("Search shelves", "/search?term="),
         ui.link("Sign in", "/auth/google/login"),
         View("<form method='post' action='/proposals/review'>"),
@@ -212,3 +214,17 @@ server reviews:
 
     route POST "/proposals/apply-result" form ApplyTitles -> json ApplyResult requires permission("shelves.review"):
         return apply_result(body, actor.id)
+
+    route GET "/work" -> html requires permission("shelves.review"):
+        return match work_screen(actor.id):
+            Ok(html) -> html
+            Err(reason) -> failure(reason)
+
+    route POST "/work/start" form ExtractionRequest -> html requires permission("shelves.review"):
+        return work_response(start_extraction(actor.id, body))
+
+    route POST "/work/checkpoint" form Checkpoint -> html requires permission("shelves.review"):
+        return work_response(checkpoint(actor.id, body))
+
+    route POST "/work/revise" form Revision -> html requires permission("shelves.review"):
+        return work_response(revise(actor.id, body))

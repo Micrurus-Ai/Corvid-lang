@@ -194,7 +194,7 @@ class LocalModel(BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.requests.put(request)
-        output = self.server.outputs.get(timeout=5)
+        output = self.server.outputs.get(timeout=getattr(self.server, "response_timeout", 5))
         if output is None:
             self.server.waiting.set()
             self.connection.settimeout(8)
@@ -483,7 +483,13 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
                 assert shelves() == [("Edited in the browser", committed[0][1] + 1),
                                      ("New manual edit", committed[1][1] + 1),
                                      (proposed["third"], committed[2][1] + 1)]
+                from check_reading_handoff import handoff_trial
+                handoff_trial(cli, installed, env, url, reviewer, peer, editor, context.new_page())
                 browser.close()
+        else:
+            from check_reading_handoff import handoff_trial
+            set_role(auth, "reviewer", "reviewer", True)
+            handoff_trial(cli, installed, env, url, reviewer, peer, editor)
     print("Replayed two saves and one conflict after restart with unchanged revisions.")
 
 
@@ -577,7 +583,9 @@ def verify(args):
         project = root / "reading-list"
         subprocess.run([cli, "new", project.name], cwd=root, env=env, check=True)
         shutil.copyfile(example / "src/main.cor", project / "src/main.cor")
-        shutil.copyfile(example / "src/reviews.cor", project / "src/reviews.cor")
+        for name in ("reviews.cor", "handoff.cor", "extract.cor"):
+            shutil.copyfile(example / "src" / name, project / "src" / name)
+        subprocess.run([cli, "check", "src/extract.cor"], cwd=project, env=env, check=True)
         subprocess.run([cli, "check", "src/reviews.cor"], cwd=project, env=env, check=True)
         shutil.copytree(example / "migrations", project / "migrations")
         subprocess.run([cli, "check"], cwd=project, env=env, check=True)
