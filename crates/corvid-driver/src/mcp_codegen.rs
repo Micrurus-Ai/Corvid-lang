@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_module_compiles() {
+    fn generated_module_typechecks_with_bundled_imports() {
         let tools = vec![descriptor(
             "search-issues",
             serde_json::json!({
@@ -291,11 +291,11 @@ mod tests {
         let path = project.path().join("src/mcp/github.cor");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, &module).unwrap();
-        let compiled = crate::compile_with_config_at_path(&module, &path, None);
+        let checked = crate::analyze_with_config_at_path(&module, &path, None);
         assert!(
-            compiled.ok(),
-            "generated module must compile: {:?}\n{module}",
-            compiled.diagnostics
+            checked.ok(),
+            "generated module must typecheck: {:?}\n{module}",
+            checked.diagnostics
         );
     }
 
