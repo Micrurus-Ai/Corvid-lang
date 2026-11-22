@@ -275,10 +275,6 @@ def check_suggestions(url, provider, original, channel, http_only, regression_di
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": user_message(original, context)}]
     assert "Call 1 returned Lookup(1). Lookup returned: The Odyssey" in preview
-    promote(preview, regression_dir)
-    for file in regression_dir.iterdir():
-        sanitized = file.read_text(encoding="utf-8")
-        assert all(secret not in sanitized for secret in [original, "The Odyssey", title])
     assert "Shelf 2: " + escape(original) in read(url)
 
     provider.outputs.put(None)
@@ -306,9 +302,16 @@ def check_suggestions(url, provider, original, channel, http_only, regression_di
             provider.outputs.put("{")
             start.click()
             expect(page.get_by_role("status")).to_contain_text("Suggestion failed")
+            title = 'Browser selection <private> & friends'
             provider.outputs.put(action("Lookup", 1))
             provider.outputs.put(action("Suggest", title))
-            start.click()
+            with page.expect_response(lambda response: response.url == url + "/suggest"
+                                      and response.request.method == "POST") as captured:
+                start.click()
+            response = captured.value
+            assert response.ok, response.status
+            preview = response.text()
+            assert PreviewForm(preview).fields == {"shelf": "2", "title": title}
             draft = page.locator("#preview").get_by_label("title", exact=True)
             expect(draft).to_have_value(title)
             page.get_by_text("Suggestion trace", exact=True).click()
@@ -321,6 +324,11 @@ def check_suggestions(url, provider, original, channel, http_only, regression_di
             page.get_by_role("button", name="Apply suggestion").click()
             expect(page.get_by_text("Saved", exact=True)).to_be_visible()
             browser.close()
+    promote(preview, regression_dir)
+    private_title = PreviewForm(preview).fields["title"]
+    for file in regression_dir.iterdir():
+        sanitized = file.read_text(encoding="utf-8")
+        assert all(secret not in sanitized for secret in [original, "The Odyssey", private_title])
     return title
 
 
