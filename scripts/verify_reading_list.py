@@ -404,6 +404,25 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         for current, _ in before:
             assert escape(current) in review
         endpoint = url + "/proposals/apply-result"
+        # Discovery must be read-only and must not consume another model response.
+        context_url = url + "/proposals/context"
+        context_body = urlencode({"proposal_key": form.fields["proposal_key"]}).encode()
+        scoped = post(context_url, context_body, reviewer)
+        discovered = PreviewForm(scoped)
+        assert (discovered.tool, discovered.action) == (form.tool, form.action)
+        assert discovered.fields == {name: value if name == "proposal_key" else ""
+                                     for name, value in form.fields.items()}
+        for title in [*proposed.values(), *(current for current, _ in before)]:
+            assert escape(title) not in scoped
+        for context, identity in [(b"proposal_key=missing", reviewer), (context_body, peer)]:
+            assert PreviewForm(post(context_url, context, identity)).action is None
+        reader = session(auth, "read-only")
+        expired = session(auth, "expired")
+        set_role(auth, "expired", "reviewer", True)
+        with closing(sqlite3.connect(auth)) as db, db:
+            db.execute("UPDATE auth_sessions SET expires_ms = 2 WHERE actor_id = 'expired'")
+        refused(context_url, context_body, expired, 401)
+        refused(context_url, context_body, reader, 403)
         fields = form.fields
         assert json.loads(post(endpoint, urlencode(dict(fields, proposal_key="missing")).encode(), reviewer))["variant"] == "InvalidProposal"
         assert json.loads(post(endpoint, urlencode(dict(fields, third=" ")).encode(), reviewer))["variant"] == "InvalidProposal"
@@ -412,6 +431,7 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         payload = urlencode(fields).encode()
         assert json.loads(post(endpoint, payload, peer))["variant"] == "InvalidProposal"
         set_role(auth, "reviewer", "reviewer", False)
+        refused(context_url, context_body, reviewer, 403)
         for path in (form.action, "/proposals/apply-result"):
             refused(url + path, payload, {}, 401)
             refused(url + path, payload, reviewer, 403)

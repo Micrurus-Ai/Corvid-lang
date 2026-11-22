@@ -8107,6 +8107,10 @@ Write `import python "math" as numbers effects: pure:` and indent a signature su
 
 Build a `pub extern "c"` agent with `--target cdylib --header` to call it from C. Follow the generated parameter order, release returned strings with `corvid_free_string` and release observation handles with `corvid_observation_release`. For a JavaScript host, build with `--target wasm` and use the generated module's `adaptImports` to supply tool implementations. Corvid integers cross the Wasm boundary as JavaScript BigInt values. The C and Wasm ABI guides include host examples.
 
+### Discovering a reviewed action
+
+In the reading-list example, keep the proposal key from the user's review and pass it to `POST /proposals/context` with the reviewer's authenticated session and CSRF token. Read the named form for that proposal. Requesting another preview would create a different proposal. The packaged HTTP exercise checks the field names, owner, permission and session expiry. [Review exercise](docs/book/19-browser-views.md#review-edits-to-three-shelves)
+
 ### Slicing a list
 
 `items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.
