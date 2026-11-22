@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+The first-app preview guide asks participants to opt in to a 30-day follow-up. The June CLI trial documents a requested retry after fixes. Voluntary repeat use still needs a participant’s account of the stack they chose for their next feature or project. Record “no new work” when a participant says so and “no response” only when a documented follow-up went unanswered during its reporting window. [Follow-up questions](docs/external-trials/first-app-preview-guide.md#at-the-30-day-follow-up)
+
 A JavaScript app can import a Corvid counter as a custom element. Its view renders at build time, its Corvid event handler runs as WebAssembly, and each instance owns its state. The host registers the exported class with the browser's `customElements.define`. [Export and use a Corvid component](docs/book/19-browser-views.md#embed-a-corvid-counter-in-a-javascript-app)
 
 Use `ui.date_field` for a native booking date, `ui.bind_field` to synchronize a custom calendar, and `ui.agent_post_form` to let an assistant fill the same form for confirmation. Replacing the picker changes one import. The booking handler and the assistant's date argument stay the same. [Booking walkthrough](docs/book/19-browser-views.md#use-a-browser-calendar-in-a-corvid-form)

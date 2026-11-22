@@ -70,6 +70,8 @@ Once those checkpoints identify the final revision, verify its six platform pack
 
 The Windows x64 checkout CLI passed the install guide's doctor, scaffold, check, run and trace replay commands. The greeting retained its original timestamp. The fresh scaffold passed the migration scan and all three CLI upgrade-assist tests passed. [Install guide](docs/book/01-install.md#verify-the-install)
 
+**Step 13 awaiting adoption feedback.** As of November 22, 2026, this checkout contains the [opt-in invitation and follow-up questions](docs/external-trials/first-app-preview-guide.md#at-the-30-day-follow-up). It has no dated opt-in cohort, invitation count, follow-up window or participant responses for that check. The June CLI trial records a requested retest. Voluntary repeat use, referrals, switching reasons and missing capabilities remain unknown. Once follow-up records are available, use recurring obstacles and their effects on participants’ work to order the next cycle. [Adoption criteria](docs/frontend-roadmap.md#will-developers-choose-corvid-again)
+
 Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
 
 Use the [simple-to-advanced application trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase) when reviewing changes to the full-stack language and grammar.
