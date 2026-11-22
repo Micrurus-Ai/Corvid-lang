@@ -1,0 +1,11 @@
+{
+  "name": "corvid-drawing-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none test/*.test.mjs"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4"
+  }
+}

@@ -449,10 +449,15 @@ From `examples/drawing_editor`, build the stroke module and serve the example on
 ```sh
 corvid check src/stroke.cor
 corvid build src/stroke.cor --target wasm
-node --test --test-isolation=none test/stroke.test.mjs
+npm ci
+npm test
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
 Open `http://127.0.0.1:8000/` and drag across the canvas when “Drag to draw” appears. A tap should paint one cell. The page maps pointer coordinates onto a 96 × 64 grid and captures the pointer until the stroke ends. The module worker loads the generated Wasm wrapper, calls Corvid to interpolate the cells between consecutive positions, and transfers a typed array back to the canvas.
 
-The Node test runs the same module in a worker thread with a local file loader and checks the returned cells. The drawing currently lives in the open page. Reload clears it.
+Wait for “Drawing saved.” before reloading. Each worker response writes its painted coordinates to IndexedDB in one transaction. Repainting the same cell reuses its key, so two tabs can add strokes without overwriting each other's saved marks. The editor loads the keys before enabling pointer input. If storage is unavailable, you can still draw for the current session.
+
+To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
+
+The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
