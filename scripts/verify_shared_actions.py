@@ -195,7 +195,7 @@ def verify(cli, cdp, channel, work_dir, package_only):
 
 def run_browser(playwright, url, cdp, channel):
     browser = (playwright.chromium.connect_over_cdp(cdp, timeout=10000) if cdp else
-               playwright.chromium.launch(channel=channel, args=["--enable-features=WebMCPTesting"]))
+               playwright.chromium.launch(channel=channel, args=["--enable-blink-features=WebMCP,WebMCPTesting"]))
     for adapter in (False, True):
         page = browser.contexts[0].new_page() if cdp else browser.new_page()
         try:

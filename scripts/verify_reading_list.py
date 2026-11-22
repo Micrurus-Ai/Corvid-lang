@@ -437,7 +437,7 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False)
         if not http_only:
             from playwright.sync_api import expect, sync_playwright
             with sync_playwright() as playwright:
-                flags = ["--enable-features=WebMCPTesting"] if webmcp else []
+                flags = ["--enable-experimental-web-platform-features"] if webmcp else []
                 browser = playwright.chromium.launch(channel=channel, args=flags)
                 context = browser.new_context()
                 for pair in reviewer["Cookie"].split("; "):

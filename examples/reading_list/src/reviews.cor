@@ -18,18 +18,21 @@ identity readers:
 # The session cookie stays HttpOnly. Echo the companion CSRF cookie on each form POST.
 fn review_controls() -> View:
     return View("""<p id='review-status' role='status'></p><section id='review'></section><script>
+const pendingReviews = new WeakSet();
 document.addEventListener('submit', event => {
     const form = event.target;
     if (form.method !== 'post') return;
     event.preventDefault();
-    const result = submitReview(form);
+    const result = submitReview(form, event.agentInvoked);
     if (event.agentInvoked) event.respondWith(result);
 });
-async function submitReview(form) {
+async function submitReview(form, agentInvoked) {
+    if (pendingReviews.has(form)) return 'Review already in progress.';
+    pendingReviews.add(form);
     const button = form.querySelector('button');
     const status = document.querySelector('#review-status');
     const token = document.cookie.split('; ').find(cookie => cookie.startsWith('corvid_csrf='));
-    button.disabled = true;
+    if (!agentInvoked) button.disabled = true;
     status.textContent = 'Working...';
     try {
         const response = await fetch(form.action, {
@@ -42,6 +45,11 @@ async function submitReview(form) {
             return status.textContent;
         }
         const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+        if (agentInvoked) {
+            // Removing the registered form cancels the browser's pending tool reply.
+            status.replaceChildren(...page.body.childNodes);
+            return status.textContent.trim();
+        }
         const review = document.querySelector('#review');
         review.replaceChildren(...page.body.childNodes);
         status.textContent = '';
@@ -50,7 +58,8 @@ async function submitReview(form) {
         status.textContent = 'Request interrupted. Retry this form.';
         return status.textContent;
     } finally {
-        button.disabled = false;
+        pendingReviews.delete(form);
+        if (!agentInvoked) button.disabled = false;
     }
 }
 </script>""")
