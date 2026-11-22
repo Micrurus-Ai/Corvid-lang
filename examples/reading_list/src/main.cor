@@ -79,7 +79,7 @@ start.onclick = async () => {
     cancel.disabled = false;
     cancel.focus();
     preview.replaceChildren();
-    status.textContent = 'Requesting a titleâ€¦';
+    status.textContent = 'Requesting a title…';
     try {
         const response = await fetch('/suggest', {
             method: 'POST', body: new URLSearchParams({shelf: start.value}), signal: request.signal
@@ -164,7 +164,7 @@ async function search() {
     results.replaceChildren();
     message.textContent = '';
     if (!field.value.trim()) return;
-    message.textContent = 'Searchingâ€¦';
+    message.textContent = 'Searching…';
     try {
         const params = new URLSearchParams({term: field.value});
         const response = await fetch('/search/results?' + params, {signal: request.signal});
