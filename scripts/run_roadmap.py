@@ -10,7 +10,7 @@ import tempfile
 import time
 
 
-BRANCH = "corvid/roadmap-tasks"
+BRANCHES = {"corvid/roadmap-tasks", "corvid/remaining-roadmap"}
 FIELDS = {
     "status": {"type": "string", "enum": ["complete", "continue", "awaiting_feedback", "blocked"]},
     "summary": {"type": "string"},
@@ -24,8 +24,11 @@ def git(*args):
 
 
 def run(review_pending=False, retry_blocked=False):
-    if git("branch", "--show-current") != BRANCH:
-        raise SystemExit(f"Run in the dedicated {BRANCH} checkout.")
+    branch = git("branch", "--show-current")
+    if branch not in BRANCHES:
+        raise SystemExit("Run in a dedicated roadmap checkout: " + ", ".join(sorted(BRANCHES)))
+    if git("diff", "--cached", "--name-only"):
+        raise SystemExit("Inspect staged changes before starting the roadmap worker.")
     state = Path(git("rev-parse", "--absolute-git-dir")) / "corvid-roadmap"
     state.mkdir(exist_ok=True)
     lock = (state / "lock").open("a+b")
@@ -43,10 +46,10 @@ def run(review_pending=False, retry_blocked=False):
                        Path("ROADMAP.md").read_text(encoding="utf-8"), re.M)
     if [int(n) for n, _, _ in steps] != list(range(1, 14)):
         raise SystemExit("Expected the ordered roadmap steps 1 through 13.")
-    git("fetch", "origin", BRANCH)
+    git("fetch", "origin", branch)
     git("merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD")
     # Also finishes a previously interrupted push. Never force-push.
-    git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    git("push", "origin", f"HEAD:refs/heads/{branch}")
     trailers = git("log", "--format=%(trailers:key=Corvid-Roadmap-Step,valueonly)").splitlines()
     pending = set(git("log", "--format=%(trailers:key=Corvid-Roadmap-Feedback,valueonly)").split())
     pending.difference_update(trailers)
@@ -86,6 +89,12 @@ independent reader or adoption feedback remains, update ROADMAP.md with the
 specific pending check and return awaiting_feedback. This is a checkpoint,
 not a completed step. Use blocked for a genuine technical dependency or required
 approval. Never publish or claim release readiness with unresolved prerequisites.
+Each pass should finish one useful, tested increment. For step 9 start with the
+offline drawing editor, then work through its remaining acceptance criteria.
+Read the latest commits before repeating old checks. For continue, include the
+verified files for this increment so the runner can commit and push it now.
+If a checkpoint is already accurately documented and unchanged, use an empty
+file list and identify the existing roadmap entry in verification.
 Previous pass: {previous}"""
             with tempfile.TemporaryDirectory() as temp:
                 result = Path(temp) / "response.json"
@@ -103,25 +112,33 @@ Previous pass: {previous}"""
             print(f"Step {number}: {report['status']} - {report['summary']}", flush=True)
             if git("rev-parse", "HEAD") != head:
                 raise SystemExit("Checkout changed during development; inspect before resuming.")
-            if report["status"] == "continue":
-                continue
-            if not report["verification"].strip() or not report["files"]:
-                raise SystemExit("Missing verification or deliverables.")
+            progressing = report["status"] == "continue"
+            if not report["verification"].strip():
+                raise SystemExit("Missing verification.")
             feedback = report["status"] == "awaiting_feedback"
             deferred = report["status"] == "blocked"
+            if not report["files"]:
+                if (feedback or deferred) and not git("status", "--porcelain"):
+                    (pending if feedback else blocked).add(number)
+                    break
+                raise SystemExit("Missing deliverables for this pass.")
             if (feedback or deferred) and "ROADMAP.md" not in report["files"]:
                 raise SystemExit("Record outstanding feedback in ROADMAP.md.")
             git("--literal-pathspecs", "add", "--", *report["files"])
             git("diff", "--cached", "--check")
             marker = "Corvid-Roadmap-Feedback" if feedback else "Corvid-Roadmap-Step"
             verb = "Checkpoint" if feedback else "Complete"
+            if progressing:
+                marker, verb = "Corvid-Roadmap-Progress", "Advance"
             if deferred:
                 marker, verb = "Corvid-Roadmap-Blocked", "Checkpoint"
-            git("commit", "-m", f"{verb} roadmap step {number}: {task.rstrip('.')}",
+            git("commit", "-m", f"{verb} roadmap step {number}: {report['summary'].splitlines()[0]}",
                 "-m", report["verification"], "-m", f"{marker}: {number}")
-            git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
-            if git("ls-remote", "origin", f"refs/heads/{BRANCH}").split()[0] != git("rev-parse", "HEAD"):
+            git("push", "origin", f"HEAD:refs/heads/{branch}")
+            if git("ls-remote", "origin", f"refs/heads/{branch}").split()[0] != git("rev-parse", "HEAD"):
                 raise SystemExit("Remote commit verification failed.")
+            if progressing:
+                continue
             if deferred:
                 blocked.add(number)
             else:
