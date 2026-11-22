@@ -56,6 +56,8 @@ The learner reference was missing eight public UI helpers. The refreshed index p
 
 The Windows x64 checkout CLI passed the install guide's doctor, scaffold, check, run and trace replay commands. The greeting retained its original timestamp. The fresh scaffold passed the migration scan and all three CLI upgrade-assist tests passed. [Install guide](docs/book/01-install.md#verify-the-install)
 
+**Step 13 blocked on the independent trial baseline (November 22).** Step 11 has a local rehearsal. The checkout has no dated, opted-in independent trial cohort or invitation count from which to establish the 30-day follow-up window. The June friends-and-family records document a self-administered build and a requested retry. Voluntary repeat use, referrals, switching reasons and missing capabilities are unknown. The next cycle remains unordered pending participant observations. [Follow-up criteria](docs/frontend-roadmap.md#will-developers-choose-corvid-again)
+
 Update the learning files, run relevant tests and check performance as each feature lands. Start independent developer feedback as soon as the first app runs. Pursue the external R03 review in parallel with engineering.
 
 Use the [simple-to-advanced application trial](docs/frontend-roadmap.md#grow-a-simple-app-in-the-same-codebase) when reviewing changes to the full-stack language and grammar.
