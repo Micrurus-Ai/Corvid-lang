@@ -752,9 +752,9 @@ fn phase_42_apps_have_hardening_pack_artifacts() {
 #[test]
 fn phase_42_external_trial_packet_is_ready_but_not_faked() {
     let docs = repo_root().join("docs").join("external-trials");
-    let trial = fs::read_to_string(docs.join("phase-42-trial-one.md")).expect("read trial packet");
+    let trial = fs::read_to_string(docs.join("backend-app-evaluation.md")).expect("read trial packet");
     let triage =
-        fs::read_to_string(docs.join("phase-42-feedback-triage.md")).expect("read triage packet");
+        fs::read_to_string(docs.join("feedback-triage-guide.md")).expect("read triage packet");
     assert!(trial.contains("Pending real external reviewer"));
     assert!(trial.contains("Do not mark 42I1 or 42I2 complete"));
     assert!(triage.contains("No external reviewer signoff has been recorded yet"));
@@ -885,7 +885,7 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
 
     let dockerfile = fs::read_to_string(out.join("Dockerfile")).expect("read Dockerfile");
     // Post-2026-06-04 Dockerfile shape (the first 33M trial report
-    // at `docs/external-trials/33m-trial-anonymous-2026-06-04.md`
+    // at `docs/external-trials/cli-runtime-trial-report-2026-06-04.md`
     // surfaced the prior shape's hard-coded monorepo paths). The
     // first replacement at commit 1455b6c referenced a phantom
     // `ghcr.io/micrurus-ai/corvid` image that NO ci workflow ever
@@ -933,7 +933,7 @@ fn deploy_package_emits_dockerfile_and_oci_metadata() {
         !dockerfile.contains("cargo build -p corvid-cli"),
         "Dockerfile must NOT embed a Corvid monorepo build step — it ran fine \
          in the monorepo and broke every standalone app. See \
-         `docs/external-trials/33m-trial-anonymous-2026-06-04.md`."
+         `docs/external-trials/cli-runtime-trial-report-2026-06-04.md`."
     );
     assert!(
         !dockerfile.contains("COPY examples/backend/"),

@@ -116,7 +116,7 @@ pub fn synthesize(reports: &[PathBuf]) -> Result<Synthesis> {
 /// trial report. The parser is deliberately conservative: it ONLY
 /// matches the exact `### <sev> — <class>: <title>` shape used by
 /// the trial-report convention at
-/// `docs/external-trials/33m-friends-and-family-prompt.md`'s report
+/// `docs/external-trials/application-build-trial.md`'s report
 /// template. Other `###` headers (intake, table-of-contents, etc.)
 /// are ignored.
 fn extract_findings(report_path: &Path, text: &str) -> Vec<Finding> {

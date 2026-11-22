@@ -9,7 +9,7 @@
 //! had no way to verify which commit their binary was at,
 //! surfaced by the first 33M friends-and-family trial's follow-up
 //! audit (see
-//! `docs/external-trials/33m-friends-and-family-followup-prompt.md`
+//! `docs/external-trials/developer-retest-guide.md`
 //! "Transparency: this follow-up itself had bugs"). After this
 //! slice the version line becomes
 //! `corvid 0.0.1 (<short-sha>, <commit-date>)` — e.g.

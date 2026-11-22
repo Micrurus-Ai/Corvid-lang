@@ -7870,8 +7870,8 @@ hallucinate themes the source reports don't actually mention.
 **Load-bearing groundedness contract.** The integration test
 `synthesize_feedback_is_grounded_every_citation_resolves_to_real_header`
 runs against both shipped trial reports
-(`33m-trial-anonymous-2026-06-04.md` and
-`33m-trial-maintainer-as-reviewer-2026-06-05.md`) and asserts
+(`cli-runtime-trial-report-2026-06-04.md` and
+`threat-intelligence-app-review-2026-06-05.md`) and asserts
 that for EVERY finding the synthesizer emits, the cited file:line
 MUST contain a `### ` header whose text contains both the claimed
 severity AND the claimed class. If the parser ever invents a
@@ -8546,9 +8546,9 @@ deferred to repositioned 33M).
 
 **42I1** was satisfied 2026-06-04 by the `anonymous-2026-06-04`
 trial — a hand-picked friends-and-family reviewer ran the
-build prompt at `docs/external-trials/33m-friends-and-family-prompt.md`
+build prompt at `docs/external-trials/application-build-trial.md`
 end-to-end against refund_bot shape, filing a report at
-`docs/external-trials/33m-trial-anonymous-2026-06-04.md`. Five
+`docs/external-trials/cli-runtime-trial-report-2026-06-04.md`. Five
 surface bugs found: four CLI signature mismatches in the
 suggested-build-path commands plus the Dockerfile's hard-coded
 monorepo paths.
@@ -8562,7 +8562,7 @@ monorepo paths.
   guarding the new shape (no ghcr.io image, no cargo build, no
   `COPY examples/backend/`, no `COPY std std`).
 - Followup prompt at
-  `docs/external-trials/33m-friends-and-family-followup-prompt.md`
+  `docs/external-trials/developer-retest-guide.md`
   sent to the trial author with the retest ask.
 
 Adjacent to 42I but tracked separately: the corvid-installer

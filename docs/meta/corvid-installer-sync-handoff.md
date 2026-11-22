@@ -6,7 +6,7 @@
 > <https://github.com/Micrurus-Ai/Corvid-lang>.
 > **Sent via:** the same DM / email / Signal channel as the
 > language-vs-installer coordination on
-> <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md>.
+> <https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md>.
 
 ---
 
@@ -297,12 +297,12 @@ Before any merge happens:
 ## Background reading (in priority order if you want context)
 
 1. **The first 33M trial report** —
-   <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-trial-anonymous-2026-06-04.md>.
+   <https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/cli-runtime-trial-report-2026-06-04.md>.
    This is the friction-surfacing report that drove the four
    slices. Reads as one developer's honest 5-hour experience
    trying to follow the install + build prompt.
 2. **The followup prompt** —
-   <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-followup-prompt.md>.
+   <https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/developer-retest-guide.md>.
    What we plan to send the same reviewer once their retry path
    actually works.
 3. **The launch-claim audit's "honest gaps" section** —

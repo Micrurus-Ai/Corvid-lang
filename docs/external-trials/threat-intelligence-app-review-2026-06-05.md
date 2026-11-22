@@ -1,10 +1,10 @@
-# [Trial] maintainer-as-reviewer-2026-06-05 — production-shape threat-intel app, friction audit
+# Maintainer review of the threat intelligence app, June 5, 2026
 
 > Self-administered trial: the maintainer playing reviewer-#2 of
 > the 33M friends-and-family round. Built a small production-
 > shape cyber-threat-intel app from scratch using the build prompt
 > at
-> [`docs/external-trials/33m-friends-and-family-prompt.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md).
+> [`docs/external-trials/application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
 > Treated as a real trial — every friction point documented, no
 > wave-throughs.
 

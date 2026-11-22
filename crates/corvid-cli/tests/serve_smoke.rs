@@ -1142,7 +1142,7 @@ server test_serve_q1a_api:
     //    THIS is the load-bearing assertion: without --with-tools-cdylib
     //    wiring, /approve would answer 500 "no handler registered for
     //    tool `echo_string`" AND drop the approval — the P1.1 regression
-    //    documented in `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
+    //    documented in `docs/external-trials/cli-runtime-trial-report-2026-06-04.md`.
     let (approve_status, approve_body) = http_post_with_headers(
         port,
         &format!("/__approvals/{approval_id}/approve"),

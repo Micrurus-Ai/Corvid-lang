@@ -35,8 +35,8 @@ fn synthesize_feedback_surfaces_canonical_categories_from_real_corpus() {
     // Run against both anonymous trial files. The maintainer-as-
     // reviewer report has 9 findings; the anonymous round-1+2 has 5.
     // Use --json so we get structured output we can assert against.
-    let anon = trial_report("33m-trial-anonymous-2026-06-04.md");
-    let maint = trial_report("33m-trial-maintainer-as-reviewer-2026-06-05.md");
+    let anon = trial_report("cli-runtime-trial-report-2026-06-04.md");
+    let maint = trial_report("threat-intelligence-app-review-2026-06-05.md");
 
     assert!(anon.is_file(), "anonymous trial report missing: {}", anon.display());
     assert!(maint.is_file(), "maintainer trial report missing: {}", maint.display());
@@ -113,8 +113,8 @@ fn synthesize_feedback_surfaces_canonical_categories_from_real_corpus() {
 /// output is structurally constrained by the same check.
 #[test]
 fn synthesize_feedback_is_grounded_every_citation_resolves_to_real_header() {
-    let anon = trial_report("33m-trial-anonymous-2026-06-04.md");
-    let maint = trial_report("33m-trial-maintainer-as-reviewer-2026-06-05.md");
+    let anon = trial_report("cli-runtime-trial-report-2026-06-04.md");
+    let maint = trial_report("threat-intelligence-app-review-2026-06-05.md");
 
     let output = Command::new(corvid_bin())
         .arg("beta")

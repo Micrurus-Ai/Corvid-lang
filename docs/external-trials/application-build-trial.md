@@ -1,9 +1,9 @@
-# Corvid v1.0 Friends-and-Family Round — Build Prompt
+# Application build trial for developers
 
 > **Slice:** `33M` (repositioned, Path A) — final 4 weeks of Phase 43.
 > **Target reviewers:** 5-10 hand-picked AI engineers.
 > **Output:** one report per reviewer, triaged through
-> [`docs/external-trials/phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md),
+> [`docs/external-trials/feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md),
 > closing as `code` / `docs` / `test` / `non-scope`.
 >
 > **Status (rev 2026-06-05):** prior trial (`anonymous-2026-06-04`)
@@ -134,8 +134,8 @@ can see anymore:
 | PEA tutorial | <https://corvid-lang.org/docs/book/15-personal-executive-agent-tutorial> |
 | Roadmap | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md> |
 | Launch claim audit (every public claim with runnable evidence) | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/meta/launch-claim-audit.md> |
-| Companion trial doc (inspect path) | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-trial-one.md> |
-| Feedback triage process | <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md> |
+| Companion trial doc (inspect path) | [backend app evaluation](backend-app-evaluation.md) |
+| Feedback triage process | [feedback triage guide](feedback-triage-guide.md) |
 | Where to file the report | New GitHub issue at <https://github.com/Micrurus-Ai/Corvid-lang/issues/new> with label `friends-and-family-trial` |
 
 ## Build path (suggested, not required)
@@ -325,7 +325,7 @@ Open a GitHub issue at
 label `friends-and-family-trial` and the title
 `[Trial] <your-handle> — <one-line summary>`. The body follows
 the
-[`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md)
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md)
 intake shape:
 
 ```markdown
@@ -373,7 +373,7 @@ intake shape:
 ## What happens with your report
 
 Per
-[`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md),
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md),
 every report disposes as one of:
 
 - `code` — fix lands with a linked commit before v1.0 cut.

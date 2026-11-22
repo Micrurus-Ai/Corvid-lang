@@ -1,4 +1,4 @@
-# Phase 42 Feedback Triage
+# Developer feedback triage guide
 
 ## Intake
 

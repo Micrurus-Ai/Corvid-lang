@@ -1,4 +1,4 @@
-# Phase 42 External Trial Packet
+# Backend application evaluation guide
 
 ## Reviewer Task
 

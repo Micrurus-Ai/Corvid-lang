@@ -1,11 +1,11 @@
-# [Trial] anonymous-2026-06-04 — friends-and-family build, mostly blocked at the CLI/runtime boundary
+# CLI and runtime trial report, June 4, 2026
 
 > First trial report against the 33M friends-and-family round
 > prompt at
-> [`33m-friends-and-family-prompt.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md).
+> [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
 > Reviewer's report verbatim below, plus the maintainer-side
 > triage disposition per
-> [`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md).
+> [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md).
 > Path-A timing posture preserved — the actual outreach window
 > hasn't opened yet, so this is a single self-administered
 > trial run that stress-tested the PROMPT itself, surfacing real
@@ -39,7 +39,7 @@
 ## Headline: the build-prompt's own "suggested build path" does not run as written
 
 Reviewer found most copy-paste commands in the
-`33m-friends-and-family-prompt.md` "Build path (suggested,
+`application-build-trial.md` "Build path (suggested,
 not required)" section do not match the actual CLI surface.
 Maintainer verification at HEAD splits the claims into
 **real prompt bugs**, **stale-binary mistakes**, and **real
@@ -198,7 +198,7 @@ of the 2026-04-29 snapshot.
 ## Disposition
 
 Per
-[`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md):
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md):
 
 **`code`** — fixed in this triage commit (`render_dockerfile`
 rewritten for standalone-app layout) + 3 follow-up slices filed
@@ -207,7 +207,7 @@ rewritten for standalone-app layout) + 3 follow-up slices filed
 `35V2-P33-corvid-run-agent-flag`).
 
 **`docs`** — fixed in this triage commit
-(`33m-friends-and-family-prompt.md` "Build path (suggested)"
+(`application-build-trial.md` "Build path (suggested)"
 section rewritten to use actual HEAD CLI signatures + version-
 pin notice added) + 2 follow-up slices filed
 (`35V2-P33-prompt-stdlib-framing`,
@@ -403,7 +403,7 @@ present.
 
 ## Round 2 maintainer triage (2026-06-05)
 
-Per the [`phase-42-feedback-triage.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/phase-42-feedback-triage.md)
+Per the [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md)
 disposition shape; closing criterion at
 [`ROADMAP.md L51`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md#L51).
 Each finding closes as `code` / `docs` / `test` / `non-scope`
@@ -428,7 +428,7 @@ before the v1.0 cut.
   files the triage table, and queues the next commits.
 - **Next commit (33m-prompt-fixes):** P3.c + P4 + P5 + the
   Minor-versioning-note edit, all in
-  [`33m-friends-and-family-prompt.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md).
+  [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
 - **Subsequent commits (ROADMAP entries):** file 33Q1-33Q5 as
   five new sub-slices under a new `33Q-trial-round-2-fixes`
   block in ROADMAP. Each carries the reviewer-named acceptance

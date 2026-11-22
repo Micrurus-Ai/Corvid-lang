@@ -1,6 +1,6 @@
 //! Lock the `corvid --version` output shape introduced by slice
 //! `35V2-P33-version-output-sha`. The reviewer-facing prompt at
-//! `docs/external-trials/33m-friends-and-family-followup-prompt.md`
+//! `docs/external-trials/developer-retest-guide.md`
 //! tells reviewers to verify their binary is at the right commit
 //! by reading the SHA out of `--version`; if the output regresses
 //! to the bare crate-version, that verification path silently
@@ -48,7 +48,7 @@ fn version_output_includes_short_sha_and_commit_date() {
         "version output must contain the `(sha, date)` parenthetical (slice \
          `35V2-P33-version-output-sha` shape): got `{trimmed}`. \
          If you intentionally removed it, the reviewer-facing prompt at \
-         `docs/external-trials/33m-friends-and-family-followup-prompt.md` \
+         `docs/external-trials/developer-retest-guide.md` \
          needs to drop the `git log --oneline -1` check it tells the \
          reviewer to run, and the install-honesty audit it walks through \
          needs an update."

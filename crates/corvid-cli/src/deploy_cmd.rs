@@ -672,7 +672,7 @@ fn render_dockerfile_with_plan(plan: DeploymentPlan<'_>, app_root: &Path) -> Str
     // examples/backend/<app>`, `COPY std std`) — that broke for every
     // standalone deployment, surfaced by the first 33M friends-and-
     // family trial report at
-    // `docs/external-trials/33m-trial-anonymous-2026-06-04.md`.
+    // `docs/external-trials/cli-runtime-trial-report-2026-06-04.md`.
     //
     // The first replacement at commit 1455b6c referenced
     // `ghcr.io/micrurus-ai/corvid:${CORVID_VERSION}` as the runtime

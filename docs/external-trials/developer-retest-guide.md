@@ -1,7 +1,7 @@
-# Follow-up to anonymous-2026-06-04 — what we fixed and what to retry
+# Developer guide to retesting reported issues
 
 > The maintainer's reply to the first 33M trial report at
-> <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-trial-anonymous-2026-06-04.md>.
+> [cli runtime trial report 2026 06 04](cli-runtime-trial-report-2026-06-04.md).
 > Sent through the same DM / email / Signal channel the
 > original outreach came through.
 > Path-A timing posture preserved — this re-test happens against
@@ -128,7 +128,7 @@ A targeted retest of just the surfaces we fixed:
    src/main.cor`) all run now. We want you to confirm a
    reviewer following the prompt literally now reaches `ls
    deploy/` without copy-paste failure.
-   <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/33m-friends-and-family-prompt.md#build-path-suggested-not-required>
+   <https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md#build-path-suggested-not-required>
 
 2. **Try `corvid serve`** against your tiny preferences
    agent. The HTTP surface you reported as unreachable

@@ -111,8 +111,8 @@ docs/
 ├── launch-rehearsal.md             ← promoted from docs/meta/
 ├── phase-43-market-readiness.md    ← promoted from docs/phases/
 ├── external-trials/                ← promoted from docs/phases/external-trials/
-│   ├── phase-42-trial-one.md
-│   └── phase-42-feedback-triage.md
+│   ├── backend-app-evaluation.md
+│   └── feedback-triage-guide.md
 ├── operations/
 │   ├── production-checklist.md
 │   ├── receipts-and-signing.md
