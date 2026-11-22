@@ -158,6 +158,12 @@ python scripts/build_component_trial.py target/debug/corvid.exe target/pages-tri
 
 Extract the resulting web archive and migrate and serve it as in the reading-list example below. Open shelf 2, activate **Read one page**, and reload to see which value lasts. Use `indented` in place of `functions` to try the block grammar, or `js` in place of `wasm` to try the experimental JavaScript lowering. Each build needs its own output directory. The two small view files are inputs to the trial script. The ordinary CLI checks, tests and packages the generated Corvid project. [Source examples and measured sizes](../frontend-component-design.md#reading-list-prototype)
 
+### Install the picker in a second app
+
+Run `python scripts/verify_picker_package.py target/debug/corvid.exe --work-dir target/picker-trial` from the repository root on Windows. Choose a new directory for each run. The trial signs the storefront's original picker, publishes it into a local directory, runs `corvid new palette`, then installs `@trial/color-picker@1.0.0`. The [palette app](../../examples/palette/src/main.cor) imports the versioned package and declares its own typed POST route.
+
+The trial verified the lockfile and matched the installed source bytes to the storefront module. After disconnecting the registry, `corvid check` reported a missing content hash for the picker's relative `./std/ui` import. Relative imports inside the installed package resolve against the artifact URL. The scaffold's copy of the UI library therefore does not satisfy this import. The trial stops before building the web archive.
+
 ### Display state in more than one view
 
 `ui.shared_int_state(name, label, initial, controls)` creates an integer control with a page-wide name. Give each owner a unique name. `ui.state_output(name, label)` adds a labeled, read-only display anywhere on that page. It picks up the initial value when the browser handlers load and updates after each successful action. Reloading the page restores the initial value.

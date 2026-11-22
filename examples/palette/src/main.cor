@@ -1,0 +1,16 @@
+import "corvid://@trial/color-picker/v1.0.0" use ColorPicker, Color, color_name
+import "./std/ui" as ui
+
+fn palette(value: Color) -> String:
+    return ui.interactive_page("Palette", [ui.text("Selected: " + color_name(value)), ColorPicker(value, "/")])
+
+server palette_app:
+    route GET "/" -> html:
+        return palette(Color(0))
+
+    route POST "/" form Color -> html:
+        return palette(body)
+
+test selected_color:
+    page = palette(Color(1))
+    assert page.contains("Selected: Moss")
