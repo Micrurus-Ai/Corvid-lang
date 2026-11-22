@@ -1,0 +1,10 @@
+component ReadingCounter:
+    state pages_read = 0
+
+    text("Pages read this session: {pages_read}")
+
+    button("Read one page") on click:
+        pages_read += 1
+
+    button("Read two pages") on click:
+        pages_read += 2

@@ -305,7 +305,7 @@ mod tests {
     use corvid_resolve::DefId;
 
     fn span() -> Span {
-        Span { start: 0, end: 0 }
+        Span::new(0, 0)
     }
 
     fn local_expr(id: u32, ty: Type) -> IrExpr {
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn marks_bare_local_string_prompt_args_as_pinned() {
-        let call_span = Span { start: 10, end: 20 };
+        let call_span = Span::new(10, 20);
         let agent = test_agent(vec![IrStmt::Return {
             value: Some(prompt_call(vec![local_expr(0, Type::String)], call_span)),
             span: span(),
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn ignores_non_local_prompt_args() {
-        let call_span = Span { start: 10, end: 20 };
+        let call_span = Span::new(10, 20);
         let agent = test_agent(vec![IrStmt::Return {
             value: Some(prompt_call(
                 vec![IrExpr {

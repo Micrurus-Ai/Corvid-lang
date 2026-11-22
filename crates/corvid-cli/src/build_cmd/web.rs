@@ -43,6 +43,46 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
     }
 
     let main = stage.path().join("src/main.cor");
+    let events = stage.path().join("src/events.cor");
+    let mut handlers = String::new();
+    let mut entry_components = Vec::new();
+    for relative in &files {
+        if relative.extension().and_then(|v| v.to_str()) != Some("cor") {
+            continue;
+        }
+        let contents = fs::read_to_string(stage.path().join(relative))?;
+        if !contents
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("component"))
+        {
+            continue;
+        }
+        let Ok(tokens) = corvid_syntax::lex(&contents) else {
+            continue;
+        };
+        let declarations = corvid_syntax::parser::components(&tokens).map_err(|errs| {
+            let e = &errs[0];
+            let line = 1 + contents[..e.span.start]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count();
+            anyhow::anyhow!("{}:{}: {}", root.join(relative).display(), line, e.kind)
+        })?;
+        for component in declarations {
+            handlers.push_str(&component.events);
+            if relative == Path::new("src/main.cor") {
+                entry_components.push(component.name);
+            }
+        }
+    }
+    if !handlers.is_empty() {
+        use std::io::Write;
+        let mut output = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&events)?;
+        writeln!(output, "\n{handlers}")?;
+    }
     let source = fs::read_to_string(&main)?;
     let config = corvid_driver::load_corvid_config_for(&main);
     let ir = corvid_driver::compile_to_ir_with_config_at_path(&source, &main, config.as_ref())
@@ -52,10 +92,23 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
                 corvid_driver::render_all_pretty(&errors, &entry, &source)
             )
         })?;
-    if ir.servers.is_empty() {
+    if ir.servers.is_empty() && entry_components.len() == 1 {
+        use std::io::Write;
+        let component = &entry_components[0];
+        writeln!(fs::OpenOptions::new().append(true).open(&main)?,
+            "\nserver component_page:\n    route GET \"/\" -> html:\n        return __ui_{component}.interactive_page(\"{component}\", [{component}()])")?;
+        let page = fs::read_to_string(&main)?;
+        corvid_driver::compile_to_ir_with_config_at_path(&page, &main, config.as_ref()).map_err(
+            |errors| {
+                anyhow::anyhow!(
+                    "{}",
+                    corvid_driver::render_all_pretty(&errors, &entry, &page)
+                )
+            },
+        )?;
+    } else if ir.servers.is_empty() {
         bail!("a web bundle needs a server declaration in src/main.cor");
     }
-    let events = stage.path().join("src/events.cor");
     if events.is_file() {
         let build = corvid_driver::build_wasm_to_disk(&events)?;
         let (Some(js), Some(wasm)) = (build.js_loader_path, build.wasm_path) else {
@@ -72,6 +125,11 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
         for asset in [js, wasm] {
             files.push(asset.strip_prefix(stage.path())?.to_owned());
         }
+    }
+    // Keep the original event source in the archive so rebuilding an extracted
+    // bundle compiles each generated handler exactly once.
+    if !handlers.is_empty() && root.join("src/events.cor").is_file() {
+        fs::copy(root.join("src/events.cor"), &events)?;
     }
     // Compilation can populate the staged cache when a locked package is first fetched.
     for relative in locked {

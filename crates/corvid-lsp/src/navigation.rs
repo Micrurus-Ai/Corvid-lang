@@ -270,7 +270,7 @@ impl NavigationIndex {
                 }
                 spans
                     .into_iter()
-                    .map(|(start, end)| Span { start, end })
+                    .map(|(start, end)| Span::new(start, end))
                     .collect()
             }
             NavTarget::Local(id) => self

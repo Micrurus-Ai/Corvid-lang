@@ -55,6 +55,7 @@ decl              ::= visibility? (
                       | tool_decl
                       | prompt_decl
                       | agent_decl
+                      | component_decl
                       | fn_decl
                       | effect_decl
                       | model_decl
@@ -229,6 +230,9 @@ model_field       ::= IDENT ':' dimension_value NEWLINE
 ## Agent declarations
 
 ```ebnf
+component_decl    ::= 'component' IDENT ':' INDENT 'state' IDENT (':' 'Int')? '=' INT NEWLINE 'text' '(' STRING ')' NEWLINE component_button+ DEDENT
+component_button  ::= 'button' '(' STRING ')' 'on' 'click' ':' INDENT IDENT '+=' INT NEWLINE DEDENT
+
 agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref uses_clause? ':' INDENT block DEDENT
 
 # Pure function (slice 45r) — the fourth callable kind. The body is
@@ -495,7 +499,10 @@ primary_expr      ::= literal
                     | struct_literal
                     | match_expr
                     | lambda_expr
+                    | bounded_ask
                     | retry_expr
+
+bounded_ask       ::= 'ask' IDENT '(' expr ')' NEWLINE INDENT 'allow' IDENT 'once' NEWLINE 'within' INT 'seconds' NEWLINE DEDENT
 
 literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
 

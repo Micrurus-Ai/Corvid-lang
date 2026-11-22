@@ -10,11 +10,25 @@ use serde::{Deserialize, Serialize};
 pub struct Span {
     pub start: usize,
     pub end: usize,
+    /// Token range inside a compiler expansion sharing this source location.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expansion: Option<(usize, usize)>,
 }
 
 impl Span {
     pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        Self {
+            start,
+            end,
+            expansion: None,
+        }
+    }
+
+    pub fn expanded(self, token: usize) -> Self {
+        Self {
+            expansion: Some((token, token)),
+            ..self
+        }
     }
 
     /// Merge two spans into one that covers both.
@@ -22,6 +36,10 @@ impl Span {
         Span {
             start: self.start.min(other.start),
             end: self.end.max(other.end),
+            expansion: match (self.expansion, other.expansion) {
+                (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+                (left, right) => left.or(right),
+            },
         }
     }
 }

@@ -311,6 +311,9 @@ impl<'a> Parser<'a> {
             // Trust boundary (slice 50i): `trusted(expr)`. Contextual
             // — only when the identifier `trusted` is immediately
             // called; a plain `trusted` identifier stays a binding.
+            TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
+                self.parse_bounded_ask()
+            }
             TokKind::Ident(w) if w == "trusted" && matches!(self.peek_ahead(1), TokKind::LParen) => {
                 let start = self.peek_span();
                 self.bump(); // trusted

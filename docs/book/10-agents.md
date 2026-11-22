@@ -39,7 +39,9 @@ agent suggest_title(shelf: Shelf) -> BookSuggestion:
 
 The model may suggest a title immediately or read one title from the shelf snapshot. A missing shelf, a second lookup, or a blank suggestion ends the operation with an error. Both model calls and the optional lookup share the deadline. The app shows the proposed title in an editable preview. The shelf changes when the reader chooses **Apply suggestion**.
 
-Edit the prototype and run `python scripts/prototype_reading_list_ask.py --write` from the checkout root. Run it without `--write` to check that the generated application matches. The generated agent exposes errors through `Result<BookSuggestion, String>`. The preview also keeps the lookup context for replay. This authoring form currently supports the reading-list prompt and its snapshot lookup. [Prototype](../../examples/reading_list/suggest_title.cor.in) and [runnable application](../../examples/reading_list/src/main.cor)
+The compiler accepts this form directly. In `examples/book_suggestions`, run `corvid check` and `corvid build src/main.cor --target web`. The named prompt takes two strings (the input and lookup context) and returns a record whose `action` is `Suggest(String)` or `Lookup(Int)`. The allowed lookup accepts an integer and returns `Result<String, String>`. The enclosing agent's concise return type names the success value. Its callers receive a `Result` and can handle lookup failures. With an explicit `Result` signature, write ordinary `Ok` and `Err` returns. [Native agent and form route](../../examples/book_suggestions/src/main.cor)
+
+Edit the prototype and run `python scripts/prototype_reading_list_ask.py --write` from the checkout root. Run it without `--write` to check that the generated application matches. The generated agent exposes errors through `Result<BookSuggestion, String>`. The preview also keeps the lookup context for replay. This older generator preserves the traced reading-list fixture. [Prototype](../../examples/reading_list/suggest_title.cor.in) and [runnable application](../../examples/reading_list/src/main.cor)
 
 ## Annotations
 

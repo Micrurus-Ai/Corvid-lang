@@ -1,0 +1,39 @@
+import "std:ui" as ui
+
+type Shelf:
+    title: String
+
+type BookSuggestion:
+    shelf: Shelf
+    title: String
+
+choice Action:
+    Lookup(number: Int)
+    Suggest(title: String)
+
+type Decision:
+    action: Action
+
+prompt recommend(current: String, context: String) -> Decision:
+    system: "Suggest a different book. You may look up shelf 1 or 2 once."
+    user: "Current book: {current}. Lookup result: {context}."
+
+fn lookup_shelf(number: Int) -> Result<String, String>:
+    if number == 1:
+        return Ok("The Odyssey")
+    if number == 2:
+        return Ok("Frankenstein")
+    return Err("Unknown shelf.")
+
+agent suggest_title(shelf: Shelf) -> BookSuggestion:
+    title = ask recommend(shelf.title)
+        allow lookup_shelf once
+        within 30 seconds
+
+    return BookSuggestion(shelf, title)
+
+server suggestions:
+    route POST "/suggest" form Shelf -> html:
+        return match suggest_title(body):
+            Ok(book) -> ui.page("Suggestion", [ui.text(book.title)])
+            Err(reason) -> ui.page("Suggestion unavailable", [ui.text(reason)])

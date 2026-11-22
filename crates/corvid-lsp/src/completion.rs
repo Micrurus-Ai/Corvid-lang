@@ -110,7 +110,7 @@ fn parse_lenient(source: &str) -> File {
         }
         Err(_) => File {
             decls: Vec::new(),
-            span: corvid_ast::Span { start: 0, end: 0 },
+            span: corvid_ast::Span::new(0, 0),
         },
     }
 }

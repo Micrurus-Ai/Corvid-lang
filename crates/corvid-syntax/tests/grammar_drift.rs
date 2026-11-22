@@ -292,6 +292,8 @@ import python "mylib" as ml effects: network:
     fn lookup(key: String) -> List<String>
 "#,
     ),
+    ("native_counter", include_str!("../../../examples/reading_counter/src/main.cor")),
+    ("native_ask", include_str!("../../../examples/book_suggestions/src/main.cor")),
     ("choice_declaration", "public choice Action:\n    Lookup(shelf: Int)\n    Stop\n"),
     (
         "record_types_and_stores",
@@ -695,6 +697,9 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("dimension_value", "effects_and_models"),
     ("model_decl", "effects_and_models"),
     ("model_field", "effects_and_models"),
+    ("component_decl", "native_counter"),
+    ("component_button", "native_counter"),
+    ("bounded_ask", "native_ask"),
     ("agent_decl", "agents_annotations_extern"),
     ("annotation", "agents_annotations_extern"),
     ("annotation_args", "agents_annotations_extern"),

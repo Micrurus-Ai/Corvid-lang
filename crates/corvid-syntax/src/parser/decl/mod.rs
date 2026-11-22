@@ -68,6 +68,7 @@ impl<'a> Parser<'a> {
         }
 
         match self.peek() {
+            TokKind::Ident(word) if word == "component" => self.parse_component_decl(),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
             TokKind::KwType => self.parse_type_decl(visibility, false).map(Decl::Type),
             TokKind::Ident(word) if word == "choice" => self.parse_type_decl(visibility, true).map(Decl::Type),
@@ -340,7 +341,13 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "`:` after agent signature")?;
         self.expect_newline()?;
 
-        let body = self.parse_indented_block()?;
+        let helpers_before = self.generated.len();
+        let mut body = self.parse_indented_block()?;
+        let return_ty = if self.generated.len() != helpers_before {
+            super::authoring::ask_return_type(return_ty, &mut body)
+        } else {
+            return_ty
+        };
         let end = body.span;
 
         Ok(AgentDecl {

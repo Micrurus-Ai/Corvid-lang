@@ -380,6 +380,8 @@ The archive includes Corvid and Python source files under `src/`, the project ma
 
 ## A component with named state (prototype)
 
+The compiler accepts the short counter directly in a project's `src/main.cor`. From `examples/reading_counter`, run `corvid check` and `corvid build src/main.cor --target web`. The web package gives a single component its own page and includes its compiled click handlers. A project with an explicit server can compose the component as a view. [Native counter](../../examples/reading_counter/src/main.cor)
+
 Each copy of a component owns its state. In this example both buttons update the same count. Mounting a second counter gives it its own count. Reloading starts each counter at zero.
 
 ```text

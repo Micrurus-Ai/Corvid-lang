@@ -392,7 +392,7 @@ mod tests {
     use corvid_types::Type;
 
     fn span() -> Span {
-        Span { start: 0, end: 0 }
+        Span::new(0, 0)
     }
 
     fn local_expr(id: u32, ty: Type) -> IrExpr {

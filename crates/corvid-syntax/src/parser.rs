@@ -102,6 +102,8 @@ struct Parser<'a> {
     /// Cleared by every `bump`, so the credit only survives when the
     /// block expression IS the end of the statement.
     block_expr_terminated: bool,
+    generated: Vec<Decl>,
+    components: Vec<Component>,
 }
 
 impl<'a> Parser<'a> {
@@ -110,7 +112,9 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             errors: Vec::new(),
-        block_expr_terminated: false,
+            block_expr_terminated: false,
+            generated: Vec::new(),
+            components: Vec::new(),
         }
     }
 
@@ -249,6 +253,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
 
+        decls.append(&mut self.generated);
         let end_span = self.peek_span();
         File {
             decls,
@@ -370,6 +375,8 @@ fn describe_token(t: &TokKind) -> String {
     }
 }
 
+mod authoring;
+pub use authoring::{components, Component};
 mod decl;
 mod effect_row;
 mod expr;

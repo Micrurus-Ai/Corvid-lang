@@ -45,7 +45,7 @@ fn count_dup_drop_stmt(stmt: &IrStmt) -> usize {
 }
 
 fn span() -> Span {
-    Span { start: 0, end: 0 }
+    Span::new(0, 0)
 }
 
 fn string_ty() -> Type {
