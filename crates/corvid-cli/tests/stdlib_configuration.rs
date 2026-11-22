@@ -11,11 +11,11 @@ fn project_reads_configuration_and_round_trips_a_json_file() {
         .unwrap();
     assert!(created.status.success(), "{created:?}");
     let project = dir.path().join("config");
-    fs::write(project.join("src/main.cor"), r#"import "./std/env" use env_get
-import "./std/io" use io_read_text, io_write_text, io_list_dir
-import "./std/json" use json_parse, json_get_int, json_object_new, json_object_set_int, json_object_finish
-import "./std/time" use time_parse_iso, time_format_iso
-import "./std/path" use path_join, path_filename, path_parent, path_extension, path_is_absolute
+    fs::write(project.join("src/main.cor"), r#"import "std:env" use env_get
+import "std:io" use io_read_text, io_write_text, io_list_dir
+import "std:json" use json_parse, json_get_int, json_object_new, json_object_set_int, json_object_finish
+import "std:time" use time_parse_iso, time_format_iso
+import "std:path" use path_join, path_filename, path_parent, path_extension, path_is_absolute
 
 agent main() -> Result<Bool, String>:
     value = env_get("CORVID_TEST_MODE")?

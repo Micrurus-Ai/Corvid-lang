@@ -8,8 +8,8 @@ sibling files, so they carry the fragment tag).
 ## One file = one module
 
 Every `.cor` file is a module. Public declarations are visible to
-other modules via `import`; imports name the file by relative string
-path (the `.cor` extension is implicit).
+other modules via `import`. Use a relative path such as `./cart` for a project file
+and a name such as `std:time` for a bundled module. Omit the `.cor` extension.
 
 ## Visibility
 
@@ -80,7 +80,7 @@ The `use` clause lifts specific names into scope directly — no
 braces, per-item aliases with `as`:
 
 ```corvid
-import "./std/io" use io_read_text, io_write_text as write
+import "std:io" use io_read_text, io_write_text as write
 
 agent main() -> Result<String, String>:
     file = io_read_text("note.txt")?

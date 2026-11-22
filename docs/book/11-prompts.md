@@ -317,7 +317,7 @@ Durable jobs use capture-free functions for this form. Once a worker checkpoints
 ### Passing an image to a prompt
 
 ```corvid
-import "./std/io" use PromptImage, io_read_image
+import "std:io" use PromptImage, io_read_image
 
 type Caption:
     label: String
@@ -336,7 +336,7 @@ Configure the project's I/O root and select a model that accepts images. Paths p
 ### Reading a page selected by the user
 
 ```corvid
-import "./std/browser" use browser_open_scoped, browser_click, browser_read_text, browser_capture, browser_close
+import "std:browser" use browser_open_scoped, browser_click, browser_read_text, browser_capture, browser_close
 
 agent main() -> String:
     browser_open_scoped(800, 600)

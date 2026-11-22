@@ -398,7 +398,7 @@ Guarantee: `taint.untrusted_cannot_reach_dangerous` (Static)
 `secret_read` solves the secrets-in-traces problem instead of ignoring it: the program receives the real value, the recorded trace event carries a redacted copy (`<redacted:XY>` + `value_redacted: true` — a RuntimeChecked guarantee, `secrets.trace_never_carries_value`), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is `Ok` with `present: false`.
 
 ```corvid
-import "./std/secrets" use secret_read
+import "std:secrets" use secret_read
 
 agent api_key() -> Result<String, String>:
     key = secret_read("ANTHROPIC_API_KEY")?
@@ -666,7 +666,7 @@ Corvid's `std/io` module ships three executing tools — `io_read_text`, `io_wri
 The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.fs_path_confinement` + the two replay-quarantine guarantees in its claim manifest, so a host can verify the binary refuses to operate outside the declared root.
 
 ```corvid
-import "./std/io" use io_read_text, io_write_text
+import "std:io" use io_read_text, io_write_text
 
 agent persist_summary(date: String, body: String) -> Result<String, String>:
     io_write_text(date + ".txt", body)?
@@ -688,7 +688,7 @@ Corvid's `std/http` module ships two executing tools — `http_get`, `http_post_
 The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement`, and `io_source.http_quarantine_on_replay` in its claim manifest, so a host can verify the binary refuses to reach private networks AND can only reach explicitly approved hosts AND cannot escape replay quarantine.
 
 ```corvid
-import "./std/http" use http_get, http_post_json, http_ok
+import "std:http" use http_get, http_post_json, http_ok
 
 agent ship_event(url: String, body: String) -> Result<Bool, String>:
     response = http_post_json(url, body)?
@@ -723,7 +723,7 @@ Corvid's `std/db` module ships three executing tools — `db_open`, `db_query`, 
 The security boundary is **declared in `corvid.toml`** (via `[io] root`) and signable: a signed cdylib carries `io_source.sqlite_parameter_binding_only`, `io_source.sqlite_write_quarantine_on_replay`, `io_source.sqlite_read_passthrough_on_replay`, and the reused `io_source.fs_path_confinement` in its claim manifest.
 
 ```corvid
-import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
 agent record_user(email: String) -> Result<Int, String>:
     handle = db_open(":memory:")?
@@ -766,7 +766,7 @@ type User:
     id: Int
     email: String
 
-import "./std/json" use json_parse, json_get_int
+import "std:json" use json_parse, json_get_int
 
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
@@ -827,8 +827,8 @@ Corvid's `std/time` and `std/random` modules make the two most common sources of
 The pure math methods (`abs`, `min`, `max`, `pow`, `sqrt`, `floor`, `ceil`, `round`) live on the builtin-method table under the always-checked rule (Int overflow traps; `sqrt` of a negative traps; `floor`/`ceil`/`round` return `Int` and trap on NaN). Durations are plain `Int` milliseconds — checked arithmetic IS the duration API.
 
 ```corvid
-import "./std/time" use time_now_utc, time_format_iso
-import "./std/random" use random_int
+import "std:time" use time_now_utc, time_format_iso
+import "std:random" use random_int
 
 agent schedule_followup(days: Int) -> String:
     now = time_now_utc()

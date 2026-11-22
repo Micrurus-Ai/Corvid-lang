@@ -56,7 +56,7 @@ async fn local_file_reaches_typed_prompt_as_image_content() {
         .success());
     let project = tmp.path().join("photos");
     let path = project.join("src/main.cor");
-    let code = r#"import "./std/io" use PromptImage, io_read_image
+    let code = r#"import "std:io" use PromptImage, io_read_image
 
 type Caption:
     label: String
@@ -164,8 +164,8 @@ async fn scoped_browser_session_reads_clicks_captures_and_closes() {
         .success());
     let dir = tmp.path().join("session");
     let run = |body: &str| {
-        let source = r#"import "./std/browser" use browser_open_scoped, browser_close, browser_click, browser_read_text, browser_capture
-import "./std/io" use io_read_image, PromptImage
+        let source = r#"import "std:browser" use browser_open_scoped, browser_close, browser_click, browser_read_text, browser_capture
+import "std:io" use io_read_image, PromptImage
 
 prompt inspect_capture(photo: PromptImage) -> String:
     "Describe the page."

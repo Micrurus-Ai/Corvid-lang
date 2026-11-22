@@ -10,7 +10,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/io" use io_read_text, io_write_text, io_list_dir
+import "std:io" use io_read_text, io_write_text, io_list_dir
 
 agent demo() -> Result<String, String>:
     io_write_text("notes.txt", "hello from corvid")?
@@ -138,7 +138,7 @@ tool calls regardless of effect.
 ## Worked example — file-backed daily summary
 
 ```corvid
-import "./std/io" use io_read_text, io_write_text
+import "std:io" use io_read_text, io_write_text
 
 agent record_summary(date: String, summary: String) -> Result<String, String>:
     path = date + ".txt"

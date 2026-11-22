@@ -30,7 +30,8 @@ fn new_project_checks_and_runs_with_an_incomplete_installation() {
     let project = tmp.path().join("hello");
     let created = cli(tmp.path(), &["new", "hello"]);
     assert!(created.status.success(), "{created:?}");
-    assert!(project.join("src/std/extra.cor").exists());
+    assert_eq!(std::fs::read_dir(project.join("src")).unwrap().count(), 1);
+    assert!(project.join("src/main.cor").is_file());
     let checked = cli(&project, &["check"]);
     assert!(checked.status.success(), "{checked:?}");
     let greeting = cli(&project, &["run"]);

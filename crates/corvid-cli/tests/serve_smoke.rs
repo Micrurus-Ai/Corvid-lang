@@ -2779,7 +2779,7 @@ fn serve_page_and_json_api_from_one_project() {
     assert!(new.status.success(), "{new:?}");
     let project = dir.path().join("notes");
     let main = project.join("src/main.cor");
-    let source = r#"import "./std/ui" as ui
+    let source = r#"import "std:ui" as ui
 
 server notes:
     route GET "/" -> html:
@@ -3320,7 +3320,7 @@ fn access_log_reports_templates_and_status_while_a_route_uses_a_secret() {
     let project = dir.path().join("service");
     let created = Command::new(corvid_bin()).current_dir(dir.path()).args(["new", "service"]).output().unwrap();
     assert!(created.status.success(), "{created:?}");
-    let source = r#"import "./std/secrets" use secret_read
+    let source = r#"import "std:secrets" use secret_read
 
 agent configured() -> Result<Bool, String>:
     secret = secret_read("CORVID_TEST_SERVICE_KEY")?

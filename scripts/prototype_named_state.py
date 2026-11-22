@@ -52,8 +52,8 @@ def lower(path):
         handlers.append(f"agent {handler}({state}: Int) -> Int:\n    return {state} + {step}\n")
     if not actions:
         raise ValueError(f"{path}: expected at least one button")
-    view = f"""import "./std/ui" as ui
-import "./std/ui" use View
+    view = f"""import "std:ui" as ui
+import "std:ui" use View
 
 public fn render_component() -> View:
     return ui.int_state({json.dumps(label.rstrip(), ensure_ascii=False)}, {initial}, [{", ".join(actions)}])
@@ -71,7 +71,7 @@ def build(path, project, cli):
     (src / "events.cor").write_text(events, encoding="utf-8")
     # Mount twice to exercise independent component instances.
     main = f"""import "./component" use render_component
-import "./std/ui" as ui
+import "std:ui" as ui
 
 server app:
     route GET "/" -> html:

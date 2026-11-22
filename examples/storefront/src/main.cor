@@ -1,6 +1,6 @@
 import "./layout" use shop_page
-import "./std/ui" as ui
-import "./std/ui" use View
+import "std:ui" as ui
+import "std:ui" use View
 import "./events" use notebook_cents, pencil_cents
 import "./color_picker" use Color
 import "./notebook" use notebook_cover

@@ -47,7 +47,7 @@ async fn document_replacement_preserves_an_index_on_failure() {
     ));
     std::fs::write(config, toml).unwrap();
     let run = |body: &str| {
-        let code = format!("import \"./std/rag\" use rag_ingest, rag_search, RagChunkEnvelope\n\nagent main() -> String:\n{body}\n");
+        let code = format!("import \"std:rag\" use rag_ingest, rag_search, RagChunkEnvelope\n\nagent main() -> String:\n{body}\n");
         std::fs::write(dir.join("src/main.cor"), code).unwrap();
         let output = Command::new(bin)
             .current_dir(&dir)
@@ -97,7 +97,7 @@ async fn document_replacement_preserves_an_index_on_failure() {
     // service would return no hits here.
     std::fs::write(
         dir.join("src/main.cor"),
-        r#"import "./std/rag" use rag_search, RagChunkEnvelope
+        r#"import "std:rag" use rag_search, RagChunkEnvelope
 
 server library:
     route GET "/find" -> json List<RagChunkEnvelope>:

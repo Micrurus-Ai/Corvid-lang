@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use corvid_driver::{
     diff_snapshots, load_corvid_config_for, render_all_pretty,
     render_all_pretty_warnings,
-    render_effect_diff, scaffold_new, snapshot_revision, vendor_std,
+    render_effect_diff, scaffold_new, snapshot_revision,
 };
 use std::path::{Path, PathBuf};
 
@@ -31,22 +31,6 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
         scaffold_new(name).context("failed to scaffold project")?
     };
     println!("created new Corvid project at `{}`", root.display());
-    match vendor_std(&root) {
-        Ok(corvid_driver::VendorOutcome::Vendored(src)) => {
-            println!("vendored stdlib from `{}`", src.display());
-        }
-        Ok(corvid_driver::VendorOutcome::AlreadyPresent) => {}
-        Ok(corvid_driver::VendorOutcome::Bundled) => println!("vendored the compiler's bundled standard library"),
-        Err(err) => return Err(err.context("copy standard library into the new project")),
-    }
-    // Slice 33Q6 (maintainer-as-reviewer-2026-06-05 P1.1): the
-    // prior "Next steps" output told reviewers `pip install
-    // corvid-runtime` — but that package is NOT on PyPI. A
-    // release-installed reviewer running the command would either
-    // 404 or get a wrong package. The fix ships the
-    // `corvid_runtime` Python package alongside the binary (under
-    // `<corvid-home>/runtime-py/`) and `python_tools.rs::find_bundled_corvid_runtime`
-    // auto-detects it at autoload time. No manual install needed.
     println!("\nNext steps:");
     println!("  cd {name}");
     println!("  corvid check");
@@ -55,11 +39,6 @@ pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
     if with_python_tools {
         println!("Try the Python tool defined in `tools.py`:");
         println!("  corvid run src/python_tools_example.cor \"Hello\"");
-    } else {
-        println!("The starter agent is pure Corvid — it reads the clock");
-        println!("through an executing, replay-traced stdlib tool. Need a");
-        println!("Python-implemented tool later? Re-scaffold with");
-        println!("`corvid new --with-python-tools` or add a `tools.py`.");
     }
     Ok(0)
 }

@@ -11,7 +11,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/http" use http_get, http_post_json
+import "std:http" use http_get, http_post_json
 
 agent fetch_status(url: String) -> Result<Int, String>:
     response = http_get(url)?
@@ -189,7 +189,7 @@ to all tool calls regardless of effect.
 ## Worked example — webhook fan-out with allowlist scoping
 
 ```corvid
-import "./std/http" use http_post_json, http_ok
+import "std:http" use http_post_json, http_ok
 
 agent notify_webhook(url: String, event_json: String) -> Result<Bool, String>:
     response = http_post_json(url, event_json)?

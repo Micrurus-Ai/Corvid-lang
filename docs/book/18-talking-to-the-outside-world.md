@@ -54,8 +54,8 @@ type User:
     id: Int
     email: String
 
-import "./std/http" use http_get
-import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+import "std:http" use http_get
+import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 

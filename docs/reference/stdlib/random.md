@@ -7,7 +7,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/random" use random_float, random_int
+import "std:random" use random_float, random_int
 
 agent roll() -> Int:
     return random_int(1, 6)

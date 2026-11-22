@@ -4,13 +4,13 @@
 
 ```text
 my-app/
-├── corvid.toml         # project manifest + [io]/[http] security boundaries
-├── .gitignore
-├── src/
-│   ├── main.cor        # entry point (any agent in here can be run)
-│   └── std/            # vendored stdlib modules (io, http, db, json, …)
-└── tools.py            # optional Python host tools for the starter echo
+  src/
+    main.cor
+  corvid.toml
+  .gitignore
 ```
+
+Start in `src/main.cor`. Add a sibling file when part of the app deserves its own name. Use `import "./cart" as cart` for your own module and `import "std:ui" as ui` for the bundled UI module. The optional `--with-python-tools` flag adds `tools.py` and `src/python_tools_example.cor`.
 
 `corvid run`, `corvid build`, `corvid check`, and `corvid test` all
 operate on the project rooted at the directory containing `corvid.toml`
@@ -18,32 +18,22 @@ operate on the project rooted at the directory containing `corvid.toml`
 
 ## `corvid.toml` reference
 
-The scaffold writes this (comments trimmed):
+A new project starts with these settings:
 
 ```toml
 name = "my-app"
 version = "0.1.0"
 
-[llm]
-# No default model is set. Pick one explicitly:
-#   default_model = "claude-opus-4-6"
-
 [io]
-# File-I/O root for the executing io_read_text / io_write_text /
-# io_list_dir tools. Path traversal and absolute-path escapes outside
-# the root are refused. Override at run time with CORVID_IO_ROOT.
 root = "."
 
 [http]
-# HTTP egress allowlist for the executing http_get / http_post_json
-# tools. The SSRF block (RFC1918 / loopback / link-local) is ALWAYS ON
-# and not configurable. Empty list = HTTP fails closed. Override with
-# CORVID_HTTP_ALLOW=host1,host2.
 allow = []
 ```
 
-Additional parsed tables for advanced configuration:
+Additional configuration tables include:
 
+- `[llm]` sets the default model for model calls.
 - `[effect-system]` — user-declared effect dimensions and dimension
   policy (see the effect-registry reference).
 - `[package-policy]` — package import policy for the package manager.

@@ -7851,7 +7851,7 @@ Inside a project, `corvid check` and `corvid run` use `src/main.cor`. For a stan
 
 To try a Python-backed tool from the terminal, use `corvid new --with-python-tools notes`, change into `notes`, and run `corvid run src/python_tools_example.cor "Hello"`. See [Calling your own Python tool](docs/book/18-talking-to-the-outside-world.md#calling-your-own-python-tool).
 
-`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
+`corvid new` starts with one source file, `src/main.cor`. Use `import "std:time" use time_now_utc` to import directly from the compiler. Use relative imports for project-owned files.
 
 A pure function can call another module's public function through either import form. Calling an imported agent, prompt or tool from a pure function is a type error. See the [module guide](docs/book/06-modules.md#reusing-a-named-function).
 
@@ -7999,7 +7999,7 @@ With `corvid-lsp`, type a module alias followed by a dot to complete its public 
 
 ### Paths and environment variables
 
-Import the following tools from `"./std/path"`. They use the host operating system's path rules and run in the interpreter. Their inputs can refer to files that do not yet exist.
+Import the following tools from `"std:path"`. They use the host operating system's path rules and run in the interpreter. Their inputs can refer to files that do not yet exist.
 
 | Function | Result |
 |---|---|
@@ -8009,7 +8009,7 @@ Import the following tools from `"./std/path"`. They use the host operating syst
 | `path_extension(path: String) -> Option<String>` | Returns the extension without the dot, when present. |
 | `path_is_absolute(path: String) -> Bool` | Tests whether the path is absolute on this host. |
 
-Import `env_get(name: String) -> Result<Option<String>, String>` from `"./std/env"`. An absent variable returns `Ok(None)`. An explicitly empty variable returns `Ok(Some(""))`. Blank names and names containing `=` or NUL return `Err`. Use `env_get("APP_MODE")?` to propagate the error and match on the returned option. A default `corvid run` uses the interpreter for these tools.
+Import `env_get(name: String) -> Result<Option<String>, String>` from `"std:env"`. An absent variable returns `Ok(None)`. An explicitly empty variable returns `Ok(Some(""))`. Blank names and names containing `=` or NUL return `Err`. Use `env_get("APP_MODE")?` to propagate the error and match on the returned option. A default `corvid run` uses the interpreter for these tools.
 
 ### Rebuilding a project with a local registry
 
@@ -8035,7 +8035,7 @@ For a sum type with variant `Approved(approver: String)`, a JSON body such as `{
 
 ### Reading typed records from SQLite
 
-Import `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>` from `"./std/db"`. Each row is a JSON object. For example, `json_get_string(rows[0], "text")?` reads a selected text column after you check that the list contains a row.
+Import `db_query_rows(handle: DbHandle, sql: String, params: List<DbParam>) -> Result<List<JsonValue>, String>` from `"std:db"`. Each row is a JSON object. For example, `json_get_string(rows[0], "text")?` reads a selected text column after you check that the list contains a row.
 
 Use the same `DbHandle` for `BEGIN IMMEDIATE`, parameterized writes, and `COMMIT`. When an agent returns early with `?` and its last handle goes out of scope, SQLite rolls back the pending transaction. Set `[io] root` in the project manifest to give a served app access to its database directory. Run `corvid migrate up --dir schema --database notes.sqlite` from the project to apply schema changes.
 
@@ -8063,11 +8063,11 @@ Declare a prompt parameter such as `calculate: (Int, Int) -> Int` and pass a fun
 
 ### Updating a searchable document
 
-Import `rag_ingest`, `rag_search` and `RagChunkEnvelope` from `"./std/rag"`. Call `rag_ingest("index.sqlite", "guide", "guide.txt", text, 800)` whenever the guide changes. Reusing the document ID replaces its passages together, so you can retry a failed update. To retrieve up to three passages, call `rag_search("index.sqlite", question, 3)`. Each hit includes the original text, source and character offsets for displaying a citation. A server route can open the same index and use the project's configured embedder.
+Import `rag_ingest`, `rag_search` and `RagChunkEnvelope` from `"std:rag"`. Call `rag_ingest("index.sqlite", "guide", "guide.txt", text, 800)` whenever the guide changes. Reusing the document ID replaces its passages together, so you can retry a failed update. To retrieve up to three passages, call `rag_search("index.sqlite", question, 3)`. Each hit includes the original text, source and character offsets for displaying a citation. A server route can open the same index and use the project's configured embedder.
 
 ### Working with images and browser sessions
 
-Use `io_read_image(path)?` from `./std/io` to get a `PromptImage`. Pass it as a typed prompt argument. In a local CLI program, `browser_open_scoped(width, height)` opens the host-selected start page. Use `browser_click(button_name)`, `browser_read_text(selector)` and `browser_capture()` to interact with it. Finish with `browser_close()`. The image prompt and browser examples in `docs/book/11-prompts.md` show the imports, host setup and return values.
+Use `io_read_image(path)?` from `std:io` to get a `PromptImage`. Pass it as a typed prompt argument. In a local CLI program, `browser_open_scoped(width, height)` opens the host-selected start page. Use `browser_click(button_name)`, `browser_read_text(selector)` and `browser_capture()` to interact with it. Finish with `browser_close()`. The image prompt and browser examples in `docs/book/11-prompts.md` show the imports, host setup and return values.
 
 ### Testing a prompt offline
 

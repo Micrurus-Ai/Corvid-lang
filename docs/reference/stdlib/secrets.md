@@ -7,7 +7,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/secrets" use secret_read
+import "std:secrets" use secret_read
 
 agent main() -> Result<Bool, String>:
     key = secret_read("EXAMPLE_SERVICE_KEY")?

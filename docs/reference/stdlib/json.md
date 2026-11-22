@@ -16,7 +16,7 @@ The umbrella ships two complementary shapes:
 ### 1. Opaque path — for dynamic JSON
 
 ```corvid
-import "./std/json" use json_parse, json_get_int, json_get_string
+import "std:json" use json_parse, json_get_int, json_get_string
 
 agent fetch_user_id(text: String) -> Result<Int, String>:
     parsed = json_parse(text)?
@@ -47,7 +47,7 @@ agent fetch_user(text: String) -> Result<User, String>:
 The user declares the target struct + a tool matching the
 `decode_<X>_from_json` pattern. (Declaring your own effect works,
 as here; since slice 45o you can also import the module's own row —
-`import "./std/json" use json_parse, json_egress_read` — and write
+`import "std:json" use json_parse, json_egress_read` — and write
 `uses json_egress_read` directly.) The runtime intercepts the call
 (via `is_typed_json_decoder_tool_call`) and routes through
 `serde_json::from_str` + `json_to_value` against the declared
@@ -215,7 +215,7 @@ parse path goes through `serde_json::from_str`; the typed-
 decoder convention inherits the same property.
 
 ```corvid
-import "./std/json" use json_parse
+import "std:json" use json_parse
 
 agent main(text: String) -> Result<JsonValue, String>:
     return json_parse(text)
@@ -231,7 +231,7 @@ Each typed accessor returns `Result<T, String>` where the Err
 branch fires on missing fields AND on type mismatches.
 
 ```corvid
-import "./std/json" use json_parse, json_get_int
+import "std:json" use json_parse, json_get_int
 
 agent main() -> Result<Int, String>:
     parsed = json_parse("{\"name\": \"alice\"}")?
@@ -311,8 +311,8 @@ type User:
     id: Int
     email: String
 
-import "./std/http" use http_get
-import "./std/db" use db_open, db_execute, db_param_int, db_param_text
+import "std:http" use http_get
+import "std:db" use db_open, db_execute, db_param_int, db_param_text
 
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 

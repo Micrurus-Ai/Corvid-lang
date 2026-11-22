@@ -6,7 +6,7 @@ Corvid tools through ONE executing surface.
 ## The surface
 
 ```corvid-fragment
-import "./std/mcp" use mcp_call
+import "std:mcp" use mcp_call
 
 found: Result<String, String> = mcp_call("notes", "search", "{\"query\": \"corvid\"}")
 ```

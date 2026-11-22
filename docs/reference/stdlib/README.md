@@ -60,7 +60,7 @@ These primitives are deliberately plain Corvid types and agents. A program can
 import the module today with a local path:
 
 ```corvid
-import "./std/ai" use AiMessage, user_message
+import "std:ai" use AiMessage, user_message
 
 agent main() -> String:
     msg = user_message("hello")

@@ -1,5 +1,5 @@
-import "./std/http" use http_get, http_post_json
-import "./std/json" use json_object_new, json_object_set_string, json_object_finish, json_parse, json_get_int
+import "std:http" use http_get, http_post_json
+import "std:json" use json_object_new, json_object_set_string, json_object_finish, json_parse, json_get_int
 
 type Message:
     text: String

@@ -6,7 +6,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/cache" use cache_put, cache_get, cache_invalidate_provenance
+import "std:cache" use cache_put, cache_get, cache_invalidate_provenance
 
 agent summarize_cached(doc_id: String, body: String) -> Result<String, String>:
     found = cache_get("summaries", doc_id)?

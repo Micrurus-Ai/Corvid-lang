@@ -1,5 +1,5 @@
-import "./std/ui" as ui
-import "./std/ui" use View
+import "std:ui" as ui
+import "std:ui" use View
 
 public fn shop_page(title: String, content: List<View>) -> String:
     css = """body { margin: 0; color: #172923; background: #faf8f1; font: 1rem/1.55 system-ui,sans-serif }

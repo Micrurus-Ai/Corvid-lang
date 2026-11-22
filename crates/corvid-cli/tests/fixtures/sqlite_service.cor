@@ -1,5 +1,5 @@
-import "./std/db" use db_open, db_execute, db_query_rows, db_param_text
-import "./std/json" use json_get_string
+import "std:db" use db_open, db_execute, db_query_rows, db_param_text
+import "std:json" use json_get_string
 
 public type Note:
     name: String

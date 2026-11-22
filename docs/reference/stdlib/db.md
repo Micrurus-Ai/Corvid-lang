@@ -14,7 +14,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/db" use db_open, db_query, db_execute, db_param_int, db_param_text
+import "std:db" use db_open, db_query, db_execute, db_param_int, db_param_text
 
 agent record_user(email: String) -> Result<Int, String>:
     handle = db_open(":memory:")?
@@ -245,7 +245,7 @@ applies to all tool calls regardless of effect.
 ## Worked example — typed user store
 
 ```corvid
-import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
+import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
 agent open_users(path: String) -> Result<DbHandle, String>:
     handle = db_open(path)?

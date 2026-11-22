@@ -9,9 +9,7 @@ corvid new hello-corvid
 cd hello-corvid
 ```
 
-The project manifest is `corvid.toml`. Your entry point is `src/main.cor`, and the standard library lives under `src/std/`. Use `corvid new --with-python-tools` if your project also needs a Python tool module.
-
-`corvid new` copies the standard library into the project's `src/std/`. If the installed library is missing or incomplete, the CLI supplies its bundled modules. Extra modules in the installation are also copied.
+Open `src/main.cor` to edit your app. Project settings live in `corvid.toml`. Import standard modules directly, for example `import "std:time" use time_now_utc`. The compiler supplies these modules. Use `corvid new --with-python-tools` to include a Python tool example.
 
 The scaffolded `corvid.toml` declares the executing-I/O security
 boundaries from day one: `[io] root = "."` confines file access to the
@@ -95,7 +93,7 @@ printf '%s' 'Corvid ships a typed effect system.' > note.txt
 In PowerShell use `Set-Content -NoNewline note.txt 'Corvid ships a typed effect system.'`. Edit `src/main.cor` to read it:
 
 ```corvid
-import "./std/io" use io_read_text
+import "std:io" use io_read_text
 
 agent main() -> Result<String, String>:
     file = io_read_text("note.txt")?

@@ -4,9 +4,9 @@ A view can be an ordinary Corvid function. Import `std/ui` in a scaffolded proje
 
 ```corvid-fragment
 # src/main.cor
-import "./std/ui" as ui
-import "./std/ui" use View
-import "./std/io" use io_write_text
+import "std:ui" as ui
+import "std:ui" use View
+import "std:io" use io_write_text
 
 fn search_box(initial: String) -> View:
     query = ui.text_field("Search notes", "query", initial)
@@ -67,7 +67,7 @@ Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fra
 In a project created by `corvid new notes`, use this as `src/main.cor`.
 
 ```corvid-fragment
-import "./std/ui" as ui
+import "std:ui" as ui
 
 server notes:
     route GET "/" -> html:
@@ -84,7 +84,7 @@ From the project directory, run `corvid serve src/main.cor --listen 127.0.0.1:80
 Run `corvid new counter`. In the new project, put the server in `src/main.cor`.
 
 ```corvid-fragment
-import "./std/ui" as ui
+import "std:ui" as ui
 
 server counter:
     route GET "/" -> html:
@@ -164,10 +164,10 @@ public type Search:
 
 ```corvid-fragment
 # src/main.cor
-import "./std/ui" as ui
+import "std:ui" as ui
 import "./search" use Search
-import "./std/ui" use View
-import "./std/io" use io_write_text
+import "std:ui" use View
+import "std:io" use io_write_text
 
 fn search_page(request: Search) -> String:
     search = View(form_for("GET /search", request, "Search"))
@@ -222,7 +222,7 @@ corvid serve src/main.cor --listen 127.0.0.1:8080
 
 Open `http://127.0.0.1:8080/`. Tab to a shelf link and press Enter. Tab to the title, replace it, and activate **Save to shelf**. Stop the server with Ctrl+C and repeat the serve command from the same directory. Open the list again to read the saved title.
 
-The scaffold supplies `src/std` and a project-relative I/O root. The archive includes the SQL migration. Running it in the extracted directory creates and seeds the database there. Reuse that directory across restarts. No model setup is required.
+The compiler supplies the standard modules and the scaffold configures a project-relative I/O root. The archive includes the SQL migration. Running it in the extracted directory creates and seeds the database there. Reuse that directory across restarts. No model setup is required.
 
 The [verification script](../../scripts/verify_reading_list.py) repeats the scaffold, package, migration and restart in fresh directories. With Python 3.12+, Python Playwright and its Chromium browser installed, run `python scripts/verify_reading_list.py path/to/corvid` from the repository root. It reports list and save navigation durations from the browser and separate HTTP save round trips. Use `--channel msedge` for installed Edge or `--http-only` for the server checks alone.
 
@@ -236,7 +236,7 @@ Open a shelf and choose **Suggest a title**. The original edit form stays availa
 
 ```corvid-fragment
 # src/main.cor
-import "./std/ui" as ui
+import "std:ui" as ui
 
 prompt answer(topic: String) -> Stream<String>:
     "{topic}"
@@ -256,7 +256,7 @@ Set `CORVID_MODEL` to your streaming provider and run `corvid serve src/main.cor
 Place the server in `src/main.cor`. Use `ui.link` with a trusted application path to navigate between pages.
 
 ```corvid-fragment
-import "./std/ui" as ui
+import "std:ui" as ui
 
 prompt answer(topic: String) -> Stream<String>:
     "{topic}"

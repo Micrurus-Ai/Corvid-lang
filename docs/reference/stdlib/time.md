@@ -7,7 +7,7 @@
 ## Quick reference
 
 ```corvid
-import "./std/time" use time_now_utc, time_monotonic_ms, time_parse_iso, time_format_iso
+import "std:time" use time_now_utc, time_monotonic_ms, time_parse_iso, time_format_iso
 
 agent deadline(days: Int) -> String:
     now = time_now_utc()

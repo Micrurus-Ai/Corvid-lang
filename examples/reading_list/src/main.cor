@@ -1,7 +1,7 @@
-import "./std/db" use db_open, db_execute, db_query_rows, db_param_text, db_param_int
-import "./std/json" use json_get_int, json_get_string
-import "./std/ui" as ui
-import "./std/ui" use View
+import "std:db" use db_open, db_execute, db_query_rows, db_param_text, db_param_int
+import "std:json" use json_get_int, json_get_string
+import "std:ui" as ui
+import "std:ui" use View
 
 type Selection:
     shelf: Int where between(1, 3)
