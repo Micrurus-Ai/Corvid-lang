@@ -1,0 +1,5 @@
+public agent read_page(current: Int) -> Int:
+    return current + 1
+
+agent reset_pages(current: Int) -> Int:
+    return 0

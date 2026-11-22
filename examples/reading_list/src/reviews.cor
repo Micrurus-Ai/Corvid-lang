@@ -17,10 +17,14 @@ identity readers:
 # The session cookie stays HttpOnly. Echo the companion CSRF cookie on each form POST.
 fn review_controls() -> View:
     return View("""<p id='review-status' role='status'></p><section id='review'></section><script>
-document.addEventListener('submit', async event => {
+document.addEventListener('submit', event => {
     const form = event.target;
     if (form.method !== 'post') return;
     event.preventDefault();
+    const result = submitReview(form);
+    if (event.agentInvoked) event.respondWith(result);
+});
+async function submitReview(form) {
     const button = form.querySelector('button');
     const status = document.querySelector('#review-status');
     const token = document.cookie.split('; ').find(cookie => cookie.startsWith('corvid_csrf='));
@@ -34,17 +38,20 @@ document.addEventListener('submit', async event => {
         if (!response.ok) {
             status.textContent = response.status === 401 ? 'Sign in to review.' :
                 response.status === 403 ? 'Permission denied. Check your access.' : 'Review failed. Try again.';
-            return;
+            return status.textContent;
         }
         const page = new DOMParser().parseFromString(await response.text(), 'text/html');
-        document.querySelector('#review').replaceChildren(...page.body.childNodes);
+        const review = document.querySelector('#review');
+        review.replaceChildren(...page.body.childNodes);
         status.textContent = '';
+        return review.textContent.trim();
     } catch {
         status.textContent = 'Request interrupted. Retry this form.';
+        return status.textContent;
     } finally {
         button.disabled = false;
     }
-});
+}
 </script>""")
 
 type Titles:
@@ -92,7 +99,7 @@ agent review_three(owner: String) -> Result<String, String>:
         db_execute(db, "INSERT INTO proposal_items(proposal_key, shelf, base_revision, owner) VALUES (?, ?, ?, ?)", [db_param_text(key), db_param_int(shelf), db_param_int(revision), db_param_text(owner)])?
     db_execute(db, "COMMIT", [])?
     controls = [
-        View("<form method='post' action='/proposals/apply'>"),
+        View("<form method='post' action='/proposals/apply' toolname='apply_reviewed_titles' tooldescription='Apply the three reviewed shelf titles after confirmation.'>"),
         View("<input type='hidden' name='proposal_key' value='" + key + "'>"),
         ui.text_field("Shelf 1, currently " + first, "first", titles.first),
         ui.text_field("Shelf 2, currently " + second, "second", titles.second),

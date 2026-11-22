@@ -229,6 +229,7 @@ class PreviewForm(HTMLParser):
         if tag == "form":
             assert attrs["method"].upper() == "POST"
             self.action = attrs["action"]
+            self.tool = attrs.get("toolname")
         elif tag == "input":
             self.fields[attrs["name"]] = attrs["value"]
 
@@ -309,7 +310,7 @@ def check_suggestions(url, provider, original, channel, http_only):
     return title
 
 
-def check_batch(cli, installed, env, provider, channel, http_only):
+def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False):
     proposed = {"first": "North & South", "second": "Emma", "third": "The Moonstone"}
     database = installed / "reading.sqlite"
 
@@ -375,6 +376,7 @@ def check_batch(cli, installed, env, provider, channel, http_only):
         provider.requests.get(timeout=2)
         form = PreviewForm(review)
         assert form.action == "/proposals/apply" and shelves() == before
+        assert form.tool == "apply_reviewed_titles"
         for name, title in proposed.items():
             assert form.fields[name] == title
         for current, _ in before:
@@ -421,7 +423,8 @@ def check_batch(cli, installed, env, provider, channel, http_only):
         if not http_only:
             from playwright.sync_api import expect, sync_playwright
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(channel=channel)
+                flags = ["--enable-features=WebMCPTesting"] if webmcp else []
+                browser = playwright.chromium.launch(channel=channel, args=flags)
                 context = browser.new_context()
                 for pair in reviewer["Cookie"].split("; "):
                     name, value = pair.split("=", 1)
@@ -435,16 +438,48 @@ def check_batch(cli, installed, env, provider, channel, http_only):
                 draft = page.locator('[name="first"]')
                 expect(draft).to_have_value(proposed["first"])
                 assert page.locator('[name="proposal_key"]').input_value() != fields["proposal_key"]
-                draft.fill("Edited in the browser")
+                if webmcp:
+                    page.wait_for_function("""async () => (await document.modelContext.getTools())
+                        .some(tool => tool.name === 'apply_reviewed_titles')""")
+                    page.evaluate("""async () => {
+                        window.reviewTool = (await document.modelContext.getTools())
+                            .find(tool => tool.name === 'apply_reviewed_titles');
+                    }""")
+                else:
+                    draft.fill("Edited in the browser")
                 set_role(auth, "reviewer", "reviewer", False)
                 apply = page.get_by_role("button", name="Apply reviewed titles")
+
+                def prepare_call(first):
+                    page.evaluate("""args => {
+                        window.reviewResult = null;
+                        document.modelContext.executeTool(window.reviewTool, args)
+                            .then(value => { window.reviewResult = {value}; },
+                                  error => { window.reviewResult = {error: String(error)}; });
+                    }""", dict(proposed, first=first))
+                    expect(draft).to_have_value(first)
+
+                def check_reply(message):
+                    page.wait_for_function("() => window.reviewResult !== null")
+                    reply = page.evaluate("() => window.reviewResult")
+                    assert message in reply.get("value", ""), reply
+
+                if webmcp:
+                    prepare_call("Attempt after revocation")
+                    assert shelves() == committed
                 apply.click()
                 expect(page.get_by_role("status")).to_contain_text("Permission denied")
+                if webmcp:
+                    check_reply("Permission denied")
                 assert shelves() == committed
                 set_role(auth, "reviewer", "reviewer", True)
                 post(url + "/save", b"shelf=2&title=New+manual+edit", editor)
+                if webmcp:
+                    prepare_call("Edited in the browser")
                 apply.click()
                 expect(page.get_by_text("Shelf 2 changed since review.", exact=False)).to_be_visible()
+                if webmcp:
+                    check_reply("Shelf 2 changed since review")
                 assert shelves() == [("Edited in the browser", committed[0][1] + 1),
                                      ("New manual edit", committed[1][1] + 1),
                                      (proposed["third"], committed[2][1] + 1)]
@@ -584,7 +619,7 @@ def verify(args):
                         browser = playwright.chromium.launch(channel=args.channel)
                         check_contract_change(cli, installed, env, browser.new_page())
                         browser.close()
-                check_batch(cli, installed, local_env, provider, args.channel, args.http_only)
+                check_batch(cli, installed, local_env, provider, args.channel, args.http_only, args.webmcp)
             finally:
                 provider.shutdown()
 
@@ -594,5 +629,7 @@ if __name__ == "__main__":
     parser.add_argument("cli", type=Path)
     parser.add_argument("--work-dir", type=Path, help="create and retain the trial in this new directory")
     parser.add_argument("--channel", help="Playwright Chromium channel, e.g. msedge")
-    parser.add_argument("--http-only", action="store_true", help="skip the keyboard and browser timings")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--http-only", action="store_true", help="skip the keyboard and browser timings")
+    mode.add_argument("--webmcp", action="store_true", help="also discover and invoke the reviewed apply form")
     verify(parser.parse_args())

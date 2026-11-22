@@ -1,0 +1,7 @@
+import "./std/ui" as ui
+
+server progress:
+    route GET "/" -> html:
+        record = ui.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to this session's reading count.")
+        clear = ui.action("Start over", "reset_pages")
+        return ui.interactive_page("Reading progress", [ui.int_state("Pages read this session", 0, [record, clear])])

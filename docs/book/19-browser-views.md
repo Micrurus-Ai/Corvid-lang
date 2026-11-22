@@ -115,6 +115,27 @@ Run `corvid build src/main.cor --target web`. Extract `target/web.tar` into an e
 | `text_state(label: String, initial: String, handler: String) -> View` | Calls a `(String) -> String` handler on initial load and on each input event. |
 | `interactive_page(title: String, content: List<View>) -> String` | Renders the page and loads its compiled browser handlers. |
 
+For a browser-local reading counter, place this control inside `ui.int_state` on an interactive page:
+
+```corvid
+record = ui.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to this session's reading count.")
+```
+
+The visible label can change independently of the tool name. The binding takes the current count from its owning control and invokes the compiled `read_page(Int) -> Int` handler. An assistant supplies an empty object. The returned decimal string preserves the full Corvid integer. A second button created with `ui.action` stays available to keyboard and pointer users. Tool registration uses the browser's optional WebMCP interface. [Reading counter](../../examples/reading_list/src/progress.cor) · [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
+
+To let an assistant edit a single-line reading note, put this handler in `src/events.cor`:
+
+```corvid
+public agent edit_note(note: String) -> String:
+    return note
+```
+
+Place `ui.assistant_text_state("Reading note", "", "edit_note", "update_reading_note", "Edit the reading note.")` on an interactive page. Typing into the field or calling `update_reading_note` with `{"note":"Chapter two"}` passes the text to the same handler. The compiled signature supplies the required field name and string result schema. The counter instead owns its input and publishes a decimal-string result schema.
+
+With Node 22.7 or newer on the path, run `python scripts/verify_shared_actions.py target/debug/corvid.exe --package-only` to check the CLI, durable worker and extracted archive. From the extracted project, `corvid jobs enqueue --task read_page --payload '[40]'` queues the call. `corvid jobs run --source src/events.cor --max-runtime-ms 1500` executes it. Inspect the returned job ID with `corvid jobs inspect --job <id>` to see the result type and fingerprint. The full trial requires Playwright and a browser with WebMCP discovery and execution enabled.
+
+The shelf-review example exposes `apply_reviewed_titles` on the proposal form. The user confirms the three edited titles and the form posts to `/proposals/apply`. The server checks the session, reviewer permission and proposal owner on submission. Retrying the same edits with the same proposal key returns the recorded outcome. Run `python scripts/verify_reading_list.py target/debug/corvid.exe --http-only` for the packaged permission and retry checks. On a WebMCP-enabled browser, the trial option `--webmcp --channel chrome` exercises discovery, fills the form through the discovered tool and confirms submission through the visible button. It checks the reply and shelf state after revocation and after access is restored. This browser path still needs a successful run.
+
 The archive includes application sources and compiled browser assets. Static applications can omit `src/events.cor`. A build error preserves the previous successful archive.
 
 ### Edit a keyed cart and reuse a color picker
