@@ -25,8 +25,8 @@ fn guide(note: String) -> String:
     form = ui.query_form("/guide", [editor])
     preview = ui.paragraph([ui.strong([ui.inline_text("Current note")]), ui.inline_text(": " + note)])
     supplies = ui.unordered_list([
-        ui.list_item([ui.inline_text("Water bottle")]),
-        ui.list_item([ui.inline_text("Trail map")])
+        ui.list_item([ui.checkbox_field("Water bottle", "water", false)]),
+        ui.list_item([ui.checkbox_field("Trail map", "map", false)])
     ])
     checklist = ui.disclosure("Packing checklist", [supplies])
     packing = ui.data_group("trail-note", note, [checklist, preview, form])

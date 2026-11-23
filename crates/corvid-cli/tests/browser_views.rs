@@ -16,6 +16,11 @@ test escapes_fields:
     field = ui.text_field("<Name>", "a\"b", "<x>&")
     assert field.html == "<label>&lt;Name&gt;<input type=\"text\" name=\"a&quot;b\" value=\"&lt;x&gt;&amp;\"></label>"
 
+test checkbox_field_escapes_strings_and_respects_initial_state:
+    packed = ui.checkbox_field("<Map> & compass", "gear\"list", true)
+    assert packed.html == "<label><input type=\"checkbox\" name=\"gear&quot;list\" checked>&lt;Map&gt; &amp; compass</label>"
+    assert ui.checkbox_field("Water", "water", false).html == "<label><input type=\"checkbox\" name=\"water\">Water</label>"
+
 test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
@@ -146,7 +151,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("21 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("22 passed"),
         "{good:?}"
     );
     fs::write(

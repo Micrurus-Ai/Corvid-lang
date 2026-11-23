@@ -404,6 +404,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn text_field(label: String, name: String, initial: String) -> View`
 - `fn text_area(label: String, name: String, initial: String) -> View` renders a labeled native multiline form field. It escapes the label, form name and initial text, and preserves an initial blank line when the browser parses the textarea.
 - `fn text_area_with_requirement(label: String, name: String, initial: String, required: Bool) -> View` renders the same field with the HTML `required` attribute when `required` is true. Passing false omits the attribute.
+- `fn checkbox_field(label: String, name: String, checked: Bool) -> View` renders a labeled native checkbox and escapes both strings. The Boolean sets the initial checked state. In a form, a checked box submits its name with the value `on`. An unchecked box contributes no entry.
 - `fn date_field(label: String, name: String, initial: String) -> View`
 - `fn bind_field(field: View, component: View) -> View`
 - `fn submit(label: String) -> View`

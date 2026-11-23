@@ -119,6 +119,12 @@ public fn grid(content: List<View>) -> View:
 public fn text_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
 
+public fn checkbox_field(label: String, name: String, checked: Bool) -> View:
+    attributes = ""
+    if checked:
+        attributes = " checked"
+    return View("<label><input type=\"checkbox\" name=\"" + escaped(name) + "\"" + attributes + ">" + escaped(label) + "</label>")
+
 public fn text_area(label: String, name: String, initial: String) -> View:
     return text_area_with_requirement(label, name, initial, false)
 

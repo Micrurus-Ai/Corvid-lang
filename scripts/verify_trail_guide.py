@@ -28,7 +28,8 @@ def check_response(url):
         '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water"><details><summary>Packing checklist</summary>'
-        '<ul><li>Water bottle</li><li>Trail map</li></ul></details>',
+        '<ul><li><label><input type="checkbox" name="water">Water bottle</label></li>'
+        '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details>',
         '<form method="get" action="/guide">',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
         '<button type="submit">Preview</button></fieldset></form>',
@@ -85,6 +86,11 @@ def check_browser(url, channel):
         toggle.click()
         expect(supplies).to_be_visible()
         expect(supplies.get_by_role("listitem")).to_have_text(["Water bottle", "Trail map"])
+        water = supplies.get_by_role("checkbox", name="Water bottle")
+        expect(water).not_to_be_checked()
+        water.check()
+        expect(water).to_be_checked()
+        expect(supplies.get_by_role("checkbox", name="Trail map")).not_to_be_checked()
         toggle.click()
         expect(supplies).to_be_hidden()
         editor = packing.get_by_role("group", name="Edit packing note")
