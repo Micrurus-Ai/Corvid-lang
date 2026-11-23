@@ -35,9 +35,11 @@ fn notes_page(note: String) -> String:
 
 Use `ui.paragraph` to mix inline views in a single paragraph. Its children appear in the order you supply them. Include any spaces between words in the text itself.
 
+Wrap important words in `ui.strong`. Pass them as `ui.inline_text` to escape the text, or include other inline views such as links.
+
 ```corvid-fragment
 fn note_preview(note: String) -> View:
-    label = ui.trusted_markup("<strong>Current note</strong>")
+    label = ui.strong([ui.inline_text("Current note")])
     return ui.paragraph([label, ui.inline_text(": " + note)])
 ```
 

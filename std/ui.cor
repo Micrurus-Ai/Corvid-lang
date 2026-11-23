@@ -20,6 +20,9 @@ public fn inline_text(value: String) -> View:
 public fn paragraph(content: List<View>) -> View:
     return View("<p>" + children(content) + "</p>")
 
+public fn strong(content: List<View>) -> View:
+    return View("<strong>" + children(content) + "</strong>")
+
 public fn abbreviation(label: String, expansion: String) -> View:
     return View("<abbr title=\"" + escaped(expansion) + "\">" + escaped(label) + "</abbr>")
 

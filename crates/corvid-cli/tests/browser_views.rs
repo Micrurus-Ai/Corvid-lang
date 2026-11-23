@@ -30,6 +30,11 @@ test abbreviation_escapes_text_and_title:
     distance = ui.abbreviation("<km> & mi", "kilometres & \"miles\"")
     assert distance.html == "<abbr title=\"kilometres &amp; &quot;miles&quot;\">&lt;km&gt; &amp; mi</abbr>"
 
+test strong_preserves_inline_children_in_order:
+    warning = ui.strong([ui.inline_text("<Closed> & "), ui.link("detour", "/detour")])
+    assert warning.html == "<strong>&lt;Closed&gt; &amp; <a href=\"/detour\" tabindex=\"0\">detour</a></strong>"
+    assert ui.strong([]).html == "<strong></strong>"
+
 test escapes_multiline_field:
     field = ui.text_area("Notes & maps", "a\"b", "\n</textarea> & more")
     assert field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\">\n\n&lt;/textarea&gt; &amp; more</textarea></label>"
@@ -141,7 +146,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("20 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("21 passed"),
         "{good:?}"
     );
     fs::write(
