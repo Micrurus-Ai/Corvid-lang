@@ -49,9 +49,9 @@ fn guide(note: String) -> String:
     supplies_aside = ui.aside("Suggested supplies", [checklist])
     packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form, preset_form])
     return match packing:
-        Ok(details) -> ui.page_in_language("en", title, [
-            ui.h1(title), navigation, route_details, ui.section("packing", "Packing note", [details])
-        ])
+        Ok(details) -> ui.page_with_landmarks("en", title, [ui.h1(title), navigation], [
+            route_details, ui.section("packing", "Packing note", [details])
+        ], [ui.link("Back to route", "#route")])
         Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])
 
 server trail_guide:

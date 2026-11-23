@@ -259,18 +259,25 @@ public fn disclosure_with_initial_state(label: String, initially_open: Bool, con
         attributes = " open"
     return View("<details" + attributes + "><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
 
-fn document_page(html_attributes: String, title: String, head: String, content: List<View>) -> String:
-    return "<!doctype html><html" + html_attributes + "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title>" + head + "</head><body><main>" + children(content) + "</main></body></html>"
+fn document_page(html_attributes: String, title: String, head: String, body: String) -> String:
+    return "<!doctype html><html" + html_attributes + "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title>" + head + "</head><body>" + body + "</body></html>"
+
+fn main_landmark(content: List<View>) -> String:
+    return "<main>" + children(content) + "</main>"
 
 public fn page(title: String, content: List<View>) -> String:
-    return document_page("", title, "", content)
+    return document_page("", title, "", main_landmark(content))
 
 public fn page_in_language(language: String, title: String, content: List<View>) -> String:
-    return document_page(" lang=\"" + escaped(language) + "\"", title, "", content)
+    return document_page(" lang=\"" + escaped(language) + "\"", title, "", main_landmark(content))
+
+public fn page_with_landmarks(language: String, title: String, header: List<View>, content: List<View>, footer: List<View>) -> String:
+    body = "<header>" + children(header) + "</header>" + main_landmark(content) + "<footer>" + children(footer) + "</footer>"
+    return document_page(" lang=\"" + escaped(language) + "\"", title, "", body)
 
 # Supply application-authored CSS, just as for a literal style element.
 public fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String:
-    return document_page(" lang=\"" + escaped(language) + "\"", title, "<style>" + trusted_css + "</style>", content)
+    return document_page(" lang=\"" + escaped(language) + "\"", title, "<style>" + trusted_css + "</style>", main_landmark(content))
 
 public fn action(label: String, handler: String) -> View:
     return View("<button type=\"button\" data-corvid-action=\"" + escaped(handler) + "\" disabled>" + escaped(label) + "</button>")

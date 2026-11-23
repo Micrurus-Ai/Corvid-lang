@@ -80,6 +80,15 @@ fn trail_page(title: String) -> String:
 
 Pass the document's primary language to `ui.page_in_language`. For example, `"en"` sets `lang="en"` on the root HTML element so readers and speech tools can identify the language of the page.
 
+Use `ui.page_with_landmarks` when navigation or footer links belong to the whole document. It places the three lists of views in a page-level header, main region and footer, in that order.
+
+```corvid-fragment
+fn trail_guide_page() -> String:
+    header = [ui.h1("Trail guide"), ui.navigation("Guide sections", [ui.link("Route", "#route")])]
+    route_section = ui.section("route", "Route", [ui.text("Follow the green markers.")])
+    return ui.page_with_landmarks("en", "Trail guide", header, [route_section], [ui.link("Back to route", "#route")])
+```
+
 ### Group navigation links
 
 To link to a named section, pair `ui.link("Packing note", "#packing")` with `ui.section("packing", "Packing note", [form])`. The section starts with an `h2`. Its ID gives the link a destination, and the heading supplies the region's name through `aria-labelledby`. Choose a unique, nonempty ID without whitespace. Child views follow the heading in list order.

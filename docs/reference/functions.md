@@ -433,6 +433,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn disclosure_with_initial_state(label: String, initially_open: Bool, content: List<View>) -> View` renders a native `details` element. It emits the boolean `open` attribute only when `initially_open` is true. The escaped label appears in the first-child `summary`, followed by the content views in order.
 - `fn fieldset(legend: String, controls: List<View>) -> View` renders a native `fieldset` with an escaped text `legend` as its first child, followed by the supplied views in order.
 - `fn page(title: String, content: List<View>) -> String`
+- `fn page_with_landmarks(language: String, title: String, header: List<View>, content: List<View>, footer: List<View>) -> String` renders `header`, `main` and `footer` as direct children of `body`. Each list renders in order, including an empty list which leaves its landmark empty. The language attribute and document title are HTML-escaped.
 - `fn page_in_language(language: String, title: String, content: List<View>) -> String` renders a document with an escaped `lang` attribute on `html`. Supply a language tag such as `en` or `fr-CA`. The title is escaped and child views appear in order inside `main`.
 - `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String`
 - `fn action(label: String, handler: String) -> View`

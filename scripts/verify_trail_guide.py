@@ -15,9 +15,9 @@ def check_response(url):
     initial = read(url)
     landmarks_and_content = [
         '<!doctype html><html lang="en">',
-        "<main><h1>River trail guide</h1>",
+        "<body><header><h1>River trail guide</h1>",
         '<nav aria-label="Guide sections"><a href="#route" tabindex="0">Route, <abbr title="3 kilometres">3 km</abbr></a>'
-        '<a href="#packing" tabindex="0">Packing note</a></nav>',
+        '<a href="#packing" tabindex="0">Packing note</a></nav></header><main>',
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker" width="24" height="24"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
         '<p><em>Estimated</em> walking time: <time datetime="PT45M">45 minutes</time></p>',
@@ -41,6 +41,7 @@ def check_response(url):
         '<option value="Bring water" selected>Water bottle</option><option value="Pack a snack">Trail snack</option></optgroup>'
         '<optgroup label="Navigation"><option value="Pack a map">Trail map</option>'
         '<option value="Bring a compass">Compass</option></optgroup></select></label><button type="submit">Use suggestion</button></form>',
+        '</main><footer><a href="#route" tabindex="0">Back to route</a></footer></body>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
@@ -62,11 +63,18 @@ def check_browser(url, channel):
         page = browser.new_page(java_script_enabled=False)
         response = page.goto(url)
         assert response.ok and "text/html" in response.headers["content-type"]
+        assert page.locator("body > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
+            "header", "main", "footer"
+        ]
+        banner = page.get_by_role("banner")
+        expect(banner.get_by_role("heading", level=1)).to_have_text("River trail guide")
+        footer = page.get_by_role("contentinfo")
+        expect(footer.get_by_role("link", name="Back to route")).to_have_attribute("href", "#route")
         main = page.get_by_role("main")
         assert main.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
-            "h1", "nav", "section", "section"
+            "section", "section"
         ]
-        expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note", "Current note"])
+        expect(main.get_by_role("heading")).to_have_text(["Route", "Packing note", "Current note"])
         route = main.get_by_role("region", name="Route", exact=True)
         assert route.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
             "h2", "figure", "p", "ol", "table"
@@ -89,7 +97,7 @@ def check_browser(url, channel):
             expect(cell.locator("data")).to_have_attribute("value", metres)
         expect(table.get_by_title("1 kilometre", exact=True)).to_have_text("1 km")
         expect(table.get_by_title("3 kilometres", exact=True)).to_have_text("3 km")
-        navigation = main.get_by_role("navigation", name="Guide sections")
+        navigation = banner.get_by_role("navigation", name="Guide sections")
         for label, fragment, heading in [("Route, 3 km", "route", "Route"), ("Packing note", "packing", "Packing note")]:
             navigation.get_by_role("link", name=label, exact=True).click()
             expect(page).to_have_url(url + "/#" + fragment)

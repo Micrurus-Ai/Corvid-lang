@@ -12,6 +12,13 @@ fn browser_views_escape_content_and_require_typed_children() {
     let source = r##"
 import "./ui" as ui
 
+test page_landmarks_preserve_sibling_and_child_order:
+    header = [ui.h1("Map & guide"), ui.text("Introduction")]
+    footer = [ui.text("<end>"), ui.link("Top", "#top")]
+    page = ui.page_with_landmarks("en\"", "<Map>", header, [ui.text("Route"), ui.text("Stops")], footer)
+    assert page.contains("<html lang=\"en&quot;\">")
+    assert page.contains("<title>&lt;Map&gt;</title></head><body><header><h1>Map &amp; guide</h1><p>Introduction</p></header><main><p>Route</p><p>Stops</p></main><footer><p>&lt;end&gt;</p>" + footer[1].html + "</footer></body></html>")
+
 test escapes_fields:
     field = ui.text_field("<Name>", "a\"b", "<x>&")
     assert field.html == "<label>&lt;Name&gt;<input type=\"text\" name=\"a&quot;b\" value=\"&lt;x&gt;&amp;\"></label>"
@@ -233,7 +240,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("38 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("39 passed"),
         "{good:?}"
     );
     fs::write(
