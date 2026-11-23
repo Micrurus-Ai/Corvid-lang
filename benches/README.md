@@ -83,3 +83,7 @@ Until a verified-quiet host is available, do not publish:
 - real-unit latency histograms
 
 Those belong to a later calibration pass, not the same-session close-out.
+
+## Long-list browser controls
+
+From the repository root, run `python scripts/benchmark_cart_controls.py --baseline 72d5c899 --rounds 20 --output cart-controls.json` with Python Playwright and Chrome installed. This comparison runs the two revisions' browser controls in fresh pages with 2 or 1,000 DOM rows. The half-way row moves down and back up 50 times. Eight trusted keyboard shortcuts after focus and scrolling settle measure time to the updated DOM announcement. The runner checks focus, live row order and position, including after independent DOM edits that insert whitespace and comments. These timings cover browser controls. The [four-way storefront benchmark](typescript/README.md#storefront-interaction) measures full-page readiness.

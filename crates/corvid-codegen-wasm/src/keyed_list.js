@@ -10,6 +10,7 @@ function bindKeyedList(region) {
     }
     rows.set(key, row);
   }
+  let rowRange;
   function move(row, direction) {
     const up = direction === "up";
     const neighbor = up ? row.previousElementSibling : row.nextElementSibling;
@@ -21,7 +22,22 @@ function bindKeyedList(region) {
         list.insertBefore(neighbor, up ? row.nextElementSibling : row);
       }
     }
-    const position = Array.from(list.children).indexOf(row) + 1;
+    // Locate the row without allocating an array of every sibling. Range offsets
+    // include text and comments, so use element indices for hand-authored lists.
+    let position;
+    if (row.parentElement !== list) {
+      position = 0;
+    } else if (!row.previousElementSibling) {
+      position = 1;
+    } else if (!row.nextElementSibling) {
+      position = list.children.length;
+    } else if (list.childNodes.length === list.children.length) {
+      rowRange ??= row.ownerDocument.createRange();
+      rowRange.selectNode(row);
+      position = rowRange.startOffset + 1;
+    } else {
+      position = Array.prototype.indexOf.call(list.children, row) + 1;
+    }
     status.textContent = row.dataset.corvidKey + ", position " + position + " of " + rows.size;
   }
   for (const [key, row] of rows) {

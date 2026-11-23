@@ -62,6 +62,19 @@ These are medians for this desktop, including an emulated CPU slowdown. At norma
 
 An independent 12-round desktop run added 96 verified edits. The optimized cold median was 39.15 ms, versus 53.35 ms for forced Wasm and 38.80 ms for TypeScript. The improvement over Wasm repeated, while the two desktop runs put Corvid and TypeScript within 0.35 ms of each other in opposite orders. [Confirmation observations](../../benches/typescript/storefront-handlers-confirmation.jsonl)
 
+### Reordering long lists
+
+Moving a row used to copy every element in the list into a JavaScript array to find its new position for the status announcement. Generated lists now use sibling checks for the ends and a reusable DOM range for interior rows. Lists with intervening text or comments count element positions separately.
+
+In Chrome 157 on Windows, 20 alternating rounds compared the shipped controls with commit `72d5c899`. The benchmark checked row order, focus and status text. Batch timings cover JavaScript event dispatch and synchronous DOM work. The shortcut timings cover trusted keydown to the status DOM mutation after scrolling settled, summarized as the median of each round's eight shortcuts and then across rounds.
+
+| Rows | 100 moves before / after | One shortcut to DOM announcement before / after |
+| ---: | ---: | ---: |
+| 2 | 1.35 / 1.15 ms | 0.45 / 0.40 ms |
+| 1,000 | 18.80 / 2.75 ms | 1.07 / 0.90 ms |
+
+At 1,000 rows the batch ran about 6.8 times faster. The measurements exclude paint and screen-reader speech latency. Quantity edits were a control workload. [Raw observations](../../benches/results/keyed-list-windows-chrome.json) ? [Reproduce the comparison](../../benches/README.md#long-list-browser-controls)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw
