@@ -504,6 +504,21 @@ With Python Playwright and its three browser engines installed, run `python scri
 
 Build the web package and serve its extracted contents with `corvid serve`. The loader keeps its stable URL, `/target/wasm/events.js`. Browsers can send its ETag on subsequent visits. When the bytes are unchanged, the server responds with HTTP 304 and an empty body.
 
-The loader requests `events.wasm?v=<SHA-256>`, where the version identifies the exact compiled bytes. Corvid serves that URL with a one-year immutable cache policy. A backend-only edit can reuse both assets. A change to the Wasm produces a new URL and updates the loader automatically. Keep the full query string in any CDN cache key. An uncached request for a previous build's hash receives HTTP 404 from the new server. Reloading the page retrieves the current loader.
+When the page needs Wasm, the loader requests `events.wasm?v=<SHA-256>`, where the version identifies the exact compiled bytes. Corvid serves that URL with a one-year immutable cache policy. A backend-only edit can reuse both assets. A change to the Wasm produces a new URL and updates the loader automatically. Keep the full query string in any CDN cache key. An uncached request for a previous build's hash receives HTTP 404 from the new server. Reloading the page retrieves the current loader.
 
 Run `python scripts/verify_browser_cache.py target/debug/corvid.exe --channel chrome` with Python Playwright, installed Chrome, Firefox and WebKit. The trial serves three extracted packages at one local origin and records the actual browser requests using persistent profiles.
+
+### Small integer handlers in the browser
+
+Write the calculation once in `src/events.cor`. For example:
+
+```corvid
+public agent line_cents(quantity: Int) -> Int:
+    return quantity * 450
+```
+
+The compiler can emit JavaScript for a single return expression using integer parameters, integer literals, addition, subtraction and multiplication. Each operation keeps the browser backend's signed 64-bit result. Calls, branches, division, remainder and other operations use the existing Wasm implementation. The application author uses the same Corvid syntax for either path.
+
+A packaged standard page containing quantity fields, optional keyed lists, and the standard event script at the end of its content can load `events.quantity.js`. It binds the fields and reordering controls and can run eligible handlers directly, even if another function in the module needs Wasm. A field referencing a different handler can load the general entrypoint. Pages that also use state panels, form enhancements, assistant controls or custom scripts keep the general bindings.
+
+From JavaScript, the public `instantiate(hostOrImports, options)` function still returns the handler object. An eligible events module uses JavaScript automatically if all its handlers qualify. Use `instantiate({}, {backend: "wasm", trace: events})` to force Wasm for comparison or `instantiate({}, {trace: events})` to record the automatic path, where `events` is an array. Both report run arguments, results and failures. Browser integer arguments and results use `bigint`. [Performance measurements](../guides/performance.md#compiled-browser-handlers)

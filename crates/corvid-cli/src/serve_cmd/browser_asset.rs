@@ -9,6 +9,34 @@ use std::sync::Arc;
 
 use super::ServeState;
 
+/// Recognize the standard document footer and only the controls this smaller entrypoint binds.
+pub(super) fn select_quantity_loader(html: &mut String) {
+    const FOOTER: &str = "<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script></main></body></html>";
+    let Some(content) = html.strip_suffix(FOOTER) else {
+        return;
+    };
+    if !content.contains("<div data-corvid-quantity-field>") {
+        return;
+    }
+    let normalized = content.to_ascii_lowercase();
+    if normalized.contains("<script") {
+        return;
+    }
+    if normalized.split("data-corvid-").skip(1).any(|suffix| {
+        let name = suffix
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .next();
+        !matches!(
+            name,
+            Some("quantity-field" | "quantity" | "list" | "key" | "move")
+        )
+    }) {
+        return;
+    }
+    let offset = content.len() + FOOTER.find("events.js").unwrap() + "events".len();
+    html.insert_str(offset, ".quantity");
+}
+
 pub(super) fn browser_asset(
     bytes: Bytes,
     mime: &'static str,

@@ -122,6 +122,11 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
             );
             return Ok(1);
         };
+        if let Some(loader) = build.quantity_loader {
+            let path = js.with_file_name("events.quantity.js");
+            fs::write(&path, loader)?;
+            files.push(path.strip_prefix(stage.path())?.to_owned());
+        }
         for asset in [js, wasm] {
             files.push(asset.strip_prefix(stage.path())?.to_owned());
         }

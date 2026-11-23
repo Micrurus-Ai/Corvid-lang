@@ -69,37 +69,47 @@ def visit(page, url, price, heading):
     expect(page.get_by_text(f"Total: {price * 2 + 125} cents", exact=True)).to_be_visible()
 
 
-def trial(context, servers):
+def trial(context, servers, compiled_js):
     with origin() as proxy:
         url = f"http://127.0.0.1:{proxy.server_port}"
         page = context.new_page()
         proxy.upstream = servers[0]
         visit(page, url, 450, "Checkout summary")
-        js = "/target/wasm/events.js"
-        wasm = next(path for path, status, _ in proxy.requests if ".wasm?v=" in path and status == 200)
+        js = "/target/wasm/events.quantity.js" if compiled_js else "/target/wasm/events.js"
+        modules = [path for path, status, _ in proxy.requests if ".wasm?v=" in path and status == 200]
+        assert len(modules) == (0 if compiled_js else 1), proxy.requests
+        assert any(path == js and status == 200 for path, status, _ in proxy.requests)
         proxy.requests.clear()
         proxy.upstream = servers[1]
         visit(page, url, 450, "Order summary")
         assert (js, 304, 0) in proxy.requests, proxy.requests
-        assert all(path != wasm for path, _, _ in proxy.requests), proxy.requests
+        assert all(".wasm?v=" not in path for path, _, _ in proxy.requests), proxy.requests
 
         proxy.upstream = servers[2]
         proxy.requests.clear()
         visit(page, url, 475, "Order summary")
         assert any(path == js and status == 200 for path, status, _ in proxy.requests), proxy.requests
+        if compiled_js:
+            assert all(".wasm?v=" not in path for path, _, _ in proxy.requests)
+            return
+        wasm = modules[0]
         assert any(path != wasm and ".wasm?v=" in path and status == 200
                    for path, status, _ in proxy.requests), proxy.requests
         stale = context.request.get(url + wasm)
         assert stale.status == 404 and stale.headers["cache-control"] == "no-store"
 
 
-def verify(cli, channel):
+def verify(cli, channel, compiled_js):
     with TemporaryDirectory() as tmp, ExitStack() as stack:
         root = Path(tmp)
         subprocess.run([cli, "new", "storefront"], cwd=root, check=True)
         project = root / "storefront"
         src = project / "src"
         shutil.copytree(ROOT / "examples/storefront/src", src, dirs_exist_ok=True)
+        # Exercise caching of the Wasm backend with multi-statement event handlers.
+        events = src / "events.cor"
+        if not compiled_js:
+            events.write_text(events.read_text().replace("    return quantity *", "    units = quantity\n    return units *"), encoding="utf-8")
         servers = []
         for release, price in (("initial", "450"), ("heading", "450"), ("price", "475")):
             for filename in ("events.cor", "main.cor"):
@@ -116,7 +126,7 @@ def verify(cli, channel):
                 context = getattr(playwright, engine).launch_persistent_context(
                     str(root / (engine + "-profile")), channel=channel if engine == "chromium" else None)
                 try:
-                    trial(context, servers)
+                    trial(context, servers, compiled_js)
                     print(engine, "warm cache and updated checkout passed", flush=True)
                 finally:
                     context.close()
@@ -126,5 +136,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cli", type=Path)
     parser.add_argument("--channel", help="Installed Chromium distribution")
+    parser.add_argument("--compiled-js", action="store_true", help="exercise quantity-only JavaScript packages")
     args = parser.parse_args()
-    verify(args.cli.resolve(), args.channel)
+    verify(args.cli.resolve(), args.channel, args.compiled_js)

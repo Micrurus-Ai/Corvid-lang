@@ -47,6 +47,21 @@ In a separate 160-edit run on the same Windows Chrome setup, timestamp probes in
 
 Corvid's streaming Wasm startup took 13.30 ms including the fetch. A median 8.70 ms elapsed between the Wasm response ending and the instance becoming available. This elapsed interval includes browser scheduling. On warm visits, handler initialization took 6.20 ms for Corvid and 0.70 ms for TypeScript. The measurement supports testing a compiler-generated JavaScript path for small, pure integer handlers. The prototype should preserve signed 64-bit behavior, diagnostics and tracing and be compared with the existing Wasm backend using the same inputs. Repeat the profile with `--profile-stages`. [Raw samples](../../benches/typescript/storefront-stages-windows-chrome.jsonl)
 
+### Compiled browser handlers
+
+On Windows 11 with Chrome 157, the compiler-generated JavaScript and quantity-specific page loader eliminated the Wasm request for the two storefront calculations. Each row below uses 24 cold and 24 warm visits per CPU setting. Every visit verified the visible quantity edit and submitted checkout receipt. The four variants ran in balanced order against the same loopback backend. The TypeScript reference uses shared general DOM bindings.
+
+| Browser handler and bindings | Desktop cold / warm ready (ms) | 4? CPU throttle cold / warm ready (ms) | Cold browser asset transfer (desktop bytes) |
+| --- | ---: | ---: | ---: |
+| Corvid forced to Wasm, general controls | 47.15 / 24.15 | 413.45 / 218.45 | 17,302 |
+| Compiled TypeScript, general controls | 38.35 / 20.40 | 280.85 / 106.15 | 11,511 |
+| Corvid generated JavaScript, general controls | 38.05 / 20.40 | 282.10 / 109.25 | 16,291 |
+| Corvid generated JavaScript, quantity controls | 38.05 / 20.10 | 264.25 / 103.20 | 3,974 |
+
+These are medians for this desktop, including an emulated CPU slowdown. At normal CPU speed, eliminating Wasm accounted for the median cold-start improvement. Narrowing the bindings reduced the transferred bytes further. Under throttling, the quantity page had a 16.60 ms lower median cold readiness time than TypeScript, while TypeScript had the lower cold p95 (305.0 ms versus Corvid's 319.9 ms). Under throttling both updated the DOM in a median 10.1 ms on the cold visit. The measurements establish the benefit over the previous Wasm path for this workload. Performance for other UI workloads and physical phones needs separate measurement. [Desktop observations](../../benches/typescript/storefront-handlers-chrome-1x.jsonl) ? [Throttled observations](../../benches/typescript/storefront-handlers-chrome-4x.jsonl) ? [Reproduction commands](../../benches/typescript/README.md#storefront-interaction)
+
+An independent 12-round desktop run added 96 verified edits. The optimized cold median was 39.15 ms, versus 53.35 ms for forced Wasm and 38.80 ms for TypeScript. The improvement over Wasm repeated, while the two desktop runs put Corvid and TypeScript within 0.35 ms of each other in opposite orders. [Confirmation observations](../../benches/typescript/storefront-handlers-confirmation.jsonl)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw

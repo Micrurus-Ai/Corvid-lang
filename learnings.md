@@ -527,6 +527,10 @@ A clean check with warnings prints `ok: file.cor — no errors (N warning(s) abo
 
 Rebuild and serve the new web package. The browser revalidates the JavaScript loader and can reuse the WebAssembly module as long as its content hash stays the same. A change to the compiled module automatically changes the URL the loader requests. See [browser asset caching](docs/book/19-browser-views.md#browser-asset-caching).
 
+### Small browser calculations
+
+A single integer return expression in `src/events.cor` can compile to JavaScript. Eligible packaged quantity pages load only their field and list bindings. The public loader also supports `instantiate({}, {backend: "wasm", trace: events})` to request Wasm and capture trace events. See [the syntax, supported operations and fallback behavior](docs/book/19-browser-views.md#small-integer-handlers-in-the-browser).
+
 ### Browser arithmetic errors
 
 In a web build, a failing integer division or remainder reports the handler and the Corvid file, line, column and function where the calculation failed. Open that location even if the handler imports the function from another file. See [debugging browser calculations](docs/book/19-browser-views.md#debug-a-browser-calculation).

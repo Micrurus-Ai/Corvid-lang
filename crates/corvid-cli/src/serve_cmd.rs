@@ -98,6 +98,7 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    quantity_page: bool,
     io_policy: corvid_runtime::io::IoToolPolicy,
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
@@ -346,7 +347,13 @@ pub(crate) fn cmd_serve(
     let openapi_json = serde_json::to_string(&corvid_abi::openapi::emit_openapi(&contract))
         .context("serialize live Corvid OpenAPI contract")?;
 
+    let asset_dir = corvid_driver::wasm_output_dir_for(file);
+    let quantity_page = asset_dir.join("events.js").is_file()
+        && asset_dir.join("events.quantity.js").is_file()
+        && !ir.servers.iter().flat_map(|server| &server.routes).any(|route|
+            route.path == "/target/wasm/events.quantity.js" && route.method == HttpMethod::Get);
     let state = Arc::new(ServeState {
+        quantity_page,
         io_policy,
         rag_embedder,
         http_policy,
@@ -399,12 +406,14 @@ pub(crate) fn cmd_serve(
         }))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
-    // Serve only the compiled browser entrypoint and its companion Wasm.
-    // Read both once so running requests see a consistent build.
-    let asset_dir = corvid_driver::wasm_output_dir_for(file);
+    // Read the packaged browser assets once so running requests see a consistent build.
     let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
     if has_events {
-        for (name, mime) in [("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")] {
+        let mut assets = vec![("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")];
+        if quantity_page {
+            assets.push(("events.quantity.js", "text/javascript; charset=utf-8"));
+        }
+        for (name, mime) in assets {
             let path = asset_dir.join(name);
             let bytes = Bytes::from(std::fs::read(&path)
                 .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
@@ -1300,7 +1309,7 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome, meta.response_kind)
+    finish(outcome, meta.response_kind, state.quantity_page)
 }
 
 enum RouteRequestBody {
@@ -1509,7 +1518,7 @@ fn capture_pending_invocation_if_queued(
 /// (slice `E0-serve-5`), 403 when an `approve` boundary denied (kept
 /// for the case where a non-queue approver is wired in — defensive),
 /// 500 otherwise.
-fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind) -> Response {
+fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, quantity_page: bool) -> Response {
     match outcome {
         // A Stream-returning handler responds as Server-Sent Events:
         // each chunk flushes to the client the moment it arrives
@@ -1545,7 +1554,11 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind) ->
             axum::response::Sse::new(sse).into_response()
         }
         Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
-            axum::response::Html(html.to_string()).into_response()
+            let mut document = html.to_string();
+            if quantity_page {
+                browser_asset::select_quantity_loader(&mut document);
+            }
+            axum::response::Html(document).into_response()
         }
         Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
         Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {

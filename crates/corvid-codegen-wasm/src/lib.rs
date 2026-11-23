@@ -24,6 +24,7 @@ use wasm_encoder::{
 mod allocator;
 mod companions;
 mod error;
+mod integer_handlers;
 mod string_pool;
 
 pub use companions::WasmArtifacts;

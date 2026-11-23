@@ -84,7 +84,7 @@ def instrument_loader(path):
     ]
     if "WebAssembly.instantiateStreaming" in source:
         markers.extend([("const source = await WebAssembly.instantiateStreaming", "wasm_start"),
-                        ("const exports = source.instance.exports;", "wasm_ready")])
+                        ("return source.instance.exports;" if "return source.instance.exports;" in source else "const exports = source.instance.exports;", "wasm_ready")])
     for anchor, name in markers:
         if source.count(anchor) != 1:
             raise RuntimeError(f"Cannot instrument {name} in {path}")
@@ -113,6 +113,19 @@ def run(args):
         loader.write_text((root / "storefront.js").read_text(encoding="utf-8") +
                           "\n" + original[original.index(shared_start):], encoding="utf-8")
         variants = ["Corvid", "TypeScript"]
+        compact = Path("target/wasm/events.quantity.js")
+        (root / "TypeScript" / compact).unlink(missing_ok=True)
+        if args.compare_handlers:
+            if not (root / "Corvid" / compact).is_file():
+                raise RuntimeError("This build did not generate a quantity loader")
+            for name in ("Corvid JS", "Corvid quantity"):
+                shutil.copytree(root / "Corvid", root / name)
+                variants.append(name)
+            (root / "Corvid JS" / compact).unlink()
+        (root / "Corvid" / compact).unlink(missing_ok=True)
+        general = root / "Corvid/target/wasm/events.js"
+        general.write_text(original.replace("instantiate(hostOrImports = {}, options = {})",
+                                            "instantiate(hostOrImports = {}, options = {backend:'wasm'})"), encoding="utf-8")
         if args.compare_preload:
             variants.append("Corvid preload")
             early = root / "Corvid preload"
@@ -132,6 +145,9 @@ def run(args):
                 for name in variants}
         orders = list(permutations(variants))
         samples = []
+        if len(variants) == 4:
+            # Counterbalance run position and immediate predecessor in blocks of four.
+            orders = [[variants[(offset + step) % 4] for step in (0, 1, 3, 2)] for offset in range(4)]
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel=args.channel)
             try:
@@ -141,10 +157,17 @@ def run(args):
                         with browser.new_context(viewport={"width": 960, "height": 720}) as context:
                             context.add_init_script(PROBE)
                             page = context.new_page()
+                            if args.cpu_slowdown != 1:
+                                cdp = context.new_cdp_session(page)
+                                cdp.send("Emulation.setCPUThrottlingRate", {"rate": args.cpu_slowdown})
                             for cache in ("cold", "warm"):
                                 sample = visit(page, urls[name])
                                 files = sorted(asset["file"] for asset in sample["assets"])
-                                expected = ["events.js"] if name == "TypeScript" else ["events.js", "events.wasm"]
+                                expected = ["events.js"]
+                                if name in ("Corvid", "Corvid preload"):
+                                    expected.append("events.wasm")
+                                elif name == "Corvid quantity":
+                                    expected = ["events.quantity.js"]
                                 if files != expected:
                                     raise AssertionError((name, cache, files))
                                 if i >= 0:
@@ -153,6 +176,7 @@ def run(args):
             finally:
                 browser.close()
         report = {
+            "cpu_slowdown": args.cpu_slowdown,
             "os": platform.platform(), "browser": version,
             "cli": subprocess.check_output([cli, "--version"], text=True).strip(),
             "wasm_sha256": hashlib.sha256((root / "Corvid/target/wasm/events.wasm").read_bytes()).hexdigest(),
@@ -177,9 +201,14 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pairs", type=int, default=40)
     parser.add_argument("--channel", default="chrome")
-    parser.add_argument("--compare-preload", action="store_true", help="also time the same cart with an early Wasm fetch")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--compare-handlers", action="store_true", help="compare Wasm, general JS, quantity JS and TypeScript")
+    parser.add_argument("--cpu-slowdown", type=int, default=1, help="Chrome CPU throttling multiplier")
+    mode.add_argument("--compare-preload", action="store_true", help="also time the same cart with an early Wasm fetch")
     parser.add_argument("--profile-stages", action="store_true", help="record loader and control startup timestamps in the benchmark copies")
     args = parser.parse_args()
     if args.pairs < 1:
         parser.error("--pairs must be positive")
+    if args.cpu_slowdown < 1 or (args.compare_handlers and args.profile_stages):
+        parser.error("Use positive CPU slowdown and profile the general loader separately")
     run(args)

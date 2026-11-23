@@ -26,6 +26,12 @@ def verify(cli, channel):
         project = root / "storefront"
         src = project / "src"
         shutil.copytree(ROOT / "examples/storefront/src", src, dirs_exist_ok=True)
+        main = src / "main.cor"
+        main.write_text(main.read_text(encoding="utf-8").replace("server shop:\n", '''server shop:
+    route GET "/pencil-quantity" -> html:
+        return shop_page("Pencils", [ui.quantity_field("Pencil count", "pencil", 1, "pencil_cents", "Cents", 125), ui.event_module()])
+
+'''), encoding="utf-8")
         events = src / "events.cor"
         events.write_text('import "./pricing" use line_total\n' + events.read_text().replace(
             "quantity * 450", "line_total(quantity, 450)"), encoding="utf-8")
@@ -46,6 +52,12 @@ def verify(cli, channel):
                 browser = getattr(playwright, engine).launch(channel=channel if engine == "chromium" else None)
                 try:
                     page = browser.new_page()
+                    page.goto(urls[0] + "/pencil-quantity")
+                    page.get_by_label("Pencil count").fill("3")
+                    expect(page.get_by_text("375", exact=True)).to_be_visible()
+                    assets = page.evaluate("""performance.getEntriesByType('resource')
+                      .filter(e => e.name.includes('/target/wasm/')).map(e => new URL(e.name).pathname)""")
+                    assert assets == ["/target/wasm/events.quantity.js"], assets
                     page.goto(urls[0] + "/cart")
                     notebook = page.get_by_label("Notebook quantity")
                     notebook.fill("2")

@@ -30,7 +30,7 @@ def trial(browser, url, width, enhanced):
     try:
         pending = []
         if enhanced:
-            page.route("**/events.js", lambda route: pending.append(route))
+            page.route("**/events.quantity.js", lambda route: pending.append(route))
         page.goto(url)
         page.keyboard.press("Tab")
         assert page.get_by_role("link", name="Open cart").evaluate("e => e === document.activeElement")
@@ -140,9 +140,12 @@ def check_rebuild(cli, project, installed, rebuilt):
         archive.extractall(rebuilt, filter="data")
     with serve(cli, rebuilt, os.environ.copy()) as url:
         cart = read(url + "/cart")
-        assert "475 cents each" in cart and 'src="/target/wasm/events.js"' in cart
+        assert "475 cents each" in cart and 'src="/target/wasm/events.quantity.js"' in cart
+        slim = read(url + "/target/wasm/events.quantity.js")
+        assert "adjusted_units" not in slim and "registerControlTool" not in slim
+        assert 'src="/target/wasm/events.js"' in read(url + "/notebook")
         assert "Total: 5825 cents" in read(url + "/checkout", b"notebook=12&pencil=1")
-        for name, mime in (("events.js", "text/javascript"), ("events.wasm", "application/wasm")):
+        for name, mime in (("events.quantity.js", "text/javascript"), ("events.js", "text/javascript"), ("events.wasm", "application/wasm")):
             path = "target/wasm/" + name
             with urlopen(f"{url}/{path}", timeout=5) as response:
                 assert response.headers.get_content_type() == mime
@@ -161,6 +164,9 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
         subprocess.run([cli, "new", "storefront"], cwd=root, check=True)
         project = root / "storefront"
         shutil.copytree(ROOT / "examples/storefront/src", project / "src", dirs_exist_ok=True)
+        with (project / "src/events.cor").open("a", encoding="utf-8") as source:
+            source.write("\npublic agent adjusted_units(units: Int, offset: Int) -> Int:\n"
+                         "    return (units + offset) * 2 - units\n")
         if lsp is not None:
             check_editor(lsp, project)
         check_picker_inputs(cli, project)
@@ -196,6 +202,36 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
 def run_browser(playwright, url, channel, engine="chromium"):
     browser = getattr(playwright, engine).launch(channel=channel)
     try:
+        with browser.new_page() as page:
+            page.goto(url)
+            observed = page.evaluate("""async () => {
+                const {instantiate} = await import('/target/wasm/events.js');
+                const runs = [];
+                for (const backend of [undefined, 'wasm']) {
+                    const trace = [];
+                    const handlers = await instantiate({}, {backend, trace});
+                    const results = [];
+                    for (const n of [0n, -1n, (1n<<63n)-1n, -(1n<<63n), 1n<<65n, '12']) {
+                        const result = handlers.notebook_cents(n);
+                        if (result !== BigInt.asIntN(64, BigInt(n) * 450n)) throw Error('incorrect i64 result');
+                        results.push(String(result));
+                    }
+                    try { handlers.notebook_cents(1); } catch (e) {
+                        if (!(e instanceof TypeError)) throw e;
+                        results.push(e.name);
+                    }
+                    if (results.at(-1) !== 'TypeError' || trace.length !== 21 ||
+                        trace.at(-1).ok !== false || !trace.at(-1).error) throw Error('missing failure trace');
+                    for (const [units, offset] of [[(1n<<63n)-1n, 1n], [-(1n<<63n), -3n], [-7n, 2n]]) {
+                        const adjusted = handlers.adjusted_units(units, offset);
+                        if (adjusted !== BigInt.asIntN(64, units + 2n * offset)) throw Error('nested arithmetic');
+                        results.push(String(adjusted));
+                    }
+                    runs.push([results, trace.map(({ts_ms, run_id, error, ...event}) => event)]);
+                }
+                return runs;
+            }""")
+            assert observed[0] == observed[1], observed
         for width in (320, 960):
             for enhanced in (False, True):
                 trial(browser, url, width, enhanced)
