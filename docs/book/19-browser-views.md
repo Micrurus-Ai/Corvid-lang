@@ -121,6 +121,8 @@ For a distance cell, `ui.abbreviation("3 km", "3 kilometres")` displays “3 km�
 
 To give the distance a machine-readable value in metres, use `ui.data_value("3000", [ui.abbreviation("3 km", "3 kilometres")])`. Readers see “3 km” and the HTML carries `<data value="3000">` around the abbreviation.
 
+For a walking time, use `ui.time_value("PT45M", [ui.inline_text("45 minutes")])`. Readers see “45 minutes”. The native `time` element carries the same duration in its `datetime` attribute. You can also supply a date such as `"2026-11-23"` and choose the date wording your readers will see.
+
 ```corvid-fragment
 fn reading_table(topic: String) -> View:
     guide = [ui.link(topic, "/guide"), ui.inline_text("Ready")]

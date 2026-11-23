@@ -29,6 +29,9 @@ public fn abbreviation(label: String, expansion: String) -> View:
 public fn data_value(value: String, content: List<View>) -> View:
     return View("<data value=\"" + escaped(value) + "\">" + children(content) + "</data>")
 
+public fn time_value(datetime: String, content: List<View>) -> View:
+    return View("<time datetime=\"" + escaped(datetime) + "\">" + children(content) + "</time>")
+
 fn heading(tag: String, label: String) -> View:
     return View("<" + tag + ">" + escaped(label) + "</" + tag + ">")
 

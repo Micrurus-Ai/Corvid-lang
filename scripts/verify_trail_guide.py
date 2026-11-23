@@ -20,6 +20,7 @@ def check_response(url):
         '<a href="#packing" tabindex="0">Packing note</a></nav>',
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
+        '<p>Walking time: <time datetime="PT45M">45 minutes</time></p>',
         '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
@@ -59,8 +60,9 @@ def check_browser(url, channel):
         expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note"])
         route = main.get_by_role("region", name="Route", exact=True)
         assert route.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
-            "h2", "figure", "ol", "table"
+            "h2", "figure", "p", "ol", "table"
         ]
+        expect(route.locator('time[datetime="PT45M"]')).to_have_text("45 minutes")
         figure = route.get_by_role("figure")
         expect(figure.locator("figcaption")).to_have_text("Follow this marker to the lookout.")
         image = figure.get_by_role("img", name="Green circle trail marker")

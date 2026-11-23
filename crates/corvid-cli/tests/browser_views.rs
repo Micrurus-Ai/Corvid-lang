@@ -111,6 +111,10 @@ test rejects_invalid_data_names:
     assert rejects_data_name("café")
     assert rejects_data_name("x>")
 
+test time_value_escapes_datetime_and_preserves_inline_children:
+    duration = ui.time_value("PT45M\" & <estimate>", [ui.strong([ui.inline_text("45")]), ui.inline_text(" <minutes>")])
+    assert duration.html == "<time datetime=\"PT45M&quot; &amp; &lt;estimate&gt;\"><strong>45</strong> &lt;minutes&gt;</time>"
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -173,7 +177,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("26 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("27 passed"),
         "{good:?}"
     );
     fs::write(
