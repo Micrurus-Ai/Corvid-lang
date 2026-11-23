@@ -100,9 +100,9 @@ Never start code on a phase or slice until we've chatted and both sides understa
 
 A slice is not done until its commit is on `main`. Dev-log + git history + ROADMAP checklist must all agree before the next slice starts.
 
-## Professional names in source
+## Professional naming
 
-Code, doc comments, and docstrings use behavioral names for features. Slice numbers (`20h slice G`, `slice 17f`) appear only in commit messages, `ROADMAP.md`, `dev-log.md`, `learnings.md`, and phase-specific doc files.
+Apply the mandatory [project-wide naming rule](CONTRIBUTING.md#professional-naming) to every new or renamed item. Check names when creating a branch and when reviewing changes for merge.
 
 ## Track deferred work in ROADMAP
 
