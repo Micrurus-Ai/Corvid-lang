@@ -3,6 +3,12 @@ import "std:ui" as ui
 type PackingNote:
     note: String
 
+fn guide_sections(route_details: ui.View, packing: Result<ui.View, String>) -> List<ui.View>:
+    packing_content = match packing:
+        Ok(details) -> details
+        Err(reason) -> ui.text(reason)
+    return [route_details, ui.section("packing", "Packing note", [packing_content])]
+
 fn guide(note: String) -> String:
     title = "River trail guide"
     navigation = ui.navigation("Guide sections", [
@@ -48,11 +54,23 @@ fn guide(note: String) -> String:
     checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
     supplies_aside = ui.aside("Suggested supplies", [checklist])
     packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form, preset_form])
-    return match packing:
-        Ok(details) -> ui.page_with_landmarks("en", title, [ui.h1(title), navigation], [
-            route_details, ui.section("packing", "Packing note", [details])
-        ], [ui.link("Back to route", "#route")])
-        Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])
+    return ui.page_with_landmarks("en", title, [ui.h1(title), navigation],
+        guide_sections(route_details, packing), [ui.link("Back to route", "#route")])
+
+test packing_error_keeps_the_route_and_escapes_the_message:
+    route_heading = ui.h2("Route")
+    packing: Result<ui.View, String> = Err("Missing <note> & supplies")
+    sections = guide_sections(route_heading, packing)
+    expected_packing = ui.section("packing", "Packing note", [ui.text("Missing <note> & supplies")])
+    assert ui.fragment(sections).html == route_heading.html + expected_packing.html
+    assert sections[1].html.contains("<p>Missing &lt;note&gt; &amp; supplies</p>")
+
+test packing_success_keeps_the_component_markup:
+    route_heading = ui.h2("Route")
+    packing = ui.data_group("trail-note", "Water", [ui.text("Bring water")])
+    sections = guide_sections(route_heading, packing)
+    assert sections[0].html == route_heading.html
+    assert sections[1].html.contains("<div data-trail-note=\"Water\"><p>Bring water</p></div>")
 
 server trail_guide:
     route GET "/" -> html:
