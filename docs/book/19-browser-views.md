@@ -95,14 +95,14 @@ packing = packing_panel(note, context, fn (text: String) -> ui.text(text))
 
 ### Recover inside a component slot
 
-When a child returns `Result<View, String>`, its parent can choose what fills that slot on failure. In the trail guide, the layout keeps the route details and the packing section heading even when the packing component returns an error. The success branch keeps the child's markup. The error branch uses `ui.text` to escape a message intended for the reader.
+The packing component returns a `Result<PackingPanel, String>`. On success, the record carries two views. The layout renders `content` inside the packing section and `footer_action` in the page footer, after the main landmark. This lets the component send its suggestions form across a layout boundary during server rendering. The form still uses the preview path from the component's context.
+
+On failure, the layout keeps the route details and the footer's navigation link. It fills the packing section with escaped error text and supplies an empty footer action.
 
 ```corvid-fragment
-fn guide_sections(route_details: ui.View, packing: Result<ui.View, String>) -> List<ui.View>:
-    packing_content = match packing:
-        Ok(details) -> details
-        Err(reason) -> ui.text(reason)
-    return [route_details, ui.section("packing", "Packing note", [packing_content])]
+panel = match packing:
+    Ok(details) -> details
+    Err(reason) -> PackingPanel(ui.text(reason), ui.fragment([]))
 ```
 
 Run `corvid serve examples/trail_guide/src/main.cor --listen 127.0.0.1:8080` from the repository root and open `http://127.0.0.1:8080/`. The [trail guide](../../examples/trail_guide/src/main.cor) combines a navigation landmark, route marker, ordered stops, distance table and packing form. Turn off JavaScript, enter a note such as `Rain & <wind>`, and select **Preview**. The GET route renders the note as text and fills the field with the same value.

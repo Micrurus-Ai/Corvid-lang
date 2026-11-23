@@ -36,12 +36,12 @@ def check_response(url):
         '<noscript><p>Select Preview to reload the guide with your note.</p></noscript>',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" rows="4" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
-        '<form method="get" action="/guide" aria-label="Suggested packing notes">'
+        '</section></main><footer><form method="get" action="/guide" aria-label="Suggested packing notes">'
         '<label>Suggested note <select name="note"><optgroup label="Food and drink">'
         '<option value="Bring water" selected>Water bottle</option><option value="Pack a snack">Trail snack</option></optgroup>'
         '<optgroup label="Navigation"><option value="Pack a map">Trail map</option>'
         '<option value="Bring a compass">Compass</option></optgroup></select></label><button type="submit">Use suggestion</button></form>',
-        '</main><footer><a href="#route" tabindex="0">Back to route</a></footer></body>',
+        '<a href="#route" tabindex="0">Back to route</a></footer></body>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
@@ -152,7 +152,7 @@ def check_browser(url, channel):
         editor.get_by_role("button", name="Restore note").click()
         expect(field).to_have_value(NOTE)
         expect(page).to_have_url(preview_url)
-        suggestions = packing.get_by_role("form", name="Suggested packing notes")
+        suggestions = footer.get_by_role("form", name="Suggested packing notes")
         preset = suggestions.get_by_role("combobox", name="Suggested note")
         expect(preset).to_have_value("Bring water")
         preset.select_option(label="Trail map")

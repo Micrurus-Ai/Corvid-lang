@@ -6,11 +6,17 @@ type PackingNote:
 type GuideContext:
     preview_path: String
 
-fn guide_sections(route_details: ui.View, packing: Result<ui.View, String>) -> List<ui.View>:
-    packing_content = match packing:
+type PackingPanel:
+    content: ui.View
+    footer_action: ui.View
+
+fn guide_layout(title: String, navigation: ui.View, route_details: ui.View, packing: Result<PackingPanel, String>) -> String:
+    panel = match packing:
         Ok(details) -> details
-        Err(reason) -> ui.text(reason)
-    return [route_details, ui.section("packing", "Packing note", [packing_content])]
+        Err(reason) -> PackingPanel(ui.text(reason), ui.fragment([]))
+    return ui.page_with_landmarks("en", title, [ui.h1(title), navigation],
+        [route_details, ui.section("packing", "Packing note", [panel.content])],
+        [panel.footer_action, ui.link("Back to route", "#route")])
 
 fn guide(note: String, context: GuideContext) -> String:
     title = "River trail guide"
@@ -35,10 +41,9 @@ fn guide(note: String, context: GuideContext) -> String:
         ui.figure("Follow this marker to the lookout.", [marker]), walking_time, stops, distances
     ])
     packing = packing_panel(note, context, fn (text: String) -> ui.preformatted_text(text))
-    return ui.page_with_landmarks("en", title, [ui.h1(title), navigation],
-        guide_sections(route_details, packing), [ui.link("Back to route", "#route")])
+    return guide_layout(title, navigation, route_details, packing)
 
-fn packing_panel(note: String, context: GuideContext, render_preview: (String) -> ui.View) -> Result<ui.View, String>:
+fn packing_panel(note: String, context: GuideContext, render_preview: (String) -> ui.View) -> Result<PackingPanel, String>:
     preview = render_preview(note)
     supplies = ui.unordered_list([
         ui.list_item([ui.checkbox_field_with_value("Water bottle", "supply", "water", false)]),
@@ -46,8 +51,9 @@ fn packing_panel(note: String, context: GuideContext, render_preview: (String) -
     ])
     checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
     supplies_aside = ui.aside("Suggested supplies", [checklist])
-    return ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview,
-        packing_note_editor(note, context), packing_suggestions(context)])
+    content = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview,
+        packing_note_editor(note, context)])?
+    return Ok(PackingPanel(content, packing_suggestions(context)))
 
 fn packing_note_editor(note: String, context: GuideContext) -> ui.View:
     note_field = ui.text_area_with_rows("Your note", "note", note, 4, true)
@@ -71,7 +77,7 @@ fn packing_suggestions(context: GuideContext) -> ui.View:
 test packing_panel_renders_the_note_with_the_callers_preview:
     panel = packing_panel("Map & compass", GuideContext("/guide"), fn (text: String) -> ui.text(text))
     has_paragraph_preview = match panel:
-        Ok(view) -> view.html.contains("<h3>Current note</h3><p>Map &amp; compass</p>")
+        Ok(details) -> details.content.html.contains("<h3>Current note</h3><p>Map &amp; compass</p>")
         Err(_) -> false
     assert has_paragraph_preview
 
@@ -85,18 +91,19 @@ test each_guide_supplies_the_destination_for_both_packing_forms:
 
 test packing_error_keeps_the_route_and_escapes_the_message:
     route_heading = ui.h2("Route")
-    packing: Result<ui.View, String> = Err("Missing <note> & supplies")
-    sections = guide_sections(route_heading, packing)
+    packing: Result<PackingPanel, String> = Err("Missing <note> & supplies")
+    page = guide_layout("Guide", ui.fragment([]), route_heading, packing)
     expected_packing = ui.section("packing", "Packing note", [ui.text("Missing <note> & supplies")])
-    assert ui.fragment(sections).html == route_heading.html + expected_packing.html
-    assert sections[1].html.contains("<p>Missing &lt;note&gt; &amp; supplies</p>")
+    assert page.contains("<main>" + route_heading.html + expected_packing.html + "</main>")
+    assert page.contains("<p>Missing &lt;note&gt; &amp; supplies</p>")
+    assert page.contains("<footer>" + ui.link("Back to route", "#route").html + "</footer>")
 
-test packing_success_keeps_the_component_markup:
-    route_heading = ui.h2("Route")
-    packing = ui.data_group("trail-note", "Water", [ui.text("Bring water")])
-    sections = guide_sections(route_heading, packing)
-    assert sections[0].html == route_heading.html
-    assert sections[1].html.contains("<div data-trail-note=\"Water\"><p>Bring water</p></div>")
+test packing_suggestions_render_once_in_the_page_footer:
+    context = GuideContext("/ridge")
+    page = guide("Bring water", context)
+    suggestions = packing_suggestions(context).html
+    assert page.contains("</main><footer>" + suggestions)
+    assert page.split(suggestions).length() == 2
 
 server trail_guide:
     route GET "/" -> html:
