@@ -192,7 +192,9 @@ fn type_declaration(ty: &ContractType) -> String {
     out
 }
 
-/// A sum type projects to a discriminated union tagged by `tag`. Error
+/// A sum type projects to a union discriminated by `variant`, matching
+/// the public JSON mapping: `{"tag": "variant", "type": …, "variant": …,
+/// "fields": [...]}` with payload fields in declaration order. Error
 /// variants keep their `@status` / `@ui` metadata on a companion
 /// const map so a frontend renders a default per branch.
 fn sum_type_declaration(ty: &ContractType) -> String {
@@ -201,12 +203,21 @@ fn sum_type_declaration(ty: &ContractType) -> String {
         .variants
         .iter()
         .map(|v| {
-            let mut fields = format!("{{ tag: \"{}\"", v.name);
-            for f in &v.fields {
-                fields.push_str(&format!("; {}: {}", f.name, ts_type(&f.type_name)));
+            let mut arm = format!(
+                "{{ tag?: \"variant\"; type?: \"{}\"; variant: \"{}\"",
+                ty.name, v.name
+            );
+            if !v.fields.is_empty() {
+                let fields = v
+                    .fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name, ts_type(&f.type_name)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                arm.push_str(&format!("; fields: [{fields}]"));
             }
-            fields.push_str(" }");
-            fields
+            arm.push_str(" }");
+            arm
         })
         .collect();
     out.push_str(&format!("export type {} =\n  | {};\n", ty.name, arms.join("\n  | ")));
@@ -343,7 +354,7 @@ fn ts_type(name: &str) -> String {
             "Result" => {
                 let (ok, err) = inner.split_once(',').unwrap_or((inner, "string"));
                 format!(
-                    "{{ ok: {} }} | {{ err: {} }}",
+                    "{{ tag?: \"ok\"; ok: {} }} | {{ tag?: \"err\"; err: {} }}",
                     ts_type(ok.trim()),
                     ts_type(err.trim())
                 )
@@ -433,8 +444,12 @@ public agent classify(q: String) -> Answer:
         assert!(types.contains("score: number;"));
         // Sum type → discriminated union + metadata map.
         assert!(types.contains("export type RefundError ="));
-        assert!(types.contains("{ tag: \"PaymentNotFound\" }"));
-        assert!(types.contains("{ tag: \"ApprovalDenied\"; reason: string }"));
+        assert!(types.contains(
+            "{ tag?: \"variant\"; type?: \"RefundError\"; variant: \"PaymentNotFound\" }"
+        ));
+        assert!(types.contains(
+            "{ tag?: \"variant\"; type?: \"RefundError\"; variant: \"ApprovalDenied\"; fields: [reason: string] }"
+        ));
         assert!(types.contains("export const RefundErrorMeta"));
         assert!(types.contains("status: 404"));
     }

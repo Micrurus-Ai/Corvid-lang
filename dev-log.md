@@ -4,6 +4,42 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - B01 first increment: routes honour the JSON contract they publish
+
+Starting typed JSON (backend and AI queue B01) surfaced three JSON
+mappings that disagreed. A live `corvid serve` rejected every body its
+own `/openapi.json` called valid for a record with an `Option` field:
+`{"tag": "x"}`, `{"tag": null}` and an omitted `tag` all returned 400,
+while the internal `{"tag": {"tag": "some", "value": "x"}}` envelope was
+accepted and echoed back. Undeclared keys were accepted although the
+schema declares `additionalProperties: false`, and errors leaked Rust
+`Debug` text without a field path. A single-file service published a
+`$ref` to a schema it never emitted, and nullable fields used the
+OpenAPI 3.0 `nullable` keyword inside a 3.1 document. The generated
+TypeScript client typed sum values with named fields that are not on
+the wire.
+
+Decision: the published contract is the spec, so the runtime changes to
+match it. One public mapping (`corvid_vm::public_json`) now decodes
+route bodies and encodes JSON replies, stream chunks and approval
+results. Prompt structured output, tool arguments and traces keep the
+internal envelope, because it matches the schema sent to model
+providers and existing recordings replay against it; the two mappings
+differ only on `Option`, `Result` and `Grounded`. `Result` replies keep
+their `tag` key, which the schema permits and existing clients read.
+Grounded values cannot be decoded from JSON, so provenance cannot be
+fabricated through a request body.
+
+Validation: 13 mapping unit tests; four new end-to-end tests that read
+the live `/openapi.json`, send every shape it accepts, validate each
+reply against the response schema and check that rejected shapes return
+a located 400; all 28 existing serve tests; all 91 ABI tests.
+
+Remaining in B01: `T.from_json` and `value.to_json()`, field renaming
+and strict decoding, moving the `decode_<Type>_from_json` convention to
+the public mapping, the native target, and the Swift, Kotlin and Python
+SDK sum-type shapes.
+
 ## 2026-07-24 - 52f-4d closed: approval policy is compiled, not supplied by serve
 
 The last hardcoded approval metadata left the HTTP runtime. An

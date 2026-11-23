@@ -12,7 +12,7 @@
 //!   route's method.
 //! - **Body** (`E0-serve-4`): a handler that is `return <agent>(body)`
 //!   on a route declaring a body type. The request JSON is deserialized
-//!   into the body struct via `json_to_value` and passed to the handler.
+//!   into the body value through the public JSON mapping (`decode_public_json`)
 //!
 //! Approval posture: every `approve` boundary that fires under `corvid
 //! serve` creates a pending entry in the existing `ApprovalQueueRuntime`
@@ -59,7 +59,10 @@ use corvid_runtime::approval_queue::ApprovalQueueRuntime;
 use corvid_runtime::approvals::ProgrammaticApprover;
 use corvid_runtime::catalog_c_api::{corvid_register_tool, dispatch_host_tool, CorvidToolFn};
 use corvid_types::Type;
-use corvid_vm::{json_to_value, value_to_json};
+use corvid_vm::{
+    decode_public_json, encode_public_json, JsonDecodeError,
+    UnknownFields,
+};
 use libloading::{Library, Symbol};
 
 mod browser_asset;
@@ -1255,9 +1258,11 @@ async fn run_route(
                 Ok(j) => j,
                 Err(e) => return bad_request("invalid_json", &e.to_string()),
             };
-            match json_to_value(json, ty, &types_by_id) {
+            // Route bodies follow the published contract, which declares
+            // `additionalProperties: false`, so undeclared keys are refused.
+            match decode_public_json(&json, ty, &types_by_id, UnknownFields::Reject) {
                 Ok(v) => Some(v),
-                Err(e) => return bad_request("invalid_body", &format!("{e:?}")),
+                Err(e) => return invalid_body(&e),
             }
         }
         None => None,
@@ -1530,7 +1535,15 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, qu
                 loop {
                     match stream.next().await {
                         Some(Ok(chunk)) => {
-                            let payload = value_to_json(&chunk);
+                            let payload = match encode_public_json(&chunk) {
+                                Ok(payload) => payload,
+                                Err(reason) => {
+                                    yield Ok(axum::response::sse::Event::default()
+                                        .event("error")
+                                        .data(reason));
+                                    break;
+                                }
+                            };
                             yield Ok::<_, std::convert::Infallible>(
                                 axum::response::sse::Event::default()
                                     .data(payload.to_string()),
@@ -1560,7 +1573,10 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, qu
             }
             axum::response::Html(document).into_response()
         }
-        Ok(value) => (StatusCode::OK, Json(value_to_json(&value))).into_response(),
+        Ok(value) => match encode_public_json(&value) {
+            Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+            Err(reason) => internal_error("unencodable_response", &reason),
+        },
         Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {
             (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
                 "error": "handler_timeout", "detail": e.kind.to_string()
@@ -1824,7 +1840,9 @@ async fn approve_approval(
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "status": "approved",
-                    "result": value_to_json(&value),
+                    "result": encode_public_json(&value).unwrap_or_else(|reason| {
+                        serde_json::json!({ "error": "unencodable_response", "detail": reason })
+                    }),
                 })),
             )
                 .into_response()
@@ -1997,6 +2015,15 @@ fn bad_request(error: &str, detail: &str) -> Response {
         Json(serde_json::json!({ "error": error, "detail": detail })),
     )
         .into_response()
+}
+
+/// 400 for a JSON body that does not match the route's declared type.
+/// `path`, `expected` and `found` locate the problem for the client.
+fn invalid_body(error: &JsonDecodeError) -> Response {
+    let mut body = error.to_json();
+    body["error"] = serde_json::json!("invalid_body");
+    body["detail"] = serde_json::json!(error.message());
+    (StatusCode::BAD_REQUEST, Json(body)).into_response()
 }
 
 fn internal_error(error: &str, detail: &str) -> Response {

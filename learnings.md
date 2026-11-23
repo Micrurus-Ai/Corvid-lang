@@ -8136,3 +8136,7 @@ In the reading-list example, keep the proposal key from the user's review and pa
 `items.slice(start, end)` returns a separate list containing the elements from `start` up to the exclusive `end`. Indexes are clamped to the list bounds. A reversed range is empty. Replacing an element in the new list leaves the corresponding slot in the original list intact. The interpreter copies only the selected elements.
 
 The named-state component prototype gives a mounted view its own integer, lets multiple buttons update it, and displays the result. The browser exercise covers two instances, pointer and keyboard activation, and reload. [Grammar, working example and build instructions](docs/book/19-browser-views.md#a-component-with-named-state-prototype)
+
+### Sending JSON to a route
+
+A `route POST "/orders" body Order -> json Receipt:` handler receives ordinary JSON. Leave an `Option` field out or send `null` for `None`. Send a `Result` as `{"ok": …}` or `{"err": …}` and a sum value as `{"variant": "Changed", "fields": [2, "Dune"]}`. Replies use the same shapes, with an added `tag`. A key the type does not declare, a wrong kind, a missing field or a refinement violation returns HTTP 400 with `path`, `expected` and `found`, such as `lines[0].quantity`. The schema at `/openapi.json` describes the same shapes, including route types that are not `public`. [JSON bodies and replies](docs/guides/backend.md#json-bodies-and-replies)
