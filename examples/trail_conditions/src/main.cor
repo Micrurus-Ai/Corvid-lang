@@ -5,7 +5,7 @@ fn trail_card(theme: String, trail: String, condition: String) -> ui.View:
     return ui.class_group("trail-card " + theme, [summary])
 
 fn conditions_page() -> String:
-    css = """body { font-family: system-ui, sans-serif }
+    css = """body { font-family: system-ui, sans-serif; background: white; color: #18231d }
 .trail-list { display: grid; gap: 1rem }
 .trail-card { container: trail-card / inline-size; --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
 .trail-card.river { --trail-accent: #225782 }
@@ -15,7 +15,16 @@ fn conditions_page() -> String:
 @container trail-card (min-width: 24rem) {
     .trail-summary { flex-direction: row; align-items: baseline; justify-content: space-between }
 }
-@media (min-width: 42rem) { .trail-list { grid-template-columns: repeat(2, minmax(0, 1fr)) } }"""
+@media screen and (min-width: 42rem) { .trail-list { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media screen and (prefers-color-scheme: dark) {
+    body { background: #18231d; color: #f2f5f3 }
+    .trail-card { --trail-accent: #9addab }
+    .trail-card.river { --trail-accent: #98cfff }
+}
+@media print {
+    body { color: black }
+    .trail-card, .trail-card.river { --trail-accent: black; break-inside: avoid }
+}"""
     forest = trail_card("forest", "Forest loop", "Dry underfoot")
     river = trail_card("river", "River walk", "Muddy near the bridge")
     return ui.styled_page("en", "Trail conditions", css, [

@@ -9,6 +9,7 @@ from verify_reading_list import serve
 
 
 def check_cards(page, url):
+    page.emulate_media(media="screen", color_scheme="light")
     page.goto(url)
     forest = page.locator(".trail-card.forest")
     river = page.locator(".trail-card.river")
@@ -36,6 +37,21 @@ def check_cards(page, url):
     forest.evaluate("card => card.style.maxInlineSize = '18rem'")
     expect(forest.locator(".trail-summary")).to_have_css("flex-direction", "column")
     expect(river.locator(".trail-summary")).to_have_css("flex-direction", "row")
+
+    page.emulate_media(media="screen", color_scheme="dark")
+    body = page.locator("body")
+    expect(body).to_have_css("background-color", "rgb(24, 35, 29)")
+    expect(body).to_have_css("color", "rgb(242, 245, 243)")
+    expect(forest.get_by_role("heading")).to_have_css("color", "rgb(154, 221, 171)")
+    expect(river.get_by_role("heading")).to_have_css("color", "rgb(152, 207, 255)")
+
+    page.emulate_media(media="print", color_scheme="dark")
+    expect(body).to_have_css("background-color", "rgb(255, 255, 255)")
+    expect(body).to_have_css("color", "rgb(0, 0, 0)")
+    for card in (forest, river):
+        expect(card.get_by_role("heading")).to_have_css("color", "rgb(0, 0, 0)")
+        expect(card).to_have_css("break-inside", "avoid")
+    assert river.bounding_box()["y"] >= forest.bounding_box()["y"] + forest.bounding_box()["height"]
 
 
 if __name__ == "__main__":

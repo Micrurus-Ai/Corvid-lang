@@ -31,6 +31,8 @@ Use `ui.class_group("trail-card river", children)` to give a group of views CSS 
 
 Each trail card declares `container: trail-card / inline-size`. Inside the card, a flex column stacks the trail name above its condition. The rule `@container trail-card (min-width: 24rem)` switches that column to a row when the card's content area reaches 24rem. This lets a narrow card keep its stacked layout even on a wide screen.
 
+The trail page uses `@media screen and (prefers-color-scheme: dark)` to set a dark background and give each card a lighter accent. The wide grid also uses a screen-only media query, so printed cards form one column at any paper width. The `@media print` rules give both cards black text and borders and use `break-inside: avoid` to keep each trail name with its condition across page breaks.
+
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
 
 ```corvid-fragment
