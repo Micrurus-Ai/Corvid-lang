@@ -382,6 +382,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 The [trail guide example](../../examples/trail_guide/src/main.cor) combines the static view functions in a server-rendered document.
 
 - `fn text(value: String) -> View`
+- `fn fragment(content: List<View>) -> View` groups siblings into one view for a component slot. It concatenates each child's existing markup in order. Nested fragments add no element or spacing. An empty fragment renders an empty string.
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.
 - `fn preformatted_text(value: String) -> View` renders escaped text in a `pre` element with `dir="auto"`. It preserves spaces and line breaks, including a leading newline. The browser infers the block's writing direction from its text.

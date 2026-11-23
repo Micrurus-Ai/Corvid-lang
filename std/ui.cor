@@ -11,6 +11,9 @@ fn children(views: List<View>) -> String:
         parts.append(item.html)
     return parts.join("")
 
+public fn fragment(content: List<View>) -> View:
+    return View(children(content))
+
 public fn text(value: String) -> View:
     return View("<p>" + escaped(value) + "</p>")
 

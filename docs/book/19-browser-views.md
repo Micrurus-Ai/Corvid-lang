@@ -67,6 +67,20 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+A layout can give each slot a name and a `View` parameter. To fill one slot with several siblings, pass `ui.fragment(content)`. In the example below, both packing items become direct children of the list. Pass `ui.fragment([])` when there are no items.
+
+```corvid-fragment
+fn packing_list(heading: View, items: View) -> View:
+    return ui.fragment([heading, ui.unordered_list([items])])
+
+fn weekend_packing() -> View:
+    items = ui.fragment([
+        ui.list_item([ui.inline_text("Water")]),
+        ui.list_item([ui.inline_text("Map")])
+    ])
+    return packing_list(ui.h2("Weekend packing"), items)
+```
+
 Run `corvid serve examples/trail_guide/src/main.cor --listen 127.0.0.1:8080` from the repository root and open `http://127.0.0.1:8080/`. The [trail guide](../../examples/trail_guide/src/main.cor) combines a navigation landmark, route marker, ordered stops, distance table and packing form. Turn off JavaScript, enter a note such as `Rain & <wind>`, and select **Preview**. The GET route renders the note as text and fills the field with the same value.
 
 ### Give the page an outline

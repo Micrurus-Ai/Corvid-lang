@@ -12,6 +12,15 @@ fn browser_views_escape_content_and_require_typed_children() {
     let source = r##"
 import "./ui" as ui
 
+fn packing_list(heading: ui.View, items: ui.View) -> ui.View:
+    return ui.fragment([heading, ui.unordered_list([items])])
+
+test fragment_slots_preserve_direct_children_across_layouts:
+    items = ui.fragment([ui.list_item([ui.inline_text("<Map>")]), ui.list_item([ui.inline_text("Water")])])
+    list = packing_list(ui.h2("Weekend"), items)
+    assert list.html == "<h2>Weekend</h2><ul><li>&lt;Map&gt;</li><li>Water</li></ul>"
+    assert packing_list(ui.fragment([]), ui.fragment([])).html == "<ul></ul>"
+
 test page_landmarks_preserve_sibling_and_child_order:
     header = [ui.h1("Map & guide"), ui.text("Introduction")]
     footer = [ui.text("<end>"), ui.link("Top", "#top")]
@@ -240,8 +249,27 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("39 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("40 passed"),
         "{good:?}"
+    );
+    let slot_call = r#"packing_list(ui.h2("Weekend"), items)"#;
+    let caller_line = source
+        .lines()
+        .position(|line| line.contains(slot_call))
+        .unwrap()
+        + 1;
+    fs::write(
+        &main,
+        source.replace(slot_call, r#"packing_list(ui.h2("Weekend"), 7)"#),
+    )
+    .unwrap();
+    let invalid_slot = run("check");
+    let diagnostic = String::from_utf8_lossy(&invalid_slot.stderr);
+    assert!(
+        !invalid_slot.status.success()
+            && diagnostic.contains("expected `View`, got `Int`")
+            && diagnostic.contains(&format!("main.cor:{caller_line}:")),
+        "{invalid_slot:?}"
     );
     fs::write(
         &main,
