@@ -83,6 +83,7 @@ import "std:ui" as ui
 
 fn describe() -> ui.RecordState:
     browser state selected = defaults()
+    key = bind selected.mode
     return selected
 
 test imported_choice:
@@ -98,13 +99,30 @@ test imported_choice:
     model.unlink()
 
 
+def check_field_diagnostics(cli, project):
+    main = project / "src/main.cor"
+    source = main.read_text()
+    for before, after, diagnostic in [
+        ("bind settings.mode", "bind settings.mdoe", "mdoe"),
+        ("bind settings.enabled", "bind settings.name", "local_checkbox"),
+        ("bind settings.mode", "bind settings.retries", "segmented_choice"),
+        ("bind settings.name", "bind initial.name", "browser state"),
+    ]:
+        assert before in source
+        main.write_text(source.replace(before, after))
+        result = subprocess.run([cli, "check", main], cwd=project, capture_output=True, text=True)
+        assert result.returncode and diagnostic in result.stderr, (after, result)
+    main.write_text(source)
+
+
 def exercise_settings(page):
     requests = []
     page.on("request", lambda request: requests.append(request.url))
     page.context.set_offline(True)
     name = page.get_by_role("textbox", name="Agent name")
     enabled = page.get_by_role("checkbox", name="Enabled")
-    mode = page.get_by_role("combobox", name="Run mode")
+    mode = page.get_by_role("group", name="Run mode")
+    scheduled = mode.get_by_role("radio", name="Scheduled")
     preview = page.get_by_role("status")
     expect(preview).to_have_text("Assistant / Manual / enabled: false / retries: 1")
     schema = page.evaluate("tools.get('update_settings').inputSchema")
@@ -116,13 +134,13 @@ def exercise_settings(page):
     expect(preview).to_have_text("Scout / Scheduled / enabled: true / retries: 3")
     expect(name).to_have_value("Scout")
     expect(enabled).to_be_checked()
-    expect(mode).to_have_value("Scheduled")
+    expect(scheduled).to_be_checked()
     for patch in ({"enabled": "true"}, {"mode": "Auto"}, {"name": ""}, {"name": "x" * 61},
                   {"retries": 6}, {"extra": True}):
         assert page.evaluate("""async v => { try { await tools.get('update_settings').execute(v); }
             catch { return true; } return false; }""", dict(desired, **patch))
         expect(preview).to_have_text(result)
-    mode.press("ArrowUp")
+    scheduled.press("ArrowLeft")
     enabled.click()
     name.fill("<Scout & Co>")
     expect(preview).to_have_text("<Scout & Co> / Manual / enabled: false / retries: 3")
@@ -144,6 +162,7 @@ def verify(cli, channel):
         settings = root / "settings"
         shutil.copytree(Path(__file__).resolve().parents[1] / "examples/agent_settings", settings,
                         ignore=shutil.ignore_patterns("target"))
+        check_field_diagnostics(cli, settings)
         package(cli, settings, root / "settings-bundle")
         pages = []
         with ExitStack() as servers:

@@ -157,9 +157,29 @@ function bindLocalSelection(region) {
     control.disabled = true;
     slot.replaceWith(control);
   }
-  const controls = owned('input[name],select[name],textarea[name]');
+  const groups = owned("[data-choice-group]");
+  for (const group of groups) {
+    const field = group.dataset.choiceGroup;
+    const options = properties[field]?.enum;
+    if (!options) throw Error("A segmented choice needs a choice field: " + field);
+    // A distinct native radio group for every mounted instance.
+    const radioName = "corvid-choice-" + crypto.getRandomValues(new Uint32Array(4)).join("-");
+    const row = group.querySelector(":scope > [data-options]");
+    for (const option of options) {
+      const label = document.createElement("label");
+      label.style.padding = "0.35rem 0.6rem";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = radioName;
+      radio.value = option;
+      label.append(radio, document.createTextNode(option));
+      row.append(label);
+    }
+  }
+  const controls = [...owned('input[name]:not([type=radio]),select[name],textarea[name]'), ...groups];
+  const boundName = control => control.dataset.choiceGroup ?? control.name;
   if (!names.length || controls.length !== names.length ||
-      names.some(name => !controls.some(input => input.name === name))) {
+      names.some(name => !controls.some(input => boundName(input) === name))) {
     throw Error("Each record field needs one matching control.");
   }
   const preview = region.querySelector(":scope > [data-local-preview]");
@@ -203,8 +223,10 @@ function bindLocalSelection(region) {
     }
     state = Object.freeze(next);
     for (const control of controls) {
-      const value = state[control.name];
-      if (control.type === "checkbox") control.checked = value;
+      const value = state[boundName(control)];
+      if (control.hasAttribute("data-choice-group")) {
+        for (const radio of control.querySelectorAll('input[type=radio]')) radio.checked = radio.value === value;
+      } else if (control.type === "checkbox") control.checked = value;
       else if (control.value !== String(value)) control.value = value;
     }
     region.querySelector(":scope > [role=alert]").textContent = "";
@@ -217,6 +239,7 @@ function bindLocalSelection(region) {
     return preview.textContent.trim();
   }
   for (const control of controls) {
+    if (control.hasAttribute("data-choice-group")) continue;
     const spec = properties[control.name];
     const expected = spec.enum ? "select-one" :
       {boolean: "checkbox", string: "textarea", integer: "range"}[spec.type];
@@ -229,10 +252,11 @@ function bindLocalSelection(region) {
   select(initial);
   for (const control of controls) {
     control.disabled = false;
-    control.addEventListener("input", () => {
-      const value = control.type === "checkbox" ? control.checked :
+    control.addEventListener("input", event => {
+      const value = control.hasAttribute("data-choice-group") ? event.target.value :
+        control.type === "checkbox" ? control.checked :
         control.type === "range" ? control.valueAsNumber : control.value;
-      try { select({...state, [control.name]: value}); }
+      try { select({...state, [boundName(control)]: value}); }
       catch (error) { region.querySelector(":scope > [role=alert]").textContent = error.message; }
     });
   }

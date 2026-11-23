@@ -438,6 +438,8 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
 - `browser state name = initial` obtains a `ui.RecordState` from a record of text, booleans, named choices, and bounded integers.
+- `ui.local_checkbox(label: String, field: String) -> View` creates a native checkbox. Use `bind state.enabled` for a checked boolean field.
+- `ui.segmented_choice(label: String, field: String) -> View` displays a named choice as a labelled group of native radio buttons. Use the arrow keys to select adjacent options. Each mounted group uses its own radio name.
 - `ui.local_field(label: String, name: String) -> View` places a labelled native control in your layout. At mount time the declared type selects a text area, checkbox, choice list, or slider.
 - `ui.record_state(bounds: Map<String, List<Int>>) -> RecordState` builds an integer-only descriptor from initial value, minimum, and maximum triples. The mixed binding uses the lower-level `ui.browser_record(rows: Map<String, List<String>>) -> RecordState` adapter. Prefer the binding syntax for application code.
 - The raw descriptor constructor takes `ui.RecordState(fields: List<IntegerField>, descriptors: List<String>)`. Code that directly constructed an integer-only descriptor can pass `[]` as the second argument.

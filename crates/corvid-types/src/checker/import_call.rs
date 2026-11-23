@@ -570,6 +570,9 @@ impl<'a> Checker<'a> {
                     return Type::Unknown;
                 };
                 self.check_args_against_imported_params(name, &function.params, args, module);
+                if module.path == std::path::Path::new("<corvid:std>").join("ui.cor") {
+                    self.check_bound_control(&function.name.name, args);
+                }
                 self.imported_type_ref_to_type(&function.return_ty, module)
             }
             DeclKind::Agent => {

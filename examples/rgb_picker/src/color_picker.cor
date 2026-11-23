@@ -19,12 +19,12 @@ public fn ColorPicker(color: Color, path: String) -> ui.View:
 public fn LocalColorPicker(color: Color) -> ui.View:
     browser state selected = color
     controls = ui.stack([
-        ui.local_slider("Red", "red"),
-        ui.local_slider("Green", "green"),
-        ui.local_slider("Blue", "blue")
+        ui.local_slider("Red", bind selected.red),
+        ui.local_slider("Green", bind selected.green),
+        ui.local_slider("Blue", bind selected.blue)
     ])
     preview = ui.row([
-        ui.record_swatch("red", "green", "blue"),
+        ui.record_swatch(bind selected.red, bind selected.green, bind selected.blue),
         ui.record_text("RGB {red}, {green}, {blue}")
     ])
     return ui.local_selection(selected, controls, preview)

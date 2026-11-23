@@ -601,12 +601,12 @@ public type Color:
 public fn LocalColorPicker(color: Color) -> ui.View:
     browser state selected = color
     controls = ui.stack([
-        ui.local_slider("Red", "red"),
-        ui.local_slider("Green", "green"),
-        ui.local_slider("Blue", "blue")
+        ui.local_slider("Red", bind selected.red),
+        ui.local_slider("Green", bind selected.green),
+        ui.local_slider("Blue", bind selected.blue)
     ])
     preview = ui.row([
-        ui.record_swatch("red", "green", "blue"),
+        ui.record_swatch(bind selected.red, bind selected.green, bind selected.blue),
         ui.record_text("RGB {red}, {green}, {blue}")
     ])
     return ui.local_selection(selected, controls, preview)
@@ -630,6 +630,18 @@ type AgentSettings:
     retries: Int where between(0, 5)
 ```
 
-Inside the component, write `browser state settings = initial`. Place fields anywhere in your layout using `ui.local_field("Agent name", "name")`, `ui.local_field("Enabled", "enabled")`, and the same function for the other fields. The declared type supplies a native control and its valid values. A choice field uses its variant names as the options. Field names in the layout are checked when the component mounts.
+Declare the state in the component and bind each control to a field.
+
+```corvid
+browser state settings = initial
+controls = ui.grid([
+    ui.local_field("Agent name", bind settings.name),
+    ui.local_checkbox("Enabled", bind settings.enabled),
+    ui.segmented_choice("Run mode", bind settings.mode),
+    ui.local_field("Retry limit", bind settings.retries)
+])
+```
+
+A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.name` also fails because that field is text. For a dropdown, use `ui.local_field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
 
 An opted-in assistant supplies a complete record in one call. For example, `{"name":"Scout","enabled":true,"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.

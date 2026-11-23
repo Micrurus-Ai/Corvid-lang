@@ -302,6 +302,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor
                 | BuiltIn::Range

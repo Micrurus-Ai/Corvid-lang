@@ -426,6 +426,8 @@ struct Checker<'a> {
 
     /// Type of each local binding, populated as we enter scopes.
     local_types: HashMap<LocalId, Type>,
+    browser_models: HashMap<LocalId, Option<Type>>,
+    browser_field_types: HashMap<Span, Type>,
 
     /// Declared return type of the currently-checked function-like.
     current_return: Option<Type>,
@@ -722,6 +724,8 @@ impl<'a> Checker<'a> {
             module_resolution,
             registry,
             local_types: HashMap::new(),
+            browser_models: HashMap::new(),
+            browser_field_types: HashMap::new(),
             current_return: None,
             in_agent_body: false,
             loop_depth: 0,

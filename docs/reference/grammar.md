@@ -638,8 +638,12 @@ public type Dimensions:
 
 fn size_editor(size: Dimensions) -> ui.View:
     browser state selected = size
-    controls = ui.row([ui.local_slider("Width", "width"), ui.local_slider("Height", "height")])
+    controls = ui.row([ui.local_slider("Width", bind selected.width), ui.local_slider("Height", bind selected.height)])
     return ui.local_selection(selected, controls, ui.record_text("{width} x {height}"))
 ```
 
 Inside a function, write `browser state name = expression`. The initializer is evaluated once. Its record type supplies the field names and bounds. A field can be a `String` (optionally refined with `len_between`), a `Bool`, a named choice whose variants have no payload, or an `Int` with inclusive ordered bounds in the browser safe integer range (-9007199254740991 through 9007199254740991). Pass the resulting `ui.RecordState` to an editor. The compatibility spelling `local type T` and its generated `T_state` helper are still supported. See [browser-local record views](functions.md#browser-local-record-views-in-stdui).
+
+### Browser field bindings
+
+`bind state.field` checks a top-level field against the initializer type of a named `browser state` binding. The expression produces the field's name as a string for view construction. Direct bindings passed to standard checkbox, slider, swatch and segmented-choice controls are also checked for compatible field types. Ordinary string arguments and text preview templates resolve at mount time. A bind expression selects a field name and does not read its current browser value.

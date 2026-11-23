@@ -28,6 +28,122 @@ impl Checker<'_> {
         }
     }
 
+    pub(super) fn track_browser_model(&mut self, local: corvid_resolve::LocalId, value: &Expr) {
+        // A browser-state declaration expands to browser_record(__browser_fields(initial)).
+        let model = match value {
+            Expr::Call { callee, args, .. } if callee.span().expansion.is_some() => {
+                match args.as_slice() {
+                    [Expr::Call { callee, args, .. }]
+                        if matches!(
+                            self.bindings.get(&callee.span()),
+                            Some(corvid_resolve::Binding::BuiltIn(
+                                corvid_resolve::BuiltIn::BrowserFields
+                            ))
+                        ) =>
+                    {
+                        args.first()
+                            .and_then(|initial| self.types.get(&initial.span()))
+                            .cloned()
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if self.local_types.contains_key(&local) {
+            if let Some(previous) = self.browser_models.get_mut(&local) {
+                if *previous != model {
+                    *previous = None;
+                }
+            }
+        } else if model.is_some() {
+            self.browser_models.insert(local, model);
+        }
+    }
+
+    pub(super) fn check_browser_field_key(&mut self, name: &Ident, args: &[Expr]) -> Type {
+        let [owner, Expr::Literal {
+            value: Literal::String(key),
+            span,
+        }] = args
+        else {
+            self.form_error(name.span, "expected bind state.field".into());
+            return Type::String;
+        };
+        self.check_expr(owner);
+        let model = match self.bindings.get(&owner.span()) {
+            Some(corvid_resolve::Binding::Local(id)) => {
+                self.browser_models.get(id).cloned().flatten()
+            }
+            _ => None,
+        };
+        let Some(model) = model else {
+            self.form_error(
+                owner.span(),
+                "bind needs a named browser state with a known record type".into(),
+            );
+            return Type::String;
+        };
+        let Some(record) = self.record_decl(&model) else {
+            return Type::String;
+        };
+        let Some(field) = record.fields.iter().find(|f| f.name.name == *key) else {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::UnknownField {
+                    struct_name: record.name.name.clone(),
+                    field: key.clone(),
+                },
+                *span,
+            ));
+            return Type::String;
+        };
+        let field_ref = field.ty.clone();
+        let ty = if let Type::ImportedStruct(t) = &model {
+            let Some(module) = self
+                .module_resolution
+                .and_then(|m| m.lookup_by_path(Path::new(&t.module_path)))
+            else {
+                return Type::String;
+            };
+            self.imported_type_ref_to_type(&field_ref, module)
+        } else {
+            self.type_ref_to_type(&field_ref)
+        };
+        self.browser_field_types.insert(name.span, ty);
+        Type::String
+    }
+
+    pub(super) fn check_bound_control(&mut self, control: &str, args: &[Expr]) {
+        let (expected, indices): (&str, &[usize]) = match control {
+            "local_slider" => ("Int", &[1]),
+            "record_swatch" => ("Int", &[0, 1, 2]),
+            "local_checkbox" => ("Bool", &[1]),
+            "segmented_choice" => ("choice", &[1]),
+            _ => return,
+        };
+        for &index in indices {
+            let Some(arg) = args.get(index) else { continue };
+            let Some(ty) = self.browser_field_types.get(&arg.span()) else {
+                continue;
+            };
+            let valid = match expected {
+                "Int" => *ty == Type::Int,
+                "Bool" => *ty == Type::Bool,
+                _ => self.record_decl(ty).is_some_and(|r| !r.variants.is_empty()),
+            };
+            if !valid {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: expected.into(),
+                        got: ty.display_name(),
+                        context: format!("{control} field binding"),
+                    },
+                    arg.span(),
+                ));
+            }
+        }
+    }
+
     pub(super) fn check_browser_fields(&mut self, name: &Ident, args: &[Expr]) -> Type {
         let result = Type::Map(
             Box::new(Type::String),

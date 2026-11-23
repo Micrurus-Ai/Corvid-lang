@@ -311,6 +311,15 @@ impl<'a> Parser<'a> {
             // Trust boundary (slice 50i): `trusted(expr)`. Contextual
             // — only when the identifier `trusted` is immediately
             // called; a plain `trusted` identifier stays a binding.
+            TokKind::Ident(w) if w == "bind" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
+                self.bump();
+                let (owner, owner_span) = self.expect_ident()?;
+                self.expect(TokKind::Dot, "a field on a browser state binding")?;
+                let (field, field_span) = self.expect_ident()?;
+                let owner = Expr::Ident { name: Ident::new(owner, owner_span), span: owner_span };
+                let key = Expr::Literal { value: Literal::String(field), span: field_span };
+                Ok(super::authoring::call("__browser_field_key", vec![owner, key], start_span.merge(field_span)))
+            }
             TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
                 self.parse_bounded_ask()
             }

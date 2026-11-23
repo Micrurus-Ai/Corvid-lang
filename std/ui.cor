@@ -229,3 +229,8 @@ public fn browser_record(rows: Map<String, List<String>>) -> RecordState:
 
 public fn local_field(label: String, name: String) -> View:
     return View("<label>" + escaped(label) + "<span data-local-field=\"" + escaped(name) + "\"></span></label>")
+public fn local_checkbox(label: String, field: String) -> View:
+    return View("<label><input disabled type=\"checkbox\" name=\"" + escaped(field) + "\">" + escaped(label) + "</label>")
+
+public fn segmented_choice(label: String, field: String) -> View:
+    return View("<fieldset disabled data-choice-group=\"" + escaped(field) + "\"><legend>" + escaped(label) + "</legend><span data-options style=\"display:inline-flex;flex-wrap:wrap;border:1px solid currentColor;border-radius:0.35rem\"></span></fieldset>")

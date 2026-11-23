@@ -74,6 +74,7 @@ impl<'a> Checker<'a> {
                 self.record_if_grounded_coercion(&value_ty, &local_ty, value.span());
                 if let Some(Binding::Local(local_id)) = self.bindings.get(&name.span) {
                     self.update_weak_local_on_assignment(*local_id, value, &local_ty);
+                    self.track_browser_model(*local_id, value);
                     self.local_types.insert(*local_id, local_ty);
                 }
             }
