@@ -16,6 +16,27 @@ from run_roadmap import FIELDS
 
 ROADMAP = Path("docs/frontend-roadmap.md")
 MARKER = "Corvid-Frontend-Complete"
+# Stable Git names, independent of queue ordering and edits to display titles.
+BRANCHES = {
+    "F01": "frontend/semantic-html",
+    "F02": "frontend/responsive-styling",
+    "F03": "frontend/svg-and-motion",
+    "F04": "frontend/component-lifecycle",
+    "F05": "frontend/reactive-rendering",
+    "F06": "frontend/accessible-interactions",
+    "F07": "frontend/navigation",
+    "F08": "frontend/async-resources",
+    "F09": "frontend/javascript-interop",
+    "F10": "frontend/browser-api-bindings",
+    "F11": "frontend/offline-sync",
+    "F12": "frontend/graphics-and-media",
+    "F13": "frontend/internationalization",
+    "F14": "frontend/server-rendering-and-hydration",
+    "F15": "frontend/assistant-accessible-actions",
+    "F16": "frontend/component-tooling",
+    "F17": "frontend/performance-and-compatibility",
+    "F18": "frontend/application-acceptance",
+}
 
 
 def git(cwd, *args):
@@ -34,6 +55,8 @@ def queue(source):
         tasks[task] = (title, deps, check)
     if not tasks:
         raise ValueError("Frontend queue is empty.")
+    if tasks.keys() != BRANCHES.keys() or len(set(BRANCHES.values())) != len(tasks):
+        raise ValueError("Each frontend roadmap task needs a unique, descriptive branch name.")
     return tasks
 
 
@@ -133,7 +156,7 @@ def finish(tree, branch):
 
 
 def run_task(tree, state, task, title, check):
-    branch = f"corvid/frontend-{task.lower()}"
+    branch = BRANCHES[task]
     note = state / f"{task}.json"
     refs = git(tree, "branch", "--list", branch)
     if refs:
@@ -217,7 +240,7 @@ def main():
             if git(tree, "status", "--porcelain"):
                 event = load(state / "current.json")
                 resume = event.get("task", "")
-                if (resume not in tasks or git(tree, "branch", "--show-current") != f"corvid/frontend-{resume.lower()}"
+                if (resume not in tasks or git(tree, "branch", "--show-current") != BRANCHES[resume]
                         or event.get("head") != git(tree, "rev-parse", "HEAD")
                         or git(tree, "diff", "--cached", "--name-only")):
                     raise RuntimeError(f"Unattributed or staged changes in {tree}. Inspect before resuming.")
