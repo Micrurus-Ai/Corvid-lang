@@ -35,13 +35,24 @@ impl<'a> Parser<'a> {
         {
             return Ok(callee);
         }
-        let start = self.bump().span;
+        let children = self.parse_child_list()?;
+        let span = callee.span().merge(children.span());
+        Ok(Expr::Call { callee: Box::new(callee), args: vec![children], span })
+    }
+
+    fn parse_child_list(&mut self) -> Result<Expr, ParseError> {
+        let start = self.expect(TokKind::Colon, ": before child views")?;
         self.expect_newline()?;
         self.expect(TokKind::Indent, "indented child expressions")?;
         let mut items = Vec::new();
         self.skip_newlines();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
-            items.push(self.parse_value_line()?);
+            let item = if matches!(self.peek(), TokKind::KwIf) {
+                self.parse_conditional_child()?
+            } else {
+                self.parse_value_line()?
+            };
+            items.push(item);
             self.expect_newline()?;
             self.skip_newlines();
         }
@@ -51,12 +62,42 @@ impl<'a> Parser<'a> {
         let end = items.last().expect("nonempty children").span();
         self.expect(TokKind::Dedent, "end of child block")?;
         self.block_expr_terminated = true;
-        let span = callee.span().merge(end);
-        Ok(Expr::Call {
-            callee: Box::new(callee),
-            args: vec![Expr::List { items, span: start.merge(end) }],
-            span,
-        })
+        Ok(Expr::List { items, span: start.merge(end) })
+    }
+
+    fn parse_browser_field_path(&mut self) -> Result<(Expr, Expr), ParseError> {
+        let (owner, owner_span) = self.expect_ident()?;
+        self.expect(TokKind::Dot, "a field on a browser state binding")?;
+        let (mut field, mut field_span) = self.expect_ident()?;
+        while matches!(self.peek(), TokKind::Dot) {
+            self.bump();
+            let (part, end) = self.expect_ident()?;
+            field.push('.');
+            field.push_str(&part);
+            field_span = field_span.merge(end);
+        }
+        let owner = Expr::Ident { name: Ident::new(owner, owner_span), span: owner_span };
+        let key = Expr::Literal { value: Literal::String(field), span: field_span };
+        Ok((owner, key))
+    }
+
+    fn parse_conditional_child(&mut self) -> Result<Expr, ParseError> {
+        let start = self.bump().span;
+        let (owner, field) = self.parse_browser_field_path()?;
+        self.expect(TokKind::Eq, "== before a named choice")?;
+        let (variant, span) = self.expect_ident()?;
+        let variant = Expr::Literal { value: Literal::String(variant), span };
+        let condition = super::authoring::call("__browser_field_key", vec![owner, field, variant.clone()], start.merge(span));
+        let children = self.parse_child_list()?;
+        let helper = format!("__browser_case_{}", start.start);
+        let import = format!("import \"std:ui\" as {helper}_ui use choice_children as {helper}\n");
+        let mut tokens = crate::lex(&import).expect("valid conditional view import");
+        for (index, token) in tokens.iter_mut().enumerate() {
+            token.span = start.expanded(index);
+        }
+        self.generated.push(Parser::new(&tokens).parse_decl()?);
+        let span = start.merge(children.span());
+        Ok(super::authoring::call(&helper, vec![condition, variant, children], span))
     }
 
     // or_expr := and_expr ('or' and_expr)*
@@ -346,18 +387,8 @@ impl<'a> Parser<'a> {
             // called; a plain `trusted` identifier stays a binding.
             TokKind::Ident(w) if w == "bind" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
                 self.bump();
-                let (owner, owner_span) = self.expect_ident()?;
-                self.expect(TokKind::Dot, "a field on a browser state binding")?;
-                let (mut field, mut field_span) = self.expect_ident()?;
-                while matches!(self.peek(), TokKind::Dot) {
-                    self.bump();
-                    let (part, end) = self.expect_ident()?;
-                    field.push('.');
-                    field.push_str(&part);
-                    field_span = field_span.merge(end);
-                }
-                let owner = Expr::Ident { name: Ident::new(owner, owner_span), span: owner_span };
-                let key = Expr::Literal { value: Literal::String(field), span: field_span };
+                let (owner, key) = self.parse_browser_field_path()?;
+                let field_span = key.span();
                 Ok(super::authoring::call("__browser_field_key", vec![owner, key], start_span.merge(field_span)))
             }
             TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {

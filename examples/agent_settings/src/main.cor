@@ -14,6 +14,7 @@ type AgentSettings:
     profile: AgentProfile
     tools: AgentTools
     mode: RunMode
+    interval_minutes: Int where between(1, 60)
     retries: Int where between(0, 5)
 
 fn settings_panel(children: List<ui.View>) -> ui.View:
@@ -37,6 +38,8 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
         ui.field("Agent name", bind settings.profile.name)
         ui.checkbox("Allow web search", bind settings.tools.web_search)
         ui.segmented_choice("Run mode", bind settings.mode)
+        if settings.mode == Scheduled:
+            ui.field("Interval in minutes", bind settings.interval_minutes)
         ui.field("Retry limit", bind settings.retries)
     preview = agent_card(
         ui.value(bind settings.profile.name),
@@ -48,5 +51,5 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
 
 server app:
     route GET "/" -> html:
-        editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false), Manual, 1))
+        editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false), Manual, 5, 1))
         return ui.interactive_page("Agent settings", [ui.assistant_selection(editor, "update_settings", "Update the agent settings.")])

@@ -200,6 +200,12 @@ function bindLocalSelection(region) {
     }
     return {node, channels};
   });
+  const conditions = owned("[data-choice-field]").map(node => {
+    const field = fieldName(node.dataset.choiceField);
+    const variant = node.dataset.choiceVariant;
+    if (!properties[field].enum?.includes(variant)) throw Error("Invalid choice condition for " + field);
+    return {node, field, variant};
+  });
   let state;
   function select(values) {
     if (!values || Array.isArray(values) || typeof values !== "object" ||
@@ -222,6 +228,7 @@ function bindLocalSelection(region) {
       next[name] = value;
     }
     state = Object.freeze(next);
+    for (const {node, field, variant} of conditions) node.hidden = state[field] !== variant;
     for (const control of controls) {
       const value = state[boundName(control)];
       if (control.hasAttribute("data-choice-group")) {

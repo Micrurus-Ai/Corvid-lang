@@ -201,6 +201,9 @@ public fn record_text(pattern: String) -> View:
 public fn value(field: String) -> View:
     return record_text("{" + field + "}")
 
+public fn choice_children(field: String, variant: String, content: List<View>) -> View:
+    return View("<div hidden data-choice-field=\"" + escaped(field) + "\" data-choice-variant=\"" + escaped(variant) + "\">" + children(content) + "</div>")
+
 public fn record_swatch(red: String, green: String, blue: String) -> View:
     return View("<span data-record-swatch data-red=\"" + escaped(red) + "\" data-green=\"" + escaped(green) + "\" data-blue=\"" + escaped(blue) + "\" style=\"display:inline-block;width:3rem;height:2rem\" aria-hidden=\"true\"></span>")
 

@@ -65,7 +65,7 @@ impl Checker<'_> {
         let [owner, Expr::Literal {
             value: Literal::String(key),
             span,
-        }] = args
+        }, condition @ ..] = args
         else {
             self.form_error(name.span, "expected bind state.field".into());
             return Type::String;
@@ -106,6 +106,17 @@ impl Checker<'_> {
         }
         if self.record_decl(&ty).is_some_and(|r| r.variants.is_empty()) {
             self.form_error(*span, "bind needs a field inside this record".into());
+        }
+        match condition {
+            [] => {}
+            [Expr::Literal { value: Literal::String(variant), span }] => {
+                let valid = self.record_decl(&ty).is_some_and(|r|
+                    r.variants.iter().any(|v| v.name.name == *variant && v.fields.is_empty()));
+                if !valid {
+                    self.form_error(*span, format!("expected a choice field with a variant named `{variant}`"));
+                }
+            }
+            _ => self.form_error(name.span, "expected a named choice in the view condition".into()),
         }
         self.browser_field_types.insert(name.span, ty);
         Type::String

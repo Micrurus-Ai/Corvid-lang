@@ -109,6 +109,9 @@ def check_field_diagnostics(cli, project):
         ("ui.value(bind settings.profile.name)", "ui.value(bind settings.profile.nmae)", "nmae"),
         ("bind settings.profile.name", "bind settings.profil.name", "profil"),
         ("bind settings.tools.web_search", "bind settings.profile.name", "checkbox field binding"),
+        ("if settings.mode == Scheduled", "if settings.mdoe == Scheduled", "mdoe"),
+        ("if settings.mode == Scheduled", "if settings.mode == Missing", "Missing"),
+        ("if settings.mode == Scheduled", "if settings.retries == Scheduled", "choice field"),
         ("bind settings.mode", "bind settings.retries", "segmented_choice"),
         ("bind settings.profile.name", "bind initial.profile.name", "browser state"),
     ]:
@@ -116,6 +119,9 @@ def check_field_diagnostics(cli, project):
         main.write_text(source.replace(before, after))
         result = subprocess.run([cli, "check", main], cwd=project, capture_output=True, text=True)
         assert result.returncode and diagnostic in result.stderr, (after, result)
+        if before.startswith("if "):
+            line = next(i for i, text in enumerate(source.splitlines(), 1) if before in text)
+            assert f"main.cor:{line}:" in result.stderr, result.stderr
     main.write_text(source)
 
 
@@ -167,7 +173,9 @@ def exercise_settings(page):
     schema = page.evaluate("tools.get('update_settings').inputSchema")
     assert schema["properties"]["mode"]["enum"] == ["Manual", "Scheduled"]
     assert schema["properties"]["tools"]["properties"]["web_search"] == {"type": "boolean"}
-    desired = {"profile": {"name": "Scout"}, "tools": {"web_search": True}, "mode": "Scheduled", "retries": 3}
+    interval = page.get_by_label("Interval in minutes")
+    expect(interval).to_be_hidden()
+    desired = {"interval_minutes": 10, "profile": {"name": "Scout"}, "tools": {"web_search": True}, "mode": "Scheduled", "retries": 3}
     select = "v => tools.get('update_settings').execute(v)"
     result = page.evaluate(select, desired)
     expect_card("Scout", "Scheduled", "true", "3")
@@ -175,12 +183,26 @@ def exercise_settings(page):
     expect(name).to_have_value("Scout")
     expect(enabled).to_be_checked()
     expect(scheduled).to_be_checked()
+    expect(interval).to_be_visible()
+    expect(interval).to_have_value("10")
+    interval.focus()
+    for _ in range(5):
+        interval.press("ArrowRight")
+    expect(interval).to_have_value("15")
     for patch in ({"tools": {"web_search": "true"}}, {"mode": "Auto"}, {"profile": {"name": ""}},
                   {"profile": {"name": "x" * 61}}, {"profile": {}}, {"tools": {"web_search": True, "extra": 1}},
                   {"retries": 6}, {"extra": True}):
         assert page.evaluate("""async v => { try { await tools.get('update_settings').execute(v); }
             catch { return true; } return false; }""", dict(desired, **patch))
         expect(preview).to_have_text(result)
+    scheduled.press("ArrowLeft")
+    expect(interval).to_be_hidden()
+    manual = mode.get_by_role("radio", name="Manual")
+    manual.press("Tab")
+    expect(page.get_by_label("Retry limit")).to_be_focused()
+    manual.press("ArrowRight")
+    expect(interval).to_have_value("15")
+    expect(interval).to_be_visible()
     scheduled.press("ArrowLeft")
     enabled.click()
     expect(name).to_have_value("Scout")

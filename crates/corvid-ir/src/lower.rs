@@ -1865,7 +1865,7 @@ impl<'a> Lowerer<'a> {
                         next_cursor: Box::new(next_cursor),
                     };
                 }
-                Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey)) if args.len() == 2 => {
+                Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey)) if matches!(args.len(), 2 | 3) => {
                     return self.lower_expr(&args[1]).kind;
                 }
                 Some(Binding::BuiltIn(BuiltIn::BrowserFields)) if args.len() == 1 => {

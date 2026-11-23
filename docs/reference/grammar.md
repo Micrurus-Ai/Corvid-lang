@@ -648,6 +648,10 @@ Inside a function, write `browser state name = expression`. The initializer is e
 
 `bind state.field` and nested paths such as `bind settings.profile.name` check each field against the declared record type. The path must end at an editable leaf. The expression produces the dot-separated path as a string for view construction. Direct bindings passed to standard checkbox, slider, swatch and segmented-choice controls are also checked for compatible field types. Ordinary string arguments and text preview templates resolve at mount time. A bind expression selects a field name and does not read its current browser value.
 
+### Choice conditions in view layouts
+
+Inside an indented child list, `if state.field == Variant:` takes one or more indented view expressions. The field can be a nested path rooted in a named browser state. The right-hand name must belong to that field?s payload-free choice type. The browser shows the group while the choice matches and retains its controls and values when hidden. The condition controls visibility only. All fields are still validated on assistant submission. This form supports equality with one named choice variant.
+
 ### Indented child blocks
 
 At a line boundary, a function name followed by a colon takes an indented block of one or more child expressions. Corvid evaluates the children in source order and passes them as a single list argument. Each child occupies its own logical line. A child can itself be a block call. The ordinary function signature determines the element and result types.

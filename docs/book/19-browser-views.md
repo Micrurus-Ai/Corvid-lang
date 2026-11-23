@@ -633,6 +633,7 @@ type AgentSettings:
     profile: AgentProfile
     tools: AgentTools
     mode: RunMode
+    interval_minutes: Int where between(1, 60)
     retries: Int where between(0, 5)
 ```
 
@@ -644,12 +645,16 @@ controls = ui.grid:
     ui.field("Agent name", bind settings.profile.name)
     ui.checkbox("Allow web search", bind settings.tools.web_search)
     ui.segmented_choice("Run mode", bind settings.mode)
+    if settings.mode == Scheduled:
+        ui.field("Interval in minutes", bind settings.interval_minutes)
     ui.field("Retry limit", bind settings.retries)
 ```
 
 A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.profile.name` also fails because that field is text. For a dropdown, use `ui.field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
 
-An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true},"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
+Choose **Scheduled** to reveal the interval, change it, then switch to **Manual**. Tab skips the hidden interval. Choose **Scheduled** again to recover its value. An assistant changing the mode triggers the same update.
+
+An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true},"mode":"Scheduled","interval_minutes":15,"retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
 
 ### Show a field in a custom live preview
 
