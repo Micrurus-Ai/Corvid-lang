@@ -91,6 +91,20 @@ The application timings include runtime, connection and data conversion costs. E
 
 Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25 available. [Per-save observations and configuration](../../benches/results/reading-save-windows-chrome.json)
 
+### Cancellable AI stream
+
+On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.
+
+| Interval (ms), median / p95 | Corvid preview | Node TypeScript |
+| --- | ---: | ---: |
+| Start click to first text in the visible output | 51.10 / 66.10 | 50.95 / 68.10 |
+| Cancel click to cancelled DOM status | 0.35 / 0.50 | 0.30 / 0.50 |
+| Cancel click to fixture stopping generation | 12.52 / 13.23 | 12.66 / 13.75 |
+
+First text and status timings use the browser clock. The upstream stop measurement uses a local monotonic clock aligned with the browser before each request using seven round trips. Median half-round-trip uncertainty was about 0.5 ms per stack. The 0.14 ms difference between stop medians is within that uncertainty. These measurements cover framework and transport behavior with a controlled token schedule. A hosted model adds its own inference, network and cancellation behavior.
+
+Run `python scripts/benchmark_text_stream.py PATH_TO_CORVID --output stream.json` with Python Playwright, Chrome and Node 25 available. [Per-stream observations](../../benches/results/text-stream-windows-chrome.json)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw

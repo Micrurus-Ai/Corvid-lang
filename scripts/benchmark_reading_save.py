@@ -1,6 +1,6 @@
 """Compare a browser save through SQLite commit and verify all shelves after restart."""
 import argparse
-from contextlib import contextmanager, ExitStack, closing
+from contextlib import ExitStack, closing
 from html import escape
 import hashlib
 import json
@@ -9,14 +9,13 @@ import os
 from pathlib import Path
 import re
 import shutil
-import socket
 import sqlite3
 import statistics
 import subprocess
 from tempfile import TemporaryDirectory
-import time
 
 from playwright.sync_api import sync_playwright
+from benchmark_node import node_server
 from verify_browser_diagnostics import package
 from verify_reading_list import read, serve
 from verify_storefront import ROOT
@@ -76,29 +75,6 @@ server library:
     path.write_text('import "std:time" use time_monotonic_ms\n' + code, encoding="utf-8")
 
 
-@contextmanager
-def node_server(directory, templates):
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    proc = subprocess.Popen(["node", ROOT / "benches/typescript/reading-save.mts", str(port), templates], cwd=directory)
-    url = f"http://127.0.0.1:{port}"
-    try:
-        for _ in range(150):
-            if proc.poll() is not None:
-                raise RuntimeError("TypeScript server exited")
-            try:
-                read(url + "/settings")
-                break
-            except OSError:
-                time.sleep(.05)
-        else:
-            raise TimeoutError(url)
-        yield url
-    finally:
-        proc.terminate()
-        proc.wait(timeout=10)
-
 
 def template(url, db):
     data = {"settings": json.loads(read(url + "/settings"))[0], "settingsSql": SQL, "forms": {}}
@@ -137,7 +113,7 @@ def verify(args):
             with closing(sqlite3.connect(corvid / "reading.sqlite")) as db:
                 layout = template(urls["Corvid"], db)
             templates.write_text(json.dumps(layout), encoding="utf-8")
-            urls["TypeScript"] = services.enter_context(node_server(node, templates))
+            urls["TypeScript"] = services.enter_context(node_server(node, ROOT / "benches/typescript/reading-save.mts", templates, "/settings"))
             node_settings = json.loads(read(urls["TypeScript"] + "/settings"))
             for key in ("journal", "sync", "fk", "page"):
                 assert node_settings[key] == layout["settings"][key], (node_settings, layout["settings"])
@@ -179,7 +155,7 @@ def verify(args):
             finally:
                 browser.close()
         for name, directory, service in (("Corvid", corvid, serve(cli, corvid, env)),
-                                         ("TypeScript", node, node_server(node, templates))):
+                                         ("TypeScript", node, node_server(node, ROOT / "benches/typescript/reading-save.mts", templates, "/settings"))):
             with service as url, closing(sqlite3.connect(directory / "reading.sqlite")) as db:
                 rows = {s: (t, rev) for s, t, rev in db.execute("SELECT shelf, title, revision FROM shelves")}
                 assert rows == expected
