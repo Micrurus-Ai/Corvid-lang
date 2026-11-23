@@ -206,6 +206,9 @@ public fn option(value: String, label: String, selected: Bool) -> View:
         attributes = " selected"
     return View("<option value=\"" + escaped(value) + "\"" + attributes + ">" + escaped(label) + "</option>")
 
+public fn option_group(label: String, options: List<View>) -> View:
+    return View("<optgroup label=\"" + escaped(label) + "\">" + children(options) + "</optgroup>")
+
 public fn select_field(label: String, name: String, options: List<View>) -> View:
     return render_select(label, name, options, "")
 

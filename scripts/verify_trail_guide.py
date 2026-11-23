@@ -37,8 +37,10 @@ def check_response(url):
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" rows="4" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
         '<form method="get" action="/guide" aria-label="Suggested packing notes">'
-        '<label>Suggested note <select name="note"><option value="Bring water" selected>Water bottle</option>'
-        '<option value="Pack a map">Trail map</option></select></label><button type="submit">Use suggestion</button></form>',
+        '<label>Suggested note <select name="note"><optgroup label="Food and drink">'
+        '<option value="Bring water" selected>Water bottle</option><option value="Pack a snack">Trail snack</option></optgroup>'
+        '<optgroup label="Navigation"><option value="Pack a map">Trail map</option>'
+        '<option value="Bring a compass">Compass</option></optgroup></select></label><button type="submit">Use suggestion</button></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)

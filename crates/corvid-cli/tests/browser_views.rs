@@ -32,6 +32,12 @@ test native_select_preserves_option_order_and_escapes_labels_and_values:
     assert field.html == "<label>&lt;Pick&gt; <select name=\"gear&quot;list\"><option value=\"a&quot;b\">&lt;First&gt;</option><option value=\"\" selected>None &amp; more</option></select></label>"
     assert ui.submit_on_change_select("Pick", "gear", []).html == "<label>Pick <select name=\"gear\" data-corvid-submit-change></select></label>"
 
+test option_group_escapes_label_and_keeps_selected_option_in_order:
+    choices = [ui.option("map", "Trail map", false), ui.option("water", "Water", true)]
+    group = ui.option_group("Gear & \"maps\" <today>", choices)
+    assert group.html == "<optgroup label=\"Gear &amp; &quot;maps&quot; &lt;today&gt;\"><option value=\"map\">Trail map</option><option value=\"water\" selected>Water</option></optgroup>"
+    assert ui.option_group("Gear", []).html == "<optgroup label=\"Gear\"></optgroup>"
+
 test reset_button_escapes_its_label:
     button = ui.reset_button("Restore <note> & map")
     assert button.html == "<button type=\"reset\">Restore &lt;note&gt; &amp; map</button>"
@@ -227,7 +233,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("37 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("38 passed"),
         "{good:?}"
     );
     fs::write(
