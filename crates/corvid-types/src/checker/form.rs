@@ -31,7 +31,7 @@ impl Checker<'_> {
     pub(super) fn check_browser_fields(&mut self, name: &Ident, args: &[Expr]) -> Type {
         let result = Type::Map(
             Box::new(Type::String),
-            Box::new(Type::List(Box::new(Type::Int))),
+            Box::new(Type::List(Box::new(Type::String))),
         );
         let [initial] = args else {
             self.errors.push(TypeError::new(
@@ -45,19 +45,52 @@ impl Checker<'_> {
             return result;
         };
         let ty = self.check_expr(initial);
-        let invalid = self.record_decl(&ty).is_none_or(|record| {
-            record.fields.is_empty()
-                || !record.variants.is_empty()
-                || record
-                    .fields
-                    .iter()
-                    .any(|field| field.browser_integer_bounds().is_none())
+        let fields = self
+            .record_decl(&ty)
+            .filter(|r| r.variants.is_empty())
+            .map(|r| r.fields.clone());
+        let invalid = fields.is_none_or(|fields| {
+            fields.is_empty()
+                || fields.iter().any(|field| {
+                    if field.browser_integer_bounds().is_some() {
+                        return false;
+                    }
+                    let field_ty = match &ty {
+                        Type::ImportedStruct(t) => {
+                            let Some(module) = self.module_resolution.and_then(|modules| {
+                                modules.lookup_by_path(Path::new(&t.module_path))
+                            }) else {
+                                return true;
+                            };
+                            self.imported_type_ref_to_type(&field.ty, module)
+                        }
+                        _ => self.type_ref_to_type(&field.ty),
+                    };
+                    match field_ty {
+                        Type::Bool => field.refinement.is_some(),
+                        Type::String => match field.refinement {
+                            None => false,
+                            Some(corvid_ast::Refinement::LenBetween { min, max }) => {
+                                min > max || max > (1 << 53) - 1
+                            }
+                            _ => true,
+                        },
+                        _ => {
+                            field.refinement.is_some()
+                                || self.record_decl(&field_ty).is_none_or(|r| {
+                                    r.variants.is_empty()
+                                        || r.variants.iter().any(|v| !v.fields.is_empty())
+                                })
+                        }
+                    }
+                })
         });
         if invalid {
             self.errors.push(TypeError::new(
                 TypeErrorKind::TypeMismatch {
-                    expected: "a record of Int fields with ordered, browser-safe between bounds"
-                        .into(),
+                    expected:
+                        "a record of bounded integers, text, booleans or choices without payloads"
+                            .into(),
                     got: ty.display_name(),
                     context: "browser state".into(),
                 },

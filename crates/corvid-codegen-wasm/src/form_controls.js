@@ -129,13 +129,38 @@ function bindLocalSelection(region) {
     properties[field] = {type: "integer", minimum, maximum};
     initial[field] = Number(value);
   }
+  for (const node of region.querySelectorAll(":scope > [data-record-field]")) {
+    const {name, schema, value} = JSON.parse(node.dataset.recordField);
+    if (Object.hasOwn(initial, name)) throw Error("Duplicate record field: " + name);
+    properties[name] = schema;
+    initial[name] = value;
+  }
   const names = Object.keys(initial);
   const owned = selector => Array.from(region.querySelectorAll(selector))
     .filter(node => node.closest("[data-local-selection]") === region);
-  const sliders = owned('input[type="range"][name]');
-  if (!names.length || sliders.length !== names.length ||
-      names.some(name => !sliders.some(input => input.name === name))) {
-    throw Error("Each record field needs one matching slider.");
+  for (const slot of owned("[data-local-field]")) {
+    const name = slot.dataset.localField;
+    const spec = properties[name];
+    if (!spec) throw Error("Unknown record field: " + name);
+    let control;
+    if (spec.enum) {
+      control = document.createElement("select");
+      for (const value of spec.enum) control.add(new Option(value, value));
+    } else if (spec.type === "string") {
+      control = document.createElement("textarea");
+      control.rows = 1;
+    } else {
+      control = document.createElement("input");
+      control.type = spec.type === "boolean" ? "checkbox" : "range";
+    }
+    control.name = name;
+    control.disabled = true;
+    slot.replaceWith(control);
+  }
+  const controls = owned('input[name],select[name],textarea[name]');
+  if (!names.length || controls.length !== names.length ||
+      names.some(name => !controls.some(input => input.name === name))) {
+    throw Error("Each record field needs one matching control.");
   }
   const preview = region.querySelector(":scope > [data-local-preview]");
   const placeholder = /\{([^{}]+)\}/g;
@@ -148,9 +173,13 @@ function bindLocalSelection(region) {
     for (const match of pattern.matchAll(placeholder)) fieldName(match[1]);
     return {node, pattern};
   });
-  const samples = owned("[data-record-swatch]").map(node => ({
-    node, channels: [node.dataset.red, node.dataset.green, node.dataset.blue].map(fieldName),
-  }));
+  const samples = owned("[data-record-swatch]").map(node => {
+    const channels = [node.dataset.red, node.dataset.green, node.dataset.blue].map(fieldName);
+    if (channels.some(name => properties[name].type !== "integer")) {
+      throw Error("A color swatch needs three integer fields.");
+    }
+    return {node, channels};
+  });
   let state;
   function select(values) {
     if (!values || Array.isArray(values) || typeof values !== "object" ||
@@ -158,13 +187,27 @@ function bindLocalSelection(region) {
     const next = Object.create(null);
     for (const name of names) {
       const value = values[name];
-      const {minimum, maximum} = properties[name];
-      if (!Object.hasOwn(values, name) || !Number.isSafeInteger(value) ||
-          value < minimum || value > maximum) throw Error("Invalid " + name + ".");
+      const spec = properties[name];
+      let valid = false;
+      if (spec.type === "integer") {
+        valid = Number.isSafeInteger(value) && value >= spec.minimum && value <= spec.maximum;
+      } else if (spec.type === "boolean") {
+        valid = typeof value === "boolean";
+      } else if (spec.type === "string" && typeof value === "string") {
+        const length = Array.from(value).length;
+        valid = (!spec.enum || spec.enum.includes(value)) &&
+          length >= (spec.minLength ?? 0) && length <= (spec.maxLength ?? Infinity);
+      }
+      if (!Object.hasOwn(values, name) || !valid) throw Error("Invalid " + name + ".");
       next[name] = value;
     }
     state = Object.freeze(next);
-    for (const input of sliders) input.valueAsNumber = state[input.name];
+    for (const control of controls) {
+      const value = state[control.name];
+      if (control.type === "checkbox") control.checked = value;
+      else if (control.value !== String(value)) control.value = value;
+    }
+    region.querySelector(":scope > [role=alert]").textContent = "";
     for (const {node, pattern} of texts) {
       node.textContent = pattern.replace(placeholder, (_, name) => state[name]);
     }
@@ -173,14 +216,25 @@ function bindLocalSelection(region) {
     }
     return preview.textContent.trim();
   }
-  for (const input of sliders) {
-    input.min = properties[input.name].minimum;
-    input.max = properties[input.name].maximum;
+  for (const control of controls) {
+    const spec = properties[control.name];
+    const expected = spec.enum ? "select-one" :
+      {boolean: "checkbox", string: "textarea", integer: "range"}[spec.type];
+    if (control.type !== expected) throw Error("Incorrect control for " + control.name);
+    if (control.type === "range") {
+      control.min = spec.minimum;
+      control.max = spec.maximum;
+    }
   }
   select(initial);
-  for (const input of sliders) {
-    input.disabled = false;
-    input.addEventListener("input", () => select({...state, [input.name]: input.valueAsNumber}));
+  for (const control of controls) {
+    control.disabled = false;
+    control.addEventListener("input", () => {
+      const value = control.type === "checkbox" ? control.checked :
+        control.type === "range" ? control.valueAsNumber : control.value;
+      try { select({...state, [control.name]: value}); }
+      catch (error) { region.querySelector(":scope > [role=alert]").textContent = error.message; }
+    });
   }
   const owner = region.parentElement;
   if (owner.hasAttribute("data-corvid-selection-owner") && document.modelContext?.registerTool) {
@@ -188,7 +242,7 @@ function bindLocalSelection(region) {
       name: owner.dataset.corvidTool, description: owner.dataset.corvidDescription,
       inputSchema: {type: "object", properties, required: names, additionalProperties: false},
       execute(values) {
-        if (!region.isConnected || sliders.some(input => input.matches(":disabled"))) {
+        if (!region.isConnected || controls.some(input => input.matches(":disabled"))) {
           throw Error("Selection is unavailable.");
         }
         return select(values);

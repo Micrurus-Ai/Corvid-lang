@@ -66,9 +66,67 @@ test state_bindings:
     model.write_text(model.read_text().replace("Int where between(1, 800)", "Int"))
     rejected = subprocess.run([cli, "check", probe], cwd=project, capture_output=True, text=True)
     assert rejected.returncode and "browser state" in rejected.stderr, rejected
+    model.write_text("""public choice Mode:
+    Manual
+    Scheduled
+
+public type Settings:
+    name: String
+    enabled: Bool
+    mode: Mode
+
+public fn defaults() -> Settings:
+    return Settings("Scout", false, Manual)
+""")
+    probe.write_text("""import "./shared_dimensions" use defaults
+import "std:ui" as ui
+
+fn describe() -> ui.RecordState:
+    browser state selected = defaults()
+    return selected
+
+test imported_choice:
+    state = describe()
+    assert state.descriptors.length() == 3
+""")
+    subprocess.run([cli, "test", probe], cwd=project, check=True)
+    model.write_text(model.read_text().replace("    Scheduled", "    Scheduled(at: String)"))
+    rejected = subprocess.run([cli, "check", probe], cwd=project, capture_output=True, text=True)
+    assert rejected.returncode and "browser state" in rejected.stderr, rejected
     # The packaged fixture below contains only the application under test.
     probe.unlink()
     model.unlink()
+
+
+def exercise_settings(page):
+    requests = []
+    page.on("request", lambda request: requests.append(request.url))
+    page.context.set_offline(True)
+    name = page.get_by_role("textbox", name="Agent name")
+    enabled = page.get_by_role("checkbox", name="Enabled")
+    mode = page.get_by_role("combobox", name="Run mode")
+    preview = page.get_by_role("status")
+    expect(preview).to_have_text("Assistant / Manual / enabled: false / retries: 1")
+    schema = page.evaluate("tools.get('update_settings').inputSchema")
+    assert schema["properties"]["mode"]["enum"] == ["Manual", "Scheduled"]
+    assert schema["properties"]["enabled"] == {"type": "boolean"}
+    desired = {"name": "Scout", "enabled": True, "mode": "Scheduled", "retries": 3}
+    select = "v => tools.get('update_settings').execute(v)"
+    result = page.evaluate(select, desired)
+    expect(preview).to_have_text("Scout / Scheduled / enabled: true / retries: 3")
+    expect(name).to_have_value("Scout")
+    expect(enabled).to_be_checked()
+    expect(mode).to_have_value("Scheduled")
+    for patch in ({"enabled": "true"}, {"mode": "Auto"}, {"name": ""}, {"name": "x" * 61},
+                  {"retries": 6}, {"extra": True}):
+        assert page.evaluate("""async v => { try { await tools.get('update_settings').execute(v); }
+            catch { return true; } return false; }""", dict(desired, **patch))
+        expect(preview).to_have_text(result)
+    mode.press("ArrowUp")
+    enabled.click()
+    name.fill("<Scout & Co>")
+    expect(preview).to_have_text("<Scout & Co> / Manual / enabled: false / retries: 3")
+    assert not requests, requests
 
 
 def verify(cli, channel):
@@ -83,20 +141,28 @@ def verify(cli, channel):
         main.write_text(main.read_text().split('    route GET "/server"')[0].replace(
             '"Choose an RGB color.")]', '"Choose an RGB color."), picker]'))
         package(cli, project, root / "bundle")
+        settings = root / "settings"
+        shutil.copytree(Path(__file__).resolve().parents[1] / "examples/agent_settings", settings,
+                        ignore=shutil.ignore_patterns("target"))
+        package(cli, settings, root / "settings-bundle")
         pages = []
-        with serve(cli, root / "bundle", os.environ.copy()) as url:
+        with ExitStack() as servers:
+            url = servers.enter_context(serve(cli, root / "bundle", os.environ.copy()))
+            settings_url = servers.enter_context(serve(cli, root / "settings-bundle", os.environ.copy()))
             for engine in ("chromium", "firefox", "webkit"):
                 browser = getattr(engines, engine).launch(channel=channel if engine == "chromium" else None)
                 browsers.callback(browser.close)
-                page = browser.new_page()
-                page.add_init_script("""Object.defineProperty(document, 'modelContext', {value: {
-                    registerTool(tool) { (window.tools ??= new Map()).set(tool.name, tool); }
-                }})""")
-                page.goto(url)
-                page.wait_for_function("window.tools?.has('select_color')")
-                pages.append((engine, page))
-        for engine, page in pages:
-            exercise(page)
+                for address, tool, test in [(url, "select_color", exercise),
+                                            (settings_url, "update_settings", exercise_settings)]:
+                    page = browser.new_page()
+                    page.add_init_script("""Object.defineProperty(document, 'modelContext', {value: {
+                        registerTool(tool) { (window.tools ??= new Map()).set(tool.name, tool); }
+                    }})""")
+                    page.goto(address)
+                    page.wait_for_function("name => window.tools?.has(name)", arg=tool)
+                    pages.append((engine, page, test))
+        for engine, page, test in pages:
+            test(page)
             print(engine, "passed with server stopped", flush=True)
 
 

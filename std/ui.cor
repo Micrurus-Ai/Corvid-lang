@@ -189,6 +189,7 @@ public type IntegerField:
 
 public type RecordState:
     fields: List<IntegerField>
+    descriptors: List<String>
 
 public fn local_slider(label: String, name: String) -> View:
     return View("<label>" + escaped(label) + "<input disabled type=\"range\" name=\"" + escaped(name) + "\"></label>")
@@ -203,6 +204,8 @@ public fn local_selection(state: RecordState, controls: View, preview: View) -> 
     schema = ""
     for field in state.fields:
         schema = schema + "<i hidden data-field=\"" + escaped(field.name) + "\" data-value=\"" + field.value.to_string() + "\" data-min=\"" + field.minimum.to_string() + "\" data-max=\"" + field.maximum.to_string() + "\"></i>"
+    for descriptor in state.descriptors:
+        schema = schema + "<i hidden data-record-field=\"" + escaped(descriptor) + "\"></i>"
     return View("<fieldset data-local-selection>" + schema + controls.html + "<div role=\"status\" data-local-preview>" + preview.html + "</div><span role=\"alert\"></span></fieldset>")
 
 # Build the editor descriptor from the compiler-checked browser state initializer.
@@ -211,4 +214,18 @@ public fn record_state(bounds: Map<String, List<Int>>) -> RecordState:
     for name in bounds.keys():
         parts = bounds[name].unwrap_or([])
         fields.append(IntegerField(name, parts[0], parts[1], parts[2]))
-    return RecordState(fields)
+    return RecordState(fields, [])
+
+public fn browser_record(rows: Map<String, List<String>>) -> RecordState:
+    fields: List<IntegerField> = []
+    descriptors: List<String> = []
+    for name in rows.keys():
+        row = rows[name].unwrap_or([])
+        if row[0] == "integer":
+            fields.append(IntegerField(name, row[1].parse_int().unwrap_or(0), row[2].parse_int().unwrap_or(0), row[3].parse_int().unwrap_or(0)))
+        else:
+            descriptors.append(row[1])
+    return RecordState(fields, descriptors)
+
+public fn local_field(label: String, name: String) -> View:
+    return View("<label>" + escaped(label) + "<span data-local-field=\"" + escaped(name) + "\"></span></label>")

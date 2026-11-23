@@ -91,19 +91,54 @@ pub(super) fn browser_fields(
     let record = types.get(&values.type_id()).ok_or_else(invalid)?;
     let mut fields = Vec::with_capacity(record.fields.len());
     for field in &record.fields {
-        let Some(corvid_ast::Refinement::Between { min, max }) = field.refinement else {
-            return Err(invalid());
-        };
-        let Some(Value::Int(value)) = values.get_field(&field.name) else {
-            return Err(invalid());
+        let value = values.get_field(&field.name).ok_or_else(invalid)?;
+        let row = match value {
+            Value::Int(n) => {
+                let Some(corvid_ast::Refinement::Between { min, max }) = field.refinement else {
+                    return Err(invalid());
+                };
+                vec![
+                    "integer".into(),
+                    n.to_string(),
+                    min.to_string(),
+                    max.to_string(),
+                ]
+            }
+            value => {
+                use serde_json::json;
+                let (schema, initial) = match value {
+                    Value::String(s) => {
+                        let mut schema = json!({"type":"string"});
+                        if let Some(corvid_ast::Refinement::LenBetween { min, max }) =
+                            field.refinement
+                        {
+                            schema["minLength"] = json!(min);
+                            schema["maxLength"] = json!(max);
+                        }
+                        (schema, json!(s.as_ref()))
+                    }
+                    Value::Bool(b) => (json!({"type":"boolean"}), json!(b)),
+                    Value::Enum(e) => {
+                        let choice = types.get(&e.type_id()).ok_or_else(invalid)?;
+                        let names: Vec<_> = choice.variants.iter().map(|v| &v.name).collect();
+                        (
+                            json!({"type":"string","enum":names}),
+                            json!(e.variant_name()),
+                        )
+                    }
+                    _ => return Err(invalid()),
+                };
+                vec![
+                    "field".into(),
+                    json!({"name":field.name,"schema":schema,"value":initial}).to_string(),
+                ]
+            }
         };
         fields.push((
             Value::String(field.name.clone().into()),
-            Value::List(ListValue::new([
-                Value::Int(value),
-                Value::Int(min),
-                Value::Int(max),
-            ])),
+            Value::List(ListValue::new(
+                row.into_iter().map(|text| Value::String(text.into())),
+            )),
         ));
     }
     Ok(Value::Map(MapValue::new(fields)))

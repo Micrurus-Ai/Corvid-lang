@@ -1,0 +1,27 @@
+import "std:ui" as ui
+
+choice RunMode:
+    Manual
+    Scheduled
+
+type AgentSettings:
+    name: String where len_between(1, 60)
+    enabled: Bool
+    mode: RunMode
+    retries: Int where between(0, 5)
+
+fn settings_editor(initial: AgentSettings) -> ui.View:
+    browser state settings = initial
+    controls = ui.grid([
+        ui.local_field("Agent name", "name"),
+        ui.local_field("Enabled", "enabled"),
+        ui.local_field("Run mode", "mode"),
+        ui.local_field("Retry limit", "retries")
+    ])
+    preview = ui.record_text("{name} / {mode} / enabled: {enabled} / retries: {retries}")
+    return ui.local_selection(settings, controls, preview)
+
+server app:
+    route GET "/" -> html:
+        editor = settings_editor(AgentSettings("Assistant", false, Manual, 1))
+        return ui.interactive_page("Agent settings", [ui.assistant_selection(editor, "update_settings", "Update the agent settings.")])

@@ -613,3 +613,23 @@ public fn LocalColorPicker(color: Color) -> ui.View:
 ```
 
 Mount it on an interactive page. Each instance owns a separate record in browser memory. Slider movement updates the preview during the gesture. Wrapping the editor with `ui.assistant_selection` exposes one action taking a complete record. Both input paths validate the candidate before updating the preview. The initial page and runtime must load online. Edits then work disconnected until you close or reload the page. For a server-computed preview, the same app offers the earlier form example at `/server`.
+
+## Edit agent settings offline
+
+The [agent settings editor](../../examples/agent_settings/src/main.cor) defines one model for both human and assistant input.
+
+```corvid
+choice RunMode:
+    Manual
+    Scheduled
+
+type AgentSettings:
+    name: String where len_between(1, 60)
+    enabled: Bool
+    mode: RunMode
+    retries: Int where between(0, 5)
+```
+
+Inside the component, write `browser state settings = initial`. Place fields anywhere in your layout using `ui.local_field("Agent name", "name")`, `ui.local_field("Enabled", "enabled")`, and the same function for the other fields. The declared type supplies a native control and its valid values. A choice field uses its variant names as the options. Field names in the layout are checked when the component mounts.
+
+An opted-in assistant supplies a complete record in one call. For example, `{"name":"Scout","enabled":true,"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.

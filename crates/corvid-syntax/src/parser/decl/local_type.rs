@@ -28,7 +28,7 @@ impl Parser<'_> {
             ));
         }
         let source = format!(
-            "import \"std:ui\" as {ui}\nfn {name}_state(value: {name}) -> {ui}.RecordState:\n    return {ui}.RecordState([{}])\n",
+            "import \"std:ui\" as {ui}\nfn {name}_state(value: {name}) -> {ui}.RecordState:\n    return {ui}.RecordState([{}], [])\n",
             fields.join(", ")
         );
         let mut tokens = crate::lex(&source).expect("valid local type lowering");
