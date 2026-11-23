@@ -1,8 +1,9 @@
 import "std:ui" as ui
 
-fn trail_card(theme: String, trail: String, condition: String) -> ui.View:
+fn trail_card(theme: String, trail: String, condition: String, note: String) -> ui.View:
     summary = ui.class_group("trail-summary", [ui.h2(trail), ui.text(condition)])
-    return ui.class_group("trail-card " + theme, [summary])
+    notes = ui.disclosure("Trail note", [ui.text(note)])
+    return ui.class_group("trail-card " + theme, [summary, notes])
 
 fn conditions_page() -> String:
     css = """body { font-family: system-ui, sans-serif; background: white; color: #18231d }
@@ -12,6 +13,9 @@ fn conditions_page() -> String:
 .trail-card h2 { color: var(--trail-accent) }
 .trail-summary { display: flex; flex-direction: column; gap: .5rem }
 .trail-summary > * { margin: 0 }
+.trail-card details { margin-block-start: .75rem }
+.trail-card details[open] > summary { color: var(--trail-accent); font-weight: bold }
+.trail-card summary:focus-visible { outline: 2px solid var(--trail-accent); outline-offset: 2px }
 @container trail-card (min-width: 24rem) {
     .trail-summary { flex-direction: row; align-items: baseline; justify-content: space-between }
 }
@@ -25,8 +29,8 @@ fn conditions_page() -> String:
     body { color: black }
     .trail-card, .trail-card.river { --trail-accent: black; break-inside: avoid }
 }"""
-    forest = trail_card("forest", "Forest loop", "Dry underfoot")
-    river = trail_card("river", "River walk", "Muddy near the bridge")
+    forest = trail_card("forest", "Forest loop", "Dry underfoot", "Pine needles cover the upper path.")
+    river = trail_card("river", "River walk", "Muddy near the bridge", "Use the boardwalk at the crossing.")
     return ui.styled_page("en", "Trail conditions", css, [
         ui.h1("Trail conditions"), ui.class_group("trail-list", [forest, river])
     ])

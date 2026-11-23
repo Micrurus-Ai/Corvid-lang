@@ -33,6 +33,8 @@ Each trail card declares `container: trail-card / inline-size`. Inside the card,
 
 The trail page uses `@media screen and (prefers-color-scheme: dark)` to set a dark background and give each card a lighter accent. The wide grid also uses a screen-only media query, so printed cards form one column at any paper width. The `@media print` rules give both cards black text and borders and use `break-inside: avoid` to keep each trail name with its condition across page breaks.
 
+Tab to **Trail note** to see the focus outline in that card's accent color. Press Space to open the note. The browser sets the disclosure's `open` attribute, so `.trail-card details[open] > summary` makes its label bold and applies the accent. Press Space again to restore the closed style.
+
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
 
 ```corvid-fragment

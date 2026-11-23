@@ -33,6 +33,20 @@ def check_cards(page, url):
             expect(summary).to_have_css("display", "flex")
             expect(summary).to_have_css("flex-direction", "column" if width == 360 else "row")
 
+    forest_toggle = forest.locator("summary")
+    river_toggle = river.locator("summary")
+    page.keyboard.press("Tab")
+    expect(forest_toggle).to_be_focused()
+    expect(forest_toggle).to_have_css("outline", "rgb(40, 94, 56) solid 2px")
+    page.keyboard.press("Space")
+    expect(forest.get_by_text("Pine needles cover the upper path.")).to_be_visible()
+    expect(forest_toggle).to_have_css("color", "rgb(40, 94, 56)")
+    expect(forest_toggle).to_have_css("font-weight", "700")
+    expect(river_toggle).to_have_css("font-weight", "400")
+    expect(river.get_by_text("Use the boardwalk at the crossing.")).to_be_hidden()
+    page.keyboard.press("Space")
+    expect(forest_toggle).to_have_css("font-weight", "400")
+
     # Keep the wide viewport and constrain only the forest card.
     forest.evaluate("card => card.style.maxInlineSize = '18rem'")
     expect(forest.locator(".trail-summary")).to_have_css("flex-direction", "column")
