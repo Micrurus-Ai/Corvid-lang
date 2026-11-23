@@ -141,6 +141,20 @@ python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --rounds 20 --out
 python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --read-only-peers --rounds 10 --output reads.json
 ```
 
+### SQLite writer acquisition
+
+A ten-round diagnostic on the patched VM used the same concurrent-save benchmark. In the temporary Corvid app, each save explicitly acquired the writer with `BEGIN IMMEDIATE`, updated the shelf, and issued `COMMIT`. Both stacks used FULL synchronization and recovered all 1,342 acknowledged edits each after restart, including warm-up. No request failed.
+
+| Corvid writers with a pending suggestion | Saves measured | Begin median / p95 (ms) | Update median / p95 (ms) | Commit median / p95 (ms) | Handler median / p95 (ms) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 10 | 0 / 1 | 2 / 3 | 3 / 4 | 7.5 / 10 |
+| 10 | 100 | 56 / 142 | 2 / 3 | 3 / 5 | 67.5 / 153 |
+| 50 | 500 | 13.5 / 587 | 2 / 3 | 3 / 18 | 28 / 595 |
+
+For the 25 slowest handlers with 50 writers and a pending suggestion, 16,926 of their combined 17,229 ms elapsed inside `BEGIN IMMEDIATE` (98.2%). Without a suggestion, the same interval accounted for 98.4% of the slowest 25 handlers. These clocks include SQLite lock acquisition, tool dispatch and thread scheduling. The explicit transaction also adds tool calls relative to the shipped implicit transaction. Results pool the browser and peer requests, exclude warm-up and measure only time inside the handler. The next experiment is to queue competing writers per database before they enter SQLite and measure the full browser confirmation and both read and write tail latencies. [Per-save timings](../../benches/results/reading-writer-acquisition.json)
+
+Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --rounds 10 --profile-writer --output writer.json`.
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.

@@ -34,12 +34,45 @@ def handler_ms(html):
     return int(match[1])
 
 
+def instrument_writer_transaction(source):
+    # Only the disposable benchmark app splits SQLite's implicit transaction.
+    path = source / "main.cor"
+    code = path.read_text(encoding="utf-8")
+    start = code.index("agent save_and_show(")
+    end = code.index("agent database_settings()", start)
+    handler = code[start:end]
+    call = "    saved = update_shelf(db, reading)?"
+    comment = 'html + "<!--bench "'
+    assert handler.count(call) == handler.count(comment) == 1
+    handler = handler.replace(
+        call,
+        """    before_begin = time_monotonic_ms()
+    db_execute(db, "BEGIN IMMEDIATE", [])?
+    acquired = time_monotonic_ms()
+    saved = update_shelf(db, reading)?
+    updated = time_monotonic_ms()
+    db_execute(db, "COMMIT", [])?
+    committed = time_monotonic_ms()
+    stages = [(acquired - before_begin).to_string(), (updated - acquired).to_string(), (committed - updated).to_string()]""",
+    )
+    handler = handler.replace(comment, 'html + "<!--writer " + stages.join(" ") + "--><!--bench "')
+    path.write_text(code[:start] + handler + code[end:], encoding="utf-8")
+
+
+def writer_stages(html):
+    match = re.search(r"<!--writer ([0-9]+) ([0-9]+) ([0-9]+)--><!--bench ", html)
+    return (
+        dict(zip(("begin_ms", "update_ms", "commit_ms"), map(int, match.groups()))) if match else {}
+    )
+
+
 def peer_request(url, shelf, title, ready, start, read_only):
     ready.wait(timeout=10)
     if not start.wait(10):
         raise TimeoutError("Browser did not submit")
     begin = time.monotonic()
     duration = None
+    stages = {}
     try:
         if read_only:
             html = read(url + f"/edit?shelf={shelf}")
@@ -49,12 +82,14 @@ def peer_request(url, shelf, title, ready, start, read_only):
             error = None if "<p>Saved</p>" in html else "Missing save confirmation"
             if not error:
                 duration = handler_ms(html)
+                stages = writer_stages(html)
     except OSError as exc:
         error = str(exc)
     return {
         "title": title,
         "shelf": shelf,
         "handler_ms": duration,
+        **stages,
         "ms": round(1000 * (time.monotonic() - begin), 2),
         "error": error,
     }
@@ -106,6 +141,7 @@ def burst(pool, page, url, model, start, count, pending, label, delay, read_only
         "pending": pending,
         "read_only_peers": read_only,
         "browser_handler_ms": handler_ms(response.value.text()) if ok else None,
+        **(writer_stages(response.value.text()) if ok else {}),
         "browser_title": title,
         "browser_ms": browser_ms,
         "provider_ms_remaining_at_save": remaining_ms,
@@ -171,6 +207,8 @@ def run(args):
                 ROOT / "examples/reading_list" / folder, project / folder, dirs_exist_ok=True
             )
         instrument(project / "src")
+        if args.profile_writer:
+            instrument_writer_transaction(project / "src")
         corvid, node = root / "Corvid", root / "TypeScript"
         package(cli, project, corvid)
         subprocess.run(
@@ -249,6 +287,13 @@ def run(args):
                             args.delay_ms / 1000,
                             args.read_only_peers,
                         )
+                        if args.profile_writer and name == "Corvid":
+                            if result["browser_ms"] is not None:
+                                assert "begin_ms" in result
+                            if not args.read_only_peers:
+                                assert all(
+                                    "begin_ms" in peer or peer["error"] for peer in result["peers"]
+                                )
                         samples.append(dict(stack=name, round=round_no, **result))
         recovered = {}
         for name in urls:
@@ -264,6 +309,7 @@ def run(args):
                     "node": subprocess.check_output(["node", "--version"], text=True).strip(),
                     "sqlite": settings,
                     "delay_ms": args.delay_ms,
+                    "profile_writer": args.profile_writer,
                     "recovered": recovered,
                     "samples": samples,
                 },
@@ -286,6 +332,11 @@ if __name__ == "__main__":
         "--read-only-peers",
         action="store_true",
         help="have the other editors load edit forms while the browser saves",
+    )
+    parser.add_argument(
+        "--profile-writer",
+        action="store_true",
+        help="time BEGIN IMMEDIATE, the update and COMMIT on Corvid",
     )
     args = parser.parse_args()
     if args.rounds < 1 or not 1 <= args.delay_ms <= 4000:
