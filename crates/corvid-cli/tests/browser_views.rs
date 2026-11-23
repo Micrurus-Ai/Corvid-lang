@@ -29,6 +29,10 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test no_script_escapes_its_fallback_message:
+    hint = ui.no_script("Maps & </noscript><em>notes</em>")
+    assert hint.html == "<noscript><p>Maps &amp; &lt;/noscript&gt;&lt;em&gt;notes&lt;/em&gt;</p></noscript>"
+
 test disclosure_renders_initial_open_state:
     items = [ui.text("first"), ui.text("second")]
     expanded = ui.disclosure_with_initial_state("Maps & <tips>", true, items)
@@ -189,7 +193,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("30 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("31 passed"),
         "{good:?}"
     );
     fs::write(

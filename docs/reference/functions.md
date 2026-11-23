@@ -388,6 +388,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn data_value(value: String, content: List<View>) -> View` renders an HTML `data` element. Its `value` attribute holds the escaped machine-readable string. Its children supply the visible inline content in the given order.
 - `fn time_value(datetime: String, content: List<View>) -> View` renders a `time` element with an escaped `datetime` attribute and the supplied inline views in order. The caller supplies a valid HTML date, time or duration string.
 - `fn trusted_markup(html: String) -> View` inserts application-authored HTML verbatim at the view's position among its siblings. It performs no escaping or sanitization. Use `text` or `inline_text` for user input.
+- `fn no_script(message: String) -> View` renders escaped text in a paragraph inside a body-level `noscript` element. Browsers display the paragraph when scripting is disabled.
 - `fn paragraph(content: List<View>) -> View` renders a `p` containing the supplied views in order, without adding spaces. Supply inline content such as `inline_text`, links or abbreviations. An empty list renders `<p></p>`.
 - `fn strong(content: List<View>) -> View` marks inline content as important with a `strong` element. It keeps child views in order without inserting spaces. Use `inline_text` for plain text.
 - `h1`, `h2`, `h3`, `h4`, `h5`, and `h6` each take `(label: String) -> View` and render the corresponding HTML heading element with the label as escaped text.

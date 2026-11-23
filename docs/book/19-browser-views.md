@@ -49,6 +49,8 @@ fn note_preview(note: String) -> View:
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
+To show a hint when scripting is disabled, place `ui.no_script("Select Preview to reload the guide with your note.")` in the form's list of views. The server includes the escaped message in a `noscript` paragraph. The browser decides whether to display it.
+
 When the link label includes markup, pass inline views in reading order. For example, `ui.link_with_content("#route", [ui.inline_text("Route, "), ui.abbreviation("3 km", "3 kilometres")])` makes the whole label clickable. Include any spaces between children in the text.
 
 For an opt-in, read-only search that a compatible browser agent can discover, use `ui.agent_query_form(name, description, path, controls)`. Supply a stable unique tool name, an author-written description, and a trusted read-only GET path. The visible form and the agent use the same named fields. The user submits the form. On browsers without declarative WebMCP, the form works as a normal GET form. The server remains responsible for authorizing the request.

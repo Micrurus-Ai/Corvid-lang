@@ -33,6 +33,7 @@ def check_response(url):
         '<ul><li><label><input type="checkbox" name="water">Water bottle</label></li>'
         '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details></aside>',
         '<form method="get" action="/guide">',
+        '<noscript><p>Select Preview to reload the guide with your note.</p></noscript>',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
     ]
@@ -103,6 +104,7 @@ def check_browser(url, channel):
         toggle.click()
         expect(supplies).to_be_hidden()
         editor = packing.get_by_role("group", name="Edit packing note")
+        expect(packing.locator("form > noscript > p")).to_be_visible()
         field = editor.get_by_label("Your note")
         field.fill("")
         editor.get_by_role("button", name="Preview").click()
