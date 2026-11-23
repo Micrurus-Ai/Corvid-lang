@@ -211,6 +211,9 @@ fn text_control(label: String, initial: String, handler: String, attributes: Str
     field = "<label>" + escaped(label) + "<input type=\"text\" value=\"" + escaped(initial) + "\" data-corvid-input=\"" + escaped(handler) + "\"" + attributes + " disabled></label>"
     return View("<fieldset data-corvid-state>" + field + "<output></output><span role=\"alert\"></span></fieldset>")
 
+public fn fieldset(legend: String, controls: List<View>) -> View:
+    return View("<fieldset><legend>" + escaped(legend) + "</legend>" + children(controls) + "</fieldset>")
+
 # Submit named controls to an application-relative GET route.
 public fn query_form(path: String, controls: List<View>) -> View:
     return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")

@@ -131,6 +131,7 @@ Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fra
 | `search_form(controls: List<View>) -> View` | A GET form targeting the current page. |
 | `query_form(path: String, controls: List<View>) -> View` | A GET form targeting the supplied application path. |
 | `disclosure(label: String, content: List<View>) -> View` | Expandable content with a summary. |
+| `fieldset(legend: String, controls: List<View>) -> View` | Group related form controls under a visible legend. For example, pass `ui.fieldset("Contact details", [name_field, email_field])` as a child of a form. |
 | `link(label: String, path: String) -> View` | A link to the supplied application path. |
 | `page(title: String, content: List<View>) -> String` | An HTML document that renders the views in order. |
 

@@ -24,6 +24,12 @@ test escapes_multiline_field:
     field = ui.text_area("Notes & maps", "a\"b", "\n</textarea> & more")
     assert field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\">\n\n&lt;/textarea&gt; &amp; more</textarea></label>"
 
+test fieldset_escapes_legend_and_preserves_controls:
+    first = ui.text_field("Name", "name", "")
+    last = ui.submit("Save")
+    group = ui.fieldset("Maps & <notes>", [first, last])
+    assert group.html == "<fieldset><legend>Maps &amp; &lt;notes&gt;</legend>" + first.html + last.html + "</fieldset>"
+
 test renders_heading_levels:
     headings = [
         ui.h1("Trails & <maps>"), ui.h2("Level 2"), ui.h3("Level 3"),
@@ -108,7 +114,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("14 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("15 passed"),
         "{good:?}"
     );
     fs::write(

@@ -15,7 +15,8 @@ fn guide(note: String) -> String:
         [ui.inline_text("Bridge"), ui.trusted_markup("1 <abbr title='kilometres'>km</abbr>")],
         [ui.inline_text("Lookout"), ui.trusted_markup("3 <abbr title='kilometres'>km</abbr>")]
     ])
-    form = ui.query_form("/guide", [ui.text_area("Your note", "note", note), ui.submit("Preview")])
+    editor = ui.fieldset("Edit packing note", [ui.text_area("Your note", "note", note), ui.submit("Preview")])
+    form = ui.query_form("/guide", [editor])
     packing = ui.data_group("trail-note", note, [ui.text(note), form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [

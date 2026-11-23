@@ -27,6 +27,8 @@ def check_response(url):
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water">',
         '<form method="get" action="/guide">',
+        '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note">',
+        '<button type="submit">Preview</button></fieldset></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
@@ -63,8 +65,9 @@ def check_browser(url, channel):
         expect(page.locator(":target")).to_have_text("Packing note")
 
         packing = main.get_by_role("region", name="Packing note")
-        packing.get_by_label("Your note").fill(NOTE)
-        packing.get_by_role("button", name="Preview").click()
+        editor = packing.get_by_role("group", name="Edit packing note")
+        editor.get_by_label("Your note").fill(NOTE)
+        editor.get_by_role("button", name="Preview").click()
         page.wait_for_url(url + "/guide?*")
         submitted = parse_qs(urlsplit(page.url).query)
         assert submitted == {"note": [NOTE.replace("\n", "\r\n")]}
