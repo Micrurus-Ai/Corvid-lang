@@ -78,6 +78,45 @@ pub fn emit_wasm_artifacts(
     ir: &IrFile,
     module_name: &str,
 ) -> Result<WasmArtifacts, WasmCodegenError> {
+    emit_module(ir, module_name, None)
+}
+
+type Locate<'a> = dyn Fn(DefId, corvid_ast::Span) -> Option<String> + 'a;
+
+pub fn emit_wasm_with_locations(
+    ir: &IrFile,
+    module_name: &str,
+    locate: &Locate<'_>,
+) -> Result<WasmArtifacts, WasmCodegenError> {
+    emit_module(ir, module_name, Some(locate))
+}
+
+struct TrapSites<'a> {
+    locate: Option<&'a Locate<'a>>,
+    labels: Vec<String>,
+    global: u32,
+    agent: &'a IrAgent,
+}
+
+impl TrapSites<'_> {
+    fn mark(&mut self, function: &mut Function, span: corvid_ast::Span, operation: &str) -> bool {
+        let Some(location) = self.locate.and_then(|lookup| lookup(self.agent.id, span)) else {
+            return false;
+        };
+        self.labels.push(format!("{location} in {} ({operation})", self.agent.name));
+        function.instruction(&Instruction::I32Const(self.labels.len() as i32));
+        function.instruction(&Instruction::GlobalSet(self.global));
+        true
+    }
+
+    fn clear(&self, function: &mut Function) {
+        function.instruction(&Instruction::I32Const(0));
+        function.instruction(&Instruction::GlobalSet(self.global));
+    }
+}
+
+fn emit_module(ir: &IrFile, module_name: &str, locate: Option<&Locate<'_>>)
+    -> Result<WasmArtifacts, WasmCodegenError> {
     if ir.tools.iter().any(|tool| tool.python.is_some()) {
         return Err(WasmCodegenError::unsupported("typed Python imports require the interpreter"));
     }
@@ -174,14 +213,24 @@ pub fn emit_wasm_artifacts(
         funcs.function(type_index);
     }
 
+    let mut labels = Vec::new();
+    let location_global = globals.len();
     for (idx, agent) in scalar_agents.iter().enumerate() {
         exports.export(
             &agent.name,
             ExportKind::Func,
             agent_index_base + idx as u32,
         );
-        let function = compile_agent(agent, &agent_indices, &host_plan, &string_pool)?;
+        let mut sites = TrapSites { locate, labels, global: location_global, agent };
+        let function = compile_agent(agent, &agent_indices, &host_plan, &string_pool, &mut sites)?;
+        labels = sites.labels;
         code.function(&function);
+    }
+
+    if !labels.is_empty() {
+        globals.global(wasm_encoder::GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+            &ConstExpr::i32_const(0));
+        exports.export("corvid:trap-site", ExportKind::Global, location_global);
     }
 
     // WASM core module section ordering is fixed:
@@ -206,6 +255,7 @@ pub fn emit_wasm_artifacts(
         &scalar_agents,
         &host_plan.imports,
         module.finish(),
+        &labels,
     )
 }
 
@@ -681,6 +731,7 @@ fn compile_agent(
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
     string_pool: &StringPool,
+    sites: &mut TrapSites<'_>,
 ) -> Result<Function, WasmCodegenError> {
     let mut locals = LocalLayout::from_agent(agent)?;
     collect_block_locals(&agent.body, &mut locals)?;
@@ -694,6 +745,7 @@ fn compile_agent(
         agent_indices,
         host_plan,
         string_pool,
+        sites,
     )?;
     function.instruction(&Instruction::Unreachable);
     function.instruction(&Instruction::End);
@@ -864,6 +916,7 @@ fn emit_block(
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
     string_pool: &StringPool,
+    sites: &mut TrapSites<'_>,
 ) -> Result<(), WasmCodegenError> {
     for stmt in &block.stmts {
         match stmt {
@@ -873,7 +926,7 @@ fn emit_block(
                 value,
                 ..
             } => {
-                emit_expr(value, function, locals, agent_indices, host_plan, string_pool)?;
+                emit_expr(value, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 let slot = locals.slot(*local_id, name)?;
                 if slot.count == 1 {
                     function.instruction(&Instruction::LocalSet(slot.start));
@@ -895,12 +948,12 @@ fn emit_block(
             }
             IrStmt::Return { value, .. } => {
                 if let Some(value) = value {
-                    emit_expr(value, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_expr(value, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 function.instruction(&Instruction::Return);
             }
             IrStmt::Expr { expr, .. } => {
-                emit_expr(expr, function, locals, agent_indices, host_plan, string_pool)?;
+                emit_expr(expr, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 if !matches!(expr.ty, Type::Nothing) {
                     function.instruction(&Instruction::Drop);
                 }
@@ -911,18 +964,18 @@ fn emit_block(
                 else_block,
                 ..
             } => {
-                emit_expr(cond, function, locals, agent_indices, host_plan, string_pool)?;
+                emit_expr(cond, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 function.instruction(&Instruction::If(BlockType::Empty));
-                emit_block(then_block, function, locals, agent_indices, host_plan, string_pool)?;
+                emit_block(then_block, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 if let Some(else_block) = else_block {
                     function.instruction(&Instruction::Else);
-                    emit_block(else_block, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_block(else_block, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 function.instruction(&Instruction::End);
             }
             IrStmt::Approve { label, args, .. } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 let index = host_plan
                     .approval_indices
@@ -963,6 +1016,7 @@ fn emit_expr(
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
     string_pool: &StringPool,
+    sites: &mut TrapSites<'_>,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
         IrExprKind::Match { .. } => {
@@ -1047,7 +1101,7 @@ fn emit_expr(
             }
             IrCallKind::Agent { def_id } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 let index = agent_indices.get(def_id).copied().ok_or_else(|| {
                     WasmCodegenError::unsupported(format!(
@@ -1058,7 +1112,7 @@ fn emit_expr(
             }
             IrCallKind::Tool { def_id, .. } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 let index = host_plan.tool_indices.get(def_id).copied().ok_or_else(|| {
                     WasmCodegenError::unsupported(format!(
@@ -1069,7 +1123,7 @@ fn emit_expr(
             }
             IrCallKind::Prompt { def_id } => {
                 for arg in args {
-                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool)?;
+                    emit_expr(arg, function, locals, agent_indices, host_plan, string_pool, sites)?;
                 }
                 let index = host_plan
                     .prompt_indices
@@ -1094,12 +1148,18 @@ fn emit_expr(
             }
         },
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right } => {
-            emit_expr(left, function, locals, agent_indices, host_plan, string_pool)?;
-            emit_expr(right, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_expr(left, function, locals, agent_indices, host_plan, string_pool, sites)?;
+            emit_expr(right, function, locals, agent_indices, host_plan, string_pool, sites)?;
+            let marked = match (op, &left.ty) {
+                (BinaryOp::Div, Type::Int) => sites.mark(function, expr.span, "integer division"),
+                (BinaryOp::Mod, Type::Int) => sites.mark(function, expr.span, "integer remainder"),
+                _ => false,
+            };
             emit_binary(*op, &left.ty, function)?;
+            if marked { sites.clear(function); }
         }
         IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } => {
-            emit_unary(*op, operand, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_unary(*op, operand, function, locals, agent_indices, host_plan, string_pool, sites)?;
         }
         IrExprKind::Decl { .. }
         | IrExprKind::FieldAccess { .. }
@@ -1181,19 +1241,20 @@ fn emit_unary(
     agent_indices: &HashMap<DefId, u32>,
     host_plan: &HostImportPlan,
     string_pool: &StringPool,
+    sites: &mut TrapSites<'_>,
 ) -> Result<(), WasmCodegenError> {
     match (op, &operand.ty) {
         (UnaryOp::Neg, Type::Int) => {
             function.instruction(&Instruction::I64Const(0));
-            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool, sites)?;
             function.instruction(&Instruction::I64Sub);
         }
         (UnaryOp::Neg, Type::Float) => {
-            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool, sites)?;
             function.instruction(&Instruction::F64Neg);
         }
         (UnaryOp::Not, Type::Bool) => {
-            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool)?;
+            emit_expr(operand, function, locals, agent_indices, host_plan, string_pool, sites)?;
             function.instruction(&Instruction::I32Eqz);
         }
         _ => {

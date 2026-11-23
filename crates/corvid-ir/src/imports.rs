@@ -56,6 +56,16 @@ pub(crate) fn build_imported_def_ids(
     out
 }
 
+/// Source modules keyed by the same remapped IDs used by cross-file IR calls.
+pub fn imported_source_modules<'a>(
+    resolved: &Resolved,
+    modules: &'a ModuleResolution,
+) -> HashMap<DefId, &'a ResolvedModule> {
+    build_imported_def_ids(resolved, modules).into_iter().filter_map(|(key, id)| {
+        modules.lookup_by_path(std::path::Path::new(&key.module_path)).map(|module| (id, module))
+    }).collect()
+}
+
 pub(crate) fn resolve_root_imported_type_ref(
     modules: &ModuleResolution,
     alias: &str,

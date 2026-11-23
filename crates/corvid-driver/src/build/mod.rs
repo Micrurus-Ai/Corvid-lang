@@ -188,6 +188,7 @@ pub struct AbiBuildOutput {
 }
 
 pub(super) struct FrontendBundle {
+    modules: Option<corvid_resolve::ModuleResolution>,
     pub source: String,
     pub file: corvid_ast::File,
     pub resolved: Resolved,
@@ -353,7 +354,24 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
                 .and_then(|s| s.to_str())
                 .unwrap_or("program")
                 .to_string();
-            let artifacts = corvid_codegen_wasm::emit_wasm_artifacts(&frontend.ir, &stem)
+            let imported = frontend.modules.as_ref().map(|modules| {
+                corvid_ir::imported_source_modules(&frontend.resolved, modules)
+            }).unwrap_or_default();
+            let entry = source_path.canonicalize()?;
+            let project = entry.ancestors().find(|p| p.file_name().is_some_and(|n| n == "src"))
+                .and_then(Path::parent).or_else(|| entry.parent()).unwrap_or(&entry);
+            let locate = |id, span: corvid_ast::Span| {
+                let (path, text) = match imported.get(&id) {
+                    Some(module) => (module.path.as_path(), module.source.as_str()),
+                    None => (entry.as_path(), source.as_str()),
+                };
+                let before = text.get(..span.start)?;
+                let path = path.strip_prefix(project).unwrap_or_else(|_| Path::new(path.file_name().unwrap_or_default()));
+                let line = 1 + before.bytes().filter(|b| *b == b'\n').count();
+                let column = 1 + before.rsplit('\n').next()?.chars().count();
+                Some(format!("{}:{line}:{column}", path.to_string_lossy().replace('\\', "/")))
+            };
+            let artifacts = corvid_codegen_wasm::emit_wasm_with_locations(&frontend.ir, &stem, &locate)
                 .map_err(|e| anyhow::anyhow!("wasm codegen failed: {e}"))?;
             std::fs::create_dir_all(&out_dir)?;
             let wasm_path = out_dir.join(format!("{stem}.wasm"));
@@ -491,6 +509,7 @@ pub(super) fn build_frontend_bundle(
     let checked = typechecked.result.checked.clone();
     let ir = lower_driver_file(&file, &resolved, &typechecked.result);
     Ok(FrontendBundle {
+        modules: typechecked.result.modules,
         source: source.to_string(),
         file,
         resolved,

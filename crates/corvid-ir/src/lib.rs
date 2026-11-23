@@ -6,6 +6,7 @@
 //! See `ARCHITECTURE.md` §4.
 
 mod imports;
+pub use imports::imported_source_modules;
 pub mod lower;
 pub mod types;
 

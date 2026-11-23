@@ -487,3 +487,15 @@ Each engine checks keyboard navigation, checkout at widths of 320 and 960 pixels
 For a physical iPhone trial, open the packaged storefront on a reachable test origin in Safari. Tap **Open cart**, then **Notebook quantity**. Check that the numeric keyboard appears. Replace the quantity with **12**, leave the pencil quantity at **1**, dismiss the keyboard, tap **Move Notebook later**, then **Checkout**. Expect **Total: 5525 cents**. Record the iOS version, whether each control was reachable and the displayed total.
 
 For a screen-reader trial, listen for **Open cart**, **Notebook quantity**, the move button's label and the updated position when the notebook moves. The Windows Narrator run on November 23 confirmed the link, quantity and position. The move button's exact spoken label still needs confirmation. Narrator's speech recap can be used to check a phrase. [Microsoft Narrator guide](https://support.microsoft.com/en-us/accessibility/windows/narrator/complete-guide-to-narrator)
+
+### Debug a browser calculation
+
+When a browser handler hits a failing integer division or remainder, the message identifies the expression that failed. For example, entering two notebooks in the deliberately broken storefront trial gives this message in Chrome.
+
+```text
+Corvid handler notebook_cents failed: divide by zero at src/pricing.cor:4:12 in line_total (integer division)
+```
+
+Open `src/pricing.cor` at line 4, column 12. The cart called `notebook_cents`, which called `line_total` in that file. Its divisor was `quantity - 2`. For this cart the line total is simply `quantity * unit_price`. After changing that line and rebuilding, the same two notebooks cost 900 cents and checkout with one pencil totals 1,025 cents.
+
+With Python Playwright and its three browser engines installed, run `python scripts/verify_browser_diagnostics.py target/debug/corvid.exe` from the repository root. Pass `--channel chrome` to use installed Chrome. The trial triggers both operations, checks their individual source locations and completes checkout with the corrected calculation in Chromium, Firefox and WebKit.
