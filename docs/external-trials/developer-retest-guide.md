@@ -128,7 +128,7 @@ A targeted retest of just the surfaces we fixed:
    src/main.cor`) all run now. We want you to confirm a
    reviewer following the prompt literally now reaches `ls
    deploy/` without copy-paste failure.
-   <https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md#build-path-suggested-not-required>
+   <https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/application-build-trial.md#build-path-suggested-not-required>
 
 2. **Try `corvid serve`** against your tiny preferences
    agent. The HTTP surface you reported as unreachable

@@ -2,10 +2,10 @@
 
 > First trial report against the 33M friends-and-family round
 > prompt at
-> [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
+> [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/application-build-trial.md).
 > Reviewer's report verbatim below, plus the maintainer-side
 > triage disposition per
-> [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md).
+> [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md).
 > Path-A timing posture preserved — the actual outreach window
 > hasn't opened yet, so this is a single self-administered
 > trial run that stress-tested the PROMPT itself, surfacing real
@@ -198,7 +198,7 @@ of the 2026-04-29 snapshot.
 ## Disposition
 
 Per
-[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md):
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md):
 
 **`code`** — fixed in this triage commit (`render_dockerfile`
 rewritten for standalone-app layout) + 3 follow-up slices filed
@@ -403,7 +403,7 @@ present.
 
 ## Round 2 maintainer triage (2026-06-05)
 
-Per the [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md)
+Per the [`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md)
 disposition shape; closing criterion at
 [`ROADMAP.md L51`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/ROADMAP.md#L51).
 Each finding closes as `code` / `docs` / `test` / `non-scope`
@@ -428,7 +428,7 @@ before the v1.0 cut.
   files the triage table, and queues the next commits.
 - **Next commit (33m-prompt-fixes):** P3.c + P4 + P5 + the
   Minor-versioning-note edit, all in
-  [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
+  [`application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/application-build-trial.md).
 - **Subsequent commits (ROADMAP entries):** file 33Q1-33Q5 as
   five new sub-slices under a new `33Q-trial-round-2-fixes`
   block in ROADMAP. Each carries the reviewer-named acceptance

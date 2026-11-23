@@ -4,7 +4,7 @@
 > the 33M friends-and-family round. Built a small production-
 > shape cyber-threat-intel app from scratch using the build prompt
 > at
-> [`docs/external-trials/application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/application-build-trial.md).
+> [`docs/external-trials/application-build-trial.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/application-build-trial.md).
 > Treated as a real trial — every friction point documented, no
 > wave-throughs.
 

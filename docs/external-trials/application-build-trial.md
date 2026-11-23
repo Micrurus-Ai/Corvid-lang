@@ -3,7 +3,7 @@
 > **Slice:** `33M` (repositioned, Path A) — final 4 weeks of Phase 43.
 > **Target reviewers:** 5-10 hand-picked AI engineers.
 > **Output:** one report per reviewer, triaged through
-> [`docs/external-trials/feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md),
+> [`docs/external-trials/feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md),
 > closing as `code` / `docs` / `test` / `non-scope`.
 >
 > **Status (rev 2026-06-05):** prior trial (`anonymous-2026-06-04`)
@@ -325,7 +325,7 @@ Open a GitHub issue at
 label `friends-and-family-trial` and the title
 `[Trial] <your-handle> — <one-line summary>`. The body follows
 the
-[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md)
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md)
 intake shape:
 
 ```markdown
@@ -373,7 +373,7 @@ intake shape:
 ## What happens with your report
 
 Per
-[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/corvid/full-stack-preview/docs/external-trials/feedback-triage-guide.md),
+[`feedback-triage-guide.md`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/docs/external-trials/feedback-triage-guide.md),
 every report disposes as one of:
 
 - `code` — fix lands with a linked commit before v1.0 cut.

@@ -10,7 +10,7 @@ import tempfile
 import time
 
 
-BRANCHES = {"corvid/roadmap-tasks", "corvid/remaining-roadmap"}
+BRANCHES = {"corvid/roadmap-tasks", "corvid/component-layout"}
 FIELDS = {
     "status": {"type": "string", "enum": ["complete", "continue", "awaiting_feedback", "blocked"]},
     "summary": {"type": "string"},
