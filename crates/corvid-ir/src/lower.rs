@@ -2249,17 +2249,9 @@ impl<'a> Lowerer<'a> {
 
     fn type_ref_to_type(&self, tr: &TypeRef) -> Type {
         match tr {
-            TypeRef::Named { name, .. } => match name.name.as_str() {
-                "Int" => Type::Int,
-                "Float" => Type::Float,
-                "String" => Type::String,
-                "Bool" => Type::Bool,
-                "Nothing" => Type::Nothing,
-                "DbHandle" => Type::DbHandle,
-                "TraceId" => Type::TraceId,
-                "JsonValue" => Type::JsonValue,
-                "JsonBuilder" => Type::JsonBuilder,
-                _ => match self.symbols.lookup_def(&name.name) {
+            TypeRef::Named { name, .. } => match Type::compiler_known(&name.name) {
+                Some(known) => known,
+                None => match self.symbols.lookup_def(&name.name) {
                     Some(id) => {
                         if self.symbols.get(id).kind == DeclKind::ImportedUse {
                             return self

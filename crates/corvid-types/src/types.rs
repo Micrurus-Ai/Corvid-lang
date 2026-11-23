@@ -177,6 +177,27 @@ pub enum Type {
 }
 
 impl Type {
+    /// The type a bare compiler-known name denotes in source (`Int`,
+    /// `DbHandle`, `JsonValue`, ...), or `None` for a name that must be
+    /// looked up among declarations. The checker, the IR lowerer and
+    /// the ABI emitter all resolve names through this one table.
+    pub fn compiler_known(name: &str) -> Option<Type> {
+        Some(match name {
+            "Int" => Type::Int,
+            "Float" => Type::Float,
+            "String" => Type::String,
+            "Bool" => Type::Bool,
+            "Nothing" => Type::Nothing,
+            // Opaque runtime handles: only the executing stdlib tools
+            // (`db_open`, `json_parse`, `json_object_new`) produce them.
+            "DbHandle" => Type::DbHandle,
+            "TraceId" => Type::TraceId,
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
+            _ => return None,
+        })
+    }
+
     /// Human-readable name used in diagnostic messages.
     pub fn display_name(&self) -> String {
         match self {
