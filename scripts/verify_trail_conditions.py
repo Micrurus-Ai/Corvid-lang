@@ -27,6 +27,15 @@ def check_cards(page, url):
         else:
             assert first["y"] == second["y"]
             assert first["x"] + first["width"] < second["x"]
+        for card in (forest, river):
+            summary = card.locator(".trail-summary")
+            expect(summary).to_have_css("display", "flex")
+            expect(summary).to_have_css("flex-direction", "column" if width == 360 else "row")
+
+    # Keep the wide viewport and constrain only the forest card.
+    forest.evaluate("card => card.style.maxInlineSize = '18rem'")
+    expect(forest.locator(".trail-summary")).to_have_css("flex-direction", "column")
+    expect(river.locator(".trail-summary")).to_have_css("flex-direction", "row")
 
 
 if __name__ == "__main__":

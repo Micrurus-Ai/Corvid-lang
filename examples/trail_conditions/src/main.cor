@@ -1,14 +1,20 @@
 import "std:ui" as ui
 
 fn trail_card(theme: String, trail: String, condition: String) -> ui.View:
-    return ui.class_group("trail-card " + theme, [ui.h2(trail), ui.text(condition)])
+    summary = ui.class_group("trail-summary", [ui.h2(trail), ui.text(condition)])
+    return ui.class_group("trail-card " + theme, [summary])
 
 fn conditions_page() -> String:
     css = """body { font-family: system-ui, sans-serif }
 .trail-list { display: grid; gap: 1rem }
-.trail-card { --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
+.trail-card { container: trail-card / inline-size; --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
 .trail-card.river { --trail-accent: #225782 }
 .trail-card h2 { color: var(--trail-accent) }
+.trail-summary { display: flex; flex-direction: column; gap: .5rem }
+.trail-summary > * { margin: 0 }
+@container trail-card (min-width: 24rem) {
+    .trail-summary { flex-direction: row; align-items: baseline; justify-content: space-between }
+}
 @media (min-width: 42rem) { .trail-list { grid-template-columns: repeat(2, minmax(0, 1fr)) } }"""
     forest = trail_card("forest", "Forest loop", "Dry underfoot")
     river = trail_card("river", "River walk", "Muddy near the bridge")

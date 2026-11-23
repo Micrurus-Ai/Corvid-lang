@@ -29,6 +29,8 @@ To show the tips when the page first loads, use `ui.disclosure_with_initial_stat
 
 Use `ui.class_group("trail-card river", children)` to give a group of views CSS classes. Pass your application stylesheet to `ui.styled_page(language, title, css, content)`. In the [trail conditions example](../../examples/trail_conditions/src/main.cor), each card sets its own `--trail-accent`. Its heading inherits the value, so the forest and river cards can share a layout and use different colors. A media query puts the same cards side by side at 42rem.
 
+Each trail card declares `container: trail-card / inline-size`. Inside the card, a flex column stacks the trail name above its condition. The rule `@container trail-card (min-width: 24rem)` switches that column to a row when the card's content area reaches 24rem. This lets a narrow card keep its stacked layout even on a wide screen.
+
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
 
 ```corvid-fragment
