@@ -5,7 +5,9 @@ type PackingNote:
 
 fn guide(note: String) -> String:
     title = "River trail guide"
-    navigation = ui.navigation("Guide sections", [ui.link("Packing note", "#packing")])
+    navigation = ui.navigation("Guide sections", [
+        ui.link("Route", "#route"), ui.link("Packing note", "#packing")
+    ])
     marker = ui.image("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='green'/%3E%3C/svg%3E", "Green circle trail marker")
     stops = ui.ordered_list(1, [
         ui.list_item([ui.inline_text("Bridge")]),
@@ -15,6 +17,9 @@ fn guide(note: String) -> String:
         [ui.inline_text("Bridge"), ui.abbreviation("1 km", "1 kilometre")],
         [ui.inline_text("Lookout"), ui.abbreviation("3 km", "3 kilometres")]
     ])
+    route_details = ui.section("route", "Route", [
+        ui.figure("Follow this marker to the lookout.", [marker]), stops, distances
+    ])
     note_field = ui.text_area_with_requirement("Your note", "note", note, true)
     editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview")])
     form = ui.query_form("/guide", [editor])
@@ -22,9 +27,7 @@ fn guide(note: String) -> String:
     packing = ui.data_group("trail-note", note, [preview, form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [
-            ui.h1(title), navigation, ui.h2("Route"),
-            ui.figure("Follow this marker to the lookout.", [marker]), stops, distances,
-            ui.section("packing", "Packing note", [details])
+            ui.h1(title), navigation, route_details, ui.section("packing", "Packing note", [details])
         ])
         Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])
 

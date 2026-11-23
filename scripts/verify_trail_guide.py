@@ -16,14 +16,16 @@ def check_response(url):
     landmarks_and_content = [
         '<!doctype html><html lang="en">',
         "<main><h1>River trail guide</h1>",
-        '<nav aria-label="Guide sections"><a href="#packing"',
-        "<h2>Route</h2><figure><img ",
+        '<nav aria-label="Guide sections"><a href="#route" tabindex="0">Route</a>'
+        '<a href="#packing" tabindex="0">Packing note</a></nav>',
+        '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
         '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
         '<tr><th scope="row">Bridge</th><td><abbr title="1 kilometre">1 km</abbr></td></tr>',
-        '<tr><th scope="row">Lookout</th><td><abbr title="3 kilometres">3 km</abbr></td></tr>',
+        '<tr><th scope="row">Lookout</th><td><abbr title="3 kilometres">3 km</abbr></td></tr>'
+        '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water">',
         '<form method="get" action="/guide">',
@@ -50,10 +52,14 @@ def check_browser(url, channel):
         assert response.ok and "text/html" in response.headers["content-type"]
         main = page.get_by_role("main")
         assert main.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
-            "h1", "nav", "h2", "figure", "ol", "table", "section"
+            "h1", "nav", "section", "section"
         ]
         expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note"])
-        figure = main.get_by_role("figure")
+        route = main.get_by_role("region", name="Route", exact=True)
+        assert route.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
+            "h2", "figure", "ol", "table"
+        ]
+        figure = route.get_by_role("figure")
         expect(figure.locator("figcaption")).to_have_text("Follow this marker to the lookout.")
         image = figure.get_by_role("img", name="Green circle trail marker")
         assert image.evaluate("img => img.naturalWidth") == 24
@@ -64,9 +70,11 @@ def check_browser(url, channel):
         expect(table.get_by_role("cell")).to_have_text(["1 km", "3 km"])
         expect(table.get_by_title("1 kilometre", exact=True)).to_have_text("1 km")
         expect(table.get_by_title("3 kilometres", exact=True)).to_have_text("3 km")
-        main.get_by_role("navigation", name="Guide sections").get_by_role("link").click()
-        expect(page).to_have_url(url + "/#packing")
-        expect(page.locator(":target")).to_have_text("Packing note")
+        navigation = main.get_by_role("navigation", name="Guide sections")
+        for label, fragment in [("Route", "route"), ("Packing note", "packing")]:
+            navigation.get_by_role("link", name=label, exact=True).click()
+            expect(page).to_have_url(url + "/#" + fragment)
+            expect(page.locator("h2:target")).to_have_text(label)
 
         packing = main.get_by_role("region", name="Packing note")
         editor = packing.get_by_role("group", name="Edit packing note")
