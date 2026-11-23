@@ -28,9 +28,10 @@ def check_response(url):
         '<tr><th scope="row">Lookout</th><td><data value="3000"><abbr title="3 kilometres">3 km</abbr></data></td></tr>'
         '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
-        '<div data-trail-note="Bring water"><details open><summary>Packing checklist</summary>'
+        '<div data-trail-note="Bring water"><aside aria-label="Suggested supplies">'
+        '<details open><summary>Packing checklist</summary>'
         '<ul><li><label><input type="checkbox" name="water">Water bottle</label></li>'
-        '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details>',
+        '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details></aside>',
         '<form method="get" action="/guide">',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
@@ -84,7 +85,8 @@ def check_browser(url, channel):
             expect(page.locator("h2:target")).to_have_text(heading)
 
         packing = main.get_by_role("region", name="Packing note")
-        checklist = packing.locator("details")
+        supplies_aside = packing.get_by_role("complementary", name="Suggested supplies")
+        checklist = supplies_aside.locator("details")
         supplies = checklist.get_by_role("list", include_hidden=True)
         expect(supplies).to_be_visible()
         toggle = checklist.get_by_text("Packing checklist", exact=True)

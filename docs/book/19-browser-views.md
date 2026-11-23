@@ -78,6 +78,8 @@ Pass the document's primary language to `ui.page_in_language`. For example, `"en
 
 To link to a named section, pair `ui.link("Packing note", "#packing")` with `ui.section("packing", "Packing note", [form])`. The section starts with an `h2`. Its ID gives the link a destination, and the heading supplies the region's name through `aria-labelledby`. Choose a unique, nonempty ID without whitespace. Child views follow the heading in list order.
 
+Use `ui.aside("Suggested supplies", [checklist])` to group supplementary material in a named complementary landmark. The trail guide uses this for the packing checklist alongside the note editor.
+
 Use `ui.navigation(label, content)` to group links in a native `nav` landmark. Give the group a name that describes its destinations. Corvid escapes the label for `aria-label` and renders the children in list order.
 
 ```corvid-fragment

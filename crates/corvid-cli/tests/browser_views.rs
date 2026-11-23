@@ -153,6 +153,10 @@ test renders_native_lists_in_order:
     assert steps.html == "<ol start=\"-2\"><li>Read &lt;notes&gt; &amp; <a href=\"/ref\" tabindex=\"0\">references</a></li><li>Bring <ul><li>Notebook</li></ul></li></ol>"
     assert ui.unordered_list([]).html == "<ul></ul>"
 
+test aside_names_supplementary_content_and_preserves_order:
+    supplies = ui.aside("Gear \"A&B\"", [ui.inline_text("<Map>"), ui.strong([ui.inline_text("Water")])])
+    assert supplies.html == "<aside aria-label=\"Gear &quot;A&amp;B&quot;\">&lt;Map&gt;<strong>Water</strong></aside>"
+
 test section_names_its_region_and_preserves_order:
     region = ui.section("trail\"&", "Maps <today>", [ui.text("first"), ui.text("second")])
     assert region.html == "<section aria-labelledby=\"trail&quot;&amp;\"><h2 id=\"trail&quot;&amp;\">Maps &lt;today&gt;</h2><p>first</p><p>second</p></section>"
@@ -185,7 +189,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("29 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("30 passed"),
         "{good:?}"
     );
     fs::write(

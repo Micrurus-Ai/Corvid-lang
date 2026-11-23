@@ -72,6 +72,9 @@ public fn data_group(name: String, value: String, content: List<View>) -> Result
 public fn navigation(label: String, content: List<View>) -> View:
     return View("<nav aria-label=\"" + escaped(label) + "\">" + children(content) + "</nav>")
 
+public fn aside(label: String, content: List<View>) -> View:
+    return View("<aside aria-label=\"" + escaped(label) + "\">" + children(content) + "</aside>")
+
 public fn section(heading_id: String, title: String, content: List<View>) -> View:
     id = escaped(heading_id)
     heading_html = "<h2 id=\"" + id + "\">" + escaped(title) + "</h2>"
