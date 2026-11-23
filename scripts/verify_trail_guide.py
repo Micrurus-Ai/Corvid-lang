@@ -3,7 +3,7 @@ import argparse
 from html import escape
 import os
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from verify_reading_list import read, serve
 
@@ -22,7 +22,8 @@ def check_response(url):
         '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
-        "<tr><td>Bridge</td><td>1 km</td></tr><tr><td>Lookout</td><td>3 km</td></tr>",
+        "<tr><td>Bridge</td><td>1 <abbr title='kilometres'>km</abbr></td></tr>",
+        "<tr><td>Lookout</td><td>3 <abbr title='kilometres'>km</abbr></td></tr>",
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water">',
         '<form method="get" action="/guide">',
@@ -56,6 +57,7 @@ def check_browser(url, channel):
         table = main.get_by_role("table", name="Distances from the trailhead")
         expect(table.locator("th[scope=col]")).to_have_text(["Stop", "Distance"])
         expect(table.get_by_role("cell")).to_have_text(["Bridge", "1 km", "Lookout", "3 km"])
+        expect(table.locator("td abbr[title=kilometres]")).to_have_text(["km", "km"])
         main.get_by_role("navigation", name="Guide sections").get_by_role("link").click()
         expect(page).to_have_url(url + "/#packing")
         expect(page.locator(":target")).to_have_text("Packing note")
@@ -63,6 +65,9 @@ def check_browser(url, channel):
         packing = main.get_by_role("region", name="Packing note")
         packing.get_by_label("Your note").fill(NOTE)
         packing.get_by_role("button", name="Preview").click()
+        page.wait_for_url(url + "/guide?*")
+        submitted = parse_qs(urlsplit(page.url).query)
+        assert submitted == {"note": [NOTE.replace("\n", "\r\n")]}
         section = main.locator("[data-trail-note]")
         expect(section).to_have_attribute("data-trail-note", NOTE)
         expect(section.locator("p")).to_have_text(NOTE)
