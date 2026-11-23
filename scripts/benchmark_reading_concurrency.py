@@ -60,7 +60,24 @@ def instrument_writer_transaction(source):
     path.write_text(code[:start] + handler + code[end:], encoding="utf-8")
 
 
+def instrument_write_order(source):
+    path = source / "main.cor"
+    code = path.read_text(encoding="utf-8")
+    update = "    saved = update_shelf(db, reading)?"
+    comment = 'html + "<!--bench "'
+    assert code.count(update) == code.count(comment) == 1
+    code = code.replace(update, "    ready_to_write = time_monotonic_ms()\n" + update)
+    code = code.replace(
+        comment,
+        'html + "<!--order " + started.to_string() + " " + ready_to_write.to_string() + "--><!--bench "',
+    )
+    path.write_text(code, encoding="utf-8")
+
+
 def writer_stages(html):
+    order = re.search(r"<!--order (\d+) (\d+)--><!--bench ", html)
+    if order:
+        return {"entry_ms": int(order[1]), "before_update_ms": int(order[2])}
     match = re.search(r"<!--writer ([0-9]+) ([0-9]+) ([0-9]+)--><!--bench ", html)
     return (
         dict(zip(("begin_ms", "update_ms", "commit_ms"), map(int, match.groups()))) if match else {}
@@ -174,6 +191,17 @@ def check_database(url, path, samples):
     with closing(sqlite3.connect(path)) as db:
         log = db.execute("SELECT title,shelf FROM audit ORDER BY rowid").fetchall()
         assert len(log) == len(expected) and dict(log) == expected
+        # The audit trigger runs in the save transaction. SQLite has one
+        # writer, so the persisted rows also establish durable write order.
+        positions = {title: i for i, (title, _) in enumerate(log)}
+        for burst_result in samples:
+            title = burst_result["browser_title"]
+            if title in positions:
+                burst_result["browser_commit_rank"] = 1 + sum(
+                    positions[peer["title"]] < positions[title]
+                    for peer in burst_result["peers"]
+                    if peer["title"] in positions
+                )
         html = read(url)
         for shelf, title, revision in db.execute("SELECT shelf,title,revision FROM shelves"):
             edits = [t for t, s in log if s == shelf]
@@ -183,8 +211,10 @@ def check_database(url, path, samples):
 
 
 def report(samples, recovered):
-    print("Editors | Model pending | Stack | Browser median / p95 (ms) | Failed requests")
-    for count in (1, 10, 50):
+    print(
+        "Editors | Model pending | Stack | Browser median / p95 (ms) | Median commit position | Failed requests"
+    )
+    for count in sorted({sample["editors"] for sample in samples}):
         for pending in (False, True):
             for name in recovered:
                 rows = [
@@ -202,7 +232,9 @@ def report(samples, recovered):
                 if values:
                     p95 = values[math.ceil(0.95 * len(values)) - 1]
                     times = f"{median(values):.1f} / {p95:.1f}"
-                print(f"{count} | {pending} | {name} | {times} | {failed}")
+                ranks = [row["browser_commit_rank"] for row in rows if "browser_commit_rank" in row]
+                position = f"{median(ranks):g}" if ranks else "unavailable"
+                print(f"{count} | {pending} | {name} | {times} | {position} | {failed}")
     if any(peer["read_only"] for row in samples for peer in row["peers"]):
         print("50-client edit-form reads | Model pending | Stack | HTTP median / p95 (ms)")
         for pending in (False, True):
@@ -242,6 +274,8 @@ def run(args):
         instrument(project / "src")
         if args.profile_writer:
             instrument_writer_transaction(project / "src")
+        if args.profile_order:
+            instrument_write_order(project / "src")
         reference = "Corvid baseline" if args.compare_cli else "TypeScript"
         corvid, other = root / "Corvid", root / reference
         package(cli, project, corvid)
@@ -307,7 +341,7 @@ def run(args):
             )
             version = browser.version
             for round_no in range(args.rounds + 1):
-                cases = [(count, pending) for count in (1, 10, 50) for pending in (False, True)]
+                cases = [(count, pending) for count in args.editors for pending in (False, True)]
                 if round_no % 2:
                     cases.reverse()
                 for count, pending in cases:
@@ -337,6 +371,13 @@ def run(args):
                                     peer["read_only"] or "begin_ms" in peer or peer["error"]
                                     for peer in result["peers"]
                                 )
+                        if args.profile_order:
+                            if result["browser_ms"] is not None:
+                                assert "before_update_ms" in result
+                            assert all(
+                                p["read_only"] or p["error"] or "before_update_ms" in p
+                                for p in result["peers"]
+                            )
                         samples.append(dict(stack=name, round=round_no, **result))
         recovered = {}
         for name in urls:
@@ -362,6 +403,7 @@ def run(args):
                     "sqlite": settings,
                     "delay_ms": args.delay_ms,
                     "profile_writer": args.profile_writer,
+                    "profile_order": args.profile_order,
                     "recovered": recovered,
                     "samples": samples,
                 },
@@ -378,6 +420,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cli", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--editors",
+        nargs="+",
+        type=int,
+        choices=(1, 10, 50),
+        default=(1, 10, 50),
+        help="burst sizes to measure",
+    )
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--delay-ms", type=int, default=500)
     peer_modes = parser.add_mutually_exclusive_group()
@@ -396,7 +446,13 @@ if __name__ == "__main__":
         action="store_true",
         help="have the other editors load edit forms while the browser saves",
     )
-    parser.add_argument(
+    probes = parser.add_mutually_exclusive_group()
+    probes.add_argument(
+        "--profile-order",
+        action="store_true",
+        help="record Corvid handler entry and pre-update timestamps",
+    )
+    probes.add_argument(
         "--profile-writer",
         action="store_true",
         help="time BEGIN IMMEDIATE, the update and COMMIT on Corvid",
@@ -404,4 +460,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.rounds < 1 or not 1 <= args.delay_ms <= 4000:
         parser.error("need positive rounds and a model delay between 1 and 4000 ms")
+    if len(set(args.editors)) != len(args.editors):
+        parser.error("each editor count must appear once")
+    if args.profile_order and not args.compare_cli:
+        parser.error(
+            "--profile-order requires --compare-cli for matching Corvid clocks within each burst"
+        )
     run(args)

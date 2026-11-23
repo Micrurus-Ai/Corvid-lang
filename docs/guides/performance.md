@@ -172,6 +172,22 @@ The queue reduced the slowest save and read times under contention. In the all-w
 
 Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CANDIDATE --compare-cli PATH_TO_BASELINE --rounds 20 --output writes.json`. Add `--mixed-peers` to alternate edit-form reads with saves.
 
+### Where a browser save finishes in a write burst
+
+The earlier 20-round run found a higher browser median with the queue when all 50 clients saved. A 40-round repeat on the same Windows machine with the same two binaries found a lower median with the queue, both with and without the pending suggestion. Slow-save latency improved in both runs. Absolute times varied across runs.
+
+| 50 simultaneous saves, 40 measured bursts per cell | Before median / p95 (ms) | Queued median / p95 (ms) |
+| --- | ---: | ---: |
+| Browser confirmation, no suggestion | 429.5 / 974.8 | 237.1 / 578.4 |
+| Browser confirmation, suggestion pending | 367.3 / 841.7 | 272.6 / 620.1 |
+| Other writers' HTTP responses, suggestion pending | 389.5 / 957.4 | 296.9 / 597.4 |
+
+After restart, the runner uses the audit row order to find the browser save's position among successful writes in its burst. With the queue and a pending suggestion, the browser committed among the first ten in 19 bursts and the last ten in 12 bursts. Median confirmation was 77 ms and 583 ms in those groups, respectively. Baseline medians for those groups were 61 ms and 778 ms. All 4,100 edits per build were confirmed and recovered, including warm-up. The original run did not record commit positions, so its median difference cannot be attributed to a specific arrival order. [40-round observations](../../benches/results/reading-queue-commit-order.json)
+
+In a separate 20-round profile, each server also recorded the time just before each handler called the update helper. Equal timestamps give a range of possible positions. Across the 40 measured bursts (with and without a suggestion), the queued browser's commit position was within two places of that range **40 times**, compared with **8 times** on the baseline. All 2,100 edits per build survived restart. This supports keeping the queue's existing ordering. The pre-update clock measures application progress, and the queue itself is reached a little later. [Write-order profile](../../benches/results/reading-queue-write-order.json)
+
+Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CANDIDATE --compare-cli PATH_TO_BASELINE --editors 50 --rounds 40 --output order.json`. Add `--profile-order` to record the process-local millisecond timestamps at handler entry and just before calling the update helper. Compare those timestamps only within the same burst and server process. Timestamps that share a millisecond have an uncertain order.
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.
