@@ -117,6 +117,8 @@ When the first cell names the row, use `ui.table_with_row_headers` with the same
 
 For a distance cell, `ui.abbreviation("3 km", "3 kilometres")` displays “3 km” and puts the expanded wording in the native `abbr` element’s `title` attribute. Both arguments accept ordinary text.
 
+To give the distance a machine-readable value in metres, use `ui.data_value("3000", [ui.abbreviation("3 km", "3 kilometres")])`. Readers see “3 km” and the HTML carries `<data value="3000">` around the abbreviation.
+
 ```corvid-fragment
 fn reading_table(topic: String) -> View:
     guide = [ui.link(topic, "/guide"), ui.inline_text("Ready")]

@@ -26,6 +26,9 @@ public fn strong(content: List<View>) -> View:
 public fn abbreviation(label: String, expansion: String) -> View:
     return View("<abbr title=\"" + escaped(expansion) + "\">" + escaped(label) + "</abbr>")
 
+public fn data_value(value: String, content: List<View>) -> View:
+    return View("<data value=\"" + escaped(value) + "\">" + children(content) + "</data>")
+
 fn heading(tag: String, label: String) -> View:
     return View("<" + tag + ">" + escaped(label) + "</" + tag + ">")
 

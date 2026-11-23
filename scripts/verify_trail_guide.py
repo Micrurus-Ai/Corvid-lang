@@ -23,8 +23,8 @@ def check_response(url):
         '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
-        '<tr><th scope="row">Bridge</th><td><abbr title="1 kilometre">1 km</abbr></td></tr>',
-        '<tr><th scope="row">Lookout</th><td><abbr title="3 kilometres">3 km</abbr></td></tr>'
+        '<tr><th scope="row">Bridge</th><td><data value="1000"><abbr title="1 kilometre">1 km</abbr></data></td></tr>',
+        '<tr><th scope="row">Lookout</th><td><data value="3000"><abbr title="3 kilometres">3 km</abbr></data></td></tr>'
         '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water"><details open><summary>Packing checklist</summary>'
@@ -70,6 +70,8 @@ def check_browser(url, channel):
         expect(table.locator("th[scope=col]")).to_have_text(["Stop", "Distance"])
         expect(table.get_by_role("rowheader")).to_have_text(["Bridge", "Lookout"])
         expect(table.get_by_role("cell")).to_have_text(["1 km", "3 km"])
+        for cell, metres in zip(table.get_by_role("cell").all(), ["1000", "3000"]):
+            expect(cell.locator("data")).to_have_attribute("value", metres)
         expect(table.get_by_title("1 kilometre", exact=True)).to_have_text("1 km")
         expect(table.get_by_title("3 kilometres", exact=True)).to_have_text("3 km")
         navigation = main.get_by_role("navigation", name="Guide sections")
