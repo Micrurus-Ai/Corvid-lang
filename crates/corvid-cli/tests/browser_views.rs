@@ -190,6 +190,11 @@ test first_cell_labels_each_nonempty_row:
     header = "<th scope=\"row\">Bridge &amp; park</th>"
     assert table.html.contains("<tbody><tr>" + header + "<td>" + distance.html + "</td></tr><tr></tr><tr>" + header + "</tr></tbody>")
 
+test named_query_form_escapes_attributes_and_preserves_control_order:
+    form = ui.named_query_form("Maps & \"notes\"", "/guide?via=<map>", [ui.text_field("Note", "note", ""), ui.submit("Preview")])
+    assert form.html == "<form method=\"get\" action=\"/guide?via=&lt;map&gt;\" aria-label=\"Maps &amp; &quot;notes&quot;\"><label>Note<input type=\"text\" name=\"note\" value=\"\"></label><button type=\"submit\">Preview</button></form>"
+    assert ui.query_form("/guide", []).html == "<form method=\"get\" action=\"/guide\"></form>"
+
 test agent_query_uses_the_same_form:
     form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
     assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
@@ -204,7 +209,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("33 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("34 passed"),
         "{good:?}"
     );
     fs::write(

@@ -51,6 +51,8 @@ fn note_preview(note: String) -> View:
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
+To give the form a landmark name, use `ui.named_query_form("Packing note preview", "/guide", [note_field, ui.submit("Preview")])`. The first argument names the whole form. Keep the field’s own label so readers can also identify the individual control.
+
 To show a hint when scripting is disabled, place `ui.no_script("Select Preview to reload the guide with your note.")` in the form's list of views. The server includes the escaped message in a `noscript` paragraph. The browser decides whether to display it.
 
 When the link label includes markup, pass inline views in reading order. For example, `ui.link_with_content("#route", [ui.inline_text("Route, "), ui.abbreviation("3 km", "3 kilometres")])` makes the whole label clickable. Include any spaces between children in the text.

@@ -293,12 +293,18 @@ public fn fieldset(legend: String, controls: List<View>) -> View:
 
 # Submit named controls to an application-relative GET route.
 public fn query_form(path: String, controls: List<View>) -> View:
-    return View("<form method=\"get\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
+    return render_query_form(path, "", controls)
+
+public fn named_query_form(label: String, path: String, controls: List<View>) -> View:
+    return render_query_form(path, " aria-label=\"" + escaped(label) + "\"", controls)
+
+fn render_query_form(path: String, attributes: String, controls: List<View>) -> View:
+    return View("<form method=\"get\" action=\"" + escaped(path) + "\"" + attributes + ">" + children(controls) + "</form>")
 
 # Opt a read-only application query into declarative WebMCP discovery.
 public fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View:
     attributes = " toolname=\"" + escaped(name) + "\" tooldescription=\"" + escaped(description) + "\""
-    return View("<form method=\"get\" action=\"" + escaped(path) + "\"" + attributes + ">" + children(controls) + "</form>")
+    return render_query_form(path, attributes, controls)
 
 # Navigate to an application route. Supply a trusted path from the application.
 public fn link(label: String, path: String) -> View:

@@ -441,6 +441,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn text_state(label: String, initial: String, handler: String) -> View`
 - `fn assistant_text_state(label: String, initial: String, handler: String, name: String, description: String) -> View`
 - `fn query_form(path: String, controls: List<View>) -> View`
+- `fn named_query_form(label: String, path: String, controls: List<View>) -> View` renders a native GET form with the escaped label in `aria-label` and the escaped application path in `action`. A nonempty descriptive label names the form landmark. Controls appear in list order.
 - `fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn link(label: String, path: String) -> View`
 - `fn link_with_content(path: String, content: List<View>) -> View` renders a native anchor with an escaped `href` and its children in list order. Supply a trusted destination and inline views such as text, an abbreviation or an image. Keep other links and interactive controls outside the anchor.
