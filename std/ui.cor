@@ -272,7 +272,10 @@ public fn agent_query_form(name: String, description: String, path: String, cont
 
 # Navigate to an application route. Supply a trusted path from the application.
 public fn link(label: String, path: String) -> View:
-    return View("<a href=\"" + escaped(path) + "\" tabindex=\"0\">" + escaped(label) + "</a>")
+    return link_with_content(path, [inline_text(label)])
+
+public fn link_with_content(path: String, content: List<View>) -> View:
+    return View("<a href=\"" + escaped(path) + "\" tabindex=\"0\">" + children(content) + "</a>")
 
 public fn stream_text(label: String, path: String) -> View:
     controls = "<button type=\"button\" data-start disabled>Start</button><button type=\"button\" data-cancel disabled>Cancel</button>"

@@ -16,7 +16,7 @@ def check_response(url):
     landmarks_and_content = [
         '<!doctype html><html lang="en">',
         "<main><h1>River trail guide</h1>",
-        '<nav aria-label="Guide sections"><a href="#route" tabindex="0">Route</a>'
+        '<nav aria-label="Guide sections"><a href="#route" tabindex="0">Route, <abbr title="3 kilometres">3 km</abbr></a>'
         '<a href="#packing" tabindex="0">Packing note</a></nav>',
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
@@ -75,10 +75,10 @@ def check_browser(url, channel):
         expect(table.get_by_title("1 kilometre", exact=True)).to_have_text("1 km")
         expect(table.get_by_title("3 kilometres", exact=True)).to_have_text("3 km")
         navigation = main.get_by_role("navigation", name="Guide sections")
-        for label, fragment in [("Route", "route"), ("Packing note", "packing")]:
+        for label, fragment, heading in [("Route, 3 km", "route", "Route"), ("Packing note", "packing", "Packing note")]:
             navigation.get_by_role("link", name=label, exact=True).click()
             expect(page).to_have_url(url + "/#" + fragment)
-            expect(page.locator("h2:target")).to_have_text(label)
+            expect(page.locator("h2:target")).to_have_text(heading)
 
         packing = main.get_by_role("region", name="Packing note")
         checklist = packing.locator("details")

@@ -9,7 +9,7 @@ fn browser_views_escape_content_and_require_typed_children() {
     )
     .unwrap();
     let main = project.path().join("main.cor");
-    let source = r#"
+    let source = r##"
 import "./ui" as ui
 
 test escapes_fields:
@@ -116,6 +116,12 @@ test renders_image_attributes:
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
     assert ui.image("/border.png", "").html == "<img src=\"/border.png\" alt=\"\">"
 
+test link_escapes_destination_and_preserves_inline_content:
+    label = [ui.inline_text("Trail <A> & "), ui.strong([ui.inline_text("map")])]
+    link = ui.link_with_content("/guide?side=\"east\"&stop=2", label)
+    assert link.html == "<a href=\"/guide?side=&quot;east&quot;&amp;stop=2\" tabindex=\"0\">Trail &lt;A&gt; &amp; <strong>map</strong></a>"
+    assert ui.link("Trail <A>", "#route").html == ui.link_with_content("#route", [ui.inline_text("Trail <A>")]).html
+
 test figure_preserves_child_order_and_escapes_caption:
     figure = ui.figure("Map & <key>", [ui.image("/map.png", "Route"), ui.inline_text("North")])
     assert figure.html == "<figure><img src=\"/map.png\" alt=\"Route\">North<figcaption>Map &amp; &lt;key&gt;</figcaption></figure>"
@@ -156,7 +162,7 @@ test first_cell_labels_each_nonempty_row:
 test agent_query_uses_the_same_form:
     form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
     assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
-"#;
+"##;
     fs::write(&main, source).unwrap();
     let run = |cmd| {
         Command::new(env!("CARGO_BIN_EXE_corvid"))
@@ -167,7 +173,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("25 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("26 passed"),
         "{good:?}"
     );
     fs::write(
