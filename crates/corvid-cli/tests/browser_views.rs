@@ -21,6 +21,10 @@ test checkbox_field_escapes_strings_and_respects_initial_state:
     assert packed.html == "<label><input type=\"checkbox\" name=\"gear&quot;list\" checked>&lt;Map&gt; &amp; compass</label>"
     assert ui.checkbox_field("Water", "water", false).html == "<label><input type=\"checkbox\" name=\"water\">Water</label>"
 
+test reset_button_escapes_its_label:
+    button = ui.reset_button("Restore <note> & map")
+    assert button.html == "<button type=\"reset\">Restore &lt;note&gt; &amp; map</button>"
+
 test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
@@ -151,7 +155,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("22 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("23 passed"),
         "{good:?}"
     );
     fs::write(

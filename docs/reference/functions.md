@@ -408,6 +408,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn date_field(label: String, name: String, initial: String) -> View`
 - `fn bind_field(field: View, component: View) -> View`
 - `fn submit(label: String) -> View`
+- `fn reset_button(label: String) -> View` renders a native `<button type="reset">` with an escaped text label. Activating it restores the controls in its form to their default values.
 - `fn post_form(path: String, controls: List<View>) -> View`
 - `fn agent_post_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn option(value: String, label: String, selected: Bool) -> View`

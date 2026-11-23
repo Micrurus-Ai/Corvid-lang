@@ -145,6 +145,9 @@ public fn bind_field(field: View, component: View) -> View:
 public fn submit(label: String) -> View:
     return View("<button type=\"submit\">" + escaped(label) + "</button>")
 
+public fn reset_button(label: String) -> View:
+    return View("<button type=\"reset\">" + escaped(label) + "</button>")
+
 public fn post_form(path: String, controls: List<View>) -> View:
     return View("<form method=\"post\" action=\"" + escaped(path) + "\">" + children(controls) + "</form>")
 

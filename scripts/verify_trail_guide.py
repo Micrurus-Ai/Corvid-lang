@@ -32,7 +32,7 @@ def check_response(url):
         '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details>',
         '<form method="get" action="/guide">',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
-        '<button type="submit">Preview</button></fieldset></form>',
+        '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
@@ -111,6 +111,11 @@ def check_browser(url, channel):
         expect(section.locator("p")).to_have_text("Current note: " + NOTE)
         expect(section.locator("em")).to_have_count(0)
         expect(section.get_by_label("Your note")).to_have_value(NOTE)
+        preview_url = page.url
+        field.fill("Unsaved edit")
+        editor.get_by_role("button", name="Restore note").click()
+        expect(field).to_have_value(NOTE)
+        expect(page).to_have_url(preview_url)
         browser.close()
 
 

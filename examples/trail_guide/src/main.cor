@@ -21,7 +21,7 @@ fn guide(note: String) -> String:
         ui.figure("Follow this marker to the lookout.", [marker]), stops, distances
     ])
     note_field = ui.text_area_with_requirement("Your note", "note", note, true)
-    editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview")])
+    editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview"), ui.reset_button("Restore note")])
     form = ui.query_form("/guide", [editor])
     preview = ui.paragraph([ui.strong([ui.inline_text("Current note")]), ui.inline_text(": " + note)])
     supplies = ui.unordered_list([
