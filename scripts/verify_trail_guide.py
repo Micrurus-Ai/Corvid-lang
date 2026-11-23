@@ -27,7 +27,8 @@ def check_response(url):
         '<tr><th scope="row">Lookout</th><td><abbr title="3 kilometres">3 km</abbr></td></tr>'
         '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
-        '<div data-trail-note="Bring water">',
+        '<div data-trail-note="Bring water"><details><summary>Packing checklist</summary>'
+        '<ul><li>Water bottle</li><li>Trail map</li></ul></details>',
         '<form method="get" action="/guide">',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
         '<button type="submit">Preview</button></fieldset></form>',
@@ -77,6 +78,15 @@ def check_browser(url, channel):
             expect(page.locator("h2:target")).to_have_text(label)
 
         packing = main.get_by_role("region", name="Packing note")
+        checklist = packing.locator("details")
+        supplies = checklist.get_by_role("list", include_hidden=True)
+        expect(supplies).to_be_hidden()
+        toggle = checklist.get_by_text("Packing checklist", exact=True)
+        toggle.click()
+        expect(supplies).to_be_visible()
+        expect(supplies.get_by_role("listitem")).to_have_text(["Water bottle", "Trail map"])
+        toggle.click()
+        expect(supplies).to_be_hidden()
         editor = packing.get_by_role("group", name="Edit packing note")
         field = editor.get_by_label("Your note")
         field.fill("")
