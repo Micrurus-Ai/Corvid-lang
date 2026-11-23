@@ -112,6 +112,33 @@ A separate 40-round run timed the updated example handler and the existing TypeS
 
 Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25. Add `--profile --rounds 36` to compare the individual stages across all three variants.
 
+### Saving while an agent is working
+
+A reader presses Save in Chrome while zero, nine or 49 other clients submit edits. A second version of each burst starts a shelf suggestion first. The local model fixture receives a real HTTP request, waits 500 ms and returns the same suggestion to either stack. The runner verifies that the model was still waiting at the browser keydown and that its answer eventually reached the application. Corvid executes the packaged suggestion agent. The Node baseline reads the shelf, calls the fixture asynchronously and returns the proposed title.
+
+The browser edits shelf 1. Its trusted Enter key releases the HTTP clients, which split their edits between shelves 2 and 3. The browser clock stops when the saved title and confirmation both have layout. Each stack uses one connection per save, prepared parameters, the same initial data and SQLite FULL synchronization. A test-only SQLite trigger records each unique edit within its update transaction so overwrites can be checked individually. After restarting both applications, the runner reads the shelves through HTTP and compares titles, revision counts and the audit log with successful responses.
+
+Windows Chrome 157 ran 20 measured bursts per cell using Corvid preview `8a0c4161` and Node 25. All 2,562 edits per stack, including warm-up, received confirmations and were recovered exactly once. The model request was still pending at Save in every agent trial. The single Corvid editor saw the saved title before the provider answered in all 20 measured trials.
+
+| Simultaneous editors | Corvid, no agent | Corvid, pending agent | TypeScript, no agent | TypeScript, pending agent |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 37.0 / 40.9 | 36.8 / 43.4 | 30.1 / 38.0 | 34.0 / 42.9 |
+| 10 | 122.0 / 184.1 | 49.0 / 205.6 | 64.0 / 78.5 | 64.7 / 77.5 |
+| 50 | 253.4 / 525.0 | 173.1 / 509.2 | 167.8 / 298.7 | 67.2 / 289.2 |
+
+Each cell gives median / p95 from keydown to confirmation in milliseconds. These are bursts on one Windows host with one real browser and HTTP peers. The order of arrival within each burst varies. With only 20 browser samples per cell, the p95 is the second-largest observation. The figures do not predict sustained throughput, hosted-model latency or physical display paint. [Per-request observations and SQLite versions](../../benches/results/reading-concurrent-saves.json)
+
+When 49 peers also saved and the model was pending, their HTTP responses took 726 ms at p95 on Corvid and 302 ms on Node. Time inside the instrumented save handler reached 690 ms at p95 in Corvid and 7 ms in Node. Node executes its synchronous SQLite handlers serially, so requests can queue before the handler clock starts. Both browser and HTTP intervals include that wait.
+
+In the ten-round control with 49 peers loading edit forms and the model pending, Corvid's browser-save median / p95 fell to 51.4 / 66.0 ms and TypeScript's to 50.5 / 71.7 ms. This isolates competing writes as a contributor to the long tail. The run does not distinguish SQLite lock waits from scheduling inside the Corvid handler. Both stacks recovered all 66 browser saves including warm-up. One Corvid peer loading an edit form lost its connection. The preview server logged a worker panic at `crates/corvid-vm/src/value/heap.rs:82` with `shadow count underflow`. Its process continued serving. The underlying cause remains open. [Read-burst observations](../../benches/results/reading-concurrent-reads.json)
+
+Run the following commands with Python Playwright, Chrome, Node and the Corvid CLI. The second run replaces competing saves with requests for edit forms. Each case has a warm-up burst. The reported medians and nearest-rank p95s exclude warm-up.
+
+```sh
+python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --rounds 20 --output saves.json
+python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --read-only-peers --rounds 10 --output reads.json
+```
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.

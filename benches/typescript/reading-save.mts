@@ -10,11 +10,14 @@ function open() {
   const db = new DatabaseSync("reading.sqlite", {enableForeignKeyConstraints: Boolean(settings.fk)});
   return db;
 }
+function shelves(db: DatabaseSync) {
+  return db.prepare("SELECT shelf, title FROM shelves ORDER BY shelf").all();
+}
 function list(stamps?: number[]) {
   const db = open();
   if (stamps) stamps.push(now());
   try {
-    const rows = db.prepare("SELECT shelf, title FROM shelves ORDER BY shelf").all();
+    const rows = shelves(db);
     if (stamps) stamps.push(now());
     return rows;
   }
@@ -45,11 +48,26 @@ createServer(async (req, res) => {
       res.end(screen(list(), Number(url.searchParams.get("shelf")), false));
       return;
     }
-    if (req.method !== "POST" || url.pathname !== "/save") { res.writeHead(404).end(); return; }
+    const suggest = url.pathname === "/suggest" && template.modelUrl;
+    if (req.method !== "POST" || (url.pathname !== "/save" && !suggest)) {
+      res.writeHead(404).end(); return;
+    }
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const form = new URLSearchParams(Buffer.concat(chunks).toString());
     const shelf = Number(form.get("shelf"));
+    if (suggest) {
+      const current = list().find(row => row.shelf === shelf);
+      if (!current) { res.writeHead(400).end(); return; }
+      const answer = await fetch(template.modelUrl, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model: "local-model", messages: [{role: "user", content: String(current.title)}]}),
+      });
+      if (!answer.ok) throw Error("Model request failed");
+      const message = (await answer.json()).choices[0].message;
+      res.end(escape(JSON.parse(message.content).action.fields[0]));
+      return;
+    }
     const title = form.get("title");
     if (!Number.isInteger(shelf) || shelf < 1 || shelf > 3 || title === null) {
       res.writeHead(400).end(); return;
@@ -58,14 +76,16 @@ createServer(async (req, res) => {
     const db = open();
     const opened = template.profile ? now() : 0;
     let updated = 0;
+    let sharedRows: ReturnType<typeof shelves> | undefined;
     try {
       const result = db.prepare("UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?").run(title, shelf);
       if (result.changes !== 1) throw Error("Shelf was not found");
       if (template.profile) updated = now();
+      if (template.sharedConnection) sharedRows = shelves(db);
     } finally { db.close(); }
     const written = now();
     const stamps = template.profile ? [] as number[] : undefined;
-    const rows = list(stamps);
+    const rows = sharedRows ?? list(stamps);
     const loaded = now();
     const html = screen(rows, shelf, true);
     const end = now();
