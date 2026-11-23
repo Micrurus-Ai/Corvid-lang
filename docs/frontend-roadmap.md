@@ -18,7 +18,7 @@ The table below is the execution order for the browser frontend. The detailed de
 
 ### Ordered tasks
 
-Each ID stays stable across runs. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
+Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
 | ID | Deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
