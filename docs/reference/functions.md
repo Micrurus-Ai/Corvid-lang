@@ -379,6 +379,8 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 
 ### [std/ui](../../std/ui.cor)
 
+The [trail guide example](../../examples/trail_guide/src/main.cor) combines the static view functions in a server-rendered document.
+
 - `fn text(value: String) -> View`
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn trusted_markup(html: String) -> View` inserts application-authored HTML verbatim at the view's position among its siblings. It performs no escaping or sanitization. Use `text` or `inline_text` for user input.

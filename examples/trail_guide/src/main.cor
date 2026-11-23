@@ -1,0 +1,31 @@
+import "std:ui" as ui
+
+type PackingNote:
+    note: String
+
+fn guide(note: String) -> String:
+    title = "River trail guide"
+    navigation = ui.navigation("Guide sections", [ui.link("Packing note", "#packing")])
+    marker = ui.image("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='green'/%3E%3C/svg%3E", "Green circle trail marker")
+    stops = ui.ordered_list(1, [
+        ui.list_item([ui.inline_text("Bridge")]),
+        ui.list_item([ui.inline_text("Lookout")])
+    ])
+    distances = ui.table("Distances from the trailhead", ["Stop", "Distance"], [
+        [ui.inline_text("Bridge"), ui.inline_text("1 km")],
+        [ui.inline_text("Lookout"), ui.inline_text("3 km")]
+    ])
+    form = ui.query_form("/guide", [ui.text_field("Your note", "note", note), ui.submit("Preview")])
+    packing = ui.data_group("trail-note", note, [
+        ui.trusted_markup("<h2 id='packing'>Packing note</h2>"), ui.text(note), form
+    ])
+    return match packing:
+        Ok(section) -> ui.page(title, [ui.h1(title), navigation, ui.h2("Route"), marker, stops, distances, section])
+        Err(reason) -> ui.page(title, [ui.text(reason)])
+
+server trail_guide:
+    route GET "/" -> html:
+        return guide("Bring water")
+
+    route GET "/guide" query PackingNote -> html:
+        return guide(query.note)

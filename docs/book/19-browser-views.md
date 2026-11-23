@@ -45,6 +45,8 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+Run `corvid serve examples/trail_guide/src/main.cor --listen 127.0.0.1:8080` from the repository root and open `http://127.0.0.1:8080/`. The [trail guide](../../examples/trail_guide/src/main.cor) combines a navigation landmark, route marker, ordered stops, distance table and packing form. Turn off JavaScript, enter a note such as `Rain & <wind>`, and select **Preview**. The GET route renders the note as text and fills the field with the same value.
+
 ### Give the page an outline
 
 Use `ui.h1` for the page heading, `ui.h2` for its sections, and `ui.h3`, `ui.h4`, `ui.h5`, or `ui.h6` for successively deeper subsections. Each accepts a string and escapes it, so a title such as `Maps & <trails>` appears as literal text.
