@@ -86,6 +86,9 @@ public fn figure(caption: String, content: List<View>) -> View:
 public fn list_item(content: List<View>) -> View:
     return View("<li>" + children(content) + "</li>")
 
+public fn numbered_list_item(value: Int, content: List<View>) -> View:
+    return View("<li value=\"" + value.to_string() + "\">" + children(content) + "</li>")
+
 public fn ordered_list(start: Int, items: List<View>) -> View:
     return View("<ol start=\"" + start.to_string() + "\">" + children(items) + "</ol>")
 

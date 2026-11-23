@@ -397,6 +397,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn image(src: String, alt: String) -> View` renders an `img` with escaped `src` and `alt` attributes. Supply a trusted image URL and alternative text. An empty string emits `alt=""` for a decorative image.
 - `fn figure(caption: String, content: List<View>) -> View` renders a native `figure` with the supplied children in order, followed by a `figcaption` containing the escaped caption text.
 - `fn list_item(content: List<View>) -> View` wraps the children in an `li` in the supplied order.
+- `fn numbered_list_item(value: Int, content: List<View>) -> View` renders an `li` with an integer `value` attribute and preserves child order. Use it inside an ordered list to set that item's number.
 - `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
 - `fn unordered_list(items: List<View>) -> View` renders a `ul`. Pass list item views in display order.
 - `fn table(caption: String, columns: List<String>, rows: List<List<View>>) -> View` renders a native table with an escaped caption and escaped column headers in a `thead`. Each inner list creates one body row, with one `td` per view in the supplied order. An empty row list produces an empty `tbody`.

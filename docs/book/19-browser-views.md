@@ -103,6 +103,8 @@ fn trail_card(id: String, title: String) -> Result<View, String>:
 
 ### Write a list with text and links
 
+If a route lists only selected stops, use `ui.numbered_list_item(3, [ui.inline_text("Lookout")])` inside an ordered list to keep the lookout's original stop number. The next ordinary item continues at 4.
+
 Use `ui.inline_text` for text alongside a link. It escapes the string and preserves surrounding spaces. Put each item's children in reading order with `ui.list_item`. Use `ui.unordered_list` for bullets or `ui.ordered_list` for numbering. The first argument to `ui.ordered_list` sets the first item's number, so a second page can continue an earlier list.
 
 ```corvid-fragment

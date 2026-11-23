@@ -140,6 +140,10 @@ test renders_labelled_navigation_in_order:
     assert nav.html == "<nav aria-label=\"Walks &amp; &quot;rides&quot; &lt;nearby&gt;\"><a href=\"/map\" tabindex=\"0\">Map</a><a href=\"/trails\" tabindex=\"0\">Trails</a></nav>"
     assert ui.page("Guide", [nav]).contains("<main>" + nav.html + "</main>")
 
+test numbered_list_item_sets_ordinal_and_preserves_children:
+    stop = ui.numbered_list_item(-1, [ui.inline_text("<Bridge> & "), ui.strong([ui.inline_text("Lookout")])])
+    assert stop.html == "<li value=\"-1\">&lt;Bridge&gt; &amp; <strong>Lookout</strong></li>"
+
 test renders_native_lists_in_order:
     label = ui.inline_text("Read <notes> & ")
     first = ui.list_item([label, ui.link("references", "/ref")])
@@ -181,7 +185,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("28 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("29 passed"),
         "{good:?}"
     );
     fs::write(

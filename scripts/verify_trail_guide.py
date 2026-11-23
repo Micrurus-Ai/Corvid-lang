@@ -21,7 +21,7 @@ def check_response(url):
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
         '<p>Walking time: <time datetime="PT45M">45 minutes</time></p>',
-        '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
+        '<ol start="1"><li>Bridge</li><li value="3">Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
         '<tr><th scope="row">Bridge</th><td><data value="1000"><abbr title="1 kilometre">1 km</abbr></data></td></tr>',
@@ -68,6 +68,7 @@ def check_browser(url, channel):
         image = figure.get_by_role("img", name="Green circle trail marker")
         assert image.evaluate("img => img.naturalWidth") == 24
         expect(main.locator("ol[start='1'] > li")).to_have_text(["Bridge", "Lookout"])
+        expect(route.locator("ol > li").nth(1)).to_have_js_property("value", 3)
         table = main.get_by_role("table", name="Distances from the trailhead")
         expect(table.locator("th[scope=col]")).to_have_text(["Stop", "Distance"])
         expect(table.get_by_role("rowheader")).to_have_text(["Bridge", "Lookout"])

@@ -12,7 +12,7 @@ fn guide(note: String) -> String:
     marker = ui.image("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='green'/%3E%3C/svg%3E", "Green circle trail marker")
     stops = ui.ordered_list(1, [
         ui.list_item([ui.inline_text("Bridge")]),
-        ui.list_item([ui.inline_text("Lookout")])
+        ui.numbered_list_item(3, [ui.inline_text("Lookout")])
     ])
     distances = ui.table_with_row_headers("Distances from the trailhead", ["Stop", "Distance"], [
         [ui.inline_text("Bridge"), ui.data_value("1000", [ui.abbreviation("1 km", "1 kilometre")])],
