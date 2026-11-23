@@ -17,8 +17,8 @@ def check_response(url):
         '<!doctype html><html lang="en">',
         "<main><h1>River trail guide</h1>",
         '<nav aria-label="Guide sections"><a href="#packing"',
-        "<h2>Route</h2>",
-        'alt="Green circle trail marker">',
+        "<h2>Route</h2><figure><img ",
+        'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
         '<ol start="1"><li>Bridge</li><li>Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
@@ -50,10 +50,12 @@ def check_browser(url, channel):
         assert response.ok and "text/html" in response.headers["content-type"]
         main = page.get_by_role("main")
         assert main.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
-            "h1", "nav", "h2", "img", "ol", "table", "section"
+            "h1", "nav", "h2", "figure", "ol", "table", "section"
         ]
         expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note"])
-        image = main.get_by_role("img", name="Green circle trail marker")
+        figure = main.get_by_role("figure")
+        expect(figure.locator("figcaption")).to_have_text("Follow this marker to the lookout.")
+        image = figure.get_by_role("img", name="Green circle trail marker")
         assert image.evaluate("img => img.naturalWidth") == 24
         expect(main.locator("ol[start='1'] > li")).to_have_text(["Bridge", "Lookout"])
         table = main.get_by_role("table", name="Distances from the trailhead")

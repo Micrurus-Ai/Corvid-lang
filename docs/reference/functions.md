@@ -389,6 +389,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn section(heading_id: String, title: String, content: List<View>) -> View` renders a `section` named by its opening `h2`. Supply a unique, nonempty ID without whitespace for the heading. The function escapes the ID in both `id` and `aria-labelledby`, escapes the heading text, and renders children in list order.
 - `fn data_group(name: String, value: String, content: List<View>) -> Result<View, String>` returns a `div` with one `data-{name}` attribute, its escaped value and the children in list order. Pass the suffix only. Empty names and characters outside `a-z`, `0-9` and `-` return `Err`.
 - `fn image(src: String, alt: String) -> View` renders an `img` with escaped `src` and `alt` attributes. Supply a trusted image URL and alternative text. An empty string emits `alt=""` for a decorative image.
+- `fn figure(caption: String, content: List<View>) -> View` renders a native `figure` with the supplied children in order, followed by a `figcaption` containing the escaped caption text.
 - `fn list_item(content: List<View>) -> View` wraps the children in an `li` in the supplied order.
 - `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
 - `fn unordered_list(items: List<View>) -> View` renders a `ul`. Pass list item views in display order.

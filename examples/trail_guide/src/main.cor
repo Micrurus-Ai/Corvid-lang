@@ -20,7 +20,8 @@ fn guide(note: String) -> String:
     packing = ui.data_group("trail-note", note, [ui.text(note), form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [
-            ui.h1(title), navigation, ui.h2("Route"), marker, stops, distances,
+            ui.h1(title), navigation, ui.h2("Route"),
+            ui.figure("Follow this marker to the lookout.", [marker]), stops, distances,
             ui.section("packing", "Packing note", [details])
         ])
         Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])

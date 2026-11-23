@@ -62,6 +62,9 @@ public fn section(heading_id: String, title: String, content: List<View>) -> Vie
 public fn image(src: String, alt: String) -> View:
     return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\">")
 
+public fn figure(caption: String, content: List<View>) -> View:
+    return View("<figure>" + children(content) + "<figcaption>" + escaped(caption) + "</figcaption></figure>")
+
 public fn list_item(content: List<View>) -> View:
     return View("<li>" + children(content) + "</li>")
 

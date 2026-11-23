@@ -74,6 +74,10 @@ test renders_image_attributes:
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
     assert ui.image("/border.png", "").html == "<img src=\"/border.png\" alt=\"\">"
 
+test figure_preserves_child_order_and_escapes_caption:
+    figure = ui.figure("Map & <key>", [ui.image("/map.png", "Route"), ui.inline_text("North")])
+    assert figure.html == "<figure><img src=\"/map.png\" alt=\"Route\">North<figcaption>Map &amp; &lt;key&gt;</figcaption></figure>"
+
 test renders_labelled_navigation_in_order:
     links = [ui.link("Map", "/map"), ui.link("Trails", "/trails")]
     nav = ui.navigation("Walks & \"rides\" <nearby>", links)
@@ -114,7 +118,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("15 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("16 passed"),
         "{good:?}"
     );
     fs::write(
