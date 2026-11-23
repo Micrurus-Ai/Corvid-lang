@@ -155,6 +155,23 @@ For the 25 slowest handlers with 50 writers and a pending suggestion, 16,926 of 
 
 Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --rounds 10 --profile-writer --output writer.json`.
 
+### Queueing SQLite writers
+
+The preview now queues `db_execute` calls on autocommit connections that open the same SQLite file in one process. A waiting task yields its worker. Read queries run independently, and a connection already in a transaction can continue through commit or rollback. SQLite still coordinates external writers. This requires no change to application code.
+
+Two Windows Chrome trials compared local Corvid builds before and after the queue using the same packaged app. Each cell had 20 measured bursts, with one browser editor and the other clients making HTTP requests. Each pair alternated which build went first. SQLite used DELETE journaling and FULL synchronization. With a shelf suggestion pending at Save, the 50-client results were:
+
+| Operation | Before median / p95 (ms) | Queued median / p95 (ms) |
+| --- | ---: | ---: |
+| Browser Save to visible confirmation, 50 writers | 48.8 / 646.0 | 88.2 / 420.8 |
+| Other writers' HTTP responses, 50 writers | 320.2 / 811.5 | 232.9 / 437.4 |
+| Browser Save to visible confirmation, 25 writers and 25 readers | 134.7 / 428.4 | 46.6 / 237.9 |
+| Edit-form HTTP reads, 25 writers and 25 readers | 91.4 / 248.4 | 53.7 / 149.2 |
+
+The queue reduced the slowest save and read times under contention. In the all-writer trial, the foreground browser's median rose with and without a pending suggestion. Arrival order varies within a burst, and 20 browser observations give a coarse tail estimate. Without a model call the 50-writer browser p95 fell from 526.6 to 424.5 ms. Every request succeeded, and each build recovered all 2,562 write-trial edits and all 1,302 mixed-trial edits after restart, including warm-up. [Simultaneous writes](../../benches/results/reading-queue-writes.json) and [mixed reads and writes](../../benches/results/reading-queue-mixed.json)
+
+Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CANDIDATE --compare-cli PATH_TO_BASELINE --rounds 20 --output writes.json`. Add `--mixed-peers` to alternate edit-form reads with saves.
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.

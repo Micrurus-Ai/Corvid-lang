@@ -832,7 +832,7 @@ impl Runtime {
                 ],
             });
         }
-        let result = self.db_registry.execute(handle.handle_id, &sql, &params)?;
+        let result = self.db_registry.execute_queued(handle, &sql, &params).await?;
         let payload = serde_json::json!({
             "rows_affected": result.rows_affected as i64,
             "row_count": 0_i64,

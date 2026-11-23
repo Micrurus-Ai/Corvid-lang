@@ -74,6 +74,8 @@ as `db_query` — typed `DbParam`s threaded through
 `rows_affected` populated; an SQL, binding, or constraint error
 is `Err`.
 
+For example, if several users save at once, `db_execute` automatically queues calls on autocommit connections to the same local database file within the Corvid process. You can keep using ordinary parameterised statements. Read queries bypass this queue. Statements inside an explicit transaction also bypass it so the transaction can finish and release SQLite's lock. Separate processes coordinate through SQLite. [Concurrent save measurements](../../guides/performance.md#queueing-sqlite-writers)
+
 `db_egress_write` is NOT reversible: writes durably change DB
 state. The replay-quarantine guarantee below leverages this:
 `db_execute` during Substitute-mode replay is refused with

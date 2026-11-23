@@ -51,6 +51,7 @@ pub struct DbHandleInner {
     /// `./data/app.sqlite`").
     pub path: String,
     registry: std::sync::Weak<DbHandleRegistryInner>,
+    writer: Option<std::sync::Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl DbHandleInner {
@@ -65,6 +66,7 @@ impl DbHandleInner {
             handle_id,
             path: path.into(),
             registry: std::sync::Weak::new(),
+            writer: None,
         }
     }
 }
@@ -167,6 +169,25 @@ struct DbHandleRegistryInner {
     quarantine_writes: std::sync::atomic::AtomicBool,
 }
 
+// Requests can have separate runtimes while opening the same SQLite file.
+fn database_writer(conn: &Connection) -> Option<std::sync::Arc<tokio::sync::Mutex<()>>> {
+    use std::sync::{Arc, OnceLock, Weak};
+    type Writers = std::collections::HashMap<std::path::PathBuf, Weak<tokio::sync::Mutex<()>>>;
+    static WRITERS: OnceLock<Mutex<Writers>> = OnceLock::new();
+    let file = std::fs::canonicalize(conn.path()?).ok()?;
+    let mut writers = WRITERS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    if let Some(writer) = writers.get(&file).and_then(Weak::upgrade) {
+        return Some(writer);
+    }
+    writers.retain(|_, writer| writer.strong_count() > 0);
+    let writer = Arc::new(tokio::sync::Mutex::new(()));
+    writers.insert(file, Arc::downgrade(&writer));
+    Some(writer)
+}
+
 impl DbHandleRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -189,6 +210,11 @@ impl DbHandleRegistry {
                 RuntimeError::Other(format!("std.db sqlite open `{path}` failed: {err}"))
             })?
         };
+        let writer = if path == ":memory:" {
+            None
+        } else {
+            database_writer(&conn)
+        };
         let id = self
             .inner
             .next_id
@@ -204,6 +230,7 @@ impl DbHandleRegistry {
             handle_id: id,
             path: path.into(),
             registry: std::sync::Arc::downgrade(&self.inner),
+            writer,
         }))
     }
 
@@ -301,6 +328,31 @@ impl DbHandleRegistry {
         Ok(DbExecuteResult {
             rows_affected: rows_affected as u64,
         })
+    }
+
+    pub(crate) async fn execute_queued(
+        &self,
+        handle: &DbHandleInner,
+        sql: &str,
+        params: &[DbValue],
+    ) -> Result<DbExecuteResult, RuntimeError> {
+        let _turn = if let Some(writer) = &handle.writer {
+            let conn = self.lookup(handle.handle_id)?;
+            let autocommit = conn
+                .lock()
+                .map_err(|err| RuntimeError::Other(format!("std.db connection mutex poisoned: {err}")))?
+                .is_autocommit();
+            // An explicit transaction may already own SQLite's write lock.
+            // Let its statements (especially commit and rollback) finish.
+            if autocommit && !self.is_write_quarantined() {
+                Some(writer.lock().await)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        self.execute(handle.handle_id, sql, params)
     }
 
     /// Flip into replay-quarantine mode. Subsequent `execute`
@@ -762,6 +814,34 @@ mod tests {
     }
 
     // -------- Phase 33S3b — DbHandleRegistry plumbing tests --------
+
+    #[tokio::test]
+    async fn writer_queue_is_per_file_and_cancelled_waiters_do_not_write() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notes.db");
+        let first = DbHandleRegistry::new();
+        let second = DbHandleRegistry::new();
+        let owner = first.open(path.to_str().unwrap()).unwrap();
+        let peer = second.open(path.to_str().unwrap()).unwrap();
+        let other = second.open(dir.path().join("other.db").to_str().unwrap()).unwrap();
+
+        first.execute_queued(&owner, "CREATE TABLE notes(id INTEGER)", &[]).await.unwrap();
+        first.execute_queued(&owner, "BEGIN IMMEDIATE", &[]).await.unwrap();
+        let turn = owner.writer.as_ref().unwrap().lock().await;
+        let insert = "INSERT INTO notes VALUES (1)";
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20), second.execute_queued(&peer, insert, &[])
+        ).await.is_err());
+        second.execute_queued(&other, "CREATE TABLE other(id INTEGER)", &[]).await.unwrap();
+        assert_eq!(second.query(peer.handle_id, "SELECT id FROM notes", &[]).unwrap().row_count, 0);
+        // The owner can release SQLite's lock even with a waiting writer.
+        first.execute_queued(&owner, insert, &[]).await.unwrap();
+        first.execute_queued(&owner, "ROLLBACK", &[]).await.unwrap();
+        drop(turn);
+        second.execute_queued(&peer, insert, &[]).await.unwrap();
+        assert_eq!(second.query(peer.handle_id, "SELECT id FROM notes", &[]).unwrap().row_count, 1);
+    }
 
     #[test]
     fn final_handle_drop_rolls_back_and_releases_the_write_lock() {

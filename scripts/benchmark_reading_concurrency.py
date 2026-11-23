@@ -1,6 +1,7 @@
 """Time a real browser save during a burst of edits and a pending model request."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -87,6 +88,7 @@ def peer_request(url, shelf, title, ready, start, read_only):
         error = str(exc)
     return {
         "title": title,
+        "read_only": read_only,
         "shelf": shelf,
         "handler_ms": duration,
         **stages,
@@ -95,14 +97,22 @@ def peer_request(url, shelf, title, ready, start, read_only):
     }
 
 
-def burst(pool, page, url, model, start, count, pending, label, delay, read_only):
+def burst(pool, page, url, model, start, count, pending, label, delay, read_only, mixed):
     start.clear()
     title = label + "-browser"
     page.goto(url + "/edit?shelf=1")
     page.get_by_label("title", exact=True).fill(title)
     ready = Barrier(count)
     peers = [
-        pool.submit(peer_request, url, 2 + i % 2, f"{label}-{i}", ready, start, read_only)
+        pool.submit(
+            peer_request,
+            url,
+            2 + i % 2,
+            f"{label}-{i}",
+            ready,
+            start,
+            read_only or (mixed and i % 2 == 0),
+        )
         for i in range(count - 1)
     ]
     ready.wait(timeout=10)
@@ -158,7 +168,7 @@ def check_database(url, path, samples):
             for r in samples
             if not r["read_only_peers"]
             for p in r["peers"]
-            if not p["error"]
+            if not p["read_only"] and not p["error"]
         }
     )
     with closing(sqlite3.connect(path)) as db:
@@ -193,7 +203,30 @@ def report(samples, recovered):
                     p95 = values[math.ceil(0.95 * len(values)) - 1]
                     times = f"{median(values):.1f} / {p95:.1f}"
                 print(f"{count} | {pending} | {name} | {times} | {failed}")
+    if any(peer["read_only"] for row in samples for peer in row["peers"]):
+        print("50-client edit-form reads | Model pending | Stack | HTTP median / p95 (ms)")
+        for pending in (False, True):
+            for name in recovered:
+                times = sorted(
+                    peer["ms"]
+                    for row in samples
+                    if row["round"] > 0
+                    and row["stack"] == name
+                    and row["editors"] == 50
+                    and row["pending"] == pending
+                    for peer in row["peers"]
+                    if peer["read_only"] and not peer["error"]
+                )
+                if times:
+                    print(
+                        f"50 | {pending} | {name} | {median(times):.1f} / {times[math.ceil(0.95 * len(times)) - 1]:.1f}"
+                    )
     print("Edits recovered after restart, including warm-up:", recovered)
+
+
+def binary_digest(path):
+    with path.open("rb") as binary:
+        return hashlib.file_digest(binary, "sha256").hexdigest()
 
 
 def run(args):
@@ -209,7 +242,8 @@ def run(args):
         instrument(project / "src")
         if args.profile_writer:
             instrument_writer_transaction(project / "src")
-        corvid, node = root / "Corvid", root / "TypeScript"
+        reference = "Corvid baseline" if args.compare_cli else "TypeScript"
+        corvid, other = root / "Corvid", root / reference
         package(cli, project, corvid)
         subprocess.run(
             [cli, "migrate", "up", "--dir", "migrations", "--database", "reading.sqlite"],
@@ -220,8 +254,11 @@ def run(args):
             db.executescript("""CREATE TABLE audit(title TEXT, shelf INTEGER);
                 CREATE TRIGGER record_edit AFTER UPDATE ON shelves BEGIN
                 INSERT INTO audit VALUES(new.title,new.shelf); END;""")
-        node.mkdir()
-        shutil.copyfile(corvid / "reading.sqlite", node / "reading.sqlite")
+        if args.compare_cli:
+            shutil.copytree(corvid, other)
+        else:
+            other.mkdir()
+            shutil.copyfile(corvid / "reading.sqlite", other / "reading.sqlite")
         model = stack.enter_context(ThreadingHTTPServer(("127.0.0.1", 0), LocalModel))
         model.requests, model.outputs = Queue(), Queue()
         Thread(target=model.serve_forever, daemon=True).start()
@@ -238,8 +275,10 @@ def run(args):
         def server(name):
             if name == "Corvid":
                 return serve(cli, corvid, env)
+            if args.compare_cli:
+                return serve(args.compare_cli.resolve(), other, env)
             return node_server(
-                node, ROOT / "benches/typescript/reading-save.mts", config, "/settings"
+                other, ROOT / "benches/typescript/reading-save.mts", config, "/settings"
             )
 
         samples = []
@@ -249,12 +288,14 @@ def run(args):
                 layout = template(urls["Corvid"], db)
             layout.update(sharedConnection=True, modelUrl=base + "/chat/completions")
             config.write_text(json.dumps(layout), encoding="utf-8")
-            urls["TypeScript"] = live.enter_context(server("TypeScript"))
+            urls[reference] = live.enter_context(server(reference))
             settings = {n: json.loads(read(u + "/settings")) for n, u in urls.items()}
             settings["Corvid"] = settings["Corvid"][0]
+            if args.compare_cli:
+                settings[reference] = settings[reference][0]
             assert settings["Corvid"]["sync"] == 2
             for key in ["journal", "sync", "fk", "page"]:
-                assert settings["Corvid"][key] == settings["TypeScript"][key]
+                assert settings["Corvid"][key] == settings[reference][key]
             browser = live.enter_context(sync_playwright()).chromium.launch(channel="chrome")
             live.callback(browser.close)
             pool = live.enter_context(ThreadPoolExecutor(max_workers=54))
@@ -286,13 +327,15 @@ def run(args):
                             label,
                             args.delay_ms / 1000,
                             args.read_only_peers,
+                            args.mixed_peers,
                         )
                         if args.profile_writer and name == "Corvid":
                             if result["browser_ms"] is not None:
                                 assert "begin_ms" in result
                             if not args.read_only_peers:
                                 assert all(
-                                    "begin_ms" in peer or peer["error"] for peer in result["peers"]
+                                    peer["read_only"] or "begin_ms" in peer or peer["error"]
+                                    for peer in result["peers"]
                                 )
                         samples.append(dict(stack=name, round=round_no, **result))
         recovered = {}
@@ -306,7 +349,16 @@ def run(args):
                 {
                     "chrome": version,
                     "cli": subprocess.check_output([cli, "--version"], text=True).strip(),
-                    "node": subprocess.check_output(["node", "--version"], text=True).strip(),
+                    "comparison": reference,
+                    "binaries_sha256": {
+                        name: binary_digest(path)
+                        for name, path in (("Corvid", cli), (reference, args.compare_cli))
+                        if path
+                    },
+                    "node": None
+                    if args.compare_cli
+                    else subprocess.check_output(["node", "--version"], text=True).strip(),
+                    "mixed_peers": args.mixed_peers,
                     "sqlite": settings,
                     "delay_ms": args.delay_ms,
                     "profile_writer": args.profile_writer,
@@ -328,7 +380,18 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--delay-ms", type=int, default=500)
+    peer_modes = parser.add_mutually_exclusive_group()
+    peer_modes.add_argument(
+        "--mixed-peers",
+        action="store_true",
+        help="alternate edit-form reads and saves in each burst",
+    )
     parser.add_argument(
+        "--compare-cli",
+        type=Path,
+        help="compare a second Corvid binary using the same packaged app",
+    )
+    peer_modes.add_argument(
         "--read-only-peers",
         action="store_true",
         help="have the other editors load edit forms while the browser saves",

@@ -10,6 +10,7 @@ import hmac
 import json
 import secrets
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -581,7 +582,8 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False,
 
 
 def check_search_http(url, database):
-    assert 'href="/edit?shelf=1">The Odyssey</a>' in read(url + "/search?term=ODYS")
+    html = read(url + "/search?term=ODYS")
+    assert re.search(r'<a\b[^>]*\shref="/edit\?shelf=1"[^>]*>The Odyssey</a>', html)
     result = json.loads(read(url + "/search/results?term=ODYs"))
     assert result["variant"] == "Matches" and result["fields"] == [[{"shelf": 1, "title": "The Odyssey"}]]
     assert json.loads(read(url + "/search/results?term="))["fields"] == [[]]
