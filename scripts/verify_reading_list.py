@@ -657,10 +657,10 @@ def check_browser(url, channel, database):
 
 
 def verify(args):
-    cli = args.cli.resolve()
+    cli = "corvid" if args.cli == Path("corvid") else args.cli.resolve()
     example = Path(__file__).resolve().parents[1] / "examples/reading_list"
     system_keys = {"systemroot", "windir", "temp", "tmp", "path", "userprofile",
-                   "localappdata", "appdata", "comspec", "pathext"}
+                   "localappdata", "appdata", "comspec", "pathext", "corvid_home"}
     env = {k: v for k, v in os.environ.items() if k.lower() in system_keys}
     if args.work_dir:
         args.work_dir.mkdir(parents=True, exist_ok=False)

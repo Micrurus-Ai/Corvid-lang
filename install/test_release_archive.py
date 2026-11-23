@@ -17,7 +17,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
-def verify(archive, expected_version, work, upgrade_archive=None, upgrade_version=None, browser_matrix=False):
+def verify(archive, expected_version, work, upgrade_archive=None, upgrade_version=None, browser_matrix=False, reading_list=False):
     # Use the production installer with only its release download supplied
     # locally. This checks target selection as well as the installed layout.
     root = work / "Corvid installation"
@@ -61,6 +61,13 @@ cp "$CORVID_TEST_ARCHIVE" "$2"
         uninstall = "--uninstall"
     subprocess.run(command, cwd=work, env=env, check=True)
     exercise_installation(root, expected_version, work, browser_matrix)
+    if reading_list:
+        env["PATH"] = str(root / "bin") + os.pathsep + env["PATH"]
+        selected = shutil.which("corvid", path=env["PATH"])
+        if not selected or Path(selected).resolve().parent != (root / "bin").resolve():
+            raise RuntimeError(f"Expected the installed CLI on PATH, found {selected}")
+        subprocess.run([sys.executable, scripts.parent / "scripts/verify_reading_list.py",
+                        "corvid", "--http-only"], cwd=work, env=env, check=True)
     user_file = root / "user-notes.txt"
     user_file.write_text("keep", encoding="utf-8")
     if upgrade_archive:
@@ -298,9 +305,10 @@ if __name__ == "__main__":
     parser.add_argument("--upgrade-archive", type=Path, help="second package for an install, upgrade and rollback trial")
     parser.add_argument("--upgrade-version", help="version reported by the second package")
     parser.add_argument("--browser-matrix", action="store_true", help="also drive the installed Notes app in Chrome, Firefox and WebKit")
+    parser.add_argument("--reading-list", action="store_true", help="exercise the AI reading list with plain corvid on PATH")
     args = parser.parse_args()
     if bool(args.upgrade_archive) != bool(args.upgrade_version):
         parser.error("Supply --upgrade-archive and --upgrade-version together.")
     with tempfile.TemporaryDirectory() as directory:
         verify(args.archive.resolve(), args.expected_version, Path(directory),
-               args.upgrade_archive.resolve() if args.upgrade_archive else None, args.upgrade_version, args.browser_matrix)
+               args.upgrade_archive.resolve() if args.upgrade_archive else None, args.upgrade_version, args.browser_matrix, args.reading_list)

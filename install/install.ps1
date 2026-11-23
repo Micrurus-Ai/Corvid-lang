@@ -389,9 +389,11 @@ if ($env:CORVID_NO_MODIFY_PROFILE -ne '1') {
             previousHome = [Environment]::GetEnvironmentVariable('CORVID_HOME', 'User')
         } | ConvertTo-Json | Set-Content -LiteralPath $profileState -Encoding UTF8
     }
-    if (-not $onPath) {
-        Step "Adding $bin to user PATH"
-        $newPath = if ([string]::IsNullOrEmpty($userPath)) { $bin } else { "$userPath;$bin" }
+    $managedPath = (Get-Content -Raw -LiteralPath $profileState | ConvertFrom-Json).addedPath
+    if (-not $onPath -or ($managedPath -and ($userPath -split ';')[0].TrimEnd('\') -ine $bin.TrimEnd('\'))) {
+        Step "Putting $bin first on user PATH"
+        $otherPaths = @($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ine $bin.TrimEnd('\') })
+        $newPath = (@($bin) + $otherPaths) -join ';'
         [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
     } else {
         Ok "$bin already on user PATH"

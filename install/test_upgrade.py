@@ -67,8 +67,15 @@ try {
     }
     & $env:INSTALLER
     $installedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($installedPath -ne ('C:\existing;' + (Join-Path $env:CORVID_HOME 'bin'))) {
+    if ($installedPath -ne ((Join-Path $env:CORVID_HOME 'bin') + ';C:\existing')) {
         throw 'Installer did not persist the expected path'
+    }
+    # Simulate a previous installer that appended its own directory.
+    $bin = Join-Path $env:CORVID_HOME 'bin'
+    [Environment]::SetEnvironmentVariable('Path', "C:\existing;$bin", 'User')
+    & $env:INSTALLER
+    if ([Environment]::GetEnvironmentVariable('Path', 'User') -ne $installedPath) {
+        throw 'Upgrade did not restore precedence for its managed PATH entry'
     }
     [Environment]::SetEnvironmentVariable('Path', "$installedPath;C:\later", 'User')
     & $env:INSTALLER -Uninstall

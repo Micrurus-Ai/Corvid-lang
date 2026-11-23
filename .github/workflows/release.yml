@@ -355,6 +355,8 @@ jobs:
             docker run --rm -v "$PWD:/checkout:ro" -w /tmp debian:bookworm-slim \
               sh -ec 'apt-get update -qq && apt-get install -y -qq python3 libpython3.11 &&
                 python3 /checkout/install/test_release_archive.py "$1" "$2"' sh "/checkout/$archive" "$version"
+          elif [ "$TARGET" = x86_64-pc-windows-msvc ]; then
+            python install/test_release_archive.py "$archive" "$version" --reading-list
           else
             python install/test_release_archive.py "$archive" "$version"
           fi

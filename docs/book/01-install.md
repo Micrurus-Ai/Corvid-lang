@@ -98,7 +98,7 @@ When building from a Git checkout, `corvid --version` includes the short commit 
 
 ## Verify the install
 
-After an install or upgrade, check which CLI your shell will run. In PowerShell use `(Get-Command corvid).Source`. On macOS or Linux use `command -v corvid`. Compare the path with the `bin` directory under your installation root and the version below with the release you selected. If an older installation comes first on `PATH`, put the intended directory first or run its executable by full path throughout the exercise.
+After an install or upgrade, check which CLI your shell will run. In PowerShell use `(Get-Command corvid).Source`. On macOS or Linux use `command -v corvid`. On Windows, `Get-Command corvid -All` lists every matching executable in search order. The installer puts its managed directory first on the user PATH. Open a new terminal after installation. Compare the path with the `bin` directory under your installation root and the version below with the release you selected. If an older installation comes first on `PATH`, put the intended directory first or run its executable by full path throughout the exercise.
 
 ```sh
 corvid --version
