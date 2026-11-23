@@ -30,3 +30,5 @@ The default is 40 paired rounds after one discarded warm-up pair. Each cold visi
 - **Frame estimate** measures the same keydown to a task posted during the next animation frame after that update. This approximates a rendering opportunity. Physical display latency requires separate measurement.
 
 The JSON Lines file starts with environment and build metadata, followed by one record per edit, including the browser's reported JavaScript and Wasm transfer sizes. The runner prints medians and nearest-rank 95th percentiles. The [performance guide](../../docs/guides/performance.md#storefront-quantity-edit) records the Windows run.
+
+For the Wasm preload experiment, add `--compare-preload --pairs 42`. A third copy of the Corvid package includes a fetch preload for the content-hashed Wasm URL at the start of the cart content. The generated JavaScript and Wasm are identical across both Corvid variants. All six visit orders repeat seven times. The runner checks for exactly one resource timing entry per expected asset on each visit. The entries record the initiating element or API, request start, response end and transferred bytes.

@@ -2,6 +2,7 @@
 import argparse
 from contextlib import ExitStack
 import hashlib
+from itertools import permutations
 import json
 import math
 import os
@@ -66,7 +67,7 @@ def visit(page, url):
         assets: performance.getEntriesByType('resource')
             .filter(e => e.name.includes('/target/wasm/'))
             .map(e => ({file:new URL(e.name).pathname.split('/').pop(), bytes:e.transferSize,
-                        start_ms:e.startTime, end_ms:e.responseEnd}))
+                        start_ms:e.startTime, end_ms:e.responseEnd, initiator:e.initiatorType}))
     })""")
     expect(page.get_by_text("5400", exact=True)).to_be_visible()
     checkout(page, 12, 1)
@@ -93,22 +94,36 @@ def run(args):
             raise RuntimeError("Cannot isolate the shared storefront controls in this CLI build")
         loader.write_text((root / "storefront.js").read_text(encoding="utf-8") +
                           "\n" + original[original.index(shared_start):], encoding="utf-8")
+        variants = ["Corvid", "TypeScript"]
+        if args.compare_preload:
+            variants.append("Corvid preload")
+            early = root / "Corvid preload"
+            shutil.copytree(root / "Corvid", early)
+            digest = hashlib.sha256((early / "target/wasm/events.wasm").read_bytes()).hexdigest()
+            hint = f"<link rel='preload' as='fetch' crossorigin='anonymous' href='/target/wasm/events.wasm?v={digest}'>"
+            main = early / "src/main.cor"
+            source = main.read_text(encoding="utf-8")
+            anchor = 'shop_page("Shopping cart", ['
+            if source.count(anchor) != 1:
+                raise RuntimeError("Cannot find the storefront cart to insert the preload hint")
+            main.write_text(source.replace(anchor, anchor + f'View("{hint}"), '), encoding="utf-8")
         urls = {name: stack.enter_context(serve(cli, root / name, os.environ.copy()))
-                for name in ("Corvid", "TypeScript")}
+                for name in variants}
+        orders = list(permutations(variants))
         samples = []
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel=args.channel)
             try:
                 for i in range(-1, args.pairs):  # Discard one warm-up pair for browser process startup.
-                    order = list(urls) if i % 2 == 0 else list(reversed(urls))
+                    order = orders[i % len(orders)]
                     for name in order:
                         with browser.new_context(viewport={"width": 960, "height": 720}) as context:
                             context.add_init_script(PROBE)
                             page = context.new_page()
                             for cache in ("cold", "warm"):
                                 sample = visit(page, urls[name])
-                                files = {asset["file"] for asset in sample["assets"]}
-                                expected = {"events.js", "events.wasm"} if name == "Corvid" else {"events.js"}
+                                files = sorted(asset["file"] for asset in sample["assets"])
+                                expected = ["events.js"] if name == "TypeScript" else ["events.js", "events.wasm"]
                                 if files != expected:
                                     raise AssertionError((name, cache, files))
                                 if i >= 0:
@@ -141,6 +156,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pairs", type=int, default=40)
     parser.add_argument("--channel", default="chrome")
+    parser.add_argument("--compare-preload", action="store_true", help="also time the same cart with an early Wasm fetch")
     args = parser.parse_args()
     if args.pairs < 1:
         parser.error("--pairs must be positive")

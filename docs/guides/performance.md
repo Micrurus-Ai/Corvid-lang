@@ -19,7 +19,19 @@ Both sides used the same loopback Corvid server from a debug CLI build, generate
 
 A second 160-edit run recorded each browser asset's request start and response end. Cold readiness medians were 57.3 ms for Corvid and 43.8 ms for TypeScript. Both reached the DOM update in 1.65 ms on cold visits and 1.20 ms on warm visits.
 
-The cold JavaScript request took about 7.5 ms for either implementation. After that response ended, Corvid took a median 34.85 ms to become ready and TypeScript took 22.80 ms. Within Corvid's interval, Chrome started the Wasm request a median 21.30 ms after the JavaScript response ended. Fetching Wasm took 2.00 ms. The final interval from Wasm response end to cart readiness was 11.65 ms and includes browser scheduling, Wasm startup and control setup. Each median was computed separately. The measurements identify the serial request as a candidate for an early-fetch experiment. The speedup from overlapping requests still needs measurement. [Startup samples](../../benches/typescript/storefront-startup-windows-chrome.jsonl)
+The cold JavaScript request took about 7.5 ms for either implementation. After that response ended, Corvid took a median 34.85 ms to become ready and TypeScript took 22.80 ms. Within Corvid's interval, Chrome started the Wasm request a median 21.30 ms after the JavaScript response ended. Fetching Wasm took 2.00 ms. The final interval from Wasm response end to cart readiness was 11.65 ms and includes browser scheduling, Wasm startup and control setup. Each median was computed separately. The measurements identify the serial request as a candidate for an early-fetch experiment. The experiment below measures the effect of overlapping these requests. [Startup samples](../../benches/typescript/storefront-startup-windows-chrome.jsonl)
+
+### Early Wasm fetch experiment
+
+Chrome 157 on Windows completed 252 checked edits across 42 rounds, with a cold and a warm visit per implementation. Adding a cart preload moved the median cold Wasm request start from 43.55 ms to 14.20 ms after navigation. Chrome recorded one Wasm resource per Corvid visit. Every preloaded cold visit transferred 846 bytes for Wasm and every warm visit reused it with zero transferred bytes.
+
+| Cart | Cold readiness median / p95 (ms) | Warm readiness median / p95 (ms) |
+| --- | ---: | ---: |
+| Corvid | 56.95 / 65.90 | 29.30 / 34.90 |
+| Corvid with preload | 57.15 / 62.20 | 30.40 / 34.50 |
+| TypeScript | 45.75 / 56.50 | 25.25 / 28.30 |
+
+The preload achieved overlap without improving median readiness on loopback. It remains a benchmark variant. Slower networks could give a different result. A follow-up profile can time module evaluation, Wasm instantiation and control setup independently. [Raw observations](../../benches/typescript/storefront-preload-windows-chrome.jsonl)
 
 ## What's slow, what's fast
 
