@@ -37,6 +37,20 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+### Write a list with text and links
+
+Use `ui.inline_text` for text alongside a link. It escapes the string and preserves surrounding spaces. Put each item's children in reading order with `ui.list_item`. Use `ui.unordered_list` for bullets or `ui.ordered_list` for numbering. The first argument to `ui.ordered_list` sets the first item's number, so a second page can continue an earlier list.
+
+```corvid-fragment
+fn reading_plan(topic: String) -> View:
+    introduction = ui.list_item([ui.inline_text("Read "), ui.link(topic, "/guide")])
+    supplies = ui.unordered_list([ui.list_item([ui.inline_text("Notebook")])])
+    exercise = ui.list_item([ui.inline_text("Bring these supplies"), supplies])
+    return ui.ordered_list(3, [introduction, exercise])
+```
+
+### Arrange views
+
 Use layout functions to arrange any list of views. `ui.stack(content)` places children vertically. `ui.row(content)` places children horizontally and wraps to another line when needed. `ui.grid(content)` fits as many equal-width columns as the container allows, aiming for a minimum of 16rem per column. A narrower container gets a single column. All three preserve the order of their children and use a 1rem gap.
 
 For example, a project board can use the same column function for each status.

@@ -380,6 +380,10 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 ### [std/ui](../../std/ui.cor)
 
 - `fn text(value: String) -> View`
+- `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
+- `fn list_item(content: List<View>) -> View` wraps the children in an `li` in the supplied order.
+- `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
+- `fn unordered_list(items: List<View>) -> View` renders a `ul`. Pass list item views in display order.
 - `fn stack(content: List<View>) -> View`
 - `fn row(content: List<View>) -> View`
 - `fn grid(content: List<View>) -> View`

@@ -20,6 +20,15 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test renders_native_lists_in_order:
+    label = ui.inline_text("Read <notes> & ")
+    first = ui.list_item([label, ui.link("references", "/ref")])
+    nested = ui.unordered_list([ui.list_item([ui.inline_text("Notebook")])])
+    second = ui.list_item([ui.inline_text("Bring "), nested])
+    steps = ui.ordered_list(-2, [first, second])
+    assert steps.html == "<ol start=\"-2\"><li>Read &lt;notes&gt; &amp; <a href=\"/ref\" tabindex=\"0\">references</a></li><li>Bring <ul><li>Notebook</li></ul></li></ol>"
+    assert ui.unordered_list([]).html == "<ul></ul>"
+
 test agent_query_uses_the_same_form:
     form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
     assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
@@ -34,8 +43,19 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("3 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("4 passed"),
         "{good:?}"
+    );
+    fs::write(
+        &main,
+        source.replace("ordered_list(-2", "ordered_list(\"two\""),
+    )
+    .unwrap();
+    let bad_start = run("check");
+    assert!(!bad_start.status.success(), "{bad_start:?}");
+    assert!(
+        String::from_utf8_lossy(&bad_start.stderr).contains("expected `Int`, got `String`"),
+        "{bad_start:?}"
     );
     fs::write(main, source.replace("ui.text(\"second\")", "\"second\"")).unwrap();
     let bad = run("check");

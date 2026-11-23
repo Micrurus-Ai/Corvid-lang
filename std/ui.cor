@@ -14,6 +14,18 @@ fn children(views: List<View>) -> String:
 public fn text(value: String) -> View:
     return View("<p>" + escaped(value) + "</p>")
 
+public fn inline_text(value: String) -> View:
+    return View(escaped(value))
+
+public fn list_item(content: List<View>) -> View:
+    return View("<li>" + children(content) + "</li>")
+
+public fn ordered_list(start: Int, items: List<View>) -> View:
+    return View("<ol start=\"" + start.to_string() + "\">" + children(items) + "</ol>")
+
+public fn unordered_list(items: List<View>) -> View:
+    return View("<ul>" + children(items) + "</ul>")
+
 public fn stack(content: List<View>) -> View:
     return View("<div style=\"display:flex;flex-direction:column;gap:1rem\">" + children(content) + "</div>")
 
