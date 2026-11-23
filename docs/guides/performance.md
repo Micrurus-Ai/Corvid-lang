@@ -75,6 +75,22 @@ In Chrome 157 on Windows, 20 alternating rounds compared the shipped controls wi
 
 At 1,000 rows the batch ran about 6.8 times faster. The measurements exclude paint and screen-reader speech latency. Quantity edits were a control workload. [Raw observations](../../benches/results/keyed-list-windows-chrome.json) ? [Reproduce the comparison](../../benches/README.md#long-list-browser-controls)
 
+### Durable reading-list saves
+
+On Windows with Chrome 157, each server received three warm-up saves and 40 measured saves in alternating order. Every pair returned byte-identical receipt HTML apart from its timing comment. New server processes read back the final titles on all three shelves. Direct database checks also recovered exactly 15, 14 and 14 revisions. This verifies a process restart on the same disk.
+
+| Interval (ms), median / p95 | Corvid preview | Node TypeScript |
+| --- | ---: | ---: |
+| Save keydown to visible confirmation DOM | 43.75 / 51.80 | 40.30 / 48.30 |
+| Browser request start to first response byte | 14.80 / 17.30 | 12.00 / 13.40 |
+| Save handler, including rendering | 14 / 16 | 11 / 12 |
+| Open connection and commit one update | 10 / 13 | 9 / 10 |
+| Open connection and materialize three shelves | 3 / 3 | 2 / 3 |
+
+The application timings include runtime, connection and data conversion costs. Each stack took monotonic millisecond readings around the same operations. Both used prepared parameters, a separate read connection, SQLite DELETE journaling, FULL synchronization, foreign keys and 4 KiB pages. The release preview used SQLite 3.45.0 and Node 25 used SQLite 3.50.4. TypeScript used a static template for the generated form and suggestion controls and rendered the shelf list after each save. These are warm-process loopback timings with one active user. The browser measurement ends when the receipt elements have layout, before a confirmed display paint.
+
+Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25 available. [Per-save observations and configuration](../../benches/results/reading-save-windows-chrome.json)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw
