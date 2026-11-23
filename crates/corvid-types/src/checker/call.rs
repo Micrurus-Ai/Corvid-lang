@@ -496,6 +496,7 @@ impl<'a> Checker<'a> {
                 };
                 Type::Option(Box::new(final_inner_ty))
             }
+            BuiltIn::BrowserFields => self.check_browser_fields(name, args),
             BuiltIn::FormFor => self.check_form_for(name, args),
             BuiltIn::Range => {
                 if args.len() != 2 {

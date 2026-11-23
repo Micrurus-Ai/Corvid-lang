@@ -72,3 +72,39 @@ pub(super) fn render(
     .unwrap();
     Ok(Value::String(html.into()))
 }
+
+pub(super) fn browser_fields(
+    initial: &Value,
+    types: &HashMap<DefId, &IrType>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    use crate::value::{ListValue, MapValue};
+    let invalid = || {
+        InterpError::new(
+            InterpErrorKind::Other("expected a bounded integer record for browser state".into()),
+            span,
+        )
+    };
+    let Value::Struct(values) = initial else {
+        return Err(invalid());
+    };
+    let record = types.get(&values.type_id()).ok_or_else(invalid)?;
+    let mut fields = Vec::with_capacity(record.fields.len());
+    for field in &record.fields {
+        let Some(corvid_ast::Refinement::Between { min, max }) = field.refinement else {
+            return Err(invalid());
+        };
+        let Some(Value::Int(value)) = values.get_field(&field.name) else {
+            return Err(invalid());
+        };
+        fields.push((
+            Value::String(field.name.clone().into()),
+            Value::List(ListValue::new([
+                Value::Int(value),
+                Value::Int(min),
+                Value::Int(max),
+            ])),
+        ));
+    }
+    Ok(Value::Map(MapValue::new(fields)))
+}

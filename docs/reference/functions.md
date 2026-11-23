@@ -437,6 +437,7 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 - `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}`.
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
-- A `local type T` declaration generates `T_state(value: T) -> ui.RecordState` inside its declaring file. The descriptor contains a list of `ui.IntegerField(name: String, value: Int, minimum: Int, maximum: Int)`. Wrapping the view with `ui.assistant_selection` exposes the same bounded record update to a browser assistant.
+- `browser state name = initial` obtains a `ui.RecordState` from an ordinary bounded integer record. The generated binding uses `ui.record_state(bounds: Map<String, List<Int>>) -> RecordState`, whose entries contain the initial value, minimum, and maximum in order. Applications normally use the binding syntax.
+- Existing `local type T` declarations retain their file-local `T_state(value: T) -> ui.RecordState` helper.
 
 See [Keep a record in browser memory](../book/19-browser-views.md#keep-a-record-in-browser-memory).

@@ -590,15 +590,16 @@ Use `ui.assistant_selection(picker, "select_color", "Choose an RGB color.")` to 
 
 ## Keep a record in browser memory
 
-The [RGB picker](../../examples/rgb_picker/src/color_picker.cor) opens with a local editor at `/`. Declare the record once, including each field's valid range. Corvid generates a file-local function that takes that record and carries its initial values and bounds into the page.
+The [RGB picker](../../examples/rgb_picker/src/color_picker.cor) opens with a local editor at `/`. Declare the record once, including each field's valid range. Inside the component, `browser state selected = color` takes the initial value and its declared bounds from the record. Backend code can use the same `Color` type.
 
 ```corvid
-public local type Color:
+public type Color:
     red: Int where between(0, 255)
     green: Int where between(0, 255)
     blue: Int where between(0, 255)
 
 public fn LocalColorPicker(color: Color) -> ui.View:
+    browser state selected = color
     controls = ui.stack([
         ui.local_slider("Red", "red"),
         ui.local_slider("Green", "green"),
@@ -608,7 +609,7 @@ public fn LocalColorPicker(color: Color) -> ui.View:
         ui.record_swatch("red", "green", "blue"),
         ui.record_text("RGB {red}, {green}, {blue}")
     ])
-    return ui.local_selection(Color_state(color), controls, preview)
+    return ui.local_selection(selected, controls, preview)
 ```
 
 Mount it on an interactive page. Each instance owns a separate record in browser memory. Slider movement updates the preview during the gesture. Wrapping the editor with `ui.assistant_selection` exposes one action taking a complete record. Both input paths validate the candidate before updating the preview. The initial page and runtime must load online. Edits then work disconnected until you close or reload the page. For a server-computed preview, the same app offers the earlier form example at `/server`.

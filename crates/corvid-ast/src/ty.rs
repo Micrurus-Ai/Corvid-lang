@@ -204,6 +204,16 @@ pub struct Field {
     pub span: Span,
 }
 
+impl Field {
+    /// Bounds a browser can represent exactly in a native integer control.
+    pub fn browser_integer_bounds(&self) -> Option<(i64, i64)> {
+        let Refinement::Between { min, max } = self.refinement? else { return None };
+        const LIMIT: i64 = (1 << 53) - 1;
+        (matches!(&self.ty, TypeRef::Named { name, .. } if name.name == "Int")
+            && -LIMIT <= min && min <= max && max <= LIMIT).then_some((min, max))
+    }
+}
+
 /// `@upload(max_mb: N, retention_days: N, mime: "a/b, c/d")` on an
 /// `Upload<Format>` field (slice 51f). Any subset may be present; the
 /// inner format tag supplies default accepted MIME when `mime` is

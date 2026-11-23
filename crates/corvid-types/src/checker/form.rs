@@ -10,8 +10,8 @@ impl Checker<'_> {
             .push(TypeError::new(TypeErrorKind::InvalidForm { message }, span));
     }
 
-    pub(super) fn check_form_record(&mut self, ty: &Type, span: Span) {
-        let record = match ty {
+    fn record_decl(&self, ty: &Type) -> Option<&corvid_ast::TypeDecl> {
+        match ty {
             Type::Struct(id) => self.types_by_id.get(id).copied(),
             Type::ImportedStruct(t) => self
                 .module_resolution
@@ -25,7 +25,50 @@ impl Checker<'_> {
                     }
                 }),
             _ => None,
+        }
+    }
+
+    pub(super) fn check_browser_fields(&mut self, name: &Ident, args: &[Expr]) -> Type {
+        let result = Type::Map(
+            Box::new(Type::String),
+            Box::new(Type::List(Box::new(Type::Int))),
+        );
+        let [initial] = args else {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::ArityMismatch {
+                    callee: "browser state".into(),
+                    expected: 1,
+                    got: args.len(),
+                },
+                name.span,
+            ));
+            return result;
         };
+        let ty = self.check_expr(initial);
+        let invalid = self.record_decl(&ty).is_none_or(|record| {
+            record.fields.is_empty()
+                || !record.variants.is_empty()
+                || record
+                    .fields
+                    .iter()
+                    .any(|field| field.browser_integer_bounds().is_none())
+        });
+        if invalid {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TypeMismatch {
+                    expected: "a record of Int fields with ordered, browser-safe between bounds"
+                        .into(),
+                    got: ty.display_name(),
+                    context: "browser state".into(),
+                },
+                initial.span(),
+            ));
+        }
+        result
+    }
+
+    pub(super) fn check_form_record(&mut self, ty: &Type, span: Span) {
+        let record = self.record_decl(ty);
         let Some(record) = record.filter(|r| r.variants.is_empty() && r.alias.is_none()) else {
             self.form_error(
                 span,

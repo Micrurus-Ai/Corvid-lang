@@ -69,6 +69,11 @@ impl<'a> Parser<'a> {
         }
 
         match self.peek() {
+            TokKind::Ident(word) if word == "browser"
+                && matches!(self.peek_ahead(1), TokKind::Ident(next) if next == "state") =>
+            {
+                self.parse_browser_state()
+            }
             TokKind::KwReturn => self.parse_return_stmt(),
             TokKind::KwYield => self.parse_yield_stmt(),
             TokKind::KwIf => self.parse_if_stmt(),
@@ -97,6 +102,30 @@ impl<'a> Parser<'a> {
             TokKind::Ident(_) => self.parse_assign_or_expr_stmt(),
             _ => self.parse_expr_stmt(),
         }
+    }
+
+    fn parse_browser_state(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.bump().span;
+        self.bump(); // state
+        let (binding, binding_span) = self.expect_ident()?;
+        self.expect(TokKind::Assign, "= before the initial record")?;
+        let initial = self.parse_expr()?;
+        let span = start.merge(initial.span());
+        self.expect_newline()?;
+
+        // Import only in the consuming module. The record itself stays UI-independent.
+        let constructor = format!("__browser_record_{}", start.start);
+        let import = format!("import \"std:ui\" use record_state as {constructor}\n");
+        let mut tokens = crate::lex(&import).expect("valid browser state import");
+        for (index, token) in tokens.iter_mut().enumerate() {
+            token.span = start.expanded(index);
+        }
+        self.generated.push(Parser::new(&tokens).parse_decl()?);
+        let fields = super::authoring::call("__browser_fields", vec![initial], start.expanded(20));
+        let value = super::authoring::call(&constructor, vec![fields], start.expanded(21));
+        Ok(Stmt::Let {
+            name: Ident::new(binding, binding_span), ty: None, value, span,
+        })
     }
 
     fn parse_return_stmt(&mut self) -> Result<Stmt, ParseError> {

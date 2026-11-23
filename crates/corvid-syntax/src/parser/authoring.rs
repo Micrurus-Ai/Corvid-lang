@@ -160,7 +160,7 @@ impl Parser<'_> {
     }
 }
 
-fn call(name: &str, args: Vec<corvid_ast::Expr>, span: Span) -> corvid_ast::Expr {
+pub(super) fn call(name: &str, args: Vec<corvid_ast::Expr>, span: Span) -> corvid_ast::Expr {
     use corvid_ast::{Expr, Ident};
     Expr::Call {
         callee: Box::new(Expr::Ident {

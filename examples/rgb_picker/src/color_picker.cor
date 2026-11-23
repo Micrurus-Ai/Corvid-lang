@@ -1,6 +1,6 @@
 import "std:ui" as ui
 
-public local type Color:
+public type Color:
     red: Int where between(0, 255)
     green: Int where between(0, 255)
     blue: Int where between(0, 255)
@@ -17,6 +17,7 @@ public fn ColorPicker(color: Color, path: String) -> ui.View:
     return ui.selection(path, ui.stack([red, green, blue]), selected_color(color))
 
 public fn LocalColorPicker(color: Color) -> ui.View:
+    browser state selected = color
     controls = ui.stack([
         ui.local_slider("Red", "red"),
         ui.local_slider("Green", "green"),
@@ -26,4 +27,4 @@ public fn LocalColorPicker(color: Color) -> ui.View:
         ui.record_swatch("red", "green", "blue"),
         ui.record_text("RGB {red}, {green}, {blue}")
     ])
-    return ui.local_selection(Color_state(color), controls, preview)
+    return ui.local_selection(selected, controls, preview)

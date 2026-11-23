@@ -1,5 +1,4 @@
 use super::*;
-use corvid_ast::{Refinement, TypeRef};
 
 impl Parser<'_> {
     pub(super) fn parse_local_type(&mut self, visibility: Visibility) -> Result<Decl, ParseError> {
@@ -17,20 +16,12 @@ impl Parser<'_> {
         let ui = format!("__local_ui_{name}");
         let mut fields = Vec::new();
         for field in &record.fields {
-            let Some(Refinement::Between { min, max }) = field.refinement else {
-                return Err(self.expected_local_type("Int where between(min, max)", field.span));
-            };
-            const LIMIT: i64 = (1 << 53) - 1;
-            if !matches!(&field.ty, TypeRef::Named { name, .. } if name.name == "Int")
-                || min < -LIMIT
-                || max > LIMIT
-                || min > max
-            {
+            let Some((min, max)) = field.browser_integer_bounds() else {
                 return Err(self.expected_local_type(
-                    "ordered integer bounds in the browser safe integer range",
+                    "Int with ordered, browser-safe between bounds",
                     field.span,
                 ));
-            }
+            };
             let key = &field.name.name;
             fields.push(format!(
                 "{ui}.IntegerField(\"{key}\", value.{key}, {min}, {max})"

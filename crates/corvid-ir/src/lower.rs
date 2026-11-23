@@ -1865,6 +1865,13 @@ impl<'a> Lowerer<'a> {
                         next_cursor: Box::new(next_cursor),
                     };
                 }
+                Some(Binding::BuiltIn(BuiltIn::BrowserFields)) if args.len() == 1 => {
+                    return IrExprKind::BuiltinMethod {
+                        kind: corvid_types::BuiltinMethodKind::BrowserFields,
+                        receiver: Box::new(self.lower_expr(&args[0])),
+                        args: Vec::new(),
+                    };
+                }
                 Some(Binding::BuiltIn(BuiltIn::FormFor)) if args.len() == 3 => {
                     return IrExprKind::BuiltinMethod {
                         kind: corvid_types::BuiltinMethodKind::RouteForm,

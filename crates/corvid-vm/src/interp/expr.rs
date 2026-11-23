@@ -731,6 +731,7 @@ pub(super) fn eval_builtin_method(
             ),
             span,
         )),
+        BrowserFields => super::form::browser_fields(&recv, types, span),
         RouteForm => {
             let target = want_string(&recv, span)?;
             let label = want_string(&args[1], span)?;

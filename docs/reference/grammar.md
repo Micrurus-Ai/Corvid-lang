@@ -629,12 +629,17 @@ For a resizable region use `panel(state_name, minimum, maximum, children)`, wher
 
 The types in `std:ui` are `Point(x: Int, y: Int)` and `Stroke(start: Point, end: Point)`. The compiler renders surfaces with `ui.drag_canvas(label, initial, width, height, handler, draw)` and `ui.drag_panel(label, initial, minimum, maximum, handler, content)`. Both return a `View`. Use `ui.assistant_drag(component, name, description)` to expose the mounted component's action. See [Drawing and resizing with a Stroke](../book/19-browser-views.md#drawing-and-resizing-with-a-stroke).
 
-### Browser-local record declarations
+### Browser state bindings
 
 ```corvid
-local type Dimensions:
+public type Dimensions:
     width: Int where between(1, 800)
     height: Int where between(1, 600)
+
+fn size_editor(size: Dimensions) -> ui.View:
+    browser state selected = size
+    controls = ui.row([ui.local_slider("Width", "width"), ui.local_slider("Height", "height")])
+    return ui.local_selection(selected, controls, ui.record_text("{width} x {height}"))
 ```
 
-A local type uses ordinary record construction and field access. The declaration also generates a file-local `Dimensions_state(value: Dimensions)` function for initializing a browser editor. The usual visibility prefix, such as `public`, applies to the type. Each field must be an `Int` with inclusive ordered bounds in the range ?9007199254740991 to 9007199254740991. See [browser-local record views](functions.md#browser-local-record-views-in-stdui).
+Inside a function, write `browser state name = expression`. The initializer is evaluated once. Its record type supplies the field names and bounds. Each field must be an `Int` with inclusive ordered bounds from -9007199254740991 through 9007199254740991. Pass the resulting `ui.RecordState` to an editor. The compatibility spelling `local type T` and its generated `T_state` helper are still supported. See [browser-local record views](functions.md#browser-local-record-views-in-stdui).

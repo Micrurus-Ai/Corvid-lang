@@ -253,6 +253,7 @@ pub enum BuiltinMethodKind {
     RangeIntList,
     /// `form_for(target: String, initial: Record, submit_label: String) -> String`
     RouteForm,
+    BrowserFields,
 
     // ----- HTTP-boundary uploads (slice 52c-2) --------------------
     //
