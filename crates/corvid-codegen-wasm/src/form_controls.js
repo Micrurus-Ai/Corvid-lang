@@ -106,3 +106,93 @@ for (const form of document.querySelectorAll("form[data-corvid-selection]")) {
     })).catch(error => { alert.textContent = error.message; });
   }
 }
+
+// Each mounted record owns its value and bindings. Only initialization reads the schema markup.
+for (const region of document.querySelectorAll("[data-local-selection]")) {
+  const alert = region.querySelector(":scope > [role=alert]");
+  try {
+    bindLocalSelection(region);
+  } catch (error) {
+    alert.textContent = error.message;
+  }
+}
+
+function bindLocalSelection(region) {
+  const members = Array.from(region.querySelectorAll(":scope > [data-field]"));
+  const initial = Object.create(null);
+  const properties = Object.create(null);
+  for (const {dataset} of members) {
+    const {field, min, max, value} = dataset;
+    const minimum = Number(min), maximum = Number(max);
+    if (Object.hasOwn(initial, field) || !Number.isSafeInteger(minimum) ||
+        !Number.isSafeInteger(maximum) || minimum > maximum) throw Error("Invalid record field: " + field);
+    properties[field] = {type: "integer", minimum, maximum};
+    initial[field] = Number(value);
+  }
+  const names = Object.keys(initial);
+  const owned = selector => Array.from(region.querySelectorAll(selector))
+    .filter(node => node.closest("[data-local-selection]") === region);
+  const sliders = owned('input[type="range"][name]');
+  if (!names.length || sliders.length !== names.length ||
+      names.some(name => !sliders.some(input => input.name === name))) {
+    throw Error("Each record field needs one matching slider.");
+  }
+  const preview = region.querySelector(":scope > [data-local-preview]");
+  const placeholder = /\{([^{}]+)\}/g;
+  function fieldName(name) {
+    if (!Object.hasOwn(properties, name)) throw Error("Unknown record field: " + name);
+    return name;
+  }
+  const texts = owned("[data-record-text]").map(node => {
+    const pattern = node.dataset.recordText;
+    for (const match of pattern.matchAll(placeholder)) fieldName(match[1]);
+    return {node, pattern};
+  });
+  const samples = owned("[data-record-swatch]").map(node => ({
+    node, channels: [node.dataset.red, node.dataset.green, node.dataset.blue].map(fieldName),
+  }));
+  let state;
+  function select(values) {
+    if (!values || Array.isArray(values) || typeof values !== "object" ||
+        Object.keys(values).length !== names.length) throw Error("Expected all record fields.");
+    const next = Object.create(null);
+    for (const name of names) {
+      const value = values[name];
+      const {minimum, maximum} = properties[name];
+      if (!Object.hasOwn(values, name) || !Number.isSafeInteger(value) ||
+          value < minimum || value > maximum) throw Error("Invalid " + name + ".");
+      next[name] = value;
+    }
+    state = Object.freeze(next);
+    for (const input of sliders) input.valueAsNumber = state[input.name];
+    for (const {node, pattern} of texts) {
+      node.textContent = pattern.replace(placeholder, (_, name) => state[name]);
+    }
+    for (const {node, channels} of samples) {
+      node.style.backgroundColor = "rgb(" + channels.map(name => state[name]).join(",") + ")";
+    }
+    return preview.textContent.trim();
+  }
+  for (const input of sliders) {
+    input.min = properties[input.name].minimum;
+    input.max = properties[input.name].maximum;
+  }
+  select(initial);
+  for (const input of sliders) {
+    input.disabled = false;
+    input.addEventListener("input", () => select({...state, [input.name]: input.valueAsNumber}));
+  }
+  const owner = region.parentElement;
+  if (owner.hasAttribute("data-corvid-selection-owner") && document.modelContext?.registerTool) {
+    Promise.resolve().then(() => document.modelContext.registerTool({
+      name: owner.dataset.corvidTool, description: owner.dataset.corvidDescription,
+      inputSchema: {type: "object", properties, required: names, additionalProperties: false},
+      execute(values) {
+        if (!region.isConnected || sliders.some(input => input.matches(":disabled"))) {
+          throw Error("Selection is unavailable.");
+        }
+        return select(values);
+      },
+    })).catch(error => { region.querySelector(":scope > [role=alert]").textContent = error.message; });
+  }
+}

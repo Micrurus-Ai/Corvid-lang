@@ -587,3 +587,28 @@ route POST "/color" form Color -> html:
 Return a trusted view fragment from this route. The browser updates only that picker's preview and keeps keyboard focus. A failed request restores the last accepted values. Treat the route as a preview calculation because multiple selections can overlap in flight.
 
 Use `ui.assistant_selection(picker, "select_color", "Choose an RGB color.")` to publish a mounted instance's selection action to a compatible browser assistant. The assistant supplies all three named integers and receives the preview's text. Each picker can use its own action name. The [complete page](../../examples/rgb_picker/src/main.cor) shows how to mount it.
+
+## Keep a record in browser memory
+
+The [RGB picker](../../examples/rgb_picker/src/color_picker.cor) opens with a local editor at `/`. Declare the record once, including each field's valid range. Corvid generates a file-local function that takes that record and carries its initial values and bounds into the page.
+
+```corvid
+public local type Color:
+    red: Int where between(0, 255)
+    green: Int where between(0, 255)
+    blue: Int where between(0, 255)
+
+public fn LocalColorPicker(color: Color) -> ui.View:
+    controls = ui.stack([
+        ui.local_slider("Red", "red"),
+        ui.local_slider("Green", "green"),
+        ui.local_slider("Blue", "blue")
+    ])
+    preview = ui.row([
+        ui.record_swatch("red", "green", "blue"),
+        ui.record_text("RGB {red}, {green}, {blue}")
+    ])
+    return ui.local_selection(Color_state(color), controls, preview)
+```
+
+Mount it on an interactive page. Each instance owns a separate record in browser memory. Slider movement updates the preview during the gesture. Wrapping the editor with `ui.assistant_selection` exposes one action taking a complete record. Both input paths validate the candidate before updating the preview. The initial page and runtime must load online. Edits then work disconnected until you close or reload the page. For a server-computed preview, the same app offers the earlier form example at `/server`.

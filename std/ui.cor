@@ -180,3 +180,27 @@ public fn assistant_selection(component: View, name: String, description: String
 public fn color_sample(red: Int, green: Int, blue: Int) -> View:
     color = "rgb(" + red.to_string() + ", " + green.to_string() + ", " + blue.to_string() + ")"
     return View("<span style=\"display:inline-block;width:3rem;height:2rem;background-color:" + color + "\" aria-hidden=\"true\"></span>")
+
+public type IntegerField:
+    name: String
+    value: Int
+    minimum: Int
+    maximum: Int
+
+public type RecordState:
+    fields: List<IntegerField>
+
+public fn local_slider(label: String, name: String) -> View:
+    return View("<label>" + escaped(label) + "<input disabled type=\"range\" name=\"" + escaped(name) + "\"></label>")
+
+public fn record_text(pattern: String) -> View:
+    return View("<span data-record-text=\"" + escaped(pattern) + "\"></span>")
+
+public fn record_swatch(red: String, green: String, blue: String) -> View:
+    return View("<span data-record-swatch data-red=\"" + escaped(red) + "\" data-green=\"" + escaped(green) + "\" data-blue=\"" + escaped(blue) + "\" style=\"display:inline-block;width:3rem;height:2rem\" aria-hidden=\"true\"></span>")
+
+public fn local_selection(state: RecordState, controls: View, preview: View) -> View:
+    schema = ""
+    for field in state.fields:
+        schema = schema + "<i hidden data-field=\"" + escaped(field.name) + "\" data-value=\"" + field.value.to_string() + "\" data-min=\"" + field.minimum.to_string() + "\" data-max=\"" + field.maximum.to_string() + "\"></i>"
+    return View("<fieldset data-local-selection>" + schema + controls.html + "<div role=\"status\" data-local-preview>" + preview.html + "</div><span role=\"alert\"></span></fieldset>")

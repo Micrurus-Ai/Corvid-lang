@@ -430,3 +430,13 @@ For component syntax and coordinate semantics, see [Drawing and resizing with a 
 - `ui.color_sample(red: Int, green: Int, blue: Int) -> View` renders a decorative RGB swatch. Provide visible text in the surrounding view to identify the color.
 
 See [Build a color picker from a record](../book/19-browser-views.md#build-a-color-picker-from-a-record).
+
+## Browser-local record views in std:ui
+
+- `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
+- `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}`.
+- `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
+- `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
+- A `local type T` declaration generates `T_state(value: T) -> ui.RecordState` inside its declaring file. The descriptor contains a list of `ui.IntegerField(name: String, value: Int, minimum: Int, maximum: Int)`. Wrapping the view with `ui.assistant_selection` exposes the same bounded record update to a browser assistant.
+
+See [Keep a record in browser memory](../book/19-browser-views.md#keep-a-record-in-browser-memory).

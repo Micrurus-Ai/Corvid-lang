@@ -30,6 +30,7 @@ mod model;
 mod server_route;
 mod store;
 mod type_field;
+mod local_type;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
@@ -53,7 +54,7 @@ impl<'a> Parser<'a> {
                 | TokKind::KwModel
                 | TokKind::KwFn
                 | TokKind::At => {}
-                TokKind::Ident(word) if word == "choice" => {}
+                TokKind::Ident(word) if word == "choice" || word == "local" => {}
                 other => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
@@ -70,6 +71,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             TokKind::Ident(word) if word == "component" => self.parse_component_decl(),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
+            TokKind::Ident(word) if word == "local" => self.parse_local_type(visibility),
             TokKind::KwType => self.parse_type_decl(visibility, false).map(Decl::Type),
             TokKind::Ident(word) if word == "choice" => self.parse_type_decl(visibility, true).map(Decl::Type),
             TokKind::KwSession => self

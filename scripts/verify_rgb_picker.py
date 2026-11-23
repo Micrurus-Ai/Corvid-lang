@@ -14,7 +14,7 @@ def check(page, url):
     page.add_init_script("""Object.defineProperty(document, "modelContext", {value: {
         registerTool(tool) { (window.tools ??= new Map()).set(tool.name, tool); }
     }})""")
-    page.goto(url)
+    page.goto(url + "/server")
     page.wait_for_function("window.tools?.has('select_color')")
     picker = page.locator("form").first
     output = picker.get_by_role("status")
