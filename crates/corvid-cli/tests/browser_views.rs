@@ -20,6 +20,10 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test escapes_multiline_field:
+    field = ui.text_area("Notes & maps", "a\"b", "\n</textarea> & more")
+    assert field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\">\n\n&lt;/textarea&gt; &amp; more</textarea></label>"
+
 test renders_heading_levels:
     headings = [
         ui.h1("Trails & <maps>"), ui.h2("Level 2"), ui.h3("Level 3"),
@@ -95,7 +99,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("11 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("12 passed"),
         "{good:?}"
     );
     fs::write(

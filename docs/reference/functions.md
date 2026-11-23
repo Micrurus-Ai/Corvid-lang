@@ -396,6 +396,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn row(content: List<View>) -> View`
 - `fn grid(content: List<View>) -> View`
 - `fn text_field(label: String, name: String, initial: String) -> View`
+- `fn text_area(label: String, name: String, initial: String) -> View` renders a labeled native multiline form field. It escapes the label, form name and initial text, and preserves an initial blank line when the browser parses the textarea.
 - `fn date_field(label: String, name: String, initial: String) -> View`
 - `fn bind_field(field: View, component: View) -> View`
 - `fn submit(label: String) -> View`

@@ -15,7 +15,7 @@ fn guide(note: String) -> String:
         [ui.inline_text("Bridge"), ui.inline_text("1 km")],
         [ui.inline_text("Lookout"), ui.inline_text("3 km")]
     ])
-    form = ui.query_form("/guide", [ui.text_field("Your note", "note", note), ui.submit("Preview")])
+    form = ui.query_form("/guide", [ui.text_area("Your note", "note", note), ui.submit("Preview")])
     packing = ui.data_group("trail-note", note, [
         ui.trusted_markup("<h2 id='packing'>Packing note</h2>"), ui.text(note), form
     ])

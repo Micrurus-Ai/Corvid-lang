@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from verify_reading_list import read, serve
 
 
-NOTE = 'Rain & "<em>wind</em>"'
+NOTE = '\nRain & "</textarea><em>wind</em>"'
 
 
 def check_response(url):
@@ -31,7 +31,7 @@ def check_response(url):
     literal = escape(NOTE)
     assert f'data-trail-note="{literal}"' in response
     assert f"<p>{literal}</p>" in response
-    assert f'name="note" value="{literal}"' in response
+    assert f'<textarea name="note">\n{literal}</textarea>' in response
 
 
 def check_browser(url, channel):
@@ -55,6 +55,7 @@ def check_browser(url, channel):
         expect(table.get_by_role("cell")).to_have_text(["Bridge", "1 km", "Lookout", "3 km"])
         main.get_by_role("navigation", name="Guide sections").get_by_role("link").click()
         expect(page).to_have_url(url + "/#packing")
+        expect(page.locator(":target")).to_have_text("Packing note")
 
         main.get_by_label("Your note").fill(NOTE)
         main.get_by_role("button", name="Preview").click()
