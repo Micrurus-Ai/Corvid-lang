@@ -2,6 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+Backend and AI implementation follows the [ordered backend and AI queue](docs/backend-ai-roadmap.md#ordered-tasks). Its target is parity with what developers build in Python and TypeScript, through built-in capability and typed interoperability together.
+
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 ## Active task queue
