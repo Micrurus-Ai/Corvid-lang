@@ -17,6 +17,9 @@ public fn text(value: String) -> View:
 public fn inline_text(value: String) -> View:
     return View(escaped(value))
 
+public fn abbreviation(label: String, expansion: String) -> View:
+    return View("<abbr title=\"" + escaped(expansion) + "\">" + escaped(label) + "</abbr>")
+
 fn heading(tag: String, label: String) -> View:
     return View("<" + tag + ">" + escaped(label) + "</" + tag + ">")
 

@@ -101,6 +101,8 @@ fn reading_plan(topic: String) -> View:
 
 Pass a caption, column names, and a list of rows to `ui.table`. The caption and column names are escaped text. Each column name becomes a header with `scope="col"`. Supply one view per cell in column order. Use `ui.inline_text` for a plain value or a view such as `ui.link` for a navigable cell.
 
+For a distance cell, `ui.abbreviation("3 km", "3 kilometres")` displays “3 km” and puts the expanded wording in the native `abbr` element’s `title` attribute. Both arguments accept ordinary text.
+
 ```corvid-fragment
 fn reading_table(topic: String) -> View:
     guide = [ui.link(topic, "/guide"), ui.inline_text("Ready")]

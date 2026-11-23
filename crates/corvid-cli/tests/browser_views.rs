@@ -20,6 +20,10 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test abbreviation_escapes_text_and_title:
+    distance = ui.abbreviation("<km> & mi", "kilometres & \"miles\"")
+    assert distance.html == "<abbr title=\"kilometres &amp; &quot;miles&quot;\">&lt;km&gt; &amp; mi</abbr>"
+
 test escapes_multiline_field:
     field = ui.text_area("Notes & maps", "a\"b", "\n</textarea> & more")
     assert field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\">\n\n&lt;/textarea&gt; &amp; more</textarea></label>"
@@ -118,7 +122,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("16 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("17 passed"),
         "{good:?}"
     );
     fs::write(
