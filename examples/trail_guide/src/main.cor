@@ -16,12 +16,13 @@ fn guide(note: String) -> String:
         [ui.inline_text("Lookout"), ui.inline_text("3 km")]
     ])
     form = ui.query_form("/guide", [ui.text_area("Your note", "note", note), ui.submit("Preview")])
-    packing = ui.data_group("trail-note", note, [
-        ui.trusted_markup("<h2 id='packing'>Packing note</h2>"), ui.text(note), form
-    ])
+    packing = ui.data_group("trail-note", note, [ui.text(note), form])
     return match packing:
-        Ok(section) -> ui.page(title, [ui.h1(title), navigation, ui.h2("Route"), marker, stops, distances, section])
-        Err(reason) -> ui.page(title, [ui.text(reason)])
+        Ok(details) -> ui.page_in_language("en", title, [
+            ui.h1(title), navigation, ui.h2("Route"), marker, stops, distances,
+            ui.section("packing", "Packing note", [details])
+        ])
+        Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])
 
 server trail_guide:
     route GET "/" -> html:

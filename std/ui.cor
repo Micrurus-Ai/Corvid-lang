@@ -54,6 +54,11 @@ public fn data_group(name: String, value: String, content: List<View>) -> Result
 public fn navigation(label: String, content: List<View>) -> View:
     return View("<nav aria-label=\"" + escaped(label) + "\">" + children(content) + "</nav>")
 
+public fn section(heading_id: String, title: String, content: List<View>) -> View:
+    id = escaped(heading_id)
+    heading_html = "<h2 id=\"" + id + "\">" + escaped(title) + "</h2>"
+    return View("<section aria-labelledby=\"" + id + "\">" + heading_html + children(content) + "</section>")
+
 public fn image(src: String, alt: String) -> View:
     return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\">")
 
@@ -162,6 +167,9 @@ fn document_page(html_attributes: String, title: String, head: String, content: 
 
 public fn page(title: String, content: List<View>) -> String:
     return document_page("", title, "", content)
+
+public fn page_in_language(language: String, title: String, content: List<View>) -> String:
+    return document_page(" lang=\"" + escaped(language) + "\"", title, "", content)
 
 # Supply application-authored CSS, just as for a literal style element.
 public fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String:

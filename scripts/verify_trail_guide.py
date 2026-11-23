@@ -14,6 +14,7 @@ NOTE = '\nRain & "</textarea><em>wind</em>"'
 def check_response(url):
     initial = read(url)
     landmarks_and_content = [
+        '<!doctype html><html lang="en">',
         "<main><h1>River trail guide</h1>",
         '<nav aria-label="Guide sections"><a href="#packing"',
         "<h2>Route</h2>",
@@ -22,13 +23,15 @@ def check_response(url):
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
         "<tr><td>Bridge</td><td>1 km</td></tr><tr><td>Lookout</td><td>3 km</td></tr>",
-        """<div data-trail-note="Bring water"><h2 id='packing'>Packing note</h2>""",
+        '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
+        '<div data-trail-note="Bring water">',
         '<form method="get" action="/guide">',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
     response = read(url + "/guide?" + urlencode({"note": NOTE}))
     literal = escape(NOTE)
+    assert response.startswith('<!doctype html><html lang="en">')
     assert f'data-trail-note="{literal}"' in response
     assert f"<p>{literal}</p>" in response
     assert f'<textarea name="note">\n{literal}</textarea>' in response
@@ -44,7 +47,7 @@ def check_browser(url, channel):
         assert response.ok and "text/html" in response.headers["content-type"]
         main = page.get_by_role("main")
         assert main.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
-            "h1", "nav", "h2", "img", "ol", "table", "div"
+            "h1", "nav", "h2", "img", "ol", "table", "section"
         ]
         expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note"])
         image = main.get_by_role("img", name="Green circle trail marker")
@@ -57,8 +60,9 @@ def check_browser(url, channel):
         expect(page).to_have_url(url + "/#packing")
         expect(page.locator(":target")).to_have_text("Packing note")
 
-        main.get_by_label("Your note").fill(NOTE)
-        main.get_by_role("button", name="Preview").click()
+        packing = main.get_by_role("region", name="Packing note")
+        packing.get_by_label("Your note").fill(NOTE)
+        packing.get_by_role("button", name="Preview").click()
         section = main.locator("[data-trail-note]")
         expect(section).to_have_attribute("data-trail-note", NOTE)
         expect(section.locator("p")).to_have_text(NOTE)

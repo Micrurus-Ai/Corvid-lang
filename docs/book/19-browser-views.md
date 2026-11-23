@@ -53,10 +53,14 @@ Use `ui.h1` for the page heading, `ui.h2` for its sections, and `ui.h3`, `ui.h4`
 
 ```corvid-fragment
 fn trail_page(title: String) -> String:
-    return ui.page(title, [ui.h1(title), ui.h2("Equipment"), ui.text("Bring a compass.")])
+    return ui.page_in_language("en", title, [ui.h1(title), ui.h2("Equipment"), ui.text("Bring a compass.")])
 ```
 
+Pass the document's primary language to `ui.page_in_language`. For example, `"en"` sets `lang="en"` on the root HTML element so readers and speech tools can identify the language of the page.
+
 ### Group navigation links
+
+To link to a named section, pair `ui.link("Packing note", "#packing")` with `ui.section("packing", "Packing note", [form])`. The section starts with an `h2`. Its ID gives the link a destination, and the heading supplies the region's name through `aria-labelledby`. Choose a unique, nonempty ID without whitespace. Child views follow the heading in list order.
 
 Use `ui.navigation(label, content)` to group links in a native `nav` landmark. Give the group a name that describes its destinations. Corvid escapes the label for `aria-label` and renders the children in list order.
 

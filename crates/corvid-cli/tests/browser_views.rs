@@ -32,6 +32,11 @@ test renders_heading_levels:
     page = ui.page("Guide", headings)
     assert page.contains("<main><h1>Trails &amp; &lt;maps&gt;</h1><h2>Level 2</h2><h3>Level 3</h3><h4>Level 4</h4><h5>Level 5</h5><h6></h6></main>")
 
+test escapes_document_language:
+    page = ui.page_in_language("en\" & <tag>", "Map & guide", [ui.text("Map")])
+    assert page.contains("<!doctype html><html lang=\"en&quot; &amp; &lt;tag&gt;\"><head>")
+    assert page.contains("<title>Map &amp; guide</title></head><body><main><p>Map</p></main>")
+
 test trusted_markup_and_text_in_one_page:
     fragment = "<h1 data-topic=\"notes\">Maps &amp; trails</h1>"
     page = ui.page("Guide", [ui.trusted_markup(fragment), ui.text(fragment)])
@@ -78,6 +83,10 @@ test renders_native_lists_in_order:
     assert steps.html == "<ol start=\"-2\"><li>Read &lt;notes&gt; &amp; <a href=\"/ref\" tabindex=\"0\">references</a></li><li>Bring <ul><li>Notebook</li></ul></li></ol>"
     assert ui.unordered_list([]).html == "<ul></ul>"
 
+test section_names_its_region_and_preserves_order:
+    region = ui.section("trail\"&", "Maps <today>", [ui.text("first"), ui.text("second")])
+    assert region.html == "<section aria-labelledby=\"trail&quot;&amp;\"><h2 id=\"trail&quot;&amp;\">Maps &lt;today&gt;</h2><p>first</p><p>second</p></section>"
+
 test renders_native_table_in_order:
     guide = [ui.link("A & B", "/guide"), ui.inline_text("<ready>")]
     notes = [ui.inline_text("Notes"), ui.inline_text("Draft")]
@@ -99,7 +108,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("12 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("14 passed"),
         "{good:?}"
     );
     fs::write(
