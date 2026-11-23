@@ -385,6 +385,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn abbreviation(label: String, expansion: String) -> View` renders an `abbr` element with the label as its text and the expansion in its `title` attribute. Both strings are escaped.
 - `fn trusted_markup(html: String) -> View` inserts application-authored HTML verbatim at the view's position among its siblings. It performs no escaping or sanitization. Use `text` or `inline_text` for user input.
+- `fn paragraph(content: List<View>) -> View` renders a `p` containing the supplied views in order, without adding spaces. Supply inline content such as `inline_text`, links or abbreviations. An empty list renders `<p></p>`.
 - `h1`, `h2`, `h3`, `h4`, `h5`, and `h6` each take `(label: String) -> View` and render the corresponding HTML heading element with the label as escaped text.
 - `fn navigation(label: String, content: List<View>) -> View` renders a native `nav` with an escaped `aria-label` and its child views in list order.
 - `fn section(heading_id: String, title: String, content: List<View>) -> View` renders a `section` named by its opening `h2`. Supply a unique, nonempty ID without whitespace for the heading. The function escapes the ID in both `id` and `aria-labelledby`, escapes the heading text, and renders children in list order.

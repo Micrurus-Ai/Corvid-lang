@@ -33,6 +33,14 @@ fn notes_page(note: String) -> String:
     return ui.page("Notes", [heading, ui.text(note)])
 ```
 
+Use `ui.paragraph` to mix inline views in a single paragraph. Its children appear in the order you supply them. Include any spaces between words in the text itself.
+
+```corvid-fragment
+fn note_preview(note: String) -> View:
+    label = ui.trusted_markup("<strong>Current note</strong>")
+    return ui.paragraph([label, ui.inline_text(": " + note)])
+```
+
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
 For an opt-in, read-only search that a compatible browser agent can discover, use `ui.agent_query_form(name, description, path, controls)`. Supply a stable unique tool name, an author-written description, and a trusted read-only GET path. The visible form and the agent use the same named fields. The user submits the form. On browsers without declarative WebMCP, the form works as a normal GET form. The server remains responsible for authorizing the request.

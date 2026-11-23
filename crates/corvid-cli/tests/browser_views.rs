@@ -20,6 +20,12 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test paragraph_preserves_inline_markup_and_escaped_text:
+    label = ui.trusted_markup("<strong>Note</strong>")
+    note = ui.inline_text(": <em>Wind & rain</em>")
+    assert ui.paragraph([label, note]).html == "<p><strong>Note</strong>: &lt;em&gt;Wind &amp; rain&lt;/em&gt;</p>"
+    assert ui.paragraph([]).html == "<p></p>"
+
 test abbreviation_escapes_text_and_title:
     distance = ui.abbreviation("<km> & mi", "kilometres & \"miles\"")
     assert distance.html == "<abbr title=\"kilometres &amp; &quot;miles&quot;\">&lt;km&gt; &amp; mi</abbr>"
@@ -129,7 +135,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("18 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("19 passed"),
         "{good:?}"
     );
     fs::write(
