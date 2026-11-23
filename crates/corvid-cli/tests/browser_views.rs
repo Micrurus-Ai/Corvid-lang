@@ -20,6 +20,14 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test renders_heading_levels:
+    headings = [
+        ui.h1("Trails & <maps>"), ui.h2("Level 2"), ui.h3("Level 3"),
+        ui.h4("Level 4"), ui.h5("Level 5"), ui.h6("")
+    ]
+    page = ui.page("Guide", headings)
+    assert page.contains("<main><h1>Trails &amp; &lt;maps&gt;</h1><h2>Level 2</h2><h3>Level 3</h3><h4>Level 4</h4><h5>Level 5</h5><h6></h6></main>")
+
 test trusted_markup_and_text_in_one_page:
     fragment = "<h1 data-topic=\"notes\">Maps &amp; trails</h1>"
     page = ui.page("Guide", [ui.trusted_markup(fragment), ui.text(fragment)])
@@ -67,7 +75,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("8 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("9 passed"),
         "{good:?}"
     );
     fs::write(

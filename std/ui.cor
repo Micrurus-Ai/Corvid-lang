@@ -17,6 +17,27 @@ public fn text(value: String) -> View:
 public fn inline_text(value: String) -> View:
     return View(escaped(value))
 
+fn heading(tag: String, label: String) -> View:
+    return View("<" + tag + ">" + escaped(label) + "</" + tag + ">")
+
+public fn h1(label: String) -> View:
+    return heading("h1", label)
+
+public fn h2(label: String) -> View:
+    return heading("h2", label)
+
+public fn h3(label: String) -> View:
+    return heading("h3", label)
+
+public fn h4(label: String) -> View:
+    return heading("h4", label)
+
+public fn h5(label: String) -> View:
+    return heading("h5", label)
+
+public fn h6(label: String) -> View:
+    return heading("h6", label)
+
 # Insert an application-authored HTML fragment verbatim.
 public fn trusted_markup(html: String) -> View:
     return View(html)

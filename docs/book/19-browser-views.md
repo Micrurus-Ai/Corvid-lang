@@ -45,6 +45,15 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+### Give the page an outline
+
+Use `ui.h1` for the page heading, `ui.h2` for its sections, and `ui.h3`, `ui.h4`, `ui.h5`, or `ui.h6` for successively deeper subsections. Each accepts a string and escapes it, so a title such as `Maps & <trails>` appears as literal text.
+
+```corvid-fragment
+fn trail_page(title: String) -> String:
+    return ui.page(title, [ui.h1(title), ui.h2("Equipment"), ui.text("Bring a compass.")])
+```
+
 ### Group navigation links
 
 Use `ui.navigation(label, content)` to group links in a native `nav` landmark. Give the group a name that describes its destinations. Corvid escapes the label for `aria-label` and renders the children in list order.
