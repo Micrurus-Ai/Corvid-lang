@@ -68,6 +68,15 @@ fn trail_navigation() -> View:
 
 Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to place an image in a list of views. Choose a trusted source URL and describe what the image contributes to the page. For a purely decorative image, pass an empty string as the second argument. Corvid escapes both attribute values.
 
+### Attach application data to a group
+
+`ui.data_group` wraps child views in a `div` with a custom data attribute. Supply the name after `data-`. For example, `trail-id` produces `data-trail-id`. The name must contain at least one character and may use lowercase ASCII letters, digits and hyphens. An invalid name returns `Err`. The value can contain quotes or other text because Corvid escapes it.
+
+```corvid-fragment
+fn trail_card(id: String, title: String) -> Result<View, String>:
+    return ui.data_group("trail-id", id, [ui.h2(title), ui.link("Map", "/map")])
+```
+
 ### Write a list with text and links
 
 Use `ui.inline_text` for text alongside a link. It escapes the string and preserves surrounding spaces. Put each item's children in reading order with `ui.list_item`. Use `ui.unordered_list` for bullets or `ui.ordered_list` for numbering. The first argument to `ui.ordered_list` sets the first item's number, so a second page can continue an earlier list.

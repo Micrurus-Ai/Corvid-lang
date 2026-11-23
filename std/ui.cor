@@ -42,6 +42,15 @@ public fn h6(label: String) -> View:
 public fn trusted_markup(html: String) -> View:
     return View(html)
 
+public fn data_group(name: String, value: String, content: List<View>) -> Result<View, String>:
+    if name == "":
+        return Err("A data attribute needs a name after data-.")
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-"
+    for character in name:
+        if not allowed.contains(character):
+            return Err("Use lowercase ASCII letters, digits or hyphens in a data attribute name.")
+    return Ok(View("<div data-" + name + "=\"" + escaped(value) + "\">" + children(content) + "</div>"))
+
 public fn navigation(label: String, content: List<View>) -> View:
     return View("<nav aria-label=\"" + escaped(label) + "\">" + children(content) + "</nav>")
 

@@ -34,6 +34,26 @@ test trusted_markup_and_text_in_one_page:
     literal = "<p>&lt;h1 data-topic=&quot;notes&quot;&gt;Maps &amp;amp; trails&lt;/h1&gt;</p>"
     assert page.contains("<main>" + fragment + literal + "</main>")
 
+test custom_data_group:
+    group = ui.data_group("trail-id2", "<east> & \"west\"", [ui.h2("Map"), ui.text("Route")])
+    html = match group:
+        Ok(view) -> view.html
+        Err(message) -> message
+    assert html == "<div data-trail-id2=\"&lt;east&gt; &amp; &quot;west&quot;\"><h2>Map</h2><p>Route</p></div>"
+
+fn rejects_data_name(name: String) -> Bool:
+    return match ui.data_group(name, "", []):
+        Ok(_) -> false
+        Err(_) -> true
+
+test rejects_invalid_data_names:
+    assert rejects_data_name("")
+    assert rejects_data_name("trail id")
+    assert rejects_data_name("x=\"y\"")
+    assert rejects_data_name("Trail")
+    assert rejects_data_name("café")
+    assert rejects_data_name("x>")
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -75,7 +95,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("9 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("11 passed"),
         "{good:?}"
     );
     fs::write(

@@ -384,6 +384,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn trusted_markup(html: String) -> View` inserts application-authored HTML verbatim at the view's position among its siblings. It performs no escaping or sanitization. Use `text` or `inline_text` for user input.
 - `h1`, `h2`, `h3`, `h4`, `h5`, and `h6` each take `(label: String) -> View` and render the corresponding HTML heading element with the label as escaped text.
 - `fn navigation(label: String, content: List<View>) -> View` renders a native `nav` with an escaped `aria-label` and its child views in list order.
+- `fn data_group(name: String, value: String, content: List<View>) -> Result<View, String>` returns a `div` with one `data-{name}` attribute, its escaped value and the children in list order. Pass the suffix only. Empty names and characters outside `a-z`, `0-9` and `-` return `Err`.
 - `fn image(src: String, alt: String) -> View` renders an `img` with escaped `src` and `alt` attributes. Supply a trusted image URL and alternative text. An empty string emits `alt=""` for a decorative image.
 - `fn list_item(content: List<View>) -> View` wraps the children in an `li` in the supplied order.
 - `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
