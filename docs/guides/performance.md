@@ -15,6 +15,12 @@ The largest median difference was on the first visit. Corvid took 11.60 ms longe
 
 Both sides used the same loopback Corvid server from a debug CLI build, generated DOM controls, HTML, CSS and checkout logic. The client used the packaged Wasm loader or TypeScript 5.9.3 compiled to JavaScript. These results cover one desktop browser and one interaction. See the [method and reproduction commands](../../benches/typescript/README.md#storefront-interaction) and [all 160 observations](../../benches/typescript/storefront-windows-chrome.jsonl).
 
+### Startup profile
+
+A second 160-edit run recorded each browser asset's request start and response end. Cold readiness medians were 57.3 ms for Corvid and 43.8 ms for TypeScript. Both reached the DOM update in 1.65 ms on cold visits and 1.20 ms on warm visits.
+
+The cold JavaScript request took about 7.5 ms for either implementation. After that response ended, Corvid took a median 34.85 ms to become ready and TypeScript took 22.80 ms. Within Corvid's interval, Chrome started the Wasm request a median 21.30 ms after the JavaScript response ended. Fetching Wasm took 2.00 ms. The final interval from Wasm response end to cart readiness was 11.65 ms and includes browser scheduling, Wasm startup and control setup. Each median was computed separately. The measurements identify the serial request as a candidate for an early-fetch experiment. The speedup from overlapping requests still needs measurement. [Startup samples](../../benches/typescript/storefront-startup-windows-chrome.jsonl)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw

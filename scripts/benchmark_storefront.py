@@ -65,7 +65,8 @@ def visit(page, url):
         ...window.cartSample, ready_ms: window.cartReady,
         assets: performance.getEntriesByType('resource')
             .filter(e => e.name.includes('/target/wasm/'))
-            .map(e => ({file:new URL(e.name).pathname.split('/').pop(), bytes:e.transferSize}))
+            .map(e => ({file:new URL(e.name).pathname.split('/').pop(), bytes:e.transferSize,
+                        start_ms:e.startTime, end_ms:e.responseEnd}))
     })""")
     expect(page.get_by_text("5400", exact=True)).to_be_visible()
     checkout(page, 12, 1)
