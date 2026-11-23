@@ -434,13 +434,15 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 ## Browser-local record views in std:ui
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
+- `ui.assistant_reorder(component: View, name: String, description: String) -> View` exposes the move action for one enclosed browser list. Its inputs are a row key and a direction of `up` or `down`.
+- The keyed child loop uses `ui.browser_row(key: String, key_field: String, fields: Map<String, List<String>>, content: List<View>) -> View` to mount a record editor and `ui.browser_rows(label: String, rows: List<View>) -> View` to group the rows.
 - `ui.boolean_children(field: String, content: List<View>) -> View` shows its children while a browser boolean is true. Prefer `if settings.tools.web_search:` inside a child block for compile-time checking.
 - `ui.choice_children(field: String, variant: String, content: List<View>) -> View` groups views whose visibility follows a browser choice. Prefer an indented `if settings.mode == Scheduled` child block so the compiler checks the field and variant.
 - `ui.value(field: String) -> View` displays a browser field as live plain text inside its mounted record editor. Use `ui.value(bind settings.profile.name)` in a developer-written layout.
 - `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}` or `{profile.name}`.
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
-- `browser state name = initial` obtains a `ui.RecordState` from a record whose editable leaves are text, booleans, named choices, or bounded integers. Use `bind settings.tools.web_search` to bind a nested leaf.
+- `browser state name = initial` obtains a `ui.RecordState` from a record whose editable leaves are text, booleans, named choices, or bounded integers. Use `bind settings.tools.web_search` to bind a nested leaf. A list initializer retains its record element type for keyed rows.
 - `ui.checkbox(label: String, field: String) -> View` creates a native checkbox. Use `bind state.enabled` for a checked boolean field.
 - `ui.segmented_choice(label: String, field: String) -> View` displays a named choice as a labelled group of native radio buttons. Use the arrow keys to select adjacent options. Each mounted group uses its own radio name.
 - `ui.field(label: String, name: String) -> View` places a labelled native control in your layout. At mount time the declared type selects a text area, checkbox, choice list, or slider.

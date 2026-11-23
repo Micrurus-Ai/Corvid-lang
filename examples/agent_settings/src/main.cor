@@ -52,7 +52,27 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
     )
     return ui.local_selection(settings, controls, preview)
 
+type WorkspaceAgent:
+    id: String
+    name: String
+    enabled: Bool
+
+type Workspace:
+    agents: List<WorkspaceAgent>
+
+fn agent_list(workspace: Workspace) -> ui.View:
+    browser state members = workspace.agents
+    agents = ui.stack:
+        for agent in members by agent.id:
+            ui.field("Agent name", bind agent.name)
+            ui.checkbox("Enabled", bind agent.enabled)
+    return ui.assistant_reorder(agents, "move_agent", "Move an agent up or down by its ID.")
+
 server app:
+    route GET "/agents" -> html:
+        workspace = Workspace([WorkspaceAgent("reader", "Reader", true), WorkspaceAgent("writer", "Writer", false)])
+        return ui.interactive_page("Workspace agents", [agent_list(workspace)])
+
     route GET "/" -> html:
         editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false, 5), Manual, 5, 1))
         return ui.interactive_page("Agent settings", [ui.assistant_selection(editor, "update_settings", "Update the agent settings.")])

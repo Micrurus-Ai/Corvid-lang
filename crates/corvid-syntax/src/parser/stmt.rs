@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
 
         // Import only in the consuming module. The record itself stays UI-independent.
         let constructor = format!("__browser_record_{}", start.start);
-        let import = format!("import \"std:ui\" use browser_record as {constructor}\n");
+        let import = format!("import \"std:ui\" as {constructor}_ui use browser_record as {constructor}\n");
         let mut tokens = crate::lex(&import).expect("valid browser state import");
         for (index, token) in tokens.iter_mut().enumerate() {
             token.span = start.expanded(index);

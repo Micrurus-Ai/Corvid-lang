@@ -659,6 +659,22 @@ Select **Allow web search** to reveal the search result limit. Clearing the chec
 
 An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true,"search_limit":5},"mode":"Scheduled","interval_minutes":15,"retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
 
+### Edit and reorder a list of agents
+
+Open `/agents` in the packaged agent settings example. Each row starts with a record from the application's typed list. The browser keeps its editable values and position until reload.
+
+```corvid
+fn agent_list(workspace: Workspace) -> ui.View:
+    browser state members = workspace.agents
+    agents = ui.stack:
+        for agent in members by agent.id:
+            ui.field("Agent name", bind agent.name)
+            ui.checkbox("Enabled", bind agent.enabled)
+    return ui.assistant_reorder(agents, "move_agent", "Move an agent up or down by its ID.")
+```
+
+Give each agent a unique, nonempty string ID. Use editable fields such as the name for the controls and keep the ID stable. Start editing the second name and press Alt+Up. The row moves with the caret. An assistant can call the opted-in action with `{"key":"writer","direction":"up"}` to make the same move while the user is typing. The action advertises the available IDs.
+
 ### Show a field in a custom live preview
 
 Use `ui.value` to place an editable field's current value inside a view you design. For example, a nameplate can accept a view and place it beside a label.

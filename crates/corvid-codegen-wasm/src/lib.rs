@@ -29,7 +29,7 @@ mod string_pool;
 
 pub use companions::WasmArtifacts;
 /// DOM-only enhancements for standard form controls.
-pub const FORM_CONTROLS_JS: &str = include_str!("form_controls.js");
+pub const FORM_CONTROLS_JS: &str = concat!(include_str!("keyed_list.js"), "\n", include_str!("form_controls.js"));
 pub use error::WasmCodegenError;
 
 const HOST_MODULE: &str = "corvid:host";

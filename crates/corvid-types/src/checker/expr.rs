@@ -39,7 +39,11 @@ impl<'a> Checker<'a> {
                     _ => ty,
                 }
             }
-            Expr::Call { callee, args, span } => self.check_call(callee, args, *span, expected),
+            Expr::Call { callee, args, span } => {
+                let result = self.check_call(callee, args, *span, expected);
+                e.browser_state_initializer().and_then(|initial| self.types.get(&initial.span()))
+                    .filter(|ty| matches!(ty, Type::List(_))).cloned().unwrap_or(result)
+            }
             Expr::FieldAccess {
                 target,
                 field,
@@ -302,6 +306,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::BrowserRowKey
                 | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor

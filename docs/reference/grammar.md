@@ -642,11 +642,15 @@ fn size_editor(size: Dimensions) -> ui.View:
     return ui.local_selection(selected, controls, ui.record_text("{width} x {height}"))
 ```
 
-Inside a function, write `browser state name = expression`. The initializer is evaluated once. Its record type supplies the field names and bounds. A field can be a `String` (optionally refined with `len_between`), a `Bool`, a named choice whose variants have no payload, or an `Int` with inclusive ordered bounds in the browser safe integer range (-9007199254740991 through 9007199254740991). A field can also contain another nonempty record of supported fields. Recursive record types are unsupported. Pass the resulting `ui.RecordState` to an editor. The compatibility spelling `local type T` and its generated `T_state` helper are still supported. See [browser-local record views](functions.md#browser-local-record-views-in-stdui).
+Inside a function, write `browser state name = expression`. The initializer is evaluated once. Its record type supplies the field names and bounds. A field can be a `String` (optionally refined with `len_between`), a `Bool`, a named choice whose variants have no payload, or an `Int` with inclusive ordered bounds in the browser safe integer range (-9007199254740991 through 9007199254740991). A field can also contain another nonempty record of supported fields. Recursive record types are unsupported. Pass the resulting `ui.RecordState` to an editor. A list of these records can initialize a keyed row layout as described below. The compatibility spelling `local type T` and its generated `T_state` helper are still supported. See [browser-local record views](functions.md#browser-local-record-views-in-stdui).
 
 ### Browser field bindings
 
 `bind state.field` and nested paths such as `bind settings.profile.name` check each field against the declared record type. The path must end at an editable leaf. The expression produces the dot-separated path as a string for view construction. Direct bindings passed to standard checkbox, slider, swatch and segmented-choice controls are also checked for compatible field types. Ordinary string arguments and text preview templates resolve at mount time. A bind expression selects a field name and does not read its current browser value.
+
+### Keyed rows in view layouts
+
+Inside an indented child list, `for item in records by item.id:` builds one editable row per record in the input list, in source order. The key must be a unique nonempty string field. The loop variable is in scope inside the block, including in `bind item.field` expressions. A row accepts the same editable record fields as a browser record editor. Moving a row preserves its browser-local edits and input focus. Declare `browser state members = workspace.agents` to initialize a typed list of editable records. A typed list expression can also appear directly after `in`. The list is initialized when the page renders.
 
 ### Conditions in view layouts
 

@@ -102,6 +102,7 @@ struct Parser<'a> {
     /// Cleared by every `bump`, so the credit only survives when the
     /// block expression IS the end of the statement.
     block_expr_terminated: bool,
+    row_bindings: Vec<String>,
     generated: Vec<Decl>,
     components: Vec<Component>,
 }
@@ -113,6 +114,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             errors: Vec::new(),
             block_expr_terminated: false,
+            row_bindings: Vec::new(),
             generated: Vec::new(),
             components: Vec::new(),
         }

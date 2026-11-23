@@ -388,7 +388,7 @@ fn emit_js_loader(
             out.push_str(&format!("const {name} = new Map({bindings});\n"));
         }
         out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
-        out.push_str(crate::FORM_CONTROLS_JS);
+        out.push_str(include_str!("form_controls.js"));
         out.push_str("}\n");
         out.push_str(include_str!("browser_controls.js"));
         if agents.iter().any(|agent| agent.name.starts_with("__drag_")) {

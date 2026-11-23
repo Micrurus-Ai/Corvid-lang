@@ -1427,7 +1427,14 @@ impl<'a> Lowerer<'a> {
                     .collect(),
                 body: Box::new(self.lower_expr(body)),
             },
-            Expr::Call { callee, args, .. } => self.lower_call(callee, args),
+            Expr::Call { callee, args, .. } => {
+                if let Some(initial) = e.browser_state_initializer().filter(|value|
+                    matches!(self.types.get(&value.span()), Some(Type::List(_)))) {
+                    self.lower_expr(initial).kind
+                } else {
+                    self.lower_call(callee, args)
+                }
+            }
             Expr::FieldAccess { target, field, .. } => IrExprKind::FieldAccess {
                 target: Box::new(self.lower_expr(target)),
                 field: field.name.clone(),
@@ -1865,7 +1872,7 @@ impl<'a> Lowerer<'a> {
                         next_cursor: Box::new(next_cursor),
                     };
                 }
-                Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey)) if matches!(args.len(), 2 | 3) => {
+                Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey | BuiltIn::BrowserRowKey)) if matches!(args.len(), 2 | 3) => {
                     return self.lower_expr(&args[1]).kind;
                 }
                 Some(Binding::BuiltIn(BuiltIn::BrowserFields)) if args.len() == 1 => {

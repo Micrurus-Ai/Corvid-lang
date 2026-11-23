@@ -141,6 +141,20 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Recover the initializer of the parser-generated browser state constructor.
+    pub fn browser_state_initializer(&self) -> Option<&Expr> {
+        let Expr::Call { callee, args, .. } = self else { return None };
+        if !matches!(callee.as_ref(), Expr::Ident { name, .. }
+            if name.span.expansion.is_some() && name.name.starts_with("__browser_record_")) {
+            return None;
+        }
+        let [Expr::Call { callee, args, .. }] = args.as_slice() else { return None };
+        match (callee.as_ref(), args.as_slice()) {
+            (Expr::Ident { name, .. }, [initial]) if name.name == "__browser_fields" => Some(initial),
+            _ => None,
+        }
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Expr::Literal { span, .. }

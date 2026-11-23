@@ -29,27 +29,8 @@ impl Checker<'_> {
     }
 
     pub(super) fn track_browser_model(&mut self, local: corvid_resolve::LocalId, value: &Expr) {
-        // A browser-state declaration expands to browser_record(__browser_fields(initial)).
-        let model = match value {
-            Expr::Call { callee, args, .. } if callee.span().expansion.is_some() => {
-                match args.as_slice() {
-                    [Expr::Call { callee, args, .. }]
-                        if matches!(
-                            self.bindings.get(&callee.span()),
-                            Some(corvid_resolve::Binding::BuiltIn(
-                                corvid_resolve::BuiltIn::BrowserFields
-                            ))
-                        ) =>
-                    {
-                        args.first()
-                            .and_then(|initial| self.types.get(&initial.span()))
-                            .cloned()
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
+        let model = value.browser_state_initializer()
+            .and_then(|initial| self.types.get(&initial.span())).cloned();
         if self.local_types.contains_key(&local) {
             if let Some(previous) = self.browser_models.get_mut(&local) {
                 if *previous != model {
@@ -61,7 +42,7 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn check_browser_field_key(&mut self, name: &Ident, args: &[Expr]) -> Type {
+    pub(super) fn check_browser_field_key(&mut self, name: &Ident, args: &[Expr], row: bool) -> Type {
         let [owner, Expr::Literal {
             value: Literal::String(key),
             span,
@@ -70,12 +51,13 @@ impl Checker<'_> {
             self.form_error(name.span, "expected bind state.field".into());
             return Type::String;
         };
-        self.check_expr(owner);
-        let model = match self.bindings.get(&owner.span()) {
-            Some(corvid_resolve::Binding::Local(id)) => {
-                self.browser_models.get(id).cloned().flatten()
-            }
-            _ => None,
+        let owner_type = self.check_expr(owner);
+        let model = if row {
+            Some(owner_type)
+        } else if let Some(corvid_resolve::Binding::Local(id)) = self.bindings.get(&owner.span()) {
+            self.browser_models.get(id).cloned().flatten()
+        } else {
+            None
         };
         let Some(model) = model else {
             self.form_error(
@@ -175,7 +157,11 @@ impl Checker<'_> {
             return result;
         };
         let ty = self.check_expr(initial);
-        let invalid = !self.valid_browser_record(&ty, &mut Vec::new());
+        let record = match &ty {
+            Type::List(item) if name.span.expansion.is_some() => item.as_ref(),
+            _ => &ty,
+        };
+        let invalid = !self.valid_browser_record(record, &mut Vec::new());
         if invalid {
             self.errors.push(TypeError::new(
                 TypeErrorKind::TypeMismatch {

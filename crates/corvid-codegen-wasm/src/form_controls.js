@@ -107,6 +107,8 @@ for (const form of document.querySelectorAll("form[data-corvid-selection]")) {
   }
 }
 
+for (const list of document.querySelectorAll("[data-browser-rows]")) bindKeyedList(list);
+
 // Each mounted record owns its value and bindings. Only initialization reads the schema markup.
 for (const region of document.querySelectorAll("[data-local-selection]")) {
   const alert = region.querySelector(":scope > [role=alert]");
@@ -178,8 +180,12 @@ function bindLocalSelection(region) {
   }
   const controls = [...owned('input[name]:not([type=radio]),select[name],textarea[name]'), ...groups];
   const boundName = control => control.dataset.choiceGroup ?? control.name;
-  if (!names.length || controls.length !== names.length ||
-      names.some(name => !controls.some(input => boundName(input) === name))) {
+  const rowKey = region.parentElement.dataset.rowKeyField;
+  const editable = controls.map(boundName);
+  if (rowKey && (editable.includes(rowKey) || editable.some(name => !Object.hasOwn(initial, name)) ||
+      new Set(editable).size !== editable.length)) throw Error("Invalid editable row field.");
+  if (!rowKey && (!names.length || controls.length !== names.length ||
+      names.some(name => !controls.some(input => boundName(input) === name)))) {
     throw Error("Each record field needs one matching control.");
   }
   const preview = region.querySelector(":scope > [data-local-preview]");

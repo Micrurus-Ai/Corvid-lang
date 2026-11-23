@@ -40,13 +40,27 @@ function bindKeyedList(region) {
     }
     status.textContent = row.dataset.corvidKey + ", position " + position + " of " + rows.size;
   }
+  const owner = region.closest("[data-reorder-owner]");
+  if (owner && rows.size && document.modelContext?.registerTool && owner.querySelectorAll("[data-browser-rows]").length === 1) {
+    Promise.resolve().then(() => document.modelContext.registerTool({
+      name: owner.dataset.corvidTool, description: owner.dataset.corvidDescription,
+      inputSchema: {type: "object", additionalProperties: false, required: ["key", "direction"],
+        properties: {key: {type: "string", enum: Array.from(rows.keys())}, direction: {type: "string", enum: ["up", "down"]}}},
+      execute(input) {
+        if (!region.isConnected || !input || Object.keys(input).length !== 2 ||
+            !rows.has(input.key) || !["up", "down"].includes(input.direction)) throw Error("Invalid row move.");
+        move(rows.get(input.key), input.direction);
+        return status.textContent;
+      },
+    })).catch(error => { status.textContent = error.message; });
+  }
   for (const [key, row] of rows) {
     for (const button of row.querySelectorAll(":scope > button[data-corvid-move]")) {
       button.addEventListener("click", () => move(rows.get(key), button.dataset.corvidMove));
       button.hidden = false;
     }
     row.addEventListener("keydown", event => {
-      if (event.target.closest("[data-corvid-list]") !== region || event.isComposing ||
+      if (event.target.closest("[data-corvid-list], [data-browser-rows]") !== region || event.isComposing ||
           !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();

@@ -97,6 +97,23 @@ test imported_choice:
     model.write_text(model.read_text().replace("    Scheduled", "    Scheduled(at: String)"))
     rejected = subprocess.run([cli, "check", probe], cwd=project, capture_output=True, text=True)
     assert rejected.returncode and "browser state" in rejected.stderr, rejected
+    probe.write_text("""import "std:ui" as ui
+type Member:
+    id: String
+    name: String
+
+test list_initializers:
+    browser state people = [Member("one", "First")]
+    browser state others = [Member("two", "Second")]
+    rows = ui.stack:
+        for agent in people by agent.id:
+            ui.text(agent.id)
+            ui.field("Name", bind agent.name)
+    assert people[0].id == "one"
+    assert others[0].name == "Second"
+    assert rows.html.length() > 0
+""")
+    subprocess.run([cli, "test", probe], cwd=project, check=True)
     # The packaged fixture below contains only the application under test.
     probe.unlink()
     model.unlink()
@@ -106,6 +123,8 @@ def check_field_diagnostics(cli, project):
     main = project / "src/main.cor"
     source = main.read_text()
     for before, after, diagnostic in [
+        ("bind agent.enabled", "bind agent.unknown", "unknown"),
+        ("by agent.id", "by agent.enabled", "String"),
         ("ui.value(bind settings.profile.name)", "ui.value(bind settings.profile.nmae)", "nmae"),
         ("bind settings.profile.name", "bind settings.profil.name", "profil"),
         ("bind settings.tools.web_search", "bind settings.profile.name", "checkbox field binding"),
@@ -236,6 +255,33 @@ def exercise_settings(page):
     assert not requests, requests
 
 
+def exercise_rows(page):
+    page.context.set_offline(True)
+    rows = page.get_by_role("listitem")
+    expect(rows).to_have_count(2)
+    assert page.evaluate("tools.get('move_agent').inputSchema.properties.key.enum") == ["reader", "writer"]
+    assert page.evaluate("""async () => { try { await tools.get('move_agent').execute({key:'missing', direction:'up'}); }
+        catch { return true; } return false; }""")
+    writer = page.locator('[data-corvid-key="writer"]')
+    name = writer.get_by_role("textbox", name="Agent name")
+    name.fill("Writer")
+    name.evaluate("node => { window.editedNode = node; node.setSelectionRange(2, 2); }")
+    name.press("x")
+    result = page.evaluate("() => tools.get('move_agent').execute({key:'writer', direction:'up'})")
+    assert "position 1" in result
+    expect(rows.first).to_have_attribute("data-corvid-key", "writer")
+    expect(name).to_be_focused()
+    assert name.evaluate("node => node === window.editedNode && node.selectionStart === 3 && node.selectionEnd === 3")
+    name.press("y")
+    expect(name).to_have_value("Wrxyiter")
+    expect(rows.last.get_by_role("textbox")).to_have_value("Reader")
+    name.press("Alt+ArrowDown")
+    expect(rows.last).to_have_attribute("data-corvid-key", "writer")
+    expect(name).to_be_focused()
+    writer.get_by_role("checkbox").check()
+    expect(writer.get_by_role("checkbox")).to_be_checked()
+
+
 def verify(cli, channel):
     with TemporaryDirectory() as tmp, sync_playwright() as engines, ExitStack() as browsers:
         root = Path(tmp)
@@ -253,6 +299,14 @@ def verify(cli, channel):
                         ignore=shutil.ignore_patterns("target"))
         check_child_blocks(cli, settings)
         check_field_diagnostics(cli, settings)
+        settings_main = settings / "src/main.cor"
+        with settings_main.open("a") as fixture:
+            fixture.write('\n    route GET "/empty" -> html:\n'
+                          '        empty: List<WorkspaceAgent> = []\n'
+                          '        return ui.interactive_page("Empty", [agent_list(Workspace(empty))])\n'
+                          '    route GET "/duplicate" -> html:\n'
+                          '        same = WorkspaceAgent("same", "Name", true)\n'
+                          '        return ui.interactive_page("Duplicate", [agent_list(Workspace([same, same]))])\n')
         package(cli, settings, root / "settings-bundle")
         pages = []
         with ExitStack() as servers:
@@ -262,7 +316,8 @@ def verify(cli, channel):
                 browser = getattr(engines, engine).launch(channel=channel if engine == "chromium" else None)
                 browsers.callback(browser.close)
                 for address, tool, test in [(url, "select_color", exercise),
-                                            (settings_url, "update_settings", exercise_settings)]:
+                                            (settings_url, "update_settings", exercise_settings),
+                                            (settings_url + "/agents", "move_agent", exercise_rows)]:
                     page = browser.new_page()
                     page.add_init_script("""Object.defineProperty(document, 'modelContext', {value: {
                         registerTool(tool) { (window.tools ??= new Map()).set(tool.name, tool); }
@@ -270,6 +325,17 @@ def verify(cli, channel):
                     page.goto(address)
                     page.wait_for_function("name => window.tools?.has(name)", arg=tool)
                     pages.append((engine, page, test))
+                for path, count in (("empty", 0), ("duplicate", 2)):
+                    boundary = browser.new_page()
+                    boundary.add_init_script("""Object.defineProperty(document, "modelContext", {value: {
+                        registerTool() { window.registeredMove = true; }
+                    }})""")
+                    boundary.goto(settings_url + "/" + path)
+                    expect(boundary.get_by_role("listitem")).to_have_count(count)
+                    if count:
+                        expect(boundary.locator("[data-browser-rows] > [role=status]")).to_contain_text("unique key")
+                    assert not boundary.evaluate("Boolean(window.registeredMove)")
+                    boundary.close()
         for engine, page, test in pages:
             test(page)
             print(engine, "passed with server stopped", flush=True)

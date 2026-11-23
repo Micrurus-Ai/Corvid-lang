@@ -56,6 +56,7 @@ pub enum BuiltIn {
     FormFor,
     BrowserFields,
     BrowserFieldKey,
+    BrowserRowKey,
     /// Call: `Weak::upgrade(reference: Weak<T>) -> Option<T>`.
     WeakUpgrade,
     /// Call: `merge(streams: List<Stream<T>>) -> Stream<T>`.
@@ -183,6 +184,7 @@ impl SymbolTable {
         self.builtins.insert("None".into(), BuiltIn::None);
         self.builtins.insert("Weak::new".into(), BuiltIn::WeakNew);
         self.builtins.insert("range".into(), BuiltIn::Range);
+        self.builtins.insert("__browser_row_key".into(), BuiltIn::BrowserRowKey);
         self.builtins.insert("__browser_field_key".into(), BuiltIn::BrowserFieldKey);
         self.builtins.insert("__browser_fields".into(), BuiltIn::BrowserFields);
         self.builtins.insert("form_for".into(), BuiltIn::FormFor);

@@ -49,6 +49,8 @@ impl<'a> Parser<'a> {
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             let item = if matches!(self.peek(), TokKind::KwIf) {
                 self.parse_conditional_child()?
+            } else if matches!(self.peek(), TokKind::KwFor) {
+                self.parse_keyed_children()?
             } else {
                 self.parse_value_line()?
             };
@@ -65,8 +67,72 @@ impl<'a> Parser<'a> {
         Ok(Expr::List { items, span: start.merge(end) })
     }
 
+    fn field_key_builtin(&self, owner: &Expr) -> &'static str {
+        if matches!(owner, Expr::Ident { name, .. } if self.row_bindings.contains(&name.name)) {
+            "__browser_row_key"
+        } else {
+            "__browser_field_key"
+        }
+    }
+
+    fn parse_keyed_children(&mut self) -> Result<Expr, ParseError> {
+        let start = self.bump().span;
+        let (row, row_span) = if matches!(self.peek(), TokKind::KwAgent) {
+            ("agent".to_owned(), self.bump().span)
+        } else {
+            self.expect_ident()?
+        };
+        self.expect(TokKind::KwIn, "in before the list of records")?;
+        let source = self.parse_expr()?;
+        self.expect_contextual_ident("by")?;
+        if row == "agent" {
+            self.expect(TokKind::KwAgent, "the current agent row")?;
+        } else {
+            self.expect_contextual_ident(&row)?;
+        }
+        self.expect(TokKind::Dot, "a key field on the current row")?;
+        let (key, key_span) = self.expect_ident()?;
+        self.row_bindings.push(row.clone());
+        let children = self.parse_child_list();
+        self.row_bindings.pop();
+        let children = children?;
+        let end = children.span();
+        let alias = format!("__rows_ui_{}", start.start);
+        let mut tokens = crate::lex(&format!("import \"std:ui\" as {alias}\n")).expect("UI import");
+        for (i, token) in tokens.iter_mut().enumerate() {
+            token.span = start.expanded(i);
+        }
+        self.generated.push(Parser::new(&tokens).parse_decl()?);
+        let ident = |name: &str, span| Expr::Ident { name: Ident::new(name, span), span };
+        let string = |value, span| Expr::Literal { value: Literal::String(value), span };
+        let method = |target, name: &str, args, span| Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                target: Box::new(target), field: Ident::new(name, span), span
+            }), args, span
+        };
+        let key_value = Expr::FieldAccess {
+            target: Box::new(ident(&row, start.expanded(20))),
+            field: Ident::new(&key, key_span), span: key_span,
+        };
+        let fields = super::authoring::call("__browser_fields", vec![ident(&row, start.expanded(21))], start.expanded(22));
+        let item = method(ident(&alias, start.expanded(23)), "browser_row",
+            vec![key_value, string(key, start.expanded(24)), fields, children], start.expanded(25));
+        let render = Expr::Lambda {
+            params: vec![LambdaParam { name: Ident::new(row.clone(), row_span), ty: None, span: row_span }],
+            body: Box::new(item), span: start.expanded(26),
+        };
+        let rows = method(source, "map", vec![render], start.expanded(27));
+        Ok(method(ident(&alias, start.expanded(28)), "browser_rows",
+            vec![string(row, start.expanded(29)), rows], start.merge(end)))
+    }
+
     fn parse_browser_field_path(&mut self) -> Result<(Expr, Expr), ParseError> {
-        let (owner, owner_span) = self.expect_ident()?;
+        let (owner, owner_span) = if matches!(self.peek(), TokKind::KwAgent)
+            && self.row_bindings.iter().any(|row| row == "agent") {
+            ("agent".to_owned(), self.bump().span)
+        } else {
+            self.expect_ident()?
+        };
         self.expect(TokKind::Dot, "a field on a browser state binding")?;
         let (mut field, mut field_span) = self.expect_ident()?;
         while matches!(self.peek(), TokKind::Dot) {
@@ -91,7 +157,7 @@ impl<'a> Parser<'a> {
             let (variant, span) = self.expect_ident()?;
             ("choice_children", Expr::Literal { value: Literal::String(variant), span })
         };
-        let condition = super::authoring::call("__browser_field_key",
+        let condition = super::authoring::call(self.field_key_builtin(&owner),
             vec![owner, field, expected.clone()], start.merge(expected.span()));
         let mut args = vec![condition];
         if matches!(expected, Expr::Literal { value: Literal::String(_), .. }) {
@@ -395,11 +461,11 @@ impl<'a> Parser<'a> {
             // Trust boundary (slice 50i): `trusted(expr)`. Contextual
             // — only when the identifier `trusted` is immediately
             // called; a plain `trusted` identifier stays a binding.
-            TokKind::Ident(w) if w == "bind" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
+            TokKind::Ident(w) if w == "bind" && matches!(self.peek_ahead(1), TokKind::Ident(_) | TokKind::KwAgent) => {
                 self.bump();
                 let (owner, key) = self.parse_browser_field_path()?;
                 let field_span = key.span();
-                Ok(super::authoring::call("__browser_field_key", vec![owner, key], start_span.merge(field_span)))
+                Ok(super::authoring::call(self.field_key_builtin(&owner), vec![owner, key], start_span.merge(field_span)))
             }
             TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
                 self.parse_bounded_ask()
@@ -414,6 +480,10 @@ impl<'a> Parser<'a> {
                     inner: Box::new(inner),
                     span: start.merge(self.prev_span()),
                 })
+            }
+            TokKind::KwAgent if self.row_bindings.iter().any(|row| row == "agent") => {
+                let span = self.bump().span;
+                Ok(Expr::Ident { name: Ident::new("agent", span), span })
             }
             TokKind::KwReplay => self.parse_replay_expr(),
             TokKind::KwMatch => self.parse_match_expr(),
