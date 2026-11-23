@@ -10,7 +10,7 @@ import tempfile
 import time
 
 
-BRANCHES = {"corvid/roadmap-tasks", "corvid/component-layout"}
+TASK_BRANCH_PREFIX = "corvid/task-"
 FIELDS = {
     "status": {"type": "string", "enum": ["complete", "continue", "awaiting_feedback", "blocked"]},
     "summary": {"type": "string"},
@@ -25,8 +25,9 @@ def git(*args):
 
 def run(review_pending=False, retry_blocked=False):
     branch = git("branch", "--show-current")
-    if branch not in BRANCHES:
-        raise SystemExit("Run in a dedicated roadmap checkout: " + ", ".join(sorted(BRANCHES)))
+    is_task_branch = branch.startswith(TASK_BRANCH_PREFIX) and branch != TASK_BRANCH_PREFIX
+    if not is_task_branch and branch != "corvid/roadmap-tasks":
+        raise SystemExit("Run in a published corvid/task-<name> checkout for this task.")
     if git("diff", "--cached", "--name-only"):
         raise SystemExit("Inspect staged changes before starting the roadmap worker.")
     state = Path(git("rev-parse", "--absolute-git-dir")) / "corvid-roadmap"
