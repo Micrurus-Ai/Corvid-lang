@@ -120,7 +120,7 @@ def verify(cli, channel, bundle):
                 expect(status).to_have_text("Connection interrupted")
                 page.unroute("**/answer")
                 fragment = "caf\u00e9 <milk>"
-                for end in ("cancel", "broken", "done", "leave"):
+                for end in ("cancel", "broken", "done", "unmount", "leave"):
                     start.click()
                     commands, closed = calls.get(timeout=6)
                     expect(status).to_have_text("Loading")
@@ -139,6 +139,21 @@ def verify(cli, channel, bundle):
                         commands.put("DONE")
                         expect(status).to_have_text("Complete")
                         expect(output).to_have_text(fragment + "!")
+                    elif end == "unmount":
+                        widget = page.locator("corvid-text-stream").element_handle()
+                        widget.evaluate("(element) => element.remove()")
+                        assert closed.wait(6), "unmounted component kept its connection open"
+                        assert widget.evaluate("""element =>
+                            element.querySelector("[data-start]").disabled &&
+                            element.querySelector("[data-cancel]").disabled""")
+                        detached_status = widget.evaluate("""element => {
+                            element.querySelector("[data-start]").dispatchEvent(new Event("click"));
+                            return element.querySelector("[role=status]").textContent;
+                        }""")
+                        assert detached_status == "Interrupted"
+                        widget.evaluate("element => document.querySelector('main').append(element)")
+                        expect(start).to_be_enabled()
+                        expect(output).to_have_text(fragment)
                     else:
                         page.goto(url + "/healthz")
                     assert closed.wait(6), "provider connection stayed open"

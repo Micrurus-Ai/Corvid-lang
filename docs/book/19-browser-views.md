@@ -511,6 +511,8 @@ server help:
 
 Set `CORVID_MODEL` to your streaming provider and run `corvid serve src/main.cor`. Open the root page and press Start. The answer appears as chunks arrive. Cancel closes the connection and keeps the text already received. If the connection fails, Start again makes a fresh request and clears the old answer. Leaving the page closes an active stream. The path argument is an application-relative GET URL on the same origin. Each message must carry a JSON string. The Corvid server sends the completion and error events and serves the browser module.
 
+Each answer view owns its connection. Removing the view while an answer is arriving closes the stream and leaves the received text in the view. If you mount that view again, press **Start again** to request a fresh answer.
+
 ## Packaging an interactive application
 
 Place the server in `src/main.cor`. Use `ui.link` with a trusted application path to navigate between pages.
