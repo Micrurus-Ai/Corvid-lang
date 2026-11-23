@@ -1,5 +1,20 @@
 # Performance
 
+## Storefront quantity edit
+
+On November 23, 2026, Chrome 157 on Windows 11 completed 160 checked edits across the packaged Corvid storefront and a compiled TypeScript pricing handler. Each cell shows the median / 95th percentile in milliseconds, with 40 samples per row.
+
+| Handler | Visit | Navigation to ready | Key to DOM update | Key to estimated frame |
+| --- | --- | ---: | ---: | ---: |
+| Corvid | Cold | 57.80 / 82.30 | 1.80 / 2.30 | 12.65 / 25.10 |
+| TypeScript | Cold | 46.20 / 65.50 | 1.70 / 2.60 | 12.35 / 25.10 |
+| Corvid | Warm | 29.95 / 36.40 | 1.30 / 1.80 | 11.10 / 22.40 |
+| TypeScript | Warm | 25.95 / 35.40 | 1.30 / 2.10 | 7.90 / 19.10 |
+
+The largest median difference was on the first visit. Corvid took 11.60 ms longer to become interactive. Chrome reported 16,700 transferred bytes for Corvid's cold browser assets and 11,438 for TypeScript's. All 40 warm Corvid visits reused the Wasm from cache. Both implementations updated the DOM in a median 1.30 ms on warm visits. Frame estimates also include browser scheduling.
+
+Both sides used the same loopback Corvid server from a debug CLI build, generated DOM controls, HTML, CSS and checkout logic. The client used the packaged Wasm loader or TypeScript 5.9.3 compiled to JavaScript. These results cover one desktop browser and one interaction. See the [method and reproduction commands](../../benches/typescript/README.md#storefront-interaction) and [all 160 observations](../../benches/typescript/storefront-windows-chrome.jsonl).
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw
