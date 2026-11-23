@@ -50,7 +50,17 @@ impl HeapMeta {
     }
 
     pub(super) fn retain(&self) {
+        let _access = crate::cycle_collector::heap_access();
         self.strong.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn retain_if_alive(&self) -> bool {
+        let _access = crate::cycle_collector::heap_access();
+        self.strong
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count != 0).then(|| count + 1)
+            })
+            .is_ok()
     }
 
     pub(super) fn release(&self) -> usize {

@@ -14,6 +14,7 @@ corvid-runtime = { workspace = true }
 corvid-trace-schema = { workspace = true }
 corvid-prompt-format = { workspace = true }
 serde_json = { workspace = true }
+parking_lot = "0.12"
 async-recursion = "1"
 futures = "0.3"
 async-trait = "0.1"

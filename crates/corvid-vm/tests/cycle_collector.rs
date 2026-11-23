@@ -116,3 +116,69 @@ fn acyclic_struct_frees_without_collection() {
     assert!(weak.upgrade().is_none(), "acyclic value should free on refcount fast path");
     assert_eq!(collect_cycles(), 0, "nothing should remain for cycle collection");
 }
+
+#[test]
+fn shared_map_choice_and_closure_hold_their_captured_values() {
+    use corvid_ir::{IrExpr, IrExprKind, IrLiteral};
+    use corvid_vm::value::{ClosureValue, EnumValue, MapValue};
+    use corvid_vm::ListValue;
+
+    let _guard = test_lock();
+    let list = ListValue::new([]);
+    let weak = Value::List(list.clone()).downgrade().unwrap();
+    let choice = Value::Enum(EnumValue::new(
+        DefId(2), "Action", 0, "Show", vec![Value::List(list.clone())],
+    ));
+    let body = IrExpr {
+        kind: IrExprKind::Literal(IrLiteral::Int(0)),
+        ty: corvid_types::Type::Int,
+        span: corvid_ast::Span::new(0, 0),
+    };
+    let handler = Value::Closure(ClosureValue::new(
+        vec![], body, vec![(corvid_resolve::LocalId(0), choice)],
+    ));
+    let map = MapValue::new([(Value::Int(1), handler)]);
+    list.push(Value::Map(map.clone()));
+    list.push(Value::Map(map.clone()));
+    drop(list);
+    assert_eq!(collect_cycles(), 0);
+    assert!(map.get_by_key(&Value::Int(1)).is_some());
+    drop(map);
+    assert_eq!(collect_cycles(), 4);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn reclaiming_a_cycle_releases_its_edge_to_a_live_record() {
+    let _guard = test_lock();
+    let live = StructValue::new(DefId(1), "Shelf", []);
+    let cycle = StructValue::new(DefId(2), "Node", []);
+    cycle.set_field("self", Value::Struct(cycle.clone()));
+    cycle.set_field("shelf", Value::Struct(live.clone()));
+    drop(cycle);
+    assert_eq!(collect_cycles(), 1);
+    assert_eq!(live.strong_count_for_tests(), 1);
+}
+
+#[test]
+fn pending_cycle_is_collected_after_a_worker_finishes_using_the_heap() {
+    let _guard = test_lock();
+    let cycle = StructValue::new(DefId(1), "Node", []);
+    cycle.set_field("next", Value::Struct(cycle.clone()));
+    drop(cycle);
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let shelf = StructValue::new(DefId(2), "Shelf", []);
+            shelf.with_fields(|_| {
+                barrier.wait();
+                barrier.wait();
+            });
+        });
+        barrier.wait();
+        let deferred = collect_cycles();
+        barrier.wait();
+        assert_eq!(deferred, 0);
+    });
+    assert_eq!(collect_cycles(), 1);
+}

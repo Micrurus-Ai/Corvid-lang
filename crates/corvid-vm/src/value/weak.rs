@@ -5,10 +5,8 @@
 //! `WeakValue::upgrade` is the inverse of `Value::downgrade`: it
 //! attempts to revive a `Value` from a weak handle, returning
 //! `None` when the underlying object has already been freed by
-//! the cycle collector. The check on `meta.strong_count() == 0`
-//! catches the race where the object's last strong reference was
-//! retired between this `upgrade` call's `Weak::upgrade` and the
-//! decision to retain.
+//! the cycle collector. Retaining only while the count is positive
+//! prevents resurrection during the last strong release.
 
 use std::sync::Weak;
 
@@ -52,21 +50,17 @@ impl WeakValue {
             WeakValue::String(value) => value.upgrade().map(Value::String),
             WeakValue::Struct(value) => {
                 let upgraded = value.0.upgrade()?;
-                if upgraded.meta.strong_count() == 0 {
-                    None
-                } else {
-                    upgraded.meta.retain();
-                    Some(Value::Struct(StructValue(upgraded)))
-                }
+                upgraded
+                    .meta
+                    .retain_if_alive()
+                    .then(|| Value::Struct(StructValue(upgraded)))
             }
             WeakValue::List(value) => {
                 let upgraded = value.0.upgrade()?;
-                if upgraded.meta.strong_count() == 0 {
-                    None
-                } else {
-                    upgraded.meta.retain();
-                    Some(Value::List(ListValue(upgraded)))
-                }
+                upgraded
+                    .meta
+                    .retain_if_alive()
+                    .then(|| Value::List(ListValue(upgraded)))
             }
         }
     }

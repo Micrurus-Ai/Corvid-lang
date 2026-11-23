@@ -128,6 +128,7 @@ impl ClosureValue {
     }
 
     pub fn env_cloned(&self) -> Vec<(LocalId, Value)> {
+        let _access = cycle_collector::heap_access();
         self.0
             .env
             .lock()
@@ -182,6 +183,7 @@ impl StructValue {
     }
 
     pub fn get_field(&self, field: &str) -> Option<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .fields
             .lock()
@@ -191,6 +193,7 @@ impl StructValue {
     }
 
     pub fn with_fields<R>(&self, f: impl FnOnce(&HashMap<String, Value>) -> R) -> R {
+        let _access = cycle_collector::heap_access();
         let guard = self.0.fields.lock().expect("struct fields lock poisoned");
         let fields = guard.as_ref().expect("struct payload already freed");
         f(fields)
@@ -202,6 +205,7 @@ impl StructValue {
 
     #[doc(hidden)]
     pub fn set_field(&self, field: impl Into<String>, value: Value) {
+        let _access = cycle_collector::heap_access();
         let mut guard = self.0.fields.lock().expect("struct fields lock poisoned");
         let fields = guard.as_mut().expect("struct payload already freed");
         fields.insert(field.into(), value);
@@ -247,6 +251,7 @@ impl ListValue {
     }
 
     pub fn len(&self) -> usize {
+        let _access = cycle_collector::heap_access();
         self.0
             .items
             .lock()
@@ -257,6 +262,7 @@ impl ListValue {
     }
 
     pub fn iter_cloned(&self) -> Vec<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .items
             .lock()
@@ -267,6 +273,7 @@ impl ListValue {
     }
 
     pub(crate) fn slice(&self, start: i64, end: i64) -> Self {
+        let _access = cycle_collector::heap_access();
         let guard = self.0.items.lock().expect("list items lock poisoned");
         let items = guard.as_ref().expect("list payload already freed");
         let len = items.len() as i64;
@@ -276,6 +283,7 @@ impl ListValue {
     }
 
     pub fn get(&self, idx: usize) -> Option<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .items
             .lock()
@@ -288,6 +296,7 @@ impl ListValue {
     /// assignment). Callers bounds-check first; out-of-range is a
     /// no-op here to keep the lock scope minimal.
     pub fn set(&self, idx: usize, value: Value) {
+        let _access = cycle_collector::heap_access();
         if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
             if idx < items.len() {
                 items[idx] = value;
@@ -297,6 +306,7 @@ impl ListValue {
 
     /// Append an element in place (slice 45f `append`).
     pub fn push(&self, value: Value) {
+        let _access = cycle_collector::heap_access();
         if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
             items.push(value);
         }
@@ -304,6 +314,7 @@ impl ListValue {
 
     /// Reverse in place (slice 45f `reverse`).
     pub fn reverse_in_place(&self) {
+        let _access = cycle_collector::heap_access();
         if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
             items.reverse();
         }
@@ -315,6 +326,7 @@ impl ListValue {
         &self,
         cmp: impl FnMut(&Value, &Value) -> std::cmp::Ordering,
     ) {
+        let _access = cycle_collector::heap_access();
         if let Some(items) = self.0.items.lock().expect("list lock").as_mut() {
             items.sort_by(cmp);
         }
@@ -353,6 +365,7 @@ impl BoxedValue {
     }
 
     pub fn get(&self) -> Value {
+        let _access = cycle_collector::heap_access();
         self.0
             .value
             .lock()
@@ -415,6 +428,7 @@ impl EnumValue {
     }
 
     pub fn fields_cloned(&self) -> Vec<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .fields
             .lock()
@@ -431,7 +445,14 @@ impl EnumValue {
 
 impl Clone for EnumValue {
     fn clone(&self) -> Self {
+        self.0.meta.retain();
         Self(self.0.clone())
+    }
+}
+
+impl Drop for EnumValue {
+    fn drop(&mut self) {
+        cycle_collector::release_object(ObjectRef::Enum(self.0.clone()));
     }
 }
 
@@ -467,6 +488,7 @@ impl MapValue {
     }
 
     pub fn len(&self) -> usize {
+        let _access = cycle_collector::heap_access();
         self.0
             .entries
             .lock()
@@ -481,6 +503,7 @@ impl MapValue {
     }
 
     pub fn get_by_key(&self, key: &Value) -> Option<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .entries
             .lock()
@@ -490,6 +513,7 @@ impl MapValue {
     }
 
     pub fn insert_or_update(&self, key: Value, value: Value) {
+        let _access = cycle_collector::heap_access();
         if let Some(entries) = self.0.entries.lock().expect("map lock").as_mut() {
             if let Some(slot) = entries.iter_mut().find(|(k, _)| *k == key) {
                 slot.1 = value;
@@ -500,6 +524,7 @@ impl MapValue {
     }
 
     pub fn remove(&self, key: &Value) -> Option<Value> {
+        let _access = cycle_collector::heap_access();
         let mut guard = self.0.entries.lock().expect("map lock");
         let entries = guard.as_mut()?;
         let idx = entries.iter().position(|(k, _)| k == key)?;
@@ -507,6 +532,7 @@ impl MapValue {
     }
 
     pub fn keys_cloned(&self) -> Vec<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .entries
             .lock()
@@ -517,6 +543,7 @@ impl MapValue {
     }
 
     pub fn values_cloned(&self) -> Vec<Value> {
+        let _access = cycle_collector::heap_access();
         self.0
             .entries
             .lock()
@@ -527,6 +554,7 @@ impl MapValue {
     }
 
     pub fn entries_cloned(&self) -> Vec<(Value, Value)> {
+        let _access = cycle_collector::heap_access();
         self.0
             .entries
             .lock()
@@ -543,7 +571,14 @@ impl MapValue {
 
 impl Clone for ClosureValue {
     fn clone(&self) -> Self {
+        self.0.meta.retain();
         Self(self.0.clone())
+    }
+}
+
+impl Drop for ClosureValue {
+    fn drop(&mut self) {
+        cycle_collector::release_object(ObjectRef::Closure(self.0.clone()));
     }
 }
 
@@ -558,7 +593,14 @@ impl PartialEq for ClosureValue {
 
 impl Clone for MapValue {
     fn clone(&self) -> Self {
+        self.0.meta.retain();
         Self(self.0.clone())
+    }
+}
+
+impl Drop for MapValue {
+    fn drop(&mut self) {
+        cycle_collector::release_object(ObjectRef::Map(self.0.clone()));
     }
 }
 

@@ -5,25 +5,29 @@
 //! implementation-sharing.
 
 use crate::value::{Color, ObjectRef, WeakObjectRef};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use std::cell::Cell;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
 
-struct CollectorState {
-    roots: Vec<WeakObjectRef>,
-    collecting: bool,
+// Acquire before touching a cell payload or its ownership count. Multiple
+// application threads can use the heap together. Trial deletion requires a
+// stable graph and defers if any application thread is using it.
+static HEAP: RwLock<()> = RwLock::new(());
+static ROOTS: Mutex<Vec<WeakObjectRef>> = Mutex::new(Vec::new());
+thread_local! {
+    static IN_COLLECTION: Cell<bool> = const { Cell::new(false) };
 }
 
-static STATE: OnceLock<Mutex<CollectorState>> = OnceLock::new();
-static SUPPRESS_RELEASE_DEPTH: AtomicUsize = AtomicUsize::new(0);
+pub(crate) fn heap_access() -> Option<RwLockReadGuard<'static, ()>> {
+    (!IN_COLLECTION.get()).then(|| HEAP.read_recursive())
+}
 
-fn state() -> &'static Mutex<CollectorState> {
-    STATE.get_or_init(|| {
-        Mutex::new(CollectorState {
-            roots: Vec::new(),
-            collecting: false,
-        })
-    })
+struct CollectionScope;
+
+impl Drop for CollectionScope {
+    fn drop(&mut self) {
+        IN_COLLECTION.set(false);
+    }
 }
 
 fn auto_trigger() -> usize {
@@ -33,27 +37,11 @@ fn auto_trigger() -> usize {
         .unwrap_or(10_000)
 }
 
-fn release_suppressed() -> bool {
-    SUPPRESS_RELEASE_DEPTH.load(Ordering::Acquire) > 0
-}
-
-struct SuppressReleaseGuard;
-
-impl SuppressReleaseGuard {
-    fn new() -> Self {
-        SUPPRESS_RELEASE_DEPTH.fetch_add(1, Ordering::AcqRel);
-        Self
-    }
-}
-
-impl Drop for SuppressReleaseGuard {
-    fn drop(&mut self) {
-        SUPPRESS_RELEASE_DEPTH.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
 pub(crate) fn release_object(object: ObjectRef) {
-    if release_suppressed() {
+    let access = heap_access();
+    // All condemned cells were retired before their edges were removed.
+    // Edges from a condemned cell to a live cell still need a normal release.
+    if IN_COLLECTION.get() && object.strong_count() == 0 {
         return;
     }
 
@@ -64,34 +52,31 @@ pub(crate) fn release_object(object: ObjectRef) {
     }
 
     let should_collect = {
-        let mut guard = state().lock().expect("cycle collector lock poisoned");
+        let mut roots = ROOTS.lock();
         if !object.buffered() {
             object.set_buffered(true);
             object.set_color(Color::Purple);
-            guard.roots.push(object.downgrade());
+            roots.push(object.downgrade());
         }
         let trigger = auto_trigger();
-        !guard.collecting && trigger > 0 && guard.roots.len() >= trigger
+        trigger > 0 && roots.len() >= trigger
     };
 
+    drop(access);
     if should_collect {
         let _ = collect_cycles();
     }
 }
 
+/// Reclaim unreachable cycles while the heap is idle. If another heap
+/// operation is active, leave the candidate roots queued for a later pass.
 pub fn collect_cycles() -> usize {
-    if release_suppressed() {
+    let Some(_exclusive) = HEAP.try_write() else {
         return 0;
-    }
-
-    let roots = {
-        let mut guard = state().lock().expect("cycle collector lock poisoned");
-        if guard.collecting {
-            return 0;
-        }
-        guard.collecting = true;
-        guard.roots.clone()
     };
+    IN_COLLECTION.set(true);
+    let _scope = CollectionScope;
+    let roots = std::mem::take(&mut *ROOTS.lock());
 
     for root in &roots {
         if let Some(object) = root.upgrade() {
@@ -117,7 +102,6 @@ pub fn collect_cycles() -> usize {
     let collected = condemned.len();
 
     if !condemned.is_empty() {
-        let _suppress = SuppressReleaseGuard::new();
         for object in &condemned {
             object.prepare_collect();
         }
@@ -126,9 +110,6 @@ pub fn collect_cycles() -> usize {
         }
     }
 
-    let mut guard = state().lock().expect("cycle collector lock poisoned");
-    guard.roots.clear();
-    guard.collecting = false;
     collected
 }
 
