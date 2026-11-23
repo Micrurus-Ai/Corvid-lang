@@ -21,6 +21,11 @@ test checkbox_field_escapes_strings_and_respects_initial_state:
     assert packed.html == "<label><input type=\"checkbox\" name=\"gear&quot;list\" checked>&lt;Map&gt; &amp; compass</label>"
     assert ui.checkbox_field("Water", "water", false).html == "<label><input type=\"checkbox\" name=\"water\">Water</label>"
 
+test checkbox_submission_value_is_escaped_even_when_initially_unchecked:
+    supply = ui.checkbox_field_with_value("<Map>", "gear\"list", "map\" & <case>", false)
+    assert supply.html == "<label><input type=\"checkbox\" name=\"gear&quot;list\" value=\"map&quot; &amp; &lt;case&gt;\">&lt;Map&gt;</label>"
+    assert ui.checkbox_field_with_value("None", "gear", "", true).html == "<label><input type=\"checkbox\" name=\"gear\" value=\"\" checked>None</label>"
+
 test reset_button_escapes_its_label:
     button = ui.reset_button("Restore <note> & map")
     assert button.html == "<button type=\"reset\">Restore &lt;note&gt; &amp; map</button>"
@@ -216,7 +221,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("35 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("36 passed"),
         "{good:?}"
     );
     fs::write(

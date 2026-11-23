@@ -30,8 +30,8 @@ def check_response(url):
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water"><aside aria-label="Suggested supplies">'
         '<details open><summary>Packing checklist</summary>'
-        '<ul><li><label><input type="checkbox" name="water">Water bottle</label></li>'
-        '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details></aside>',
+        '<ul><li><label><input type="checkbox" name="supply" value="water">Water bottle</label></li>'
+        '<li><label><input type="checkbox" name="supply" value="map">Trail map</label></li></ul></details></aside>',
         '<form method="get" action="/guide" aria-label="Packing note preview">',
         '<noscript><p>Select Preview to reload the guide with your note.</p></noscript>',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" rows="4" required>',
@@ -102,10 +102,13 @@ def check_browser(url, channel):
         expect(supplies).to_be_visible()
         expect(supplies.get_by_role("listitem")).to_have_text(["Water bottle", "Trail map"])
         water = supplies.get_by_role("checkbox", name="Water bottle")
+        trail_map = supplies.get_by_role("checkbox", name="Trail map")
+        expect(water).to_have_value("water")
+        expect(trail_map).to_have_value("map")
         expect(water).not_to_be_checked()
         water.check()
         expect(water).to_be_checked()
-        expect(supplies.get_by_role("checkbox", name="Trail map")).not_to_be_checked()
+        expect(trail_map).not_to_be_checked()
         toggle.click()
         expect(supplies).to_be_hidden()
         form = packing.get_by_role("form", name="Packing note preview", exact=True)
