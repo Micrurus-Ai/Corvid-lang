@@ -623,27 +623,33 @@ choice RunMode:
     Manual
     Scheduled
 
-type AgentSettings:
+type AgentProfile:
     name: String where len_between(1, 60)
-    enabled: Bool
+
+type AgentTools:
+    web_search: Bool
+
+type AgentSettings:
+    profile: AgentProfile
+    tools: AgentTools
     mode: RunMode
     retries: Int where between(0, 5)
 ```
 
-Declare the state in the component and bind each control to a field.
+Declare the state in the component and bind each control to a field. Editing `profile.name` preserves the other settings. Preview text can read the same path with `{profile.name}`.
 
 ```corvid
 browser state settings = initial
 controls = ui.grid:
-    ui.field("Agent name", bind settings.name)
-    ui.checkbox("Enabled", bind settings.enabled)
+    ui.field("Agent name", bind settings.profile.name)
+    ui.checkbox("Allow web search", bind settings.tools.web_search)
     ui.segmented_choice("Run mode", bind settings.mode)
     ui.field("Retry limit", bind settings.retries)
 ```
 
-A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.name` also fails because that field is text. For a dropdown, use `ui.field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
+A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.profile.name` also fails because that field is text. For a dropdown, use `ui.field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
 
-An opted-in assistant supplies a complete record in one call. For example, `{"name":"Scout","enabled":true,"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
+An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true},"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
 
 ### Give a custom container the same syntax
 

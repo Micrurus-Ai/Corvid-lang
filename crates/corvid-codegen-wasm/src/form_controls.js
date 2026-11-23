@@ -262,14 +262,41 @@ function bindLocalSelection(region) {
   }
   const owner = region.parentElement;
   if (owner.hasAttribute("data-corvid-selection-owner") && document.modelContext?.registerTool) {
+    const objectSchema = () => ({type: "object", properties: Object.create(null),
+      required: [], additionalProperties: false});
+    const inputSchema = objectSchema();
+    for (const name of names) {
+      const parts = name.split(".");
+      let parent = inputSchema;
+      for (const [index, part] of parts.entries()) {
+        if (!Object.hasOwn(parent.properties, part)) {
+          parent.required.push(part);
+          parent.properties[part] = index === parts.length - 1 ? properties[name] : objectSchema();
+        }
+        parent = parent.properties[part];
+      }
+    }
+    function readObject(schema, value, prefix, fields) {
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+          Object.keys(value).length !== schema.required.length) throw Error("Expected all record fields.");
+      for (const part of schema.required) {
+        if (!Object.hasOwn(value, part)) throw Error("Missing " + prefix + part);
+        const path = prefix + part;
+        const child = schema.properties[part];
+        if (child.type === "object") readObject(child, value[part], path + ".", fields);
+        else fields[path] = value[part];
+      }
+    }
     Promise.resolve().then(() => document.modelContext.registerTool({
       name: owner.dataset.corvidTool, description: owner.dataset.corvidDescription,
-      inputSchema: {type: "object", properties, required: names, additionalProperties: false},
+      inputSchema,
       execute(values) {
         if (!region.isConnected || controls.some(input => input.matches(":disabled"))) {
           throw Error("Selection is unavailable.");
         }
-        return select(values);
+        const fields = Object.create(null);
+        readObject(inputSchema, values, "", fields);
+        return select(fields);
       },
     })).catch(error => { region.querySelector(":scope > [role=alert]").textContent = error.message; });
   }

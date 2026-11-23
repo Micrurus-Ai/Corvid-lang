@@ -348,7 +348,14 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let (owner, owner_span) = self.expect_ident()?;
                 self.expect(TokKind::Dot, "a field on a browser state binding")?;
-                let (field, field_span) = self.expect_ident()?;
+                let (mut field, mut field_span) = self.expect_ident()?;
+                while matches!(self.peek(), TokKind::Dot) {
+                    self.bump();
+                    let (part, end) = self.expect_ident()?;
+                    field.push('.');
+                    field.push_str(&part);
+                    field_span = field_span.merge(end);
+                }
                 let owner = Expr::Ident { name: Ident::new(owner, owner_span), span: owner_span };
                 let key = Expr::Literal { value: Literal::String(field), span: field_span };
                 Ok(super::authoring::call("__browser_field_key", vec![owner, key], start_span.merge(field_span)))

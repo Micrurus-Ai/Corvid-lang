@@ -84,31 +84,29 @@ impl Checker<'_> {
             );
             return Type::String;
         };
-        let Some(record) = self.record_decl(&model) else {
-            return Type::String;
-        };
-        let Some(field) = record.fields.iter().find(|f| f.name.name == *key) else {
-            self.errors.push(TypeError::new(
-                TypeErrorKind::UnknownField {
-                    struct_name: record.name.name.clone(),
-                    field: key.clone(),
-                },
-                *span,
-            ));
-            return Type::String;
-        };
-        let field_ref = field.ty.clone();
-        let ty = if let Type::ImportedStruct(t) = &model {
-            let Some(module) = self
-                .module_resolution
-                .and_then(|m| m.lookup_by_path(Path::new(&t.module_path)))
-            else {
+        let mut ty = model;
+        for part in key.split('.') {
+            let field = self
+                .record_decl(&ty)
+                .and_then(|record| record.fields.iter().find(|f| f.name.name == part))
+                .map(|field| field.ty.clone());
+            let Some(field) = field else {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::UnknownField {
+                        struct_name: self
+                            .record_decl(&ty)
+                            .map_or_else(|| ty.display_name(), |r| r.name.name.clone()),
+                        field: part.into(),
+                    },
+                    *span,
+                ));
                 return Type::String;
             };
-            self.imported_type_ref_to_type(&field_ref, module)
-        } else {
-            self.type_ref_to_type(&field_ref)
-        };
+            ty = self.browser_member_type(&ty, &field);
+        }
+        if self.record_decl(&ty).is_some_and(|r| r.variants.is_empty()) {
+            self.form_error(*span, "bind needs a field inside this record".into());
+        }
         self.browser_field_types.insert(name.span, ty);
         Type::String
     }
@@ -161,46 +159,7 @@ impl Checker<'_> {
             return result;
         };
         let ty = self.check_expr(initial);
-        let fields = self
-            .record_decl(&ty)
-            .filter(|r| r.variants.is_empty())
-            .map(|r| r.fields.clone());
-        let invalid = fields.is_none_or(|fields| {
-            fields.is_empty()
-                || fields.iter().any(|field| {
-                    if field.browser_integer_bounds().is_some() {
-                        return false;
-                    }
-                    let field_ty = match &ty {
-                        Type::ImportedStruct(t) => {
-                            let Some(module) = self.module_resolution.and_then(|modules| {
-                                modules.lookup_by_path(Path::new(&t.module_path))
-                            }) else {
-                                return true;
-                            };
-                            self.imported_type_ref_to_type(&field.ty, module)
-                        }
-                        _ => self.type_ref_to_type(&field.ty),
-                    };
-                    match field_ty {
-                        Type::Bool => field.refinement.is_some(),
-                        Type::String => match field.refinement {
-                            None => false,
-                            Some(corvid_ast::Refinement::LenBetween { min, max }) => {
-                                min > max || max > (1 << 53) - 1
-                            }
-                            _ => true,
-                        },
-                        _ => {
-                            field.refinement.is_some()
-                                || self.record_decl(&field_ty).is_none_or(|r| {
-                                    r.variants.is_empty()
-                                        || r.variants.iter().any(|v| !v.fields.is_empty())
-                                })
-                        }
-                    }
-                })
-        });
+        let invalid = !self.valid_browser_record(&ty, &mut Vec::new());
         if invalid {
             self.errors.push(TypeError::new(
                 TypeErrorKind::TypeMismatch {
@@ -214,6 +173,66 @@ impl Checker<'_> {
             ));
         }
         result
+    }
+
+    fn browser_member_type(&mut self, owner: &Type, field: &TypeRef) -> Type {
+        if let Type::ImportedStruct(t) = owner {
+            if let Some(module) = self
+                .module_resolution
+                .and_then(|m| m.lookup_by_path(Path::new(&t.module_path)))
+            {
+                return self.imported_type_ref_to_type(field, module);
+            }
+        }
+        self.type_ref_to_type(field)
+    }
+
+    fn valid_browser_record(&mut self, ty: &Type, parents: &mut Vec<Type>) -> bool {
+        if parents.contains(ty) {
+            return false;
+        }
+        parents.push(ty.clone());
+        let fields = self
+            .record_decl(ty)
+            .filter(|r| r.variants.is_empty())
+            .map(|r| r.fields.clone());
+        let invalid = fields.is_none_or(|fields| {
+            fields.is_empty()
+                || fields.iter().any(|field| {
+                    if field.browser_integer_bounds().is_some() {
+                        return false;
+                    }
+                    let field_ty = self.browser_member_type(ty, &field.ty);
+                    match field_ty {
+                        Type::Bool => field.refinement.is_some(),
+                        Type::String => match field.refinement {
+                            None => false,
+                            Some(corvid_ast::Refinement::LenBetween { min, max }) => {
+                                min > max || max > (1 << 53) - 1
+                            }
+                            _ => true,
+                        },
+                        _ if self
+                            .record_decl(&field_ty)
+                            .is_some_and(|r| !r.variants.is_empty()) =>
+                        {
+                            field.refinement.is_some()
+                                || self
+                                    .record_decl(&field_ty)
+                                    .unwrap()
+                                    .variants
+                                    .iter()
+                                    .any(|v| !v.fields.is_empty())
+                        }
+                        _ => {
+                            field.refinement.is_some()
+                                || !self.valid_browser_record(&field_ty, parents)
+                        }
+                    }
+                })
+        });
+        parents.pop();
+        !invalid
     }
 
     pub(super) fn check_form_record(&mut self, ty: &Type, span: Span) {

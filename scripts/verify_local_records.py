@@ -70,20 +70,23 @@ test state_bindings:
     Manual
     Scheduled
 
-public type Settings:
+public type Profile:
     name: String
+
+public type Settings:
+    profile: Profile
     enabled: Bool
     mode: Mode
 
 public fn defaults() -> Settings:
-    return Settings("Scout", false, Manual)
+    return Settings(Profile("Scout"), false, Manual)
 """)
     probe.write_text("""import "./shared_dimensions" use defaults
 import "std:ui" as ui
 
 fn describe() -> ui.RecordState:
     browser state selected = defaults()
-    key = bind selected.mode
+    key = bind selected.profile.name
     return selected
 
 test imported_choice:
@@ -103,10 +106,11 @@ def check_field_diagnostics(cli, project):
     main = project / "src/main.cor"
     source = main.read_text()
     for before, after, diagnostic in [
-        ("bind settings.mode", "bind settings.mdoe", "mdoe"),
-        ("bind settings.enabled", "bind settings.name", "checkbox field binding"),
+        ("bind settings.profile.name", "bind settings.profile.nmae", "nmae"),
+        ("bind settings.profile.name", "bind settings.profil.name", "profil"),
+        ("bind settings.tools.web_search", "bind settings.profile.name", "checkbox field binding"),
         ("bind settings.mode", "bind settings.retries", "segmented_choice"),
-        ("bind settings.name", "bind initial.name", "browser state"),
+        ("bind settings.profile.name", "bind initial.profile.name", "browser state"),
     ]:
         assert before in source
         main.write_text(source.replace(before, after))
@@ -147,30 +151,34 @@ def exercise_settings(page):
     page.on("request", lambda request: requests.append(request.url))
     page.context.set_offline(True)
     name = page.get_by_role("textbox", name="Agent name")
-    enabled = page.get_by_role("checkbox", name="Enabled")
+    enabled = page.get_by_role("checkbox", name="Allow web search")
     mode = page.get_by_role("group", name="Run mode")
     scheduled = mode.get_by_role("radio", name="Scheduled")
     preview = page.get_by_role("status")
-    expect(preview).to_have_text("Assistant / Manual / enabled: false / retries: 1")
+    expect(preview).to_have_text("Assistant / Manual / web search: false / retries: 1")
     schema = page.evaluate("tools.get('update_settings').inputSchema")
     assert schema["properties"]["mode"]["enum"] == ["Manual", "Scheduled"]
-    assert schema["properties"]["enabled"] == {"type": "boolean"}
-    desired = {"name": "Scout", "enabled": True, "mode": "Scheduled", "retries": 3}
+    assert schema["properties"]["tools"]["properties"]["web_search"] == {"type": "boolean"}
+    desired = {"profile": {"name": "Scout"}, "tools": {"web_search": True}, "mode": "Scheduled", "retries": 3}
     select = "v => tools.get('update_settings').execute(v)"
     result = page.evaluate(select, desired)
-    expect(preview).to_have_text("Scout / Scheduled / enabled: true / retries: 3")
+    expect(preview).to_have_text("Scout / Scheduled / web search: true / retries: 3")
     expect(name).to_have_value("Scout")
     expect(enabled).to_be_checked()
     expect(scheduled).to_be_checked()
-    for patch in ({"enabled": "true"}, {"mode": "Auto"}, {"name": ""}, {"name": "x" * 61},
+    for patch in ({"tools": {"web_search": "true"}}, {"mode": "Auto"}, {"profile": {"name": ""}},
+                  {"profile": {"name": "x" * 61}}, {"profile": {}}, {"tools": {"web_search": True, "extra": 1}},
                   {"retries": 6}, {"extra": True}):
         assert page.evaluate("""async v => { try { await tools.get('update_settings').execute(v); }
             catch { return true; } return false; }""", dict(desired, **patch))
         expect(preview).to_have_text(result)
     scheduled.press("ArrowLeft")
     enabled.click()
+    expect(name).to_have_value("Scout")
+    expect(preview).to_have_text("Scout / Manual / web search: false / retries: 3")
     name.fill("<Scout & Co>")
-    expect(preview).to_have_text("<Scout & Co> / Manual / enabled: false / retries: 3")
+    expect(preview).to_have_text("<Scout & Co> / Manual / web search: false / retries: 3")
+    expect(enabled).not_to_be_checked()
     assert not requests, requests
 
 

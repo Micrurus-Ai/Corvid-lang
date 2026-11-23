@@ -4,23 +4,32 @@ choice RunMode:
     Manual
     Scheduled
 
-type AgentSettings:
+type AgentProfile:
     name: String where len_between(1, 60)
-    enabled: Bool
+
+type AgentTools:
+    web_search: Bool
+
+type AgentSettings:
+    profile: AgentProfile
+    tools: AgentTools
     mode: RunMode
     retries: Int where between(0, 5)
 
+fn settings_panel(children: List<ui.View>) -> ui.View:
+    return ui.grid(children)
+
 fn settings_editor(initial: AgentSettings) -> ui.View:
     browser state settings = initial
-    controls = ui.grid:
-        ui.field("Agent name", bind settings.name)
-        ui.checkbox("Enabled", bind settings.enabled)
+    controls = settings_panel:
+        ui.field("Agent name", bind settings.profile.name)
+        ui.checkbox("Allow web search", bind settings.tools.web_search)
         ui.segmented_choice("Run mode", bind settings.mode)
         ui.field("Retry limit", bind settings.retries)
-    preview = ui.record_text("{name} / {mode} / enabled: {enabled} / retries: {retries}")
+    preview = ui.record_text("{profile.name} / {mode} / web search: {tools.web_search} / retries: {retries}")
     return ui.local_selection(settings, controls, preview)
 
 server app:
     route GET "/" -> html:
-        editor = settings_editor(AgentSettings("Assistant", false, Manual, 1))
+        editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false), Manual, 1))
         return ui.interactive_page("Agent settings", [ui.assistant_selection(editor, "update_settings", "Update the agent settings.")])

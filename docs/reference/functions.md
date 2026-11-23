@@ -434,10 +434,10 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 ## Browser-local record views in std:ui
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
-- `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}`.
+- `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}` or `{profile.name}`.
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
-- `browser state name = initial` obtains a `ui.RecordState` from a record of text, booleans, named choices, and bounded integers.
+- `browser state name = initial` obtains a `ui.RecordState` from a record whose editable leaves are text, booleans, named choices, or bounded integers. Use `bind settings.tools.web_search` to bind a nested leaf.
 - `ui.checkbox(label: String, field: String) -> View` creates a native checkbox. Use `bind state.enabled` for a checked boolean field.
 - `ui.segmented_choice(label: String, field: String) -> View` displays a named choice as a labelled group of native radio buttons. Use the arrow keys to select adjacent options. Each mounted group uses its own radio name.
 - `ui.field(label: String, name: String) -> View` places a labelled native control in your layout. At mount time the declared type selects a text area, checkbox, choice list, or slider.

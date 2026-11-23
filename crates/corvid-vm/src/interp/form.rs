@@ -78,7 +78,19 @@ pub(super) fn browser_fields(
     types: &HashMap<DefId, &IrType>,
     span: Span,
 ) -> Result<Value, InterpError> {
-    use crate::value::{ListValue, MapValue};
+    let mut fields = Vec::new();
+    collect_browser_fields(initial, types, span, "", &mut fields)?;
+    Ok(Value::Map(crate::value::MapValue::new(fields)))
+}
+
+fn collect_browser_fields(
+    initial: &Value,
+    types: &HashMap<DefId, &IrType>,
+    span: Span,
+    prefix: &str,
+    fields: &mut Vec<(Value, Value)>,
+) -> Result<(), InterpError> {
+    use crate::value::ListValue;
     let invalid = || {
         InterpError::new(
             InterpErrorKind::Other("expected a bounded integer record for browser state".into()),
@@ -89,10 +101,14 @@ pub(super) fn browser_fields(
         return Err(invalid());
     };
     let record = types.get(&values.type_id()).ok_or_else(invalid)?;
-    let mut fields = Vec::with_capacity(record.fields.len());
     for field in &record.fields {
+        let path = format!("{prefix}{}", field.name);
         let value = values.get_field(&field.name).ok_or_else(invalid)?;
         let row = match value {
+            Value::Struct(_) => {
+                collect_browser_fields(&value, types, span, &format!("{path}."), fields)?;
+                continue;
+            }
             Value::Int(n) => {
                 let Some(corvid_ast::Refinement::Between { min, max }) = field.refinement else {
                     return Err(invalid());
@@ -130,16 +146,16 @@ pub(super) fn browser_fields(
                 };
                 vec![
                     "field".into(),
-                    json!({"name":field.name,"schema":schema,"value":initial}).to_string(),
+                    json!({"name":path,"schema":schema,"value":initial}).to_string(),
                 ]
             }
         };
         fields.push((
-            Value::String(field.name.clone().into()),
+            Value::String(path.into()),
             Value::List(ListValue::new(
                 row.into_iter().map(|text| Value::String(text.into())),
             )),
         ));
     }
-    Ok(Value::Map(MapValue::new(fields)))
+    Ok(())
 }
