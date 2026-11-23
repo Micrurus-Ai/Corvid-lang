@@ -37,6 +37,10 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+### Include an image
+
+Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to place an image in a list of views. Choose a trusted source URL and describe what the image contributes to the page. For a purely decorative image, pass an empty string as the second argument. Corvid escapes both attribute values.
+
 ### Write a list with text and links
 
 Use `ui.inline_text` for text alongside a link. It escapes the string and preserves surrounding spaces. Put each item's children in reading order with `ui.list_item`. Use `ui.unordered_list` for bullets or `ui.ordered_list` for numbering. The first argument to `ui.ordered_list` sets the first item's number, so a second page can continue an earlier list.

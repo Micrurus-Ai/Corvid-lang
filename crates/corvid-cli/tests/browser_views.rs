@@ -20,6 +20,11 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test renders_image_attributes:
+    map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
+    assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
+    assert ui.image("/border.png", "").html == "<img src=\"/border.png\" alt=\"\">"
+
 test renders_native_lists_in_order:
     label = ui.inline_text("Read <notes> & ")
     first = ui.list_item([label, ui.link("references", "/ref")])
@@ -50,7 +55,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("5 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("6 passed"),
         "{good:?}"
     );
     fs::write(
