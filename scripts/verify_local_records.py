@@ -104,7 +104,7 @@ def check_field_diagnostics(cli, project):
     source = main.read_text()
     for before, after, diagnostic in [
         ("bind settings.mode", "bind settings.mdoe", "mdoe"),
-        ("bind settings.enabled", "bind settings.name", "local_checkbox"),
+        ("bind settings.enabled", "bind settings.name", "checkbox field binding"),
         ("bind settings.mode", "bind settings.retries", "segmented_choice"),
         ("bind settings.name", "bind initial.name", "browser state"),
     ]:

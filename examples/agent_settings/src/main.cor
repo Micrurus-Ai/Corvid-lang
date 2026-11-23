@@ -13,10 +13,10 @@ type AgentSettings:
 fn settings_editor(initial: AgentSettings) -> ui.View:
     browser state settings = initial
     controls = ui.grid([
-        ui.local_field("Agent name", bind settings.name),
-        ui.local_checkbox("Enabled", bind settings.enabled),
+        ui.field("Agent name", bind settings.name),
+        ui.checkbox("Enabled", bind settings.enabled),
         ui.segmented_choice("Run mode", bind settings.mode),
-        ui.local_field("Retry limit", bind settings.retries)
+        ui.field("Retry limit", bind settings.retries)
     ])
     preview = ui.record_text("{name} / {mode} / enabled: {enabled} / retries: {retries}")
     return ui.local_selection(settings, controls, preview)

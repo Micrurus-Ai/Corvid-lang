@@ -117,7 +117,7 @@ impl Checker<'_> {
         let (expected, indices): (&str, &[usize]) = match control {
             "local_slider" => ("Int", &[1]),
             "record_swatch" => ("Int", &[0, 1, 2]),
-            "local_checkbox" => ("Bool", &[1]),
+            "local_checkbox" | "checkbox" => ("Bool", &[1]),
             "segmented_choice" => ("choice", &[1]),
             _ => return,
         };

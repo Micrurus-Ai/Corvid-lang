@@ -635,13 +635,13 @@ Declare the state in the component and bind each control to a field.
 ```corvid
 browser state settings = initial
 controls = ui.grid([
-    ui.local_field("Agent name", bind settings.name),
-    ui.local_checkbox("Enabled", bind settings.enabled),
+    ui.field("Agent name", bind settings.name),
+    ui.checkbox("Enabled", bind settings.enabled),
     ui.segmented_choice("Run mode", bind settings.mode),
-    ui.local_field("Retry limit", bind settings.retries)
+    ui.field("Retry limit", bind settings.retries)
 ])
 ```
 
-A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.name` also fails because that field is text. For a dropdown, use `ui.local_field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
+A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.name` also fails because that field is text. For a dropdown, use `ui.field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
 
 An opted-in assistant supplies a complete record in one call. For example, `{"name":"Scout","enabled":true,"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
