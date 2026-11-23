@@ -188,26 +188,36 @@ def check_database(url, path, samples):
             if not p["read_only"] and not p["error"]
         }
     )
+    log = verify_audit(url, path, expected)
+    # The audit trigger runs in the save transaction. SQLite has one
+    # writer, so the persisted rows also establish durable write order.
+    positions = {title: i for i, (title, _) in enumerate(log)}
+    for burst_result in samples:
+        title = burst_result["browser_title"]
+        if title in positions:
+            burst_result["browser_commit_rank"] = 1 + sum(
+                positions[peer["title"]] < positions[title]
+                for peer in burst_result["peers"]
+                if peer["title"] in positions
+            )
+    return len(log)
+
+
+def verify_audit(url, path, expected, unconfirmed=None):
     with closing(sqlite3.connect(path)) as db:
         log = db.execute("SELECT title,shelf FROM audit ORDER BY rowid").fetchall()
-        assert len(log) == len(expected) and dict(log) == expected
-        # The audit trigger runs in the save transaction. SQLite has one
-        # writer, so the persisted rows also establish durable write order.
-        positions = {title: i for i, (title, _) in enumerate(log)}
-        for burst_result in samples:
-            title = burst_result["browser_title"]
-            if title in positions:
-                burst_result["browser_commit_rank"] = 1 + sum(
-                    positions[peer["title"]] < positions[title]
-                    for peer in burst_result["peers"]
-                    if peer["title"] in positions
-                )
+        recorded = dict(log)
+        assert len(log) == len(recorded), "Duplicate durable edit"
+        assert expected.items() <= recorded.items(), "Acknowledged edit missing after restart"
+        assert recorded.items() - expected.items() <= (unconfirmed or {}).items(), (
+            "Unexpected durable edit"
+        )
         html = read(url)
         for shelf, title, revision in db.execute("SELECT shelf,title,revision FROM shelves"):
             edits = [t for t, s in log if s == shelf]
             assert revision == len(edits) and (not edits or title == edits[-1])
             assert f"Shelf {shelf}: {title}" in html
-    return len(log)
+    return log
 
 
 def report(samples, recovered):
@@ -261,6 +271,19 @@ def binary_digest(path):
         return hashlib.file_digest(binary, "sha256").hexdigest()
 
 
+def package_audited_app(cli, project, directory):
+    package(cli, project, directory)
+    subprocess.run(
+        [cli, "migrate", "up", "--dir", "migrations", "--database", "reading.sqlite"],
+        cwd=directory,
+        check=True,
+    )
+    with closing(sqlite3.connect(directory / "reading.sqlite")) as db:
+        db.executescript("""CREATE TABLE audit(title TEXT, shelf INTEGER);
+            CREATE TRIGGER record_edit AFTER UPDATE ON shelves BEGIN
+            INSERT INTO audit VALUES(new.title,new.shelf); END;""")
+
+
 def run(args):
     cli = args.cli.resolve()
     with TemporaryDirectory() as tmp, ExitStack() as stack:
@@ -278,16 +301,7 @@ def run(args):
             instrument_write_order(project / "src")
         reference = "Corvid baseline" if args.compare_cli else "TypeScript"
         corvid, other = root / "Corvid", root / reference
-        package(cli, project, corvid)
-        subprocess.run(
-            [cli, "migrate", "up", "--dir", "migrations", "--database", "reading.sqlite"],
-            cwd=corvid,
-            check=True,
-        )
-        with closing(sqlite3.connect(corvid / "reading.sqlite")) as db:
-            db.executescript("""CREATE TABLE audit(title TEXT, shelf INTEGER);
-                CREATE TRIGGER record_edit AFTER UPDATE ON shelves BEGIN
-                INSERT INTO audit VALUES(new.title,new.shelf); END;""")
+        package_audited_app(cli, project, corvid)
         if args.compare_cli:
             shutil.copytree(corvid, other)
         else:

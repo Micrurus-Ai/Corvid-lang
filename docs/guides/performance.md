@@ -188,6 +188,27 @@ In a separate 20-round profile, each server also recorded the time just before e
 
 Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CANDIDATE --compare-cli PATH_TO_BASELINE --editors 50 --rounds 40 --output order.json`. Add `--profile-order` to record the process-local millisecond timestamps at handler entry and just before calling the update helper. Compare those timestamps only within the same burst and server process. Timestamps that share a millisecond have an uncertain order.
 
+### Sustained editing and backlog
+
+On Windows Chrome, a Node client scheduled saves at a fixed rate and 20 edit-form reads per second regardless of earlier response times. Chrome on the same machine attempted to open the edit form every two seconds, one navigation at a time. A slow navigation reduced the number of browser probes completed during the window. Both Corvid builds served separate copies of the same packaged app and initial SQLite database. A trigger logged each edit in its save transaction. The two 12-second trials reversed build order and load order.
+
+| Offered saves/s | Build | Outstanding requests at cutoff, trials 1 / 2 | Time to finish after cutoff, seconds | Successful HTTP save / read p95, ms | Failed saves / reads |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 20 | Before queue | 0 / 0 | 0 / 0 | 21 / 10 | 0 / 0 |
+| 20 | Queued | 0 / 0 | 0 / 0 | 25 / 14 | 0 / 0 |
+| 80 | Before queue | 22 / 257 | 0.50 / 4.29 | 4,348 / 3,922 | 2 / 0 |
+| 80 | Queued | 1 / 329 | 0.002 / 5.57 | 5,066 / 347 | 0 / 0 |
+| 160 | Before queue | 1,071 / 1,110 | 12.72 / 14.65 | 17,245 / 13,554 | 319 / 59 |
+| 160 | Queued | 603 / 762 | 5.48 / 8.44 | 7,619 / 66 | 0 / 0 |
+
+Outstanding requests are measured from HTTP dispatch to response completion, including failures. That count includes work in the client, transport and server. Drain time starts at the end of the offered-load window. The client recorded scheduled and actual dispatch times separately. The p95 dispatch lag ranged from 8 to 14 ms across the pooled rate/build cells. At the highest rate, the baseline recorded 374 refused connections and four HTTP 200 responses without a save confirmation. Across the complete short trial each build recovered exactly its acknowledged writes, including warm-up (6,260 with the queue and 5,939 before it). [Request timings, browser visits and restart counts](../../benches/results/reading-sustained-windows-chrome.json)
+
+At 160 saves/s the browser saw the edit form within 113 ms at p95 with the queue (12 visits). On the baseline it took 18.2 seconds at p95, with only seven visits because slow visits overlapped later scheduled probes. These small samples describe this machine. At the same offered rate the queue still took seconds to drain, and the 80-save/s windows varied substantially between trials.
+
+A separate 60-second run offered 80 saves and 20 HTTP reads per second. On the queued build, all 4,800 measured saves and 1,200 reads succeeded. At cutoff 149 requests were outstanding and the last response arrived 1.82 seconds later. Save p95 was 1.76 seconds, HTTP read p95 was 102 ms, and Chrome observed the form within 163 ms at p95 across 30 visits. The baseline had 2,283 requests outstanding at cutoff and took 26.81 seconds for all client requests to finish or fail. It had 1,064 failed saves and 184 failed reads. Both builds recovered every acknowledged edit. The baseline database additionally contained 56 edits for which the client never received confirmation. A client timeout therefore did not guarantee that its edit had been rolled back. The first attempt at this longer trial stopped on a baseline browser navigation timeout. The completed repeat recorded browser failures independently and ran the baseline first. [One-minute observations](../../benches/results/reading-sustained-minute.json)
+
+Run `python scripts/benchmark_reading_arrivals.py PATH_TO_QUEUED_CLI --baseline PATH_TO_PREVIOUS_CLI --output sustained.json`. Use `--rates 80 --seconds 60 --rounds 1` for the one-minute workload. The benchmark includes warm-up edits in restart verification and excludes them from latency summaries.
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.
