@@ -49,6 +49,17 @@ fn reading_plan(topic: String) -> View:
     return ui.ordered_list(3, [introduction, exercise])
 ```
 
+### Build a data table
+
+Pass a caption, column names, and a list of rows to `ui.table`. The caption and column names are escaped text. Each column name becomes a header with `scope="col"`. Supply one view per cell in column order. Use `ui.inline_text` for a plain value or a view such as `ui.link` for a navigable cell.
+
+```corvid-fragment
+fn reading_table(topic: String) -> View:
+    guide = [ui.link(topic, "/guide"), ui.inline_text("Ready")]
+    notes = [ui.inline_text("Field notes"), ui.inline_text("Draft")]
+    return ui.table("Reading queue", ["Title", "Status"], [guide, notes])
+```
+
 ### Arrange views
 
 Use layout functions to arrange any list of views. `ui.stack(content)` places children vertically. `ui.row(content)` places children horizontally and wraps to another line when needed. `ui.grid(content)` fits as many equal-width columns as the container allows, aiming for a minimum of 16rem per column. A narrower container gets a single column. All three preserve the order of their children and use a 1rem gap.

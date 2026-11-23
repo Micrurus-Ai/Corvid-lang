@@ -26,6 +26,19 @@ public fn ordered_list(start: Int, items: List<View>) -> View:
 public fn unordered_list(items: List<View>) -> View:
     return View("<ul>" + children(items) + "</ul>")
 
+public fn table(caption: String, columns: List<String>, rows: List<List<View>>) -> View:
+    parts = ["<table><caption>" + escaped(caption) + "</caption><thead><tr>"]
+    for column in columns:
+        parts.append("<th scope=\"col\">" + escaped(column) + "</th>")
+    parts.append("</tr></thead><tbody>")
+    for cells in rows:
+        parts.append("<tr>")
+        for cell in cells:
+            parts.append("<td>" + cell.html + "</td>")
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return View(parts.join(""))
+
 public fn stack(content: List<View>) -> View:
     return View("<div style=\"display:flex;flex-direction:column;gap:1rem\">" + children(content) + "</div>")
 

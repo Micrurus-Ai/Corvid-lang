@@ -29,6 +29,13 @@ test renders_native_lists_in_order:
     assert steps.html == "<ol start=\"-2\"><li>Read &lt;notes&gt; &amp; <a href=\"/ref\" tabindex=\"0\">references</a></li><li>Bring <ul><li>Notebook</li></ul></li></ol>"
     assert ui.unordered_list([]).html == "<ul></ul>"
 
+test renders_native_table_in_order:
+    guide = [ui.link("A & B", "/guide"), ui.inline_text("<ready>")]
+    notes = [ui.inline_text("Notes"), ui.inline_text("Draft")]
+    table = ui.table("Books <today>", ["Title & author", "Status"], [guide, notes])
+    assert table.html == "<table><caption>Books &lt;today&gt;</caption><thead><tr><th scope=\"col\">Title &amp; author</th><th scope=\"col\">Status</th></tr></thead><tbody><tr><td><a href=\"/guide\" tabindex=\"0\">A &amp; B</a></td><td>&lt;ready&gt;</td></tr><tr><td>Notes</td><td>Draft</td></tr></tbody></table>"
+    assert ui.table("Queue", ["Title"], []).html == "<table><caption>Queue</caption><thead><tr><th scope=\"col\">Title</th></tr></thead><tbody></tbody></table>"
+
 test agent_query_uses_the_same_form:
     form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
     assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
@@ -43,7 +50,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("4 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("5 passed"),
         "{good:?}"
     );
     fs::write(
@@ -56,6 +63,14 @@ test agent_query_uses_the_same_form:
     assert!(
         String::from_utf8_lossy(&bad_start.stderr).contains("expected `Int`, got `String`"),
         "{bad_start:?}"
+    );
+    fs::write(&main, source.replace("[guide, notes]", "[[\"raw\"]]")).unwrap();
+    let bad_cells = run("check");
+    assert!(
+        !bad_cells.status.success()
+            && String::from_utf8_lossy(&bad_cells.stderr)
+                .contains("expected `List<List<View>>`, got `List<List<String>>`"),
+        "{bad_cells:?}"
     );
     fs::write(main, source.replace("ui.text(\"second\")", "\"second\"")).unwrap();
     let bad = run("check");

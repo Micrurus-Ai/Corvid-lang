@@ -384,6 +384,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn list_item(content: List<View>) -> View` wraps the children in an `li` in the supplied order.
 - `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
 - `fn unordered_list(items: List<View>) -> View` renders a `ul`. Pass list item views in display order.
+- `fn table(caption: String, columns: List<String>, rows: List<List<View>>) -> View` renders a native table with an escaped caption and escaped column headers in a `thead`. Each inner list creates one body row, with one `td` per view in the supplied order. An empty row list produces an empty `tbody`.
 - `fn stack(content: List<View>) -> View`
 - `fn row(content: List<View>) -> View`
 - `fn grid(content: List<View>) -> View`
