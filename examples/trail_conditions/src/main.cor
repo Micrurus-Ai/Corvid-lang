@@ -1,0 +1,25 @@
+import "std:ui" as ui
+
+fn trail_card(theme: String, trail: String, condition: String) -> ui.View:
+    return ui.class_group("trail-card " + theme, [ui.h2(trail), ui.text(condition)])
+
+fn conditions_page() -> String:
+    css = """body { font-family: system-ui, sans-serif }
+.trail-list { display: grid; gap: 1rem }
+.trail-card { --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
+.trail-card.river { --trail-accent: #225782 }
+.trail-card h2 { color: var(--trail-accent) }
+@media (min-width: 42rem) { .trail-list { grid-template-columns: repeat(2, minmax(0, 1fr)) } }"""
+    forest = trail_card("forest", "Forest loop", "Dry underfoot")
+    river = trail_card("river", "River walk", "Muddy near the bridge")
+    return ui.styled_page("en", "Trail conditions", css, [
+        ui.h1("Trail conditions"), ui.class_group("trail-list", [forest, river])
+    ])
+
+test class_group_escapes_classes_and_keeps_child_order:
+    group = ui.class_group("map\" & <trail>", [ui.text("First"), ui.text("Second")])
+    assert group.html == "<div class=\"map&quot; &amp; &lt;trail&gt;\"><p>First</p><p>Second</p></div>"
+
+server trail_conditions:
+    route GET "/" -> html:
+        return conditions_page()
