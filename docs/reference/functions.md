@@ -395,6 +395,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn ordered_list(start: Int, items: List<View>) -> View` renders an `ol` with an integer `start` attribute. Pass list item views in display order.
 - `fn unordered_list(items: List<View>) -> View` renders a `ul`. Pass list item views in display order.
 - `fn table(caption: String, columns: List<String>, rows: List<List<View>>) -> View` renders a native table with an escaped caption and escaped column headers in a `thead`. Each inner list creates one body row, with one `td` per view in the supplied order. An empty row list produces an empty `tbody`.
+- `fn table_with_row_headers(caption: String, columns: List<String>, rows: List<List<View>>) -> View` takes the same inputs as `table`. The first view in each nonempty body row becomes a `th` with `scope="row"`. Remaining views become `td` cells in order. An empty inner list produces an empty row.
 - `fn stack(content: List<View>) -> View`
 - `fn row(content: List<View>) -> View`
 - `fn grid(content: List<View>) -> View`

@@ -108,6 +108,13 @@ test renders_native_table_in_order:
     assert table.html == "<table><caption>Books &lt;today&gt;</caption><thead><tr><th scope=\"col\">Title &amp; author</th><th scope=\"col\">Status</th></tr></thead><tbody><tr><td><a href=\"/guide\" tabindex=\"0\">A &amp; B</a></td><td>&lt;ready&gt;</td></tr><tr><td>Notes</td><td>Draft</td></tr></tbody></table>"
     assert ui.table("Queue", ["Title"], []).html == "<table><caption>Queue</caption><thead><tr><th scope=\"col\">Title</th></tr></thead><tbody></tbody></table>"
 
+test first_cell_labels_each_nonempty_row:
+    stop = ui.inline_text("Bridge & park")
+    distance = ui.abbreviation("1 km", "1 kilometre")
+    table = ui.table_with_row_headers("Distances", ["Stop", "Distance"], [[stop, distance], [], [stop]])
+    header = "<th scope=\"row\">Bridge &amp; park</th>"
+    assert table.html.contains("<tbody><tr>" + header + "<td>" + distance.html + "</td></tr><tr></tr><tr>" + header + "</tr></tbody>")
+
 test agent_query_uses_the_same_form:
     form = ui.agent_query_form("find_slots", "Find \"open\" slots", "/slots", [ui.text_field("Day", "day", ""), ui.submit("Find slots")])
     assert form.html == "<form method=\"get\" action=\"/slots\" toolname=\"find_slots\" tooldescription=\"Find &quot;open&quot; slots\"><label>Day<input type=\"text\" name=\"day\" value=\"\"></label><button type=\"submit\">Find slots</button></form>"
@@ -122,7 +129,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("17 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("18 passed"),
         "{good:?}"
     );
     fs::write(

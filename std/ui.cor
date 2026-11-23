@@ -78,14 +78,25 @@ public fn unordered_list(items: List<View>) -> View:
     return View("<ul>" + children(items) + "</ul>")
 
 public fn table(caption: String, columns: List<String>, rows: List<List<View>>) -> View:
+    return render_table(caption, columns, rows, false)
+
+public fn table_with_row_headers(caption: String, columns: List<String>, rows: List<List<View>>) -> View:
+    return render_table(caption, columns, rows, true)
+
+fn render_table(caption: String, columns: List<String>, rows: List<List<View>>, row_headers: Bool) -> View:
     parts = ["<table><caption>" + escaped(caption) + "</caption><thead><tr>"]
     for column in columns:
         parts.append("<th scope=\"col\">" + escaped(column) + "</th>")
     parts.append("</tr></thead><tbody>")
     for cells in rows:
         parts.append("<tr>")
+        needs_row_header = row_headers
         for cell in cells:
-            parts.append("<td>" + cell.html + "</td>")
+            if needs_row_header:
+                parts.append("<th scope=\"row\">" + cell.html + "</th>")
+                needs_row_header = false
+            else:
+                parts.append("<td>" + cell.html + "</td>")
         parts.append("</tr>")
     parts.append("</tbody></table>")
     return View(parts.join(""))
