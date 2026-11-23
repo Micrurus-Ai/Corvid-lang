@@ -18,7 +18,10 @@ fn guide(note: String) -> String:
         [ui.inline_text("Bridge"), ui.data_value("1000", [ui.abbreviation("1 km", "1 kilometre")])],
         [ui.inline_text("Lookout"), ui.data_value("3000", [ui.abbreviation("3 km", "3 kilometres")])]
     ])
-    walking_time = ui.paragraph([ui.inline_text("Walking time: "), ui.time_value("PT45M", [ui.inline_text("45 minutes")])])
+    walking_time = ui.paragraph([
+        ui.trusted_markup("<em>Estimated</em> walking time: "),
+        ui.time_value("PT45M", [ui.inline_text("45 minutes")])
+    ])
     route_details = ui.section("route", "Route", [
         ui.figure("Follow this marker to the lookout.", [marker]), walking_time, stops, distances
     ])

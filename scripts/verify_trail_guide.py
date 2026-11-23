@@ -20,7 +20,7 @@ def check_response(url):
         '<a href="#packing" tabindex="0">Packing note</a></nav>',
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
         'alt="Green circle trail marker" width="24" height="24"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
-        '<p>Walking time: <time datetime="PT45M">45 minutes</time></p>',
+        '<p><em>Estimated</em> walking time: <time datetime="PT45M">45 minutes</time></p>',
         '<ol start="1"><li>Bridge</li><li value="3">Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
         '<th scope="col">Stop</th><th scope="col">Distance</th>',
@@ -42,6 +42,8 @@ def check_response(url):
     response = read(url + "/guide?" + urlencode({"note": NOTE}))
     literal = escape(NOTE)
     assert response.startswith('<!doctype html><html lang="en">')
+    assert "<em>Estimated</em>" in response
+    assert "<em>wind</em>" not in response
     assert f'data-trail-note="{literal}"' in response
     assert f'<h3>Current note</h3><pre dir="auto">\n{literal}</pre>' in response
     assert f'<textarea name="note" required>\n{literal}</textarea>' in response
@@ -65,6 +67,7 @@ def check_browser(url, channel):
             "h2", "figure", "p", "ol", "table"
         ]
         expect(route.locator('time[datetime="PT45M"]')).to_have_text("45 minutes")
+        expect(route.locator("p > em")).to_have_text("Estimated")
         figure = route.get_by_role("figure")
         expect(figure.locator("figcaption")).to_have_text("Follow this marker to the lookout.")
         image = figure.get_by_role("img", name="Green circle trail marker")
