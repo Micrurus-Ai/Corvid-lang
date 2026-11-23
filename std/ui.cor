@@ -23,6 +23,10 @@ public fn no_script(message: String) -> View:
 public fn isolated_text(value: String) -> View:
     return View("<bdi>" + escaped(value) + "</bdi>")
 
+public fn preformatted_text(value: String) -> View:
+    # HTML parsers discard the first newline after a pre start tag.
+    return View("<pre dir=\"auto\">\n" + escaped(value) + "</pre>")
+
 public fn paragraph(content: List<View>) -> View:
     return View("<p>" + children(content) + "</p>")
 

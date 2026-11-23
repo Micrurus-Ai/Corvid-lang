@@ -50,6 +50,11 @@ test abbreviation_escapes_text_and_title:
     distance = ui.abbreviation("<km> & mi", "kilometres & \"miles\"")
     assert distance.html == "<abbr title=\"kilometres &amp; &quot;miles&quot;\">&lt;km&gt; &amp; mi</abbr>"
 
+test preformatted_text_preserves_whitespace_and_escapes_markup:
+    note = ui.preformatted_text("\n  A & B\n\t</pre>")
+    assert note.html == "<pre dir=\"auto\">\n\n  A &amp; B\n\t&lt;/pre&gt;</pre>"
+    assert ui.preformatted_text("").html == "<pre dir=\"auto\">\n</pre>"
+
 test isolated_text_escapes_content_inside_direction_boundary:
     note = ui.isolated_text("مطر & </bdi>")
     assert note.html == "<bdi>مطر &amp; &lt;/bdi&gt;</bdi>"
@@ -193,7 +198,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("31 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("32 passed"),
         "{good:?}"
     );
     fs::write(

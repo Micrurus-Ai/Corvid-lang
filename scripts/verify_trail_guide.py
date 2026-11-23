@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from verify_reading_list import read, serve
 
 
-NOTE = '\nمطر & "</textarea><em>wind</em>"'
+NOTE = '\nمطر & "</textarea></pre><em>wind</em>"\n  Bring water'
 
 
 def check_response(url):
@@ -43,7 +43,7 @@ def check_response(url):
     literal = escape(NOTE)
     assert response.startswith('<!doctype html><html lang="en">')
     assert f'data-trail-note="{literal}"' in response
-    assert f"<p><strong>Current note</strong>: <bdi>{literal}</bdi></p>" in response
+    assert f'<h3>Current note</h3><pre dir="auto">\n{literal}</pre>' in response
     assert f'<textarea name="note" required>\n{literal}</textarea>' in response
 
 
@@ -59,7 +59,7 @@ def check_browser(url, channel):
         assert main.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
             "h1", "nav", "section", "section"
         ]
-        expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note"])
+        expect(main.get_by_role("heading")).to_have_text(["River trail guide", "Route", "Packing note", "Current note"])
         route = main.get_by_role("region", name="Route", exact=True)
         assert route.locator(":scope > *").evaluate_all("nodes => nodes.map(n => n.localName)") == [
             "h2", "figure", "p", "ol", "table"
@@ -118,11 +118,10 @@ def check_browser(url, channel):
         assert submitted == {"note": [NOTE.replace("\n", "\r\n")]}
         section = main.locator("[data-trail-note]")
         expect(section).to_have_attribute("data-trail-note", NOTE)
-        expect(section.locator("p > strong")).to_have_text("Current note")
-        isolated_note = section.locator("p > bdi")
-        expect(isolated_note).to_have_text(NOTE)
-        expect(isolated_note).to_have_css("direction", "rtl")
-        expect(section.locator("p")).to_have_text("Current note: " + NOTE)
+        expect(section.get_by_role("heading", level=3)).to_have_text("Current note")
+        preview = section.locator("pre")
+        assert preview.text_content() == NOTE
+        expect(preview).to_have_css("direction", "rtl")
         expect(section.locator("em")).to_have_count(0)
         expect(section.get_by_label("Your note")).to_have_value(NOTE)
         preview_url = page.url

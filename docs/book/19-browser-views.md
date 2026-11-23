@@ -39,7 +39,9 @@ Use `ui.paragraph` to mix inline views in a single paragraph. Its children appea
 
 Wrap important words in `ui.strong`. Pass them as `ui.inline_text` to escape the text, or include other inline views such as links.
 
-When a reader's note may start in a different writing direction from its label, pass the note to `ui.isolated_text`. It escapes the text and wraps it in a native `bdi` element so the browser determines the note's direction independently.
+For a multiline preview, use `ui.preformatted_text(note)`. The trail guide uses it below the **Current note** heading so that blank lines and indentation survive the trip from the text area to the preview. The browser determines the block’s writing direction from the note itself.
+
+When a reader's note appears inline with its label, pass the note to `ui.isolated_text`. It escapes the text and wraps it in a native `bdi` element so the browser determines the note's direction independently.
 
 ```corvid-fragment
 fn note_preview(note: String) -> View:

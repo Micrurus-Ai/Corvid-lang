@@ -26,14 +26,14 @@ fn guide(note: String) -> String:
     editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview"), ui.reset_button("Restore note")])
     preview_hint = ui.no_script("Select Preview to reload the guide with your note.")
     form = ui.query_form("/guide", [preview_hint, editor])
-    preview = ui.paragraph([ui.strong([ui.inline_text("Current note")]), ui.inline_text(": "), ui.isolated_text(note)])
+    preview = ui.preformatted_text(note)
     supplies = ui.unordered_list([
         ui.list_item([ui.checkbox_field("Water bottle", "water", false)]),
         ui.list_item([ui.checkbox_field("Trail map", "map", false)])
     ])
     checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
     supplies_aside = ui.aside("Suggested supplies", [checklist])
-    packing = ui.data_group("trail-note", note, [supplies_aside, preview, form])
+    packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [
             ui.h1(title), navigation, route_details, ui.section("packing", "Packing note", [details])
