@@ -85,6 +85,14 @@ fn weekend_packing() -> View:
 
 In the trail guide, the route supplies `GuideContext("/guide")` to the page. The page passes that record to the packing panel, which passes it to the note editor and the suggestions form. Both forms read `context.preview_path` for their GET action. To render the guide for a different destination, supply another record at the page call. The context belongs to that render and follows ordinary typed function arguments.
 
+### Let the caller render a preview
+
+The trail guide's packing panel takes a callback named `render_preview` with type `(String) -> ui.View`. The panel calls `render_preview(note)` while building the page and places the returned view below **Current note**. The guide supplies a preformatted preview to preserve line breaks. Another caller can supply a paragraph using the same panel.
+
+```corvid-fragment
+packing = packing_panel(note, context, fn (text: String) -> ui.text(text))
+```
+
 ### Recover inside a component slot
 
 When a child returns `Result<View, String>`, its parent can choose what fills that slot on failure. In the trail guide, the layout keeps the route details and the packing section heading even when the packing component returns an error. The success branch keeps the child's markup. The error branch uses `ui.text` to escape a message intended for the reader.

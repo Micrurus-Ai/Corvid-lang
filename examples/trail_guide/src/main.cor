@@ -34,12 +34,12 @@ fn guide(note: String, context: GuideContext) -> String:
     route_details = ui.section("route", "Route", [
         ui.figure("Follow this marker to the lookout.", [marker]), walking_time, stops, distances
     ])
-    packing = packing_panel(note, context)
+    packing = packing_panel(note, context, fn (text: String) -> ui.preformatted_text(text))
     return ui.page_with_landmarks("en", title, [ui.h1(title), navigation],
         guide_sections(route_details, packing), [ui.link("Back to route", "#route")])
 
-fn packing_panel(note: String, context: GuideContext) -> Result<ui.View, String>:
-    preview = ui.preformatted_text(note)
+fn packing_panel(note: String, context: GuideContext, render_preview: (String) -> ui.View) -> Result<ui.View, String>:
+    preview = render_preview(note)
     supplies = ui.unordered_list([
         ui.list_item([ui.checkbox_field_with_value("Water bottle", "supply", "water", false)]),
         ui.list_item([ui.checkbox_field_with_value("Trail map", "supply", "map", false)])
@@ -67,6 +67,13 @@ fn packing_suggestions(context: GuideContext) -> ui.View:
         ])
     ])
     return ui.named_query_form("Suggested packing notes", context.preview_path, [preset, ui.submit("Use suggestion")])
+
+test packing_panel_renders_the_note_with_the_callers_preview:
+    panel = packing_panel("Map & compass", GuideContext("/guide"), fn (text: String) -> ui.text(text))
+    has_paragraph_preview = match panel:
+        Ok(view) -> view.html.contains("<h3>Current note</h3><p>Map &amp; compass</p>")
+        Err(_) -> false
+    assert has_paragraph_preview
 
 test each_guide_supplies_the_destination_for_both_packing_forms:
     river = guide("Bring water", GuideContext("/river"))
