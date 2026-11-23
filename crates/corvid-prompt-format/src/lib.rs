@@ -33,6 +33,21 @@ pub fn schema_for(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Value {
     schema_for_inner(ty, types_by_id, &mut Vec::new())
 }
 
+/// JSON Schema for the compiler-known `JsonError` record. Prompt
+/// schemas and the published OpenAPI document both use this one.
+pub fn json_error_schema() -> Value {
+    let fields = corvid_types::json_error_fields();
+    let properties: serde_json::Map<String, Value> =
+        fields.iter().map(|(name, _)| (name.to_string(), json!({ "type": "string" }))).collect();
+    let required: Vec<&str> = fields.iter().map(|(name, _)| *name).collect();
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
 fn schema_for_inner(
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
@@ -212,6 +227,7 @@ fn schema_for_inner(
         // shouldn't appear as a prompt return type; emit a
         // permissive schema and let the typechecker enforce.
         Type::JsonBuilder => json!({}),
+        Type::JsonError => json_error_schema(),
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so

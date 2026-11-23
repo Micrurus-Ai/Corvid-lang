@@ -93,6 +93,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         // diagnostic. Same shape as `DbHandle`.
         Type::JsonValue => "JsonValue".into(),
         Type::JsonBuilder => "JsonBuilder".into(),
+        Type::JsonError => "JsonError".into(),
         // Slice 51f — `Upload<Format>` / `Page<Item>` are
         // HTTP-boundary types; stable mangled names keep typeinfo
         // lookups from crashing, but any emission that USES them bails
@@ -547,6 +548,9 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // mentioning these types to the interpreter.
         Type::JsonValue => false,
         Type::JsonBuilder => false,
+        // B01 — typed JSON decoding is interpreter-tier until the
+        // native target gains the public JSON mapping.
+        Type::JsonError => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the

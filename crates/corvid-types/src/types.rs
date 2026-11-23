@@ -168,6 +168,13 @@ pub enum Type {
     /// reason as `JsonValue` — interpreter-only in 33R5b.
     JsonBuilder,
 
+    /// Compiler-known `JsonError` — why `T.from_json(text)` failed.
+    /// A read-only record whose fields are listed by
+    /// [`crate::builtin_methods::json_error_fields`]: `path` (such as
+    /// `items[1].quantity`, empty at the root), `expected`, `found`
+    /// and `message`. At runtime it is an ordinary record value.
+    JsonError,
+
     /// Synthetic struct-like value for backend route path captures.
     RouteParams(Vec<(String, Type)>),
 
@@ -194,6 +201,7 @@ impl Type {
             "TraceId" => Type::TraceId,
             "JsonValue" => Type::JsonValue,
             "JsonBuilder" => Type::JsonBuilder,
+            "JsonError" => Type::JsonError,
             _ => return None,
         })
     }
@@ -244,6 +252,7 @@ impl Type {
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),
             Type::JsonBuilder => "JsonBuilder".into(),
+            Type::JsonError => "JsonError".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

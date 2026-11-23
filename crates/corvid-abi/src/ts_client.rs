@@ -338,6 +338,12 @@ fn ts_type(name: &str) -> String {
         "String" | "TraceId" => return "string".to_string(),
         "Bool" => return "boolean".to_string(),
         "Nothing" => return "null".to_string(),
+        // The compiler-known `JsonError` record, written out inline.
+        "JsonError" => {
+            let fields: Vec<String> =
+                corvid_types::json_error_fields().iter().map(|(field, _)| format!("{field}: string")).collect();
+            return format!("{{ {} }}", fields.join("; "));
+        }
         _ => {}
     }
     if let Some((head, inner)) = split_generic(name) {

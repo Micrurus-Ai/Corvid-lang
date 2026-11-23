@@ -40,6 +40,16 @@ pub enum TypeErrorKind {
     /// E.g. `x = String` or `greet(Int)`.
     TypeAsValue { name: String },
 
+    /// `T.from_json(text)` or `value.to_json()` on a type that has no
+    /// public JSON form, or whose JSON form would drop a guarantee
+    /// (`Grounded` provenance, `Tainted` marking).
+    NoJsonForm {
+        method: String,
+        ty: String,
+        reason: String,
+        hint: String,
+    },
+
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
     BareFunctionReference { name: String },
@@ -515,6 +525,9 @@ impl TypeErrorKind {
             Self::TypeAsValue { name } => {
                 format!("`{name}` is a type, not a value")
             }
+            Self::NoJsonForm { method, ty, reason, .. } => {
+                format!("`{method}` is not available for `{ty}`: {reason}")
+            }
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
             }
@@ -926,6 +939,7 @@ impl TypeErrorKind {
             Self::NotAStruct { .. } => {
                 Some("use `.field` only on values of a user-declared `type`".into())
             }
+            Self::NoJsonForm { hint, .. } => Some(hint.clone()),
             Self::TypeAsValue { name } => Some(format!(
                 "to create a value of type `{name}`, call a tool or prompt that returns one"
             )),

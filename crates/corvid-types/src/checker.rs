@@ -887,6 +887,7 @@ mod struct_literal_check;
 mod match_check;
 mod expr;
 mod import_call;
+mod json_methods;
 mod ops;
 mod prompt;
 mod stmt;

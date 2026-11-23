@@ -38,7 +38,7 @@ pub use test_runner::{
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
 };
 
-use self::expr::{eval_binop, eval_builtin_method, eval_literal, eval_unop, require_bool};
+use self::expr::{eval_binop, eval_builtin_method, eval_json_decode, eval_literal, eval_unop, require_bool};
 use self::grounding::{maybe_ground_tool_result, tool_has_retrieval_effect};
 use crate::conv::{json_to_value, value_to_json};
 use crate::env::Env;
@@ -580,6 +580,12 @@ impl<'ir> Interpreter<'ir> {
                         return self
                             .eval_higher_order_list_method(*kind, recv, arg_vals, expr.span)
                             .await
+                            .map(ExprFlow::Value);
+                    }
+                    // `T.from_json(text)` (B01): the target type is the
+                    // `T` of the call's checked `Result<T, JsonError>`.
+                    if matches!(kind, Bmk::JsonDecode | Bmk::JsonDecodeStrict) {
+                        return eval_json_decode(*kind, &recv, &expr.ty, &self.types_by_id, expr.span)
                             .map(ExprFlow::Value);
                     }
                 }

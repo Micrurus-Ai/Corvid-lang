@@ -64,11 +64,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B01 typed JSON encode and decode** (in progress)
 
 - [x] One public JSON mapping for HTTP. Route bodies, JSON replies, stream chunks and approval results follow the published schema, and invalid bodies return a 400 naming `path`, `expected` and `found`. Single-file services publish schemas for their private route types, nullable fields use the OpenAPI 3.1 form, and the TypeScript client matches the wire shape. The live-contract tests send every accepted shape and validate each reply against the served schema. [JSON bodies and replies](guides/backend.md#json-bodies-and-replies)
-- [ ] `T.from_json(text)` and `value.to_json()` through the same mapping, with an opt-in strict mode for unknown fields.
+- [x] `T.from_json(text)`, `T.from_json_strict(text)` and `value.to_json()` through the same mapping, returning a `JsonError` record with `path`, `expected`, `found` and `message`. Aliases name list and map targets. The checker refuses types without a JSON form, `from_json` refuses `Grounded` data, and `to_json` on `Tainted` data stays tainted. [Typed decoding and encoding](reference/stdlib/json.md#typed-decoding-and-encoding)
+- [ ] Decode types imported from another module with `from_json`.
 - [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first.
 - [ ] Move the `decode_<Type>_from_json` convention to the public mapping.
 - [ ] Native target support.
-- [ ] Swift, Kotlin and Python SDK sum types use the wire shape.
+- [ ] Swift, Kotlin and Python SDK sum types use the wire shape, and the SDKs describe `JsonError`.
 
 B01 to B06 are the foundation. Interoperability (B02, B07, B08) and built-in capability (B03 to B06, B09 onward) advance together, so a developer always has a typed path to a capability before Corvid gains a built-in version of it.
 

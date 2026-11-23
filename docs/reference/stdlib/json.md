@@ -54,11 +54,62 @@ as here; since slice 45o you can also import the module's own row —
 target type. **No per-type runtime handler exists** — the
 dispatch is generic over the declared signature.
 
+## Typed decoding and encoding
+
+Every type has `to_json`, and `from_json` is called on a type name.
+Neither needs an import:
+
+```corvid
+agent read_order(text: String) -> String:
+    return match Order.from_json(text):
+        Ok(order) -> order.to_json()
+        Err(problem) -> problem.message
+```
+
+| Call | Result |
+| --- | --- |
+| `T.from_json(text)` | `Result<T, JsonError>`. Keys `T` does not declare are skipped, because external APIs add fields. |
+| `T.from_json_strict(text)` | `Result<T, JsonError>`. The first undeclared key is an error. |
+| `value.to_json()` | Compact JSON text with object keys in sorted order, so the same value always encodes to the same text. |
+
+A `JsonError` has four `String` fields: `path` (such as
+`lines[0].quantity`, empty when the problem is the whole text),
+`expected`, `found`, and `message`, which combines them into one line.
+Text that is not JSON fails at the root, and its `found` gives the line
+and column.
+
+To decode a list, map or option at the top level, name it with a type
+alias:
+
+```corvid
+type Orders = List<Order>
+
+agent count(text: String) -> Int:
+    return match Orders.from_json(text):
+        Ok(orders) -> orders.length()
+        Err(problem) -> 0
+```
+
+The checker refuses a call when the type has no JSON form in that
+direction, naming the field that prevents it. `from_json` refuses a
+type that contains `Grounded`, because JSON text cannot prove where a
+value came from. Neither method accepts a type that contains a function,
+stream, handle, upload or JSON builder. `to_json` on a value that
+contains `Tainted` data returns `Tainted<String>`, so encoding never
+removes taint. An `extend` block cannot declare a method named
+`to_json`, `from_json` or `from_json_strict`.
+
+The methods are pure, so `@deterministic` code may call them and replay
+reproduces their results. Encoding a `Float` that is NaN or infinite
+stops the program, because JSON has no form for it. The native target
+and decoding types imported from another module are not supported yet.
+Programs that use these methods run on the interpreter.
+
 ## Public JSON mapping
 
 The public mapping is the JSON Corvid exchanges with code outside the
-program. HTTP request bodies and JSON replies use it, and the
-published OpenAPI schemas describe it.
+program. HTTP request bodies and JSON replies, `T.from_json` and
+`to_json` use it, and the published OpenAPI schemas describe it.
 
 | Corvid | JSON |
 | --- | --- |
@@ -83,8 +134,8 @@ handles, streams and JSON builders have no JSON form.
 A decode error names the first problem by path, such as `items[2].price`
 or `["user id"]` for a key that is not an identifier, with the expected
 type and what was found. Field refinements are checked at the same
-path. HTTP routes reject keys a record does not declare, as their
-published schemas state `additionalProperties: false`.
+path. HTTP routes and `from_json_strict` reject keys a record does not
+declare, as the published schemas state `additionalProperties: false`.
 
 Prompt structured output, tool arguments and recorded traces use
 Corvid's internal envelope instead, which represents `Option` as

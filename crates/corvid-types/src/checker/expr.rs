@@ -478,6 +478,21 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Partial(inner) => self.check_partial_field(inner, field, span),
+            Type::JsonError => {
+                match crate::builtin_methods::json_error_fields().into_iter().find(|(name, _)| *name == field.name) {
+                    Some((_, ty)) => ty,
+                    None => {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::UnknownField {
+                                struct_name: "JsonError".into(),
+                                field: field.name.clone(),
+                            },
+                            span,
+                        ));
+                        Type::Unknown
+                    }
+                }
+            }
             Type::RouteParams(fields) => {
                 if let Some((_, ty)) = fields.iter().find(|(name, _)| name == &field.name) {
                     ty.clone()

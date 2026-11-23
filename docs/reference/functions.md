@@ -111,6 +111,14 @@ Use `None` for an absent option. Pass a type name as the second argument to `ask
 - `Upload<Format>.content_type() -> String`
 - `Upload<Format>.size() -> Int`
 
+## Every type
+
+- `T.from_json(text: String) -> Result<T, JsonError>`
+- `T.from_json_strict(text: String) -> Result<T, JsonError>`
+- `T.to_json() -> String`
+
+Call `from_json` on a type name, such as `Order.from_json(text)`. Use a type alias to decode a list or map, such as `type Orders = List<Order>`. A `JsonError` has the `String` fields `path`, `expected`, `found` and `message`. See the [public JSON mapping](stdlib/json.md#public-json-mapping).
+
 ## Grounded
 
 - `Grounded<T>.unwrap_discarding_sources() -> T`

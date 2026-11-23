@@ -31,7 +31,10 @@ pub mod step;
 pub mod value;
 
 pub use conv::{json_to_value, value_to_json, ConvError};
-pub use public_json::{decode_public_json, encode_public_json, JsonDecodeError, UnknownFields};
+pub use public_json::{
+    decode_public_json, decode_public_json_text, encode_public_json, encode_public_json_text, JsonDecodeError,
+    UnknownFields,
+};
 pub use cycle_collector::collect_cycles;
 pub use env::Env;
 pub use errors::{InterpError, InterpErrorKind};

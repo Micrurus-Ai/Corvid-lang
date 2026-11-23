@@ -315,6 +315,9 @@ fn scalar_schema(name: &str) -> Option<Value> {
         "String" | "TraceId" => json!({ "type": "string" }),
         "Bool" => json!({ "type": "boolean" }),
         "Nothing" => json!({ "type": "null" }),
+        // The compiler-known `JsonError` record has no declaration to
+        // publish as a component, so it is described inline.
+        "JsonError" => corvid_prompt_format::json_error_schema(),
         _ => return None,
     })
 }
