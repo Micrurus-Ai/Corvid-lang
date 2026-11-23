@@ -84,6 +84,9 @@ def write(path, value):
 
 
 def worker(tree, state, task, title, check, previous):
+    revision = git(tree, "rev-parse", "HEAD")
+    receipt = state / f"verification-{revision}.txt"
+    host_result = receipt.read_text(encoding="utf-8") if receipt.is_file() else "None."
     prompt = f"""Implement one tested increment of {task}, {title}, from {ROADMAP}.
 Acceptance for the whole task: {check}
 Inspect the repository and relevant examples before editing. Work only on frontend
@@ -97,6 +100,12 @@ files and commands/results. Return complete only if all acceptance criteria
 pass on this revision. Return continue for a tested increment with work left.
 Return blocked or awaiting_feedback for a concrete dependency. Never invent
 browser, device, assistant, accessibility, performance, or human feedback results.
+First identify the remaining acceptance criteria. If the implementation already
+covers them and only an external check remains, do not add optional features.
+Use a matching host result for the checks it actually ran. If verification is
+unavailable, return blocked with the exact command and dependency. If your pass
+changes the inputs to that check, the earlier result no longer covers those edits.
+Host verification for starting revision {revision}: {host_result}
 Prior report (may predate integration with current main): {previous}
 """
     with tempfile.TemporaryDirectory(dir=state) as tmp:
