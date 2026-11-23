@@ -162,9 +162,14 @@ public fn text_area(label: String, name: String, initial: String) -> View:
     return text_area_with_requirement(label, name, initial, false)
 
 public fn text_area_with_requirement(label: String, name: String, initial: String, required: Bool) -> View:
+    return text_area_with_rows(label, name, initial, 0, required)
+
+public fn text_area_with_rows(label: String, name: String, initial: String, rows: Int, required: Bool) -> View:
     attributes = ""
+    if rows > 0:
+        attributes = " rows=\"" + rows.to_string() + "\""
     if required:
-        attributes = " required"
+        attributes = attributes + " required"
     # HTML parsers discard the first newline after a textarea start tag.
     return View("<label>" + escaped(label) + "<textarea name=\"" + escaped(name) + "\"" + attributes + ">\n" + escaped(initial) + "</textarea></label>")
 

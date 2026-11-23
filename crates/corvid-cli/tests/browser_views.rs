@@ -79,6 +79,13 @@ test textarea_requirement_controls_boolean_attribute:
     assert required_field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\" required>\n\n&lt;/textarea&gt;</textarea></label>"
     assert optional_field.html == ui.text_area("Note", "note", "").html
 
+test textarea_rows_preserve_content_and_native_requirement:
+    field = ui.text_area_with_rows("Maps & notes", "trip\"note", "\n</textarea>", 4, true)
+    assert field.html == "<label>Maps &amp; notes<textarea name=\"trip&quot;note\" rows=\"4\" required>\n\n&lt;/textarea&gt;</textarea></label>"
+    assert ui.text_area_with_rows("Note", "note", "", 1, false).html == "<label>Note<textarea name=\"note\" rows=\"1\">\n</textarea></label>"
+    assert ui.text_area_with_rows("Note", "note", "", -1, true).html == ui.text_area_with_requirement("Note", "note", "", true).html
+    assert ui.text_area_with_rows("Note", "note", "", 0, false).html == ui.text_area("Note", "note", "").html
+
 test fieldset_escapes_legend_and_preserves_controls:
     first = ui.text_field("Name", "name", "")
     last = ui.submit("Save")
@@ -209,7 +216,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("34 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("35 passed"),
         "{good:?}"
     );
     fs::write(

@@ -167,6 +167,7 @@ Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fra
 | `text_area(label: String, name: String, initial: String) -> View` | A labeled multiline field. Use `ui.text_area("Your note", "note", note)` to show a submitted packing note for further editing, including any leading blank line. |
 | `checkbox_field(label: String, name: String, checked: Bool) -> View` | Use `ui.checkbox_field("Trail map", "map", false)` for a box the reader can tick with scripts disabled. Pass `true` to start with the box checked. |
 | `text_area_with_requirement(label: String, name: String, initial: String, required: Bool) -> View` | Use `ui.text_area_with_requirement("Your note", "note", note, true)` when the browser should require a value before submitting the form. Pass `false` for an optional field. |
+| `text_area_with_rows(label: String, name: String, initial: String, rows: Int, required: Bool) -> View` | The trail guide uses `ui.text_area_with_rows("Your note", "note", note, 4, true)` to show four lines while editing. Longer notes can scroll. Pass zero or a negative row count for the browser default. |
 | `submit(label: String) -> View` | A submit button for its enclosing form. |
 | `reset_button(label: String) -> View` | Put `ui.reset_button("Restore note")` beside Preview. After editing the note, select Restore note to return the form controls to the values rendered on the current page. This works with scripts disabled. |
 | `search_form(controls: List<View>) -> View` | A GET form targeting the current page. |

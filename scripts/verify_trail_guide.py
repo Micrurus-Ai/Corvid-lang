@@ -34,7 +34,7 @@ def check_response(url):
         '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details></aside>',
         '<form method="get" action="/guide" aria-label="Packing note preview">',
         '<noscript><p>Select Preview to reload the guide with your note.</p></noscript>',
-        '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
+        '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" rows="4" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
@@ -46,7 +46,7 @@ def check_response(url):
     assert "<em>wind</em>" not in response
     assert f'data-trail-note="{literal}"' in response
     assert f'<h3>Current note</h3><pre dir="auto">\n{literal}</pre>' in response
-    assert f'<textarea name="note" required>\n{literal}</textarea>' in response
+    assert f'<textarea name="note" rows="4" required>\n{literal}</textarea>' in response
 
 
 def check_browser(url, channel):
@@ -112,6 +112,7 @@ def check_browser(url, channel):
         editor = form.get_by_role("group", name="Edit packing note")
         expect(form.locator(":scope > noscript > p")).to_be_visible()
         field = editor.get_by_label("Your note")
+        expect(field).to_have_js_property("rows", 4)
         field.fill("")
         editor.get_by_role("button", name="Preview").click()
         expect(field).to_be_focused()
