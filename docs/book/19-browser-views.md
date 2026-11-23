@@ -651,6 +651,25 @@ A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox dire
 
 An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true},"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
 
+### Show a field in a custom live preview
+
+Use `ui.value` to place an editable field's current value inside a view you design. For example, a nameplate can accept a view and place it beside a label.
+
+```corvid
+fn nameplate(name: ui.View) -> ui.View:
+    return ui.row:
+        ui.text("Agent name")
+        name
+
+fn name_editor(initial: AgentProfile) -> ui.View:
+    browser state profile = initial
+    control = ui.field("Agent name", bind profile.name)
+    preview = nameplate(ui.value(bind profile.name))
+    return ui.local_selection(profile, control, preview)
+```
+
+The nameplate updates as the user types or an opted-in assistant submits a valid change. The browser writes the name as plain text and keeps the input focused. Use the same pattern for nested fields, booleans, bounded integers, and named choices. The layout function runs when the page is rendered. Only the bound text needs to change during editing.
+
 ### Give a custom container the same syntax
 
 A child block passes one list to the function named before the colon. Each line adds one child. A nested block adds the view returned by its container.

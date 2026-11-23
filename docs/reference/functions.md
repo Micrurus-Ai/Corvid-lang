@@ -434,6 +434,7 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 ## Browser-local record views in std:ui
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
+- `ui.value(field: String) -> View` displays a browser field as live plain text inside its mounted record editor. Use `ui.value(bind settings.profile.name)` in a developer-written layout.
 - `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}` or `{profile.name}`.
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.

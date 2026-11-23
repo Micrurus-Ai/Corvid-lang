@@ -197,6 +197,10 @@ public fn local_slider(label: String, name: String) -> View:
 public fn record_text(pattern: String) -> View:
     return View("<span data-record-text=\"" + escaped(pattern) + "\"></span>")
 
+# Display the current value of a bound browser field anywhere inside its editor.
+public fn value(field: String) -> View:
+    return record_text("{" + field + "}")
+
 public fn record_swatch(red: String, green: String, blue: String) -> View:
     return View("<span data-record-swatch data-red=\"" + escaped(red) + "\" data-green=\"" + escaped(green) + "\" data-blue=\"" + escaped(blue) + "\" style=\"display:inline-block;width:3rem;height:2rem\" aria-hidden=\"true\"></span>")
 

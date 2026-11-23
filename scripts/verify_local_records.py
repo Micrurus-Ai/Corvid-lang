@@ -106,7 +106,7 @@ def check_field_diagnostics(cli, project):
     main = project / "src/main.cor"
     source = main.read_text()
     for before, after, diagnostic in [
-        ("bind settings.profile.name", "bind settings.profile.nmae", "nmae"),
+        ("ui.value(bind settings.profile.name)", "ui.value(bind settings.profile.nmae)", "nmae"),
         ("bind settings.profile.name", "bind settings.profil.name", "profil"),
         ("bind settings.tools.web_search", "bind settings.profile.name", "checkbox field binding"),
         ("bind settings.mode", "bind settings.retries", "segmented_choice"),
@@ -155,14 +155,23 @@ def exercise_settings(page):
     mode = page.get_by_role("group", name="Run mode")
     scheduled = mode.get_by_role("radio", name="Scheduled")
     preview = page.get_by_role("status")
-    expect(preview).to_have_text("Assistant / Manual / web search: false / retries: 1")
+    rows = preview.locator(":scope > div > div")
+    def expect_card(agent, mode, search, retries):
+        expect(rows).to_have_count(4)
+        for row, label, value in zip(rows.all(), ["Agent name", "Run mode", "Web search", "Retry limit"],
+                                     [agent, mode, search, retries]):
+            expect(row.locator("p")).to_have_text(label)
+            expect(row.locator("span")).to_have_text(value)
+    expect_card("Assistant", "Manual", "false", "1")
+    mode_text = rows.nth(1).locator("span")
     schema = page.evaluate("tools.get('update_settings').inputSchema")
     assert schema["properties"]["mode"]["enum"] == ["Manual", "Scheduled"]
     assert schema["properties"]["tools"]["properties"]["web_search"] == {"type": "boolean"}
     desired = {"profile": {"name": "Scout"}, "tools": {"web_search": True}, "mode": "Scheduled", "retries": 3}
     select = "v => tools.get('update_settings').execute(v)"
     result = page.evaluate(select, desired)
-    expect(preview).to_have_text("Scout / Scheduled / web search: true / retries: 3")
+    expect_card("Scout", "Scheduled", "true", "3")
+    assert result == preview.text_content().strip()
     expect(name).to_have_value("Scout")
     expect(enabled).to_be_checked()
     expect(scheduled).to_be_checked()
@@ -175,9 +184,12 @@ def exercise_settings(page):
     scheduled.press("ArrowLeft")
     enabled.click()
     expect(name).to_have_value("Scout")
-    expect(preview).to_have_text("Scout / Manual / web search: false / retries: 3")
+    expect_card("Scout", "Manual", "false", "3")
+    mode_text.evaluate("node => window.previousModeText = node.firstChild")
     name.fill("<Scout & Co>")
-    expect(preview).to_have_text("<Scout & Co> / Manual / web search: false / retries: 3")
+    expect_card("<Scout & Co>", "Manual", "false", "3")
+    expect(name).to_be_focused()
+    assert mode_text.evaluate("node => node.firstChild === window.previousModeText")
     expect(enabled).not_to_be_checked()
     assert not requests, requests
 

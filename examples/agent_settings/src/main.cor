@@ -19,6 +19,18 @@ type AgentSettings:
 fn settings_panel(children: List<ui.View>) -> ui.View:
     return ui.grid(children)
 
+fn preview_row(label: String, content: ui.View) -> ui.View:
+    return ui.row:
+        ui.text(label)
+        content
+
+fn agent_card(name: ui.View, mode: ui.View, search: ui.View, retries: ui.View) -> ui.View:
+    return ui.stack:
+        preview_row("Agent name", name)
+        preview_row("Run mode", mode)
+        preview_row("Web search", search)
+        preview_row("Retry limit", retries)
+
 fn settings_editor(initial: AgentSettings) -> ui.View:
     browser state settings = initial
     controls = settings_panel:
@@ -26,7 +38,12 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
         ui.checkbox("Allow web search", bind settings.tools.web_search)
         ui.segmented_choice("Run mode", bind settings.mode)
         ui.field("Retry limit", bind settings.retries)
-    preview = ui.record_text("{profile.name} / {mode} / web search: {tools.web_search} / retries: {retries}")
+    preview = agent_card(
+        ui.value(bind settings.profile.name),
+        ui.value(bind settings.mode),
+        ui.value(bind settings.tools.web_search),
+        ui.value(bind settings.retries)
+    )
     return ui.local_selection(settings, controls, preview)
 
 server app:

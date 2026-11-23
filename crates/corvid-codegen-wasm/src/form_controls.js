@@ -231,7 +231,8 @@ function bindLocalSelection(region) {
     }
     region.querySelector(":scope > [role=alert]").textContent = "";
     for (const {node, pattern} of texts) {
-      node.textContent = pattern.replace(placeholder, (_, name) => state[name]);
+      const text = pattern.replace(placeholder, (_, name) => state[name]);
+      if (node.textContent !== text) node.textContent = text;
     }
     for (const {node, channels} of samples) {
       node.style.backgroundColor = "rgb(" + channels.map(name => state[name]).join(",") + ")";
