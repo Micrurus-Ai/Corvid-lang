@@ -242,6 +242,17 @@ The "honest slower" framing is deliberate — Corvid's value is the
 correctness surface, not raw orchestration speed. See the
 [benchmarks](https://corvid-lang.org/benchmarks) page for full archives.
 
+## Corvid, CPython, Node.js and Rust on the same workload
+
+One Windows x64 session compared fresh command-line processes on two inputs. Each cell is Corvid's median elapsed time divided by the other implementation's median, with a 95% paired bootstrap interval. A ratio of 0.50 means the Corvid command took half as long. Both native programs were compiled before measurement.
+
+| Input | Corvid / CPython | Corvid / Node.js | Corvid / Rust |
+|---|---:|---:|---:|
+| Zero records | 0.36 (0.34–0.38) | 0.20 (0.20–0.22) | 1.08 (0.99–1.18) |
+| Score one million records | 0.12 (0.12–0.13) | 0.28 (0.27–0.30) | 1.47 (1.38–1.53) |
+
+For the million-record batch, native Corvid finished sooner than CPython and Node.js and took 47% longer than optimized Rust. Startup accounts for much of the elapsed time, particularly for Node.js. The scoring loop uses integer arithmetic with deterministic inputs and makes zero model or network calls. See the [implementations and reproduction command](../../benches/process_latency/README.md) and the [raw samples and tool versions](../../benches/results/process-latency-windows-x64/session.json).
+
 ## When to optimize
 
 In order:
