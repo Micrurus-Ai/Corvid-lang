@@ -10,9 +10,14 @@ function open() {
   const db = new DatabaseSync("reading.sqlite", {enableForeignKeyConstraints: Boolean(settings.fk)});
   return db;
 }
-function list() {
+function list(stamps?: number[]) {
   const db = open();
-  try { return db.prepare("SELECT shelf, title FROM shelves ORDER BY shelf").all(); }
+  if (stamps) stamps.push(now());
+  try {
+    const rows = db.prepare("SELECT shelf, title FROM shelves ORDER BY shelf").all();
+    if (stamps) stamps.push(now());
+    return rows;
+  }
   finally { db.close(); }
 }
 function escape(value: string) {
@@ -51,14 +56,25 @@ createServer(async (req, res) => {
     }
     const begin = now();
     const db = open();
+    const opened = template.profile ? now() : 0;
+    let updated = 0;
     try {
       const result = db.prepare("UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?").run(title, shelf);
       if (result.changes !== 1) throw Error("Shelf was not found");
+      if (template.profile) updated = now();
     } finally { db.close(); }
     const written = now();
-    const rows = list();
+    const stamps = template.profile ? [] as number[] : undefined;
+    const rows = list(stamps);
     const loaded = now();
     const html = screen(rows, shelf, true);
-    res.end(html + `<!--bench ${written-begin} ${loaded-written} ${now()-begin}-->`);
+    const end = now();
+    const timings = [written-begin, loaded-written, end-begin];
+    if (stamps) {
+      const [readerOpened, queried] = stamps;
+      // SQLite's all() returns JavaScript rows directly; no separate decode loop.
+      timings.push(opened-begin, updated-opened, readerOpened-written, queried-readerOpened, 0, end-loaded);
+    }
+    res.end(html + "<!--bench " + timings.join(" ") + "-->");
   } catch (error) { res.writeHead(500).end(String(error)); }
 }).listen(Number(port), "127.0.0.1");

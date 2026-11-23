@@ -141,6 +141,9 @@ cancel.onclick = () => {
 
 public agent list_readings() -> Result<List<Reading>, String>:
     db = db_open("reading.sqlite")?
+    return read_shelves(db)
+
+agent read_shelves(db: DbHandle) -> Result<List<Reading>, String>:
     rows = db_query_rows(db, "SELECT shelf, title FROM shelves ORDER BY shelf", [])?
     readings: List<Reading> = []
     for row in rows:
@@ -151,6 +154,9 @@ public agent list_readings() -> Result<List<Reading>, String>:
 
 public agent save(reading: Reading) -> Result<Reading, String>:
     db = db_open("reading.sqlite")?
+    return update_shelf(db, reading)
+
+agent update_shelf(db: DbHandle, reading: Reading) -> Result<Reading, String>:
     result = db_execute(db, "UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?", [db_param_text(reading.title), db_param_int(reading.shelf)])?
     if result.rows_affected != 1:
         return Err("Shelf was not found")
@@ -259,6 +265,12 @@ agent show(selected: Int, message: String) -> String:
         Ok(readings) -> screen(readings, selected, message)
         Err(reason) -> failure(reason)
 
+agent save_and_show(reading: Reading) -> Result<String, String>:
+    db = db_open("reading.sqlite")?
+    saved = update_shelf(db, reading)?
+    readings = read_shelves(db)?
+    return Ok(screen(readings, saved.shelf, "Saved"))
+
 server library:
     route GET "/search" query Search -> html:
         return search_page(query.term)
@@ -278,8 +290,8 @@ server library:
             Err(reason) -> ui.text(reason).html
 
     route POST "/save" form Reading -> html:
-        return match save(body):
-            Ok(reading) -> show(reading.shelf, "Saved")
+        return match save_and_show(body):
+            Ok(html) -> html
             Err(reason) -> failure(reason)
 
 test lists_shelves_in_order:

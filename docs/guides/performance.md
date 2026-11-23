@@ -89,7 +89,28 @@ On Windows with Chrome 157, each server received three warm-up saves and 40 meas
 
 The application timings include runtime, connection and data conversion costs. Each stack took monotonic millisecond readings around the same operations. Both used prepared parameters, a separate read connection, SQLite DELETE journaling, FULL synchronization, foreign keys and 4 KiB pages. The release preview used SQLite 3.45.0 and Node 25 used SQLite 3.50.4. TypeScript used a static template for the generated form and suggestion controls and rendered the shelf list after each save. These are warm-process loopback timings with one active user. The browser measurement ends when the receipt elements have layout, before a confirmed display paint.
 
-Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25 available. [Per-save observations and configuration](../../benches/results/reading-save-windows-chrome.json)
+The original comparison used the two-connection reading-list example at commit `919b5b94`. [Per-save observations and configuration](../../benches/results/reading-save-windows-chrome.json)
+
+### Reusing the save connection
+
+The reading-list save handler now opens SQLite once, commits the update, then queries the shelves on the same request-local connection. Its SQLite durability settings are unchanged. In two Windows Chrome trials, three variants ran in all six possible orders. Each produced identical receipt HTML and recovered every expected shelf revision after restart.
+
+| Median interval (ms), 36 rounds per variant | Corvid, two connections | Corvid, one connection | Node TypeScript, two connections |
+| --- | ---: | ---: | ---: |
+| Open write connection | 0 | 0 | 1 |
+| Execute and commit update | 9 | 9 | 8 |
+| Obtain read connection | 2 | 0 | 2 |
+| Query three shelves | 1 | 1 | 0 |
+| Decode rows into readings | 0 | 0 | Included in query |
+| Render receipt | 1 | 1 | 0 |
+| Whole handler | 14 | 12 | 11.5 |
+| Save keydown to visible confirmation DOM | 43.1 | 40.6 | 41.6 |
+
+The 24-round repeat measured median handlers of 14, 12.5 and 11 ms respectively. The consistent saving came from avoiding the second open. Browser results varied more. In the first trial the one-connection Corvid variant had a lower median but a higher p95 than the two-connection variant (52.0 versus 50.9 ms). Stage clocks resolve whole milliseconds. Both instrumented Corvid variants keep the first handle in scope through rendering. Node closes its connections explicitly, and the individual stage columns exclude its close time. [36-round profile](../../benches/results/reading-save-stages-windows-chrome.json) | [24-round repeat](../../benches/results/reading-save-stages-repeat-windows-chrome.json)
+
+A separate 40-round run timed the updated example handler and the existing TypeScript implementation. Median / p95 time from Save to visible confirmation was **42.75 / 54.90 ms** for Corvid and **42.95 / 55.00 ms** for TypeScript. The median handler took 14 ms for Corvid and 13 ms for TypeScript. The browser results were effectively tied on this machine. Both servers recovered revisions 15, 14 and 14 after restart. [40-round application results](../../benches/results/reading-save-reused-windows-chrome.json)
+
+Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25. Add `--profile --rounds 36` to compare the individual stages across all three variants.
 
 ### Cancellable AI stream
 

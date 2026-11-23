@@ -237,6 +237,8 @@ Open `/openapi.json` on the running service to inspect the form's contract. In t
 
 ## Package and restart a reading list
 
+When one request writes a shelf and displays the updated list, open the database once. In the example, `save_and_show` passes the same `DbHandle` to `update_shelf` and `read_shelves`. The update commits before the query runs. Callers that only need to list or save can still use `list_readings()` or `save(reading)`. [Reading-list source](../../examples/reading_list/src/main.cor)
+
 The [reading list](../../examples/reading_list/src/main.cor) renders three shelves from SQLite. Select a shelf to open the typed `Reading` form. The submitted shelf number chooses the row to update. The POST handler binds the title and shelf as SQL parameters, then lists the stored rows again.
 
 From the repository root, run these commands in PowerShell with the Corvid CLI on your path. Use new directories for the project and extracted package.
