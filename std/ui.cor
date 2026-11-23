@@ -165,3 +165,18 @@ public fn drag_panel(label: String, initial: Int, minimum: Int, maximum: Int, ha
 # Explicitly expose this instance's drag action to a compatible assistant.
 public fn assistant_drag(component: View, name: String, description: String) -> View:
     return View("<div data-corvid-drag-owner" + tool_attributes(name, description) + ">" + component.html + "</div>")
+
+# A labelled integer control usable in forms and record selections.
+public fn slider(label: String, name: String, value: Int, minimum: Int, maximum: Int) -> View:
+    return View("<label>" + escaped(label) + "<input type=\"range\" name=\"" + escaped(name) + "\" value=\"" + value.to_string() + "\" min=\"" + minimum.to_string() + "\" max=\"" + maximum.to_string() + "\"></label>")
+
+# Render a server-backed selection. Controls and initial preview are ordinary views.
+public fn selection(path: String, controls: View, preview: View) -> View:
+    return View("<form method=\"post\" action=\"" + escaped(path) + "\" data-corvid-selection>" + controls.html + "<button type=\"submit\">Apply</button><div data-corvid-preview role=\"status\">" + preview.html + "</div><span role=\"alert\"></span></form>")
+
+public fn assistant_selection(component: View, name: String, description: String) -> View:
+    return View("<div data-corvid-selection-owner" + tool_attributes(name, description) + ">" + component.html + "</div>")
+
+public fn color_sample(red: Int, green: Int, blue: Int) -> View:
+    color = "rgb(" + red.to_string() + ", " + green.to_string() + ", " + blue.to_string() + ")"
+    return View("<span style=\"display:inline-block;width:3rem;height:2rem;background-color:" + color + "\" aria-hidden=\"true\"></span>")

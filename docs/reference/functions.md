@@ -421,3 +421,12 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `ui.drag_panel(label: String, initial: Int, minimum: Int, maximum: Int, handler: String, content: List<View>) -> View` renders the bounded panel used by a component drag handler.
 
 For component syntax and coordinate semantics, see [Drawing and resizing with a Stroke](../book/19-browser-views.md#drawing-and-resizing-with-a-stroke).
+
+## Record selections in std:ui
+
+- `ui.slider(label: String, name: String, value: Int, minimum: Int, maximum: Int) -> View` creates a labelled native integer slider.
+- `ui.selection(path: String, controls: View, preview: View) -> View` groups uniquely named sliders in a custom layout. A change posts their integer values to a same-origin Corvid form route. Its HTML fragment replaces the preview.
+- `ui.assistant_selection(component: View, name: String, description: String) -> View` exposes one selection instance as a named browser tool. Its required integer fields and inclusive limits come from that instance's sliders. The server separately enforces the application's record type.
+- `ui.color_sample(red: Int, green: Int, blue: Int) -> View` renders a decorative RGB swatch. Provide visible text in the surrounding view to identify the color.
+
+See [Build a color picker from a record](../book/19-browser-views.md#build-a-color-picker-from-a-record).

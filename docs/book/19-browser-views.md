@@ -559,3 +559,31 @@ component Sidebar:
 The panel takes its width state, minimum and maximum widths, and a list of child views. Drag its separator or focus it and use Left and Right to resize. The width stays inside the declared bounds.
 
 To expose a mounted instance to a compatible assistant, wrap it in `ui.assistant_drag(Sketch(), "add_stroke", "Draw a line between two canvas points.")`. Choose a unique tool name per instance on the page. The tool accepts the same start and end points as the local handler and returns the updated state as decimal text. See the [complete app](../../examples/pointer_components/src/main.cor).
+
+## Build a color picker from a record
+
+The [RGB picker](../../examples/rgb_picker/src/color_picker.cor) is an ordinary function returning a view. Its author chooses the record, layout, controls, and preview. Each slider name matches a field of the record.
+
+```corvid
+public type Color:
+    red: Int where between(0, 255)
+    green: Int where between(0, 255)
+    blue: Int where between(0, 255)
+
+public fn ColorPicker(color: Color, path: String) -> ui.View:
+    red = ui.slider("Red", "red", color.red, 0, 255)
+    green = ui.slider("Green", "green", color.green, 0, 255)
+    blue = ui.slider("Blue", "blue", color.blue, 0, 255)
+    return ui.selection(path, ui.stack([red, green, blue]), selected_color(color))
+```
+
+The page mounts the picker inside `ui.interactive_page`. A pointer or keyboard change sends the three current values to the same-origin form route. Corvid decodes and validates the record, then calls the application's renderer.
+
+```corvid
+route POST "/color" form Color -> html:
+    return selected_color(body).html
+```
+
+Return a trusted view fragment from this route. The browser updates only that picker's preview and keeps keyboard focus. A failed request restores the last accepted values. Treat the route as a preview calculation because multiple selections can overlap in flight.
+
+Use `ui.assistant_selection(picker, "select_color", "Choose an RGB color.")` to publish a mounted instance's selection action to a compatible browser assistant. The assistant supplies all three named integers and receives the preview's text. Each picker can use its own action name. The [complete page](../../examples/rgb_picker/src/main.cor) shows how to mount it.

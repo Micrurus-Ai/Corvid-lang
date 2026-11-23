@@ -1,0 +1,10 @@
+import "./color_picker" use Color, ColorPicker, selected_color
+import "std:ui" as ui
+
+server palette:
+    route GET "/" -> html:
+        picker = ColorPicker(Color(20, 80, 160), "/color")
+        return ui.interactive_page("Color picker", [ui.assistant_selection(picker, "select_color", "Choose an RGB color.")])
+
+    route POST "/color" form Color -> html:
+        return selected_color(body).html

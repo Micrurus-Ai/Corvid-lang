@@ -1,0 +1,17 @@
+import "std:ui" as ui
+
+public type Color:
+    red: Int where between(0, 255)
+    green: Int where between(0, 255)
+    blue: Int where between(0, 255)
+
+public fn selected_color(color: Color) -> ui.View:
+    sample = ui.color_sample(color.red, color.green, color.blue)
+    channels = color.red.to_string() + ", " + color.green.to_string() + ", " + color.blue.to_string()
+    return ui.row([sample, ui.text("RGB " + channels)])
+
+public fn ColorPicker(color: Color, path: String) -> ui.View:
+    red = ui.slider("Red", "red", color.red, 0, 255)
+    green = ui.slider("Green", "green", color.green, 0, 255)
+    blue = ui.slider("Blue", "blue", color.blue, 0, 255)
+    return ui.selection(path, ui.stack([red, green, blue]), selected_color(color))
