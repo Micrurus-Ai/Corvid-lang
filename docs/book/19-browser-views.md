@@ -141,6 +141,7 @@ Import `"./std/ui" as ui` in a scaffolded project. A `View` contains an HTML fra
 | `text(value: String) -> View` | A paragraph containing the escaped value. |
 | `text_field(label: String, name: String, initial: String) -> View` | A labeled text input with a form name and initial value. |
 | `text_area(label: String, name: String, initial: String) -> View` | A labeled multiline field. Use `ui.text_area("Your note", "note", note)` to show a submitted packing note for further editing, including any leading blank line. |
+| `text_area_with_requirement(label: String, name: String, initial: String, required: Bool) -> View` | Use `ui.text_area_with_requirement("Your note", "note", note, true)` when the browser should require a value before submitting the form. Pass `false` for an optional field. |
 | `submit(label: String) -> View` | A submit button for its enclosing form. |
 | `search_form(controls: List<View>) -> View` | A GET form targeting the current page. |
 | `query_form(path: String, controls: List<View>) -> View` | A GET form targeting the supplied application path. |

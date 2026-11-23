@@ -27,7 +27,7 @@ def check_response(url):
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
         '<div data-trail-note="Bring water">',
         '<form method="get" action="/guide">',
-        '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note">',
+        '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" required>',
         '<button type="submit">Preview</button></fieldset></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
@@ -37,7 +37,7 @@ def check_response(url):
     assert response.startswith('<!doctype html><html lang="en">')
     assert f'data-trail-note="{literal}"' in response
     assert f"<p><strong>Current note</strong>: {literal}</p>" in response
-    assert f'<textarea name="note">\n{literal}</textarea>' in response
+    assert f'<textarea name="note" required>\n{literal}</textarea>' in response
 
 
 def check_browser(url, channel):
@@ -70,7 +70,13 @@ def check_browser(url, channel):
 
         packing = main.get_by_role("region", name="Packing note")
         editor = packing.get_by_role("group", name="Edit packing note")
-        editor.get_by_label("Your note").fill(NOTE)
+        field = editor.get_by_label("Your note")
+        field.fill("")
+        editor.get_by_role("button", name="Preview").click()
+        expect(field).to_be_focused()
+        assert field.evaluate("field => field.validity.valueMissing")
+        expect(page).to_have_url(url + "/#packing")
+        field.fill(NOTE)
         editor.get_by_role("button", name="Preview").click()
         page.wait_for_url(url + "/guide?*")
         submitted = parse_qs(urlsplit(page.url).query)

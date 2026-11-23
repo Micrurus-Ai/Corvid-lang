@@ -117,8 +117,14 @@ public fn text_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
 
 public fn text_area(label: String, name: String, initial: String) -> View:
+    return text_area_with_requirement(label, name, initial, false)
+
+public fn text_area_with_requirement(label: String, name: String, initial: String, required: Bool) -> View:
+    attributes = ""
+    if required:
+        attributes = " required"
     # HTML parsers discard the first newline after a textarea start tag.
-    return View("<label>" + escaped(label) + "<textarea name=\"" + escaped(name) + "\">\n" + escaped(initial) + "</textarea></label>")
+    return View("<label>" + escaped(label) + "<textarea name=\"" + escaped(name) + "\"" + attributes + ">\n" + escaped(initial) + "</textarea></label>")
 
 public fn date_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"date\" required name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")

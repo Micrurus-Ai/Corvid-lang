@@ -34,6 +34,12 @@ test escapes_multiline_field:
     field = ui.text_area("Notes & maps", "a\"b", "\n</textarea> & more")
     assert field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\">\n\n&lt;/textarea&gt; &amp; more</textarea></label>"
 
+test textarea_requirement_controls_boolean_attribute:
+    required_field = ui.text_area_with_requirement("Notes & maps", "a\"b", "\n</textarea>", true)
+    optional_field = ui.text_area_with_requirement("Note", "note", "", false)
+    assert required_field.html == "<label>Notes &amp; maps<textarea name=\"a&quot;b\" required>\n\n&lt;/textarea&gt;</textarea></label>"
+    assert optional_field.html == ui.text_area("Note", "note", "").html
+
 test fieldset_escapes_legend_and_preserves_controls:
     first = ui.text_field("Name", "name", "")
     last = ui.submit("Save")
@@ -135,7 +141,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("19 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("20 passed"),
         "{good:?}"
     );
     fs::write(
@@ -148,6 +154,18 @@ test agent_query_uses_the_same_form:
     assert!(
         String::from_utf8_lossy(&bad_start.stderr).contains("expected `Int`, got `String`"),
         "{bad_start:?}"
+    );
+    fs::write(
+        &main,
+        source.replace("\"note\", \"\", false)", "\"note\", \"\", \"false\")"),
+    )
+    .unwrap();
+    let bad_requirement = run("check");
+    assert!(
+        !bad_requirement.status.success()
+            && String::from_utf8_lossy(&bad_requirement.stderr)
+                .contains("expected `Bool`, got `String`"),
+        "{bad_requirement:?}"
     );
     fs::write(&main, source.replace("[guide, notes]", "[[\"raw\"]]")).unwrap();
     let bad_cells = run("check");
