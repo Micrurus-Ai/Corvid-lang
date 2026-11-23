@@ -17,7 +17,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
-def verify(archive, expected_version, work, upgrade_archive=None, upgrade_version=None):
+def verify(archive, expected_version, work, upgrade_archive=None, upgrade_version=None, browser_matrix=False):
     # Use the production installer with only its release download supplied
     # locally. This checks target selection as well as the installed layout.
     root = work / "Corvid installation"
@@ -60,7 +60,7 @@ cp "$CORVID_TEST_ARCHIVE" "$2"
         command = ["sh", scripts / "install.sh"]
         uninstall = "--uninstall"
     subprocess.run(command, cwd=work, env=env, check=True)
-    exercise_installation(root, expected_version, work)
+    exercise_installation(root, expected_version, work, browser_matrix)
     user_file = root / "user-notes.txt"
     user_file.write_text("keep", encoding="utf-8")
     if upgrade_archive:
@@ -86,7 +86,7 @@ cp "$CORVID_TEST_ARCHIVE" "$2"
             stage = "rollback" if restoring else "upgrade"
             deployed = work / stage
             shutil.unpack_archive(app / "target/web.tar", deployed)
-            check_deployed_app(cli, deployed, env, reported)
+            check_deployed_app(cli, deployed, env, reported, browser_matrix)
             print(f"{stage.capitalize()} preserved the app source and user file.", flush=True)
     subprocess.run([*command, uninstall], cwd=work, env=env, check=True)
     if list(root.iterdir()) != [user_file] or user_file.read_text(encoding="utf-8") != "keep":
@@ -130,7 +130,7 @@ def check_editor_diagnostics(lsp, work, env):
         raise RuntimeError(f"Expected diagnostics for the error and none after correction: {diagnostics}")
 
 
-def exercise_installation(root, expected_version, work):
+def exercise_installation(root, expected_version, work, browser_matrix):
     windows = os.name == "nt"
     cli = root / "bin" / ("corvid.exe" if windows else "corvid")
     lsp = root / "bin" / ("corvid-lsp.exe" if windows else "corvid-lsp")
@@ -214,10 +214,10 @@ print(run_sync(twice, 21), run_sync(remainder, -7.5))
     deployed = work / "deployed"
     shutil.unpack_archive(project / "target/web.tar", deployed)
     project.rename(work / "original-notes")
-    check_deployed_app(cli, deployed, env, version)
+    check_deployed_app(cli, deployed, env, version, browser_matrix)
 
 
-def check_deployed_app(cli, deployed, env, version):
+def check_deployed_app(cli, deployed, env, version, browser_matrix):
     if not any(deployed.rglob("*.wasm")):
         raise RuntimeError("Web bundle is missing the compiled browser handler")
     with socket.socket() as sock:
@@ -253,6 +253,8 @@ def check_deployed_app(cli, deployed, env, version):
                 expected = (deployed / "target/wasm" / name).read_bytes()
                 if response.headers.get_content_type() != mime or response.read() != expected:
                     raise RuntimeError(f"Server returned the wrong content for {name}")
+        if browser_matrix:
+            check_notes_browsers(f"http://{address}")
     finally:
         server.terminate()
         try:
@@ -263,15 +265,42 @@ def check_deployed_app(cli, deployed, env, version):
     print(f"{version} built and served the relocated web application.")
 
 
+def check_notes_browsers(url):
+    from playwright.sync_api import expect, sync_playwright
+
+    with sync_playwright() as playwright:
+        for engine in ("chromium", "firefox", "webkit"):
+            browser = getattr(playwright, engine).launch(channel="chrome" if engine == "chromium" else None)
+            try:
+                page = browser.new_page()
+                page.goto(url)
+                page.keyboard.press("Tab")
+                expect(page.get_by_role("link", name="Open workspace")).to_be_focused()
+                page.keyboard.press("Enter")
+                group = page.get_by_role("group", name="Notes reviewed")
+                button = group.get_by_role("button", name="Review", exact=True)
+                expect(button).to_be_enabled()
+                page.keyboard.press("Tab")
+                expect(button).to_be_focused()
+                page.keyboard.press("Space")
+                expect(group.get_by_role("status")).to_have_text("1")
+                page.reload()
+                expect(group.get_by_role("status")).to_have_text("0")
+                print(f"Notes workspace: {engine} {browser.version} passed.", flush=True)
+            finally:
+                browser.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("expected_version")
     parser.add_argument("--upgrade-archive", type=Path, help="second package for an install, upgrade and rollback trial")
     parser.add_argument("--upgrade-version", help="version reported by the second package")
+    parser.add_argument("--browser-matrix", action="store_true", help="also drive the installed Notes app in Chrome, Firefox and WebKit")
     args = parser.parse_args()
     if bool(args.upgrade_archive) != bool(args.upgrade_version):
         parser.error("Supply --upgrade-archive and --upgrade-version together.")
     with tempfile.TemporaryDirectory() as directory:
         verify(args.archive.resolve(), args.expected_version, Path(directory),
-               args.upgrade_archive.resolve() if args.upgrade_archive else None, args.upgrade_version)
+               args.upgrade_archive.resolve() if args.upgrade_archive else None, args.upgrade_version, args.browser_matrix)

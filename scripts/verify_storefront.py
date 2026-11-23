@@ -92,6 +92,30 @@ def picker_trial(browser, url, enhanced):
         page.close()
 
 
+def touch_checkout(browser, url, device):
+    from playwright.sync_api import expect
+
+    page = browser.new_page(**device)
+    try:
+        page.goto(url)
+        page.get_by_role("link", name="Open cart").tap()
+        quantity = page.get_by_label("Notebook quantity")
+        quantity.tap()
+        expect(quantity).to_be_focused()
+        assert quantity.get_attribute("inputmode") == "numeric"
+        quantity.evaluate("field => field.select()")
+        page.keyboard.insert_text("12")
+        row = page.locator('[data-corvid-key="notebook"]')
+        expect(row.get_by_text("5400", exact=True)).to_be_visible()
+        row.get_by_role("button", name="Move Notebook later").tap()
+        expect(page.get_by_text("notebook, position 2 of 2", exact=True)).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.get_by_role("button", name="Checkout").tap()
+        expect(page.get_by_text("Total: 5525 cents", exact=True)).to_be_visible()
+    finally:
+        page.close()
+
+
 def check_picker_inputs(cli, project):
     for screen in ("notebook", "pencil"):
         path = project / "src" / (screen + ".cor")
@@ -179,6 +203,11 @@ def run_browser(playwright, url, channel, engine="chromium"):
         for enhanced in (False, True):
             picker_trial(browser, url, enhanced)
             print(f"Both ColorPicker screens, scripting={enhanced}: passed")
+        devices = {"chromium": "Pixel 7", "webkit": "iPhone 13"}
+        if engine in devices:
+            device = devices[engine]
+            touch_checkout(browser, url, playwright.devices[device])
+            print(f"{device} emulation: touch checkout and quantity entry passed")
     finally:
         browser.close()
 

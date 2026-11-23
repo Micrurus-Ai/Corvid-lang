@@ -471,3 +471,19 @@ Wait for “Drawing saved.” before reloading. Each worker response writes its 
 To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
 
 The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
+
+### Check the storefront across browsers and devices
+
+Run the packaged storefront trial with Python Playwright. Install its Firefox and WebKit engines with `python -m playwright install firefox webkit` and use an installed Google Chrome for the Chromium check.
+
+```shell
+python scripts/verify_storefront.py target/debug/corvid.exe --channel chrome
+python scripts/verify_storefront.py target/debug/corvid.exe --browser firefox
+python scripts/verify_storefront.py target/debug/corvid.exe --browser webkit
+```
+
+Each engine checks keyboard navigation, checkout at widths of 320 and 960 pixels, and the two picker screens with and without scripting. Chrome and WebKit also run touch-device simulations. Corvid's `ui.link` uses a native anchor with `tabindex="0"` so a link participates in normal keyboard focus order in the tested WebKit configuration.
+
+For a physical iPhone trial, open the packaged storefront on a reachable test origin in Safari. Tap **Open cart**, then **Notebook quantity**. Check that the numeric keyboard appears. Replace the quantity with **12**, leave the pencil quantity at **1**, dismiss the keyboard, tap **Move Notebook later**, then **Checkout**. Expect **Total: 5525 cents**. Record the iOS version, whether each control was reachable and the displayed total.
+
+For a screen-reader trial, listen for **Open cart**, **Notebook quantity**, the move button's label and the updated position when the notebook moves. The Windows Narrator run on November 23 confirmed the link, quantity and position. The move button's exact spoken label still needs confirmation. Narrator's speech recap can be used to check a phrase. [Microsoft Narrator guide](https://support.microsoft.com/en-us/accessibility/windows/narrator/complete-guide-to-narrator)

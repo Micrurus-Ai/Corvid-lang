@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Use `ui.link` for a route a keyboard user should reach with Tab. Its native anchor now explicitly participates in the page's normal tab order. The installed Notes workspace and packaged storefront passed in Chrome, Firefox and WebKit on Windows. [Browser trial](docs/book/19-browser-views.md#check-the-storefront-across-browsers-and-devices)
+
 Use `corvid check` and `corvid build src/main.cor --target web` directly in the [counter](examples/reading_counter/src/main.cor) or [book suggestion](examples/book_suggestions/src/main.cor) project. The compiler checks the state name at its use and the permitted lookup at its declaration in the ask block. The counter button runs locally. One deadline covers both prompt calls and the lookup.
 
 In a named-state component, `state pages_read = 0` infers an integer for each mounted instance. A button can update it with `pages_read += 1`. In the reading-list agent prototype, `allow lookup_shelf once` permits one lookup and `within 30 seconds` bounds the complete recommendation. A `BookSuggestion` is a preview. **Apply suggestion** writes it to the shelf. [Agent](docs/book/10-agents.md#your-first-agent-in-the-reading-list) and [component](docs/book/19-browser-views.md#a-component-with-named-state-prototype)

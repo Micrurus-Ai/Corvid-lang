@@ -82,7 +82,7 @@ From the repository root, supply the two platform archives in separate directori
 python install/test_release_archive.py previous/corvid-x86_64-pc-windows-msvc.zip 0.0.1 --upgrade-archive next/corvid-x86_64-pc-windows-msvc.zip --upgrade-version 0.0.1
 ```
 
-The trial installs into a temporary home, creates an app, upgrades it and reinstalls the original archive. At each stage it serves the packaged UI, JSON route and browser assets. It also checks that rollback restores the original CLI bytes and that uninstall preserves a user-owned file.
+The trial installs into a temporary home, creates an app, upgrades it and reinstalls the original archive. At each stage it serves the packaged UI, JSON route and browser assets. It also checks that rollback restores the original CLI bytes and that uninstall preserves a user-owned file. Add `--browser-matrix` to open the packaged Notes workspace in Chrome, Firefox and WebKit. This checks keyboard navigation, the Review button, the updated counter and reload at every tested install stage. It requires Python Playwright, Google Chrome and the Playwright Firefox and WebKit engines.
 
 ## From a source checkout
 
