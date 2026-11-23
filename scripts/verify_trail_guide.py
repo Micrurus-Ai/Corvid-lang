@@ -36,6 +36,9 @@ def check_response(url):
         '<noscript><p>Select Preview to reload the guide with your note.</p></noscript>',
         '<fieldset><legend>Edit packing note</legend><label>Your note<textarea name="note" rows="4" required>',
         '<button type="submit">Preview</button><button type="reset">Restore note</button></fieldset></form>',
+        '<form method="get" action="/guide" aria-label="Suggested packing notes">'
+        '<label>Suggested note <select name="note"><option value="Bring water" selected>Water bottle</option>'
+        '<option value="Pack a map">Trail map</option></select></label><button type="submit">Use suggestion</button></form>',
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
@@ -139,6 +142,14 @@ def check_browser(url, channel):
         editor.get_by_role("button", name="Restore note").click()
         expect(field).to_have_value(NOTE)
         expect(page).to_have_url(preview_url)
+        suggestions = packing.get_by_role("form", name="Suggested packing notes")
+        preset = suggestions.get_by_role("combobox", name="Suggested note")
+        expect(preset).to_have_value("Bring water")
+        preset.select_option(label="Trail map")
+        expect(page).to_have_url(preview_url)
+        suggestions.get_by_role("button", name="Use suggestion").click()
+        expect(page).to_have_url(url + "/guide?note=Pack+a+map")
+        expect(field).to_have_value("Pack a map")
         browser.close()
 
 

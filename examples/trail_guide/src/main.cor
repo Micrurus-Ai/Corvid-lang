@@ -29,6 +29,11 @@ fn guide(note: String) -> String:
     editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview"), ui.reset_button("Restore note")])
     preview_hint = ui.no_script("Select Preview to reload the guide with your note.")
     form = ui.named_query_form("Packing note preview", "/guide", [preview_hint, editor])
+    preset = ui.select_field("Suggested note", "note", [
+        ui.option("Bring water", "Water bottle", true),
+        ui.option("Pack a map", "Trail map", false)
+    ])
+    preset_form = ui.named_query_form("Suggested packing notes", "/guide", [preset, ui.submit("Use suggestion")])
     preview = ui.preformatted_text(note)
     supplies = ui.unordered_list([
         ui.list_item([ui.checkbox_field_with_value("Water bottle", "supply", "water", false)]),
@@ -36,7 +41,7 @@ fn guide(note: String) -> String:
     ])
     checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
     supplies_aside = ui.aside("Suggested supplies", [checklist])
-    packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form])
+    packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form, preset_form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [
             ui.h1(title), navigation, route_details, ui.section("packing", "Packing note", [details])

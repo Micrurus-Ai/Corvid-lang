@@ -206,9 +206,15 @@ public fn option(value: String, label: String, selected: Bool) -> View:
         attributes = " selected"
     return View("<option value=\"" + escaped(value) + "\"" + attributes + ">" + escaped(label) + "</option>")
 
+public fn select_field(label: String, name: String, options: List<View>) -> View:
+    return render_select(label, name, options, "")
+
 # A change submits the surrounding native form once its event module attaches.
 public fn submit_on_change_select(label: String, name: String, options: List<View>) -> View:
-    return View("<label>" + escaped(label) + " <select name=\"" + escaped(name) + "\" data-corvid-submit-change>" + children(options) + "</select></label>")
+    return render_select(label, name, options, " data-corvid-submit-change")
+
+fn render_select(label: String, name: String, options: List<View>, attributes: String) -> View:
+    return View("<label>" + escaped(label) + " <select name=\"" + escaped(name) + "\"" + attributes + ">" + children(options) + "</select></label>")
 
 # Each direct child has a stable application key. Movement controls attach in place.
 public fn keyed_item(key: String, label: String, content: List<View>) -> View:
