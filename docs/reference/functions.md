@@ -413,3 +413,11 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `fn stream_text(label: String, path: String) -> View`
 
 `assistant_action` opts an integer-state button into WebMCP. Use a unique tool name per page. `assistant_text_state` exposes a single-line text control. Its tool requires one string field named for the handler parameter and returns the handler's string result.
+
+## Drag components in std:ui
+
+- `ui.assistant_drag(component: View, name: String, description: String) -> View` exposes one instance to a browser assistant under a unique name.
+- `ui.drag_canvas(label: String, initial: Int, width: Int, height: Int, handler: String, draw: Bool) -> View` renders the canvas used by a component drag handler.
+- `ui.drag_panel(label: String, initial: Int, minimum: Int, maximum: Int, handler: String, content: List<View>) -> View` renders the bounded panel used by a component drag handler.
+
+For component syntax and coordinate semantics, see [Drawing and resizing with a Stroke](../book/19-browser-views.md#drawing-and-resizing-with-a-stroke).

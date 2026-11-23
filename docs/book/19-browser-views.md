@@ -528,3 +528,34 @@ From JavaScript, the public `instantiate(hostOrImports, options)` function still
 ### Reordering long lists
 
 The standard keyed list keeps keyboard focus on the moved row and announces its current position. In generated lists the browser runtime obtains an interior row's position directly from the DOM, avoiding a JavaScript copy of all sibling elements on every move. It counts only elements when hand-authored markup introduces whitespace or comments. The position follows the live order even after application code moves rows. [Browser measurements](../guides/performance.md#reordering-long-lists)
+
+## Drawing and resizing with a Stroke
+
+A drag handler receives two points measured in local pixels. Read their integer coordinates as `stroke.start.x`, `stroke.start.y`, `stroke.end.x`, and `stroke.end.y`. Each mounted component owns its integer state. Reloading the page restores the initial value.
+
+```corvid
+component Sketch:
+    state marks = 0
+    text("Brush marks: {marks}")
+    canvas(320, 160)
+    on drag(stroke: Stroke):
+        line(stroke.start, stroke.end)
+        marks += 1
+```
+
+On a canvas, pressing the pointer makes a dot. Moving it emits a segment from the previous sample. Arrow keys move the drawing cursor one pixel, or ten with Shift. The optional `line` statement paints the segment. The state assignment runs once per segment.
+
+```corvid
+import "std:ui" as ui
+
+component Sidebar:
+    state width = 200
+    text("Panel width: {width}")
+    panel(width, 96, 480, [ui.text("Notes")])
+    on drag(stroke: Stroke):
+        width += stroke.end.x - stroke.start.x
+```
+
+The panel takes its width state, minimum and maximum widths, and a list of child views. Drag its separator or focus it and use Left and Right to resize. The width stays inside the declared bounds.
+
+To expose a mounted instance to a compatible assistant, wrap it in `ui.assistant_drag(Sketch(), "add_stroke", "Draw a line between two canvas points.")`. Choose a unique tool name per instance on the page. The tool accepts the same start and end points as the local handler and returns the updated state as decimal text. See the [complete app](../../examples/pointer_components/src/main.cor).

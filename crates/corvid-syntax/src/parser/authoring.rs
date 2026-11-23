@@ -1,3 +1,5 @@
+mod drag;
+
 use super::{describe_token, Parser};
 use crate::{lex, ParseError, ParseErrorKind, TokKind};
 use corvid_ast::{Decl, Span};
@@ -78,7 +80,17 @@ impl Parser<'_> {
         let mut events = String::new();
         let mut buttons = Vec::new();
         let ui = format!("__ui_{name}");
-        while self.peek_ident_is("button") {
+        let mut panel_content = None;
+        let surface = if self.peek_ident_is("canvas") || self.peek_ident_is("panel") {
+            let (view, handler, children) =
+                self.parse_drag_component(&name, &state, initial, &ui)?;
+            panel_content = children;
+            events = handler;
+            Some(view)
+        } else {
+            None
+        };
+        while surface.is_none() && self.peek_ident_is("button") {
             self.bump();
             captions.push(self.ui_string()?);
             self.expect(TokKind::KwOn, "on click")?;
@@ -96,11 +108,19 @@ impl Parser<'_> {
                 "agent {handler}(value: Int) -> Int:\n    return value + {increment}\n"
             ));
         }
-        if buttons.is_empty() {
+        if surface.is_none() && buttons.is_empty() {
             return Err(self.expected("button"));
         }
         self.expect(TokKind::Dedent, "end of component")?;
-        let source = format!("import \"std:ui\" as {ui}\npublic fn {name}() -> {ui}.View:\n    return {ui}.int_state(\"CAPTION0\", {initial}, [{}])\n", buttons.join(", "));
+        let view = surface.unwrap_or_else(|| {
+            format!(
+                "{ui}.int_state(\"CAPTION0\", {initial}, [{}])",
+                buttons.join(", ")
+            )
+        });
+        let source = format!(
+            "import \"std:ui\" as {ui}\npublic fn {name}() -> {ui}.View:\n    return {view}\n"
+        );
         let mut tokens = lex(&source).expect("valid component lowering");
         for (index, token) in tokens.iter_mut().enumerate() {
             token.span = start.expanded(index);
@@ -120,7 +140,21 @@ impl Parser<'_> {
         }
         let mut generated = file.decls.into_iter();
         let import = generated.next().expect("component UI import");
-        self.generated.extend(generated);
+        let mut view_fn = generated.next().expect("component view function");
+        if let Some(children) = panel_content {
+            let Decl::Fn(view) = &mut view_fn else {
+                unreachable!()
+            };
+            let [corvid_ast::Stmt::Return {
+                value: Some(corvid_ast::Expr::Call { args, .. }),
+                ..
+            }] = view.body.stmts.as_mut_slice()
+            else {
+                unreachable!()
+            };
+            *args.last_mut().expect("panel children argument") = children;
+        }
+        self.generated.push(view_fn);
         self.components.push(Component { name, events });
         Ok(import)
     }

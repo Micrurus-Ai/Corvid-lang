@@ -32,10 +32,13 @@ async function bindStateControls(root = document) {
   try {
     handlers = await instantiate();
   } catch (error) {
-    for (const alert of root.querySelectorAll("fieldset[data-corvid-state] > [role=alert], [data-corvid-quantity-field] > [role=alert]")) {
+    for (const alert of root.querySelectorAll("[data-corvid-drag] > [role=alert], fieldset[data-corvid-state] > [role=alert], [data-corvid-quantity-field] > [role=alert]")) {
       alert.textContent = "Could not load Corvid event handlers: " + error.message;
     }
     return;
+  }
+  if (typeof bindDrag === "function") {
+    for (const region of root.querySelectorAll("[data-corvid-drag]")) bindDrag(region, handlers);
   }
   for (const field of root.querySelectorAll("[data-corvid-quantity-field]")) {
     bindQuantity(field, handlers, intStateHandlers);

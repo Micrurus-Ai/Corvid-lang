@@ -1,0 +1,9 @@
+import "./sketch" use Sketch
+import "./sidebar" use Sidebar
+import "std:ui" as ui
+
+server workspace:
+    route GET "/" -> html:
+        sketch = ui.assistant_drag(Sketch(), "add_stroke", "Draw a line between two canvas points.")
+        sidebar = ui.assistant_drag(Sidebar(), "resize_panel", "Resize the notes panel horizontally.")
+        return ui.interactive_page("Sketch workspace", [sketch, sidebar])

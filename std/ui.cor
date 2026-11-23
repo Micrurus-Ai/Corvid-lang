@@ -138,3 +138,30 @@ public fn stream_text(label: String, path: String) -> View:
     content = "<span role=\"status\">Ready</span><pre data-output></pre>"
     widget = "<corvid-text-stream data-path=\"" + escaped(path) + "\"><fieldset><legend>" + escaped(label) + "</legend>" + controls + content + "</fieldset></corvid-text-stream>"
     return View(widget + "<script type=\"module\" src=\"/.well-known/corvid/stream.js\"></script>")
+# A Stroke carries two local pixel positions. Generated drag handlers project their
+# coordinates onto the browser integer ABI.
+public type Point:
+    x: Int
+    y: Int
+
+public type Stroke:
+    start: Point
+    end: Point
+
+fn drag_region(label: String, initial: Int, handler: String, control: String) -> View:
+    return View("<fieldset data-corvid-drag=\"" + escaped(handler) + "\"><legend>" + escaped(label) + " <output>" + initial.to_string() + "</output></legend>" + control + "<span role=\"alert\"></span></fieldset>")
+
+public fn drag_canvas(label: String, initial: Int, width: Int, height: Int, handler: String, draw: Bool) -> View:
+    paint = ""
+    if draw:
+        paint = " data-corvid-line"
+    control = "<canvas" + paint + " tabindex=\"0\" aria-label=\"Drawing surface. Drag or use arrow keys to draw.\" width=\"" + width.to_string() + "\" height=\"" + height.to_string() + "\" style=\"touch-action:none;outline:1px solid currentColor\"></canvas>"
+    return drag_region(label, initial, handler, control)
+
+public fn drag_panel(label: String, initial: Int, minimum: Int, maximum: Int, handler: String, content: List<View>) -> View:
+    control = "<div data-corvid-panel style=\"box-sizing:border-box;display:flex;justify-content:space-between;border:1px solid currentColor;width:" + initial.to_string() + "px\"><div style=\"min-width:0;overflow:auto\">" + children(content) + "</div><span tabindex=\"0\" role=\"separator\" aria-label=\"Resize panel\" aria-orientation=\"vertical\" aria-valuemin=\"" + minimum.to_string() + "\" aria-valuemax=\"" + maximum.to_string() + "\" aria-valuenow=\"" + initial.to_string() + "\" style=\"width:1.25rem;min-height:2rem;background:ButtonFace;cursor:ew-resize;touch-action:none\"></span></div>"
+    return drag_region(label, initial, handler, control)
+
+# Explicitly expose this instance's drag action to a compatible assistant.
+public fn assistant_drag(component: View, name: String, description: String) -> View:
+    return View("<div data-corvid-drag-owner" + tool_attributes(name, description) + ">" + component.html + "</div>")

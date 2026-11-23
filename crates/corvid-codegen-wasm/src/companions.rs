@@ -391,6 +391,9 @@ fn emit_js_loader(
         out.push_str(crate::FORM_CONTROLS_JS);
         out.push_str("}\n");
         out.push_str(include_str!("browser_controls.js"));
+        if agents.iter().any(|agent| agent.name.starts_with("__drag_")) {
+            out.push_str(include_str!("drag_controls.js"));
+        }
         out.push_str(include_str!("quantity_field.js"));
         out.push_str(include_str!("keyed_list.js"));
     }

@@ -613,3 +613,18 @@ truth. This grammar was extracted from it; if a future parser change
 diverges, the drift gates fail and one of the two must change. The
 per-production parse-evidence snippets live in
 [`crates/corvid-syntax/tests/grammar_drift.rs`](https://github.com/Micrurus-Ai/Corvid-lang/blob/main/crates/corvid-syntax/tests/grammar_drift.rs).
+
+### Component drag handlers
+
+After the integer state declaration and interpolated text, a component can declare one drag surface followed by one handler.
+
+```text
+canvas(width, height)
+on drag(parameter: Stroke):
+    line(parameter.start, parameter.end)
+    state_name += expression
+```
+
+For a resizable region use `panel(state_name, minimum, maximum, children)`, where children has type `List<ui.View>`. Sizes and bounds are integer literals from 1 to 8192. Panel bounds must contain the initial width. The optional line statement is available on a canvas. End the handler with an assignment using `=` or `+=`. The expression accepts integer literals, the state name, point coordinates, parentheses, and the arithmetic operators `+`, `-`, and `*`.
+
+The types in `std:ui` are `Point(x: Int, y: Int)` and `Stroke(start: Point, end: Point)`. The compiler renders surfaces with `ui.drag_canvas(label, initial, width, height, handler, draw)` and `ui.drag_panel(label, initial, minimum, maximum, handler, content)`. Both return a `View`. Use `ui.assistant_drag(component, name, description)` to expose the mounted component's action. See [Drawing and resizing with a Stroke](../book/19-browser-views.md#drawing-and-resizing-with-a-stroke).

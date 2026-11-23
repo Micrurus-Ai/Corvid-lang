@@ -1,0 +1,7 @@
+component Sketch:
+    state marks = 0
+    text("Brush marks: {marks}")
+    canvas(320, 160)
+    on drag(stroke: Stroke):
+        line(stroke.start, stroke.end)
+        marks += 1

@@ -1,0 +1,8 @@
+import "std:ui" as ui
+
+component Sidebar:
+    state width = 200
+    text("Panel width: {width}")
+    panel(width, 96, 480, [ui.text("Notes")])
+    on drag(stroke: Stroke):
+        width += stroke.end.x - stroke.start.x
