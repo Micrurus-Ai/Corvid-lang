@@ -1,6 +1,7 @@
 """Exercise a candidate CLI archive outside the checkout, before publication."""
 
 import argparse
+import hashlib
 from http.client import parse_headers
 from io import BytesIO
 import json
@@ -16,7 +17,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
-def verify(archive, expected_version, work):
+def verify(archive, expected_version, work, upgrade_archive=None, upgrade_version=None):
     # Use the production installer with only its release download supplied
     # locally. This checks target selection as well as the installed layout.
     root = work / "Corvid installation"
@@ -62,6 +63,31 @@ cp "$CORVID_TEST_ARCHIVE" "$2"
     exercise_installation(root, expected_version, work)
     user_file = root / "user-notes.txt"
     user_file.write_text("keep", encoding="utf-8")
+    if upgrade_archive:
+        cli = root / "bin" / ("corvid.exe" if os.name == "nt" else "corvid")
+        original = hashlib.sha256(cli.read_bytes()).digest()
+        app = work / "original-notes"
+        source = (app / "src/main.cor").read_bytes()
+        for package, version, restoring in (
+            (upgrade_archive, upgrade_version, False), (archive, expected_version, True)
+        ):
+            env.update(CORVID_TEST_ARCHIVE=str(package), CORVID_VERSION="v" + version)
+            subprocess.run(command, cwd=work, env=env, check=True)
+            digest = hashlib.sha256(cli.read_bytes()).digest()
+            if (digest == original) != restoring:
+                raise RuntimeError("The installed CLI did not switch to the expected build")
+            reported = subprocess.check_output([cli, "--version"], env=env, text=True).strip()
+            if reported.split()[:2] != ["corvid", version]:
+                raise RuntimeError(f"Unexpected installed version: {reported}")
+            if (app / "src/main.cor").read_bytes() != source or user_file.read_text() != "keep":
+                raise RuntimeError("Installation changed user-owned files")
+            subprocess.run([cli, "check"], cwd=app, env=env, check=True)
+            subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=app, env=env, check=True)
+            stage = "rollback" if restoring else "upgrade"
+            deployed = work / stage
+            shutil.unpack_archive(app / "target/web.tar", deployed)
+            check_deployed_app(cli, deployed, env, reported)
+            print(f"{stage.capitalize()} preserved the app source and user file.", flush=True)
     subprocess.run([*command, uninstall], cwd=work, env=env, check=True)
     if list(root.iterdir()) != [user_file] or user_file.read_text(encoding="utf-8") != "keep":
         raise RuntimeError("Uninstall did not preserve exactly the user-owned file")
@@ -188,6 +214,10 @@ print(run_sync(twice, 21), run_sync(remainder, -7.5))
     deployed = work / "deployed"
     shutil.unpack_archive(project / "target/web.tar", deployed)
     project.rename(work / "original-notes")
+    check_deployed_app(cli, deployed, env, version)
+
+
+def check_deployed_app(cli, deployed, env, version):
     if not any(deployed.rglob("*.wasm")):
         raise RuntimeError("Web bundle is missing the compiled browser handler")
     with socket.socket() as sock:
@@ -237,6 +267,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("expected_version")
+    parser.add_argument("--upgrade-archive", type=Path, help="second package for an install, upgrade and rollback trial")
+    parser.add_argument("--upgrade-version", help="version reported by the second package")
     args = parser.parse_args()
+    if bool(args.upgrade_archive) != bool(args.upgrade_version):
+        parser.error("Supply --upgrade-archive and --upgrade-version together.")
     with tempfile.TemporaryDirectory() as directory:
-        verify(args.archive.resolve(), args.expected_version, Path(directory))
+        verify(args.archive.resolve(), args.expected_version, Path(directory),
+               args.upgrade_archive.resolve() if args.upgrade_archive else None, args.upgrade_version)

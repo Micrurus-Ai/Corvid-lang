@@ -74,6 +74,16 @@ For an isolated installation, set `CORVID_HOME` to a dedicated directory,
 environment changes, and `CORVID_SKIP_EDITOR_EXTENSION=1` to skip editor
 integration. Run the executable directly from that directory's `bin` folder.
 
+### Rehearse an upgrade with two local archives
+
+From the repository root, supply the two platform archives in separate directories, each with its normal release filename. Use the version printed by each CLI. Different preview builds may report the same version.
+
+```shell
+python install/test_release_archive.py previous/corvid-x86_64-pc-windows-msvc.zip 0.0.1 --upgrade-archive next/corvid-x86_64-pc-windows-msvc.zip --upgrade-version 0.0.1
+```
+
+The trial installs into a temporary home, creates an app, upgrades it and reinstalls the original archive. At each stage it serves the packaged UI, JSON route and browser assets. It also checks that rollback restores the original CLI bytes and that uninstall preserves a user-owned file.
+
 ## From a source checkout
 
 From the repository root, build the CLI with the workspace lockfile and
