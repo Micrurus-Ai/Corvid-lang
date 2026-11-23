@@ -109,6 +109,11 @@ impl Checker<'_> {
         }
         match condition {
             [] => {}
+            [Expr::Literal { value: Literal::Bool(true), span }] => {
+                if ty != Type::Bool {
+                    self.form_error(*span, "a condition without a comparison needs a Bool field".into());
+                }
+            }
             [Expr::Literal { value: Literal::String(variant), span }] => {
                 let valid = self.record_decl(&ty).is_some_and(|r|
                     r.variants.iter().any(|v| v.name.name == *variant && v.fields.is_empty()));

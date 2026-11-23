@@ -201,6 +201,9 @@ public fn record_text(pattern: String) -> View:
 public fn value(field: String) -> View:
     return record_text("{" + field + "}")
 
+public fn boolean_children(field: String, content: List<View>) -> View:
+    return View("<div hidden data-boolean-field=\"" + escaped(field) + "\">" + children(content) + "</div>")
+
 public fn choice_children(field: String, variant: String, content: List<View>) -> View:
     return View("<div hidden data-choice-field=\"" + escaped(field) + "\" data-choice-variant=\"" + escaped(variant) + "\">" + children(content) + "</div>")
 

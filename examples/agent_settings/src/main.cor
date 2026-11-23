@@ -9,6 +9,7 @@ type AgentProfile:
 
 type AgentTools:
     web_search: Bool
+    search_limit: Int where between(1, 20)
 
 type AgentSettings:
     profile: AgentProfile
@@ -37,6 +38,8 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
     controls = settings_panel:
         ui.field("Agent name", bind settings.profile.name)
         ui.checkbox("Allow web search", bind settings.tools.web_search)
+        if settings.tools.web_search:
+            ui.field("Search result limit", bind settings.tools.search_limit)
         ui.segmented_choice("Run mode", bind settings.mode)
         if settings.mode == Scheduled:
             ui.field("Interval in minutes", bind settings.interval_minutes)
@@ -51,5 +54,5 @@ fn settings_editor(initial: AgentSettings) -> ui.View:
 
 server app:
     route GET "/" -> html:
-        editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false), Manual, 5, 1))
+        editor = settings_editor(AgentSettings(AgentProfile("Assistant"), AgentTools(false, 5), Manual, 5, 1))
         return ui.interactive_page("Agent settings", [ui.assistant_selection(editor, "update_settings", "Update the agent settings.")])

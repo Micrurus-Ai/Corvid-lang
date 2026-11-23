@@ -84,20 +84,30 @@ impl<'a> Parser<'a> {
     fn parse_conditional_child(&mut self) -> Result<Expr, ParseError> {
         let start = self.bump().span;
         let (owner, field) = self.parse_browser_field_path()?;
-        self.expect(TokKind::Eq, "== before a named choice")?;
-        let (variant, span) = self.expect_ident()?;
-        let variant = Expr::Literal { value: Literal::String(variant), span };
-        let condition = super::authoring::call("__browser_field_key", vec![owner, field, variant.clone()], start.merge(span));
+        let (helper_name, expected) = if matches!(self.peek(), TokKind::Colon) {
+            ("boolean_children", Expr::Literal { value: Literal::Bool(true), span: field.span() })
+        } else {
+            self.expect(TokKind::Eq, "a colon after a boolean field or == before a named choice")?;
+            let (variant, span) = self.expect_ident()?;
+            ("choice_children", Expr::Literal { value: Literal::String(variant), span })
+        };
+        let condition = super::authoring::call("__browser_field_key",
+            vec![owner, field, expected.clone()], start.merge(expected.span()));
+        let mut args = vec![condition];
+        if matches!(expected, Expr::Literal { value: Literal::String(_), .. }) {
+            args.push(expected);
+        }
         let children = self.parse_child_list()?;
         let helper = format!("__browser_case_{}", start.start);
-        let import = format!("import \"std:ui\" as {helper}_ui use choice_children as {helper}\n");
+        let import = format!("import \"std:ui\" as {helper}_ui use {helper_name} as {helper}\n");
         let mut tokens = crate::lex(&import).expect("valid conditional view import");
         for (index, token) in tokens.iter_mut().enumerate() {
             token.span = start.expanded(index);
         }
         self.generated.push(Parser::new(&tokens).parse_decl()?);
         let span = start.merge(children.span());
-        Ok(super::authoring::call(&helper, vec![condition, variant, children], span))
+        args.push(children);
+        Ok(super::authoring::call(&helper, args, span))
     }
 
     // or_expr := and_expr ('or' and_expr)*

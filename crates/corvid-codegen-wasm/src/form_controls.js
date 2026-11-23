@@ -200,11 +200,16 @@ function bindLocalSelection(region) {
     }
     return {node, channels};
   });
-  const conditions = owned("[data-choice-field]").map(node => {
+  const conditions = owned("[data-choice-field], [data-boolean-field]").map(node => {
+    if (node.hasAttribute("data-boolean-field")) {
+      const field = fieldName(node.dataset.booleanField);
+      if (properties[field].type !== "boolean") throw Error("Expected a boolean field: " + field);
+      return {node, field, expected: true};
+    }
     const field = fieldName(node.dataset.choiceField);
     const variant = node.dataset.choiceVariant;
     if (!properties[field].enum?.includes(variant)) throw Error("Invalid choice condition for " + field);
-    return {node, field, variant};
+    return {node, field, expected: variant};
   });
   let state;
   function select(values) {
@@ -228,7 +233,7 @@ function bindLocalSelection(region) {
       next[name] = value;
     }
     state = Object.freeze(next);
-    for (const {node, field, variant} of conditions) node.hidden = state[field] !== variant;
+    for (const {node, field, expected} of conditions) node.hidden = state[field] !== expected;
     for (const control of controls) {
       const value = state[boundName(control)];
       if (control.hasAttribute("data-choice-group")) {

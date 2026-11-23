@@ -109,6 +109,8 @@ def check_field_diagnostics(cli, project):
         ("ui.value(bind settings.profile.name)", "ui.value(bind settings.profile.nmae)", "nmae"),
         ("bind settings.profile.name", "bind settings.profil.name", "profil"),
         ("bind settings.tools.web_search", "bind settings.profile.name", "checkbox field binding"),
+        ("if settings.tools.web_search:", "if settings.profile.name:", "Bool field"),
+        ("if settings.tools.web_search:", "if settings.tools.search_typo:", "search_typo"),
         ("if settings.mode == Scheduled", "if settings.mdoe == Scheduled", "mdoe"),
         ("if settings.mode == Scheduled", "if settings.mode == Missing", "Missing"),
         ("if settings.mode == Scheduled", "if settings.retries == Scheduled", "choice field"),
@@ -175,13 +177,26 @@ def exercise_settings(page):
     assert schema["properties"]["tools"]["properties"]["web_search"] == {"type": "boolean"}
     interval = page.get_by_label("Interval in minutes")
     expect(interval).to_be_hidden()
-    desired = {"interval_minutes": 10, "profile": {"name": "Scout"}, "tools": {"web_search": True}, "mode": "Scheduled", "retries": 3}
+    limit = page.get_by_label("Search result limit")
+    expect(limit).to_be_hidden()
+    desired = {"interval_minutes": 10, "profile": {"name": "Scout"}, "tools": {"web_search": True, "search_limit": 7}, "mode": "Scheduled", "retries": 3}
     select = "v => tools.get('update_settings').execute(v)"
     result = page.evaluate(select, desired)
     expect_card("Scout", "Scheduled", "true", "3")
     assert result == preview.text_content().strip()
     expect(name).to_have_value("Scout")
     expect(enabled).to_be_checked()
+    expect(limit).to_be_visible()
+    expect(limit).to_have_value("7")
+    limit.press("ArrowRight")
+    expect(limit).to_have_value("8")
+    enabled.press("Space")
+    expect(limit).to_be_hidden()
+    enabled.press("Tab")
+    expect(scheduled).to_be_focused()
+    enabled.press("Space")
+    expect(limit).to_be_visible()
+    expect(limit).to_have_value("8")
     expect(scheduled).to_be_checked()
     expect(interval).to_be_visible()
     expect(interval).to_have_value("10")
@@ -189,7 +204,7 @@ def exercise_settings(page):
     for _ in range(5):
         interval.press("ArrowRight")
     expect(interval).to_have_value("15")
-    for patch in ({"tools": {"web_search": "true"}}, {"mode": "Auto"}, {"profile": {"name": ""}},
+    for patch in ({"tools": {"web_search": "true", "search_limit": 7}}, {"mode": "Auto"}, {"profile": {"name": ""}},
                   {"profile": {"name": "x" * 61}}, {"profile": {}}, {"tools": {"web_search": True, "extra": 1}},
                   {"retries": 6}, {"extra": True}):
         assert page.evaluate("""async v => { try { await tools.get('update_settings').execute(v); }
@@ -213,6 +228,11 @@ def exercise_settings(page):
     expect(name).to_be_focused()
     assert mode_text.evaluate("node => node.firstChild === window.previousModeText")
     expect(enabled).not_to_be_checked()
+    expect(limit).to_be_hidden()
+    page.evaluate(select, desired)
+    expect(limit).to_be_visible()
+    page.evaluate(select, dict(desired, tools={"web_search": False, "search_limit": 8}))
+    expect(limit).to_be_hidden()
     assert not requests, requests
 
 

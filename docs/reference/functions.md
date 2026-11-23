@@ -434,6 +434,7 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 ## Browser-local record views in std:ui
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
+- `ui.boolean_children(field: String, content: List<View>) -> View` shows its children while a browser boolean is true. Prefer `if settings.tools.web_search:` inside a child block for compile-time checking.
 - `ui.choice_children(field: String, variant: String, content: List<View>) -> View` groups views whose visibility follows a browser choice. Prefer an indented `if settings.mode == Scheduled` child block so the compiler checks the field and variant.
 - `ui.value(field: String) -> View` displays a browser field as live plain text inside its mounted record editor. Use `ui.value(bind settings.profile.name)` in a developer-written layout.
 - `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}` or `{profile.name}`.
