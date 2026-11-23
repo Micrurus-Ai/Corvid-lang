@@ -19,7 +19,7 @@ def check_response(url):
         '<nav aria-label="Guide sections"><a href="#route" tabindex="0">Route, <abbr title="3 kilometres">3 km</abbr></a>'
         '<a href="#packing" tabindex="0">Packing note</a></nav>',
         '<section aria-labelledby="route"><h2 id="route">Route</h2><figure><img ',
-        'alt="Green circle trail marker"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
+        'alt="Green circle trail marker" width="24" height="24"><figcaption>Follow this marker to the lookout.</figcaption></figure>',
         '<p>Walking time: <time datetime="PT45M">45 minutes</time></p>',
         '<ol start="1"><li>Bridge</li><li value="3">Lookout</li></ol>',
         "<table><caption>Distances from the trailhead</caption>",
@@ -68,6 +68,8 @@ def check_browser(url, channel):
         figure = route.get_by_role("figure")
         expect(figure.locator("figcaption")).to_have_text("Follow this marker to the lookout.")
         image = figure.get_by_role("img", name="Green circle trail marker")
+        expect(image).to_have_attribute("width", "24")
+        expect(image).to_have_attribute("height", "24")
         assert image.evaluate("img => img.naturalWidth") == 24
         expect(main.locator("ol[start='1'] > li")).to_have_text(["Bridge", "Lookout"])
         expect(route.locator("ol > li").nth(1)).to_have_js_property("value", 3)

@@ -128,6 +128,12 @@ test time_value_escapes_datetime_and_preserves_inline_children:
     duration = ui.time_value("PT45M\" & <estimate>", [ui.strong([ui.inline_text("45")]), ui.inline_text(" <minutes>")])
     assert duration.html == "<time datetime=\"PT45M&quot; &amp; &lt;estimate&gt;\"><strong>45</strong> &lt;minutes&gt;</time>"
 
+test image_dimensions_preserve_zero_and_omit_negative_values:
+    marker = ui.image_with_dimensions("/map?a&b", "Trail \"A\"", 24, 16)
+    assert marker.html == "<img src=\"/map?a&amp;b\" alt=\"Trail &quot;A&quot;\" width=\"24\" height=\"16\">"
+    assert ui.image_with_dimensions("/map", "", -1, 0).html == "<img src=\"/map\" alt=\"\" height=\"0\">"
+    assert ui.image_with_dimensions("/map", "", 0, -1).html == "<img src=\"/map\" alt=\"\" width=\"0\">"
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -198,7 +204,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("32 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("33 passed"),
         "{good:?}"
     );
     fs::write(

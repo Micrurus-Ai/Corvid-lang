@@ -88,7 +88,18 @@ public fn section(heading_id: String, title: String, content: List<View>) -> Vie
     return View("<section aria-labelledby=\"" + id + "\">" + heading_html + children(content) + "</section>")
 
 public fn image(src: String, alt: String) -> View:
-    return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\">")
+    return image_element(src, alt, "")
+
+public fn image_with_dimensions(src: String, alt: String, width: Int, height: Int) -> View:
+    dimensions = ""
+    if width >= 0:
+        dimensions = " width=\"" + width.to_string() + "\""
+    if height >= 0:
+        dimensions = dimensions + " height=\"" + height.to_string() + "\""
+    return image_element(src, alt, dimensions)
+
+fn image_element(src: String, alt: String, dimensions: String) -> View:
+    return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\"" + dimensions + ">")
 
 public fn figure(caption: String, content: List<View>) -> View:
     return View("<figure>" + children(content) + "<figcaption>" + escaped(caption) + "</figcaption></figure>")

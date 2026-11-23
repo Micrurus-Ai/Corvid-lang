@@ -96,6 +96,8 @@ fn trail_navigation() -> View:
 
 Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to place an image in a list of views. Choose a trusted source URL and describe what the image contributes to the page. For a purely decorative image, pass an empty string as the second argument. Corvid escapes both attribute values.
 
+When you know the image size, pass its width and height in CSS pixels. The trail guide uses `ui.image_with_dimensions(marker_url, "Green circle trail marker", 24, 24)` so the browser can reserve space before the marker loads.
+
 To show a visible caption below an image, use `ui.figure("Follow this marker to the lookout.", [marker])`, where `marker` is the image view. The image's alternative text describes the marker. The caption tells readers where it leads.
 
 ### Attach application data to a group
