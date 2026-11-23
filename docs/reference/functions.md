@@ -383,6 +383,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 
 - `fn text(value: String) -> View`
 - `fn fragment(content: List<View>) -> View` groups siblings into one view for a component slot. It concatenates each child's existing markup in order. Nested fragments add no element or spacing. An empty fragment renders an empty string.
+- `fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View` returns the child view on success. On error it calls `render_error` with the message and returns that view in the child's place. Use `ui.text` inside the callback to escape error text.
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.
 - `fn preformatted_text(value: String) -> View` renders escaped text in a `pre` element with `dir="auto"`. It preserves spaces and line breaks, including a leading newline. The browser infers the block's writing direction from its text.

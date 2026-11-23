@@ -14,6 +14,12 @@ fn children(views: List<View>) -> String:
 public fn fragment(content: List<View>) -> View:
     return View(children(content))
 
+public fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View:
+    recovered = match result:
+        Ok(content) -> content
+        Err(reason) -> render_error(reason)
+    return recovered
+
 public fn text(value: String) -> View:
     return View("<p>" + escaped(value) + "</p>")
 

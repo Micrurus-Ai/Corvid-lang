@@ -40,8 +40,16 @@ fn guide(note: String, context: GuideContext) -> String:
     route_details = ui.section("route", "Route", [
         ui.figure("Follow this marker to the lookout.", [marker]), walking_time, stops, distances
     ])
-    packing = packing_panel(note, context, fn (text: String) -> ui.preformatted_text(text))
+    packing = packing_panel(note, context, fn (text: String) -> render_packing_preview(text))
     return guide_layout(title, navigation, route_details, packing)
+
+fn packing_preview(note: String) -> Result<ui.View, String>:
+    if note == "":
+        return Err("Enter a packing note to see its preview.")
+    return Ok(ui.preformatted_text(note))
+
+fn render_packing_preview(note: String) -> ui.View:
+    return ui.recover_view(packing_preview(note), fn (reason: String) -> ui.text(reason))
 
 fn packing_panel(note: String, context: GuideContext, render_preview: (String) -> ui.View) -> Result<PackingPanel, String>:
     preview = render_preview(note)
@@ -104,6 +112,17 @@ test packing_suggestions_render_once_in_the_page_footer:
     suggestions = packing_suggestions(context).html
     assert page.contains("</main><footer>" + suggestions)
     assert page.split(suggestions).length() == 2
+
+test empty_preview_keeps_the_packing_editor_and_footer_action:
+    context = GuideContext("/ridge")
+    page = guide("", context)
+    assert page.contains("<h3>Current note</h3><p>Enter a packing note to see its preview.</p>")
+    assert page.contains(packing_note_editor("", context).html)
+    assert page.contains("</main><footer>" + packing_suggestions(context).html)
+
+test successful_preview_preserves_the_child_markup:
+    page = guide("Water & snacks", GuideContext("/ridge"))
+    assert page.contains("<h3>Current note</h3>" + ui.preformatted_text("Water & snacks").html)
 
 server trail_guide:
     route GET "/" -> html:

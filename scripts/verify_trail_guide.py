@@ -45,6 +45,10 @@ def check_response(url):
     ]
     positions = [initial.index(fragment) for fragment in landmarks_and_content]
     assert positions == sorted(positions)
+    empty_note = read(url + "/guide?note=")
+    assert "<h3>Current note</h3><p>Enter a packing note to see its preview.</p>" in empty_note
+    assert '<form method="get" action="/guide" aria-label="Packing note preview">' in empty_note
+    assert '</main><footer><form method="get" action="/guide" aria-label="Suggested packing notes">' in empty_note
     response = read(url + "/guide?" + urlencode({"note": NOTE}))
     literal = escape(NOTE)
     assert response.startswith('<!doctype html><html lang="en">')

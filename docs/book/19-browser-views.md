@@ -95,6 +95,12 @@ packing = packing_panel(note, context, fn (text: String) -> ui.text(text))
 
 ### Recover inside a component slot
 
+Use `ui.recover_view` to handle a failure where the child appears. In the trail guide, `packing_preview` returns an error for an empty note. The caller renders the message under **Current note**, and the editor and footer action still use the route's context. A successful preview keeps its original formatting.
+
+```corvid-fragment
+preview = ui.recover_view(packing_preview(note), fn (reason: String) -> ui.text(reason))
+```
+
 The packing component returns a `Result<PackingPanel, String>`. On success, the record carries two views. The layout renders `content` inside the packing section and `footer_action` in the page footer, after the main landmark. This lets the component send its suggestions form across a layout boundary during server rendering. The form still uses the preview path from the component's context.
 
 On failure, the layout keeps the route details and the footer's navigation link. It fills the packing section with escaped error text and supplies an empty footer action.
