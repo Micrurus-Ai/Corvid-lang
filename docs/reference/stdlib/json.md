@@ -54,6 +54,44 @@ as here; since slice 45o you can also import the module's own row —
 target type. **No per-type runtime handler exists** — the
 dispatch is generic over the declared signature.
 
+## Public JSON mapping
+
+The public mapping is the JSON Corvid exchanges with code outside the
+program. HTTP request bodies and JSON replies use it, and the
+published OpenAPI schemas describe it.
+
+| Corvid | JSON |
+| --- | --- |
+| `Int` | integer; a fractional or out-of-range number is an error |
+| `Float` | number; an integer is accepted |
+| `String`, `Bool` | string, boolean |
+| `Nothing` | `null` |
+| record | object with one key per field |
+| `Option<T>` | the `T` value, or `null` for `None`; a record field may also be left out |
+| `List<T>` | array |
+| `Map<String, V>` | object |
+| `Map<K, V>` with another key type | array of `[key, value]` pairs |
+| `Result<T, E>` | `{"tag": "ok", "ok": T}` or `{"tag": "err", "err": E}`; `tag` is optional on input but must agree with the key present |
+| sum type | `{"tag": "variant", "type": "<Type>", "variant": "<Variant>", "fields": [...]}` with payload fields in declaration order; on input only `variant` and, for a payload, `fields` are required |
+| `Grounded<T>` | `{"value": T, "sources": [...]}` on output only |
+| `JsonValue` | the JSON value itself |
+
+Decoding never invents provenance. A `Grounded<T>` target is rejected
+because JSON text cannot show where a value came from. Functions,
+handles, streams and JSON builders have no JSON form.
+
+A decode error names the first problem by path, such as `items[2].price`
+or `["user id"]` for a key that is not an identifier, with the expected
+type and what was found. Field refinements are checked at the same
+path. HTTP routes reject keys a record does not declare, as their
+published schemas state `additionalProperties: false`.
+
+Prompt structured output, tool arguments and recorded traces use
+Corvid's internal envelope instead, which represents `Option` as
+`{"tag": "some", "value": …}` or `{"tag": "none"}`. Records, lists,
+scalars and sum types have the same form in both. The typed-decoder
+convention below currently uses the internal envelope.
+
 ## The opaque shape
 
 ### `JsonValue` — opaque parsed JSON
