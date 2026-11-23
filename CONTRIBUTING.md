@@ -4,6 +4,15 @@ This document is for the people building Corvid — today that's a team of two, 
 
 ---
 
+## Professional naming
+
+**Every new or renamed Corvid name must describe its purpose in terms a developer can understand on first reading.** This is a project-wide contribution requirement for people and automated contributors. It applies to frontend, backend, AI and tooling, across branches, directories, files, packages, examples, tests, language syntax, types, functions, variables, commands, configuration, documentation and interface labels.
+
+- Use established Corvid vocabulary consistently. Name types for the concepts they represent and actions for the behavior they perform. Follow the casing and spelling conventions of the surrounding language or tool. Familiar terms such as HTML, HTTP and SVG are appropriate.
+- Name a branch for the work it delivers, such as `frontend/semantic-html`. Name an example for what someone can build, such as `reading_list`. Name a test for the behavior it checks, such as `reordering_preserves_focus`.
+- Keep task IDs, phase numbers and trial sequence numbers in tracking metadata. A ticket number alone, an internal codename, or a placeholder such as `phase22_demo`, `temp2` or `final_final` is grounds for revision. Numbers with domain meaning, official product names, protocol identifiers and externally required spellings retain their established forms.
+- Review names before publishing a branch and before merging a change. If a reviewer needs the roadmap or the author's explanation to understand a project name, choose a clearer name. For an existing public name, preserve compatibility through the project's deprecation and migration process and update the learning files, references and examples together.
+
 ## Mission
 
 **Make programming AI agents as safe and natural as programming anything else.**
