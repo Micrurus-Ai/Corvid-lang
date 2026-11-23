@@ -20,6 +20,12 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test trusted_markup_and_text_in_one_page:
+    fragment = "<h1 data-topic=\"notes\">Maps &amp; trails</h1>"
+    page = ui.page("Guide", [ui.trusted_markup(fragment), ui.text(fragment)])
+    literal = "<p>&lt;h1 data-topic=&quot;notes&quot;&gt;Maps &amp;amp; trails&lt;/h1&gt;</p>"
+    assert page.contains("<main>" + fragment + literal + "</main>")
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -61,7 +67,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("7 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("8 passed"),
         "{good:?}"
     );
     fs::write(

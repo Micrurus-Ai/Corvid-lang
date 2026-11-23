@@ -23,7 +23,15 @@ From the project root, set `CORVID_IO_ROOT` to the directory where you want the 
 
 The field keeps its current text as you type. Press Enter in the field or click Search to submit a GET request to the current page with a `query` parameter. A static page reloads its initial values. The disclosure keeps its own open or closed state until navigation. Click its summary or focus it and press Space to toggle it.
 
-`ui.text`, `ui.text_field`, `ui.submit`, `ui.disclosure`, and `ui.page` escape their text arguments for HTML. Pass user input through those functions. Constructing a `View` directly treats its `html` field as trusted markup.
+`ui.text`, `ui.text_field`, `ui.submit`, `ui.disclosure`, and `ui.page` escape their text arguments for HTML. Pass user input through those functions.
+
+Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
+
+```corvid-fragment
+fn notes_page(note: String) -> String:
+    heading = ui.trusted_markup("<h1 data-topic='notes'>Field notes</h1>")
+    return ui.page("Notes", [heading, ui.text(note)])
+```
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.
 
