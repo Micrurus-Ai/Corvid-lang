@@ -70,6 +70,10 @@ public fn browser_row(key: String, key_field: String, fields: Map<String, List<S
 public fn browser_rows(label: String, rows: List<View>) -> View:
     return View("<div data-browser-rows><ol aria-label=\"" + escaped(label) + "\">" + children(rows) + "</ol><span role=\"status\"></span></div>")
 
+public fn list_editor(rows: View, new_row: View, add_label: String, remove_label: String) -> View:
+    add = "<button type=\"button\" data-add-row hidden>" + escaped(add_label) + "</button>"
+    return View("<section data-list-editor data-remove-label=\"" + escaped(remove_label) + "\">" + rows.html + add + "<template>" + new_row.html + "</template></section>")
+
 public fn assistant_reorder(component: View, name: String, description: String) -> View:
     return View("<div data-reorder-owner" + tool_attributes(name, description) + ">" + component.html + "</div>")
 

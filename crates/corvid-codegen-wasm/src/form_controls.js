@@ -107,7 +107,7 @@ for (const form of document.querySelectorAll("form[data-corvid-selection]")) {
   }
 }
 
-for (const list of document.querySelectorAll("[data-browser-rows]")) bindKeyedList(list);
+for (const list of document.querySelectorAll("[data-browser-rows]")) bindKeyedList(list, bindLocalSelection);
 
 // Each mounted record owns its value and bindings. Only initialization reads the schema markup.
 for (const region of document.querySelectorAll("[data-local-selection]")) {

@@ -60,13 +60,17 @@ type WorkspaceAgent:
 type Workspace:
     agents: List<WorkspaceAgent>
 
-fn agent_list(workspace: Workspace) -> ui.View:
-    browser state members = workspace.agents
-    agents = ui.stack:
+fn agent_rows(initial: List<WorkspaceAgent>) -> ui.View:
+    browser state members = initial
+    return ui.stack:
         for agent in members by agent.id:
             ui.field("Agent name", bind agent.name)
             ui.checkbox("Enabled", bind agent.enabled)
-    return ui.assistant_reorder(agents, "move_agent", "Move an agent up or down by its ID.")
+
+fn agent_list(workspace: Workspace) -> ui.View:
+    new_agent = WorkspaceAgent("agent", "New agent", true)
+    editor = ui.list_editor(agent_rows(workspace.agents), agent_rows([new_agent]), "Add agent", "Remove agent")
+    return ui.assistant_reorder(editor, "move_agent", "Move an agent up or down by its ID.")
 
 server app:
     route GET "/agents" -> html:

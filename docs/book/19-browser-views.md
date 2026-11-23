@@ -664,16 +664,22 @@ An opted-in assistant supplies a complete record in one call. For example, `{"pr
 Open `/agents` in the packaged agent settings example. Each row starts with a record from the application's typed list. The browser keeps its editable values and position until reload.
 
 ```corvid
-fn agent_list(workspace: Workspace) -> ui.View:
-    browser state members = workspace.agents
-    agents = ui.stack:
+fn agent_rows(initial: List<WorkspaceAgent>) -> ui.View:
+    browser state members = initial
+    return ui.stack:
         for agent in members by agent.id:
             ui.field("Agent name", bind agent.name)
             ui.checkbox("Enabled", bind agent.enabled)
-    return ui.assistant_reorder(agents, "move_agent", "Move an agent up or down by its ID.")
+
+fn agent_list(workspace: Workspace) -> ui.View:
+    new_agent = WorkspaceAgent("agent", "New agent", true)
+    editor = ui.list_editor(agent_rows(workspace.agents), agent_rows([new_agent]), "Add agent", "Remove agent")
+    return ui.assistant_reorder(editor, "move_agent", "Move an agent up or down by its ID.")
 ```
 
-Give each agent a unique, nonempty string ID. Use editable fields such as the name for the controls and keep the ID stable. Start editing the second name and press Alt+Up. The row moves with the caret. An assistant can call the opted-in action with `{"key":"writer","direction":"up"}` to make the same move while the user is typing. The action advertises the available IDs.
+Give each agent a unique, nonempty string ID. Use editable fields such as the name for the controls and keep the ID stable. Start editing the second name and press Alt+Up. The row moves with the caret. An assistant can call the opted-in action with `{"key":"writer","direction":"up"}` to make the same move while the user is typing. On an editable list, calling the reorder action with `{}` returns the current IDs in display order.
+
+**Add agent** creates a row from the supplied template, including its initial name and enabled setting. The template key supplies the prefix for new IDs such as `agent-1` and `agent-2`. **Remove agent** removes just that row. If you remove the last row, the Add button remains available. Use `ui.value(bind agent.id)` when displaying the generated ID.
 
 ### Show a field in a custom live preview
 

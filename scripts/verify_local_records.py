@@ -259,7 +259,7 @@ def exercise_rows(page):
     page.context.set_offline(True)
     rows = page.get_by_role("listitem")
     expect(rows).to_have_count(2)
-    assert page.evaluate("tools.get('move_agent').inputSchema.properties.key.enum") == ["reader", "writer"]
+    assert page.evaluate("tools.get('move_agent').inputSchema.properties.key") == {"type": "string"}
     assert page.evaluate("""async () => { try { await tools.get('move_agent').execute({key:'missing', direction:'up'}); }
         catch { return true; } return false; }""")
     writer = page.locator('[data-corvid-key="writer"]')
@@ -267,6 +267,25 @@ def exercise_rows(page):
     name.fill("Writer")
     name.evaluate("node => { window.editedNode = node; node.setSelectionRange(2, 2); }")
     name.press("x")
+    add = page.get_by_role("button", name="Add agent")
+    name.evaluate("node => node.setSelectionRange(2, 4)")
+    add.click()
+    expect(rows).to_have_count(3)
+    expect(name).to_be_focused()
+    assert name.evaluate("node => node === window.editedNode && node.selectionStart === 2 && node.selectionEnd === 4")
+    assert page.evaluate("tools.get('move_agent').execute({})") == ["reader", "writer", "agent-1"]
+    draft = page.locator('[data-corvid-key="agent-1"]')
+    expect(draft.get_by_role("textbox")).to_have_value("New agent")
+    expect(draft.get_by_role("checkbox")).to_be_checked()
+    page.evaluate("() => tools.get('move_agent').execute({key:'agent-1', direction:'up'})")
+    expect(rows.nth(1)).to_have_attribute("data-corvid-key", "agent-1")
+    draft.get_by_role("button", name="Remove agent agent-1").click()
+    expect(rows).to_have_count(2)
+    expect(name).to_be_focused()
+    assert name.evaluate("node => node === window.editedNode && node.selectionStart === 2 && node.selectionEnd === 4")
+    assert page.evaluate("""async () => { try { await tools.get('move_agent').execute({key:'agent-1', direction:'up'}); }
+        catch { return true; } return false; }""")
+    name.evaluate("node => node.setSelectionRange(3, 3)")
     result = page.evaluate("() => tools.get('move_agent').execute({key:'writer', direction:'up'})")
     assert "position 1" in result
     expect(rows.first).to_have_attribute("data-corvid-key", "writer")
@@ -280,6 +299,19 @@ def exercise_rows(page):
     expect(name).to_be_focused()
     writer.get_by_role("checkbox").check()
     expect(writer.get_by_role("checkbox")).to_be_checked()
+    writer.get_by_role("button", name="Remove agent writer").press("Enter")
+    last = page.get_by_role("button", name="Remove agent reader")
+    expect(last).to_be_focused()
+    last.press("Enter")
+    expect(rows).to_have_count(0)
+    assert page.evaluate("tools.get('move_agent').execute({})") == []
+    expect(add).to_be_focused()
+    add.press("Enter")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_have_attribute("data-corvid-key", "agent-2")
+    expect(rows.first.get_by_role("textbox")).to_have_value("New agent")
+    rows.first.get_by_role("textbox").fill("Fresh")
+    expect(rows.first.get_by_role("textbox")).to_have_value("Fresh")
 
 
 def verify(cli, channel):
@@ -334,7 +366,12 @@ def verify(cli, channel):
                     expect(boundary.get_by_role("listitem")).to_have_count(count)
                     if count:
                         expect(boundary.locator("[data-browser-rows] > [role=status]")).to_contain_text("unique key")
-                    assert not boundary.evaluate("Boolean(window.registeredMove)")
+                        assert not boundary.evaluate("Boolean(window.registeredMove)")
+                    else:
+                        boundary.context.set_offline(True)
+                        boundary.get_by_role("button", name="Add agent").press("Enter")
+                        expect(boundary.get_by_role("listitem")).to_have_count(1)
+                        expect(boundary.get_by_role("textbox")).to_have_value("New agent")
                     boundary.close()
         for engine, page, test in pages:
             test(page)
