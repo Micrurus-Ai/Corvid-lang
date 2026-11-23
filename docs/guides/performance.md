@@ -33,6 +33,20 @@ Chrome 157 on Windows completed 252 checked edits across 42 rounds, with a cold 
 
 The preload achieved overlap without improving median readiness on loopback. It remains a benchmark variant. Slower networks could give a different result. A follow-up profile can time module evaluation, Wasm instantiation and control setup independently. [Raw observations](../../benches/typescript/storefront-preload-windows-chrome.jsonl)
 
+### Handler startup profile
+
+In a separate 160-edit run on the same Windows Chrome setup, timestamp probes in temporary loader copies measured these median cold-visit intervals. Each implementation had 40 cold and 40 warm visits.
+
+| Interval (ms) | Corvid | TypeScript |
+| --- | ---: | ---: |
+| Loader response end to first module statement | 22.25 | 22.45 |
+| Module entry to beginning handler initialization | 2.00 | 2.00 |
+| Begin initialization to handlers available | 13.50 | 0.90 |
+| Handlers available to quantity controls bound | 2.75 | 1.40 |
+| Navigation start to observed cart readiness | 68.75 | 54.40 |
+
+Corvid's streaming Wasm startup took 13.30 ms including the fetch. A median 8.70 ms elapsed between the Wasm response ending and the instance becoming available. This elapsed interval includes browser scheduling. On warm visits, handler initialization took 6.20 ms for Corvid and 0.70 ms for TypeScript. The measurement supports testing a compiler-generated JavaScript path for small, pure integer handlers. The prototype should preserve signed 64-bit behavior, diagnostics and tracing and be compared with the existing Wasm backend using the same inputs. Repeat the profile with `--profile-stages`. [Raw samples](../../benches/typescript/storefront-stages-windows-chrome.jsonl)
+
 ## What's slow, what's fast
 
 Corvid's optimization target is the AI-orchestration surface, not raw

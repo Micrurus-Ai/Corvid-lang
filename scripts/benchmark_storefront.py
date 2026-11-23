@@ -64,6 +64,7 @@ def visit(page, url):
     page.wait_for_function("window.cartSample !== undefined")
     result = page.evaluate("""() => ({
         ...window.cartSample, ready_ms: window.cartReady,
+        ...(window.startupStages ? {stages:window.startupStages} : {}),
         assets: performance.getEntriesByType('resource')
             .filter(e => e.name.includes('/target/wasm/'))
             .map(e => ({file:new URL(e.name).pathname.split('/').pop(), bytes:e.transferSize,
@@ -72,6 +73,23 @@ def visit(page, url):
     expect(page.get_by_text("5400", exact=True)).to_be_visible()
     checkout(page, 12, 1)
     return result
+
+
+def instrument_loader(path):
+    source = path.read_text(encoding="utf-8")
+    markers = [
+        ("handlers = await instantiate();", "init_start"),
+        ('for (const field of root.querySelectorAll("[data-corvid-quantity-field]"))', "handlers_ready"),
+        ("for (const panel of panels)", "quantities_bound"),
+    ]
+    if "WebAssembly.instantiateStreaming" in source:
+        markers.extend([("const source = await WebAssembly.instantiateStreaming", "wasm_start"),
+                        ("const exports = source.instance.exports;", "wasm_ready")])
+    for anchor, name in markers:
+        if source.count(anchor) != 1:
+            raise RuntimeError(f"Cannot instrument {name} in {path}")
+        source = source.replace(anchor, f"window.startupStages.{name} = performance.now();\n  " + anchor)
+    path.write_text("window.startupStages = {module_start: performance.now()};\n" + source, encoding="utf-8")
 
 
 def run(args):
@@ -107,6 +125,9 @@ def run(args):
             if source.count(anchor) != 1:
                 raise RuntimeError("Cannot find the storefront cart to insert the preload hint")
             main.write_text(source.replace(anchor, anchor + f'View("{hint}"), '), encoding="utf-8")
+        if args.profile_stages:
+            for name in variants:
+                instrument_loader(root / name / "target/wasm/events.js")
         urls = {name: stack.enter_context(serve(cli, root / name, os.environ.copy()))
                 for name in variants}
         orders = list(permutations(variants))
@@ -157,6 +178,7 @@ if __name__ == "__main__":
     parser.add_argument("--pairs", type=int, default=40)
     parser.add_argument("--channel", default="chrome")
     parser.add_argument("--compare-preload", action="store_true", help="also time the same cart with an early Wasm fetch")
+    parser.add_argument("--profile-stages", action="store_true", help="record loader and control startup timestamps in the benchmark copies")
     args = parser.parse_args()
     if args.pairs < 1:
         parser.error("--pairs must be positive")
