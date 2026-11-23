@@ -25,6 +25,12 @@ test renders_image_attributes:
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
     assert ui.image("/border.png", "").html == "<img src=\"/border.png\" alt=\"\">"
 
+test renders_labelled_navigation_in_order:
+    links = [ui.link("Map", "/map"), ui.link("Trails", "/trails")]
+    nav = ui.navigation("Walks & \"rides\" <nearby>", links)
+    assert nav.html == "<nav aria-label=\"Walks &amp; &quot;rides&quot; &lt;nearby&gt;\"><a href=\"/map\" tabindex=\"0\">Map</a><a href=\"/trails\" tabindex=\"0\">Trails</a></nav>"
+    assert ui.page("Guide", [nav]).contains("<main>" + nav.html + "</main>")
+
 test renders_native_lists_in_order:
     label = ui.inline_text("Read <notes> & ")
     first = ui.list_item([label, ui.link("references", "/ref")])
@@ -55,7 +61,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("6 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("7 passed"),
         "{good:?}"
     );
     fs::write(

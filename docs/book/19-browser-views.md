@@ -37,6 +37,16 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+### Group navigation links
+
+Use `ui.navigation(label, content)` to group links in a native `nav` landmark. Give the group a name that describes its destinations. Corvid escapes the label for `aria-label` and renders the children in list order.
+
+```corvid-fragment
+fn trail_navigation() -> View:
+    links = [ui.link("Map", "/map"), ui.link("Trails", "/trails")]
+    return ui.navigation("Trail guide", links)
+```
+
 ### Include an image
 
 Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to place an image in a list of views. Choose a trusted source URL and describe what the image contributes to the page. For a purely decorative image, pass an empty string as the second argument. Corvid escapes both attribute values.
