@@ -62,6 +62,9 @@ use corvid_types::Type;
 use corvid_vm::{json_to_value, value_to_json};
 use libloading::{Library, Symbol};
 
+mod browser_asset;
+use browser_asset::browser_asset;
+
 use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
 
 /// What the serve loop remembers about each in-flight approval so the
@@ -409,17 +412,14 @@ pub(crate) fn cmd_serve(
             if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
                 anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
             }
-            app = app.route(&route, on(MethodFilter::GET, move || {
-                let bytes = bytes.clone();
-                async move { ([(axum::http::header::CONTENT_TYPE, mime)], bytes) }
-            }));
+            app = app.route(&route, browser_asset(bytes, mime, name == "events.wasm"));
         }
     } else if !state.ir.servers.iter().flat_map(|s| &s.routes)
         .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
-        app = app.route("/target/wasm/events.js", on(MethodFilter::GET, || async {
-            ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                corvid_driver::FORM_CONTROLS_JS)
-        }));
+        app = app.route("/target/wasm/events.js", browser_asset(
+            Bytes::from_static(corvid_driver::FORM_CONTROLS_JS.as_bytes()),
+            "text/javascript; charset=utf-8", false,
+        ));
     }
 
     // Slice 52a: register EVERY declared route and execute its body via

@@ -499,3 +499,11 @@ Corvid handler notebook_cents failed: divide by zero at src/pricing.cor:4:12 in 
 Open `src/pricing.cor` at line 4, column 12. The cart called `notebook_cents`, which called `line_total` in that file. Its divisor was `quantity - 2`. For this cart the line total is simply `quantity * unit_price`. After changing that line and rebuilding, the same two notebooks cost 900 cents and checkout with one pencil totals 1,025 cents.
 
 With Python Playwright and its three browser engines installed, run `python scripts/verify_browser_diagnostics.py target/debug/corvid.exe` from the repository root. Pass `--channel chrome` to use installed Chrome. The trial triggers both operations, checks their individual source locations and completes checkout with the corrected calculation in Chromium, Firefox and WebKit.
+
+### Browser asset caching
+
+Build the web package and serve its extracted contents with `corvid serve`. The loader keeps its stable URL, `/target/wasm/events.js`. Browsers can send its ETag on subsequent visits. When the bytes are unchanged, the server responds with HTTP 304 and an empty body.
+
+The loader requests `events.wasm?v=<SHA-256>`, where the version identifies the exact compiled bytes. Corvid serves that URL with a one-year immutable cache policy. A backend-only edit can reuse both assets. A change to the Wasm produces a new URL and updates the loader automatically. Keep the full query string in any CDN cache key. An uncached request for a previous build's hash receives HTTP 404 from the new server. Reloading the page retrieves the current loader.
+
+Run `python scripts/verify_browser_cache.py target/debug/corvid.exe --channel chrome` with Python Playwright, installed Chrome, Firefox and WebKit. The trial serves three extracted packages at one local origin and records the actual browser requests using persistent profiles.

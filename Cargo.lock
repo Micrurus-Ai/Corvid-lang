@@ -814,6 +814,7 @@ dependencies = [
  "corvid-vm",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "wasm-encoder 0.244.0",
  "wasmparser 0.244.0",

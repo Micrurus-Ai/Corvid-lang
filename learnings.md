@@ -523,6 +523,10 @@ Some declarations parse + typecheck cleanly but won't execute on v1.0 because a 
 A clean check with warnings prints `ok: file.cor — no errors (N warning(s) above)` and exits 0 — warnings are signal, not failure.
 
 
+### Updating a packaged web app
+
+Rebuild and serve the new web package. The browser revalidates the JavaScript loader and can reuse the WebAssembly module as long as its content hash stays the same. A change to the compiled module automatically changes the URL the loader requests. See [browser asset caching](docs/book/19-browser-views.md#browser-asset-caching).
+
 ### Browser arithmetic errors
 
 In a web build, a failing integer division or remainder reports the handler and the Corvid file, line, column and function where the calculation failed. Open that location even if the handler imports the function from another file. See [debugging browser calculations](docs/book/19-browser-views.md#debug-a-browser-calculation).
