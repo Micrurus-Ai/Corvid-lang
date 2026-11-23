@@ -383,6 +383,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 
 - `fn text(value: String) -> View`
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
+- `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.
 - `fn abbreviation(label: String, expansion: String) -> View` renders an `abbr` element with the label as its text and the expansion in its `title` attribute. Both strings are escaped.
 - `fn data_value(value: String, content: List<View>) -> View` renders an HTML `data` element. Its `value` attribute holds the escaped machine-readable string. Its children supply the visible inline content in the given order.
 - `fn time_value(datetime: String, content: List<View>) -> View` renders a `time` element with an escaped `datetime` attribute and the supplied inline views in order. The caller supplies a valid HTML date, time or duration string.

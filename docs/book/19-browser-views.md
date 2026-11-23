@@ -39,10 +39,12 @@ Use `ui.paragraph` to mix inline views in a single paragraph. Its children appea
 
 Wrap important words in `ui.strong`. Pass them as `ui.inline_text` to escape the text, or include other inline views such as links.
 
+When a reader's note may start in a different writing direction from its label, pass the note to `ui.isolated_text`. It escapes the text and wraps it in a native `bdi` element so the browser determines the note's direction independently.
+
 ```corvid-fragment
 fn note_preview(note: String) -> View:
     label = ui.strong([ui.inline_text("Current note")])
-    return ui.paragraph([label, ui.inline_text(": " + note)])
+    return ui.paragraph([label, ui.inline_text(": "), ui.isolated_text(note)])
 ```
 
 Use `ui.query_form(path, controls)` to submit named fields to an application route with GET, and `ui.link(label, path)` to navigate there. Supply a trusted application path for each.

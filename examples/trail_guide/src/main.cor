@@ -25,7 +25,7 @@ fn guide(note: String) -> String:
     note_field = ui.text_area_with_requirement("Your note", "note", note, true)
     editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview"), ui.reset_button("Restore note")])
     form = ui.query_form("/guide", [editor])
-    preview = ui.paragraph([ui.strong([ui.inline_text("Current note")]), ui.inline_text(": " + note)])
+    preview = ui.paragraph([ui.strong([ui.inline_text("Current note")]), ui.inline_text(": "), ui.isolated_text(note)])
     supplies = ui.unordered_list([
         ui.list_item([ui.checkbox_field("Water bottle", "water", false)]),
         ui.list_item([ui.checkbox_field("Trail map", "map", false)])

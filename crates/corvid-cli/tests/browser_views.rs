@@ -46,6 +46,10 @@ test abbreviation_escapes_text_and_title:
     distance = ui.abbreviation("<km> & mi", "kilometres & \"miles\"")
     assert distance.html == "<abbr title=\"kilometres &amp; &quot;miles&quot;\">&lt;km&gt; &amp; mi</abbr>"
 
+test isolated_text_escapes_content_inside_direction_boundary:
+    note = ui.isolated_text("مطر & </bdi>")
+    assert note.html == "<bdi>مطر &amp; &lt;/bdi&gt;</bdi>"
+
 test data_value_escapes_its_attribute_and_preserves_inline_children:
     label = ui.data_value("east\" & <west>", [ui.inline_text("<3 "), ui.abbreviation("km", "kilometres")])
     assert label.html == "<data value=\"east&quot; &amp; &lt;west&gt;\">&lt;3 <abbr title=\"kilometres\">km</abbr></data>"
@@ -177,7 +181,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("27 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("28 passed"),
         "{good:?}"
     );
     fs::write(

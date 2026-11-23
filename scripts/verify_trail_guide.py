@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from verify_reading_list import read, serve
 
 
-NOTE = '\nRain & "</textarea><em>wind</em>"'
+NOTE = '\nمطر & "</textarea><em>wind</em>"'
 
 
 def check_response(url):
@@ -41,7 +41,7 @@ def check_response(url):
     literal = escape(NOTE)
     assert response.startswith('<!doctype html><html lang="en">')
     assert f'data-trail-note="{literal}"' in response
-    assert f"<p><strong>Current note</strong>: {literal}</p>" in response
+    assert f"<p><strong>Current note</strong>: <bdi>{literal}</bdi></p>" in response
     assert f'<textarea name="note" required>\n{literal}</textarea>' in response
 
 
@@ -114,6 +114,9 @@ def check_browser(url, channel):
         section = main.locator("[data-trail-note]")
         expect(section).to_have_attribute("data-trail-note", NOTE)
         expect(section.locator("p > strong")).to_have_text("Current note")
+        isolated_note = section.locator("p > bdi")
+        expect(isolated_note).to_have_text(NOTE)
+        expect(isolated_note).to_have_css("direction", "rtl")
         expect(section.locator("p")).to_have_text("Current note: " + NOTE)
         expect(section.locator("em")).to_have_count(0)
         expect(section.get_by_label("Your note")).to_have_value(NOTE)
