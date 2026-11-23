@@ -23,7 +23,7 @@ pub enum ReplItem {
 /// — the parser stops before them and leaves them for the caller.
 pub fn parse_expr(tokens: &[Token]) -> Result<Expr, ParseError> {
     let mut p = Parser::new(tokens);
-    let expr = p.parse_expr()?;
+    let expr = p.parse_value_line()?;
     Ok(expr)
 }
 
@@ -292,7 +292,7 @@ impl<'a> Parser<'a> {
             return self.parse_stmt().map(ReplItem::Stmt);
         }
 
-        let expr = self.parse_expr()?;
+        let expr = self.parse_value_line()?;
         self.expect_newline()?;
         Ok(ReplItem::Expr(expr))
     }

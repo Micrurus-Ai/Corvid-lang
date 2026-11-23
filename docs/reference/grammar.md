@@ -647,3 +647,15 @@ Inside a function, write `browser state name = expression`. The initializer is e
 ### Browser field bindings
 
 `bind state.field` checks a top-level field against the initializer type of a named `browser state` binding. The expression produces the field's name as a string for view construction. Direct bindings passed to standard checkbox, slider, swatch and segmented-choice controls are also checked for compatible field types. Ordinary string arguments and text preview templates resolve at mount time. A bind expression selects a field name and does not read its current browser value.
+
+### Indented child blocks
+
+At a line boundary, a function name followed by a colon takes an indented block of one or more child expressions. Corvid evaluates the children in source order and passes them as a single list argument. Each child occupies its own logical line. A child can itself be a block call. The ordinary function signature determines the element and result types.
+
+```corvid
+controls = ui.grid:
+    ui.field("Agent name", bind settings.name)
+    ui.checkbox("Enabled", bind settings.enabled)
+```
+
+This is equivalent to `ui.grid([ui.field("Agent name", bind settings.name), ui.checkbox("Enabled", bind settings.enabled)])`. The same syntax works with a developer-defined function, in an assignment, after `return` or `yield`, and as a standalone expression statement. Use an ordinary call for an empty or dynamically assembled list.

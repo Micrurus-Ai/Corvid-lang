@@ -26,6 +26,39 @@ impl<'a> Parser<'a> {
         self.parse_or()
     }
 
+    /// At a value's line boundary, a named callee can take its list argument
+    /// as indented child expressions. Control-flow headers retain their colon.
+    pub(super) fn parse_value_line(&mut self) -> Result<Expr, ParseError> {
+        let callee = self.parse_expr()?;
+        if self.block_expr_terminated || !matches!(self.peek(), TokKind::Colon)
+            || !matches!(callee, Expr::Ident { .. } | Expr::FieldAccess { .. })
+        {
+            return Ok(callee);
+        }
+        let start = self.bump().span;
+        self.expect_newline()?;
+        self.expect(TokKind::Indent, "indented child expressions")?;
+        let mut items = Vec::new();
+        self.skip_newlines();
+        while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
+            items.push(self.parse_value_line()?);
+            self.expect_newline()?;
+            self.skip_newlines();
+        }
+        if items.is_empty() {
+            return Err(ParseError { kind: ParseErrorKind::EmptyBlock, span: start });
+        }
+        let end = items.last().expect("nonempty children").span();
+        self.expect(TokKind::Dedent, "end of child block")?;
+        self.block_expr_terminated = true;
+        let span = callee.span().merge(end);
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args: vec![Expr::List { items, span: start.merge(end) }],
+            span,
+        })
+    }
+
     // or_expr := and_expr ('or' and_expr)*
     fn parse_or(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_and()?;

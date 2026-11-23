@@ -634,14 +634,31 @@ Declare the state in the component and bind each control to a field.
 
 ```corvid
 browser state settings = initial
-controls = ui.grid([
-    ui.field("Agent name", bind settings.name),
-    ui.checkbox("Enabled", bind settings.enabled),
-    ui.segmented_choice("Run mode", bind settings.mode),
+controls = ui.grid:
+    ui.field("Agent name", bind settings.name)
+    ui.checkbox("Enabled", bind settings.enabled)
+    ui.segmented_choice("Run mode", bind settings.mode)
     ui.field("Retry limit", bind settings.retries)
-])
 ```
 
 A typo such as `bind settings.mdoe` fails compilation. Binding the checkbox directly to `settings.name` also fails because that field is text. For a dropdown, use `ui.field("Run mode", bind settings.mode)`. For adjacent radio options, use `ui.segmented_choice` as above. Both edit the same `RunMode` value and expose the same assistant action.
 
 An opted-in assistant supplies a complete record in one call. For example, `{"name":"Scout","enabled":true,"mode":"Scheduled","retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
+
+### Give a custom container the same syntax
+
+A child block passes one list to the function named before the colon. Each line adds one child. A nested block adds the view returned by its container.
+
+```corvid
+fn settings_panel(children: List<ui.View>) -> ui.View:
+    return ui.stack(children)
+
+fn panel_preview() -> ui.View:
+    return settings_panel:
+        ui.text("Agent settings")
+        ui.row:
+            ui.text("Manual")
+            ui.text("Scheduled")
+```
+
+Use `settings_panel(children)` or `ui.grid(children)` when you already have a list, including a list built in a loop. Use `ui.grid([])` for an empty grid.

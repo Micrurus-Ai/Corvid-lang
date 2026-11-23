@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
         let value = if matches!(self.peek(), TokKind::Newline | TokKind::Eof) {
             None
         } else {
-            Some(self.parse_expr()?)
+            Some(self.parse_value_line()?)
         };
         let end = self.peek_span();
         self.expect_newline()?;
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
     fn parse_yield_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.peek_span();
         self.bump(); // yield
-        let value = self.parse_expr()?;
+        let value = self.parse_value_line()?;
         let end = value.span();
         self.expect_newline()?;
         Ok(Stmt::Yield {
@@ -322,7 +322,7 @@ impl<'a> Parser<'a> {
             let start = self.peek_span();
             let (name, name_span) = self.expect_ident()?;
             self.bump(); // =
-            let value = self.parse_expr()?;
+            let value = self.parse_value_line()?;
             let end = value.span();
             self.expect_newline()?;
             return Ok(Stmt::Let {
@@ -343,7 +343,7 @@ impl<'a> Parser<'a> {
             )
             && !matches!(
                 self.tokens.get(self.pos + 2).map(|t| &t.kind),
-                Some(TokKind::Colon)
+                Some(TokKind::Colon | TokKind::Newline)
             )
         {
             let start = self.peek_span();
@@ -354,7 +354,7 @@ impl<'a> Parser<'a> {
                 TokKind::Assign,
                 "`=` after the type annotation in an annotated assignment",
             )?;
-            let value = self.parse_expr()?;
+            let value = self.parse_value_line()?;
             let end = value.span();
             self.expect_newline()?;
             return Ok(Stmt::Let {
@@ -368,7 +368,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
-        let expr = self.parse_expr()?;
+        let expr = self.parse_value_line()?;
 
         // Destructuring binding (slice 45n): a struct literal
         // followed by `=` is a PATTERN — `Decision { refund, .. } =

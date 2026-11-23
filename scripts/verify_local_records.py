@@ -115,6 +115,33 @@ def check_field_diagnostics(cli, project):
     main.write_text(source)
 
 
+def check_child_blocks(cli, project):
+    probe = project / "src/layout_test.cor"
+    probe.write_text("""import "std:ui" as ui
+
+fn settings_panel(children: List<ui.View>) -> ui.View:
+    return ui.stack(children)
+
+fn panel_preview() -> ui.View:
+    return settings_panel:
+        ui.field("Name", "name")
+        ui.row:
+            ui.checkbox("Enabled", "enabled")
+            ui.text("Manual")
+        ui.text("Scheduled")
+
+test layout_order:
+    row = ui.row([ui.local_checkbox("Enabled", "enabled"), ui.text("Manual")])
+    children = [ui.local_field("Name", "name"), row, ui.text("Scheduled")]
+    assert panel_preview().html == settings_panel(children).html
+""")
+    subprocess.run([cli, "test", probe], cwd=project, check=True)
+    probe.write_text(probe.read_text().replace('        ui.text("Scheduled")', '        42'))
+    invalid = subprocess.run([cli, "check", probe], cwd=project, capture_output=True, text=True)
+    assert invalid.returncode and "Int" in invalid.stderr, invalid
+    probe.unlink()
+
+
 def exercise_settings(page):
     requests = []
     page.on("request", lambda request: requests.append(request.url))
@@ -162,6 +189,7 @@ def verify(cli, channel):
         settings = root / "settings"
         shutil.copytree(Path(__file__).resolve().parents[1] / "examples/agent_settings", settings,
                         ignore=shutil.ignore_patterns("target"))
+        check_child_blocks(cli, settings)
         check_field_diagnostics(cli, settings)
         package(cli, settings, root / "settings-bundle")
         pages = []

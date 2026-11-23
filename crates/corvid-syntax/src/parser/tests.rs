@@ -812,6 +812,29 @@ prompt classify(ctx: String) -> String:
         parse_file(&tokens)
     }
 
+    #[test]
+    fn nested_child_blocks_preserve_order_and_stop_at_the_next_statement() {
+        let source = "fn make() -> Int:\n    items: Int = panel:\n        ui.row:\n            a()\n            b()\n        c()\n    return items\n";
+        let file = parse_file_src(source);
+        let Decl::Fn(f) = &file.decls[0] else { panic!("expected function") };
+        let [Stmt::Let { value: Expr::Call { args, .. }, .. }, Stmt::Return { .. }] =
+            f.body.stmts.as_slice() else { panic!("expected assignment then return") };
+        let [Expr::List { items, .. }] = args.as_slice() else { panic!("expected list argument") };
+        assert_eq!(items.len(), 2);
+        let Expr::Call { args, .. } = &items[0] else { panic!("expected nested call") };
+        assert!(matches!(args.as_slice(), [Expr::List { items, .. }] if items.len() == 2));
+    }
+
+    #[test]
+    fn child_blocks_require_indented_expressions() {
+        for source in [
+            "fn make() -> Int:\n    return panel:\n    return 1\n",
+            "fn make() -> Int:\n    return panel:\n        a(), b()\n",
+        ] {
+            assert!(!parse_file_errs(source).1.is_empty(), "{source}");
+        }
+    }
+
     // -------------------- imports --------------------
 
     #[test]
