@@ -27,7 +27,7 @@ def check_response(url):
         '<tr><th scope="row">Lookout</th><td><abbr title="3 kilometres">3 km</abbr></td></tr>'
         '</tbody></table></section>',
         '<section aria-labelledby="packing"><h2 id="packing">Packing note</h2>',
-        '<div data-trail-note="Bring water"><details><summary>Packing checklist</summary>'
+        '<div data-trail-note="Bring water"><details open><summary>Packing checklist</summary>'
         '<ul><li><label><input type="checkbox" name="water">Water bottle</label></li>'
         '<li><label><input type="checkbox" name="map">Trail map</label></li></ul></details>',
         '<form method="get" action="/guide">',
@@ -81,8 +81,10 @@ def check_browser(url, channel):
         packing = main.get_by_role("region", name="Packing note")
         checklist = packing.locator("details")
         supplies = checklist.get_by_role("list", include_hidden=True)
-        expect(supplies).to_be_hidden()
+        expect(supplies).to_be_visible()
         toggle = checklist.get_by_text("Packing checklist", exact=True)
+        toggle.click()
+        expect(supplies).to_be_hidden()
         toggle.click()
         expect(supplies).to_be_visible()
         expect(supplies.get_by_role("listitem")).to_have_text(["Water bottle", "Trail map"])

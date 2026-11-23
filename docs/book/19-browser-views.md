@@ -23,6 +23,8 @@ From the project root, set `CORVID_IO_ROOT` to the directory where you want the 
 
 The field keeps its current text as you type. Press Enter in the field or click Search to submit a GET request to the current page with a `query` parameter. A static page reloads its initial values. The disclosure keeps its own open or closed state until navigation. Click its summary or focus it and press Space to toggle it.
 
+To show the tips when the page first loads, use `ui.disclosure_with_initial_state("Search tips", true, [ui.text("Use a word from the note.")])`. Passing `false` starts it collapsed, like `ui.disclosure`. Readers can toggle either version with scripts disabled.
+
 `ui.text`, `ui.text_field`, `ui.submit`, `ui.disclosure`, and `ui.page` escape their text arguments for HTML. Pass user input through those functions.
 
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.

@@ -28,7 +28,7 @@ fn guide(note: String) -> String:
         ui.list_item([ui.checkbox_field("Water bottle", "water", false)]),
         ui.list_item([ui.checkbox_field("Trail map", "map", false)])
     ])
-    checklist = ui.disclosure("Packing checklist", [supplies])
+    checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
     packing = ui.data_group("trail-note", note, [checklist, preview, form])
     return match packing:
         Ok(details) -> ui.page_in_language("en", title, [

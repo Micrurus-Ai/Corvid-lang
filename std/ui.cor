@@ -198,7 +198,13 @@ public fn search_form(controls: List<View>) -> View:
     return View("<form method=\"get\">" + children(controls) + "</form>")
 
 public fn disclosure(label: String, content: List<View>) -> View:
-    return View("<details><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
+    return disclosure_with_initial_state(label, false, content)
+
+public fn disclosure_with_initial_state(label: String, initially_open: Bool, content: List<View>) -> View:
+    attributes = ""
+    if initially_open:
+        attributes = " open"
+    return View("<details" + attributes + "><summary>" + escaped(label) + "</summary>" + children(content) + "</details>")
 
 fn document_page(html_attributes: String, title: String, head: String, content: List<View>) -> String:
     return "<!doctype html><html" + html_attributes + "><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + escaped(title) + "</title>" + head + "</head><body><main>" + children(content) + "</main></body></html>"

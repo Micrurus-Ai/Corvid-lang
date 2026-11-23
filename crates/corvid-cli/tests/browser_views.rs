@@ -29,6 +29,13 @@ test preserves_child_order:
     body = ui.disclosure("More", [ui.text("first"), ui.text("second")])
     assert body.html == "<details><summary>More</summary><p>first</p><p>second</p></details>"
 
+test disclosure_renders_initial_open_state:
+    items = [ui.text("first"), ui.text("second")]
+    expanded = ui.disclosure_with_initial_state("Maps & <tips>", true, items)
+    collapsed = ui.disclosure_with_initial_state("Maps", false, [])
+    assert expanded.html == "<details open><summary>Maps &amp; &lt;tips&gt;</summary><p>first</p><p>second</p></details>"
+    assert collapsed.html == "<details><summary>Maps</summary></details>"
+
 test paragraph_preserves_inline_markup_and_escaped_text:
     label = ui.trusted_markup("<strong>Note</strong>")
     note = ui.inline_text(": <em>Wind & rain</em>")
@@ -155,7 +162,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("23 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("24 passed"),
         "{good:?}"
     );
     fs::write(
