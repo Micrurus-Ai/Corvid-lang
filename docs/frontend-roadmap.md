@@ -45,6 +45,8 @@ Task branches use descriptive names such as `frontend/semantic-html` and `fronte
 
 Run `python scripts/run_frontend.py --status` to inspect the queue and `python -u scripts/run_frontend.py --run` to start or resume it. The runner works in a separate checkout and publishes verified increments to a task branch. A verified completed task advances GitHub main by fast-forward and its task branch is removed. If main advances concurrently, the runner integrates it and calls for verification again. A blocked task leaves independent tasks eligible. Use `--retry-blocked` after the missing input becomes available. The runner keeps local reports and logs under the repository's Git directory in `corvid-frontend`.
 
+If the worker cannot run the last acceptance check, it records the command and the task waits for verification. A host operator can run that command against the exact Git revision and save the command, environment, and result in `corvid-frontend/verification-<full-commit-sha>.txt` under the common Git directory. On resume with `--retry-blocked`, the worker receives that revision's result and checks the outstanding criteria before starting more implementation.
+
 Every language or public library change must update the learning guide and references in the same increment. Reuse the existing browser checks and extend them at the normal scaffold, build and run entry points. Frontend work can touch shared compiler files for frontend behavior. Changes to backend or AI grammar and new server protocols require coordination with Claude Code. Independent feedback, hardware checks and publication are separate from automated implementation.
 
 ## Starting point
