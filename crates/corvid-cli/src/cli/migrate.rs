@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum MigrateCommand {
-    /// Write the migration that creates the tables a program declares.
+    /// Write the migration that brings the stored tables to the program's declarations.
     Plan {
         /// The Corvid source whose `table` declarations to plan.
         source: PathBuf,
@@ -20,6 +20,12 @@ pub enum MigrateCommand {
         /// Print the planned migration without writing it.
         #[arg(long)]
         dry_run: bool,
+        /// For a Postgres program: the environment variable holding a
+        /// scratch database's connection string. The planner applies the
+        /// migrations there inside a transaction it rolls back, and refuses
+        /// a database that is not empty.
+        #[arg(long, value_name = "ENV_VAR")]
+        scratch: Option<String>,
     },
     /// Report applied, pending, and drifted migrations.
     Status {
@@ -39,6 +45,10 @@ pub enum MigrateCommand {
         /// Show what would be checked without writing state.
         #[arg(long)]
         dry_run: bool,
+        /// The Corvid program whose `database` block names the database,
+        /// engine, connection string and TLS policy, instead of `--database`.
+        #[arg(long, value_name = "SOURCE", conflicts_with = "database")]
+        program: Option<PathBuf>,
     },
     /// Apply pending migrations in order.
     Up {
@@ -58,6 +68,10 @@ pub enum MigrateCommand {
         /// Report pending migrations without applying them.
         #[arg(long)]
         dry_run: bool,
+        /// The Corvid program whose `database` block names the database,
+        /// engine, connection string and TLS policy, instead of `--database`.
+        #[arg(long, value_name = "SOURCE", conflicts_with = "database")]
+        program: Option<PathBuf>,
     },
     /// Roll back the latest migration when a down migration exists.
     Down {
@@ -80,5 +94,9 @@ pub enum MigrateCommand {
         /// Report the rollback candidate without mutating state.
         #[arg(long)]
         dry_run: bool,
+        /// The Corvid program whose `database` block names the database,
+        /// engine, connection string and TLS policy, instead of `--database`.
+        #[arg(long, value_name = "SOURCE", conflicts_with = "database")]
+        program: Option<PathBuf>,
     },
 }

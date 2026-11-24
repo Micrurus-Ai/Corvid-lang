@@ -139,6 +139,23 @@ impl TableEngine {
             Self::Postgres { .. } => postgres_type(kind),
         }
     }
+
+    /// The kind a stored column's type names on this engine, if Corvid
+    /// created it: the inverse of [`Self::column_type`].
+    pub fn kind_of(self, sql_type: &str) -> Option<ColumnKind> {
+        match self {
+            Self::Sqlite => ColumnKind::from_sql_type(sql_type),
+            Self::Postgres { .. } => [ColumnKind::Integer, ColumnKind::Real, ColumnKind::Text, ColumnKind::Boolean, ColumnKind::Json]
+                .into_iter()
+                .find(|kind| postgres_type(*kind).eq_ignore_ascii_case(sql_type.trim())),
+        }
+    }
+
+    /// Whether a column's type or nullability changes by rebuilding the
+    /// table (SQLite, which cannot alter a column) or in place.
+    pub fn rebuilds_to_alter(self) -> bool {
+        !self.is_postgres()
+    }
 }
 
 fn postgres_type(kind: ColumnKind) -> &'static str {

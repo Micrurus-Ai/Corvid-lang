@@ -74,9 +74,8 @@ A SQLite database is a file, so a SQLite block refuses `tls:`.
 Every operation, query, conflict and replay behaves the same on both
 engines; only the SQL differs. A program moves from SQLite to Postgres by
 changing its `database` block, with no change to the code that reads and
-writes rows. `corvid migrate plan` does not plan Postgres migrations yet
-(slice P4b); it refuses a Postgres program and asks for the migration to
-be written by hand.
+writes rows. Migrations are planned and applied as on SQLite; see
+[Migrations](#migrations).
 
 ## Operations
 
@@ -192,7 +191,7 @@ corvid migrate up --database library.sqlite
 ```
 
 `corvid migrate plan` applies the existing migrations in `migrations/`
-to an empty in-memory database, compares what that leaves with the
+to an empty database, compares what that leaves with the
 declared tables, and writes one new migration that brings the stored
 tables to the declarations. It runs the new migration on that database
 before writing it, so a plan that would fail is never written. Review
@@ -200,6 +199,26 @@ it, then apply it with `corvid migrate up`, passing the database the
 `location` names. `migrate up` runs each migration in one transaction,
 so a migration that fails changes nothing. A program that uses a table
 no migration created fails with a message naming these commands.
+
+On SQLite the planner's database is in memory. On Postgres it is a scratch
+database you name, and `migrate up` reads the database from the program:
+
+```sh
+corvid migrate plan src/main.cor --scratch SCRATCH_DATABASE_URL
+corvid migrate up --program src/main.cor
+```
+
+`--scratch` names the environment variable holding an empty database's
+connection string. The planner refuses a database that holds any table,
+so it can never be pointed at real data, and it applies the migrations
+inside a transaction it rolls back, so the scratch database ends empty.
+`--program` connects to the database the program's `database` block
+declares, with its `tls:` policy, so the connection string never appears
+on the command line; `migrate status` and `migrate down` take it too.
+A migration may not begin or end a transaction itself: one containing
+`BEGIN`, `COMMIT` or `ROLLBACK` is refused before it runs, because each
+migration runs in the runner's own transaction. Planning and migrating a
+program whose tables live in more than one database is planned work.
 
 The planner never guesses about data. A rename and a drop are declared
 in the table:
@@ -240,5 +259,5 @@ clause, so a table may still have a field named `retired: Bool`.
 ## Not yet
 
 These are later slices of [B09](../proposals/b09-typed-persistence.md):
-migration planning for Postgres, MySQL, and the native target. Programs that use tables run
+MySQL and the native target. Programs that use tables run
 on the interpreter.

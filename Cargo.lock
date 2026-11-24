@@ -746,6 +746,7 @@ dependencies = [
  "hmac 0.12.1",
  "libloading",
  "multer",
+ "postgres",
  "rand_core 0.6.4",
  "rayon",
  "reqwest",

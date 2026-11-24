@@ -136,7 +136,7 @@ agent shelves_of(user: String) -> List<Shelf>:
 - [ ] P4. Postgres, with the cross-engine query suite. Split in two:
   - [x] P4a. Tables run on Postgres: every operation and query, recorded
     and replayed, with the same test suite run on both engines.
-  - [ ] P4b. `corvid migrate plan` for Postgres, planning against a
+  - [x] P4b. `corvid migrate plan` for Postgres, planning against a
     scratch database the developer names, because Postgres migrations
     cannot be replayed into in-memory SQLite.
 - [ ] P5. MySQL on the same suite.
