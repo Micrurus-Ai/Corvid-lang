@@ -118,11 +118,17 @@ Prior report (may predate integration with current main): {previous}
         result = Path(tmp) / "result.json"
         command = ["codex", "exec", "--sandbox", "workspace-write", "--output-schema",
                    str(state / "schema.json"), "-o", str(result), "-"]
+        env = os.environ.copy()
+        # Each checkout needs its own executable, even when both build the same binary name.
+        if tree.name.endswith("-parallel") or not env.get("CARGO_TARGET_DIR"):
+            env["CARGO_TARGET_DIR"] = str(tree / "target")
+        else:
+            env["CARGO_TARGET_DIR"] = str(Path(env["CARGO_TARGET_DIR"]).resolve())
         with (state / f"{task}.log").open("ab") as log:
             for attempt in range(3):
                 result.unlink(missing_ok=True)
                 response = subprocess.run(command, cwd=tree, input=prompt.encode("utf-8"), stdout=log,
-                                          stderr=subprocess.STDOUT)
+                                          stderr=subprocess.STDOUT, env=env)
                 if response.returncode == 0 and result.is_file():
                     break
                 if attempt == 2:
