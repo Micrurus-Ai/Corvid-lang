@@ -11,14 +11,24 @@ fn junction_page() -> String:
         direction_link("#bridge", "West to the bridge", "rotate(180 6 3)"),
         direction_link("#lookout", "East to the lookout", "")
     ])
-    styles = """nav { display: flex; gap: 1rem; max-width: 30rem }
+    candidates = "/assets/junction-map-320.png 320w, /assets/junction-map-640.png 640w"
+    map_image = ui.responsive_image("/assets/junction-map-320.png", "At the fork, the west trail crosses the river and the east trail climbs to the lookout.", candidates, "(max-width: 656px) calc(100vw - 16px), 640px")
+    styles = """@font-face { font-family: 'Barlow Condensed'; src: url('/assets/BarlowCondensed-Regular.ttf') format('truetype'); font-display: swap }
+body { margin: 8px }
+h1 { font: 2.5rem 'Barlow Condensed', sans-serif }
+img { display: block; width: 100%; max-width: 640px; height: auto }
+nav { display: flex; gap: 1rem; max-width: 30rem }
 nav a { flex: 1; min-width: 0 }
 nav svg { display: block; fill: currentColor }
 nav a:focus-visible { outline: 3px solid currentColor; outline-offset: 2px }
-h2:target { text-decoration: underline }"""
+h2:target { text-decoration: underline; transform: translateX(0.5rem) }
+@media (prefers-reduced-motion: no-preference) {
+    h2 { transition: transform 360ms ease-out }
+}"""
     return ui.styled_page("en", "Trail junction", styles, [
         ui.h1("Trail junction"),
         ui.text("Choose the left arrow for the bridge or the right arrow for the lookout."),
+        map_image,
         choices,
         ui.section("bridge", "Bridge", [ui.text("Follow the river west to the footbridge.")]),
         ui.section("lookout", "Lookout", [ui.text("Climb the ridge east to the lookout.")])

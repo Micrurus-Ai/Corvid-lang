@@ -15,6 +15,9 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
     let stage = tempfile::tempdir()?;
     let mut files = Vec::new();
     collect(root, Path::new("src"), &["cor", "py"], &mut files)?;
+    for (name, _) in crate::web_assets::list(root)? {
+        files.push(Path::new("assets").join(name));
+    }
     if root.join("migrations").exists() {
         collect(root, Path::new("migrations"), &["sql"], &mut files)?;
     }

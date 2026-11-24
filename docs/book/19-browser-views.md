@@ -148,6 +148,14 @@ The [trail junction example](../../examples/trail_junction/src/main.cor) turns t
 
 Run `corvid serve examples/trail_junction/src/main.cor` and open the displayed address. Click an arrow, or Tab to it and press Enter. The link selects the matching trail heading and the stylesheet underlines it.
 
+### Package a trail map and animate the selected destination
+
+Place the map images and font in the project's top-level `assets/` directory alongside `src/`. The trail junction passes two local PNG URLs and their pixel widths to `ui.responsive_image`. Its `sizes` accounts for the page margins and the 640-pixel map width limit. The heading uses the local Barlow Condensed font through an authored CSS `@font-face` rule. Keep the font license alongside the font.
+
+Selecting a destination moves its heading half a rem. The stylesheet enables the transform transition inside `@media (prefers-reduced-motion: no-preference)`. Selecting another destination during the movement cancels the original CSS transition. With reduced motion, the selected heading takes its final position immediately.
+
+Run `corvid build examples/trail_junction/src/main.cor --target web` to package the sources and local assets in the example's `target/web.tar`. Extract it into an empty directory and run `corvid serve src/main.cor` there. The [Edge check](../../scripts/verify_trail_junction.py) exercises the extracted package at two viewport widths and with both motion preferences.
+
 ### Attach application data to a group
 
 `ui.data_group` wraps child views in a `div` with a custom data attribute. Supply the name after `data-`. For example, `trail-id` produces `data-trail-id`. The name must contain at least one character and may use lowercase ASCII letters, digits and hyphens. An invalid name returns `Err`. The value can contain quotes or other text because Corvid escapes it.
