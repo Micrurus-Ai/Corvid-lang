@@ -33,8 +33,10 @@ expected; add the arm at every exhaustive match in the same commit.
    `docs/backend-ai-roadmap.md` saying it runs in parallel on the macOS
    session, and push that change on its own. The rule against reordering
    the roadmap without an amendment applies to both sessions.
-2. Work on one branch per task, named for the task, such as
-   `backend/b06-decimal-and-time`.
+2. Work on one branch per task, named for the work it delivers, such as
+   `backend/decimal-and-time`. Keep task IDs such as `B06` out of branch,
+   file and test names; they belong in commit messages and the roadmap
+   (see [professional naming](../../CONTRIBUTING.md#professional-naming)).
 3. Each slice of the task ships with its docs: the proposal or reference
    page, the roadmap checklist, `dev-log.md` and `learnings.md`.
    `dev-log.md` and `learnings.md` collect entries from every session, so
