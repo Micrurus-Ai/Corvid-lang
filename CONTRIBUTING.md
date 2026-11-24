@@ -235,6 +235,8 @@ cargo build --locked --release -p corvid-test-tools
 cargo test --locked -p corvid-codegen-cl --test parity
 ```
 
+The generated Swift and Kotlin SDKs are compiled and run by `crates/corvid-abi/tests/compiled_sdk_round_trip.rs` when `swiftc`, or `kotlinc` and the kotlinx-serialization core and json jars, are available: set `CORVID_SWIFTC`, `CORVID_KOTLINC` and `CORVID_KOTLIN_CLASSPATH`, or put the tools on `PATH`. Without them the tests report that they skipped.
+
 The tests look for Cargo's output through the `corvid-test-paths` crate, so `CARGO_TARGET_DIR` and `build.target-dir` work as long as the build and the test run use the same setting.
 
 ### Git

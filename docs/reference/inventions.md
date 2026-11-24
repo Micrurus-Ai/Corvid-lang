@@ -517,6 +517,15 @@ Corvid's contract does, and every generated client, the console, and the SDKs in
 four languages read the SAME contract — so no two platforms can disagree about a
 type's shape.
 
+The Swift, Kotlin and Python models encode and decode the public JSON mapping
+themselves: a sum type travels as `{"tag": "variant", "type", "variant",
+"fields": [...]}`, a `Result` as `{"tag": "ok", "ok"}` or `{"tag": "err",
+"err"}`, a map whose keys are not `String` as `[key, value]` pairs, and an
+absent value as `null`. Each SDK describes `JsonError` and the `Page` envelope
+from the compiler's own field lists. Kotlin needs only the
+`kotlinx-serialization-json` runtime, and Swift uses Foundation's
+`JSONEncoder` and `JSONDecoder`.
+
 ### Typed Errors That Reach The Frontend
 
 An error enum's variants carry an `@status(code)` and `@ui(...)` presentation
@@ -906,7 +915,7 @@ falling out of one declaration.
 | Identity, Safe By Construction | Shipped (51g-51i) | `corvid check` on an `identity` block | `crates/corvid-abi/src/app_contract.rs` (identity + auth-route + linking tests) + `corvid-types` `check_identity` | [`inventions.md`](#identity-safe-by-construction) | Insecure session config is a compile error absent a loud opt-out; account-linking never silently merges by email. Route mounting in `corvid serve` is a serve-integration follow-up; the storage-layer OAuth crypto ships in `corvid-runtime/src/auth`. |
 | Connector Token ≠ Login Session | Shipped (51j) | `corvid contract list --kind connector` | `crates/corvid-connector-runtime/src/auth.rs` (`login_session_credential_*`, `per_user_*`) | [`core-semantics.md`](./core-semantics.md) (`connector.per_user_token_separate_from_session`) | Runtime refuses a login-session credential at the connector boundary; per-user connectors require the end-user actor. |
 | Auth Safe-Defaults Are Unbypassable | Shipped (51k) | run `crates/corvid-runtime/src/jwt_verify/mock_idp.rs` tests | `mock_idp.rs` (`every_mutated_token_is_refused`, `byte_fuzz_never_panics_and_never_forges`) | [`core-semantics.md`](./core-semantics.md) (`auth.jwt_tamper_and_fuzz_resistant`) | A mock IdP whose only verifiable token is the correct one; six source-bypass mutators + a 2000-input byte-fuzz. |
-| Typed SDKs In Four Languages | Shipped (51l, 51o) | `corvid generate sdk --language ts\|swift\|kotlin\|python` | `crates/corvid-abi/src/ts_client.rs` + `sdk_gen.rs` tests | [`inventions.md`](#the-application-surface) | One contract → typed models everywhere; the TS target is a full client (shipped `@corvid/client`), the others are typed models + a transport scaffold. |
+| Typed SDKs In Four Languages | Shipped (51l, 51o) | `corvid generate sdk --language ts\|swift\|kotlin\|python` | `crates/corvid-abi/src/ts_client.rs` + `sdk_gen` tests + `crates/corvid-abi/tests/python_sdk_round_trip.rs` + `crates/corvid-abi/tests/compiled_sdk_round_trip.rs` | [`inventions.md`](#the-application-surface) | One contract → typed models everywhere; the TS target is a full client (shipped `@corvid/client`), the others are typed models that read and write the public JSON mapping, including sum types, `Result`, `JsonError` and pages, + a transport scaffold. Non-scope: the Swift, Kotlin and Python transports are stubs. |
 | Universal Dev Console | Shipped (51m) | `corvid dev` | `crates/corvid-abi/src/dev_console.rs` tests | [`inventions.md`](#the-application-surface) | One self-contained, contract-driven console for every app; execution targets a running `corvid serve`. |
 | React Hooks + Frontend Scaffold | Shipped (51n, 51p, 51q) | `corvid generate frontend --framework react` | `sdk/typescript/react` (tsc-checked) + `crates/corvid-abi/src/frontend_gen.rs` tests | [`inventions.md`](#the-application-surface) | Generic hooks specialized by the generated types + prototype components + a runnable starter; scaffolds you own, not product UI. |
 | Route Execution (path/query/body) | Shipped (52a) | `corvid serve examples/orders_api/src/main.cor` | `crates/corvid-cli/src/serve_cmd.rs` tests + `crates/corvid-cli/tests/serve_smoke.rs` | [`inventions.md`](#the-complete-application-runtime) | Every declared route shape runs its handler body through the interpreter (path params, query structs, typed JSON bodies); malformed boundary input is a structured 400. Native-tier parity is later work. |

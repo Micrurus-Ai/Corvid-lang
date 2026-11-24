@@ -79,14 +79,6 @@ const NOTE_SCAFFOLD: &str =
 
 // ----------------------------- shared -----------------------------
 
-fn split_generic(name: &str) -> Option<(&str, &str)> {
-    let open = name.find('<')?;
-    if !name.ends_with('>') {
-        return None;
-    }
-    Some((&name[..open], &name[open + 1..name.len() - 1]))
-}
-
 fn lower_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {

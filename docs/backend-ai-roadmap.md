@@ -117,7 +117,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Native decoding. `T.from_json` and `T.from_json_strict` compile to native code through the decoder the interpreter uses, now in `corvid-public-json`. The compiler embeds one decode plan per target type, naming the typeinfo of every shape the runtime allocates, so the runtime never decides a native layout. `JsonError` is an ordinary native record, so `problem.message` works in match arms. Parity tests compare both tiers and check that a failed decode releases what it built.
 - [x] Native encoding. `value.to_json()` walks the type instead of the value, through one encoder both tiers share, and compiles to native code using the plan decoding embeds. An empty map with non-String keys now encodes as `[]` and decodes back. `Grounded` values stay on the interpreter, because native code keeps no provenance to encode.
 - [x] An absent field typed `Tainted<Option<T>>` decodes as `None`, as an absent `Option<T>` field does, on both tiers.
-- [ ] Swift, Kotlin and Python SDK sum types use the wire shape, and the SDKs describe `JsonError`.
+- [x] Swift, Kotlin and Python SDK models read and write the public JSON mapping: sum types in the wire shape, `Result`, maps with non-String keys as pairs, `null` for absent values, `JsonError` and the `Page` envelope. Kotlin `Int` fields are `Long`, as Corvid's `Int` is 64-bit. Tests run the generated Python and compile and run the generated Kotlin and Swift.
+- [ ] The Application Contract names field types as written in source, so a field typed with an alias (`orders: Orders`) names `Orders`, which no SDK declares. Name types from the checker's resolved types instead, as IR lowering does. The TypeScript client and the frontend read the contract, so agree the change with frontend development first.
 
 **Test infrastructure**
 
