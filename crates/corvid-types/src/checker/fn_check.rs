@@ -95,6 +95,14 @@ impl<'a> Checker<'a> {
     fn walk_fn_purity_expr(&mut self, fn_name: &str, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, span } => {
+                if let Some((table, op)) = crate::table_call_target(callee, self.file, self.symbols, self.bindings) {
+                    let action = if op.writes() { "writes" } else { "reads" };
+                    self.fn_purity_violation(
+                        fn_name,
+                        &format!("a call to `{}.{}`, which {action} the database", table.name().name, op.name()),
+                        *span,
+                    );
+                }
                 if let Some((import, function)) = crate::effects::python_call_target(
                     callee, self.file, self.symbols, self.bindings,
                 ) {

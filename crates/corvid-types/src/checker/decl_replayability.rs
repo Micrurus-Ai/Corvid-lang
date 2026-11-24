@@ -196,6 +196,15 @@ impl<'a> Checker<'a> {
             None => return,
         };
 
+        // A database read can return different rows on each run.
+        if crate::table_call_target(callee, self.file, self.symbols, self.bindings).is_some() {
+            self.errors.push(TypeError::with_guarantee(
+                TypeErrorKind::NonDeterministicCall {
+                    agent: agent.into(), call: name, call_kind: "database operation".into(),
+                }, span, "replay.deterministic_pure_path",
+            ));
+            return;
+        }
         if crate::effects::python_call_target(callee, self.file, self.symbols, self.bindings).is_some() {
             self.errors.push(TypeError::with_guarantee(
                 TypeErrorKind::NonDeterministicCall {

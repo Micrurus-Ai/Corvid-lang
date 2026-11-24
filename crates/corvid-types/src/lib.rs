@@ -16,6 +16,7 @@ pub mod effects;
 pub mod errors;
 pub mod law_check;
 pub mod repl;
+pub mod table_ops;
 pub mod type_receiver;
 pub mod types;
 
@@ -46,6 +47,7 @@ pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_N
 pub use builtin_methods::{
     builtin_method, json_error_fields, type_method, BuiltinMethodKind, BuiltinMethodSig, JSON_ERROR_TYPE_ID,
 };
+pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};
 pub use type_receiver::{type_receiver, TypeReceiver};
 pub use types::Type;
 

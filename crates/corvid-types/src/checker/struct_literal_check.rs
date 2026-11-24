@@ -160,10 +160,17 @@ impl<'a> Checker<'a> {
                 }
             }
             None => {
+                // A table row may leave out `revision`; it is then 0,
+                // a row never stored (B09).
+                let is_table = self
+                    .types_by_id
+                    .get(&def_id)
+                    .is_some_and(|decl| crate::table_decl(self.file, decl.span).is_some());
                 let missing: Vec<&str> = decl_fields
                     .iter()
                     .map(|(n, _)| n.as_str())
                     .filter(|n| !provided.contains(n))
+                    .filter(|n| !(is_table && *n == corvid_ast::TableDecl::REVISION_FIELD))
                     .collect();
                 if !missing.is_empty() {
                     self.errors.push(TypeError::new(

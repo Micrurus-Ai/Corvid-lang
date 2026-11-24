@@ -404,7 +404,8 @@ impl<'a> Checker<'a> {
             | DeclKind::Effect
             | DeclKind::Model
             | DeclKind::Server
-            | DeclKind::Identity => Type::Unknown,
+            | DeclKind::Identity
+            | DeclKind::Database => Type::Unknown,
         }
     }
 

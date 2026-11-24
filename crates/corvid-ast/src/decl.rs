@@ -1305,9 +1305,19 @@ impl TableDecl {
 pub struct DatabaseDecl {
     pub name: Ident,
     pub engine: Option<Ident>,
-    pub location: Option<Expr>,
+    pub location: Option<DatabaseLocation>,
     pub tables: Vec<Ident>,
     pub span: Span,
+}
+
+/// Where a database is: a path, or the environment variable that holds
+/// one, so a deployment can choose it without editing source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DatabaseLocation {
+    /// `location: "library.sqlite"`
+    Path(String),
+    /// `location: env("LIBRARY_DATABASE")`
+    Env(String),
 }
 
 /// A tool declaration:

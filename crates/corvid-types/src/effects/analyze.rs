@@ -320,6 +320,10 @@ fn collect_expr_effects(
 ) {
     match expr {
         corvid_ast::Expr::Call { callee, args, .. } => {
+            // `Shelf.save(row)` uses the built-in database effects (B09).
+            if let Some((_, op)) = crate::table_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
+                effects.names.push(op.effect().into());
+            }
             if let Some((import, _)) = python_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
                 effects.names.extend(import.effect_row.effects.iter().map(|e| e.name.name.clone()));
             }

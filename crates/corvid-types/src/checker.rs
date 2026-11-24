@@ -660,6 +660,12 @@ impl<'a> Checker<'a> {
                         types.insert(id, t);
                     }
                 }
+                Decl::Table(t) => {
+                    if let Some(id) = resolved.symbols.lookup_def(&t.record.name.name) {
+                        types.insert(id, &t.record);
+                    }
+                }
+                Decl::Database(_) => {}
                 Decl::Store(_) => {}
                 Decl::Import(_) => {}
                 Decl::Effect(_) => {}
@@ -816,6 +822,8 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Decl::Type(t) => self.check_field_refinements(t),
+                Decl::Table(t) => self.check_table(t),
+                Decl::Database(d) => self.check_database(d),
                 Decl::Identity(i) => self.check_identity(i),
                 Decl::Connector(c) => self.check_connector(c),
                 Decl::Tool(t) => self.check_retired_json_decoder_tool(t),
@@ -902,6 +910,7 @@ mod expr;
 mod import_call;
 mod json_methods;
 mod signature_types;
+mod tables;
 mod ops;
 mod prompt;
 mod stmt;

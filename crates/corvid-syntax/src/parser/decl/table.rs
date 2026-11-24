@@ -7,7 +7,7 @@
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::{describe_token, Parser};
 use crate::token::TokKind;
-use corvid_ast::{DatabaseDecl, Field, Ident, TableDecl, TypeDecl, TypeRef, Visibility};
+use corvid_ast::{DatabaseDecl, DatabaseLocation, Field, Ident, TableDecl, TypeDecl, TypeRef, Visibility};
 
 impl<'a> Parser<'a> {
     /// Whether the next tokens start `<word> <Name>:`.
@@ -119,7 +119,7 @@ impl<'a> Parser<'a> {
     fn parse_database_setting(
         &mut self,
         engine: &mut Option<Ident>,
-        location: &mut Option<corvid_ast::Expr>,
+        location: &mut Option<DatabaseLocation>,
         tables: &mut Vec<Ident>,
     ) -> Result<(), ParseError> {
         let (setting, setting_span) = self.expect_ident()?;
@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
                 let (value, span) = self.expect_ident()?;
                 *engine = Some(Ident::new(value, span));
             }
-            "location" => *location = Some(self.parse_expr()?),
+            "location" => *location = Some(self.parse_database_location()?),
             "tables" => loop {
                 let (table, span) = self.expect_ident()?;
                 tables.push(Ident::new(table, span));
@@ -149,6 +149,45 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_newline()
+    }
+
+    /// `"path"` or `env("NAME")`.
+    fn parse_database_location(&mut self) -> Result<DatabaseLocation, ParseError> {
+        let span = self.peek_span();
+        match self.peek().clone() {
+            TokKind::StringLit(path) => {
+                self.bump();
+                Ok(DatabaseLocation::Path(path))
+            }
+            TokKind::Ident(word) if word == "env" && matches!(self.peek_ahead(1), TokKind::LParen) => {
+                self.bump(); // env
+                self.bump(); // (
+                let name = match self.peek().clone() {
+                    TokKind::StringLit(name) => {
+                        self.bump();
+                        name
+                    }
+                    other => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(&other),
+                                expected: "the environment variable's name as text, such as `env(\"LIBRARY_DATABASE\")`".into(),
+                            },
+                            span: self.peek_span(),
+                        })
+                    }
+                };
+                self.expect(TokKind::RParen, "`)` after the environment variable's name")?;
+                Ok(DatabaseLocation::Env(name))
+            }
+            other => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: describe_token(&other),
+                    expected: "a path as text, or `env(\"NAME\")`".into(),
+                },
+                span,
+            }),
+        }
     }
 
     fn expect_block_start(&mut self) -> Result<(), ParseError> {

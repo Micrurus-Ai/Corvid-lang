@@ -363,6 +363,24 @@ pub enum TypeErrorKind {
         field: String,
         message: String,
     },
+    /// B09 — a table declares no `key` field.
+    TableKeyRequired { table: String },
+    /// B09 — a table's key is neither `Int` nor `String`.
+    TableKeyType { table: String, key: String, found: String },
+    /// B09 — a table declares `revision`, which every row carries.
+    TableFieldReserved { table: String, field: String },
+    /// B09 — a `public` table; tables are private to their module.
+    TableNotPublic { table: String },
+    /// B09 — a table no `database` block lists.
+    TableOutsideDatabase { table: String },
+    /// B09 — a table two `database` blocks list.
+    TableInTwoDatabases { table: String, first: String, second: String },
+    /// B09 — a `database` block omits a setting that has no default.
+    DatabaseSettingRequired { database: String, setting: String, allowed: String },
+    /// B09 — an engine the runtime cannot run yet, or does not know.
+    DatabaseEngineUnavailable { database: String, engine: String, available: String },
+    /// B09 — a `database` block lists a name that is not a table.
+    DatabaseTableNotATable { database: String, name: String },
 
     /// A `route:` arm inside a prompt points at a name that is not a
     /// `model` declaration. The runtime can only dispatch to models,
@@ -780,6 +798,32 @@ impl TypeErrorKind {
             } => {
                 format!("field `{field}` on `{type_name}`: {message}")
             }
+            Self::TableKeyRequired { table } => format!("table `{table}` declares no key field"),
+            Self::TableKeyType { table, key, found } => {
+                format!("the key `{key}` of table `{table}` is `{found}`; a key is `Int` or `String`")
+            }
+            Self::TableFieldReserved { table, field } => {
+                format!("table `{table}` declares `{field}`, which every row already carries")
+            }
+            Self::TableNotPublic { table } => {
+                format!("table `{table}` is `public`, but tables are private to the module that declares them")
+            }
+            Self::TableOutsideDatabase { table } => {
+                format!("table `{table}` is not listed in any `database` block, so nothing says where its rows live")
+            }
+            Self::TableInTwoDatabases { table, first, second } => {
+                format!("table `{table}` is listed in both database `{first}` and database `{second}`")
+            }
+            Self::DatabaseSettingRequired { database, setting, allowed } => {
+                format!("database `{database}` does not say `{setting}`; it must be one of {allowed}")
+            }
+            Self::DatabaseEngineUnavailable { database, engine, available } => {
+                format!("database `{database}` names engine `{engine}`; the engines that run today are {available}")
+            }
+            Self::DatabaseTableNotATable { database, name } => {
+                format!("database `{database}` lists `{name}`, which is not a table")
+            }
+
             Self::InvalidCustomDimension { dimension, message } => {
                 format!("invalid custom dimension `{dimension}` in corvid.toml: {message}")
             }
@@ -1134,6 +1178,27 @@ impl TypeErrorKind {
                 "this value derives from untrusted content (a `data: untrusted` source, or a prompt that read one) — the prompt-injection sink rule refuses it here. Either constrain the value and assert the boundary explicitly with `trusted(expr)` (greppable, reviewable), or restructure so the dangerous call's arguments never touch untrusted content"
                     .into(),
             ),
+            Self::TableKeyRequired { .. } => Some(
+                "mark the field that identifies a row, for example `key shelf: Int`; rows are saved by key with a revision check".into(),
+            ),
+            Self::TableKeyType { .. } => Some("declare the key as `Int` or `String`".into()),
+            Self::TableFieldReserved { .. } => Some(
+                "the database maintains `revision` and advances it on every write; give the field another name".into(),
+            ),
+            Self::TableNotPublic { .. } => Some(
+                "remove `public`; another module reaches the rows through an agent this module exports".into(),
+            ),
+            Self::TableOutsideDatabase { .. } => Some(
+                "add the table to `tables:` in the `database` block that holds it".into(),
+            ),
+            Self::TableInTwoDatabases { .. } => Some("list each table in exactly one `database` block".into()),
+            Self::DatabaseSettingRequired { .. } => Some(
+                "where data lives is a decision the source states: write the setting in the `database` block".into(),
+            ),
+            Self::DatabaseEngineUnavailable { .. } => Some(
+                "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
+            ),
+            Self::DatabaseTableNotATable { .. } => Some("`tables:` names `table` declarations".into()),
             Self::RefinementInvalid { .. } => Some(
                 "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"
                     .into(),

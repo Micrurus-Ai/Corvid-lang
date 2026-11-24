@@ -80,7 +80,8 @@ impl<'a> Checker<'a> {
                     | DeclKind::Effect
                     | DeclKind::Model
                     | DeclKind::Server
-                    | DeclKind::Identity => {
+                    | DeclKind::Identity
+                    | DeclKind::Database => {
                         for a in args {
                             let _ = self.check_expr(a);
                         }
@@ -936,6 +937,10 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Type {
+        // `Shelf.save(row)`: an operation of a stored table (B09).
+        if let Some(ty) = self.check_table_method_call(target, method_name, args, span) {
+            return ty;
+        }
         // `Order.from_json(text)`: the receiver is a type, not a value.
         if let Some(ty) = self.check_type_method_call(target, method_name, args, span) {
             return ty;
@@ -1197,7 +1202,11 @@ impl<'a> Checker<'a> {
             return Type::Unknown;
         }
 
-        if args.len() != ty_decl.fields.len() {
+        // A table row built in code may leave out its trailing
+        // `revision`; it is then 0, a row never stored (B09).
+        let omits_revision =
+            args.len() + 1 == ty_decl.fields.len() && crate::table_decl(self.file, ty_decl.span).is_some();
+        if args.len() != ty_decl.fields.len() && !omits_revision {
             self.errors.push(TypeError::new(
                 TypeErrorKind::ArityMismatch {
                     callee: name.to_string(),

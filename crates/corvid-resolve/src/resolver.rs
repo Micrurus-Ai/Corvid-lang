@@ -477,9 +477,6 @@ impl Resolver {
                             }),
                         }
                     }
-                    if let Some(location) = &d.location {
-                        self.resolve_expr(location);
-                    }
                 }
                 Decl::Tool(t) => self.resolve_tool_decl(t),
                 Decl::Prompt(p) => self.resolve_prompt_decl(p),
