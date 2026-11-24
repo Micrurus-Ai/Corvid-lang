@@ -4,6 +4,37 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - B01 fourth increment: decode types from other modules
+
+`from_json` and `from_json_strict` now accept a public type from another
+module, in both import spellings: `Customer.from_json(text)` after
+`use Customer` and `m.Customer.from_json(text)` after `as m`.
+
+Decisions:
+
+- **One answer to "which type does this receiver name".** The checker
+  and the IR lowerer each decided this separately, and both accepted
+  only a local type name. The new `corvid_types::type_receiver` resolves
+  all three spellings and both layers call it, so a call the checker
+  types as a type method is always lowered as one.
+- **The runtime needed nothing.** Every imported module's types are
+  already appended to the IR type table under remapped ids, and the
+  public mapping already decoded `ImportedStruct` through that table.
+  The refusal was only in the checker.
+- **Fixed a recursion bug found on the way.** The JSON-form walk never
+  recorded an imported record as visited, so `to_json` on a
+  self-referential imported type (`referrer: Option<Customer>`) would
+  have recursed forever at compile time. Visited types are now keyed by
+  module and id, since ids are only unique within one module. The
+  recursive `Customer` test pins it.
+- **Imported aliases are refused, not half-supported.** An alias declared
+  in another module is treated as a record in every type position today,
+  across the checker, the lowerer and the ABI emitter. Expanding it only
+  for `from_json` would make `from_json`'s result disagree with
+  the same alias written in a signature. So `from_json` refuses it with
+  the local alias to write instead, and expanding imported aliases
+  everywhere is filed as its own item in the backend roadmap.
+
 ## 2026-11-23 - B01 third increment: retire the `decode_<Type>_from_json` convention
 
 Declaring `tool decode_<X>_from_json(text: String) -> Result<X, String>`

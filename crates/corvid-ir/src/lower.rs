@@ -2165,9 +2165,10 @@ impl<'a> Lowerer<'a> {
         field: &Ident,
         args: &[Expr],
     ) -> Option<IrExprKind> {
-        let Expr::Ident { name, .. } = target else { return None };
-        let Binding::Decl(id) = self.bindings.get(&name.span)? else { return None };
-        if self.symbols.get(*id).kind != DeclKind::Type || args.len() != 1 {
+        // The checker decided the receiver names a type with this same
+        // function, so the two layers cannot disagree.
+        corvid_types::type_receiver(target, self.bindings, self.symbols, self.module_resolution)?;
+        if args.len() != 1 {
             return None;
         }
         let sig = corvid_types::type_method(&Type::Unknown, &field.name)?;

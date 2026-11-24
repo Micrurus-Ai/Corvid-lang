@@ -384,7 +384,7 @@ enum TypeContext<'a> {
     Imported(&'a corvid_resolve::ResolvedModule),
 }
 
-fn imported_struct_type(
+pub(super) fn imported_struct_type(
     module: &corvid_resolve::ResolvedModule,
     def_id: corvid_resolve::DefId,
     name: &str,
