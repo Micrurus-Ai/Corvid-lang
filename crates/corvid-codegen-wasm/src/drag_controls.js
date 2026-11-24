@@ -4,10 +4,14 @@ function bindDrag(region, handlers) {
   const reduce = handlers[region.dataset.corvidDrag];
   const canvas = region.querySelector(":scope > canvas");
   const panel = region.querySelector(":scope > [data-corvid-panel]");
-  const control = canvas ?? panel.querySelector(":scope > [role=separator]");
+  const control = canvas ?? panel?.querySelector(":scope > [role=separator]");
   const context = canvas?.getContext("2d");
-  if (typeof reduce !== "function" || (canvas && !context)) {
-    alert.textContent = "Could not initialize the drag action.";
+  if (!control || !alert || !/^-?\d+$/.test(output?.value) ||
+      typeof reduce !== "function" || (canvas && !context)) {
+    const location = handlerLocations.get(region.dataset.corvidDrag) ?? "std/ui";
+    const message = location + ": could not initialize the drag action.";
+    if (alert) alert.textContent = message;
+    else console.error(message, region);
     return;
   }
   let state = BigInt(output.value);

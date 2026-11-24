@@ -39,6 +39,12 @@ const panel = {
   querySelectorAll: () => controls,
 };
 const moduleUrl = pathToFileURL(loader);
+const elements = new Map();
+globalThis.HTMLElement = class {};
+globalThis.customElements = {
+  get: name => elements.get(name),
+  define: (name, element) => elements.set(name, element),
+};
 globalThis.document = {
   querySelectorAll(selector) {
     if (selector.startsWith("script")) return [{ src: moduleUrl.href }];

@@ -810,6 +810,7 @@ dependencies = [
 name = "corvid-codegen-wasm"
 version = "0.0.1"
 dependencies = [
+ "base64",
  "corvid-ast",
  "corvid-ir",
  "corvid-resolve",

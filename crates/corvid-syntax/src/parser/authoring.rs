@@ -8,6 +8,8 @@ use corvid_ast::{Decl, Span};
 pub struct Component {
     pub name: String,
     pub events: String,
+    /// Original source span for each line added to the browser event module.
+    pub event_line_spans: Vec<Span>,
 }
 
 pub fn browser_declarations(
@@ -161,12 +163,13 @@ impl Parser<'_> {
         self.expect_newline()?;
         let mut captions = vec![label.trim_end().to_owned()];
         let mut events = String::new();
+        let mut event_line_spans = Vec::new();
         let mut buttons = Vec::new();
         let ui = format!("__ui_{name}");
         let mut panel_content = None;
         let surface = if self.peek_ident_is("canvas") || self.peek_ident_is("panel") {
             let (view, handler, children) =
-                self.parse_drag_component(&name, &state, initial, &ui)?;
+                self.parse_drag_component(&name, &state, initial, &ui, &mut event_line_spans)?;
             panel_content = children;
             events = handler;
             Some(view)
@@ -174,11 +177,13 @@ impl Parser<'_> {
             None
         };
         while surface.is_none() && self.peek_ident_is("button") {
+            let button_span = self.peek_span();
             self.bump();
             captions.push(self.ui_string()?);
             self.expect(TokKind::KwOn, "on click")?;
             self.expect_contextual_ident("click")?;
             self.open_block()?;
+            event_line_spans.extend([button_span, self.peek_span()]);
             self.expect_contextual_ident(&state)?;
             self.expect(TokKind::PlusEq, "+=")?;
             let increment = self.parse_u64_literal("a nonnegative increment")?;
@@ -238,7 +243,7 @@ impl Parser<'_> {
             *args.last_mut().expect("panel children argument") = children;
         }
         self.generated.push(view_fn);
-        self.components.push(Component { name, events });
+        self.components.push(Component { name, events, event_line_spans });
         Ok(import)
     }
 }

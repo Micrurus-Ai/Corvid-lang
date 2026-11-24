@@ -6,6 +6,7 @@ license.workspace = true
 description = "WASM code generator for the Corvid compiler."
 
 [dependencies]
+base64 = "0.22"
 corvid-ast = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }

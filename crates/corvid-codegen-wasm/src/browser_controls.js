@@ -30,6 +30,9 @@ export function componentElement(html) {
 async function bindStateControls(root = document) {
   for (const region of root.querySelectorAll("[data-corvid-list]")) bindKeyedList(region);
   const panels = root.querySelectorAll("fieldset[data-corvid-state]");
+  const dragRegions = root.querySelectorAll("[data-corvid-drag]");
+  const quantities = root.querySelectorAll("[data-corvid-quantity-field]");
+  if (!panels.length && !dragRegions.length && !quantities.length) return;
   const readers = new Map();
   for (const output of root.querySelectorAll("output[data-corvid-read]")) {
     const name = output.dataset.corvidRead;
@@ -46,15 +49,24 @@ async function bindStateControls(root = document) {
     return;
   }
   if (typeof bindDrag === "function") {
-    for (const region of root.querySelectorAll("[data-corvid-drag]")) bindDrag(region, handlers);
+    for (const region of dragRegions) bindDrag(region, handlers);
   }
-  for (const field of root.querySelectorAll("[data-corvid-quantity-field]")) {
-    bindQuantity(field, handlers, intStateHandlers);
+  for (const field of quantities) {
+    const binding = quantityBinding(field);
+    if (binding) bindQuantity(binding, handlers);
   }
   for (const panel of panels) {
     const output = panel.querySelector(":scope > output");
     const alert = panel.querySelector(":scope > [role=alert]");
     const input = panel.querySelector(":scope > label > input[data-corvid-input]");
+    if (!output || !alert || (!input && !/^-?\d+$/.test(output.value))) {
+      const handler = input?.dataset.corvidInput ?? panel.querySelector("button[data-corvid-action]")?.dataset.corvidAction;
+      const location = handlerLocations.get(handler) ?? "std/ui.state";
+      const message = location + ": expected a state output and an alert for this control.";
+      if (alert) alert.textContent = message;
+      else console.error(message, panel);
+      continue;
+    }
     if (input) {
       const name = input.dataset.corvidInput;
       if (!textStateHandlers.has(name)) {
@@ -63,7 +75,7 @@ async function bindStateControls(root = document) {
       }
       const invoke = value => {
         const result = handlers[name](value);
-        input.value = value;
+        if (input.value !== value) input.value = value;
         output.value = result;
         alert.textContent = "";
         return result;

@@ -1,6 +1,12 @@
 function bindKeyedList(region, mountRecord) {
   const list = region.querySelector(":scope > ol");
   const status = region.querySelector(":scope > [role=status]");
+  if (!list || !status) {
+    const message = "std/ui.keyed_list: expected an ordered list and a status element.";
+    if (status) status.textContent = message;
+    else console.error(message, region);
+    return;
+  }
   const rows = new Map();
   for (const row of list.children) {
     const key = row.dataset.corvidKey;

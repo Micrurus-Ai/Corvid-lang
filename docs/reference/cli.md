@@ -14,12 +14,21 @@ corvid init                             # add corvid.toml to existing dir
 corvid build <file>                     # compile to target (default native)
 corvid build <file> --target=wasm       # WASM target
 corvid build <file> --target=server     # rendered axum binary
+corvid build src/main.cor --target web  # package routes and browser assets in target/web.tar
 corvid build <file> --sign              # sign the cdylib + receipts
 corvid run <file>                       # build and run an agent
 corvid check [file]                     # typecheck file or project src/main.cor
 corvid test                             # run tests in tests/
 corvid bench <file>                     # run a benchmark
 ```
+
+### Web packages
+
+Extract `target/web.tar` and run `corvid serve src/main.cor` in the extracted directory. The archive contains server sources for the Corvid process. The browser receives the rendered page and its public assets. The build orders component source paths before compiling their handlers and sorts the archive entries.
+
+The server adds subresource integrity to the standard interactive page footer. Unversioned compiled assets use ETags and require revalidation. A matching SHA-256 version query permits immutable caching. A stale version receives HTTP 404 with `Cache-Control: no-store`. The split quantity module pins its lazy runtime import to that runtime's digest.
+
+The event JavaScript includes inline version 3 source maps for generated export wrappers and for direct calculations in the quantity module. Generated component handlers map to the component's source file. Mappings refer to project-relative source files and omit source contents. Browser compilation of `src/events.cor` checks its resolved import graph for Python and the server modules `std:db`, `std:env`, `std:io` and `std:secrets`. A rejected web build preserves the previous archive.
 
 ## Diagnostics & audit
 
