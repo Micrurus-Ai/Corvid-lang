@@ -850,6 +850,7 @@ version = "0.0.1"
 dependencies = [
  "argon2",
  "corvid-text",
+ "ed25519-dalek",
  "hmac 0.12.1",
  "rand_core 0.6.4",
  "sha2 0.10.9",

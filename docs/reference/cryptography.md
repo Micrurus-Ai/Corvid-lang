@@ -1,8 +1,8 @@
 # Cryptography
 
-`Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes and HMAC are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
+`Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes, HMAC and Ed25519 signature verification are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
 
-Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, `Secret`, random tokens and password hashing run on the interpreter. A program that uses `Bytes` or `Secret` runs on the interpreter until the native cryptography slice, and a native build that refuses one names that slice. Ed25519 verification comes in a later slice. [Proposal](../proposals/cryptography.md)
+Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. A program that uses `Bytes` or `Secret` runs on the interpreter until the native cryptography slice, and a native build that refuses one names that slice. Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
 
 ```corvid
 agent content_hash(body: String) -> String:
@@ -124,6 +124,49 @@ agent verify_standard_webhook(message_id: String, timestamp: String, signature_h
 Both programs are the acceptance test, run through the driver against recorded requests whose signatures were computed outside Corvid: the recorded requests verify, and a changed body byte, timestamp, message id, signature or key is rejected. The trace of a verification holds `<redacted>` for the secret read and nothing for the HMAC. Every request is checked in full: `==` on `Bytes` takes the same time whichever byte differs, so a forged signature cannot be guessed byte by byte.
 
 These programs check the signature only. A complete verifier also refuses a timestamp too far from the current time, so a recorded request cannot be replayed later, and reads the body exactly as it arrived. A reusable verifier, its declared tolerance, and raw request bodies in routes come with verified webhooks (B16).
+
+## Signatures
+
+| Call | Result |
+| --- | --- |
+| `message.verify_ed25519(signature, public_key)` | `Bool`: whether `signature` is the signer's Ed25519 signature of the bytes |
+
+All three are `Bytes`: the signed message, the 64-byte signature and the signer's 32-byte public key. An Ed25519 signature (RFC 8032) is made with a private key the receiver never sees and checked with the public key, so anyone can verify a release, a signed token or a webhook from a provider that signs with a public key, and nobody but the signer can make one. Like every `Bytes` method it is pure: allowed in `@deterministic` agents, never traced, and the same in replay.
+
+```corvid
+agent signed_by_publisher(body: String, signature_base64: String) -> Result<Bool, String>:
+    signature = Bytes.from_base64(signature_base64)?
+    public_key = Bytes.from_hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")?
+    return Ok(body.utf8().verify_ed25519(signature, public_key))
+```
+
+The answer is `false` for a forged or altered signature, a changed message or another signer's key, and also for a signature that is not 64 bytes or a public key that is not 32 bytes or not a point on the curve. A malformed signature verifies nothing, so it gets the same answer as a forged one; a decoding mistake in the hex or base64 is still an `Err` from `Bytes.from_hex` or `from_base64`. A 64-byte key is usually a private key with its public half appended, as some tools print it: pass only the public half.
+
+**Verification is strict.** RFC 8032 lets verifiers differ on edge cases, and the permissive reading accepts signatures nobody made: with a public key of small order, such as the identity point, a signature of 63 zero bytes after a single `01` verifies for every message. Corvid refuses a public key or a signature point R of small order, and an S that is not reduced below the group order, so a valid signature cannot be altered into a second valid one. This is the `verify_strict` check of the `ed25519-dalek` library. A signature from any conforming signer verifies; RFC 8032's test vectors do.
+
+### Verify a signed release
+
+`corvid release` signs its manifest as a DSSE envelope: the signature covers `DSSEv1 <type length> <type> <payload length> <payload>`, so it cannot be moved to a payload of another type. Corvid checks one with string methods and `verify_ed25519`:
+
+```corvid
+fn pre_authentication_encoding(payload_type: String, payload: String) -> Bytes:
+    type_length = payload_type.utf8().length().to_string()
+    payload_length = payload.utf8().length().to_string()
+    return ("DSSEv1 " + type_length + " " + payload_type + " " + payload_length + " " + payload).utf8()
+
+@deterministic
+agent verify_release(payload_type: String, payload_base64: String, signature_base64: String, public_key_hex: String) -> Result<Bool, String>:
+    if payload_type != "application/vnd.corvid.release.manifest.v1+json":
+        return Ok(false)
+    payload = Bytes.from_base64(payload_base64)?.to_utf8()?
+    signature = Bytes.from_base64(signature_base64)?
+    public_key = Bytes.from_hex(public_key_hex)?
+    return Ok(pre_authentication_encoding(payload_type, payload).verify_ed25519(signature, public_key))
+```
+
+A driver test signs a release manifest with the release tooling's own signing function and runs this program: the signed release verifies, and a changed manifest byte, another manifest's signature, a changed signature character, another payload type and another signer's key are rejected, each with the same answer as the tooling's verifier. The lengths are byte counts, read from `utf8()`. The manifest is JSON text, so the encoding is built as a string; a binary payload would need byte concatenation, which `Bytes` does not offer.
+
+Signing is not offered: a private key is a long-lived credential whose storage needs its own design.
 
 ## Comparing bytes
 

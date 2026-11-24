@@ -148,8 +148,9 @@ Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` re
 - `Bytes.sha512() -> Bytes`
 - `Bytes.hmac_sha256(key: Bytes or Secret) -> Bytes`
 - `Bytes.hmac_sha512(key: Bytes or Secret) -> Bytes`
+- `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) -> Bool`
 
-`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. An HMAC key is `Bytes` or a `Secret`. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
+`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. An HMAC key is `Bytes` or a `Secret`. `verify_ed25519` checks a 64-byte Ed25519 signature against a 32-byte public key strictly, and is `false` for any other length. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
 
 ## Secret
 

@@ -4,6 +4,62 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Ed25519 signature verification (B04, fifth slice)
+
+`message.verify_ed25519(signature, public_key)` is a pure method on
+`Bytes`: the signed bytes, a 64-byte signature and a 32-byte public
+key, all `Bytes`, answering `Bool`. It is allowed in `@deterministic`
+agents and never traced. The rule lives once, in `corvid-crypto`'s new
+`signature.rs`, over the `ed25519-dalek` 2 version the runtime, the ABI
+tooling and the CLI already locked; the interpreter only moves values
+in and out.
+
+Verification is strict. RFC 8032 lets verifiers differ on edge cases,
+and the permissive check `ed25519-dalek` offers as `verify` accepts a
+signature nobody made: under the identity point as the public key, the
+64 bytes `01 00 ... 00` verify for every message. A unit test shows the
+permissive check accepting that forgery and `verify_ed25519` refusing
+it. `verify_strict` refuses a public key or a signature point R of
+small order, and an S not reduced below the group order, so a valid
+signature cannot be altered into a second valid one (also tested, by
+adding the group order to S). Every Ed25519 vector in RFC 8032 section
+7.1 verifies: TEST 1, 2, 3, the 1023-byte TEST 1024 and TEST SHA(abc),
+copied from the RFC's text.
+
+A wrong length is `false`, not an error. A signature that is not 64
+bytes, a key that is not 32, or 32 bytes that are not a curve point
+verify nothing, which is what a forgery gets, and the length of a
+received signature is the sender's choice, so a `Result` would give
+every check two failure branches handled the same way. Decoding stays
+a `Result` (`Bytes.from_hex`, `from_base64`), so a garbled header is
+still reported. Fixed-length `Signature` and `PublicKey` types and a
+free `verify_ed25519(message, signature, key)` were considered and are
+recorded in the proposal.
+
+Reuse: the repository verifies Ed25519 in five places (`corvid-abi`'s
+DSSE `verify_envelope`, two CLI signing modules, the driver's
+dimension artifacts and package registry), each a single permissive
+library call inside its own envelope parsing and messages, with an
+already-parsed key. None was a function to move, and switching them to
+strict verification changes what they accept in files other sessions
+own, so moving them onto `corvid_crypto::verify_ed25519` is a roadmap
+item. The driver test instead uses the tooling directly: it signs a
+release manifest with `corvid_abi::sign_envelope`, the function
+`corvid release` signs with, and a Corvid program rebuilds the DSSE
+Pre-Authentication Encoding with string methods and verifies it. The
+genuine release verifies; a changed manifest byte, another manifest's
+signature, a changed signature character, another payload type and
+another signer's key are rejected, and for each case
+`corvid_abi::verify_envelope` gives the same answer. The encoding is
+built as text because the manifest is JSON; joining byte strings for a
+binary payload is a roadmap item.
+
+Native code still refuses every `Bytes` method, this one included,
+until the native cryptography slice. Signing stays deferred: a private
+key is a long-lived credential whose storage needs its own design.
+
+---
+
 ## 2026-11-25 - Random tokens and declared-cost password hashing (B04, fourth slice)
 
 `std/crypto` is a new executing module. `random_token(bytes)` draws

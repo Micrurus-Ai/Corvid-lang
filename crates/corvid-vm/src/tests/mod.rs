@@ -29,6 +29,7 @@ mod bytes;
 mod hmac;
 mod secrets;
 mod passwords;
+mod ed25519;
 
 /// Compile source text all the way down to IR. Panics on any frontend
 /// error — tests should pass clean programs.

@@ -507,6 +507,11 @@ pub enum BuiltinMethodKind {
     /// `Bytes.hmac_sha512(key) -> Bytes` — the 64-byte HMAC-SHA512 tag;
     /// the same keys.
     BytesHmacSha512,
+    /// `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) ->
+    /// Bool` — whether `signature` is the receiver's Ed25519 signature
+    /// under `public_key`, verified strictly; `false` for a signature
+    /// that is not 64 bytes or a key that is not 32.
+    BytesVerifyEd25519,
     /// `Secret.decode_base64_after(prefix: String) -> Result<Secret,
     /// String>` — the key written in base64 after a literal prefix, as
     /// a new secret.
@@ -602,7 +607,8 @@ impl BuiltinMethodKind {
         )
     }
 
-    /// The byte-string, hashing, HMAC, secret-key and password methods.
+    /// The byte-string, hashing, HMAC, signature, secret-key and password
+    /// methods.
     pub fn is_crypto(self) -> bool {
         use BuiltinMethodKind::*;
         matches!(
@@ -621,6 +627,7 @@ impl BuiltinMethodKind {
                 | BytesSha512
                 | BytesHmacSha256
                 | BytesHmacSha512
+                | BytesVerifyEd25519
                 | SecretDecodeBase64After
                 | SecretVerifyPassword
         )
@@ -920,6 +927,7 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Bytes, "sha512") => sig(BytesSha512, vec![], Type::Bytes),
         (Type::Bytes, "hmac_sha256") => sig(BytesHmacSha256, vec![Type::Bytes], Type::Bytes),
         (Type::Bytes, "hmac_sha512") => sig(BytesHmacSha512, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "verify_ed25519") => sig(BytesVerifyEd25519, vec![Type::Bytes, Type::Bytes], Type::Bool),
         (Type::Secret, "decode_base64_after") => sig(
             SecretDecodeBase64After,
             vec![Type::String],

@@ -1,5 +1,5 @@
-//! Byte strings, hashing and HMAC on the interpreter tier: the `Bytes`
-//! methods, `String.utf8()`, `Secret.decode_base64_after` and
+//! Byte strings, hashing, HMAC and signatures on the interpreter tier:
+//! the `Bytes` methods, `String.utf8()`, `Secret.decode_base64_after` and
 //! `Secret.verify_password`.
 //!
 //! Every rule is `corvid_crypto`'s, the code the native runtime will
@@ -56,6 +56,12 @@ pub(super) fn eval_crypto_method(
         (BytesSha512, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::sha512(b))),
         (BytesHmacSha256, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::hmac_sha256(b, hmac_key()?))),
         (BytesHmacSha512, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::hmac_sha512(b, hmac_key()?))),
+        (BytesVerifyEd25519, Value::Bytes(message)) => match args {
+            [Value::Bytes(signature), Value::Bytes(public_key)] => {
+                Ok(Value::Bool(corvid_crypto::verify_ed25519(message, signature, public_key)))
+            }
+            other => Err(internal(format!("a signature and a public key must be Bytes, not {other:?}"))),
+        },
         (SecretDecodeBase64After, Value::Secret(secret)) => match args.first() {
             Some(Value::String(prefix)) => Ok(decoded(secret.decode_base64_after(prefix).map(Value::Secret))),
             other => Err(internal(format!("a key prefix must be a String, not {other:?}"))),

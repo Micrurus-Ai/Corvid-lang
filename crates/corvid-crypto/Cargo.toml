@@ -3,7 +3,7 @@ name = "corvid-crypto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Cryptography rules for Corvid: the Bytes and Secret types with constant-time equality, the hex and base64 forms of bytes, SHA-2 hashing, HMAC, random tokens and Argon2id password hashing. The checker, the interpreter and the native runtime all call this one implementation."
+description = "Cryptography rules for Corvid: the Bytes and Secret types with constant-time equality, the hex and base64 forms of bytes, SHA-2 hashing, HMAC, Ed25519 signature verification, random tokens and Argon2id password hashing. The checker, the interpreter and the native runtime all call this one implementation."
 
 [dependencies]
 # The byte codecs are corvid-text's, so text and bytes share one
@@ -19,3 +19,6 @@ subtle = "2.6"
 # this crate.
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Ed25519 verification: the version the runtime, the ABI tooling and
+# the CLI already use to sign and verify releases and attestations.
+ed25519-dalek = "2"
