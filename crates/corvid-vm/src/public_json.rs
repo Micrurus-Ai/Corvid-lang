@@ -137,6 +137,7 @@ pub(crate) fn value_of_text_scalar(value: TextScalar) -> Value {
         TextScalar::ZonedTime(z) => Value::ZonedTime(z),
         TextScalar::Currency(c) => Value::Currency(c),
         TextScalar::Locale(l) => Value::Locale(Arc::new(l)),
+        TextScalar::Bytes(b) => Value::Bytes(b),
     }
 }
 
@@ -150,6 +151,7 @@ pub(crate) fn text_scalar_of_value(value: &Value) -> Option<TextScalar> {
         Value::ZonedTime(z) => TextScalar::ZonedTime(*z),
         Value::Currency(c) => TextScalar::Currency(*c),
         Value::Locale(l) => TextScalar::Locale((**l).clone()),
+        Value::Bytes(b) => TextScalar::Bytes(b.clone()),
         _ => return None,
     })
 }

@@ -108,7 +108,8 @@ and `message`, and encodes to the same text. A type the native target
 cannot hold runs on the interpreter: a map whose keys are not
 `String`, a `JsonValue`, a `Grounded` value, whose sources native
 code does not keep. `Decimal` and the time, zone, currency and locale
-types compile, each carried as its canonical text.
+types compile, each carried as its canonical text. `Bytes` runs on the
+interpreter until the native cryptography slice.
 
 ## Public JSON mapping
 
@@ -132,6 +133,7 @@ program. HTTP request bodies and JSON replies, `T.from_json` and
 | `Grounded<T>` | `{"value": T, "sources": [...]}` on output only |
 | `JsonValue` | the JSON value itself |
 | `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`, `Locale` | a string in the type's exact text: `"19.90"`, `"PT1H30M"`, `"2026-07-11T08:30:00Z"`, `"Europe/Berlin"`, `"2026-03-29T03:30:00+02:00[Europe/Berlin]"`, `"EUR"`, `"de-DE"`. A JSON number for a `Decimal` is refused, because it could lose digits |
+| `Bytes` | a string in base64url (RFC 4648 section 5) without padding, such as `"3q2-7w"`; decoding also accepts `=` padding. Schemas publish `contentEncoding: base64url` |
 
 Decoding never invents provenance. A `Grounded<T>` target is rejected
 because JSON text cannot show where a value came from. Functions,

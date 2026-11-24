@@ -13,9 +13,12 @@
 use corvid_types::Type;
 
 /// Whether native code holds `ty` as its canonical text. The public
-/// JSON crate's list of text-scalar types is the one list.
+/// JSON crate's list of text-scalar types is the one list, less
+/// `Bytes`: its JSON form is text too, but native code has no form for
+/// it until the native cryptography slice, which must keep `==`
+/// constant-time rather than reuse string equality.
 pub fn is_text_scalar(ty: &Type) -> bool {
-    corvid_public_json::text_scalar::name(ty).is_some()
+    !matches!(ty, Type::Bytes) && corvid_public_json::text_scalar::name(ty).is_some()
 }
 
 /// `ty` without the compile-time `Tainted` and `Grounded` wrappers,
@@ -66,6 +69,7 @@ mod tests {
             assert!(is_text_scalar(&ty), "{}", ty.display_name());
         }
         assert!(!is_text_scalar(&Type::String));
+        assert!(!is_text_scalar(&Type::Bytes));
         assert_eq!(scalar_of(&Type::Grounded(Box::new(Type::Tainted(Box::new(Type::Instant))))), &Type::Instant);
     }
 }

@@ -13,4 +13,5 @@ corvid-types = { workspace = true }
 corvid-currency = { workspace = true }
 corvid-time = { workspace = true }
 corvid-decimal = { workspace = true }
+corvid-crypto = { workspace = true }
 serde_json = { workspace = true }

@@ -68,7 +68,8 @@ fn a_type_without_a_plan_form_is_refused_by_name() {
 
 #[test]
 fn every_text_scalar_type_has_a_plan_form() {
-    for ty in [Type::Decimal, Type::Duration, Type::Instant, Type::TimeZone, Type::ZonedTime, Type::Currency, Type::Locale] {
+    for name in crate::text_scalar::NAMES {
+        let ty = corvid_types::Type::compiler_known(name).expect("a text scalar is a compiler-known type");
         let root = Type::List(Box::new(Type::Option(Box::new(ty))));
         let plan = DecodePlan { root: root.clone(), types: vec![], shapes: BTreeMap::new(), owning_maps: vec![] };
         let read = DecodePlan::from_text(&plan.to_text().expect("writes")).expect("reads");

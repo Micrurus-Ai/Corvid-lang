@@ -845,6 +845,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-crypto"
+version = "0.0.1"
+dependencies = [
+ "corvid-text",
+ "sha2 0.10.9",
+ "subtle",
+]
+
+[[package]]
 name = "corvid-currency"
 version = "0.0.1"
 dependencies = [
@@ -999,6 +1008,7 @@ name = "corvid-public-json"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-crypto",
  "corvid-currency",
  "corvid-decimal",
  "corvid-ir",
@@ -1213,6 +1223,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "corvid-ast",
+ "corvid-crypto",
  "corvid-currency",
  "corvid-decimal",
  "corvid-ir",

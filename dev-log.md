@@ -4,6 +4,53 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Byte strings and SHA-2 hashing (B04, first slice)
+
+Corvid has a `Bytes` type: an immutable byte string for digests, MAC
+tags, signatures, keys and binary payloads. A new `corvid-crypto` crate
+holds its rules and depends only on `corvid-text` and the `sha2` and
+`subtle` crates the runtime already uses. `text.utf8()` turns text into
+bytes and `bytes.to_utf8()` turns them back as a `Result`;
+`to_hex()`, `to_base64()` and `to_base64_url()` write them as text, and
+`Bytes.from_hex(text)`, `Bytes.from_base64(text)` and
+`Bytes.from_base64_url(text)` read them back through the builtin
+type-method table `Instant.from_epoch_milliseconds` uses. `sha256()`,
+`sha384()` and `sha512()` hash them. Every method is pure, so none is
+traced and all run in `@deterministic` code.
+
+The codecs were not written twice. `corvid-text` gained byte variants
+of its hex and base64 codecs, and the text codecs are now those plus a
+UTF-8 check, so `Bytes.from_hex` and `text.decode_hex()` share one
+decoder and one set of messages. This closes B03's deferred byte-codec
+item.
+
+`==` on `Bytes` is constant-time. The interpreter's value equality
+calls `Bytes::constant_time_eq` (`subtle`'s comparison, which depends
+only on the lengths), so records and lists holding bytes and
+`list.contains` compare the same way. The checker refuses ordering, with
+a hint that an ordered comparison stops at the first differing byte,
+and refuses `+` and any mix with `String`, naming `utf8()` and the
+encodings. Those rules sit in a new `checker/bytes.rs`.
+
+In JSON a `Bytes` value is unpadded base64url text, added as one more
+`corvid_public_json::text_scalar` type, so decoding, encoding, tool and
+prompt values, prompt schemas, OpenAPI, the TypeScript client and the
+SDKs pick it up from that one module. Schemas publish
+`contentEncoding: base64url`. Table columns of type `Bytes` are refused
+with the B06 types, and `column_kind` names `Bytes` explicitly, a
+one-arm edit to the main line's `tables/schema.rs`.
+
+Native code refuses any program that mentions `Bytes`, with a reason
+naming the native cryptography slice, and native code's list of
+text-held scalars leaves `Bytes` out: holding it as text would make
+`==` native string equality, which is not constant-time.
+
+Syntax: `Bytes.from_hex(text)` beat `text.decode_hex_bytes()`, which
+differs from the text decoder by an easy-to-miss suffix; `text.utf8()`
+beat `text.to_bytes()`, which hides the encoding. Shared enums gain
+`Type::Bytes`, `BuiltIn::Bytes`, `Value::Bytes` and the byte-string
+`BuiltinMethodKind` entries, with every exhaustive arm.
+
 ## 2026-11-24 - Native time and currency types (B06, seventh slice)
 
 Programs that use `Duration`, `Instant`, `TimeZone`, `ZonedTime`,

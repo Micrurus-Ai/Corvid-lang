@@ -73,6 +73,9 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         Type::Decimal => (ColumnKind::Json, false),
         // B06 — the same deferred decision for the time types.
         Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => (ColumnKind::Json, false),
+        // The same deferred decision for `Bytes`, which may want a BLOB
+        // column; the checker refuses `Bytes` table columns until then.
+        Type::Bytes => (ColumnKind::Json, false),
         _ => (ColumnKind::Json, false),
     }
 }

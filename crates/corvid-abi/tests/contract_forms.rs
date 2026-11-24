@@ -1,5 +1,5 @@
-//! B06 — every published projection carries the exact-text types the
-//! same way: OpenAPI with the shared schema, the TypeScript client and
+//! Every published projection carries the exact-text types (the B06
+//! types and `Bytes`) the same way: OpenAPI with the shared schema, the TypeScript client and
 //! the Swift, Kotlin and Python SDKs as strings holding the exact text,
 //! and the generated Python round-trips that text unchanged.
 
@@ -19,6 +19,7 @@ public type Invoice:
     office: TimeZone
     currency: Currency
     locale: Locale
+    digest: Bytes
 
 public agent echo(invoice: Invoice) -> Invoice:
     return invoice
@@ -58,12 +59,14 @@ fn the_typescript_client_and_sdks_hold_the_exact_text_as_strings() {
     let ts: String = emit_ts_client(&contract).into_iter().map(|f| f.contents).collect();
     assert!(ts.contains("total: string"), "{ts}");
     assert!(ts.contains("due: string"), "{ts}");
+    assert!(ts.contains("digest: string"), "{ts}");
     let swift = emit_sdk(&contract, SdkLanguage::Swift).remove(0).contents;
     assert!(swift.contains("total: String"), "{swift}");
     let kotlin = emit_sdk(&contract, SdkLanguage::Kotlin).remove(0).contents;
     assert!(kotlin.contains("total: String"), "{kotlin}");
     let python = emit_sdk(&contract, SdkLanguage::Python).remove(0).contents;
     assert!(python.contains("total: str"), "{python}");
+    assert!(python.contains("digest: str"), "{python}");
 }
 
 #[test]
@@ -89,9 +92,10 @@ INVOICE = {
     "office": "Asia/Tokyo",
     "currency": "EUR",
     "locale": "de-DE",
+    "digest": "3q2-7w",
 }
 invoice = models.Invoice.from_json(INVOICE)
-assert invoice.total == "19.90" and invoice.issued.endswith(".000000001Z")
+assert invoice.total == "19.90" and invoice.issued.endswith(".000000001Z") and invoice.digest == "3q2-7w"
 assert invoice.to_json() == INVOICE, invoice.to_json()
 try:
     models.Invoice.from_json({**INVOICE, "total": 19.9})

@@ -909,6 +909,7 @@ mod decl;
 mod decl_eval;
 mod decl_extern_c;
 mod decimal;
+mod bytes;
 mod currency;
 mod time;
 mod form;

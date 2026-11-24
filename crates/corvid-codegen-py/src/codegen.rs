@@ -691,6 +691,9 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         T::Decimal => "object".into(),
         // B06 — the Python backend refuses time types like `Decimal`.
         T::Duration | T::Instant | T::TimeZone | T::ZonedTime | T::Currency | T::Locale => "object".into(),
+        // `Bytes` values come only from builtin methods, which the
+        // Python backend refuses before a hint is needed.
+        T::Bytes => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

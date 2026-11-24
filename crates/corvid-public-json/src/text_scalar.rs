@@ -1,8 +1,9 @@
-//! B06 — the types whose public JSON form is their exact text.
+//! The types whose public JSON form is their exact text.
 //!
 //! `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`,
-//! `Currency` and `Locale` each cross JSON as a string in their one
-//! canonical text form, the form their own crate prints and parses:
+//! `Currency`, `Locale` and `Bytes` each cross JSON as a string in
+//! their one canonical text form, the form their own crate prints and
+//! parses:
 //!
 //! | Type | JSON | Example |
 //! | --- | --- | --- |
@@ -13,6 +14,7 @@
 //! | `ZonedTime` | RFC 9557 | `"2026-03-29T03:30:00+02:00[Europe/Berlin]"` |
 //! | `Currency` | the ISO 4217 code | `"EUR"` |
 //! | `Locale` | the canonical BCP 47 tag | `"de-DE"` |
+//! | `Bytes` | base64url (RFC 4648 section 5), unpadded | `"3q2-7w"` |
 //!
 //! A string, not a JSON number, carries a `Decimal`, because JSON
 //! numbers lose digits in JavaScript and in any decoder that goes
@@ -21,6 +23,7 @@
 //! and prompt values on the interpreter, OpenAPI, prompt schemas)
 //! reads this one module, so the forms cannot drift apart.
 
+use corvid_crypto::Bytes;
 use corvid_currency::{Currency, Locale};
 use corvid_decimal::Decimal;
 use corvid_time::{Duration, Instant, TimeZone, ZonedTime};
@@ -37,6 +40,7 @@ pub enum TextScalar {
     ZonedTime(ZonedTime),
     Currency(Currency),
     Locale(Locale),
+    Bytes(Bytes),
 }
 
 impl TextScalar {
@@ -50,12 +54,14 @@ impl TextScalar {
             TextScalar::ZonedTime(z) => z.to_string(),
             TextScalar::Currency(c) => c.to_string(),
             TextScalar::Locale(l) => l.to_string(),
+            TextScalar::Bytes(b) => b.to_base64_url(),
         }
     }
 }
 
 /// The names of the text-scalar types, as contracts and SDKs write them.
-pub const NAMES: [&str; 7] = ["Decimal", "Duration", "Instant", "TimeZone", "ZonedTime", "Currency", "Locale"];
+pub const NAMES: [&str; 8] =
+    ["Decimal", "Duration", "Instant", "TimeZone", "ZonedTime", "Currency", "Locale", "Bytes"];
 
 /// Whether a contract type name is a text scalar.
 pub fn is_name(name: &str) -> bool {
@@ -72,6 +78,7 @@ pub fn name(ty: &Type) -> Option<&'static str> {
         Type::ZonedTime => "ZonedTime",
         Type::Currency => "Currency",
         Type::Locale => "Locale",
+        Type::Bytes => "Bytes",
         _ => return None,
     })
 }
@@ -88,6 +95,7 @@ pub fn parse(ty: &Type, text: &str) -> Result<TextScalar, String> {
         Type::ZonedTime => ZonedTime::parse(text).map(TextScalar::ZonedTime).map_err(|e| problem(&e)),
         Type::Currency => Currency::parse(text).map(TextScalar::Currency).map_err(|e| problem(&e)),
         Type::Locale => Locale::parse(text).map(TextScalar::Locale).map_err(|e| problem(&e)),
+        Type::Bytes => Bytes::from_base64_url(text).map(TextScalar::Bytes),
         other => Err(format!("`{}` is not a text-scalar type", other.display_name())),
     }
 }
@@ -130,6 +138,14 @@ pub fn json_schema_by_name(name: &str) -> Option<J> {
             "description": "an ISO 4217 currency code, such as EUR",
         }),
         "Locale" => json!({ "type": "string", "description": "a BCP 47 locale tag, such as de-DE" }),
+        // JSON Schema 2020-12's own keyword for binary data carried in a
+        // string (section 8.3 of the validation vocabulary).
+        "Bytes" => json!({
+            "type": "string",
+            "contentEncoding": "base64url",
+            "pattern": "^[A-Za-z0-9_-]*={0,2}$",
+            "description": "bytes written as URL-safe base64 (RFC 4648 section 5) without padding, such as 3q2-7w",
+        }),
         _ => return None,
     })
 }
@@ -153,6 +169,7 @@ mod tests {
             (Type::ZonedTime, "2026-03-29T03:30:00+02:00[Europe/Berlin]"),
             (Type::Currency, "EUR"),
             (Type::Locale, "de-DE"),
+            (Type::Bytes, "3q2-7w"),
         ];
         for (ty, text) in cases {
             let value = parse(&ty, text).unwrap_or_else(|e| panic!("{text}: {e}"));
@@ -165,6 +182,14 @@ mod tests {
     fn a_decimal_number_is_refused_with_the_reason() {
         let message = needs_a_string(&Type::Decimal, &json!(19.99));
         assert!(message.contains("written as a string"), "{message}");
+    }
+
+    #[test]
+    fn bytes_read_padded_base64url_and_write_it_unpadded() {
+        let value = parse(&Type::Bytes, "3q2-7w==").unwrap();
+        assert_eq!(value.to_text(), "3q2-7w");
+        let error = parse(&Type::Bytes, "3q2+7w").unwrap_err();
+        assert!(error.contains("not URL-safe base64"), "{error}");
     }
 
     #[test]

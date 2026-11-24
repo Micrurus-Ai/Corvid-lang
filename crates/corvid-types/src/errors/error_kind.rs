@@ -97,6 +97,10 @@ pub enum TypeErrorKind {
     /// B06 — an operator that does not apply to the time types involved.
     TimeOperatorMismatch { left: String, right: String, hint: String },
 
+    /// An operator other than `==` and `!=` with a `Bytes` operand, or
+    /// `Bytes` compared with another type.
+    BytesOperatorMismatch { left: String, right: String, hint: String },
+
     /// B06 — a `Decimal`, `Duration` or `Instant` in a type that leaves
     /// the program as JSON before B06's JSON slice gives it a form.
     PendingJsonFormAtBoundary { type_name: String, boundary: String },
@@ -641,6 +645,9 @@ impl TypeErrorKind {
             Self::TimeOperatorMismatch { left, right, .. } => {
                 format!("this operator does not combine `{left}` and `{right}`")
             }
+            Self::BytesOperatorMismatch { left, right, .. } => {
+                format!("this operator does not combine `{left}` and `{right}`")
+            }
             Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
                 "a `{type_name}` cannot be {boundary} yet: its storage mapping, which decides how queries compare it, arrives with B09"
             ),
@@ -1098,8 +1105,12 @@ impl TypeErrorKind {
                 "use an IANA zone name such as `Europe/Berlin` or `America/New_York`; for a name chosen at run time, use `parse_time_zone()`".into(),
             ),
             Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::BytesOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::UnknownCurrencyOrLocale { .. } => Some(
                 "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
+            ),
+            Self::PendingJsonFormAtBoundary { type_name, .. } if type_name == "Bytes" => Some(
+                "store `to_base64_url()` in a `String` column and read it back with `Bytes.from_base64_url(text)`".into(),
             ),
             Self::PendingJsonFormAtBoundary { .. } => Some(
                 "store its exact text with `to_string()` in a `String` column and read it back with the matching `parse_` method".into(),

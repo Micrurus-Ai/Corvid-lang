@@ -466,6 +466,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
         // B06 — a native `Decimal`, time, currency or locale value is a
         // String holding its canonical text.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Ok(I64),
+        Type::Bytes => Err(CodegenError::not_supported(
+            "`Bytes` - byte strings run on the interpreter tier until the native cryptography slice lands",
+            span,
+        )),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

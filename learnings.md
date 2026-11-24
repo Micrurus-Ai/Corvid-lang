@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Corvid has a `Bytes` type for digests, signatures and keys. `body.utf8().sha256().to_hex()` hashes text, `Bytes.from_hex(text)` and the base64 readers return a `Result`, and `==` on bytes is constant-time, so comparing a received signature with `==` is already the safe comparison. Bytes have no ordering, no `+` and never mix with text without a named encoding. In JSON they are unpadded base64url strings. Programs that use `Bytes` run on the interpreter for now. [Cryptography](docs/reference/cryptography.md)
+
 Durations, instants, time zones, zoned times, currencies, locales and `format_currency` compile to native code and give the interpreter's results and messages, because both call `corvid-time` and `corvid-currency`. Instants compare by time, not text, and a native replay warns about a different tz database just as the interpreter does. Tools and prompts that take or return these types, including `time_now()`, still run on the interpreter. [Durations and instants](docs/reference/stdlib/time.md#durations-and-instants)
 
 Programs that use `Decimal` compile to native code and give the same digits and the same error messages as the interpreter, because both call `corvid-decimal`. A native decimal is held as its exact text, so `1.0 == 1.00` still holds inside records and lists. `format_currency`, `+=` on a decimal, and tools or prompts that take or return a `Decimal` still run on the interpreter; `corvid run` picks it for them. [Exact decimals](docs/reference/decimal.md)

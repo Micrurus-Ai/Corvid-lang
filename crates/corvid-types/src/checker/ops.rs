@@ -77,7 +77,10 @@ impl<'a> Checker<'a> {
 
         let b06 = match self.check_decimal_binop(op, l, r, &lt, &rt, span) {
             Some(decimal) => Some(decimal),
-            None => self.check_time_binop(op, l, r, &lt, &rt),
+            None => match self.check_bytes_binop(op, l, r, &lt, &rt) {
+                Some(bytes) => Some(bytes),
+                None => self.check_time_binop(op, l, r, &lt, &rt),
+            },
         };
         let result = if let Some(b06) = b06 {
             b06

@@ -197,6 +197,7 @@ fn write_type(ty: &Type) -> Result<J, String> {
         Type::ZonedTime => json!("ZonedTime"),
         Type::Currency => json!("Currency"),
         Type::Locale => json!("Locale"),
+        Type::Bytes => json!("Bytes"),
         Type::Option(inner) => json!({ "Option": write_type(inner)? }),
         Type::List(inner) => json!({ "List": write_type(inner)? }),
         Type::Tainted(inner) => json!({ "Tainted": write_type(inner)? }),
@@ -226,6 +227,7 @@ fn read_type(json: &J) -> Result<Type, String> {
             "ZonedTime" => Type::ZonedTime,
             "Currency" => Type::Currency,
             "Locale" => Type::Locale,
+            "Bytes" => Type::Bytes,
             other => return Err(format!("decode plan names an unknown type `{other}`")),
         });
     }

@@ -165,6 +165,11 @@ pub fn emit_type_description(
         Type::Locale => TypeDescription::Struct {
             name: "Locale".to_string(),
         },
+        // `Bytes` is named the same way: the contract's projections read
+        // its base64url JSON form from `corvid_public_json::text_scalar`.
+        Type::Bytes => TypeDescription::Struct {
+            name: "Bytes".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

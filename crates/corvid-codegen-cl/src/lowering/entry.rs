@@ -495,6 +495,12 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::Bytes => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `Bytes` - byte strings run on the interpreter tier until the native cryptography slice lands; use the interpreter tier (`corvid run --tier interp`)."
+            ),
+            span,
+        )),
         // B06 — a returned `Decimal`, time, currency or locale value
         // prints its canonical text, as the interpreter prints it.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale

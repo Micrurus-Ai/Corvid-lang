@@ -1,0 +1,15 @@
+[package]
+name = "corvid-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cryptography rules for Corvid: the Bytes type with constant-time equality, its hex and base64 forms, and SHA-2 hashing. The checker, the interpreter and the native runtime all call this one implementation."
+
+[dependencies]
+# The byte codecs are corvid-text's, so text and bytes share one
+# alphabet, one strictness rule and one set of error messages.
+corvid-text = { workspace = true }
+# The same SHA-2 and constant-time comparison crates the runtime
+# already uses for API keys and release signatures.
+sha2 = "0.10"
+subtle = "2.6"

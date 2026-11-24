@@ -235,7 +235,15 @@ fn schema_for_inner(
         // B06 — a model reads and writes these as their exact text, with
         // the schema every public projection shares, so an amount never
         // passes through a float on its way to or from a model.
-        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
+        // `Bytes` likewise crosses as its base64url text.
+        Type::Decimal
+        | Type::Duration
+        | Type::Instant
+        | Type::TimeZone
+        | Type::ZonedTime
+        | Type::Currency
+        | Type::Locale
+        | Type::Bytes => {
             corvid_public_json::text_scalar::json_schema(ty).expect("a text-scalar type has a schema")
         }
         // Slice 51f — `Upload<Format>` and `Page<Item>` are

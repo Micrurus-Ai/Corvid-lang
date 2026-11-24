@@ -228,7 +228,16 @@ impl<'a> Checker<'a> {
             // `corvid_public_json::text_scalar`). Table columns are the
             // exception: their storage mapping decides query semantics and
             // belongs to B09, so a table check refuses them for now.
-            Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
+            // `Bytes` crosses JSON as base64url text, the same way, and
+            // waits for B09's storage mapping like the B06 types.
+            Type::Decimal
+            | Type::Duration
+            | Type::Instant
+            | Type::TimeZone
+            | Type::ZonedTime
+            | Type::Currency
+            | Type::Locale
+            | Type::Bytes => {
                 if self.refuse_b06_columns {
                     Err(NoForm::pending(match ty {
                         Type::Decimal => "Decimal",
@@ -237,6 +246,7 @@ impl<'a> Checker<'a> {
                         Type::TimeZone => "TimeZone",
                         Type::ZonedTime => "ZonedTime",
                         Type::Currency => "Currency",
+                        Type::Bytes => "Bytes",
                         _ => "Locale",
                     }))
                 } else {

@@ -25,6 +25,7 @@ mod currency;
 mod json_forms;
 mod test_runner;
 mod text;
+mod bytes;
 
 /// Compile source text all the way down to IR. Panics on any frontend
 /// error — tests should pass clean programs.

@@ -9,6 +9,7 @@ mod time_zones;
 mod currency;
 mod json_forms;
 mod text_methods;
+mod bytes;
 
 fn check(src: &str) -> Checked {
     let tokens = lex(src).expect("lex failed");

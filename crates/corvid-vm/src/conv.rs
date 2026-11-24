@@ -34,7 +34,8 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         | Value::TimeZone(_)
         | Value::ZonedTime(_)
         | Value::Currency(_)
-        | Value::Locale(_) => serde_json::Value::String(
+        | Value::Locale(_)
+        | Value::Bytes(_) => serde_json::Value::String(
             crate::public_json::text_scalar_of_value(v).expect("matched a text scalar").to_text(),
         ),
         Value::String(s) => serde_json::Value::String(s.to_string()),
@@ -516,6 +517,7 @@ fn type_label(t: &Type) -> String {
         Type::ZonedTime => "ZonedTime".into(),
         Type::Currency => "Currency".into(),
         Type::Locale => "Locale".into(),
+        Type::Bytes => "Bytes".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

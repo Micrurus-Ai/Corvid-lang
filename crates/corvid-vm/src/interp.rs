@@ -36,6 +36,8 @@ mod decimal;
 mod time;
 #[path = "interp/currency.rs"]
 mod currency;
+#[path = "interp/crypto.rs"]
+mod crypto;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 

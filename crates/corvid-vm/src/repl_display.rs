@@ -30,6 +30,7 @@ fn render_value_inner(
         Value::ZonedTime(z) => z.to_string(),
         Value::Currency(c) => c.to_string(),
         Value::Locale(l) => l.to_string(),
+        Value::Bytes(b) => format!("{b:?}"),
         Value::String(s) => format!("\"{}\"", escape_display(s)),
         Value::Bool(b) => {
             if *b {
