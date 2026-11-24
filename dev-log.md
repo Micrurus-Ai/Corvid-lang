@@ -243,6 +243,24 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - Native loops keep every update on the legacy ownership path
+
+With `CORVID_DUP_DROP_PASS=0`, a native loop that rebinds a refcounted
+local from its own value (`subtotal = subtotal + line.price *
+line.quantity`) lost updates. The legacy path released the old value
+before lowering the new one, so the new value read freed memory. It
+stayed hidden in simple loops and showed once the memory was reused: the
+Decimal invoice parity test printed `3.30` instead of `16.05`. The legacy
+path now lowers the new value first and releases the old one after; the
+default unified pass, whose ownership analysis expects the earlier
+order, is unchanged. A regression test in `dup_drop_pipeline.rs` runs
+the invoice program under both settings, failing without the fix, and
+the harness now returns what the program printed, not only its
+allocation counts. `corvid run`'s native cache key now includes the
+setting, read through the one `dup_drop_pass_enabled` that lowering also
+uses, so a binary built under one setting is never reused under the
+other.
+
 ## 2026-11-24 - Atomic table writes (B09 P7a)
 
 `atomic:` blocks make several table writes succeed or fail together. The

@@ -74,12 +74,22 @@ pub fn cache_key_with_tools(source: &str, tools_lib_path: &str) -> String {
 /// Compute the cache key for a given source. Deterministic: same input
 /// bytes always produce the same 16-char hex string.
 pub fn cache_key(source: &str) -> String {
+    cache_key_for(source, corvid_codegen_cl::dup_drop_pass_enabled())
+}
+
+/// [`cache_key`] with the ownership-pass setting given, so a test can
+/// compare both settings without changing the process environment.
+fn cache_key_for(source: &str, dup_drop_pass: bool) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
     feed_bytes(source.as_bytes(), &mut h);
     feed_bytes(b"|cl=", &mut h);
     feed_bytes(env!("CARGO_PKG_VERSION").as_bytes(), &mut h);
     feed_bytes(b"|backend=", &mut h);
     feed_bytes(corvid_codegen_cl::NATIVE_BACKEND_ID.as_bytes(), &mut h);
+    // The ownership pass changes the emitted code, so a binary built
+    // under one setting must not be reused under the other.
+    feed_bytes(b"|dup-drop=", &mut h);
+    feed_bytes(if dup_drop_pass { b"on" } else { b"off" }, &mut h);
     // Fold the native support sources into the key so edits to
     // entry.c, alloc.c, verify.c, and the other native support
     // files invalidate cached binaries. The previous formulation
@@ -129,6 +139,13 @@ mod tests {
         let a = cache_key("agent f() -> Int:\n    return 1\n");
         let b = cache_key("agent f() -> Int:\n    return 2\n");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn the_ownership_pass_setting_keys_the_cache() {
+        let source = "agent main() -> Int:\n    return 1\n";
+        assert_ne!(cache_key_for(source, true), cache_key_for(source, false));
+        assert_eq!(cache_key_for(source, true), cache_key_for(source, true));
     }
 
     #[test]

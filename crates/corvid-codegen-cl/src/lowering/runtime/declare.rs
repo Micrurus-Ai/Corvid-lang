@@ -1410,9 +1410,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // stabilized in production.
         in_match_operand: Default::default(),
         next_variable: Default::default(),
-        dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true),
+        dup_drop_enabled: crate::dup_drop_pass_enabled(),
         // Default to the native (link-time wrapper) dispatch; `lower_file`
         // sets this true for library targets (cdylib/staticlib).
         tools_via_registry: false,
