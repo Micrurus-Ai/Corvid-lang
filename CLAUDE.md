@@ -4,10 +4,20 @@ Rules that apply to every piece of work in this repo. Machine-enforceable where 
 
 ## Design decision principle
 
-**Every design decision is judged on making Corvid great, innovative, inventive, powerful, and easier than any other language available.** Set by the CTO 2026-07-09; ease bar strengthened 2026-07-10. How to apply:
+**Every design decision is judged on making Corvid great, innovative, inventive, powerful, and easier than any other language available.** Set by the CTO 2026-07-09; ease bar strengthened 2026-07-10; goal restated 2026-11-23.
+
+**The goal.** Corvid is a general-purpose language for building an entire application — UI, backend and AI — in one language that a first-time reader can follow. A small app takes little code; a team can build a large AI application at full scale from day one with the same grammar, types and tools. Anything developers build on the backend and AI side with Python or TypeScript and their libraries must be buildable in Corvid, through built-in capability or typed interop.
+
+**The defining advantage.** A person and an AI agent use the application through the **same typed actions**. An action is defined once — its inputs, who may call it, its validation and its conflict behavior — and the UI, the backend and an authorized assistant all use that one definition. There is no separate agent API, and the author chooses which actions an assistant can discover. Changing an action's input makes the compiler point at every affected UI, backend and agent caller.
+
+**The organizing principle: the application and the AI can always see each other.** The compiler understands every screen, action, type, permission, effect and cost, so an assistant receives typed application state instead of screenshots, a coding AI can ask the compiler what calls what and what a change breaks, and an outside AI can use a deployed app's declared actions. In the other direction, people see what an agent did — which action, why, at what cost, and whether it can be undone — and developers see one timeline across UI, backend, agent and model steps. What an AI may see or call is always declared in source; nothing is exposed to an AI by default. The [platform plan](docs/proposals/corvid-platform-plan.md) applies this principle to the roadmap.
+
+Corvid is not a niche language for agent safety. Effects, provenance, approval, replay and budgets are what make it safe to hand those shared actions to an agent; they serve the goal rather than define it.
+
+How to apply:
 
 1. **For commodity features** (strings, lists, maps, bindings), "inventive" means picking the best known semantics and removing every papercut other languages kept — not exotic syntax. The ease bar dominates; coherence with the Python-flavored, effect-typed surface is what makes Corvid easiest. (Precedents: `x = 42` bindings with optional `x: Int = 42` annotation and no `let` keyword; `m[k] -> Option<V>` instead of KeyError/zero-values; `split("")` traps with a hint; Float→String always shows the decimal point.)
-2. **The invention budget concentrates on the moat**: effects, provenance, approval, replay, budgets. Commodity features must **compose** with the moat — e.g. cost analysis covers assignment-target index expressions so `@budget` stays sound; builtin methods are pure so replay stays deterministic; no method path may silently launder `Grounded<T>`.
+2. **The invention budget goes to what lets a developer build the whole application**: shared typed actions across UI, backend and agents first, then the guarantees that make agent access safe — effects, provenance, approval, replay, budgets. Judge every proposal by what it lets a developer build. Every feature must **compose** with those guarantees — e.g. cost analysis covers assignment-target index expressions so `@budget` stays sound; builtin methods are pure so replay stays deterministic; no method path may silently launder `Grounded<T>`.
 3. **Safety choices that remove failure modes count as both "powerful" and "easier"** — checked arithmetic everywhere, compile-time gates over runtime surprises.
 4. Record the rationale per slice in `ROADMAP.md` and `dev-log.md`. No per-decision escalation needed; decide against these criteria and write it down.
 
@@ -84,7 +94,7 @@ Every new invention ships with public proof at the same time as the code. A feat
 
 Before an invention slice is complete, it must include:
 
-- A README catalog entry or an explicit update explaining why the existing entry already covers it.
+- A row in the README's invention table and an entry in [`docs/reference/invention-catalog.md`](docs/reference/invention-catalog.md), or an explicit update explaining why an existing entry already covers it.
 - A `corvid tour --topic <name>` demo whose source compiles through the normal driver pipeline.
 - A `docs/reference/inventions.md` proof-matrix row with shipped status, runnable command, test coverage, spec link, and explicit non-scope.
 - A spec or reference-doc link that defines the behavior.

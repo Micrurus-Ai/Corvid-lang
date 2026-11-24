@@ -1,4 +1,4 @@
-//! B01 â€” `T.from_json(text)`, `T.from_json_strict(text)` and
+//! B01 - `T.from_json(text)`, `T.from_json_strict(text)` and
 //! `value.to_json()` through the public JSON mapping, compiled and run
 //! as real programs. The mapping itself is unit-tested in
 //! `corvid_vm::public_json`; these pin the language surface: typing,
@@ -261,4 +261,127 @@ fn every_reserved_method_name_is_a_built_in() {
             "`{name}` is reserved for extend methods but the method table does not offer it"
         );
     }
+}
+
+// ----- Types declared in another module ----------------------------
+
+const MODELS: &str = "
+public type Address:
+    city: String
+
+public type Customer:
+    id: Int
+    address: Address
+    referrer: Option<Customer>
+
+public type Customers = List<Customer>
+";
+
+/// Compile `main` next to a `models.cor` holding [`MODELS`].
+fn compile_with_models(main: &str) -> Result<corvid_ir::IrFile, Vec<Diagnostic>> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("models.cor"), MODELS).unwrap();
+    let main_path = dir.path().join("main.cor");
+    std::fs::write(&main_path, main).unwrap();
+    corvid_driver::compile_to_ir_with_config_at_path(main, &main_path, None)
+}
+
+async fn run_with_models(main: &str) -> String {
+    let ir = compile_with_models(main).unwrap_or_else(|errors| panic!("source must compile: {errors:#?}"));
+    let out = run_ir_with_runtime(&ir, None, vec![], &Runtime::builder().build())
+        .await
+        .expect("program must run");
+    run_text(out)
+}
+
+const CUSTOMER_JSON: &str = r#"{\"id\": 4, \"address\": {\"city\": \"Kampala\"}, \"referrer\": {\"id\": 1, \"address\": {\"city\": \"Gulu\"}, \"referrer\": null}}"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_type_imported_by_name_decodes_and_encodes() {
+    let out = run_with_models(&format!(
+        r#"import "./models" use Customer
+
+agent main() -> String:
+    return match Customer.from_json("{CUSTOMER_JSON}"):
+        Ok(customer) -> customer.address.city + " " + customer.to_json()
+        Err(problem) -> problem.message
+"#
+    ))
+    .await;
+    assert_eq!(
+        out,
+        r#"Kampala {"address":{"city":"Kampala"},"id":4,"referrer":{"address":{"city":"Gulu"},"id":1,"referrer":null}}"#
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_type_reached_through_a_module_alias_decodes() {
+    let out = run_with_models(&format!(
+        r#"import "./models" as m
+
+agent referrer_city(customer: m.Customer) -> String:
+    return match customer.referrer:
+        Some(referrer) -> referrer.address.city
+        None -> "no referrer"
+
+agent main() -> String:
+    return match m.Customer.from_json("{CUSTOMER_JSON}"):
+        Ok(customer) -> referrer_city(customer)
+        Err(problem) -> problem.message
+"#
+    ))
+    .await;
+    assert_eq!(out, "Gulu");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_local_alias_over_an_imported_type_decodes_a_list_with_located_errors() {
+    let out = run_with_models(
+        r#"import "./models" as m
+
+type Customers = List<m.Customer>
+
+agent main() -> String:
+    return match Customers.from_json("[{\"id\": 1, \"address\": {\"city\": 5}}]"):
+        Ok(customers) -> "decoded"
+        Err(problem) -> problem.path + " | " + problem.expected
+"#,
+    )
+    .await;
+    assert_eq!(out, "[0].address.city | String");
+}
+
+/// Aliases declared in another module are not expanded in any type
+/// position yet, so `from_json` on one is refused with the local
+/// alias to write instead, rather than decoding the wrong shape.
+#[test]
+fn an_alias_declared_in_another_module_is_refused_with_the_local_spelling() {
+    let errors = compile_with_models(
+        "import \"./models\" use Customers\n\nagent main(text: String) -> Bool:\n    return Customers.from_json(text).is_ok()\n",
+    )
+    .expect_err("an imported alias target must be refused");
+    assert!(
+        errors.iter().any(|e| e.message.contains("alias declared in another module")
+            && e.hint.as_deref().is_some_and(|hint| hint.contains("type Customers = ..."))),
+        "expected the alias refusal with a local-alias hint, got {errors:#?}"
+    );
+}
+
+#[test]
+fn an_imported_type_without_a_json_form_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("models.cor"),
+        "public type Cited:\n    claim: Grounded<String>\n",
+    )
+    .unwrap();
+    let main = "import \"./models\" use Cited\n\nagent main(text: String) -> Bool:\n    return Cited.from_json(text).is_ok()\n";
+    let main_path = dir.path().join("main.cor");
+    std::fs::write(&main_path, main).unwrap();
+    let errors = corvid_driver::compile_to_ir_with_config_at_path(main, &main_path, None)
+        .expect_err("decoding Grounded data from an imported type must be refused");
+    assert!(
+        errors.iter().any(|e| e.message.contains("field `Cited.claim`") && e.message.contains("Grounded")),
+        "expected the refusal to name the imported field, got {errors:#?}"
+    );
 }

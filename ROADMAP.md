@@ -4,6 +4,8 @@ Frontend implementation follows the [ordered browser frontend queue](docs/fronte
 
 Backend and AI implementation follows the [ordered backend and AI queue](docs/backend-ai-roadmap.md#ordered-tasks). Its target is parity with what developers build in Python and TypeScript, through built-in capability and typed interoperability together.
 
+The [platform plan](docs/proposals/corvid-platform-plan.md), adopted for backend and AI on 2026-11-23, organizes the next work around one principle: the application and the AI can always see each other, within what the author declares. It adds backend and AI tasks B21 to B43, moves B09 to B11 ahead of B02 to B08, and proposes frontend tasks F-P1 to F-P6 for frontend development to accept into its own queue.
+
 After verifying each completed roadmap task, commit its implementation, tests and learning-file updates together, push the commit to `corvid/roadmap-tasks`, and verify the commit on GitHub. Publication of releases and external deployment require separate authorization.
 
 ## Active task queue

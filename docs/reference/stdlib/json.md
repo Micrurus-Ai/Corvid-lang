@@ -80,6 +80,14 @@ agent count(text: String) -> Int:
         Err(problem) -> 0
 ```
 
+A public type from another module is called the way it is imported:
+`Customer.from_json(text)` after `import "./models" use Customer`, or
+`m.Customer.from_json(text)` after `import "./models" as m`. An alias
+declared in another module is refused for now, because aliases from
+other modules are not expanded in any type position yet. Declare the
+alias in your own module instead, such as
+`type Customers = List<m.Customer>`.
+
 The checker refuses a call when the type has no JSON form in that
 direction, naming the field that prevents it. `from_json` refuses a
 type that contains `Grounded`, because JSON text cannot prove where a
@@ -92,8 +100,8 @@ removes taint. An `extend` block cannot declare a method named
 The methods are pure, so `@deterministic` code may call them and replay
 reproduces their results. Encoding a `Float` that is NaN or infinite
 stops the program, because JSON has no form for it. The native target
-and decoding types imported from another module are not supported yet.
-Programs that use these methods run on the interpreter.
+is not supported yet, so programs that use these methods run on the
+interpreter.
 
 ## Public JSON mapping
 
