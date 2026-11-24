@@ -160,8 +160,8 @@ fn is_native_value_type(ty: &Type) -> bool {
         // B06 — exact decimals run on the interpreter until the native
         // Decimal slice.
         Type::Decimal => false,
-        // B06 — durations and instants likewise, until their native slice.
-        Type::Duration | Type::Instant => false,
+        // B06 — the time types likewise, until their native slice.
+        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.

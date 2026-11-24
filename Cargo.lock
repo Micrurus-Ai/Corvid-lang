@@ -888,6 +888,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-time",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -931,6 +932,7 @@ dependencies = [
  "corvid-decimal",
  "corvid-resolve",
  "corvid-syntax",
+ "corvid-time",
  "corvid-types",
 ]
 
@@ -1146,6 +1148,7 @@ name = "corvid-time"
 version = "0.0.1"
 dependencies = [
  "chrono",
+ "chrono-tz",
  "serde",
 ]
 

@@ -4,6 +4,50 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - The tz database version in traces (B06, 3b)
+
+Zone-dependent results are pure functions of the IANA database
+compiled into the binary, so replay recomputes them instead of reading
+them from the trace, and a newer Corvid with updated zone rules could
+answer differently. The trace header now records the database version
+(trace schema v3, `SchemaHeader.tzdb_version`, defaulted so v1 and v2
+traces read as "unknown").
+
+Replay does not refuse a trace over it: most traces never touch a
+zone, and refusing them would break replay for no reason. Instead the
+interpreter reports every zone-dependent operation (local fields,
+calendar moves, `to_string`, `parse_local_time`, `parse_zoned_time`),
+and when the databases differ or the recorded one is unknown, the
+first use of each operation in each zone prints a warning naming the
+operation, the zone and both versions. A record-then-replay test
+rewrites the header to an old version, to none, and back, and checks
+that the replay still matches, warns where zones are used, and stays
+silent for a program with no zones.
+
+## 2026-11-24 - Time zones on the interpreter (B06, third slice)
+
+`TimeZone` and `ZonedTime` join the B06 types, over the `chrono-tz`
+database the queue scheduler already used; the scheduler now looks
+zones up through `corvid-time`, so a program and a schedule cannot
+disagree about a zone name or a daylight-saving change.
+
+Under the simplicity rule the proposal's `TimeZone("Europe/Berlin")`
+went the way of `Decimal("19.99")`: a string literal where a zone is
+meant is one, checked at compile time with a "did you mean" from the
+IANA list. Local text is read with `parse_local_time(zone)`, named
+for what the text holds, and a time the zone skips or repeats is an
+`Err` that names both offsets. Calendar moves keep the wall-clock
+time, clamp to the end of the month, and follow RFC 5545 when they
+land in a gap or fold. The acceptance pair holds: one calendar day
+across Berlin's spring change is 23 hours, and 24 hours later is
+10:00. Zoned times have `==` but no `<`, because two of them in
+different zones can be the same instant.
+
+`zone` turned out to be a keyword (the schedule declaration's), so
+the accessor is `time_zone()` and the roadmap records making the
+keyword contextual. Recording the database version in trace headers
+touches every tier's trace writer, so it is its own increment.
+
 ## 2026-11-24 - Durations and instants on the interpreter (B06, second slice)
 
 `Duration` and `Instant` are new primitive types, with every rule in a

@@ -49,6 +49,13 @@ pub enum TraceEvent {
         /// sidecar — the trace is self-describing.
         #[serde(default)]
         source_path: Option<String>,
+        /// B06 — the IANA time zone database the recording binary was
+        /// built with, such as `2025b`. Zone rules change between
+        /// versions, so replay compares it with its own and warns at
+        /// each zone-dependent operation when they differ. `None` for
+        /// pre-schema-v3 traces, read as "unknown" rather than refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tzdb_version: Option<String>,
         ts_ms: u64,
         run_id: String,
     },

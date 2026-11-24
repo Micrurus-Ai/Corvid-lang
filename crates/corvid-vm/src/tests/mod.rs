@@ -20,6 +20,7 @@ mod parallel;
 mod regex;
 mod decimal;
 mod time;
+mod time_zones;
 mod test_runner;
 mod text;
 

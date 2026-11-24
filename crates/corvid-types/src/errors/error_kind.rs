@@ -87,6 +87,9 @@ pub enum TypeErrorKind {
     /// B06 — a `Decimal` division or remainder by the literal zero.
     DecimalDivisionByZero,
 
+    /// B06 — a string literal in a `TimeZone` slot that names no IANA zone.
+    UnknownTimeZone { name: String, suggestion: Option<String> },
+
     /// B06 — an operator that does not apply to the time types involved.
     TimeOperatorMismatch { left: String, right: String, hint: String },
 
@@ -625,6 +628,9 @@ impl TypeErrorKind {
                 format!("a `Decimal` rounds to between 0 and 28 places, not {places}")
             }
             Self::DecimalDivisionByZero => "this `Decimal` division is by zero".into(),
+            Self::UnknownTimeZone { name, .. } => {
+                format!("`{name}` is not a time zone in the IANA database")
+            }
             Self::TimeOperatorMismatch { left, right, .. } => {
                 format!("this operator does not combine `{left}` and `{right}`")
             }
@@ -1079,10 +1085,16 @@ impl TypeErrorKind {
                 "places is the number of digits after the point, from 0 to 28".into(),
             ),
             Self::DecimalDivisionByZero => Some("divide by a non-zero value".into()),
+            Self::UnknownTimeZone { suggestion: Some(suggestion), .. } => Some(format!("did you mean `{suggestion}`?")),
+            Self::UnknownTimeZone { suggestion: None, .. } => Some(
+                "use an IANA zone name such as `Europe/Berlin` or `America/New_York`; for a name chosen at run time, use `parse_time_zone()`".into(),
+            ),
             Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::PendingJsonFormAtBoundary { type_name, .. } => Some(match type_name.as_str() {
                 "Decimal" => "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
                 "Duration" => "carry it as a String with `span.to_string()` and read it back with `parse_duration()`".into(),
+                "TimeZone" => "carry it as a String with `zone.to_string()` and read it back with `parse_time_zone()`".into(),
+                "ZonedTime" => "carry it as a String with `at.to_string()` and read it back with `parse_zoned_time()`".into(),
                 _ => "carry it as a String with `at.to_string()` and read it back with `parse_instant()`".into(),
             }),
             Self::UnknownField { struct_name, field } => Some(format!(

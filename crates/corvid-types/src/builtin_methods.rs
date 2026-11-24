@@ -414,6 +414,39 @@ pub enum BuiltinMethodKind {
     StringParseDuration,
     /// `String.parse_instant() -> Result<Instant, String>` — RFC 3339.
     StringParseInstant,
+    /// `Instant.in_zone(zone: TimeZone) -> ZonedTime` — always succeeds.
+    InstantInZone,
+    /// `ZonedTime.<field>() -> Int` — `year`, `month`, `day`, `hour`,
+    /// `minute`, `second`, `nanosecond`, `weekday` (1 = Monday) and
+    /// `offset_seconds`, from `corvid_time::ZonedField`.
+    ZonedTimeField(corvid_time::ZonedField),
+    /// `ZonedTime.time_zone() -> TimeZone` (`zone` is a keyword).
+    ZonedTimeZone,
+    /// `ZonedTime.instant() -> Instant`.
+    ZonedTimeInstant,
+    /// `ZonedTime.add_days(n: Int) -> ZonedTime` — the same local time
+    /// on another calendar day.
+    ZonedTimeAddDays,
+    /// `ZonedTime.add_months(n: Int) -> ZonedTime` — clamped to the
+    /// month's last day.
+    ZonedTimeAddMonths,
+    /// `ZonedTime.add_years(n: Int) -> ZonedTime`.
+    ZonedTimeAddYears,
+    /// `ZonedTime.with_zone(zone: TimeZone) -> ZonedTime` — the same
+    /// instant in another zone.
+    ZonedTimeWithZone,
+    /// `ZonedTime.to_string() -> String` — RFC 9557.
+    ZonedTimeToString,
+    /// `TimeZone.to_string() -> String` — the IANA name.
+    TimeZoneToString,
+    /// `String.parse_time_zone() -> Result<TimeZone, String>`.
+    StringParseTimeZone,
+    /// `String.parse_zoned_time() -> Result<ZonedTime, String>` — RFC 9557.
+    StringParseZonedTime,
+    /// `String.parse_local_time(zone: TimeZone) -> Result<ZonedTime,
+    /// String>` — a wall-clock time; a skipped or repeated local time
+    /// is an `Err` naming both offsets.
+    StringParseLocalTime,
 }
 
 impl BuiltinMethodKind {
@@ -471,6 +504,19 @@ impl BuiltinMethodKind {
                 | InstantFromEpochMilliseconds
                 | StringParseDuration
                 | StringParseInstant
+                | InstantInZone
+                | ZonedTimeField(_)
+                | ZonedTimeZone
+                | ZonedTimeInstant
+                | ZonedTimeAddDays
+                | ZonedTimeAddMonths
+                | ZonedTimeAddYears
+                | ZonedTimeWithZone
+                | ZonedTimeToString
+                | TimeZoneToString
+                | StringParseTimeZone
+                | StringParseZonedTime
+                | StringParseLocalTime
         )
     }
 
@@ -690,6 +736,35 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         ),
         (Type::Instant, "epoch_milliseconds") => sig(InstantEpochMilliseconds, vec![], Type::Int),
         (Type::Instant, "to_string") => sig(InstantToString, vec![], Type::String),
+        (Type::Instant, "in_zone") => sig(InstantInZone, vec![Type::TimeZone], Type::ZonedTime),
+        (Type::ZonedTime, method) if corvid_time::ZonedField::from_name(method).is_some() => sig(
+            ZonedTimeField(corvid_time::ZonedField::from_name(method).expect("checked by the guard")),
+            vec![],
+            Type::Int,
+        ),
+        (Type::ZonedTime, "time_zone") => sig(ZonedTimeZone, vec![], Type::TimeZone),
+        (Type::ZonedTime, "instant") => sig(ZonedTimeInstant, vec![], Type::Instant),
+        (Type::ZonedTime, "add_days") => sig(ZonedTimeAddDays, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "add_months") => sig(ZonedTimeAddMonths, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "add_years") => sig(ZonedTimeAddYears, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "with_zone") => sig(ZonedTimeWithZone, vec![Type::TimeZone], Type::ZonedTime),
+        (Type::ZonedTime, "to_string") => sig(ZonedTimeToString, vec![], Type::String),
+        (Type::TimeZone, "to_string") => sig(TimeZoneToString, vec![], Type::String),
+        (Type::String, "parse_time_zone") => sig(
+            StringParseTimeZone,
+            vec![],
+            Type::Result(Box::new(Type::TimeZone), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_zoned_time") => sig(
+            StringParseZonedTime,
+            vec![],
+            Type::Result(Box::new(Type::ZonedTime), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_local_time") => sig(
+            StringParseLocalTime,
+            vec![Type::TimeZone],
+            Type::Result(Box::new(Type::ZonedTime), Box::new(Type::String)),
+        ),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

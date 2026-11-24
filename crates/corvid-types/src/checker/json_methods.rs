@@ -229,7 +229,15 @@ impl<'a> Checker<'a> {
             // Tools and prompts carry time as its standard text on the
             // interpreter (RFC 3339, ISO 8601); the published mapping —
             // routes, `from_json`, SDKs — arrives with the JSON slice.
-            Type::Duration | Type::Instant if self.time_text_boundary => Ok(false),
+            Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime if self.time_text_boundary => Ok(false),
+            Type::TimeZone => Err(NoForm::pending(
+                "TimeZone",
+                "send `zone.to_string()` and read it back with `parse_time_zone()`",
+            )),
+            Type::ZonedTime => Err(NoForm::pending(
+                "ZonedTime",
+                "send `at.to_string()` and read it back with `parse_zoned_time()`",
+            )),
             Type::Duration => Err(NoForm::pending(
                 "Duration",
                 "send `span.to_string()` and read it back with `parse_duration()`",

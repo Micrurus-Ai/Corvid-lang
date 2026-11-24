@@ -60,12 +60,14 @@ The PR behavior-diff reviewer shipped in §14.8 is itself a `@deterministic` age
 Every run writes a newline-delimited JSON (`.jsonl`) trace. The first line is always a `SchemaHeader` carrying the `SCHEMA_VERSION` + run metadata; subsequent lines are event records.
 
 ```json
-{"type":"SchemaHeader","schema_version":3,"run_id":"2026-04-22-ab12","ts_ms":1745000000000,"source_path":"src/classify.cor"}
+{"kind":"schema_header","version":3,"writer":"corvid-vm","run_id":"2026-04-22-ab12","ts_ms":1745000000000,"source_path":"src/classify.cor","tzdb_version":"2025b"}
 {"type":"RunStarted","ts_ms":1745000000001,"run_id":"2026-04-22-ab12","agent":"classify_inbox","args":["hello"]}
 {"type":"LlmCall","ts_ms":1745000000002,"run_id":"2026-04-22-ab12","prompt":"classify","model":"claude-sonnet-4-6","args":["hello"]}
 {"type":"LlmResult","ts_ms":1745000000010,"run_id":"2026-04-22-ab12","prompt":"classify","model":"claude-sonnet-4-6","result":"positive"}
 {"type":"RunCompleted","ts_ms":1745000000011,"run_id":"2026-04-22-ab12","ok":true,"result":"positive"}
 ```
+
+`tzdb_version` (schema v3, B06) names the IANA time zone database the recording binary was built with. Zone-dependent results, such as a local hour, a calendar move or reading a local time, are pure functions of that database, so replay recomputes them rather than reading them from the trace. When the replaying binary's database differs from the recording's, or the trace predates the field, replay still runs. The first time each zone-dependent operation runs in each zone, it prints a warning naming the operation, the zone and both versions, and `Runtime::replay_zone_rules_warnings` returns the same list. A trace that touches no zone produces no warning, whatever its database.
 
 `SCHEMA_VERSION` is monotonically increasing; the runtime's `validate_supported_schema` rejects traces older than `MIN_SUPPORTED_SCHEMA_VERSION` with a typed error so a future compiler can refuse to replay a stale trace instead of mis-substituting. Implementation reference: [crates/corvid-trace-schema/src/event.rs](../../crates/corvid-trace-schema/src/event.rs).
 

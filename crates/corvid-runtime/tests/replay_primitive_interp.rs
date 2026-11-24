@@ -127,6 +127,7 @@ fn empty_trace(path: &Path, writer: &str) {
                 writer: writer.to_string(),
                 commit_sha: None,
                 source_path: None,
+                tzdb_version: None,
                 ts_ms: 0,
                 run_id: "r-empty".into(),
             },

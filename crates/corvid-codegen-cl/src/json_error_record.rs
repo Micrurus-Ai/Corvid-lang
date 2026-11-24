@@ -75,6 +75,8 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::Decimal
         | Type::Duration
         | Type::Instant
+        | Type::TimeZone
+        | Type::ZonedTime
         | Type::Unknown => false,
     }
 }

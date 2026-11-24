@@ -199,6 +199,7 @@ mod tests {
                 writer: WRITER_INTERPRETER.into(),
                 commit_sha: None,
                 source_path: Some("demo.cor".into()),
+                tzdb_version: None,
                 ts_ms: 1,
                 run_id: run_id.into(),
             },

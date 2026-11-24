@@ -21,6 +21,9 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.parse_decimal() -> Result<Decimal, String>`
 - `String.parse_duration() -> Result<Duration, String>`
 - `String.parse_instant() -> Result<Instant, String>`
+- `String.parse_time_zone() -> Result<TimeZone, String>`
+- `String.parse_zoned_time() -> Result<ZonedTime, String>`
+- `String.parse_local_time(zone: TimeZone) -> Result<ZonedTime, String>`
 - `String.encode_base64() -> String`
 - `String.decode_base64() -> Result<String, String>`
 - `String.encode_base64_url() -> String`
@@ -95,6 +98,24 @@ A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19
 - `Instant.from_epoch_milliseconds(n: Int) -> Instant`
 - `Instant.epoch_milliseconds() -> Int`
 - `Instant.to_string() -> String`
+- `Instant.in_zone(zone: TimeZone) -> ZonedTime`
+
+## ZonedTime
+
+- `ZonedTime.year() -> Int`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `weekday()`, `offset_seconds()`
+- `ZonedTime.time_zone() -> TimeZone`
+- `ZonedTime.instant() -> Instant`
+- `ZonedTime.add_days(n: Int) -> ZonedTime`
+- `ZonedTime.add_months(n: Int) -> ZonedTime`
+- `ZonedTime.add_years(n: Int) -> ZonedTime`
+- `ZonedTime.with_zone(zone: TimeZone) -> ZonedTime`
+- `ZonedTime.to_string() -> String`
+
+## TimeZone
+
+- `TimeZone.to_string() -> String`
+
+A string literal where a `TimeZone` is meant is a zone the compiler checks: `at.in_zone("Europe/Berlin")`. See [Time zones](stdlib/time.md#time-zones).
 
 Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` reads the clock. See [Durations and instants](stdlib/time.md#durations-and-instants).
 

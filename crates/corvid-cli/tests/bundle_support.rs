@@ -551,6 +551,7 @@ fn write_classify_trace(
             writer: WRITER_NATIVE.to_string(),
             commit_sha: None,
             source_path: Some(source_path.to_string()),
+            tzdb_version: None,
             ts_ms: 0,
             run_id: run_id.clone(),
         },
