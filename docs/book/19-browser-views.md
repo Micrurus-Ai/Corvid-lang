@@ -932,6 +932,23 @@ Select **Allow web search** to reveal the search result limit. Clearing the chec
 
 An opted-in assistant supplies a complete record in one call. For example, `{"profile":{"name":"Scout"},"tools":{"web_search":true,"search_limit":5},"mode":"Scheduled","interval_minutes":15,"retries":3}` updates every control and the preview together. Invalid values leave the committed record intact. The editor keeps its values in browser memory until reload. A run mode entered in this example represents a setting. Connecting a scheduler to it is application code.
 
+### Derive two views from a reading plan
+
+The reading plan editor shows a time estimate and a list of page notes. Both read the same `ReadingPlan` record. Change the page count to add or remove pages, select **Review even pages only** to filter them, or select **Newest first** to reverse their order. A note on a page that stays in the list keeps its input element. Removing that page discards its note. [Reading plan](../../examples/reading_plan/src/main.cor)
+
+```corvid
+minutes = ui.derived_value("reading_minutes", [bind plan.pages])
+reminder = ui.conditional_view("needs_break", [bind plan.pages, bind plan.even_only], [ui.text("Schedule a break")])
+fields = [bind plan.pages, bind plan.even_only, bind plan.newest_first]
+notes = ui.projected_rows("Page notes", "visible_pages", "page_number", fields, [
+    ui.row_key(), ui.text_field("Note", "note", "")
+])
+```
+
+Place these views inside `ui.local_selection` on an interactive page. Define the named agents in `src/events.cor`. Each receives the current field values in the order supplied. For example, `needs_break(pages: Int, even_only: Bool) -> Bool` evaluates a compound condition. The sessions output uses a guarded `match` on the page count. For the list, `visible_pages` returns the count and `page_number` takes one additional zero-based index and returns the stable key shown by `ui.row_key()`. [Reading plan projections](../../examples/reading_plan/src/events.cor)
+
+Synchronous edits update the record immediately. The projections render the latest values together at the next microtask checkpoint. Each mounted editor owns its record. Removing a projection unsubscribes it, and reattaching it reads the current record.
+
 ### Edit and reorder a list of agents
 
 Open `/agents` in the packaged agent settings example. Each row starts with a record from the application's typed list. The browser keeps its editable values and position until reload.

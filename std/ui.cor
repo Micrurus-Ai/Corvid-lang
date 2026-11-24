@@ -489,6 +489,23 @@ public fn record_text(pattern: String) -> View:
 public fn value(field: String) -> View:
     return record_text("{" + field + "}")
 
+# Evaluate a browser export against the listed fields of the surrounding record.
+fn record_projection(handler: String, fields: List<String>, attributes: String, content: String) -> View:
+    return View("<corvid-record-projection data-handler=\"" + escaped(handler) + "\" data-fields=\"" + escaped(fields.join(" ")) + "\"" + attributes + ">" + content + "</corvid-record-projection>")
+
+public fn derived_value(handler: String, fields: List<String>) -> View:
+    return record_projection(handler, fields, "", "<output></output>")
+
+public fn conditional_view(predicate: String, fields: List<String>, content: List<View>) -> View:
+    return record_projection(predicate, fields, " hidden data-condition", children(content))
+
+public fn projected_rows(label: String, count: String, key_at: String, fields: List<String>, row: List<View>) -> View:
+    content = "<ol aria-label=\"" + escaped(label) + "\"></ol><template><li>" + children(row) + "</li></template>"
+    return record_projection(count, fields, " data-key-at=\"" + escaped(key_at) + "\"", content)
+
+public fn row_key() -> View:
+    return View("<span data-projected-key></span>")
+
 public fn boolean_children(field: String, content: List<View>) -> View:
     return View("<div hidden data-boolean-field=\"" + escaped(field) + "\">" + children(content) + "</div>")
 

@@ -358,6 +358,12 @@ fn emit_js_loader(
     out.push_str("  };\n");
     out.push_str("}\n");
     if module_name == "events" {
+        let signatures: Vec<_> = agents.iter().map(|agent| {
+            let params: Vec<_> = agent.params.iter().map(|param| wasm_boundary_kind(&param.ty)).collect();
+            (&agent.name, (params, wasm_boundary_kind(&agent.return_ty)))
+        }).collect();
+        let signatures = serde_json::to_string(&signatures).expect("serialize projection signatures");
+        out.push_str(&format!("const projectionSignatures = new Map({signatures});\n"));
         for (name, ty) in [("intStateHandlers", Type::Int), ("textStateHandlers", Type::String)] {
             let bindings: Vec<_> = agents.iter()
                 .filter(|agent| agent.params.len() == 1 && agent.params[0].ty == ty && agent.return_ty == ty)
@@ -388,6 +394,7 @@ fn emit_js_loader(
             out.push_str(&format!("const {name} = new Map({bindings});\n"));
         }
         out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
+        out.push_str(include_str!("record_projections.js"));
         out.push_str(include_str!("form_controls.js"));
         out.push_str("}\n");
         out.push_str(include_str!("browser_controls.js"));

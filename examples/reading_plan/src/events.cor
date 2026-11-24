@@ -1,0 +1,25 @@
+agent reading_minutes(pages: Int) -> Int:
+    return pages * 3
+
+agent needs_break(pages: Int, even_only: Bool) -> Bool:
+    return pages > 3 and not even_only
+
+agent review_sessions(pages: Int) -> Int:
+    return match pages:
+        0 -> 0
+        _ if pages <= 3 -> 1
+        _ -> 2
+
+agent visible_pages(pages: Int, even_only: Bool, newest_first: Bool) -> Int:
+    if even_only:
+        return pages / 2
+    return pages
+
+agent page_number(pages: Int, even_only: Bool, newest_first: Bool, index: Int) -> Int:
+    if even_only:
+        if newest_first:
+            return (pages / 2 - index) * 2
+        return (index + 1) * 2
+    if newest_first:
+        return pages - index
+    return index + 1
