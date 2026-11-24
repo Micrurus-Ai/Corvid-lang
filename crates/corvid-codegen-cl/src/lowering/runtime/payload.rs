@@ -2,11 +2,11 @@ use super::*;
 
 /// Per-struct payload uses fixed 8-byte field slots for simple offset
 /// math. Tighter packing is a later optimization.
-pub(in crate::lowering) const STRUCT_FIELD_SLOT_BYTES: i32 = 8;
+pub(in crate::lowering) const STRUCT_FIELD_SLOT_BYTES: i32 = corvid_runtime::native_layout::SLOT_BYTES;
 
 /// Bytes per struct field when computing alloc size.
 pub(in crate::lowering) fn struct_payload_bytes(n_fields: usize) -> i64 {
-    (n_fields as i64) * (STRUCT_FIELD_SLOT_BYTES as i64)
+    corvid_runtime::native_layout::record_payload_bytes(n_fields)
 }
 
 pub(in crate::lowering) struct TracePayload {

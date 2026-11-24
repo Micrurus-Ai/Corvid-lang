@@ -54,13 +54,10 @@ const TYPEINFO_FLAG_REGION_ALLOCATABLE: u32 = 0x10;
 #[allow(dead_code)]
 const TYPEINFO_FLAG_REUSE_SHAPE_HINT: u32 = 0x20;
 
-pub const RESULT_PAYLOAD_BYTES: i64 = 16;
-pub const RESULT_TAG_OFFSET: i32 = 0;
-pub const RESULT_PAYLOAD_OFFSET: i32 = 8;
-pub const RESULT_TAG_OK: i64 = 0;
-pub const RESULT_TAG_ERR: i64 = 1;
-pub const OPTION_PAYLOAD_BYTES: i64 = 8;
-pub const OPTION_PAYLOAD_OFFSET: i32 = 0;
+pub use corvid_runtime::native_layout::{
+    OPTION_PAYLOAD_BYTES, OPTION_PAYLOAD_OFFSET, RESULT_PAYLOAD_BYTES, RESULT_PAYLOAD_OFFSET, RESULT_TAG_ERR,
+    RESULT_TAG_OFFSET, RESULT_TAG_OK,
+};
 
 /// Emit `corvid_typeinfo_<TypeName>` as a .rodata data symbol with
 /// function-pointer relocations to the type's destroy_fn (if any)
