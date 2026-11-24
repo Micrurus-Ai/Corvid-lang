@@ -1,0 +1,25 @@
+import "std:ui" as ui
+
+type TrailSearch:
+    trail: String
+
+fn report_page() -> String:
+    trail = ui.required_combobox("Trail", "trail", "trail-options", ["River walk", "Ridge path", "Lake loop"])
+    search = ui.named_query_form("Find a trail", "/trail", [trail, ui.submit("Find trail")])
+    editor = ui.rich_text_editor("Field notes", [ui.inline_text("Trail conditions")])
+    notes = ui.modal_dialog("field-journal", "Edit field notes", "Field journal",
+        [editor, ui.file_drop_field("Choose or drop photos", "photos")], "Close journal")
+    return ui.interactive_page("Trail report", [ui.h1("Trail report"), search, notes])
+
+test suggestions_escape_text_and_reference_the_named_list:
+    field = ui.required_combobox("Route", "route", "route-list", ["Bridge & creek", "<summit>"])
+    assert field.html.contains("aria-controls=\"route-list\"")
+    assert field.html.contains(">Bridge &amp; creek</li>")
+    assert field.html.contains(">&lt;summit&gt;</li>")
+
+server trail_report:
+    route GET "/" -> html:
+        return report_page()
+
+    route GET "/trail" query TrailSearch -> html:
+        return ui.page("Trail", [ui.h1(query.trail)])

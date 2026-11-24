@@ -65,6 +65,10 @@ Use `ui.query_form(path, controls)` to submit named fields to an application rou
 
 To give the form a landmark name, use `ui.named_query_form("Packing note preview", "/guide", [note_field, ui.submit("Preview")])`. The first argument names the whole form. Keep the field’s own label so readers can also identify the individual control.
 
+In an interactive page, use `ui.required_combobox("Trail", "trail", "trail-options", ["River walk", "Ridge path"])` inside a native form. Type to filter suggestions, use the arrow keys to highlight one, then press Enter to accept it. Enter again submits the form. Free text is valid. Give each list a unique ID.
+
+The [trail report](../../examples/trail_report/src/main.cor) also opens a field journal with `ui.modal_dialog("journal", "Edit notes", "Field journal", content, "Close journal")`. Give each dialog its own ID. In browsers supporting HTML button commands, opening it moves focus inside and closing it returns focus to its opener. Compose `ui.rich_text_editor("Notes", [ui.inline_text("Trail conditions")])` for a browser-editable draft with native selection, formatting and undo. Add `ui.file_drop_field("Choose or drop photos", "photos")` for a labeled multiple-file picker that also accepts drops on its label.
+
 To show a hint when scripting is disabled, place `ui.no_script("Select Preview to reload the guide with your note.")` in the form's list of views. The server includes the escaped message in a `noscript` paragraph. The browser decides whether to display it.
 
 When the link label includes markup, pass inline views in reading order. For example, `ui.link_with_content("#route", [ui.inline_text("Route, "), ui.abbreviation("3 km", "3 kilometres")])` makes the whole label clickable. Include any spaces between children in the text.

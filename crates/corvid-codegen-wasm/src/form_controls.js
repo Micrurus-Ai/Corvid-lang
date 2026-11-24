@@ -1,4 +1,107 @@
 // This module is loaded by interactive pages, including pages with no Wasm exports.
+if (!customElements.get("corvid-combobox")) {
+  customElements.define("corvid-combobox", class extends HTMLElement {
+    #listeners;
+
+    connectedCallback() {
+      queueMicrotask(() => {
+        if (!this.isConnected || this.#listeners) return;
+        const field = this.querySelector("input");
+        const list = this.querySelector('[role="listbox"]');
+        const alert = this.querySelector('[role="alert"]');
+        if (!field || !list || !alert) return;
+        this.#listeners = new AbortController();
+        const listeners = {signal: this.#listeners.signal};
+        const options = Array.from(list.children);
+        let active;
+        let composing = false;
+        function highlight(option) {
+          active?.setAttribute("aria-selected", "false");
+          active = option;
+          if (active) {
+            active.setAttribute("aria-selected", "true");
+            field.setAttribute("aria-activedescendant", active.id);
+            active.scrollIntoView({block: "nearest"});
+          } else field.removeAttribute("aria-activedescendant");
+        }
+        function expand(open) {
+          highlight(null);
+          list.hidden = !open;
+          field.setAttribute("aria-expanded", String(open));
+        }
+        function filter() {
+          const prefix = field.value.toLocaleLowerCase();
+          for (const option of options) {
+            option.hidden = !option.textContent.toLocaleLowerCase().startsWith(prefix);
+          }
+          expand(options.some(option => !option.hidden));
+        }
+        function choose(option) {
+          field.value = option.textContent;
+          field.dispatchEvent(new Event("input", {bubbles: true}));
+          expand(false);
+          field.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        field.addEventListener("compositionstart", () => { composing = true; expand(false); }, listeners);
+        field.addEventListener("compositionend", () => { composing = false; filter(); }, listeners);
+        field.addEventListener("invalid", () => {
+          field.setAttribute("aria-invalid", "true");
+          alert.textContent = field.validationMessage;
+        }, listeners);
+        field.addEventListener("input", event => {
+          if (field.validity.valid) {
+            field.removeAttribute("aria-invalid");
+            alert.textContent = "";
+          }
+          if (!composing && !event.isComposing) filter();
+        }, listeners);
+        field.addEventListener("click", filter, listeners);
+        field.addEventListener("blur", () => expand(false), listeners);
+        field.addEventListener("keydown", event => {
+          if (composing || event.isComposing || event.defaultPrevented) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            if (list.hidden) filter();
+            const visible = options.filter(option => !option.hidden);
+            if (!visible.length) return;
+            const index = visible.indexOf(active);
+            const next = event.key === "ArrowDown" ? (index + 1) % visible.length :
+              (index <= 0 ? visible.length - 1 : index - 1);
+            highlight(visible[next]);
+          } else if (event.key === "Enter" && active) {
+            choose(active);
+          } else if (event.key === "Escape" && !list.hidden) {
+            expand(false);
+          } else return;
+          event.preventDefault();
+        }, listeners);
+        list.addEventListener("pointerdown", event => event.preventDefault(), listeners);
+        list.addEventListener("click", event => {
+          if (options.includes(event.target) && !event.target.hidden) choose(event.target);
+        }, listeners);
+        expand(false);
+      });
+    }
+
+    disconnectedCallback() {
+      this.#listeners?.abort();
+      this.#listeners = undefined;
+    }
+  });
+}
+
+for (const label of document.querySelectorAll("label[data-corvid-file-drop]")) {
+  label.addEventListener("dragover", event => {
+    if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+  });
+  label.addEventListener("drop", event => {
+    if (!event.dataTransfer?.files.length || label.control.disabled || event.defaultPrevented) return;
+    event.preventDefault();
+    label.control.files = event.dataTransfer.files;
+    label.control.dispatchEvent(new Event("input", {bubbles: true}));
+    label.control.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+}
+
 if (!customElements.get("corvid-owned-element")) {
   customElements.define("corvid-owned-element", class extends HTMLElement {
     #waitingFor;
