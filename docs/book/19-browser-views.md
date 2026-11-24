@@ -131,6 +131,19 @@ fn trail_map() -> View:
 
 To show a visible caption below an image, use `ui.figure("Follow this marker to the lookout.", [marker])`, where `marker` is the image view. The image's alternative text describes the marker. The caption tells readers where it leads.
 
+### Draw a scalable SVG graphic
+
+This direction marker uses a 12-by-4 coordinate system. The shaft and arrowhead share those coordinates. Translating the arrowhead eight units to the right places it at the end of the shaft.
+
+```corvid-fragment
+fn direction_marker() -> ui.View:
+    shaft = ui.svg_path("M0 1 H8 V3 H0 Z", "")
+    arrowhead = ui.svg_path("M0 0 L4 2 L0 4 Z", "translate(8 0)")
+    return ui.svg_graphic("Trail continues east", "0 0 12 4", [shaft, arrowhead])
+```
+
+`ui.svg_graphic` renders an inline image at the width of its container. Give the whole graphic a name that conveys its meaning. The four numbers in the view box specify its left edge, top edge, width and height. Use `ui.svg_path` for each shape in paint order. Pass an empty transform to use the original coordinates.
+
 ### Attach application data to a group
 
 `ui.data_group` wraps child views in a `div` with a custom data attribute. Supply the name after `data-`. For example, `trail-id` produces `data-trail-id`. The name must contain at least one character and may use lowercase ASCII letters, digits and hyphens. An invalid name returns `Err`. The value can contain quotes or other text because Corvid escapes it.
