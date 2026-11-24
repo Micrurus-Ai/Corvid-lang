@@ -194,6 +194,28 @@ public fn grid(content: List<View>) -> View:
 public fn text_field(label: String, name: String, initial: String) -> View:
     return View("<label>" + escaped(label) + "<input type=\"text\" name=\"" + escaped(name) + "\" value=\"" + escaped(initial) + "\"></label>")
 
+public fn required_combobox(label: String, name: String, list_id: String, suggestions: List<String>) -> View:
+    options: List<String> = []
+    for suggestion in suggestions:
+        option_id = list_id + "-option-" + options.length().to_string()
+        options.append("<li role=\"option\" aria-selected=\"false\" id=\"" + escaped(option_id) + "\">" + escaped(suggestion) + "</li>")
+    list_ref = escaped(list_id)
+    field = "<label>" + escaped(label) + "<input type=\"text\" required autocomplete=\"off\" role=\"combobox\" aria-autocomplete=\"list\" aria-expanded=\"false\" aria-controls=\"" + list_ref + "\" aria-describedby=\"" + list_ref + "-error\" name=\"" + escaped(name) + "\"></label>"
+    choices = "<ul role=\"listbox\" aria-label=\"" + escaped(label) + "\" id=\"" + list_ref + "\" hidden>" + options.join("") + "</ul>"
+    return View("<corvid-combobox>" + field + choices + "<span role=\"alert\" id=\"" + list_ref + "-error\"></span></corvid-combobox>")
+
+public fn modal_dialog(id: String, opener: String, title: String, content: List<View>, close_label: String) -> View:
+    dialog_id = escaped(id)
+    trigger = "<button type=\"button\" command=\"show-modal\" commandfor=\"" + dialog_id + "\">" + escaped(opener) + "</button>"
+    dismiss = "<button type=\"button\" command=\"close\" commandfor=\"" + dialog_id + "\">" + escaped(close_label) + "</button>"
+    return View(trigger + "<dialog id=\"" + dialog_id + "\" aria-labelledby=\"" + dialog_id + "-title\"><h2 id=\"" + dialog_id + "-title\">" + escaped(title) + "</h2>" + children(content) + dismiss + "</dialog>")
+
+public fn file_drop_field(label: String, name: String) -> View:
+    return View("<label data-corvid-file-drop>" + escaped(label) + "<input type=\"file\" name=\"" + escaped(name) + "\" multiple></label>")
+
+public fn rich_text_editor(label: String, content: List<View>) -> View:
+    return View("<div contenteditable=\"true\" role=\"textbox\" aria-multiline=\"true\" aria-label=\"" + escaped(label) + "\">" + children(content) + "</div>")
+
 public fn checkbox_field(label: String, name: String, checked: Bool) -> View:
     return render_checkbox(label, name, "", checked)
 
