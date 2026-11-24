@@ -16,121 +16,17 @@ use crate::db::{DbHandleInner, DbValue};
 use crate::errors::RuntimeError;
 use crate::Runtime;
 use corvid_ast::DatabaseLocation;
-use corvid_types::Type;
 use serde_json::Value as J;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod migration;
 mod query;
+mod schema;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
-
-/// How a field's values are stored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColumnKind {
-    Integer,
-    Real,
-    Text,
-    /// A `Bool`, stored as 0 or 1.
-    Boolean,
-    /// Any other type, stored as its public JSON text.
-    Json,
-}
-
-impl ColumnKind {
-    /// The declared SQL type. Each kind has its own, so the stored
-    /// schema records how a column is stored and the migration planner
-    /// can see a change from `Int` to `Bool` or from `String` to a
-    /// JSON-stored type. `BOOLEAN` has SQLite's numeric affinity, which
-    /// keeps 0 and 1 as integers; `JSON TEXT` contains `TEXT`, so its
-    /// affinity is text and JSON such as `5` is never turned into a
-    /// number.
-    pub fn sql_type(self) -> &'static str {
-        match self {
-            Self::Integer => "INTEGER",
-            Self::Real => "REAL",
-            Self::Text => "TEXT",
-            Self::Boolean => "BOOLEAN",
-            Self::Json => "JSON TEXT",
-        }
-    }
-
-    /// The kind a stored column's declared type names, if Corvid
-    /// created it.
-    pub fn from_sql_type(sql_type: &str) -> Option<Self> {
-        Some(match sql_type.trim().to_ascii_uppercase().as_str() {
-            "INTEGER" => Self::Integer,
-            "REAL" => Self::Real,
-            "TEXT" => Self::Text,
-            "BOOLEAN" => Self::Boolean,
-            "JSON TEXT" => Self::Json,
-            _ => return None,
-        })
-    }
-}
-
-/// How a field of type `ty` is stored, and whether the column admits
-/// `NULL`. The interpreter and the migration planner both decide
-/// columns here. `Option<T>` is a nullable column of `T`'s kind, except
-/// when `T` is itself an `Option`: `Some(None)` and `None` would both be
-/// `NULL`, so a nested option is stored as JSON.
-pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
-    match ty {
-        Type::Tainted(inner) => column_kind(inner),
-        Type::Option(inner) => match untainted(inner) {
-            Type::Option(_) => (ColumnKind::Json, true),
-            inner => (column_kind(inner).0, true),
-        },
-        Type::Int => (ColumnKind::Integer, false),
-        Type::Float => (ColumnKind::Real, false),
-        Type::String => (ColumnKind::Text, false),
-        Type::Bool => (ColumnKind::Boolean, false),
-        _ => (ColumnKind::Json, false),
-    }
-}
-
-/// `ty` without `Tainted` wrappers; taint is tracked statically.
-pub fn untainted(mut ty: &Type) -> &Type {
-    while let Type::Tainted(inner) = ty {
-        ty = inner;
-    }
-    ty
-}
-
-/// A table's declared shape: its name, key and typed columns, with
-/// `revision` last, and the history clauses the migration planner reads.
-#[derive(Debug, Clone)]
-pub struct TableSchema {
-    pub name: String,
-    pub key: String,
-    pub columns: Vec<(String, Type)>,
-    /// `(field, old name)` for each `renamed from`.
-    pub renamed: Vec<(String, String)>,
-    /// Stored columns declared `retired`.
-    pub retired: Vec<String>,
-}
-
-/// The `CREATE TABLE` statement for a declared table.
-pub fn create_table_sql(table: &TableSchema) -> String {
-    create_table_named(table, &table.name)
-}
-
-/// [`create_table_sql`] under another name, for rebuilding a table.
-fn create_table_named(table: &TableSchema, name: &str) -> String {
-    let columns = table
-        .columns
-        .iter()
-        .map(|(name, ty)| {
-            let (kind, nullable) = column_kind(ty);
-            let key = if *name == table.key { " PRIMARY KEY" } else { "" };
-            let null = if nullable { "" } else { " NOT NULL" };
-            format!("    {} {}{key}{null}", quote(name), kind.sql_type())
-        })
-        .collect::<Vec<_>>()
-        .join(",\n");
-    format!("CREATE TABLE {} (\n{columns}\n);\n", quote(name))
-}
+pub use schema::{column_kind, create_table_sql, untainted, ColumnKind, TableSchema};
+use schema::{create_table_named, quote};
 
 /// One table as an operation sees it.
 #[derive(Debug, Clone, Copy)]
@@ -162,10 +58,6 @@ pub fn resolve_location(location: &DatabaseLocation) -> Result<String, RuntimeEr
             ))
         }),
     }
-}
-
-fn quote(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 impl Runtime {
