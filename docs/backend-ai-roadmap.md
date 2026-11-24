@@ -112,7 +112,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Decode public types from another module, written `Customer.from_json` after `use Customer` or `m.Customer.from_json` after `as m`. The checker and the IR lowerer share one function that decides which type a receiver names.
 - [x] Expand type aliases declared in another module in every type position. The checker records the type of every type reference, and IR lowering reads that table instead of resolving types a second time, which also fixed record fields typed with any alias lowering to an empty record.
 - [x] The ABI emitter reads the checker's table too, so the descriptor describes aliases and imported types exactly as the compiled program uses them. Its own resolver, which returned `Unknown` for every imported type, is deleted.
-- [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first. [Proposal](proposals/b01-json-field-keys.md)
+- [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first. [Proposal](proposals/json-field-keys.md)
 - [x] Retire the `decode_<Type>_from_json` tool convention in favour of `T.from_json`. Declaring such a tool is a compile error naming the replacement, and the book, tour and reference now use `from_json`. [Retired convention](reference/stdlib/json.md#retired-the-decode_type_from_json-tool-convention)
 - [x] Native decoding. `T.from_json` and `T.from_json_strict` compile to native code through the decoder the interpreter uses, now in `corvid-public-json`. The compiler embeds one decode plan per target type, naming the typeinfo of every shape the runtime allocates, so the runtime never decides a native layout. `JsonError` is an ordinary native record, so `problem.message` works in match arms. Parity tests compare both tiers and check that a failed decode releases what it built.
 - [x] Native encoding. `value.to_json()` walks the type instead of the value, through one encoder both tiers share, and compiles to native code using the plan decoding embeds. An empty map with non-String keys now encodes as `[]` and decodes back. `Grounded` values stay on the interpreter, because native code keeps no provenance to encode.
@@ -120,7 +120,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Swift, Kotlin and Python SDK models read and write the public JSON mapping: sum types in the wire shape, `Result`, maps with non-String keys as pairs, `null` for absent values, `JsonError` and the `Page` envelope. Kotlin `Int` fields are `Long`, as Corvid's `Int` is 64-bit. Tests run the generated Python and compile and run the generated Kotlin and Swift.
 - [ ] The Application Contract names field types as written in source, so a field typed with an alias (`orders: Orders`) names `Orders`, which no SDK declares. Name types from the checker's resolved types instead, as IR lowering does. The TypeScript client and the frontend read the contract, so agree the change with frontend development first.
 
-**B03 text and encoding** (in progress). [Proposal](proposals/b03-text-and-encoding.md)
+**B03 text and encoding** (in progress). [Proposal](proposals/text-and-encoding.md)
 
 - [x] Encoding and UUID parsing on the interpreter: base64 (standard and URL-safe), hex and URL-component encoders and decoders, and `parse_uuid`, all pure String methods backed by one `corvid-text` crate. Decoders return `Result` values and never trap. [Text and encoding](reference/text-and-encoding.md)
 - [x] Regular expressions on the interpreter: `contains_regex`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex`, with the pattern and a literal replacement checked at compile time, and the `RegexMatch` record with character positions and capture groups. [Regular expressions](reference/text-and-encoding.md#regular-expressions)
@@ -157,7 +157,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
 - [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
 
-**B09 typed persistence** (in progress). [Proposal](proposals/b09-typed-persistence.md) · [Reference](reference/tables.md)
+**B09 typed persistence** (in progress). [Proposal](proposals/typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
 - [x] P1b. Table operations are recorded in the trace as `table:<Table>.<op>` calls, and a replay serves reads and write outcomes from it without opening the database.

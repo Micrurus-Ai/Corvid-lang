@@ -414,7 +414,7 @@ knows it. `RegexMatch` is registered; `JsonError` is left for B01.
 
 ## 2026-11-24 - B03 text and encoding: encoders, decoders and UUID parsing
 
-[The proposal](docs/proposals/b03-text-and-encoding.md) settles the
+[The proposal](docs/proposals/text-and-encoding.md) settles the
 surface for all of B03, and this slice ships the first part on the
 interpreter: eight encoding methods and `parse_uuid`, all builtin
 `String` methods.
@@ -493,7 +493,7 @@ native target.
 
 ## 2026-11-24 - B09 typed persistence: the design
 
-[The proposal](docs/proposals/b09-typed-persistence.md) settles the
+[The proposal](docs/proposals/typed-persistence.md) settles the
 shape before any code. A `table` is a record type with a declared key
 and a database-maintained `revision`; a `database` block must name its
 engine, location and tables, because where data lives is a decision the
