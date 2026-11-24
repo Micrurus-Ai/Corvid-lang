@@ -1,8 +1,8 @@
-# Beyond LangChain, LangGraph and LangSmith
+# Beyond LangChain, LangGraph, LangSmith and LlamaIndex
 
 Readers: backend and AI development, and anyone judging whether an application built with LangChain or LangGraph is better built in Corvid.
 
-LangChain is the most widely used framework for LLM applications in Python and TypeScript. LangGraph builds stateful agents on it, and LangSmith traces and evaluates them. **The target is not parity. Every feature developers use from the three has a stronger Corvid version**, listed below with the task that delivers it. A row is done only when its stronger version works through the public toolchain with tests. Task B20 is the final check: a real LangGraph agent ported to Corvid passes its original tests with less code and fewer ways to fail.
+LangChain is the most widely used framework for LLM applications in Python and TypeScript. LangGraph builds stateful agents on it, LangSmith traces and evaluates them, and LlamaIndex specializes in connecting models to an application's data. **The target is not parity. Every feature developers use from the four has a stronger Corvid version**, listed below with the task that delivers it. A row is done only when its stronger version works through the public toolchain with tests. Task B20 is the final check: a real LangGraph agent ported to Corvid passes its original tests with less code and fewer ways to fail.
 
 ## Why Corvid can do each of these better
 
@@ -93,6 +93,33 @@ In the tables, **Shipped** means the stronger version works today. A task ID mea
 | Prompt management | Prompt hub | Prompts are code: versioned with the program, typed, and compared across recorded runs with `corvid trace-diff`. | Shipped |
 | OpenTelemetry | OpenTelemetry export | OpenTelemetry export from the runtime, with conformance verified. | Open audit item in the main roadmap |
 
+## LlamaIndex
+
+LlamaIndex focuses on connecting models to an application's own data. Corvid's stronger version of each of its features:
+
+| Feature | LlamaIndex | Corvid's stronger version | Status |
+| --- | --- | --- | --- |
+| Data connectors | LlamaHub connectors | Connectors whose records are typed and whose text is untrusted by default, so a poisoned page cannot steer a dangerous action. Built-in connectors cover Gmail, Slack, calendars, Microsoft 365, tasks and files; the rest come through typed interop. | Partial — B45, B02 |
+| Document parsing | LlamaParse | PDF, HTML and table parsing that keeps each passage's position, so a citation points at the page and table it came from. | B45 |
+| Chunking | Node parsers | Structure-aware splitting with positions kept for citations. | B45 |
+| Ingestion pipeline | Caching and deduplication | Re-indexing that skips unchanged documents by content hash, with stable citations and a recorded index version. | B45, B56 |
+| Vector indexes | `VectorStoreIndex` | Indexes whose type records the embedding model and dimension, so querying with the wrong model is a compile error. | B57 |
+| Knowledge and property graphs | `PropertyGraphIndex` | Graph indexes whose nodes and relations are declared types, extracted with typed prompts, each fact carrying its source. | B60 |
+| Hybrid, fusion, auto-merging and recursive retrieval | Retrievers | Retrieval strategies as typed, composable steps, costed and traced. | B17, B45 |
+| Rerankers and cutoffs | Node postprocessors | Declared reranking whose cost counts in the budget. | B17 |
+| Answer synthesis | Refine, tree summarize, compact | Synthesis strategies whose answers stay `Grounded`, with the sources of each part of the answer kept. | B61 |
+| Citations | `CitationQueryEngine` | Sources are part of the value's type, and an unsourced value cannot be returned as grounded. | Shipped |
+| Sub-questions and routing | Sub-question and router query engines | Decomposition and routing written as ordinary agent code with `match`, `parallel:` and B46 fan-out, budgeted as a whole. | Shipped for routing; fan-out B46 |
+| Text to SQL | NL-to-SQL query engine | Model-generated SQL is checked against the declared tables before it runs, read-only unless declared otherwise. | B31, B09 |
+| Dataframe questions | Pandas query engine | Questions answered over typed dataframes, with generated code run in a sandbox and checked against the schema. | B31, B52 |
+| Chat engines | Condense-question and context chat | Conversation history as `List<AiMessage>`, with retrieved context kept `Grounded`. | Shipped; retrieval context B61 |
+| Structured extraction | Pydantic programs, LlamaExtract | Typed prompt output with refinements and repair, plus document-scale extraction where each field records the passage it came from. | Shipped; source per field B61 |
+| Agents | Function-calling and ReAct agents | `ask ... allow ... within`, bounded and budgeted. | Shipped |
+| Workflows | Event-driven steps with typed events | Ordinary typed agent code with durable checkpoints, pause and resume, and human steps that appear in the application. | B13, B48 |
+| Faithfulness and relevancy evaluation | Evaluators | `eval` declarations with model-judged assertions, running in `corvid test` against recorded responses. | Shipped; in the build B49 |
+| Retrieval evaluation | Hit rate, MRR, generated datasets | Retrieval metrics computed from recorded queries and the documents that answered them, failing the build when they drop. | B62 |
+| Managed indexes | LlamaCloud | Indexes deployed with the application binary, or a declared external store; no hosted service is required. | B17, B43 |
+
 ## The ecosystem
 
 LangChain's largest advantage is its integrations: hundreds of model providers, vector stores, loaders and tools. Corvid does not wait to rebuild them. Typed Python interoperability on every target (B02, accepted by B07) and server-side npm interoperability (B08) let a Corvid program call any LangChain integration with checked types, and with effects, approval, taint and replay applied to each call. That already makes each integration safer to use from Corvid than from Python. Built-in versions follow for the integrations nearly every application needs.
@@ -113,6 +140,9 @@ LangChain's largest advantage is its integrations: hundreds of model providers, 
 - [ ] B48: approvals and editable proposals in the application without interface code (frontend proposal F-P7).
 - [ ] B49: evaluations in `corvid test` with recorded baselines.
 - [ ] B50: typed multi-agent handoffs with declared authority and budget shares.
-- [ ] B02, B07, B08: any LangChain integration callable from Corvid with checked types.
+- [ ] B60: knowledge and property graph indexes with declared node and relation types and a source for every fact.
+- [ ] B61: answer synthesis and document extraction that keep the sources of each part of the result.
+- [ ] B62: retrieval metrics from recorded queries that fail the build when they drop.
+- [ ] B02, B07, B08: any LangChain or LlamaIndex integration callable from Corvid with checked types.
 - [ ] B20: port a LangGraph agent; it passes the original's tests, and lines of code, change time and failure diagnostics are recorded against the original.
 - [ ] Publish a side-by-side example of the same agent in LangGraph and in Corvid once B13 lands.
