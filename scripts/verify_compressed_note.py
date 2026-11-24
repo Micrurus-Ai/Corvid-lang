@@ -58,7 +58,7 @@ def verify_browser(host, channel):
                 browser = playwright.chromium.launch(channel=channel)
                 page = browser.new_page()
                 page.goto(f"http://127.0.0.1:{server.server_port}")
-                field = page.get_by_label("Note", exact=True)
+                field = page.locator('textarea[name="note"]')
                 picker = page.get_by_label("Import a compressed note")
                 importer = page.locator("compressed-note")
                 output = importer.locator("output")
