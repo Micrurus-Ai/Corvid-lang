@@ -961,6 +961,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-public-json"
+version = "0.0.1"
+dependencies = [
+ "corvid-ast",
+ "corvid-ir",
+ "corvid-resolve",
+ "corvid-types",
+ "serde_json",
+]
+
+[[package]]
 name = "corvid-repl"
 version = "0.0.1"
 dependencies = [
@@ -1136,6 +1147,7 @@ dependencies = [
  "corvid-ast",
  "corvid-ir",
  "corvid-prompt-format",
+ "corvid-public-json",
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",

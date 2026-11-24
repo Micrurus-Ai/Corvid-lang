@@ -1,0 +1,13 @@
+[package]
+name = "corvid-public-json"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The public JSON mapping between Corvid types and ordinary JSON: one decoder, shared by the interpreter and the native runtime, with typed errors located at a JSON path."
+
+[dependencies]
+corvid-ast = { workspace = true }
+corvid-ir = { workspace = true }
+corvid-resolve = { workspace = true }
+corvid-types = { workspace = true }
+serde_json = { workspace = true }
