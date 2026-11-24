@@ -1,0 +1,8 @@
+tool start_preview() -> Nothing
+tool stop_preview() -> Nothing
+
+browser lifecycle open_preview() -> Nothing:
+    start_preview()
+
+browser lifecycle close_preview() -> Nothing:
+    stop_preview()

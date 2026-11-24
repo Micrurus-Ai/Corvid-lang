@@ -1,0 +1,12 @@
+import "std:ui" as ui
+import "./events" use open_preview, close_preview
+
+agent main() -> String:
+    picker = ui.View("<label>Preview a UTF-8 file <input type='file'></label>")
+    preview = ui.View("<pre aria-label='File preview'></pre>")
+    copy = ui.View("<button type='button' disabled>Copy preview</button>")
+    status = ui.View("<output>Choose a text file.</output>")
+    controls = ui.fragment([picker, preview, copy, status])
+    panel = ui.View("<file-preview>" + controls.html + "</file-preview>")
+    extension = ui.View("<script type='module' src='./file_preview.js'></script>")
+    return ui.interactive_page("File preview", [extension, ui.owned_element(panel, open_preview(), close_preview())])
