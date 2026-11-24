@@ -12,6 +12,7 @@ members = [
     "crates/corvid-abi",
     "crates/corvid-abi-verify",
     "crates/corvid-ir",
+    "crates/corvid-public-json",
     "crates/corvid-prompt-format",
     "crates/corvid-vm",
     "crates/corvid-repl",
@@ -99,6 +100,7 @@ corvid-connector-runtime = { path = "crates/corvid-connector-runtime" }
 corvid-macros   = { path = "crates/corvid-macros" }
 corvid-test-tools = { path = "crates/corvid-test-tools" }
 corvid-test-paths = { path = "crates/corvid-test-paths" }
+corvid-public-json = { path = "crates/corvid-public-json" }
 corvid-driver   = { path = "crates/corvid-driver" }
 corvid-differential-verify = { path = "crates/corvid-differential-verify" }
 corvid-shadow-daemon = { path = "crates/corvid-shadow-daemon" }

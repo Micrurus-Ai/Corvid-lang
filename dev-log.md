@@ -4,6 +4,33 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - One JSON decoder for the interpreter and native code
+
+Native `T.from_json` must accept exactly the JSON the interpreter
+accepts and fail with the same path, expectation and finding. A second
+decoder written for native values would drift from the first, so the
+decoder moved out of `corvid-vm` into the new crate
+`corvid-public-json`, written against a `ValueBuilder` trait. The
+interpreter builds its `Value`s through it today; the native runtime
+will build heap objects through the same walk.
+
+Decisions:
+
+- **Building cannot fail; discarding is explicit.** The decoder checks
+  each piece of JSON before asking the builder for a value, and when a
+  later piece fails it hands every value it built back through
+  `discard`. Native objects are reference-counted, so a value neither
+  consumed by its parent nor discarded would leak; a counting builder
+  in the crate's tests proves none is.
+- **Refinements are checked on the decoded JSON.** A field whose type
+  is `Int` or `String`, possibly `Tainted`, is checked with
+  `Refinement::admits_int` and `admits_text`, the one definition the
+  internal envelope now also uses.
+- **Encoding stays in the interpreter for now.** It is walked by value
+  rather than by type, and it encodes an empty map with non-String keys
+  as `{}`, which decodes back as an error. Native `to_json` will make
+  the encoder type-directed and shared, as its own change.
+
 ## 2026-11-23 - Tests find Cargo's build output wherever it is
 
 About 200 native and C-library tests failed on a machine that builds

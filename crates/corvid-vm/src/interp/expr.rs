@@ -801,7 +801,7 @@ pub(super) fn eval_json_decode(
     types: &std::collections::HashMap<corvid_resolve::DefId, &corvid_ir::IrType>,
     span: Span,
 ) -> Result<Value, InterpError> {
-    use crate::public_json::{decode_public_json_text, UnknownFields};
+    use crate::public_json::{decode_public_json_text, JsonErrorValue, UnknownFields};
     let corvid_types::Type::Result(target, _) = call_ty else {
         return Err(InterpError::new(
             InterpErrorKind::Other(format!("from_json has no target type (its call is typed `{}`)", call_ty.display_name())),
