@@ -20,6 +20,9 @@ auditing the language's formal claims.
   `fixture`, `mock` internals.
 - [Package manager scope](package-manager-scope.md) — what the
   package manager covers and doesn't.
+- [Parallel backend sessions](parallel-backend-sessions.md) — how the
+  Windows and macOS backend sessions split the roadmap, claim tasks
+  and push.
 
 ## See also
 
