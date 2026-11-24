@@ -226,6 +226,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             expr_mentions_local(items, local_id) || expr_mentions_local(next_cursor, local_id)
         }
         IrExprKind::TableOp { arg, .. } => expr_mentions_local(arg, local_id),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_mentions_local(e, local_id)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_mentions_local(scrutinee, local_id)
                 || arms.iter().any(|arm| {
@@ -337,7 +338,7 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
             expr_is_effect_free(items) && expr_is_effect_free(next_cursor)
         }
         // A table operation reads or writes the database.
-        IrExprKind::TableOp { .. } => false,
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => false,
         // A match is effect-free iff every part is; pattern binding
         // writes are locals, not shared-state effects.
         IrExprKind::Match { scrutinee, arms } => {

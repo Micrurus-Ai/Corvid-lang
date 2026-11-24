@@ -245,6 +245,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
                 + count_local_mentions_expr(next_cursor, local_id)
         }
         IrExprKind::TableOp { arg, .. } => count_local_mentions_expr(arg, local_id),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().map(|e| count_local_mentions_expr(e, local_id)).sum(),
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -337,7 +338,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         IrExprKind::StructLiteral { .. } => true,
         // `Page(...)` builds a new struct cell (items + cursor handles).
         IrExprKind::PageNew { .. } => true,
-        IrExprKind::TableOp { .. } => true,
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

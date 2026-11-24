@@ -107,6 +107,20 @@ impl<'a> Checker<'a> {
     fn walk_deterministic_expr(&mut self, agent: &str, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, span } => {
+                // A query chain reads the database; report it once, at
+                // its outermost call.
+                if let Some(query) = crate::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings) {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::NonDeterministicCall {
+                            agent: agent.into(),
+                            call: format!("{} query", query.table.name().name),
+                            call_kind: "database operation".into(),
+                        },
+                        *span,
+                        "replay.deterministic_pure_path",
+                    ));
+                    return;
+                }
                 self.classify_deterministic_call(agent, callee, *span);
                 self.walk_deterministic_expr(agent, callee);
                 for arg in args {

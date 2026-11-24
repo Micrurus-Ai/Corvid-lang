@@ -50,7 +50,8 @@ values. Every table must be listed in exactly one `database` block.
 
 ## Operations
 
-Each table offers four operations as methods:
+Each table offers four operations on single rows as methods; [queries](#queries)
+read many rows.
 
 | Call | Result |
 | --- | --- |
@@ -76,6 +77,45 @@ agent store(renamed: Shelf) -> String:
         Err(current) -> "someone else changed the shelf first"
 ```
 
+## Queries
+
+A query starts with `Shelf.where(fn (s) -> condition)` or `Shelf.all()`,
+then may add `.order_by(fn (s) -> s.column)`, `.descending()` and
+`.take(n)`, in that order. The whole chain is one expression of type
+`List<Shelf>`, and it runs as one database query: the rows are filtered,
+sorted and limited in the database, not in the program.
+
+```corvid
+agent recent(owner: String, count: Int) -> List<Shelf>:
+    return Shelf.where(fn (s) -> s.owner == owner and s.note != None).order_by(fn (s) -> s.title).descending().take(count)
+```
+
+A `where` condition may use:
+
+| Form | Example |
+| --- | --- |
+| A comparison of a column with a value | `s.owner == owner`, `s.shelf >= 10`, `3 < s.shelf` |
+| A missing value | `s.note == None`, `s.note != None` |
+| A string test on a column | `s.title.contains(word)`, `s.title.starts_with("A")`, `s.title.ends_with(suffix)` |
+| A `Bool` column | `s.archived` |
+| `and`, `or`, `not`, `true`, `false` | `not s.archived or s.shelf == 1` |
+
+The value on the other side of a comparison is computed by the agent
+before the query runs, so it may use the agent's variables and calls but
+not the row. Anything else is a compile error that says which part the
+database cannot run: comparing two columns, calling a function on a
+column, or comparing a column stored as JSON. `order_by` reads exactly
+one column, and `take` takes an `Int`; a negative count stops the run
+with its reason.
+
+Results always come back in a defined order. With `order_by`, rows with
+equal values keep key order; without it, rows come back in key order.
+`None` sorts before any value, so it comes last under `descending`. Every value is bound as a parameter, and
+`==` matches missing values, so `s.note == None` finds the rows with no
+note.
+
+A query uses `db_egress_read`, like `Shelf.get`, so pure `fn`s and
+`@deterministic` agents cannot run one.
 ## Effects and determinism
 
 `Shelf.get` uses the built-in `db_egress_read` effect, and `insert`,
@@ -88,7 +128,9 @@ parameter-only binding.
 ## Replay
 
 Each table operation is recorded in the trace as a call named
-`table:<Table>.<op>`, with its argument and its outcome. A replay serves
+`table:<Table>.<op>`, with its argument and its outcome; a query is
+recorded as `table:<Table>.query` with its SQL, its parameters and the
+rows it returned. A replay serves
 every operation from the trace: reads return the recorded rows and
 writes return the recorded outcomes, and the database is never opened.
 A replayed run whose table operations differ from the recording stops
@@ -126,7 +168,6 @@ commands.
 ## Not yet
 
 These are later slices of [B09](../proposals/b09-typed-persistence.md):
-queries beyond get-by-key (`where`, `order_by`, `take`), migrations of
-changed tables with declared renames and drops, Postgres and MySQL,
+migrations of changed tables with declared renames and drops, Postgres and MySQL,
 and the native target. Programs that
 use tables run on the interpreter.

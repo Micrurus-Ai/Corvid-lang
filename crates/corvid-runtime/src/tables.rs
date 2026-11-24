@@ -1,5 +1,5 @@
 //! Table storage (B09): the SQL behind `Shelf.get`, `Shelf.insert`,
-//! `Shelf.save` and `Shelf.delete`.
+//! `Shelf.save` and `Shelf.delete`; queries live in [`query`].
 //!
 //! Operations run through the same [`crate::db::DbHandleRegistry`] the
 //! `std.db` tools use, so they share its per-file writer lock, its
@@ -20,6 +20,9 @@ use corvid_types::Type;
 use serde_json::Value as J;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+mod query;
+pub use query::{query_sql, TableFilter, TableQuery};
 
 /// How a field's values are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,15 +238,17 @@ impl Runtime {
         let sql = format!("SELECT {names} FROM {} WHERE {} = ?1", quote(table.name), quote(table.key));
         let rows = self.db_registry().query(handle.handle_id, &sql, &[key]).map_err(|e| named(table, e))?;
         let Some(cells) = rows.rows.into_iter().next() else { return Ok(None) };
-        let mut cells = cells;
-        Ok(Some(
-            table
-                .columns
-                .iter()
-                .map(|c| cells.remove(c).map(|cell| cell.value).unwrap_or(DbValue::Null))
-                .collect(),
-        ))
+        Ok(Some(ordered_row(table, cells)))
     }
+}
+
+/// A result row's cells in [`TableRef::columns`] order.
+fn ordered_row(table: &TableRef<'_>, mut cells: std::collections::BTreeMap<String, crate::db::DbCell>) -> Row {
+    table
+        .columns
+        .iter()
+        .map(|c| cells.remove(c).map(|cell| cell.value).unwrap_or(DbValue::Null))
+        .collect()
 }
 
 /// The recorded and replayable operations (P1b). Each is recorded as a

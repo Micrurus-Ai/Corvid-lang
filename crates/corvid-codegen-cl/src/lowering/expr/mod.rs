@@ -136,7 +136,7 @@ pub(super) fn lower_expr(
             "Page<Item> responses are interpreter-only in 52c-2 (served via corvid serve)",
             expr.span,
         )),
-        IrExprKind::TableOp { .. } => Err(CodegenError::not_supported(
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => Err(CodegenError::not_supported(
             "table operations run on the interpreter until native tables land (B09 P6); use `corvid run --tier interp`",
             expr.span,
         )),

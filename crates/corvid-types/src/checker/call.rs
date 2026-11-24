@@ -937,6 +937,10 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Type {
+        // `Shelf.where(...).take(n)`: a query over a stored table (B09 P2).
+        if let Some(ty) = self.check_table_query_call(target, method_name, args, span) {
+            return ty;
+        }
         // `Shelf.save(row)`: an operation of a stored table (B09).
         if let Some(ty) = self.check_table_method_call(target, method_name, args, span) {
             return ty;

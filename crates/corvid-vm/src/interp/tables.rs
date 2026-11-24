@@ -11,9 +11,9 @@ use crate::errors::{InterpError, InterpErrorKind};
 use crate::public_json::{decode_public_json_text, encode_public_json_text, UnknownFields};
 use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
-use corvid_ir::{IrTable, IrType};
+use corvid_ir::{IrTable, IrTableFilter, IrType};
 use corvid_runtime::db::DbValue;
-use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableRef};
+use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableFilter, TableQuery, TableRef};
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
 
@@ -73,6 +73,98 @@ impl<'ir> Interpreter<'ir> {
                 }
             }
         })
+    }
+
+    /// A query chain (B09 P2). `operands` are the evaluated `where`
+    /// values, then the `take` count if there is one, in the order
+    /// `corvid_ir::table_query_operands` gives them.
+    pub(super) async fn eval_table_query(
+        &mut self,
+        table: &IrTable,
+        filter: Option<&IrTableFilter>,
+        order: Option<&str>,
+        descending: bool,
+        operands: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        let record = *self
+            .types_by_id
+            .get(&table.def_id)
+            .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
+        let mut operands = operands.into_iter();
+        let filter = match filter {
+            Some(filter) => Some(self.table_filter(record, filter, &mut operands).map_err(fail)?),
+            None => None,
+        };
+        let take = match operands.next() {
+            Some(Value::Int(n)) => Some(n),
+            Some(other) => return Err(fail(format!("`take` needs an Int, got {}", other.type_name()))),
+            None => None,
+        };
+        let query = TableQuery { filter, order: order.map(str::to_string), descending, take };
+        let target = TableRef {
+            name: &table.name,
+            key: &table.key,
+            columns: &table.columns,
+            location: &table.database.location,
+        };
+        let rows = self
+            .runtime
+            .table_query(&target, &query)
+            .await
+            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        let items = rows.into_iter().map(|row| self.row_value(record, row)).collect::<Result<Vec<_>, _>>().map_err(fail)?;
+        Ok(Value::List(crate::value::ListValue::new(items)))
+    }
+
+    /// A lowered condition with its values converted to column values.
+    fn table_filter(
+        &self,
+        record: &IrType,
+        filter: &IrTableFilter,
+        operands: &mut std::vec::IntoIter<Value>,
+    ) -> Result<TableFilter, String> {
+        let column_type = |column: &str| {
+            record
+                .fields
+                .iter()
+                .find(|f| f.name == column)
+                .map(|f| &f.ty)
+                .ok_or_else(|| format!("table `{}` has no column `{column}`", record.name))
+        };
+        Ok(match filter {
+            IrTableFilter::Const(b) => TableFilter::Const(*b),
+            IrTableFilter::Column(column) => TableFilter::Column(column.clone()),
+            IrTableFilter::And(left, right) => {
+                let left = self.table_filter(record, left, operands)?;
+                TableFilter::And(Box::new(left), Box::new(self.table_filter(record, right, operands)?))
+            }
+            IrTableFilter::Or(left, right) => {
+                let left = self.table_filter(record, left, operands)?;
+                TableFilter::Or(Box::new(left), Box::new(self.table_filter(record, right, operands)?))
+            }
+            IrTableFilter::Not(inner) => TableFilter::Not(Box::new(self.table_filter(record, inner, operands)?)),
+            IrTableFilter::Compare { column, op, .. } => {
+                let value = self.query_value(&next_operand(operands)?, column_type(column)?)?;
+                TableFilter::Compare { column: column.clone(), op: *op, value }
+            }
+            IrTableFilter::Text { column, test, .. } => {
+                let value = self.query_value(&next_operand(operands)?, column_type(column)?)?;
+                TableFilter::Text { column: column.clone(), test: *test, value }
+            }
+        })
+    }
+
+    /// A value compared with a column, stored the way the column is. A
+    /// `Float` compared with an `Int` column stays a float, so SQLite
+    /// compares the two as numbers, as the agent would.
+    fn query_value(&self, value: &Value, column_ty: &Type) -> Result<DbValue, String> {
+        let (kind, _) = column_kind(untainted(column_ty));
+        match (kind, value) {
+            (ColumnKind::Integer, Value::Float(f)) => Ok(DbValue::Float(*f)),
+            _ => self.to_column(value, column_ty),
+        }
     }
 
     /// A row value's columns, in declaration order.
@@ -157,4 +249,8 @@ impl<'ir> Interpreter<'ir> {
         };
         Ok(if nullable { Value::OptionSome(BoxedValue::new(scalar)) } else { scalar })
     }
+}
+
+fn next_operand(operands: &mut std::vec::IntoIter<Value>) -> Result<Value, String> {
+    operands.next().ok_or_else(|| "a query condition is missing a value".to_string())
 }

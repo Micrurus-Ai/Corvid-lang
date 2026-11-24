@@ -123,12 +123,12 @@ agent shelves_of(user: String) -> List<Shelf>:
 
 ## Slices
 
-- [ ] P1. `table` and `database` declarations, the row record with
+- [x] P1. `table` and `database` declarations, the row record with
   `revision`, `Shelf.get`, `Shelf.insert`, `Shelf.save` and
   `Shelf.delete` with `Result`-typed conflicts, on SQLite through the
   interpreter, with effects and replay. `corvid migrate plan` writes
   the `CREATE TABLE` for new tables.
-- [ ] P2. Typed queries: `where`, `order_by`, `descending`, `take`,
+- [x] P2. Typed queries: `where`, `order_by`, `descending`, `take`,
   `all`, and the compile-time check that a condition can run in the
   database.
 - [ ] P3. Migrations from declaration changes: added and altered
@@ -145,6 +145,13 @@ agent shelves_of(user: String) -> List<Shelf>:
   row instead of an `expecting:` argument.
 - Conflicts are ordinary `Result` values holding the stored row, so no
   new generic conflict type is needed.
+- A query is a method chain read whole by the compiler, not a value
+  built step by step, so it needs no new grammar and no query type: the
+  chain has type `List<T>`. The checker and IR lowering read a `where`
+  condition through one function, so what type-checks is exactly what
+  runs. Results are ordered by key when nothing else decides, and `==`
+  is SQL `IS`, so `== None` finds missing values and no condition is left
+  undecided by `NULL`.
 
 ## Open questions for review
 

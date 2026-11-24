@@ -331,6 +331,7 @@ fn expr_consumes_target(
                 || expr_consumes_target(next_cursor, target, sigs)
         }
         IrExprKind::TableOp { arg, .. } => expr_consumes_target(arg, target, sigs),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_consumes_target(e, target, sigs)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -432,6 +433,7 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
             expr_references(items, target) || expr_references(next_cursor, target)
         }
         IrExprKind::TableOp { arg, .. } => expr_references(arg, target),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_references(e, target)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_references(scrutinee, target)
                 || arms.iter().any(|arm| {

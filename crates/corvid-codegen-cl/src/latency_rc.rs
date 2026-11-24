@@ -188,6 +188,11 @@ fn collect_prompt_pins_in_expr(
             collect_prompt_pins_in_expr(next_cursor, borrowed_reads, out);
         }
         IrExprKind::TableOp { arg, .. } => collect_prompt_pins_in_expr(arg, borrowed_reads, out),
+        IrExprKind::TableQuery { filter, take, .. } => {
+            for e in corvid_ir::table_query_operands(filter, take) {
+                collect_prompt_pins_in_expr(e, borrowed_reads, out);
+            }
+        }
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_prompt_pins_in_expr(receiver, borrowed_reads, out);
             for a in args {

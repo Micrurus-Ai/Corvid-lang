@@ -1866,6 +1866,9 @@ impl<'a> Lowerer<'a> {
                     args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
                 };
             }
+            if let Some(rewrite) = self.try_table_query(callee, args) {
+                return rewrite;
+            }
             if let Some(rewrite) = self.try_table_call(callee, args) {
                 return rewrite;
             }
@@ -2220,25 +2223,77 @@ impl<'a> Lowerer<'a> {
     fn try_table_call(&self, callee: &Expr, args: &[Expr]) -> Option<IrExprKind> {
         let (table, op) = corvid_types::table_call_target(callee, self.file, self.symbols, self.bindings)?;
         let arg = args.first()?;
+        Some(IrExprKind::TableOp {
+            op,
+            table: self.ir_table(table)?,
+            arg: Box::new(self.lower_expr(arg)),
+        })
+    }
+
+    /// A query chain (B09 P2), recognized and read by the same
+    /// `table_ops` functions the checker uses.
+    fn try_table_query(&self, callee: &Expr, args: &[Expr]) -> Option<IrExprKind> {
+        let query = corvid_types::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings)?;
+        let filter = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => {
+                let row = &params.first()?.name.name;
+                let condition = corvid_types::table_ops::query_condition(query.table, row, body).ok()?;
+                Some(self.lower_table_filter(&condition))
+            }
+            Some(_) => return None,
+            None => None,
+        };
+        let order = match query.order {
+            Some(Expr::Lambda { params, body, .. }) => {
+                Some(corvid_types::table_ops::query_column(query.table, &params.first()?.name.name, body)?)
+            }
+            Some(_) => return None,
+            None => None,
+        };
+        Some(IrExprKind::TableQuery {
+            table: self.ir_table(query.table)?,
+            filter,
+            order,
+            descending: query.descending,
+            take: query.take.map(|count| Box::new(self.lower_expr(count))),
+        })
+    }
+
+    fn lower_table_filter(&self, condition: &corvid_types::table_ops::QueryCondition<'_>) -> crate::types::IrTableFilter {
+        use corvid_types::table_ops::QueryCondition as C;
+        use crate::types::IrTableFilter as F;
+        match condition {
+            C::Const(b) => F::Const(*b),
+            C::Column(column) => F::Column(column.clone()),
+            C::And(left, right) => F::And(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
+            C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
+            C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner))),
+            C::Compare { column, op, value } => {
+                F::Compare { column: column.clone(), op: *op, value: Box::new(self.lower_expr(value)) }
+            }
+            C::Text { column, test, value } => {
+                F::Text { column: column.clone(), test: *test, value: Box::new(self.lower_expr(value)) }
+            }
+        }
+    }
+
+    /// What a table's operations need: its row type, key, columns and database.
+    fn ir_table(&self, table: &corvid_ast::TableDecl) -> Option<crate::types::IrTable> {
         let def_id = self.remap_def_id(self.symbols.lookup_def(&table.name().name)?);
         let database = self.file.decls.iter().find_map(|decl| match decl {
             Decl::Database(db) if db.tables.iter().any(|t| t.name == table.name().name) => Some(db),
             _ => None,
         })?;
-        Some(IrExprKind::TableOp {
-            op,
-            table: crate::types::IrTable {
-                def_id,
-                name: table.name().name.clone(),
-                key: table.key.as_ref()?.name.clone(),
-                columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
-                database: crate::types::IrDatabase {
-                    name: database.name.name.clone(),
-                    engine: database.engine.as_ref()?.name.clone(),
-                    location: database.location.clone()?,
-                },
+        Some(crate::types::IrTable {
+            def_id,
+            name: table.name().name.clone(),
+            key: table.key.as_ref()?.name.clone(),
+            columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
+            database: crate::types::IrDatabase {
+                name: database.name.name.clone(),
+                engine: database.engine.as_ref()?.name.clone(),
+                location: database.location.clone()?,
             },
-            arg: Box::new(self.lower_expr(arg)),
         })
     }
 

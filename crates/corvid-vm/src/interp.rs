@@ -1198,6 +1198,19 @@ impl<'ir> Interpreter<'ir> {
                 self.eval_table_op(*op, table, arg_v, expr.span).await.map(ExprFlow::Value)
             },
 
+            IrExprKind::TableQuery { table, filter, order, descending, take } => {
+                let mut operands = Vec::new();
+                for operand in corvid_ir::table_query_operands(filter, take) {
+                    match self.eval_expr(operand).await?.into_value() {
+                        Ok(v) => operands.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    }
+                }
+                self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span)
+                    .await
+                    .map(ExprFlow::Value)
+            },
+
             IrExprKind::TryPropagate { inner } => {
                 let inner = match self.eval_expr(inner).await? {
                     ExprFlow::Value(v) => v,

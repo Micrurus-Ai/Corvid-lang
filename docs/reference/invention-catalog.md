@@ -950,7 +950,10 @@ so renaming a column is a compile error at every read, and SQL text never
 appears in source. Every row carries a database-maintained `revision`:
 `Shelf.save(row)` writes only if the stored row still has the revision
 the row was read at, and a conflict is an ordinary typed value holding
-the row stored now. `corvid migrate plan` writes the migration that
+the row stored now. A query, `Shelf.where(fn (s) -> s.owner == owner)`
+with optional `order_by`, `descending` and `take`, is a `List<Shelf>`
+run as one parameterized query, and a condition the database cannot run
+is a compile error. `corvid migrate plan` writes the migration that
 creates declared tables.
 
 ```corvid

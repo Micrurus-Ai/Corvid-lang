@@ -200,6 +200,14 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
             visit_expr(next_cursor, visit);
         }
         IrExprKind::TableOp { arg, .. } => visit_expr(arg, visit),
+        IrExprKind::TableQuery { filter, take, .. } => {
+            if let Some(filter) = filter {
+                filter.for_each_value_mut(&mut |value| visit_expr(value, visit));
+            }
+            if let Some(take) = take {
+                visit_expr(take, visit);
+            }
+        }
     }
 }
 

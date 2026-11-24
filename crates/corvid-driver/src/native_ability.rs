@@ -333,7 +333,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `Page<Item>` responses are interpreter-only in 52c-2.
         IrExprKind::PageNew { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
-        IrExprKind::TableOp { table, .. } => Err(NotNativeReason::TableOperation { table: table.name.clone() }),
+        IrExprKind::TableOp { table, .. } | IrExprKind::TableQuery { table, .. } => Err(NotNativeReason::TableOperation { table: table.name.clone() }),
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast,
             receiver,

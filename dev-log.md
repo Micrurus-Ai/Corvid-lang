@@ -4,6 +4,24 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Typed table queries (B09 P2)
+
+`Shelf.where(fn (s) -> condition)` and `Shelf.all()`, with optional
+`order_by`, `descending` and `take`, read many rows as one
+parameterized `SELECT`. The chain is a method chain the compiler reads
+whole, so it needed no new grammar and no query type: it is a
+`List<Shelf>`. A `where` condition is limited to what SQL runs exactly
+as the agent would: comparisons of a column with an agent-computed
+value, `== None`, the three string tests, a `Bool` column, and `and`,
+`or`, `not`. One function in `corvid_types::table_ops` reads the
+condition for both the checker and IR lowering, so what type-checks is
+what runs. Ordering is always defined (key order breaks ties and is the
+default), which keeps replays and pagination stable, and `==` is SQL
+`IS`, so `NULL` never leaves a condition undecided. A query is recorded
+as `table:<Table>.query` with its SQL and parameters and replays
+without the database. JSON-stored columns cannot be compared; indexes
+and comparisons inside records wait for a later slice.
+
 ## 2026-11-24 - Table operations replay from the trace (B09 P1b)
 
 A table operation is now recorded like a tool call, `table:Shelf.save`

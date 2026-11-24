@@ -11,7 +11,7 @@
 
 use crate::migrate_cmd::{migration_version, scan_migration_files};
 use anyhow::{bail, Context, Result};
-use corvid_runtime::tables::{create_table_sql, TableSchema};
+use corvid_runtime::tables::create_table_sql;
 use rusqlite::Connection;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -118,6 +118,7 @@ fn next_version(migrations: &[crate::migrate_cmd::MigrationFile]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use corvid_runtime::tables::TableSchema;
 
     fn schema() -> TableSchema {
         use corvid_types::Type;

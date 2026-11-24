@@ -1097,6 +1097,76 @@ pub enum IrExprKind {
         table: IrTable,
         arg: Box<IrExpr>,
     },
+
+    /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
+    /// `Shelf.all()`, then optional `order_by`, `descending` and `take`.
+    /// It runs as one database query and has type `List<Shelf>`.
+    TableQuery {
+        table: IrTable,
+        /// `None` for `all()`.
+        filter: Option<IrTableFilter>,
+        /// The column `order_by` reads.
+        order: Option<String>,
+        descending: bool,
+        take: Option<Box<IrExpr>>,
+    },
+}
+
+/// The expressions a query chain evaluates before it runs, in
+/// evaluation order: the `where` values, then the `take` count.
+/// IR walkers visit a `TableQuery` through this.
+pub fn table_query_operands<'a>(filter: &'a Option<IrTableFilter>, take: &'a Option<Box<IrExpr>>) -> Vec<&'a IrExpr> {
+    let mut operands = filter.as_ref().map(IrTableFilter::values).unwrap_or_default();
+    operands.extend(take.as_deref());
+    operands
+}
+
+/// A `where` condition as the database runs it (B09 P2). The values
+/// compared with columns are evaluated by the agent before the query.
+#[derive(Debug, Clone)]
+pub enum IrTableFilter {
+    Const(bool),
+    /// A `Bool` column read on its own.
+    Column(String),
+    And(Box<IrTableFilter>, Box<IrTableFilter>),
+    Or(Box<IrTableFilter>, Box<IrTableFilter>),
+    Not(Box<IrTableFilter>),
+    Compare { column: String, op: corvid_types::table_ops::QueryCompare, value: Box<IrExpr> },
+    Text { column: String, test: corvid_types::table_ops::QueryTextTest, value: Box<IrExpr> },
+}
+
+impl IrTableFilter {
+    /// Every value expression in the condition, left to right.
+    pub fn values(&self) -> Vec<&IrExpr> {
+        let mut out = Vec::new();
+        self.collect_values(&mut out);
+        out
+    }
+
+    fn collect_values<'a>(&'a self, out: &mut Vec<&'a IrExpr>) {
+        match self {
+            Self::Const(_) | Self::Column(_) => {}
+            Self::And(left, right) | Self::Or(left, right) => {
+                left.collect_values(out);
+                right.collect_values(out);
+            }
+            Self::Not(inner) => inner.collect_values(out),
+            Self::Compare { value, .. } | Self::Text { value, .. } => out.push(value),
+        }
+    }
+
+    /// [`Self::values`], mutably.
+    pub fn for_each_value_mut(&mut self, visit: &mut dyn FnMut(&mut IrExpr)) {
+        match self {
+            Self::Const(_) | Self::Column(_) => {}
+            Self::And(left, right) | Self::Or(left, right) => {
+                left.for_each_value_mut(visit);
+                right.for_each_value_mut(visit);
+            }
+            Self::Not(inner) => inner.for_each_value_mut(visit),
+            Self::Compare { value, .. } | Self::Text { value, .. } => visit(value),
+        }
+    }
 }
 
 /// What a table operation needs to run (B09): the table's row type,

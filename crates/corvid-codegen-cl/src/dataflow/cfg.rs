@@ -492,6 +492,11 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
             out.extend(collect_reads(next_cursor, false));
         }
         IrExprKind::TableOp { arg, .. } => out.extend(collect_reads(arg, false)),
+        IrExprKind::TableQuery { filter, take, .. } => {
+            for e in corvid_ir::table_query_operands(filter, take) {
+                out.extend(collect_reads(e, false));
+            }
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args } => {
             out.extend(collect_reads(receiver, false));
             for a in args {

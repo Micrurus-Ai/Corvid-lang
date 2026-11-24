@@ -324,6 +324,9 @@ fn collect_expr_effects(
             if let Some((_, op)) = crate::table_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
                 effects.names.push(op.effect().into());
             }
+            if crate::table_ops::table_query_call(callee, args, file, &resolved.symbols, &resolved.bindings).is_some() {
+                effects.names.push(crate::TableOp::Get.effect().into());
+            }
             if let Some((import, _)) = python_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
                 effects.names.extend(import.effect_row.effects.iter().map(|e| e.name.name.clone()));
             }

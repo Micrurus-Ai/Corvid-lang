@@ -340,7 +340,7 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
                 );
             }
-            IrExprKind::TableOp { .. } => {
+            IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => {
                 self.out.write(
                     "(_ for _ in ()).throw(NotImplementedError(\"table operations run on the interpreter (B09)\"))",
                 );

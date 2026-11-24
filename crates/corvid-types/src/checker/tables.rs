@@ -3,11 +3,12 @@
 //! A table is a record type stored in a database. The checker enforces
 //! the decisions the source must state (a key, an engine, a location,
 //! which database holds each table) and types the table's operations:
-//! `get`, `insert`, `save` and `delete`.
+//! `get`, `insert`, `save` and `delete`, and query chains (`where`,
+//! `all`, `order_by`, `descending`, `take`).
 
 use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
-use crate::table_ops::{table_method_target, TableOp};
+use crate::table_ops::{table_method_target, QueryCondition, TableOp};
 use crate::types::Type;
 use corvid_ast::{DatabaseDecl, Decl, Expr, Ident, Span, TableDecl, TypeRef, Visibility};
 
@@ -191,6 +192,156 @@ impl<'a> Checker<'a> {
     }
 }
 
+impl<'a> Checker<'a> {
+    /// A query chain ending in `receiver.method(args)`: `Shelf.where(...)`
+    /// or `Shelf.all()`, then optional `order_by`, `descending`, `take`.
+    /// Returns `None` when the call does not end a query.
+    pub(super) fn check_table_query_call(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        let query = crate::table_ops::table_query_target(receiver, &method.name, args, self.file, self.symbols, self.bindings)?;
+        let row_id = self.symbols.lookup_def(&query.table.name().name)?;
+        let row = Type::Struct(row_id);
+        let function = |ret: Type| Type::Function {
+            params: vec![row.clone()],
+            ret: Box::new(ret),
+            effect: corvid_ast::Effect::Safe,
+        };
+        if let Some(filter) = query.filter {
+            let ty = self.check_expr_as(filter, Some(&function(Type::Bool)));
+            self.require_function_of_row(filter, &ty, &row, "where");
+            if let Expr::Lambda { params, body, .. } = filter {
+                if let Some(param) = params.first() {
+                    self.check_translatable_condition(query.table, param, body);
+                }
+            }
+        }
+        if let Some(order) = query.order {
+            let ty = self.check_expr_as(order, Some(&function(Type::Unknown)));
+            self.require_function_of_row(order, &ty, &row, "order_by");
+            let column = match order {
+                Expr::Lambda { params, body, .. } => params.first().and_then(|p| column_read(query.table, p, body)),
+                _ => None,
+            };
+            if column.is_none() {
+                self.query_error(order.span(), "`order_by` takes a function that reads one column, such as `fn (s) -> s.title`");
+            }
+        }
+        if let Some(count) = query.take {
+            let got = self.check_expr_as(count, Some(&Type::Int));
+            if !got.is_assignable_to(&Type::Int) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: "Int".into(),
+                        got: got.display_name(),
+                        context: "argument to `take`".into(),
+                    },
+                    count.span(),
+                ));
+            }
+        }
+        let _ = span;
+        Some(Type::List(Box::new(row)))
+    }
+
+    fn require_function_of_row(&mut self, expr: &Expr, ty: &Type, row: &Type, stage: &str) {
+        if !matches!(expr, Expr::Lambda { .. }) {
+            self.query_error(expr.span(), &format!("`{stage}` takes a function written in place, such as `fn (s) -> ...`, so the database can run it"));
+            return;
+        }
+        if let Type::Function { params, .. } = ty {
+            if params.first().is_some_and(|p| p != row && !matches!(p, Type::Unknown)) {
+                self.query_error(expr.span(), &format!("the `{stage}` function's parameter must be the table's row"));
+            }
+        }
+    }
+
+    /// Refuse the parts of a `where` condition the database cannot run,
+    /// through the same reading IR lowering uses.
+    fn check_translatable_condition(&mut self, table: &TableDecl, row: &corvid_ast::LambdaParam, condition: &Expr) {
+        match crate::table_ops::query_condition(table, &row.name.name, condition) {
+            Ok(read) => self.check_query_condition(table, row, &read, condition.span()),
+            Err(refusal) => self.query_error(refusal.span, refusal.message),
+        }
+    }
+
+    /// Every column the condition compares must be stored as a scalar,
+    /// and every value compared with one must not read the row.
+    fn check_query_condition(&mut self, table: &TableDecl, row: &corvid_ast::LambdaParam, condition: &QueryCondition<'_>, span: Span) {
+        match condition {
+            QueryCondition::Const(_) => {}
+            QueryCondition::Column(column) => self.check_column_is_queryable(table, column, span),
+            QueryCondition::And(left, right) | QueryCondition::Or(left, right) => {
+                self.check_query_condition(table, row, left, span);
+                self.check_query_condition(table, row, right, span);
+            }
+            QueryCondition::Not(inner) => self.check_query_condition(table, row, inner, span),
+            QueryCondition::Compare { column, value, .. } | QueryCondition::Text { column, value, .. } => {
+                self.check_column_is_queryable(table, column, value.span());
+                self.check_agent_value(row, value);
+            }
+        }
+    }
+
+    /// A column the database can compare: not one stored as JSON.
+    fn check_column_is_queryable(&mut self, table: &TableDecl, column: &str, span: Span) {
+        let Some(field) = table.record.fields.iter().find(|f| f.name.name == column) else { return };
+        let ty = self.type_ref_to_type(&field.ty);
+        if !queryable_column_type(&ty) {
+            self.query_error(span, &format!("column `{column}` is stored as JSON, so the database cannot compare it"));
+        }
+    }
+
+    /// A value compared with a column is computed by the agent before
+    /// the query runs, so it must not read the row.
+    fn check_agent_value(&mut self, row: &corvid_ast::LambdaParam, value: &Expr) {
+        if mentions_ident(value, &row.name.name) {
+            self.query_error(value.span(), "a value compared with a column cannot read the row; compare one column with a value from the agent");
+        }
+    }
+
+    fn query_error(&mut self, span: Span, message: &str) {
+        self.errors.push(TypeError::new(
+            TypeErrorKind::TableQueryNotTranslatable { message: message.to_string() },
+            span,
+        ));
+    }
+}
+
+/// The column `expr` reads, through the one rule IR lowering also uses.
+fn column_read(table: &TableDecl, row: &corvid_ast::LambdaParam, expr: &Expr) -> Option<String> {
+    crate::table_ops::query_column(table, &row.name.name, expr)
+}
+
+/// Scalar columns and options of scalars; other types are stored as JSON.
+fn queryable_column_type(ty: &Type) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::String | Type::Bool => true,
+        Type::Tainted(inner) => queryable_column_type(inner),
+        Type::Option(inner) => matches!(**inner, Type::Int | Type::Float | Type::String | Type::Bool),
+        _ => false,
+    }
+}
+
+fn mentions_ident(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident { name: ident, .. } => ident.name == name,
+        Expr::Literal { .. } => false,
+        Expr::FieldAccess { target, .. } => mentions_ident(target, name),
+        Expr::Call { callee, args, .. } => mentions_ident(callee, name) || args.iter().any(|a| mentions_ident(a, name)),
+        Expr::BinOp { left, right, .. } => mentions_ident(left, name) || mentions_ident(right, name),
+        Expr::UnOp { operand, .. } => mentions_ident(operand, name),
+        Expr::Index { target, index, .. } => mentions_ident(target, name) || mentions_ident(index, name),
+        Expr::List { items, .. } => items.iter().any(|i| mentions_ident(i, name)),
+        // Anything richer is not a plain agent value; treat it as reading the row.
+        _ => true,
+    }
+}
+
 fn quoted(names: &[&str]) -> String {
     names.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ")
 }
@@ -284,5 +435,62 @@ agent seen(shelf: Shelf) -> Int:
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
+    }
+
+    #[test]
+    fn a_query_chain_is_a_list_of_rows() {
+        let src = format!(
+            "{LIBRARY}
+agent mine(owner: String, limit: Int) -> List<Shelf>:
+    return Shelf.where(fn (s) -> s.owner == owner and not (s.note == None) or 3 < s.shelf).order_by(fn (s) -> s.title).descending().take(limit)
+
+agent titled(prefix: String) -> List<Shelf>:
+    return Shelf.where(fn (s) -> s.title.starts_with(prefix) or s.title.contains(\"x\") or s.title.ends_with(\"y\"))
+
+agent every() -> List<Shelf>:
+    return Shelf.all()
+"
+        );
+        let errors = messages(&src);
+        assert!(errors.is_empty(), "{errors:#?}");
+    }
+
+    #[test]
+    fn a_condition_the_database_cannot_run_is_refused() {
+        let refused = |condition: &str, expected: &str| {
+            let errors = messages(&format!(
+                "{LIBRARY}\nfn shout(text: String) -> String:\n    return text\n\nfn long(text: String) -> Bool:\n    return text == \"long\"\n\nagent q() -> List<Shelf>:\n    return Shelf.where(fn (s) -> {condition})\n"
+            ));
+            assert!(errors.iter().any(|m| m.contains(expected)), "{condition}: {errors:#?}");
+        };
+        refused("s.owner == s.title", "compares one column with a value");
+        refused("shout(s.title) == \"A\"", "compares one column with a value");
+        refused("long(s.title)", "only `contains`, `starts_with` and `ends_with`");
+        refused("s.title.contains(shout(s.owner))", "cannot read the row");
+        refused("s.title.to_upper() == \"A\"", "compares one column with a value");
+    }
+
+    #[test]
+    fn a_json_column_cannot_be_compared() {
+        let errors = messages(
+            "database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    tags: List<String>\n\nagent q(tags: List<String>) -> List<T>:\n    return T.where(fn (t) -> t.tags == tags)\n",
+        );
+        assert!(errors.iter().any(|m| m.contains("stored as JSON")), "{errors:#?}");
+    }
+
+    #[test]
+    fn order_by_reads_one_column_and_take_counts() {
+        let order = messages(&format!("{LIBRARY}\nagent q() -> List<Shelf>:\n    return Shelf.all().order_by(fn (s) -> s.shelf + 1)\n"));
+        assert!(order.iter().any(|m| m.contains("reads one column")), "{order:#?}");
+        let take = messages(&format!("{LIBRARY}\nagent q() -> List<Shelf>:\n    return Shelf.all().take(\"3\")\n"));
+        assert!(take.iter().any(|m| m.contains("argument to `take`")), "{take:#?}");
+    }
+
+    #[test]
+    fn pure_code_cannot_query_a_table() {
+        let errors = messages(&format!("{LIBRARY}\nfn peek() -> List<Shelf>:\n    return Shelf.all()\n"));
+        assert!(errors.iter().any(|m| m.contains("a query of table `Shelf`")), "{errors:#?}");
+        let deterministic = messages(&format!("{LIBRARY}\n@deterministic\nagent peek() -> List<Shelf>:\n    return Shelf.all()\n"));
+        assert!(deterministic.iter().any(|m| m.contains("database operation")), "{deterministic:#?}");
     }
 }
