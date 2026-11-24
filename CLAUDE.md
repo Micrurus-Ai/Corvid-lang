@@ -21,6 +21,19 @@ How to apply:
 3. **Safety choices that remove failure modes count as both "powerful" and "easier"** — checked arithmetic everywhere, compile-time gates over runtime surprises.
 4. Record the rationale per slice in `ROADMAP.md` and `dev-log.md`. No per-decision escalation needed; decide against these criteria and write it down.
 
+## Syntax as simple as it can be
+
+**Every piece of syntax is as simple, readable and understandable as it can possibly be.** Set by the CTO 2026-11-24. Before adding or changing syntax, ask: *if Steve Jobs were shipping this, would he ship it like this?* If the answer is no, simplify until it is yes.
+
+How to apply:
+
+1. **A first-time reader understands it without the docs.** Source reads like a plain description of what happens: `name: String renamed from title`, `retired legacy_note`, `Shelf.where(fn (s) -> s.owner == owner)`. Use plain words over symbols, abbreviations or jargon.
+2. **Remove until it breaks.** Every keyword, punctuation mark and required part must earn its place. If the compiler can know something for certain, the source does not repeat it. A consequential policy is still written explicitly (see "No hidden defaults"): simple never means hiding a decision.
+3. **One obvious way.** Do not add a second spelling for something the language can already say. A new form must replace or clearly beat the old one.
+4. **The common case is the shortest.** What most programs write most often takes the least code; rarer needs may take more.
+5. **Check it in context.** Write the new syntax in a realistic program next to existing code before settling it. If it looks foreign, noisy or needs a comment to explain, it is not done.
+6. Record which simpler alternatives were considered and why the shipped form won, in the slice's proposal or `dev-log.md` entry.
+
 ## File responsibility discipline
 
 **Every source file holds exactly one responsibility.** Line count is a *heuristic for where to look* — it is not the rule.
