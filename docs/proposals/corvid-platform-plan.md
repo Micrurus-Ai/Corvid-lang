@@ -96,12 +96,16 @@ Each needs frontend development's agreement before it enters the frontend queue.
 | F-P4 | Timeline inspector for the one-timeline debugger | B28 |
 | F-P5 | Browser playground that runs curated examples without installing, building on the [playground contract](../meta/playground-examples-contract.md) | B21 |
 | F-P6 | Desktop and mobile targets for the same interface code | — |
+| F-P7 | Generated approval and proposal-editing interface for human-in-the-loop agent runs | B48 |
+| F-P8 | Generated correction interface for model predictions, feeding typed training and evaluation data | B58 |
 
 ## Order of work
 
-1. Finish what remains of B01 that does not wait on frontend agreement, and run B23, the friction audit.
-2. B21, then B22.
-3. B09, B10 and B11, moved ahead of B02 to B08 because the flagship demo and all of Track 2 depend on them.
+Language work comes first, so the order was amended on 2026-11-23:
+
+1. Finish what remains of B01 that does not wait on frontend agreement.
+2. B09, B10 and B11, moved ahead of B02 to B08 because the flagship demo and all of Track 2 depend on them.
+3. B21, B22 and B23, the friction audit.
 4. B24, the flagship demo, then the README's final step.
 5. Track 2 in its listed order, interleaved with B02 to B08 and B12 to B20 by dependency.
 6. Track 3 by dependency.
