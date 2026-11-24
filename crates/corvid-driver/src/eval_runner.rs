@@ -663,6 +663,7 @@ eval math:
                     writer: WRITER_INTERPRETER.into(),
                     commit_sha: None,
                     source_path: Some("suite.cor".into()),
+                    tzdb_version: None,
                     ts_ms: 0,
                     run_id: "r".into(),
                 },

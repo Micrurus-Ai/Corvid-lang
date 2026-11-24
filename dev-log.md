@@ -4,6 +4,26 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - The tz database version in traces (B06, 3b)
+
+Zone-dependent results are pure functions of the IANA database
+compiled into the binary, so replay recomputes them instead of reading
+them from the trace, and a newer Corvid with updated zone rules could
+answer differently. The trace header now records the database version
+(trace schema v3, `SchemaHeader.tzdb_version`, defaulted so v1 and v2
+traces read as "unknown").
+
+Replay does not refuse a trace over it: most traces never touch a
+zone, and refusing them would break replay for no reason. Instead the
+interpreter reports every zone-dependent operation (local fields,
+calendar moves, `to_string`, `parse_local_time`, `parse_zoned_time`),
+and when the databases differ or the recorded one is unknown, the
+first use of each operation in each zone prints a warning naming the
+operation, the zone and both versions. A record-then-replay test
+rewrites the header to an old version, to none, and back, and checks
+that the replay still matches, warns where zones are used, and stays
+silent for a program with no zones.
+
 ## 2026-11-24 - Time zones on the interpreter (B06, third slice)
 
 `TimeZone` and `ZonedTime` join the B06 types, over the `chrono-tz`

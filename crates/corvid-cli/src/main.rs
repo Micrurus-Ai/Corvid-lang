@@ -57,6 +57,7 @@ mod jobs_explain_cmd;
 mod lineage_cmd;
 mod migrate_cmd;
 mod migrate_plan_cmd;
+mod migrate_sqlite;
 mod observe_cmd;
 mod observe_helpers_cmd;
 mod ops_cmd;

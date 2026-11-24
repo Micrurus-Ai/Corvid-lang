@@ -13,6 +13,7 @@ fn sample_header(run_id: &str) -> TraceEvent {
         writer: WRITER_INTERPRETER.into(),
         commit_sha: Some("cafe1234".into()),
         source_path: Some("examples/refund_bot.cor".into()),
+        tzdb_version: Some("2025b".into()),
         ts_ms: 0,
         run_id: run_id.into(),
     }
@@ -202,6 +203,7 @@ fn validate_supported_schema_rejects_future_version() {
         writer: "corvid-vm".into(),
         commit_sha: None,
         source_path: None,
+        tzdb_version: None,
         ts_ms: 0,
         run_id: "r".into(),
     }];
@@ -244,6 +246,7 @@ fn absent_source_path_serializes_as_null_and_reads_as_none() {
         writer: WRITER_INTERPRETER.into(),
         commit_sha: None,
         source_path: None,
+        tzdb_version: None,
         ts_ms: 0,
         run_id: "r-no-source".into(),
     };
@@ -385,4 +388,21 @@ fn tempfile_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("corvid-trace-schema-test-{pid}-{n}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// B06 — a v2 trace has no `tzdb_version`; it reads as `None`
+/// ("unknown"), and the field is written only when known.
+#[test]
+fn a_trace_without_a_tzdb_version_reads_as_unknown() {
+    let line = r#"{"kind":"schema_header","version":2,"writer":"corvid-vm","ts_ms":0,"run_id":"old"}"#;
+    let header: TraceEvent = serde_json::from_str(line).unwrap();
+    match &header {
+        TraceEvent::SchemaHeader { tzdb_version, .. } => assert_eq!(tzdb_version, &None),
+        other => panic!("expected a schema header, got {other:?}"),
+    }
+    validate_supported_schema(&[header.clone()]).unwrap();
+    let written = serde_json::to_string(&header).unwrap();
+    assert!(!written.contains("tzdb_version"), "an unknown version is not written: {written}");
+    let known = sample_header("new");
+    assert!(serde_json::to_string(&known).unwrap().contains(r#""tzdb_version":"2025b""#));
 }

@@ -170,6 +170,7 @@ mod tests {
             writer: WRITER_INTERPRETER.into(),
             commit_sha: None,
             source_path: None,
+            tzdb_version: None,
             ts_ms: 0,
             run_id: run_id.into(),
         }];

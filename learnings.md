@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A replay warns, instead of failing, when the trace was recorded with a different time zone database: the warning names each zone-dependent operation and zone whose result could differ, and traces that never use a zone replay silently. Traces record the database version from schema v3 on. [Replay](docs/internals/effect-spec/14-replay.md)
+
 Write a zone as a string where a `TimeZone` is meant, `at.in_zone("Europe/Berlin")`, and the compiler checks the name. `zoned.add_days(1)` keeps the local time, so across a daylight-saving change it is 23 or 25 hours; add a `Duration` for exact elapsed time. Read a wall-clock time with `text.parse_local_time(zone)`: a time the zone skips or repeats is an `Err` naming both offsets. Zoned times compare with `==`; compare `.instant()` to order them. [Time zones](docs/reference/stdlib/time.md#time-zones)
 
 Use `time_now()` from `std:time` for the clock: it returns an exact `Instant`, and `time_now() - started` is a `Duration`. Instants move by durations and subtract to them; adding a bare number is a compile error because a number has no unit. Read a duration with `whole_seconds()` or another `whole_` unit, and text with `parse_instant()` (RFC 3339) and `parse_duration()` (ISO 8601). A prompt typed `-> Instant` tells the model the format. [Durations and instants](docs/reference/stdlib/time.md#durations-and-instants)

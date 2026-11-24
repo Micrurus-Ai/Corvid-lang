@@ -24,6 +24,36 @@ fn mismatch(expected: &str, got: &Value, span: Span) -> InterpError {
     )
 }
 
+/// The operation name and zone when `kind` consults a zone's rules:
+/// a local field, a calendar move, RFC 9557 text, or reading a local
+/// or zoned time. Replay reports these so it can warn when the
+/// recording's tz database differs. Moving a `ZonedTime` by a
+/// `Duration` and comparing instants do not consult the rules.
+pub(super) fn zone_rules_use(kind: BuiltinMethodKind, receiver: &Value, args: &[Value]) -> Option<(&'static str, String)> {
+    use BuiltinMethodKind::*;
+    let zone_of_receiver = || match receiver {
+        Value::ZonedTime(z) => Some(z.zone().to_string()),
+        _ => None,
+    };
+    let zone_argument = || match args.first() {
+        Some(Value::TimeZone(z)) => Some(z.to_string()),
+        _ => None,
+    };
+    match kind {
+        ZonedTimeField(field) => Some((field.name(), zone_of_receiver()?)),
+        ZonedTimeAddDays => Some(("add_days", zone_of_receiver()?)),
+        ZonedTimeAddMonths => Some(("add_months", zone_of_receiver()?)),
+        ZonedTimeAddYears => Some(("add_years", zone_of_receiver()?)),
+        ZonedTimeToString => Some(("to_string", zone_of_receiver()?)),
+        StringParseLocalTime => Some(("parse_local_time", zone_argument()?)),
+        StringParseZonedTime => match receiver {
+            Value::String(text) => ZonedTime::parse(text.trim()).ok().map(|z| ("parse_zoned_time", z.zone().to_string())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Whether `l op r` is a time operation the interpreter evaluates here.
 pub(super) fn is_time_operand(value: &Value) -> bool {
     matches!(value, Value::Duration(_) | Value::Instant(_) | Value::ZonedTime(_) | Value::TimeZone(_))

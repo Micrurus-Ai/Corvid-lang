@@ -128,6 +128,7 @@ async fn test_runner_evaluates_trace_fixture_assertions() {
                 writer: WRITER_INTERPRETER.into(),
                 commit_sha: None,
                 source_path: Some("refund.cor".into()),
+                tzdb_version: None,
                 ts_ms: 0,
                 run_id: "run-1".into(),
             },
