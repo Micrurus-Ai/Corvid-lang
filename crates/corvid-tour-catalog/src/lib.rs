@@ -646,6 +646,36 @@ agent typed_path(text: String) -> Result<Int, String>:
 "#,
     },
     TourTopic {
+        name: "tables",
+        title: "Typed Tables With Revision-Checked Writes",
+        category: "Executing I/O",
+        pitch: "A `table` is a record type stored in a database the program declares: a `database` block must name its engine, location and tables, because where data lives is a decision the source states. Rows come back as typed records, so a renamed column is a compile error at every read, and SQL text never appears in source. Every row carries a database-maintained `revision`; `Shelf.save(row)` writes only if the stored row still has the revision the row was read at, and a conflict comes back as a typed value holding the row stored now. `corvid migrate plan` writes the migration that creates declared tables. The tour declares a table and the agents that read and rename a shelf.",
+        spec: "docs/reference/tables.md",
+        roadmap: "B09 typed persistence (P1)",
+        test: "crates/corvid-driver/tests/tables_e2e.rs + crates/corvid-cli/tests/tables_migrate.rs + crates/corvid-types/src/checker/tables.rs tests",
+        non_scope: "SQLite through the interpreter only; queries beyond get-by-key, Postgres, MySQL, migrations of changed tables, recorded replay of table operations and the native target are later B09 slices.",
+        source: r#"database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+    tables: Shelf
+
+table Shelf:
+    key shelf: Int
+    owner: String
+    title: String
+
+agent rename(shelf_id: Int, title: String) -> String:
+    return match Shelf.get(shelf_id):
+        None -> "there is no such shelf"
+        Some(shelf) -> store(Shelf { title: title, ..shelf })
+
+agent store(renamed: Shelf) -> String:
+    return match Shelf.save(renamed):
+        Ok(saved) -> "saved revision " + saved.revision.to_string()
+        Err(current) -> "someone else changed the shelf first"
+"#,
+    },
+    TourTopic {
         name: "sqlite",
         title: "Executing SQLite Surface",
         category: "Executing I/O",

@@ -311,6 +311,18 @@ memory prefs:
 "#,
     ),
     (
+        "tables_and_databases",
+        r#"database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+    tables: Shelf
+
+table Shelf:
+    key shelf: Int
+    title: String
+"#,
+    ),
+    (
         "weak_type_refs",
         r#"effect io_eff:
     reversible: true
@@ -680,6 +692,10 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("type_field", "record_types_and_stores"),
     ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
+    ("table_decl", "tables_and_databases"),
+    ("table_field", "tables_and_databases"),
+    ("database_decl", "tables_and_databases"),
+    ("database_setting", "tables_and_databases"),
     ("type_ref", "record_types_and_stores"),
     ("type_args", "record_types_and_stores"),
     ("type_arg", "weak_type_refs"),

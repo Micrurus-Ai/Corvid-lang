@@ -52,6 +52,8 @@ program           ::= (decl | NEWLINE)* EOF
 decl              ::= visibility? (
                         type_decl
                       | store_decl
+                      | table_decl
+                      | database_decl
                       | tool_decl
                       | prompt_decl
                       | agent_decl
@@ -122,6 +124,16 @@ field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
 type_alias_body   ::= type_ref
 
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
+
+# B09: a stored record type and the database that holds it.
+# `table`, `database`, `key`, `engine`, `location`, `tables` and `env`
+# are contextual: they stay ordinary identifiers elsewhere.
+table_decl        ::= 'table' IDENT ':' INDENT table_field+ DEDENT
+table_field       ::= 'key'? type_field
+database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
+database_setting  ::= 'engine' ':' IDENT NEWLINE
+                    | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
+                    | 'tables' ':' IDENT (',' IDENT)* NEWLINE
 ```
 
 ## Type references

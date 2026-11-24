@@ -1,6 +1,6 @@
 # B09: Typed persistence
 
-Status: proposed, 2026-11-24. Backend and AI syntax; no frontend grammar
+Status: P1 shipped 2026-11-24; later slices in progress. Backend and AI syntax; no frontend grammar
 is affected.
 
 ## Problem
@@ -94,10 +94,10 @@ agent shelves_of(user: String) -> List<Shelf>:
    is a compile error naming the part that cannot run in the
    database. SQL text never appears in source, so injection is not
    expressible.
-6. **Effects and replay compose.** Each table gets `reads_<table>` /
-   `writes_<table>` effects (reads and writes of `Shelf` are
-   `reads_shelf` / `writes_shelf`), so `@budget`, approvals and effect
-   rows see database work, and an agent that only reads cannot write.
+6. **Effects and replay compose.** Reads use the built-in
+   `db_egress_read` effect and writes `db_egress_write`, the effects
+   `std.db` already declares, so effect rows and approvals see database
+   work without a second set of database effects.
    Every query and write is recorded in the trace with its result, and
    replay returns the recorded rows without touching the database.
 7. **Migrations come from declarations.** `corvid migrate plan` compares

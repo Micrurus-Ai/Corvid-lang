@@ -941,3 +941,32 @@ Roadmap: [Phase 52 verified provider protocols](../../ROADMAP.md)
 Proof: [the durable lifecycle](../../crates/corvid-driver/tests/protocol_lifecycle.rs) + [the transition engine](../../crates/corvid-runtime/src/protocol.rs) + [the simulator](../../crates/corvid-runtime/src/protocol_simulate.rs)
 Non-scope: Validating that a provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are a later 52i slice. The deadline and cadence are declared and checked, never defaulted.
 
+#### Typed Tables With Revision-Checked Writes
+
+A `table` is a record type stored in a database the program declares.
+The `database` block must name its engine, location and tables, so where
+data lives is always stated in source. Rows come back as typed records,
+so renaming a column is a compile error at every read, and SQL text never
+appears in source. Every row carries a database-maintained `revision`:
+`Shelf.save(row)` writes only if the stored row still has the revision
+the row was read at, and a conflict is an ordinary typed value holding
+the row stored now. `corvid migrate plan` writes the migration that
+creates declared tables.
+
+```corvid
+database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+    tables: Shelf
+
+table Shelf:
+    key shelf: Int
+    title: String
+
+agent store(renamed: Shelf) -> String:
+    return match Shelf.save(renamed):
+        Ok(saved) -> "saved revision " + saved.revision.to_string()
+        Err(current) -> "someone else changed the shelf first"
+```
+
+Try it: `corvid tour --topic tables`. Reference: [Tables](./tables.md).

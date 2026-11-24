@@ -4,6 +4,46 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Tables: typed rows with revision-checked writes (B09 P1)
+
+A Corvid program can now declare `table Shelf:` and `database library:`
+and read and write rows without SQL text. `Shelf.get`, `insert`, `save`
+and `delete` are typed from the row, every write is a compare-and-set on
+the row's `revision`, and a conflict comes back as a typed `Result`
+holding the row stored now. `corvid migrate plan` writes the migration
+that creates declared tables.
+
+Decisions:
+
+- **The revision travels in the row.** Corvid calls have no named
+  arguments and adding them would change grammar the frontend shares,
+  so instead of `save(row, expecting: n)` a row carries the revision it
+  was read at, and `Shelf { revision: seen, ..row }` states a different
+  expectation in source.
+- **Conflicts are plain `Result` values.** `Err` holds the stored row
+  (or `None` when deleted), so no new generic conflict type was needed.
+- **A table is a record.** The parser builds the table's record with
+  `revision` appended, so the checker, IR, interpreter and JSON mapping
+  treat rows exactly like records; only construction may omit
+  `revision`, which IR lowering fills with 0.
+- **One recognizer.** `table_call_target` in `corvid-types` decides
+  whether a call is a table operation for the checker, the effect
+  analyzer, the purity and determinism checks and IR lowering.
+- **One storage map.** `column_kind` in `corvid-runtime` decides each
+  field's column for both the interpreter and the migration planner; a
+  nested `Option` is stored as JSON so `Some(None)` is not `NULL`.
+- **Reuse the std.db handles.** Table SQL runs through
+  `DbHandleRegistry`, so it shares the writer lock, parameter-only
+  binding and replay write quarantine rather than adding a second
+  connection layer.
+- **Migrations are the schema history.** The planner applies existing
+  migrations to an in-memory database instead of reading the live one,
+  so a plan is the same on every machine.
+
+Deferred, on the roadmap: recorded replay of table reads (P1b), typed
+queries (P2), migrations of changed tables (P3), Postgres, MySQL and the
+native target.
+
 ## 2026-11-24 - B09 typed persistence: the design
 
 [The proposal](docs/proposals/b09-typed-persistence.md) settles the

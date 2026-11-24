@@ -8152,3 +8152,7 @@ A public type from another module decodes the way it is imported: `Customer.from
 ### Aliases from other modules
 
 A `public` alias in another module is as transparent as a local one. After `import "./models" use Customers`, a parameter typed `Customers` is a `List<Customer>`, so `customers.length()` works, and a record field typed `m.Customers` after `import "./models" as m` holds the list. Before this, the compiler treated an alias from another module as a record with no fields, and a record field typed with any alias decoded as an empty record. [Type aliases](docs/book/05-types.md#type-aliases)
+
+### Storing records in tables
+
+A `table` is a record type stored in a database: `table Shelf:` with one field marked `key`, listed in a `database` block that names its `engine: sqlite`, its `location:` (a path or `env("NAME")`) and its `tables:`. Leaving out a setting or a key is a compile error that names it. `Shelf.get(key)` returns `Option<Shelf>`. `Shelf.insert(row)`, `Shelf.save(row)` and `Shelf.delete(row)` return a `Result` whose `Err` holds the row stored now, because every row carries a `revision` and a write succeeds only if the stored row still has the revision the row was read at. Build a new row without `revision`, as `Shelf(1, "ana", "Reading")`; edit a stored one with `Shelf { title: t, ..shelf }`. `corvid migrate plan src/main.cor` writes the migration that creates declared tables, and `corvid migrate up --database <location>` applies it. Tables run on the interpreter. [Tables](docs/reference/tables.md)
