@@ -27,7 +27,9 @@ mod postgres;
 mod query;
 mod recorded;
 mod schema;
+mod transaction;
 pub use dialect::TableEngine;
+pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
 pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
@@ -47,6 +49,8 @@ pub struct TableRef<'a> {
     pub kinds: &'a [ColumnKind],
     pub location: &'a DatabaseLocation,
     pub engine: TableEngine,
+    /// The `atomic:` block this operation runs inside, if any.
+    pub transaction: Option<&'a TableTransaction>,
 }
 
 /// A row's values, in [`TableRef::columns`] order.
@@ -81,6 +85,18 @@ impl Runtime {
     async fn table_connection(&self, table: &TableRef<'_>) -> Result<TableConnection, RuntimeError> {
         let location = resolve_location(table.location)?;
         let id = format!("{}:{location}", table.engine.name());
+        if let Some(transaction) = table.transaction {
+            if transaction.id != id {
+                return Err(RuntimeError::Other(format!(
+                    "table `{}` is not in the database its `atomic:` block writes to",
+                    table.name
+                )));
+            }
+            // A replay serves every operation before reaching here.
+            return transaction.connection.clone().ok_or_else(|| {
+                RuntimeError::Other("an `atomic:` block has no connection outside a replay".into())
+            });
+        }
         if let Some(connection) = self.table_databases.connections.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
             return Ok(connection.clone());
         }
@@ -255,6 +271,11 @@ fn key_value(table: &TableRef<'_>, row: &[DbValue]) -> Result<DbValue, RuntimeEr
     row.get(key_index(table)?)
         .cloned()
         .ok_or_else(|| RuntimeError::Other(format!("table `{}`: a row has no key value", table.name)))
+}
+
+/// A failure ending a database's transaction, with the database named.
+fn named_database(database: &str, error: RuntimeError) -> RuntimeError {
+    RuntimeError::Other(format!("database `{database}`: {error}"))
 }
 
 /// Name the missing table and the commands that create it.

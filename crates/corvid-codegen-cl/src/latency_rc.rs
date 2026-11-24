@@ -131,6 +131,8 @@ fn collect_prompt_pins_in_stmt(
         IrStmt::If { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
         IrStmt::For { iter, .. } => collect_prompt_pins_in_expr(iter, borrowed_reads, out),
         IrStmt::While { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        IrStmt::Atomic { .. } => {}
         IrStmt::Destructure { value, .. } => {
             collect_prompt_pins_in_expr(value, borrowed_reads, out)
         }

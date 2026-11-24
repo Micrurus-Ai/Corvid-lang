@@ -1316,6 +1316,15 @@ impl<'a> Lowerer<'a> {
                 body: self.lower_block(body),
                 span: *span,
             },
+            Stmt::Atomic { body, span } => {
+                // The checker proved every table here lives in one database.
+                let tables = corvid_types::table_ops::atomic_tables(body, self.file, self.symbols, self.bindings);
+                let database = tables
+                    .first()
+                    .and_then(|table| corvid_types::table_ops::table_database(self.file, &table.name().name))
+                    .and_then(ir_database);
+                IrStmt::Atomic { database, body: self.lower_block(body), span: *span }
+            }
             Stmt::Break { span } => IrStmt::Break { span: *span },
             Stmt::Continue { span } => IrStmt::Continue { span: *span },
             Stmt::Pass { span } => IrStmt::Pass { span: *span },
@@ -2331,21 +2340,13 @@ impl<'a> Lowerer<'a> {
     /// What a table's operations need: its row type, key, columns and database.
     fn ir_table(&self, table: &corvid_ast::TableDecl) -> Option<crate::types::IrTable> {
         let def_id = self.remap_def_id(self.symbols.lookup_def(&table.name().name)?);
-        let database = self.file.decls.iter().find_map(|decl| match decl {
-            Decl::Database(db) if db.tables.iter().any(|t| t.name == table.name().name) => Some(db),
-            _ => None,
-        })?;
+        let database = corvid_types::table_ops::table_database(self.file, &table.name().name)?;
         Some(crate::types::IrTable {
             def_id,
             name: table.name().name.clone(),
             key: table.key.as_ref()?.name.clone(),
             columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
-            database: crate::types::IrDatabase {
-                name: database.name.name.clone(),
-                engine: database.engine.as_ref()?.name.clone(),
-                location: database.location.clone()?,
-                tls: database.tls.as_ref().map(|tls| tls.name.clone()),
-            },
+            database: ir_database(database)?,
         })
     }
 
@@ -2631,4 +2632,14 @@ pub fn param_is_history(p: &Param) -> bool {
         if name.name == "List"
             && args.len() == 1
             && matches!(&args[0], corvid_ast::TypeRef::Named { name, .. } if name.name == "AiMessage"))
+}
+
+/// A `database` block as table operations and `atomic:` blocks run it.
+fn ir_database(database: &corvid_ast::DatabaseDecl) -> Option<crate::types::IrDatabase> {
+    Some(crate::types::IrDatabase {
+        name: database.name.name.clone(),
+        engine: database.engine.as_ref()?.name.clone(),
+        location: database.location.clone()?,
+        tls: database.tls.as_ref().map(|tls| tls.name.clone()),
+    })
 }

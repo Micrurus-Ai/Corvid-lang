@@ -176,6 +176,9 @@ fn collect_stmt_capabilities(
             collect_expr_capabilities(iter, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
         }
+        corvid_ast::Stmt::Atomic { body, .. } => {
+            collect_body_capabilities(body, file, resolved, caps);
+        }
         corvid_ast::Stmt::While { cond, body, .. } => {
             collect_expr_capabilities(cond, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
@@ -275,6 +278,9 @@ fn collect_stmt_effects(
         }
         corvid_ast::Stmt::For { iter, body, .. } => {
             collect_expr_effects(iter, file, resolved, effects);
+            collect_body_effects(body, file, resolved, effects);
+        }
+        corvid_ast::Stmt::Atomic { body, .. } => {
             collect_body_effects(body, file, resolved, effects);
         }
         corvid_ast::Stmt::While { cond, body, .. } => {

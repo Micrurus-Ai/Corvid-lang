@@ -277,6 +277,11 @@ impl Codegen {
                 self.emit_expr(expr);
                 self.out.newline();
             }
+            IrStmt::Atomic { .. } => {
+                self.out.writeln(
+                    "raise NotImplementedError(\"atomic blocks run on the interpreter (B09)\")",
+                );
+            }
             IrStmt::While { cond, body, .. } => {
                 self.out.write("while ");
                 self.emit_expr(cond);

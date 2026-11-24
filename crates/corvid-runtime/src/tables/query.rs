@@ -152,7 +152,7 @@ mod tests {
     const KINDS: &[ColumnKind] = &[ColumnKind::Integer, ColumnKind::Text, ColumnKind::Integer, ColumnKind::Integer];
 
     fn table<'a>(columns: &'a [String], location: &'a DatabaseLocation, engine: super::super::TableEngine) -> TableRef<'a> {
-        TableRef { name: "Shelf", key: "id", columns, kinds: KINDS, location, engine }
+        TableRef { name: "Shelf", key: "id", columns, kinds: KINDS, location, engine, transaction: None }
     }
 
     #[test]

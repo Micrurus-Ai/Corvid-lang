@@ -366,6 +366,9 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
             scan_expr(iter, max_id);
             scan_block(body, max_id);
         }
+        IrStmt::Atomic { body, .. } => {
+            scan_block(body, max_id);
+        }
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, max_id);
             scan_block(body, max_id);

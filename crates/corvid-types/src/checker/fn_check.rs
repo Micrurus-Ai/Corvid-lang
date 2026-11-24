@@ -78,6 +78,9 @@ impl<'a> Checker<'a> {
                 self.walk_fn_purity_expr(fn_name, iter);
                 self.walk_fn_purity_block(fn_name, body);
             }
+            Stmt::Atomic { body, .. } => {
+                self.walk_fn_purity_block(fn_name, body);
+            }
             Stmt::While { cond, body, .. } => {
                 self.walk_fn_purity_expr(fn_name, cond);
                 self.walk_fn_purity_block(fn_name, body);

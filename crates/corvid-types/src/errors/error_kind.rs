@@ -414,6 +414,8 @@ pub enum TypeErrorKind {
     /// B09 P3 — `renamed from` or `retired` contradicts the table's
     /// declared columns or another clause.
     TableColumnHistoryConflict { table: String, message: String },
+    /// B09 P7a — something an `atomic:` block cannot hold.
+    AtomicBlockRefused { message: String },
     /// B09 — a table declares no `key` field.
     TableKeyRequired { table: String },
     /// B09 — a table's key is neither `Int` nor `String`.
@@ -888,6 +890,7 @@ impl TypeErrorKind {
             }
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
+            Self::AtomicBlockRefused { message } => message.clone(),
             Self::TableKeyRequired { table } => format!("table `{table}` declares no key field"),
             Self::TableKeyType { table, key, found } => {
                 format!("the key `{key}` of table `{table}` is `{found}`; a key is `Int` or `String`")
@@ -1310,6 +1313,9 @@ impl TypeErrorKind {
             ),
             Self::TableQueryNotTranslatable { .. } => Some(
                 "a query runs in the database, so its parts are limited to what SQL can do: filter with comparisons of a column and an agent value, order by one column, take a count; combine further in the agent after the query".into(),
+            ),
+            Self::AtomicBlockRefused { .. } => Some(
+                "an `atomic:` block holds only what the database can undo: table operations, queries and pure code. Do anything else (a tool, a model call, an approval) before or after the block, and finish the block before returning".into(),
             ),
             Self::TableColumnHistoryConflict { .. } => Some(
                 "`renamed from` names the column a field was stored as before, and `retired` names stored columns the table no longer has; each stored name appears once, and never as a declared field".into(),

@@ -569,6 +569,11 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             out.push_str(":\n");
             render_block(body, indent + 1, out);
         }
+        Stmt::Atomic { body, .. } => {
+            push_indent(indent, out);
+            out.push_str("atomic:\n");
+            render_block(body, indent + 1, out);
+        }
         Stmt::While { cond, body, .. } => {
             push_indent(indent, out);
             out.push_str("while ");

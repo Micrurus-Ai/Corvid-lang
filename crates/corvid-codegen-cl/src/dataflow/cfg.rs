@@ -313,6 +313,10 @@ impl CfgBuilder {
                         self.push_stmt(cur, CfgStmt::Expr { reads }, my_path.clone());
                     }
                 }
+                // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+                IrStmt::Atomic { .. } => {
+                    self.push_stmt(cur, CfgStmt::Other { reads: Vec::new() }, my_path);
+                }
                 IrStmt::While { cond, body, .. } => {
                     // Same edge shape as `for`: head -> body,
                     // body -> head (backedge), head -> after. The

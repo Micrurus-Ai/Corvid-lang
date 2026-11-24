@@ -755,6 +755,16 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// `atomic:` (B09 P7a): the body's table writes commit together,
+    /// or are all undone when the body is left through an error.
+    /// `database` is the one database the body's tables live in, or
+    /// `None` when the body touches no table.
+    Atomic {
+        database: Option<IrDatabase>,
+        body: IrBlock,
+        span: Span,
+    },
+
     /// `approve Label(args)` — authorizes matching dangerous tool calls.
     Approve {
         label: String,
