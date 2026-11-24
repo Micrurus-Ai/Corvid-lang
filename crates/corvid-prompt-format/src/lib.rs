@@ -241,6 +241,11 @@ fn schema_for_inner(
         // for a duration.
         Type::Instant => json!({ "type": "string", "format": "date-time" }),
         Type::Duration => json!({ "type": "string", "format": "duration" }),
+        Type::TimeZone => json!({ "type": "string", "description": "an IANA time zone name, such as Europe/Berlin" }),
+        Type::ZonedTime => json!({
+            "type": "string",
+            "description": "RFC 9557 zoned time: local time, offset and IANA zone, such as 2026-03-29T03:30:00+02:00[Europe/Berlin]",
+        }),
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so

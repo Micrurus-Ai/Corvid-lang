@@ -571,6 +571,9 @@ impl Codegen {
             // precision, which Corvid's exact `Decimal` never does, so
             // the Python backend refuses decimals rather than change
             // their meaning.
+            IrLiteral::TimeZone(_) => self.out.write(
+                "(_ for _ in ()).throw(NotImplementedError(\"TimeZone is interpreter-only until B06's native time slice\"))",
+            ),
             IrLiteral::Decimal(_) => self.out.write(
                 "(_ for _ in ()).throw(NotImplementedError(\"Decimal is interpreter-only until B06's native Decimal slice\"))",
             ),
@@ -679,7 +682,7 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // until its native slice) before a hint is needed.
         T::Decimal => "object".into(),
         // B06 — the Python backend refuses time types like `Decimal`.
-        T::Duration | T::Instant => "object".into(),
+        T::Duration | T::Instant | T::TimeZone | T::ZonedTime => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

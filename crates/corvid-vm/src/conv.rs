@@ -34,6 +34,8 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         // text, the form `corvid_time` parses back.
         Value::Duration(d) => serde_json::Value::String(d.to_string()),
         Value::Instant(i) => serde_json::Value::String(i.to_string()),
+        Value::TimeZone(z) => serde_json::Value::String(z.to_string()),
+        Value::ZonedTime(z) => serde_json::Value::String(z.to_string()),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -195,6 +197,12 @@ pub fn json_to_value(
         (Type::Instant, J::String(text)) => corvid_time::Instant::parse(&text)
             .map(Value::Instant)
             .map_err(|error| ConvError::TypeMismatch { expected: "Instant".into(), got: format!("`{text}`: {error}") }),
+        (Type::TimeZone, J::String(text)) => corvid_time::TimeZone::parse(&text)
+            .map(Value::TimeZone)
+            .map_err(|error| ConvError::TypeMismatch { expected: "TimeZone".into(), got: error.to_string() }),
+        (Type::ZonedTime, J::String(text)) => corvid_time::ZonedTime::parse(&text)
+            .map(Value::ZonedTime)
+            .map_err(|error| ConvError::TypeMismatch { expected: "ZonedTime".into(), got: format!("`{text}`: {error}") }),
         (Type::Int, J::Number(n)) => n
             .as_i64()
             .map(Value::Int)
@@ -509,6 +517,8 @@ fn type_label(t: &Type) -> String {
         Type::Decimal => "Decimal".into(),
         Type::Duration => "Duration".into(),
         Type::Instant => "Instant".into(),
+        Type::TimeZone => "TimeZone".into(),
+        Type::ZonedTime => "ZonedTime".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

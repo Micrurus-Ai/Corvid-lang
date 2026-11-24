@@ -23,6 +23,8 @@ impl fmt::Display for Value {
             Value::Decimal(d) => write!(f, "{d}"),
             Value::Duration(d) => write!(f, "{d}"),
             Value::Instant(i) => write!(f, "{i}"),
+            Value::TimeZone(z) => write!(f, "{z}"),
+            Value::ZonedTime(z) => write!(f, "{z}"),
             Value::String(s) => write!(f, "\"{}\"", escape_display(s)),
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Nothing => write!(f, "nothing"),

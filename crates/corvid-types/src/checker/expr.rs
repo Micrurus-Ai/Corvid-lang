@@ -30,6 +30,10 @@ impl<'a> Checker<'a> {
             {
                 self.check_decimal_literal(value, *span)
             }
+            // B06 — a string literal where a `TimeZone` is meant is one.
+            Expr::Literal { value: Literal::String(name), span } if matches!(expected, Some(Type::TimeZone)) => {
+                self.check_time_zone_literal(name, *span)
+            }
             Expr::Literal { value, .. } => match value {
                 Literal::Int(_) => Type::Int,
                 Literal::Float { value: _, .. } => Type::Float,
@@ -270,6 +274,8 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Decimal
                 | BuiltIn::Duration
                 | BuiltIn::Instant
+                | BuiltIn::TimeZone
+                | BuiltIn::ZonedTime
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

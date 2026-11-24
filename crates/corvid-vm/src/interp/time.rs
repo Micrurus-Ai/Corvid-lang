@@ -9,7 +9,7 @@
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::value::{BoxedValue, Value};
 use corvid_ast::{BinaryOp, Span};
-use corvid_time::{Duration, Instant, TimeError};
+use corvid_time::{Duration, Instant, TimeError, TimeZone, ZonedTime};
 use corvid_types::BuiltinMethodKind;
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ fn mismatch(expected: &str, got: &Value, span: Span) -> InterpError {
 
 /// Whether `l op r` is a time operation the interpreter evaluates here.
 pub(super) fn is_time_operand(value: &Value) -> bool {
-    matches!(value, Value::Duration(_) | Value::Instant(_))
+    matches!(value, Value::Duration(_) | Value::Instant(_) | Value::ZonedTime(_) | Value::TimeZone(_))
 }
 
 /// `l op r` where either side is a `Duration` or an `Instant`. The
@@ -45,6 +45,11 @@ pub(super) fn eval_time_arithmetic(op: BinaryOp, l: &Value, r: &Value, span: Spa
         }
         (Sub, Value::Instant(i), Value::Duration(d)) => instant(i.checked_sub(d)),
         (Sub, Value::Instant(a), Value::Instant(b)) => Ok(Value::Duration(a.duration_since(b))),
+        (Add, Value::ZonedTime(z), Value::Duration(d)) | (Add, Value::Duration(d), Value::ZonedTime(z)) => {
+            z.checked_add(d).map(Value::ZonedTime).map_err(|e| trap(e, span))
+        }
+        (Sub, Value::ZonedTime(z), Value::Duration(d)) => z.checked_sub(d).map(Value::ZonedTime).map_err(|e| trap(e, span)),
+        (Sub, Value::ZonedTime(a), Value::ZonedTime(b)) => Ok(Value::Duration(a.instant().duration_since(&b.instant()))),
         (_, a, b) => Err(InterpError::new(
             InterpErrorKind::TypeMismatch {
                 expected: "a duration or instant operation".into(),
@@ -72,14 +77,51 @@ pub(super) fn eval_time_ordering(op: BinaryOp, l: &Value, r: &Value, span: Span)
 }
 
 /// A `Duration` or `Instant` builtin method, or a parse into one.
-pub(super) fn eval_time_method(kind: BuiltinMethodKind, receiver: &Value, span: Span) -> Result<Value, InterpError> {
+pub(super) fn eval_time_method(
+    kind: BuiltinMethodKind,
+    receiver: &Value,
+    args: &[Value],
+    span: Span,
+) -> Result<Value, InterpError> {
     use BuiltinMethodKind::*;
     let text = |value: String| Value::String(Arc::from(value));
     let parsed = |result: Result<Value, String>| match result {
         Ok(value) => Value::ResultOk(BoxedValue::new(value)),
         Err(message) => Value::ResultErr(BoxedValue::new(text(message))),
     };
+    let zone_argument = || match args.first() {
+        Some(Value::TimeZone(zone)) => Ok(*zone),
+        Some(other) => Err(mismatch("TimeZone", other, span)),
+        None => Err(mismatch("TimeZone", &Value::Nothing, span)),
+    };
+    let count_argument = || match args.first() {
+        Some(Value::Int(n)) => Ok(*n),
+        Some(other) => Err(mismatch("Int", other, span)),
+        None => Err(mismatch("Int", &Value::Nothing, span)),
+    };
+    let zoned = |result: Result<ZonedTime, TimeError>| result.map(Value::ZonedTime).map_err(|e| trap(e, span));
     match (kind, receiver) {
+        (InstantInZone, Value::Instant(i)) => Ok(Value::ZonedTime(i.in_zone(zone_argument()?))),
+        (ZonedTimeField(field), Value::ZonedTime(z)) => Ok(Value::Int(z.field(field))),
+        (ZonedTimeZone, Value::ZonedTime(z)) => Ok(Value::TimeZone(z.zone())),
+        (ZonedTimeInstant, Value::ZonedTime(z)) => Ok(Value::Instant(z.instant())),
+        (ZonedTimeAddDays, Value::ZonedTime(z)) => zoned(z.add_days(count_argument()?)),
+        (ZonedTimeAddMonths, Value::ZonedTime(z)) => zoned(z.add_months(count_argument()?)),
+        (ZonedTimeAddYears, Value::ZonedTime(z)) => zoned(z.add_years(count_argument()?)),
+        (ZonedTimeWithZone, Value::ZonedTime(z)) => Ok(Value::ZonedTime(z.with_zone(zone_argument()?))),
+        (ZonedTimeToString, Value::ZonedTime(z)) => Ok(text(z.to_string())),
+        (TimeZoneToString, Value::TimeZone(z)) => Ok(text(z.to_string())),
+        (StringParseTimeZone, Value::String(s)) => Ok(parsed(
+            TimeZone::parse(s.trim()).map(Value::TimeZone).map_err(|e| e.to_string()),
+        )),
+        (StringParseZonedTime, Value::String(s)) => Ok(parsed(
+            ZonedTime::parse(s.trim())
+                .map(Value::ZonedTime)
+                .map_err(|e| format!("`{s}` is not a zoned time: {e}")),
+        )),
+        (StringParseLocalTime, Value::String(s)) => Ok(parsed(
+            ZonedTime::parse_local(s.trim(), zone_argument()?).map(Value::ZonedTime).map_err(|e| e.to_string()),
+        )),
         (DurationWhole(unit), Value::Duration(d)) => d.whole(unit).map(Value::Int).map_err(|e| trap(e, span)),
         (DurationAbs, Value::Duration(d)) => Ok(Value::Duration(d.abs())),
         (DurationToString, Value::Duration(d)) => Ok(text(d.to_string())),

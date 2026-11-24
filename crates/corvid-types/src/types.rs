@@ -29,6 +29,10 @@ pub enum Type {
     Duration,
     /// B06 — an exact point on the UTC timeline (`corvid_time::Instant`).
     Instant,
+    /// B06 — an IANA time zone (`corvid_time::TimeZone`).
+    TimeZone,
+    /// B06 — an instant seen in a time zone (`corvid_time::ZonedTime`).
+    ZonedTime,
     String,
     Bool,
     Nothing,
@@ -221,6 +225,8 @@ impl Type {
             "Decimal" => Type::Decimal,
             "Duration" => Type::Duration,
             "Instant" => Type::Instant,
+            "TimeZone" => Type::TimeZone,
+            "ZonedTime" => Type::ZonedTime,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -244,6 +250,8 @@ impl Type {
             Type::Decimal => "Decimal".into(),
             Type::Duration => "Duration".into(),
             Type::Instant => "Instant".into(),
+            Type::TimeZone => "TimeZone".into(),
+            Type::ZonedTime => "ZonedTime".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),

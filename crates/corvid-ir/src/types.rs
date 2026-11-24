@@ -1279,6 +1279,8 @@ pub enum IrLiteral {
     Float(f64),
     /// B06 — an exact decimal literal (`19.99` where a `Decimal` is meant).
     Decimal(corvid_decimal::Decimal),
+    /// B06 — a zone literal (`"Europe/Berlin"` where a `TimeZone` is meant).
+    TimeZone(corvid_time::TimeZone),
     String(String),
     Bool(bool),
     Nothing,

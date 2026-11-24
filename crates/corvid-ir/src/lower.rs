@@ -1427,6 +1427,15 @@ impl<'a> Lowerer<'a> {
                         .unwrap_or(corvid_decimal::Decimal::ZERO),
                 ))
             }
+            // B06 — a string literal the checker typed `TimeZone`, looked
+            // up with the parser the checker used.
+            Expr::Literal { value: Literal::String(name), .. } if matches!(ty, Type::TimeZone) => {
+                IrExprKind::Literal(IrLiteral::TimeZone(
+                    // Unreachable for a program that checked: the checker
+                    // reports an unknown zone name.
+                    corvid_time::TimeZone::parse(name).unwrap_or(corvid_time::TimeZone::UTC),
+                ))
+            }
             Expr::Literal { value, .. } => IrExprKind::Literal(match value {
                 Literal::Int(n) => IrLiteral::Int(*n),
                 Literal::Float { value: f, .. } => IrLiteral::Float(*f),
@@ -2457,6 +2466,8 @@ impl<'a> Lowerer<'a> {
             Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
             Some(Binding::BuiltIn(BuiltIn::Duration)) => Type::Duration,
             Some(Binding::BuiltIn(BuiltIn::Instant)) => Type::Instant,
+            Some(Binding::BuiltIn(BuiltIn::TimeZone)) => Type::TimeZone,
+            Some(Binding::BuiltIn(BuiltIn::ZonedTime)) => Type::ZonedTime,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,

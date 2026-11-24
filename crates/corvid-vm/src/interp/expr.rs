@@ -11,6 +11,7 @@ pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
         IrLiteral::Int(n) => Value::Int(*n),
         IrLiteral::Float(f) => Value::Float(*f),
         IrLiteral::Decimal(d) => Value::Decimal(*d),
+        IrLiteral::TimeZone(z) => Value::TimeZone(*z),
         IrLiteral::String(s) => Value::String(Arc::from(s.as_str())),
         IrLiteral::Bool(b) => Value::Bool(*b),
         IrLiteral::Nothing => Value::Nothing,
@@ -795,7 +796,7 @@ pub(super) fn eval_builtin_method(
         )),
 
         _ if kind.is_decimal() => super::decimal::eval_decimal_method(kind, &recv, &args, span),
-        _ if kind.is_time() => super::time::eval_time_method(kind, &recv, span),
+        _ if kind.is_time() => super::time::eval_time_method(kind, &recv, &args, span),
         _ if kind.is_text_encoder() || kind.is_text_decoder() => {
             let s = want_string(&recv, span)?;
             super::text_methods::eval_text_method(kind, &s, span)

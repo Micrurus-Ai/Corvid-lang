@@ -40,12 +40,20 @@ use crate::errors::RuntimeError;
 #[allow(dead_code)]
 pub const GUARANTEE_ID_CRON_DST_CORRECT: &str = "jobs.cron_dst_correct";
 
+/// A schedule's zone, looked up with `corvid_time`, the same parser
+/// and database Corvid programs use, so a schedule and a program agree
+/// on every zone name and daylight-saving change (B06).
+fn schedule_zone(zone: &str) -> Result<Tz, RuntimeError> {
+    corvid_time::TimeZone::parse(zone)
+        .map(|zone| zone.chrono_zone())
+        .map_err(|err| RuntimeError::Other(format!("invalid schedule timezone `{zone}`: {err}")))
+}
+
 pub(super) fn validate_schedule(cron: &str, zone: &str) -> Result<(), RuntimeError> {
     let expression = normalize_cron(cron)?;
     Schedule::from_str(&expression)
         .map_err(|err| RuntimeError::Other(format!("invalid cron expression `{cron}`: {err}")))?;
-    zone.parse::<Tz>()
-        .map_err(|err| RuntimeError::Other(format!("invalid schedule timezone `{zone}`: {err}")))?;
+    schedule_zone(zone)?;
     Ok(())
 }
 
@@ -64,12 +72,7 @@ pub(super) fn missed_fire_times(
             schedule.cron
         ))
     })?;
-    let zone = schedule.zone.parse::<Tz>().map_err(|err| {
-        RuntimeError::Other(format!(
-            "invalid schedule timezone `{}`: {err}",
-            schedule.zone
-        ))
-    })?;
+    let zone = schedule_zone(&schedule.zone)?;
     let start_ms = schedule
         .last_fire_ms
         .unwrap_or(schedule.last_checked_ms)

@@ -10,6 +10,7 @@ corvid-ast = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-decimal = { workspace = true }
+corvid-time = { workspace = true }
 
 [dev-dependencies]
 corvid-syntax = { workspace = true }

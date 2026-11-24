@@ -1118,6 +1118,11 @@ fn emit_expr(
         IrExprKind::Literal(IrLiteral::Bool(value)) => {
             function.instruction(&Instruction::I32Const(i32::from(*value)));
         }
+        IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
+            return Err(WasmCodegenError::unsupported(
+                "`TimeZone` is interpreter-only until B06's native time slice",
+            ));
+        }
         IrExprKind::Literal(IrLiteral::Decimal(_)) => {
             return Err(WasmCodegenError::unsupported(
                 "`Decimal` is interpreter-only until B06's native Decimal slice",
