@@ -33,6 +33,19 @@ How to apply:
 4. **Prove it.** A claim of power, speed or safety ships with a test, benchmark or runnable example that shows it, as the invention shipping contract requires.
 5. **No ceiling.** When a design would block a hard but real use (hard real-time limits, very large data, formal verification, embedded or offline targets), name the limit in the roadmap as planned work instead of designing it out.
 
+## Use all three tiers in every step
+
+**For every decision, line of code, task and step, analyze how it can take advantage of Corvid having the backend, the frontend and AI native in one language, and use that to make the work more efficient, more powerful and stronger.** Set by the CTO 2026-11-24. A feature designed as if Corvid were only a backend language, only a UI language or only an AI language throws away the advantage no other language has.
+
+How to apply:
+
+1. **Ask the three questions before designing.** What does the backend know here that the frontend and AI could use? What could the UI give the person for free (forms, validation messages, conflict handling, progress)? What could an assistant do with it, safely, through declared actions? Write the answers in the slice's proposal, even when the answer is "nothing yet, because…".
+2. **One definition, every tier.** A type, validation, permission or error declared once must reach every tier from that one declaration, never a copy per tier (see "Single source of truth"). For example, a table's `where` refinement validates the frontend form, the backend write and the agent's tool call alike.
+3. **Let the compiler see across tiers.** Prefer designs where the compiler can check a change in one tier against its users in the others: a renamed column, a changed action input or a new error variant points at every affected screen, route and agent call.
+4. **Agents get typed state, not scraping.** When a feature produces data or actions, make it available to an authorized assistant as typed values and declared actions, with effects, approval, replay and budgets applied, and nothing exposed to an AI unless the source says so.
+5. **Measure the gain.** When the cross-tier design is the point, show it: less code than the separate-stack equivalent, a mistake caught at compile time that a separate stack would ship, or fewer round trips.
+6. **Coordinate across sessions.** When a backend step creates something the frontend or an assistant should use, record it for the frontend roadmap and tell the session that owns that tier, rather than waiting for it to be discovered.
+
 ## Syntax as simple as it can be
 
 **Every piece of syntax is as simple, readable and understandable as it can possibly be.** Set by the CTO 2026-11-24. Before adding or changing syntax, ask: *if Steve Jobs were shipping this, would he ship it like this?* If the answer is no, simplify until it is yes.
