@@ -428,7 +428,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn checkbox_field(label: String, name: String, checked: Bool) -> View` renders a labeled native checkbox and escapes both strings. The Boolean sets the initial checked state. In a form, a checked box submits its name with the value `on`. An unchecked box contributes no entry.
 - `fn checkbox_field_with_value(label: String, name: String, value: String, checked: Bool) -> View` renders a labeled checkbox with an explicit `value` attribute. It escapes all three strings. The Boolean sets the initial checked state. A checked box submits the supplied value, including an empty string. An unchecked box contributes no entry.
 - `fn date_field(label: String, name: String, initial: String) -> View`
-- `fn bind_field(field: View, component: View) -> View`
+- `fn bind_field(field: View, component: View) -> View` synchronizes a native field with a custom element's string `value` on interactive pages. Removing the bound view releases its field, component and form reset listeners. Reattaching it copies the field's current value into the component and binds to the current form.
 - `fn submit(label: String) -> View`
 - `fn reset_button(label: String) -> View` renders a native `<button type="reset">` with an escaped text label. Activating it restores the controls in its form to their default values.
 - `fn post_form(path: String, controls: List<View>) -> View`

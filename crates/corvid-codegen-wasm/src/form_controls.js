@@ -27,26 +27,67 @@ for (const select of document.querySelectorAll("select[data-corvid-submit-change
   select.addEventListener("change", () => select.form.requestSubmit());
 }
 
-for (const binding of document.querySelectorAll("[data-corvid-bind-field]")) {
-  const field = binding.querySelector("input, select, textarea");
-  const slot = binding.querySelector("[data-corvid-component]");
-  const component = slot?.firstElementChild;
-  if (!field || !component || !component.localName.includes("-")) continue;
-  customElements.whenDefined(component.localName).then(() => {
-    if (!("value" in component)) return;
-    const sync = () => { if (component.value !== field.value) component.value = field.value; };
-    sync();
-    field.addEventListener("input", sync);
-    field.addEventListener("change", sync);
-    field.form?.addEventListener("reset", () => queueMicrotask(sync));
-    component.addEventListener("change", () => {
-      if (field.value === component.value) return;
-      field.value = component.value;
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-      field.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    slot.hidden = false;
+// A missing optional module can leave whenDefined pending for the life of the page.
+function connectWhenDefined(bindingRef) {
+  return () => bindingRef.deref()?.connectField();
+}
+
+if (!customElements.get("corvid-field-binding")) {
+  customElements.define("corvid-field-binding", class extends HTMLElement {
+    #listeners;
+    #waitingFor;
+
+    connectedCallback() {
+      queueMicrotask(() => this.connectField());
+    }
+
+    connectField() {
+      if (!this.isConnected || this.#listeners) return;
+      const binding = this.parentElement;
+      const slot = binding?.querySelector(":scope > [data-corvid-component]");
+      const component = slot?.firstElementChild;
+      const field = binding?.querySelector("input, select, textarea");
+      if (!field || !component || !component.localName.includes("-")) return;
+      if (!customElements.get(component.localName)) {
+        if (this.#waitingFor !== component.localName) {
+          this.#waitingFor = component.localName;
+          customElements.whenDefined(component.localName).then(connectWhenDefined(new WeakRef(this)));
+        }
+        return;
+      }
+      if (!("value" in component)) return;
+      this.#listeners = new AbortController();
+      const options = { signal: this.#listeners.signal };
+      const sync = () => {
+        if (!options.signal.aborted && component.value !== field.value) component.value = field.value;
+      };
+      field.addEventListener("input", sync, options);
+      field.addEventListener("change", sync, options);
+      field.form?.addEventListener("reset", () => queueMicrotask(sync), options);
+      component.addEventListener("change", () => {
+        if (field.value === component.value) return;
+        field.value = component.value;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      }, options);
+      slot.hidden = false;
+      sync();
+    }
+
+    disconnectedCallback() {
+      this.#listeners?.abort();
+      this.#listeners = undefined;
+    }
   });
+}
+
+// Previously rendered views may predate the lifecycle element.
+for (const binding of document.querySelectorAll("[data-corvid-bind-field]")) {
+  if (!binding.querySelector(":scope > corvid-field-binding")) {
+    const lifecycle = document.createElement("corvid-field-binding");
+    lifecycle.hidden = true;
+    binding.append(lifecycle);
+  }
 }
 
 for (const form of document.querySelectorAll("form[data-corvid-receipt]")) {

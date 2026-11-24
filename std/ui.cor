@@ -202,7 +202,7 @@ public fn date_field(label: String, name: String, initial: String) -> View:
 
 # Pair one native field with a custom element that has a value property and a change event.
 public fn bind_field(field: View, component: View) -> View:
-    return View("<div data-corvid-bind-field>" + field.html + "<div hidden data-corvid-component>" + component.html + "</div></div>")
+    return View("<div data-corvid-bind-field>" + field.html + "<div hidden data-corvid-component>" + component.html + "</div><corvid-field-binding hidden></corvid-field-binding></div>")
 
 public fn submit(label: String) -> View:
     return View("<button type=\"submit\">" + escaped(label) + "</button>")
