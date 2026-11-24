@@ -1049,3 +1049,26 @@ fn panel_preview() -> ui.View:
 ```
 
 Use `settings_panel(children)` or `ui.grid(children)` when you already have a list, including a list built in a loop. Use `ui.grid([])` for an empty grid.
+
+### Use a browser API newer than Corvid
+
+The file preview reads a selected UTF-8 file, decodes its bytes in a worker, and lets the reader copy the preview. The Corvid page supplies the controls and owns the element that uses the browser APIs. Its events module declares two synchronous element methods and calls them from lifecycle handlers. [Page](../../examples/file_preview/src/main.cor) · [Lifecycle handlers](../../examples/file_preview/src/events.cor)
+
+```corvid
+tool start_preview() -> Nothing
+tool stop_preview() -> Nothing
+
+browser lifecycle open_preview() -> Nothing:
+    start_preview()
+
+browser lifecycle close_preview() -> Nothing:
+    stop_preview()
+```
+
+Implement those methods on the custom element registered by your browser module. Pass the element and the two handlers to `ui.owned_element(panel, open_preview(), close_preview())`. In this example, setup subscribes to file selections and observes preview text changes to enable the Copy button. Release removes the listeners, disconnects the observer, terminates the worker, and invalidates pending reads and clipboard completions. [Browser module](../../examples/file_preview/file_preview.ts)
+
+To add a browser operation, copy its signature from the platform specification into a partial interface. The example derives `BlobBinding.arrayBuffer()` and `ClipboardBinding.writeText(data)` from its IDL file. Assigning a browser object to the generated interface checks the adapter against that contract. The browser still controls availability and permission. Call clipboard methods from the click handler and handle promise rejection while the selectable text is still on screen. [IDL input](../../examples/file_preview/file_access.webidl) · [Binding reference](../reference/functions.md#browser-api-extension-bindings)
+
+For example, a browser may ship `Blob.bytes()` before your installed toolchain declares it. In your browser module, declare a local capability with `type ReadableBytes = Blob & { bytes?: () => Promise<Uint8Array> }`. Accept a `ReadableBytes` value, check `typeof blob.bytes === "function"` before calling it, and otherwise read `new Uint8Array(await blob.arrayBuffer())` where available. Handle a rejected read just like the existing preview. The Corvid lifecycle declarations stay the same when you extend the adapter. [File API](https://w3c.github.io/FileAPI/#blob-section)
+
+From the repository root, build the example with `python scripts/verify_file_preview.py --cli target/debug/corvid.exe --build-only`. This requires Node, npm and a built Corvid CLI. Serve it with `python -m http.server --directory examples/file_preview/target/site --bind 127.0.0.1 8000` and open `http://127.0.0.1:8000`. To run the browser assertions, replace `--build-only` with `--channel msedge`.
