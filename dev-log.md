@@ -4,6 +4,23 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - B09 typed persistence: the design
+
+[The proposal](docs/proposals/b09-typed-persistence.md) settles the
+shape before any code. A `table` is a record type with a declared key
+and a database-maintained `revision`; a `database` block must name its
+engine, location and tables, because where data lives is a decision the
+source states. Writes always pass the revision they expect and return a
+typed conflict. Queries are functions over the row, so a column rename
+is a compile error at every use, and SQL text never appears in source.
+Migrations are planned from declaration changes, and renames and drops
+are declared rather than guessed.
+
+The survey behind it: the runtime already has revision-checked writes
+and a conflict error for `store` declarations, but nothing in Corvid
+source reaches them; migrations and the executing database tools are
+SQLite-only; Postgres exists only as an unused connection struct.
+
 ## 2026-11-24 - Swift, Kotlin and Python SDKs speak the public JSON mapping
 
 The generated Swift, Kotlin and Python models declared the right types

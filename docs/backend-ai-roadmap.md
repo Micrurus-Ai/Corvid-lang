@@ -120,6 +120,16 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Swift, Kotlin and Python SDK models read and write the public JSON mapping: sum types in the wire shape, `Result`, maps with non-String keys as pairs, `null` for absent values, `JsonError` and the `Page` envelope. Kotlin `Int` fields are `Long`, as Corvid's `Int` is 64-bit. Tests run the generated Python and compile and run the generated Kotlin and Swift.
 - [ ] The Application Contract names field types as written in source, so a field typed with an alias (`orders: Orders`) names `Orders`, which no SDK declares. Name types from the checker's resolved types instead, as IR lowering does. The TypeScript client and the frontend read the contract, so agree the change with frontend development first.
 
+**B09 typed persistence** (designing). [Proposal](proposals/b09-typed-persistence.md)
+
+- [ ] P1. `table` and `database` declarations, the row record with `revision`, `T.get`, `insert`, `save(expecting:)`, `delete` and typed conflicts on SQLite through the interpreter, with effects and replay; `corvid migrate plan` writes `CREATE TABLE` for new tables.
+- [ ] P2. Typed queries (`where`, `order_by`, `descending`, `take`, `all`), refused at compile time when a condition cannot run in the database.
+- [ ] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`).
+- [ ] P4. Postgres, with a query suite every engine runs.
+- [ ] P5. MySQL.
+- [ ] P6. Native target.
+- [ ] P7. Port `examples/reading_list` from hand-written SQL to tables.
+
 **Test infrastructure**
 
 - [x] Integration tests that link Corvid programs find Cargo's build output wherever it is. The `corvid-test-paths` crate resolves the target directory from `CARGO_TARGET_DIR`, then from the `CACHEDIR.TAG` marker above the running test binary (which covers `build.target-dir`), then `<workspace>/target`. It replaces 15 copies of a `<workspace>/target/release` path, and `build_integration` no longer builds the whole workspace a second time into `<workspace>/target`.
