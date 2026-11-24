@@ -36,7 +36,10 @@ pub use io::{
 ///   run/tool/llm/approval/seed/clock/dispatch events.
 /// - `2`: `SchemaHeader.source_path` (21-A-schema-ext-source).
 ///   Optional, `#[serde(default)]` — v1 traces remain readable.
-pub const SCHEMA_VERSION: u32 = 2;
+/// - `3`: `SchemaHeader.tzdb_version` (B06). Optional,
+///   `#[serde(default)]` — older traces read as "unknown", never as
+///   an error.
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Oldest schema version this binary can still read. Traces at
 /// any version in `MIN_SUPPORTED_SCHEMA..=SCHEMA_VERSION` are

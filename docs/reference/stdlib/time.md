@@ -178,6 +178,11 @@ instant; compare `a.instant() < b.instant()`.
 Zone rules come from the IANA database compiled into Corvid
 (`corvid_time::TZDB_VERSION`), the same one the queue scheduler uses,
 so a schedule and a program agree on every daylight-saving change.
+A trace records that database's version. Replaying a trace recorded
+with a different one still works, and each zone-dependent operation
+(a local field, a calendar move, `to_string`, `parse_local_time`)
+warns once with the operation and the zone, because a zone whose
+rules changed in between can give a different answer.
 
 ## Non-scope
 

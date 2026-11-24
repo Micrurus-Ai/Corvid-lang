@@ -41,6 +41,8 @@ ed25519-dalek = { version = "2", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"
+# B06: the zone-rules replay test compares the recorded tz database.
+corvid-time = { workspace = true }
 # B09 P4: the table tests create tables on SQLite and, when
 # CORVID_TEST_POSTGRES_URL is set, on Postgres.
 rusqlite = { version = "0.31", features = ["bundled"] }

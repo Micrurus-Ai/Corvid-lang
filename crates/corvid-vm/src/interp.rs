@@ -604,6 +604,11 @@ impl<'ir> Interpreter<'ir> {
                             .map(ExprFlow::Value);
                     }
                 }
+                // B06 — a replay warns when this operation's zone rules
+                // may differ from the recording's tz database.
+                if let Some((operation, zone)) = time::zone_rules_use(*kind, &recv, &arg_vals) {
+                    self.runtime.note_zone_rules_use(operation, &zone);
+                }
                 Ok(ExprFlow::Value(eval_builtin_method(
                     *kind, recv, arg_vals, expr.span, &self.types_by_id,
                 )?))

@@ -146,7 +146,7 @@ Answered under the project's three-tier rule. Slice 1 ships the language and the
 
 ### Replay, effects and purity
 
-Every method above is pure and deterministic, so replay never records them, and they are allowed in `@deterministic` code and in `fn`s. Only `time_now` reads the clock, and it is a tool. Zone rules come from the database compiled into the binary, so a trace replayed by a Corvid build with a newer database could see a different offset for a zone whose rules changed. The trace header therefore records the database version, and replay reports a mismatch before it runs. This changes the trace schema, which every tier writes, so it is its own increment (3b) after the zones themselves.
+Every method above is pure and deterministic, so replay never records them, and they are allowed in `@deterministic` code and in `fn`s. Only `time_now` reads the clock, and it is a tool. Zone rules come from the database compiled into the binary, so a trace replayed by a Corvid build with a newer database could see a different offset for a zone whose rules changed. The trace header therefore records the database version (trace schema v3). Replay never refuses a trace over it, since most traces touch no zone: each zone-dependent operation the replay runs warns once, naming the operation, the zone and both versions, when the databases differ or the recording's is unknown. This changes the trace schema, which every tier writes, so it is its own increment (3b) after the zones themselves.
 
 ### Native code
 

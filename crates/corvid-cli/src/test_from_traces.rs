@@ -318,6 +318,7 @@ mod tests {
                 writer: WRITER_INTERPRETER.into(),
                 commit_sha: None,
                 source_path: None,
+                tzdb_version: None,
                 ts_ms: shape.ts_ms,
                 run_id: shape.run_id.clone(),
             },

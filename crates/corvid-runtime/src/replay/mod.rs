@@ -7,6 +7,7 @@ mod mutation_session;
 mod mutation_validate;
 mod result_factory;
 mod substitute;
+mod zone_rules;
 
 use event_classify::{display_step, event_to_json};
 use mutation_validate::{
@@ -39,6 +40,7 @@ pub use corvid_runtime_core::replay_divergence::ReplayDivergence;
 pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;
+use zone_rules::ReplayZoneRules;
 
 /// Reserved key under which a FAILING tool records its error message in
 /// the substituted `ToolResult` (slice 52d-3), so replay reproduces the
@@ -72,6 +74,9 @@ pub struct ReplaySource {
     /// ones. `parallel_cursor` hands them out one block-entry at a time.
     parallel_outcomes: Arc<Vec<RecordedParallelOutcomes>>,
     parallel_cursor: Arc<std::sync::atomic::AtomicUsize>,
+    /// B06 — the recording's tz database, for warnings at zone-dependent
+    /// operations whose rules may have changed since.
+    zone_rules: ReplayZoneRules,
 }
 
 /// One recorded `parallel` arm's terminal state (slice 52d-3).
@@ -239,6 +244,10 @@ impl ReplaySource {
             path: path.clone(),
             message: err.to_string(),
         })?;
+        let recorded_tzdb = match events.first() {
+            Some(TraceEvent::SchemaHeader { tzdb_version, .. }) => tzdb_version.clone(),
+            _ => None,
+        };
         match events.first() {
             Some(TraceEvent::SchemaHeader { writer, .. }) if writer == replay_writer => {}
             Some(TraceEvent::SchemaHeader { writer, .. }) => {
@@ -292,7 +301,19 @@ impl ReplaySource {
             mode,
             parallel_outcomes: Arc::new(parallel_outcomes),
             parallel_cursor: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            zone_rules: ReplayZoneRules::new(recorded_tzdb),
         })
+    }
+
+    /// B06 — reports a zone-dependent operation; returns the warning
+    /// the first time this operation and zone may differ from the
+    /// recording's tz database.
+    pub(crate) fn note_zone_rules_use(&self, operation: &str, zone: &str) -> Option<String> {
+        self.zone_rules.note_use(operation, zone)
+    }
+
+    pub(crate) fn zone_rules_warnings(&self) -> Vec<String> {
+        self.zone_rules.warnings()
     }
 
     /// Hand out the next recorded `parallel` block's arm outcomes, in
@@ -1073,6 +1094,7 @@ mod tests {
                 writer: WRITER_NATIVE.into(),
                 commit_sha: None,
                 source_path: None,
+                tzdb_version: None,
                 ts_ms: 0,
                 run_id: "native".into(),
             }],
@@ -1097,6 +1119,7 @@ mod tests {
                     writer: "interpreter".into(),
                     commit_sha: None,
                     source_path: None,
+                    tzdb_version: None,
                     ts_ms: 0,
                     run_id: "run".into(),
                 },

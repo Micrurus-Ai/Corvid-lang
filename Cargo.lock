@@ -888,6 +888,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-time",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",

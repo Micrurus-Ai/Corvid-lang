@@ -32,6 +32,28 @@ impl Runtime {
         matches!(self.mode, RuntimeMode::Replay(_))
     }
 
+    /// B06 — the interpreter calls this for each zone-dependent
+    /// operation it runs. On replay, when the recording's tz database
+    /// differs from this binary's (or is unknown), the first use of
+    /// each operation in each zone prints a warning to stderr and keeps
+    /// it for [`Runtime::replay_zone_rules_warnings`]. Live runs and
+    /// matching databases do nothing.
+    pub fn note_zone_rules_use(&self, operation: &str, zone: &str) {
+        if let RuntimeMode::Replay(source) = &self.mode {
+            if let Some(warning) = source.note_zone_rules_use(operation, zone) {
+                eprintln!("{warning}");
+            }
+        }
+    }
+
+    /// B06 — the zone-rules warnings this replay has produced so far.
+    pub fn replay_zone_rules_warnings(&self) -> Vec<String> {
+        match &self.mode {
+            RuntimeMode::Replay(source) => source.zone_rules_warnings(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Hand the interpreter the next recorded `parallel` block's arm
     /// outcomes on replay (slice 52d-3), so it can reproduce the recorded
     /// cancellation deterministically. `None` when live, or when the

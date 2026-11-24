@@ -102,6 +102,7 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             writer: "normalized-writer".into(),
             commit_sha: commit_sha.clone(),
             source_path: source_path.clone(),
+            tzdb_version: None,
             ts_ms: 0,
             run_id: "normalized-run".into(),
         },

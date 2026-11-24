@@ -11,6 +11,8 @@ pub(crate) fn schema_header(
         writer: writer.to_string(),
         commit_sha,
         source_path: None,
+        // B06 — replay compares this with its own database version.
+        tzdb_version: Some(corvid_time::TZDB_VERSION.to_string()),
         ts_ms: now_ms(),
         run_id: run_id.to_string(),
     }
