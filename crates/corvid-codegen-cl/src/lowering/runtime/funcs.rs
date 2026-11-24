@@ -48,6 +48,11 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub text_methods: Vec<(corvid_types::BuiltinMethodKind, FuncId)>,
     /// B06 `Decimal` operators and methods, by operation.
     pub decimal_operations: HashMap<crate::decimal_methods::DecimalOperation, FuncId>,
+    /// B06 `Duration`, `Instant`, `TimeZone` and `ZonedTime` operators
+    /// and methods, by operation.
+    pub time_operations: HashMap<crate::time_methods::TimeOperation, FuncId>,
+    /// B06 `Currency`, `Locale` and `format_currency`, by operation.
+    pub currency_operations: HashMap<crate::currency_methods::CurrencyOperation, FuncId>,
     /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.

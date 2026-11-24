@@ -51,12 +51,8 @@ pub(super) fn eval_currency_method(
         (CurrencyMinorDigits, Value::Currency(c)) => Ok(Value::Int(i64::from(c.minor_digits()))),
         (CurrencyToString, Value::Currency(c)) => Ok(text(c.to_string())),
         (LocaleToString, Value::Locale(l)) => Ok(text(l.to_string())),
-        (StringParseCurrency, Value::String(s)) => Ok(parsed(
-            Currency::parse(s.trim()).map(Value::Currency).map_err(|e| e.to_string()),
-        )),
-        (StringParseLocale, Value::String(s)) => Ok(parsed(
-            Locale::parse(s.trim()).map(|l| Value::Locale(Arc::new(l))).map_err(|e| e.to_string()),
-        )),
+        (StringParseCurrency, Value::String(s)) => Ok(parsed(Currency::parse_user_text(s).map(Value::Currency))),
+        (StringParseLocale, Value::String(s)) => Ok(parsed(Locale::parse_user_text(s).map(|l| Value::Locale(Arc::new(l))))),
         (other, value) => Err(InterpError::new(
             InterpErrorKind::Other(format!("internal: `{other:?}` cannot run on {}", value.type_name())),
             span,

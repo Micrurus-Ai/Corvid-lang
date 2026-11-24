@@ -17,6 +17,22 @@ unsafe fn read_slot(layout: *const u32, slot: *const u64) -> u64 {
     }
 }
 
+/// B06 — how two slots of a text-held scalar compare by value, or
+/// `None` when `kind` is not one: `1.0` equals `1.00`, and an instant
+/// equals itself however its text writes the fraction.
+fn text_scalar_equality(kind: u32) -> Option<unsafe fn(u64, u64) -> bool> {
+    Some(match kind {
+        k if k == Layout::Decimal as u32 => super::decimal::slots_equal,
+        k if k == Layout::Duration as u32 => super::time::duration_slots_equal,
+        k if k == Layout::Instant as u32 => super::time::instant_slots_equal,
+        k if k == Layout::TimeZone as u32 => super::time::time_zone_slots_equal,
+        k if k == Layout::ZonedTime as u32 => super::time::zoned_time_slots_equal,
+        k if k == Layout::Currency as u32 => super::currency::currency_slots_equal,
+        k if k == Layout::Locale as u32 => super::currency::locale_slots_equal,
+        _ => return None,
+    })
+}
+
 /// # Safety
 /// Both values must be live native values matching the compiler-emitted layout.
 /// Every child offset in the layout must reference a valid comparison node.
@@ -50,8 +66,8 @@ pub unsafe extern "C" fn corvid_structural_eq(layout: *const u32, left: u64, rig
                 }
                 continue;
             }
-            if kind == Layout::Decimal as u32 {
-                if a != b && !super::decimal::slots_equal(a, b) {
+            if let Some(slots_equal) = text_scalar_equality(kind) {
+                if a != b && !slots_equal(a, b) {
                     return 0;
                 }
                 continue;

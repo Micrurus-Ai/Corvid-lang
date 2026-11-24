@@ -12,19 +12,13 @@
 //! owns. A `DecimalError` stops the program the way the interpreter's
 //! arithmetic error does, with the same message.
 
+use super::native_scalar::{canonical, runtime_trap, slot_string};
 use super::strings::{borrow_corvid_string, string_from_rust};
 use crate::abi::CorvidString;
 use corvid_decimal::{Decimal, DecimalError, RoundingMode};
 
-/// Stop the program with a decimal arithmetic error, the native form of
-/// the interpreter's `InterpErrorKind::Arithmetic` trap.
-fn trap(error: DecimalError) -> ! {
-    eprintln!("corvid: runtime error: {error}");
-    std::process::exit(1)
-}
-
 fn checked<T>(result: Result<T, DecimalError>) -> T {
-    result.unwrap_or_else(|error| trap(error))
+    result.unwrap_or_else(|error| runtime_trap(&error))
 }
 
 /// The value a native Decimal slot holds.
@@ -33,13 +27,7 @@ fn checked<T>(result: Result<T, DecimalError>) -> T {
 /// `value` must be a live Corvid string written by this module or by a
 /// compiler-emitted Decimal literal.
 pub(crate) unsafe fn decimal_of(value: &CorvidString) -> Decimal {
-    let text = unsafe { borrow_corvid_string(value) };
-    Decimal::parse(text).unwrap_or_else(|error| {
-        // Every native Decimal is written as canonical text by the
-        // compiler or this module, so this is a compiler bug.
-        eprintln!("corvid: internal error: a native Decimal holds `{text}`, which is not decimal text: {error}");
-        std::process::abort()
-    })
+    unsafe { canonical(value, "Decimal", Decimal::parse) }
 }
 
 fn text_of(value: Decimal) -> CorvidString {
@@ -193,9 +181,5 @@ pub unsafe extern "C" fn corvid_string_parse_decimal(value: CorvidString, payloa
 /// # Safety
 /// Both slots must hold live native Decimal strings.
 pub(crate) unsafe fn slots_equal(left: u64, right: u64) -> bool {
-    // SAFETY: `CorvidString` is `#[repr(transparent)]` over the
-    // descriptor pointer a native slot holds, and has no destructor.
-    let (left, right): (CorvidString, CorvidString) =
-        unsafe { (std::mem::transmute(left as *const u8), std::mem::transmute(right as *const u8)) };
-    unsafe { decimal_of(&left) == decimal_of(&right) }
+    unsafe { decimal_of(&slot_string(left)) == decimal_of(&slot_string(right)) }
 }

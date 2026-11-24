@@ -20,4 +20,12 @@ pub enum EqualityLayout {
     /// B06 — a `Decimal` held as its canonical text, compared by
     /// numeric value, so `1.0` equals `1.00`.
     Decimal,
+    /// B06 — the time and currency types, each held as its canonical
+    /// text and compared by value through its own crate.
+    Duration,
+    Instant,
+    TimeZone,
+    ZonedTime,
+    Currency,
+    Locale,
 }

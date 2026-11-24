@@ -19,7 +19,8 @@
 
 pub mod cdylib;
 pub mod dataflow;
-pub mod decimal_boundary;
+pub mod currency_methods;
+pub use currency_methods::is_native_currency_method;
 pub mod decimal_methods;
 pub use decimal_methods::is_native_decimal_method;
 pub mod dup_drop;
@@ -31,6 +32,10 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
+pub mod text_scalar;
+pub mod text_scalar_boundary;
+pub mod time_methods;
+pub use time_methods::is_native_time_method;
 
 mod assignment;
 pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};

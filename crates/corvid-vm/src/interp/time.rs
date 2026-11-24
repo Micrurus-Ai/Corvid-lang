@@ -47,7 +47,7 @@ pub(super) fn zone_rules_use(kind: BuiltinMethodKind, receiver: &Value, args: &[
         ZonedTimeToString => Some(("to_string", zone_of_receiver()?)),
         StringParseLocalTime => Some(("parse_local_time", zone_argument()?)),
         StringParseZonedTime => match receiver {
-            Value::String(text) => ZonedTime::parse(text.trim()).ok().map(|z| ("parse_zoned_time", z.zone().to_string())),
+            Value::String(text) => ZonedTime::parse_user_text(text).ok().map(|z| ("parse_zoned_time", z.zone().to_string())),
             _ => None,
         },
         _ => None,
@@ -141,16 +141,10 @@ pub(super) fn eval_time_method(
         (ZonedTimeWithZone, Value::ZonedTime(z)) => Ok(Value::ZonedTime(z.with_zone(zone_argument()?))),
         (ZonedTimeToString, Value::ZonedTime(z)) => Ok(text(z.to_string())),
         (TimeZoneToString, Value::TimeZone(z)) => Ok(text(z.to_string())),
-        (StringParseTimeZone, Value::String(s)) => Ok(parsed(
-            TimeZone::parse(s.trim()).map(Value::TimeZone).map_err(|e| e.to_string()),
-        )),
-        (StringParseZonedTime, Value::String(s)) => Ok(parsed(
-            ZonedTime::parse(s.trim())
-                .map(Value::ZonedTime)
-                .map_err(|e| format!("`{s}` is not a zoned time: {e}")),
-        )),
+        (StringParseTimeZone, Value::String(s)) => Ok(parsed(TimeZone::parse_user_text(s).map(Value::TimeZone))),
+        (StringParseZonedTime, Value::String(s)) => Ok(parsed(ZonedTime::parse_user_text(s).map(Value::ZonedTime))),
         (StringParseLocalTime, Value::String(s)) => Ok(parsed(
-            ZonedTime::parse_local(s.trim(), zone_argument()?).map(Value::ZonedTime).map_err(|e| e.to_string()),
+            ZonedTime::parse_local_user_text(s, zone_argument()?).map(Value::ZonedTime),
         )),
         (DurationWhole(unit), Value::Duration(d)) => d.whole(unit).map(Value::Int).map_err(|e| trap(e, span)),
         (DurationAbs, Value::Duration(d)) => Ok(Value::Duration(d.abs())),
@@ -160,16 +154,8 @@ pub(super) fn eval_time_method(
         (InstantFromEpochMilliseconds, Value::Int(n)) => {
             Instant::from_epoch_milliseconds(*n).map(Value::Instant).map_err(|e| trap(e, span))
         }
-        (StringParseDuration, Value::String(s)) => Ok(parsed(
-            Duration::parse(s.trim())
-                .map(Value::Duration)
-                .map_err(|e| format!("`{s}` is not a duration: {e}")),
-        )),
-        (StringParseInstant, Value::String(s)) => Ok(parsed(
-            Instant::parse(s.trim())
-                .map(Value::Instant)
-                .map_err(|e| format!("`{s}` is not an instant: {e}")),
-        )),
+        (StringParseDuration, Value::String(s)) => Ok(parsed(Duration::parse_user_text(s).map(Value::Duration))),
+        (StringParseInstant, Value::String(s)) => Ok(parsed(Instant::parse_user_text(s).map(Value::Instant))),
         (other, value) => Err(InterpError::new(
             InterpErrorKind::Other(format!("internal: `{other:?}` cannot run on {}", value.type_name())),
             span,

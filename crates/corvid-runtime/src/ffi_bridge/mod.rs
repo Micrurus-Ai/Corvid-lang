@@ -51,17 +51,20 @@ mod approval_exports;
 // (http), 33S3 (db). The modules exist now so the per-surface
 // slices have a settled home and the `SurfaceNotImplemented`
 // helper is reachable from regression tests.
+mod currency;
 mod db_exports;
 mod decimal;
 mod http_exports;
 mod io_exports;
 mod json_exports;
 mod llm_dispatch;
+mod native_scalar;
 mod prompt_exports;
 mod replay_exports;
 mod state;
 mod strings;
 mod text;
+mod time;
 mod tokio_handle;
 mod tool_iter;
 mod typed_json;

@@ -307,6 +307,6 @@ clause, so a table may still have a field named `retired: Bool`.
 
 ## Not yet
 
-These are later slices of [B09](../proposals/b09-typed-persistence.md):
+These are later slices of [B09](../proposals/typed-persistence.md):
 MySQL and the native target. Programs that use tables run
 on the interpreter.

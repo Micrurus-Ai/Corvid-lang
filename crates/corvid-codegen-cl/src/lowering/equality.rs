@@ -60,6 +60,14 @@ impl LayoutTable<'_, '_> {
             Type::Bool => (Layout::Bool, vec![]),
             Type::String => (Layout::String, vec![]),
             Type::Decimal => (Layout::Decimal, vec![]),
+            // B06 — the time and currency types compare by value in the
+            // runtime, never by their text.
+            Type::Duration => (Layout::Duration, vec![]),
+            Type::Instant => (Layout::Instant, vec![]),
+            Type::TimeZone => (Layout::TimeZone, vec![]),
+            Type::ZonedTime => (Layout::ZonedTime, vec![]),
+            Type::Currency => (Layout::Currency, vec![]),
+            Type::Locale => (Layout::Locale, vec![]),
             Type::List(item) => (Layout::List, vec![item.as_ref().clone()]),
             Type::Option(item) => (
                 if option_uses_wrapper(ty) {

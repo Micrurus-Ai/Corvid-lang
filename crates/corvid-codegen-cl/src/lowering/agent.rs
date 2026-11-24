@@ -463,12 +463,9 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
             span,
         )),
-        // B06 — a native `Decimal` is a String holding its canonical text.
-        Type::Decimal => Ok(I64),
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Err(CodegenError::not_supported(
-            format!("`{}` - the time types run on the interpreter tier until B06's native time slice lands", ty.display_name()),
-            span,
-        )),
+        // B06 — a native `Decimal`, time, currency or locale value is a
+        // String holding its canonical text.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Ok(I64),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

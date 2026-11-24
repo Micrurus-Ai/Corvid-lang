@@ -64,10 +64,12 @@ pub enum NotNativeReason {
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
     BuiltinMethodNotNative,
-    /// B06 — a tool or prompt whose signature holds a `Decimal`; see
-    /// `corvid_codegen_cl::decimal_boundary`.
-    DecimalAtBoundary {
+    /// B06 — a tool or prompt whose signature holds a `Decimal`, time,
+    /// currency or locale type; see
+    /// `corvid_codegen_cl::text_scalar_boundary`.
+    TextScalarAtBoundary {
         name: String,
+        type_name: String,
     },
 }
 
@@ -111,10 +113,10 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
-            Self::DecimalAtBoundary { name } => write!(
+            Self::TextScalarAtBoundary { name, type_name } => write!(
                 f,
                 "program calls `{name}`: {}",
-                corvid_codegen_cl::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT
+                corvid_codegen_cl::text_scalar_boundary::text_scalar_boundary_requirement(type_name)
             ),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
@@ -130,8 +132,15 @@ impl std::fmt::Display for NotNativeReason {
 fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
         Type::String
-        // B06 — a native `Decimal` is a String holding its canonical text.
+        // B06 — a native `Decimal`, time, currency or locale value is a
+        // String holding its canonical text.
         | Type::Decimal
+        | Type::Duration
+        | Type::Instant
+        | Type::TimeZone
+        | Type::ZonedTime
+        | Type::Currency
+        | Type::Locale
         | Type::Struct(_)
         | Type::ImportedStruct(_)
         // Native code represents JsonError as a record of strings.
@@ -175,12 +184,10 @@ fn is_native_value_type(ty: &Type) -> bool {
         // B03 — regular expressions run on the interpreter until the
         // native regex slice.
         Type::RegexMatch => false,
-        // B06 — a native `Decimal` is a String holding its canonical
-        // text; every operation calls the runtime's `corvid-decimal`.
-        Type::Decimal => true,
-        // B06 — the time and currency types run on the interpreter
-        // until their native slice.
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => false,
+        // B06 — a native `Decimal`, time, currency or locale value is a
+        // String holding its canonical text; every operation calls the
+        // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.
@@ -322,14 +329,14 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
 }
 
-/// Whether a tool or prompt call passes or returns a `Decimal`, which
-/// native tool and prompt bridges have no form for.
-fn holds_decimal_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> bool {
+/// The text-held scalar type a tool or prompt call passes or returns,
+/// which native tool and prompt bridges have no form for.
+fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Type> {
     let types = |id| context.types.iter().find(|ty| ty.id == id).cloned();
-    let IrExprKind::Call { args, .. } = &call.kind else { return false };
+    let IrExprKind::Call { args, .. } = &call.kind else { return None };
     std::iter::once(&call.ty)
         .chain(args.iter().map(|arg| &arg.ty))
-        .any(|ty| corvid_codegen_cl::decimal_boundary::holds_decimal(ty, &types))
+        .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
@@ -398,6 +405,8 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 || corvid_codegen_cl::native_string_method(*kind)
                 || corvid_codegen_cl::native_text_method(*kind)
                 || corvid_codegen_cl::is_native_decimal_method(*kind)
+                || corvid_codegen_cl::is_native_time_method(*kind)
+                || corvid_codegen_cl::is_native_currency_method(*kind)
                 || matches!(kind, corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr) => {
             scan_expr(receiver, current_return_ty, context)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
@@ -447,8 +456,13 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 | IrCallKind::StructConstructor { .. }
                 | IrCallKind::Unknown => {}
             }
-            if matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. }) && holds_decimal_at_boundary(expr, context) {
-                return Err(NotNativeReason::DecimalAtBoundary { name: callee_name.clone() });
+            if matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. }) {
+                if let Some(held) = text_scalar_at_boundary(expr, context) {
+                    return Err(NotNativeReason::TextScalarAtBoundary {
+                        name: callee_name.clone(),
+                        type_name: held.display_name(),
+                    });
+                }
             }
             if matches!(kind, IrCallKind::Fixture { .. }) {
                 return Err(NotNativeReason::TestFixtureNotNative {
@@ -601,7 +615,7 @@ agent main() -> Int:
     }
 
     #[test]
-    fn decimal_programs_are_native_except_at_tool_prompt_and_currency_boundaries() {
+    fn decimal_programs_are_native_except_at_tool_and_prompt_boundaries() {
         let ir = crate::compile_to_ir(r#"
 type Line:
     price: Decimal
@@ -622,14 +636,17 @@ tool quote(sku: String) -> Decimal
 agent main() -> String:
     return quote("a").to_string()
 "#).expect("valid program with a Decimal tool");
-        assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::DecimalAtBoundary { name: "quote".into() }));
+        assert_eq!(
+            native_ability_with_tools(&ir, true),
+            Err(NotNativeReason::TextScalarAtBoundary { name: "quote".into(), type_name: "Decimal".into() })
+        );
 
         let ir = crate::compile_to_ir(r#"
 agent main() -> String:
     total: Decimal = 12.5
     return total.format_currency("EUR", "de-DE")
 "#).expect("valid currency program");
-        assert!(matches!(native_ability(&ir), Err(NotNativeReason::BuiltinMethodNotNative)));
+        assert!(native_ability(&ir).is_ok(), "{:?}", native_ability(&ir));
 
         let ir = crate::compile_to_ir(r#"
 agent main() -> Decimal:
@@ -638,6 +655,34 @@ agent main() -> Decimal:
     return total
 "#).expect("valid compound decimal assignment");
         assert!(matches!(native_ability(&ir), Err(NotNativeReason::PlaceAssignmentNotNative)));
+    }
+
+    #[test]
+    fn time_programs_are_native_except_at_tool_and_prompt_boundaries() {
+        let ir = crate::compile_to_ir(r#"
+agent main() -> String:
+    start = Instant.from_epoch_milliseconds(1774684800000)
+    local = start.in_zone("Europe/Berlin")
+    later = local.add_days(1) + (start - start)
+    berlin: TimeZone = "Europe/Berlin"
+    if later.instant() > start and local.time_zone() == berlin:
+        return later.to_string() + " " + [local.hour()].to_json()
+    return "x"
+"#).expect("valid time program");
+        assert!(native_ability(&ir).is_ok(), "{:?}", native_ability(&ir));
+
+        // `time_now` is a std tool returning an `Instant`, so a program
+        // that reads the clock stays on the interpreter, where replay
+        // records and substitutes it.
+        let ir = crate::compile_to_ir(r#"
+tool now() -> Instant
+agent main() -> String:
+    return now().to_string()
+"#).expect("valid program with a clock tool");
+        assert_eq!(
+            native_ability_with_tools(&ir, true),
+            Err(NotNativeReason::TextScalarAtBoundary { name: "now".into(), type_name: "Instant".into() })
+        );
     }
 
     #[test]

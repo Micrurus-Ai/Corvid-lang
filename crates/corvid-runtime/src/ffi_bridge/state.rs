@@ -89,6 +89,16 @@ pub(crate) fn bridge() -> &'static BridgeState {
     unsafe { &*p }
 }
 
+/// The bridge state when `corvid_runtime_init()` has run, else `None`.
+/// A binary whose program needs no async runtime never starts it, and
+/// so records and replays no trace.
+pub(crate) fn bridge_if_initialized() -> Option<&'static BridgeState> {
+    let p = BRIDGE.load(Ordering::Acquire);
+    // SAFETY: as in `bridge`; the pointer is published once by init and
+    // only retired by shutdown at process exit.
+    (!p.is_null()).then(|| unsafe { &*p })
+}
+
 /// Probe function. Returns 42. Smoke-test the FFI path.
 #[no_mangle]
 pub extern "C" fn corvid_runtime_probe() -> i64 {

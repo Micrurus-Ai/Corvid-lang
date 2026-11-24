@@ -7,6 +7,7 @@ mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
+mod scalar_call;
 mod try_propagate;
 mod try_retry;
 mod wrappers;
@@ -266,6 +267,24 @@ pub(super) fn lower_expr(
             }
             Ok(output)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_time_method(*kind) => {
+            let method = crate::time_methods::native_time_method(*kind).expect("checked by the guard");
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.time_operations.get(&operation).copied(),
+                crate::time_methods::TimeOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_currency_method(*kind) => {
+            let method = crate::currency_methods::native_currency_method(*kind).expect("checked by the guard");
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.currency_operations.get(&operation).copied(),
+                crate::currency_methods::CurrencyOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_decimal_method(*kind) => {
             let method = crate::decimal_methods::native_decimal_method(*kind).expect("checked by the guard");
             decimal::lower_decimal_method(
@@ -465,14 +484,17 @@ pub(super) fn lower_expr(
             Ok(builder.ins().iconst(I8, if *b { 1 } else { 0 }))
         }
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
-        IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => Err(CodegenError::not_supported(
-            "`Currency` and `Locale` - currency formatting runs on the interpreter tier until B06's native time and currency slice lands",
-            expr.span,
-        )),
-        IrExprKind::Literal(IrLiteral::TimeZone(_)) => Err(CodegenError::not_supported(
-            "`TimeZone` - the time types run on the interpreter tier until B06's native time slice lands",
-            expr.span,
-        )),
+        // B06 — a native zone, currency or locale is its canonical
+        // text: the IANA name, the ISO 4217 code, the BCP 47 tag.
+        IrExprKind::Literal(IrLiteral::TimeZone(zone)) => {
+            lower_string_literal(builder, module, runtime, &zone.to_string(), expr.span)
+        }
+        IrExprKind::Literal(IrLiteral::Currency(currency)) => {
+            lower_string_literal(builder, module, runtime, &currency.to_string(), expr.span)
+        }
+        IrExprKind::Literal(IrLiteral::Locale(locale)) => {
+            lower_string_literal(builder, module, runtime, &locale.to_string(), expr.span)
+        }
         // B06 — a native `Decimal` is its canonical text, the digits the
         // literal was written with (`2.50`).
         IrExprKind::Literal(IrLiteral::Decimal(d)) => {
@@ -540,6 +562,13 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // B06 — time, currency and locale operators are runtime calls;
+        // `@wrapping` does not apply to them.
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::time_methods::has_time_operand(&left.ty, &right.ty)
+                || crate::currency_methods::has_currency_operand(&left.ty, &right.ty) => scalar_call::lower_time_or_currency_binop(
+                builder, *op, left, right, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            ),
         // B06 — `@wrapping` does not apply to decimals; both forms are checked.
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty) => decimal::lower_decimal_binop(
@@ -610,6 +639,15 @@ pub(super) fn lower_expr(
             let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             lower_binop_wrapping(builder, *op, l, r, expr.span)
+        }
+        IrExprKind::UnOp { op: UnaryOp::Neg, operand } | IrExprKind::WrappingUnOp { op: UnaryOp::Neg, operand }
+            if *crate::text_scalar::scalar_of(&operand.ty) == Type::Duration => {
+            let func = *runtime.time_operations.get(&crate::time_methods::TimeOperation::DurationNegate).ok_or_else(|| {
+                CodegenError::cranelift("Duration negation was not declared", expr.span)
+            })?;
+            scalar_call::lower_scalar_negate(
+                builder, func, operand, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
         }
         IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } if operand.ty == Type::Decimal => {
             decimal::lower_decimal_unop(
@@ -786,10 +824,13 @@ pub(super) fn lower_expr(
                     ));
                 }
                 let types = |id: DefId| runtime.ir_types.get(&id).cloned();
-                if tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
-                    .any(|ty| crate::decimal_boundary::holds_decimal(ty, &types)) {
+                if let Some(held) = tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
+                    .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
                     return Err(CodegenError::not_supported(
-                        format!("tool `{callee_name}`: {}", crate::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT),
+                        format!(
+                            "tool `{callee_name}`: {}",
+                            crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
+                        ),
                         expr.span,
                     ));
                 }
@@ -1178,10 +1219,13 @@ pub(super) fn lower_expr(
             IrCallKind::Prompt { def_id, .. } => {
                 let types = |id: DefId| runtime.ir_types.get(&id).cloned();
                 if let Some(prompt) = runtime.ir_prompts.get(def_id) {
-                    if prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
-                        .any(|ty| crate::decimal_boundary::holds_decimal(ty, &types)) {
+                    if let Some(held) = prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
+                        .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
                         return Err(CodegenError::not_supported(
-                            format!("prompt `{callee_name}`: {}", crate::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT),
+                            format!(
+                                "prompt `{callee_name}`: {}",
+                                crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
+                            ),
                             expr.span,
                         ));
                     }

@@ -188,9 +188,15 @@ fn write_type(ty: &Type) -> Result<J, String> {
         Type::Bool => json!("Bool"),
         Type::Nothing => json!("Nothing"),
         Type::JsonValue => json!("JsonValue"),
-        // B06 — native code holds a `Decimal` as its canonical text. The
-        // time and currency types have no native form until their slice.
+        // B06 — native code holds every text-scalar type as its
+        // canonical text.
         Type::Decimal => json!("Decimal"),
+        Type::Duration => json!("Duration"),
+        Type::Instant => json!("Instant"),
+        Type::TimeZone => json!("TimeZone"),
+        Type::ZonedTime => json!("ZonedTime"),
+        Type::Currency => json!("Currency"),
+        Type::Locale => json!("Locale"),
         Type::Option(inner) => json!({ "Option": write_type(inner)? }),
         Type::List(inner) => json!({ "List": write_type(inner)? }),
         Type::Tainted(inner) => json!({ "Tainted": write_type(inner)? }),
@@ -214,6 +220,12 @@ fn read_type(json: &J) -> Result<Type, String> {
             "Nothing" => Type::Nothing,
             "JsonValue" => Type::JsonValue,
             "Decimal" => Type::Decimal,
+            "Duration" => Type::Duration,
+            "Instant" => Type::Instant,
+            "TimeZone" => Type::TimeZone,
+            "ZonedTime" => Type::ZonedTime,
+            "Currency" => Type::Currency,
+            "Locale" => Type::Locale,
             other => return Err(format!("decode plan names an unknown type `{other}`")),
         });
     }

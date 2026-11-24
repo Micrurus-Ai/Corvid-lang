@@ -577,10 +577,10 @@ impl Codegen {
             // the Python backend refuses decimals rather than change
             // their meaning.
             IrLiteral::Currency(_) | IrLiteral::Locale(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"currency formatting is interpreter-only until B06's native time and currency slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"Currency and Locale run on the interpreter and native tiers; the Python backend has no form for them\"))",
             ),
             IrLiteral::TimeZone(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"TimeZone is interpreter-only until B06's native time slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"TimeZone runs on the interpreter and native tiers; the Python backend has no form for it\"))",
             ),
             IrLiteral::Decimal(_) => self.out.write(
                 "(_ for _ in ()).throw(NotImplementedError(\"Decimal runs on the interpreter and native tiers; Python's decimal rounds to its context precision, so the Python backend refuses it\"))",

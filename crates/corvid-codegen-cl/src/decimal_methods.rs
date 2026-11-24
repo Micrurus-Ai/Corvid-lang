@@ -135,8 +135,8 @@ pub fn native_decimal_method(kind: BuiltinMethodKind) -> Option<NativeDecimalMet
         IntToDecimal => Call(Op::FromInt),
         FloatToDecimal => Call(Op::FromFloat),
         StringParseDecimal => Call(Op::ParseText),
-        // `format_currency` takes `Currency` and `Locale` values, which
-        // have no native form until B06's native time and currency slice.
+        // `format_currency` is a currency method: `currency_methods`
+        // names its native form.
         _ => return None,
     })
 }
@@ -162,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_decimal_method_but_format_currency_has_a_native_form() {
+    fn every_decimal_method_has_a_native_form_here_and_format_currency_in_the_currency_table() {
         use BuiltinMethodKind::*;
         let mut kinds = vec![DecimalAbs, DecimalScale, DecimalToString, DecimalToFloat, DecimalToIntTruncated, IntToDecimal, FloatToDecimal, StringParseDecimal];
         kinds.extend(RoundingMode::ALL.into_iter().map(DecimalRound));
@@ -172,6 +172,7 @@ mod tests {
             assert!(is_native_decimal_method(kind), "{kind:?} needs a native form");
         }
         assert!(!is_native_decimal_method(DecimalFormatCurrency));
+        assert!(crate::is_native_currency_method(DecimalFormatCurrency));
     }
 
     #[test]

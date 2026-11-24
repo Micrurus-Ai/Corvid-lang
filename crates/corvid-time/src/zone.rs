@@ -29,6 +29,12 @@ impl TimeZone {
         Err(TimeError::UnknownZone { name: name.to_string(), suggestion: closest_zone_name(name) })
     }
 
+    /// Corvid's `text.parse_time_zone()`: trims whitespace; the error
+    /// suggests the closest name. Both tiers call this.
+    pub fn parse_user_text(text: &str) -> Result<TimeZone, String> {
+        TimeZone::parse(text.trim()).map_err(|error| error.to_string())
+    }
+
     pub fn name(&self) -> &'static str {
         self.zone.name()
     }
@@ -79,6 +85,15 @@ fn edit_distance(a: &str, b: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_text_is_trimmed_and_its_error_suggests_a_name() {
+        assert_eq!(TimeZone::parse_user_text(" Europe/Berlin ").unwrap().name(), "Europe/Berlin");
+        assert_eq!(
+            TimeZone::parse_user_text("Europe/Berln").unwrap_err(),
+            "`Europe/Berln` is not a time zone in the IANA database; did you mean `Europe/Berlin`?"
+        );
+    }
 
     #[test]
     fn known_zones_parse() {
