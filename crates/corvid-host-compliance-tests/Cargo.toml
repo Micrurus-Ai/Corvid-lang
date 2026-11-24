@@ -6,5 +6,6 @@ license.workspace = true
 description = "Cross-language host compliance tests for Corvid replay capsules."
 
 [dev-dependencies]
+corvid-test-paths = { workspace = true }
 cc = "1"
 target-lexicon = "0.13"

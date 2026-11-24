@@ -57,20 +57,9 @@ mod sumtypes;
 /// onwards). Pure-computation fixtures don't call into it — the dead
 /// symbols are stripped by the linker.
 fn test_tools_lib_path() -> PathBuf {
-    // `CARGO_MANIFEST_DIR` is this crate's dir; walk up to workspace
-    // root, then into `target/release/` for the staticlib.
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf();
-    let name = if cfg!(windows) {
-        "corvid_test_tools.lib"
-    } else {
-        "libcorvid_test_tools.a"
-    };
-    let path = workspace_root.join("target").join("release").join(name);
+    // The staticlib is in the release directory of Cargo's target
+    // directory, wherever CARGO_TARGET_DIR or build.target-dir puts it.
+    let path = corvid_test_paths::test_tools_staticlib();
     // `corvid_test_tools.lib` already bundles `corvid-runtime` as a
     // transitive Rust dep (along with the C runtime objects); routing
     // the linker through this single Rust staticlib avoids the

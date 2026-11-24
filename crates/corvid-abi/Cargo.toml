@@ -24,6 +24,7 @@ base64 = "0.22"
 hex = "0.4"
 
 [dev-dependencies]
+corvid-test-paths = { workspace = true }
 corvid-syntax = { workspace = true }
 tempfile = { workspace = true }
 time = { workspace = true }

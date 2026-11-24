@@ -38,7 +38,7 @@ agent refund_bot(ticket_id: String, amount: Float) -> Bool:
 #[test]
 fn cdylib_with_abi_descriptor_flag_writes_json_alongside_library() {
     let (_dir, source_path) = write_project(SCALAR_SRC, "refund_bot");
-    let target_dir = repo_root().join("target");
+    let target_dir = corvid_test_paths::cargo_target_dir();
     let output = run_corvid(
         &[
             "build",
@@ -68,7 +68,7 @@ fn cdylib_with_abi_descriptor_flag_writes_json_alongside_library() {
 #[test]
 fn cdylib_without_abi_descriptor_flag_does_not_write_json() {
     let (_dir, source_path) = write_project(SCALAR_SRC, "refund_bot");
-    let target_dir = repo_root().join("target");
+    let target_dir = corvid_test_paths::cargo_target_dir();
     let output = run_corvid(
         &[
             "build",
@@ -97,7 +97,7 @@ fn cdylib_without_abi_descriptor_flag_does_not_write_json() {
 #[test]
 fn all_artifacts_flag_writes_lib_header_and_descriptor() {
     let (_dir, source_path) = write_project(SCALAR_SRC, "refund_bot");
-    let target_dir = repo_root().join("target");
+    let target_dir = corvid_test_paths::cargo_target_dir();
     let output = run_corvid(
         &[
             "build",

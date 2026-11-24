@@ -60,12 +60,7 @@ fn entry_name(ir: &corvid_ir::IrFile) -> &str {
 
 fn test_tools_lib_path() -> PathBuf {
     let workspace_root = workspace_root();
-    let name = if cfg!(windows) {
-        "corvid_test_tools.lib"
-    } else {
-        "libcorvid_test_tools.a"
-    };
-    let path = workspace_root.join("target").join("release").join(name);
+    let path = corvid_test_paths::test_tools_staticlib();
     let status = Command::new("cargo")
         .arg("build")
         .arg("-p")
@@ -86,11 +81,7 @@ fn test_tools_lib_path() -> PathBuf {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf()
+    corvid_test_paths::workspace_root()
 }
 
 fn ensure_runtime_staticlib() {
