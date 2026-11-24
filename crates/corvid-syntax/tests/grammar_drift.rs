@@ -319,7 +319,8 @@ memory prefs:
 
 table Shelf:
     key shelf: Int
-    title: String
+    title: String renamed from name
+    retired legacy, old_note
 "#,
     ),
     (
@@ -694,6 +695,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("store_decl", "record_types_and_stores"),
     ("table_decl", "tables_and_databases"),
     ("table_field", "tables_and_databases"),
+    ("table_retired", "tables_and_databases"),
     ("database_decl", "tables_and_databases"),
     ("database_setting", "tables_and_databases"),
     ("type_ref", "record_types_and_stores"),

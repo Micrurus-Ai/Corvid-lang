@@ -1,5 +1,6 @@
 //! The declared shape of a program's tables (B09), for planning
-//! migrations: each table's name, key and checked column types.
+//! migrations: each table's name, key, checked column types and its
+//! `renamed from` and `retired` clauses.
 
 use crate::{compile_to_ir, Diagnostic};
 use corvid_ast::Decl;
@@ -24,6 +25,8 @@ pub fn table_schemas(source: &str) -> Result<Vec<TableSchema>, Vec<Diagnostic>> 
                 name: record.name.clone(),
                 key: table.key.as_ref()?.name.clone(),
                 columns: record.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
+                renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
+                retired: table.retired.iter().map(|name| name.name.clone()).collect(),
             })
         })
         .collect())

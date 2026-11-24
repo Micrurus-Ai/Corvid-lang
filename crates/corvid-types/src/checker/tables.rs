@@ -50,6 +50,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.check_field_refinements(&table.record);
+        self.check_column_history(table);
 
         let databases: Vec<&DatabaseDecl> = self
             .file
@@ -71,6 +72,34 @@ impl<'a> Checker<'a> {
                 },
                 second.span,
             )),
+        }
+    }
+
+    /// `renamed from` and `retired` name stored columns, so each stored
+    /// name appears once and is never a column the table declares now.
+    fn check_column_history(&mut self, table: &TableDecl) {
+        let declared: Vec<&str> = table.record.fields.iter().map(|f| f.name.name.as_str()).collect();
+        let mut stored: Vec<&str> = Vec::new();
+        let history = table
+            .renamed
+            .iter()
+            .map(|rename| (&rename.from, format!("`{}` is renamed from `{}`", rename.field.name, rename.from.name)))
+            .chain(table.retired.iter().map(|name| (name, format!("`{}` is retired", name.name))));
+        let mut conflicts = Vec::new();
+        for (name, clause) in history {
+            if declared.contains(&name.name.as_str()) {
+                conflicts.push((name.span, format!("{clause}, but `{}` is a column the table declares", name.name)));
+            } else if stored.contains(&name.name.as_str()) {
+                conflicts.push((name.span, format!("{clause}, but `{}` is already named by another clause", name.name)));
+            } else {
+                stored.push(&name.name);
+            }
+        }
+        for (span, message) in conflicts {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TableColumnHistoryConflict { table: table.name().name.clone(), message },
+                span,
+            ));
         }
     }
 
@@ -435,6 +464,20 @@ agent seen(shelf: Shelf) -> Int:
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
+    }
+
+    #[test]
+    fn column_history_names_each_stored_column_once() {
+        let table = |body: &str| {
+            messages(&format!("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n{body}\n"))
+        };
+        assert!(table("    title: String renamed from name\n    retired: Bool\n    retired legacy, old_note").is_empty());
+        let declared = table("    title: String renamed from id");
+        assert!(declared.iter().any(|m| m.contains("`id` is a column the table declares")), "{declared:#?}");
+        let twice = table("    title: String renamed from name\n    retired name");
+        assert!(twice.iter().any(|m| m.contains("already named by another clause")), "{twice:#?}");
+        let revision = table("    retired revision");
+        assert!(revision.iter().any(|m| m.contains("`revision` is a column the table declares")), "{revision:#?}");
     }
 
     #[test]

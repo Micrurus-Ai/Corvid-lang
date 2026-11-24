@@ -7,7 +7,9 @@
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::parser::{describe_token, Parser};
 use crate::token::TokKind;
-use corvid_ast::{DatabaseDecl, DatabaseLocation, Field, Ident, TableDecl, TypeDecl, TypeRef, Visibility};
+use corvid_ast::{
+    DatabaseDecl, DatabaseLocation, Field, Ident, TableDecl, TableRename, TypeDecl, TypeRef, Visibility,
+};
 
 impl<'a> Parser<'a> {
     /// Whether the next tokens start `<word> <Name>:`.
@@ -27,10 +29,25 @@ impl<'a> Parser<'a> {
 
         let mut key = None;
         let mut fields = Vec::new();
+        let mut renamed = Vec::new();
+        let mut retired = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
+            }
+            // `retired name, other` names stored columns the table no
+            // longer has. Without `:` it cannot be a field, so `retired`
+            // stays an ordinary field name.
+            if matches!(self.peek(), TokKind::Ident(w) if w == "retired")
+                && matches!(self.peek_ahead(1), TokKind::Ident(_))
+            {
+                self.bump();
+                if let Err(e) = self.parse_retired_columns(&mut retired) {
+                    self.errors.push(e);
+                    self.sync_to_statement_boundary();
+                }
+                continue;
             }
             // `key name: Type` marks the primary key; `key` stays an
             // ordinary field name when `:` follows it directly.
@@ -49,7 +66,7 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
-            match self.parse_field() {
+            match self.parse_table_field(&mut renamed) {
                 Ok(field) => {
                     if marks_key && key.is_none() {
                         key = Some(field.name.clone());
@@ -85,7 +102,46 @@ impl<'a> Parser<'a> {
             visibility,
             span: start.merge(end),
         };
-        Ok(TableDecl { record, key })
+        Ok(TableDecl { record, key, renamed, retired })
+    }
+
+    /// A table field, optionally followed by `renamed from <old name>`.
+    fn parse_table_field(&mut self, renamed: &mut Vec<TableRename>) -> Result<Field, ParseError> {
+        let field = self.parse_field_before_newline()?;
+        if matches!(self.peek(), TokKind::Ident(w) if w == "renamed") {
+            self.bump();
+            match self.peek() {
+                TokKind::Ident(w) if w == "from" => {
+                    self.bump();
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(other),
+                            expected: "`from` and the column's old name after `renamed`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+            }
+            let (from, from_span) = self.expect_ident()?;
+            renamed.push(TableRename { field: field.name.clone(), from: Ident::new(from, from_span) });
+        }
+        self.expect_newline()?;
+        Ok(field)
+    }
+
+    /// The column names after `retired`, separated by commas.
+    fn parse_retired_columns(&mut self, retired: &mut Vec<Ident>) -> Result<(), ParseError> {
+        loop {
+            let (name, span) = self.expect_ident()?;
+            retired.push(Ident::new(name, span));
+            if !matches!(self.peek(), TokKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.expect_newline()
     }
 
     pub(super) fn parse_database_decl(&mut self) -> Result<DatabaseDecl, ParseError> {
