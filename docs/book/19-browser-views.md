@@ -806,7 +806,13 @@ Wait for “Drawing saved.” before reloading. Each worker response writes its 
 
 To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
 
-The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
+The first time you open an older sketch, close other sketchbook tabs if prompted. The editor keeps its existing marks and queues them for upload in the same database upgrade. Each subsequent stroke saves its marks and queues them together. A newer database version requires reloading a compatible editor.
+
+To share a sketch, the host must serve a writable `./sketch.json` with conditional HTTP writes. A static file server supports local drawing and offline reloads. When an upload fails, the sync message explains the failure and the queue survives a reload. Reconnect or choose **Sync drawing** to retry. When two people paint the same pixel, it stays painted. Distinct marks from both sketches survive a revision conflict.
+
+The browser adapter in `drawing-store.js` opens storage with `openDrawing(onBlocked)`, reads saved coordinate pairs with `restoreCells(db)`, and saves a worker's flat coordinate array with `saveCells(db, cells)`. On startup and reconnect, `synchronizeDrawing(db, resource)` reads the shared sketch, merges queued marks, and acknowledges the upload. The [drawing storage reference](../reference/reference-apps.md#drawing-editor-storage) describes the host contract.
+
+The Node tests use the generated worker and an in-memory IndexedDB. With Python Playwright and Edge installed, run `python scripts/verify_drawing_editor.py --cli target/debug/corvid.exe --channel msedge` from the repository root. The script builds the Wasm module and serves a conditional HTTP test resource. It checks a blocked upgrade, two offline tabs, a conflicting write on reconnect, and recovery after a shell update fails to install.
 
 ## Edit landscape tiles with a WebGL canvas
 

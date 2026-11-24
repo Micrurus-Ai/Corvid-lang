@@ -35,6 +35,19 @@ Each example has tests, evals, traces, and benchmark notes.
 | model_provider_routing | model substrate, swap_model eval |
 | local_model_chat | local model substrate, no-network compile |
 
+## Drawing editor storage
+
+`examples/drawing_editor/drawing-store.js` exports these browser functions for the 96 × 64 pixel sketchbook.
+
+| Function | Result |
+| --- | --- |
+| `openDrawing(onBlocked?)` | Resolves to the version 2 IndexedDB connection scoped to the example's directory. The optional callback reports an older connection blocking migration. Existing version 1 cells become pending uploads in the upgrade transaction. The connection closes on a subsequent version change. |
+| `restoreCells(db)` | Resolves to the stored `[x, y]` coordinate pairs. |
+| `saveCells(db, cells)` | Takes a worker stroke as alternating x and y coordinates. Resolves after the marks and pending keys commit together. |
+| `synchronizeDrawing(db, resource)` | Reads the resource, uploads the union of remote and pending marks when needed, then commits downloaded marks and clears the corresponding pending keys together. Rejects on network, format, transaction or unresolved revision errors. Concurrently queued distinct marks stay pending. |
+
+The editor calls `GET ./sketch.json` and expects either 404 or a 200 JSON document such as `{"version":1,"cells":[[10,20]]}` with a strong ETag. Coordinates are integer pairs inside the canvas. A host that supports sharing must atomically enforce `If-None-Match: *` for creation and `If-Match` for replacement, change the ETag on modification, and return 200, 201 or 204 after committing. A 412 triggers a fresh read and merge, up to three attempts per sync. The format supports adding painted cells. Replaying an upload after a lost acknowledgement preserves the union. An unknown document format stops the upload and keeps pending edits.
+
 ## The benchmark archives
 
 Phase 33N ships side-by-side benchmark runners against Python and
