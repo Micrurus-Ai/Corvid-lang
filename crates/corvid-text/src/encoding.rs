@@ -1,10 +1,13 @@
-//! Base64, hex and URL-component encoding of text.
+//! Base64, hex and URL-component encoding of text and of byte strings.
 //!
 //! Encoders never fail. Decoders accept exactly one spelling of each
 //! byte string, apart from base64 padding, which may be present or
 //! absent; anything else returns `Err` with the first problem and its
-//! position. Decoded bytes must be UTF-8, because the result is a
-//! Corvid `String`.
+//! position. The text functions encode a string's UTF-8 bytes and
+//! require decoded bytes to be UTF-8, because the result is a Corvid
+//! `String`. The byte functions (`*_bytes`) are the same codecs over
+//! raw bytes, for Corvid's `Bytes` type; the text functions are built
+//! on them, so the two cannot disagree on an alphabet or a message.
 
 use base64::alphabet;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
@@ -30,26 +33,46 @@ const URL_SAFE: GeneralPurpose = GeneralPurpose::new(
 
 /// `text.encode_base64()`.
 pub fn encode_base64(text: &str) -> String {
-    STANDARD.encode(text.as_bytes())
+    encode_base64_bytes(text.as_bytes())
 }
 
 /// `text.decode_base64()`.
 pub fn decode_base64(text: &str) -> Result<String, String> {
-    decode_base64_with(&STANDARD, "base64", text)
+    utf8_text(decode_base64_bytes(text)?)
 }
 
 /// `text.encode_base64_url()`.
 pub fn encode_base64_url(text: &str) -> String {
-    URL_SAFE.encode(text.as_bytes())
+    encode_base64_url_bytes(text.as_bytes())
 }
 
 /// `text.decode_base64_url()`.
 pub fn decode_base64_url(text: &str) -> Result<String, String> {
+    utf8_text(decode_base64_url_bytes(text)?)
+}
+
+/// `bytes.to_base64()`: the standard alphabet, padded.
+pub fn encode_base64_bytes(bytes: &[u8]) -> String {
+    STANDARD.encode(bytes)
+}
+
+/// `Bytes.from_base64(text)`: padding optional.
+pub fn decode_base64_bytes(text: &str) -> Result<Vec<u8>, String> {
+    decode_base64_with(&STANDARD, "base64", text)
+}
+
+/// `bytes.to_base64_url()`: the URL-safe alphabet, unpadded.
+pub fn encode_base64_url_bytes(bytes: &[u8]) -> String {
+    URL_SAFE.encode(bytes)
+}
+
+/// `Bytes.from_base64_url(text)`: padding optional.
+pub fn decode_base64_url_bytes(text: &str) -> Result<Vec<u8>, String> {
     decode_base64_with(&URL_SAFE, "URL-safe base64", text)
 }
 
-fn decode_base64_with(engine: &GeneralPurpose, name: &str, text: &str) -> Result<String, String> {
-    let bytes = engine.decode(text.as_bytes()).map_err(|error| match error {
+fn decode_base64_with(engine: &GeneralPurpose, name: &str, text: &str) -> Result<Vec<u8>, String> {
+    engine.decode(text.as_bytes()).map_err(|error| match error {
         DecodeError::InvalidByte(offset, _) => format!(
             "not {name}: unexpected character {} at position {}",
             describe_char_at(text, offset),
@@ -65,24 +88,33 @@ fn decode_base64_with(engine: &GeneralPurpose, name: &str, text: &str) -> Result
             text.chars().count()
         ),
         DecodeError::InvalidPadding => format!("not {name}: misplaced `=` padding"),
-    })?;
-    utf8_text(bytes)
+    })
 }
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 /// `text.encode_hex()`: two lowercase digits per UTF-8 byte.
 pub fn encode_hex(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() * 2);
-    for byte in text.bytes() {
+    encode_hex_bytes(text.as_bytes())
+}
+
+/// `text.decode_hex()`: either case; an even number of digits.
+pub fn decode_hex(text: &str) -> Result<String, String> {
+    utf8_text(decode_hex_bytes(text)?)
+}
+
+/// `bytes.to_hex()`: two lowercase digits per byte.
+pub fn encode_hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
         out.push(HEX_DIGITS[usize::from(byte >> 4)] as char);
         out.push(HEX_DIGITS[usize::from(byte & 0x0f)] as char);
     }
     out
 }
 
-/// `text.decode_hex()`: either case; an even number of digits.
-pub fn decode_hex(text: &str) -> Result<String, String> {
+/// `Bytes.from_hex(text)`: either case; an even number of digits.
+pub fn decode_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::with_capacity(text.len() / 2);
     let mut high: Option<u8> = None;
     for (position, ch) in text.chars().enumerate() {
@@ -101,7 +133,7 @@ pub fn decode_hex(text: &str) -> Result<String, String> {
             text.chars().count()
         ));
     }
-    utf8_text(bytes)
+    Ok(bytes)
 }
 
 /// The RFC 3986 unreserved characters, which never need encoding in
@@ -266,6 +298,25 @@ mod tests {
             "not hex: 3 digits cannot encode whole bytes; hex needs two digits per byte"
         );
         assert!(decode_hex("ff").unwrap_err().starts_with("the decoded bytes are not UTF-8"));
+    }
+
+    #[test]
+    fn byte_codecs_carry_bytes_that_are_not_text() {
+        let bytes = [0x00u8, 0xff, 0xfe, 0x80];
+        assert_eq!(encode_hex_bytes(&bytes), "00fffe80");
+        assert_eq!(decode_hex_bytes("00FFfe80").as_deref(), Ok(&bytes[..]));
+        assert_eq!(encode_base64_bytes(&bytes), "AP/+gA==");
+        assert_eq!(decode_base64_bytes("AP/+gA").as_deref(), Ok(&bytes[..]));
+        assert_eq!(encode_base64_url_bytes(&bytes), "AP_-gA");
+        assert_eq!(decode_base64_url_bytes("AP_-gA==").as_deref(), Ok(&bytes[..]));
+        assert_eq!(decode_hex_bytes("").as_deref(), Ok(&[][..]));
+    }
+
+    #[test]
+    fn byte_codecs_report_the_same_errors_as_the_text_codecs() {
+        assert_eq!(decode_hex_bytes("4g").unwrap_err(), decode_hex("4g").unwrap_err());
+        assert_eq!(decode_base64_bytes("Zm9v!A==").unwrap_err(), decode_base64("Zm9v!A==").unwrap_err());
+        assert_eq!(decode_base64_url_bytes("37/vv78").unwrap_err(), decode_base64_url("37/vv78").unwrap_err());
     }
 
     #[test]

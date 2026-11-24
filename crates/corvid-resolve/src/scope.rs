@@ -47,6 +47,8 @@ pub enum BuiltIn {
     Currency,
     /// B06 — `Locale`, a BCP 47 locale with CLDR data, checked the same way.
     Locale,
+    /// `Bytes`, an immutable byte string with constant-time equality.
+    Bytes,
     String,
     Bool,
     Nothing,
@@ -196,6 +198,7 @@ impl SymbolTable {
         self.builtins.insert("ZonedTime".into(), BuiltIn::ZonedTime);
         self.builtins.insert("Currency".into(), BuiltIn::Currency);
         self.builtins.insert("Locale".into(), BuiltIn::Locale);
+        self.builtins.insert("Bytes".into(), BuiltIn::Bytes);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

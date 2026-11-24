@@ -69,6 +69,8 @@ These use entropy, so they are tools, traced like `uuid_v4`:
 
 A new crate, `corvid-crypto`, holds every rule: hashing, HMAC, Ed25519 verification, constant-time comparison, Argon2id hashing and verification, and token generation from operating-system entropy. The checker, the interpreter, the native runtime and the API-key store call it, as `corvid-text` serves B03 and `corvid-decimal` serves B06.
 
+The hex and base64 codecs are the exception: they stay in `corvid-text`, which gained byte variants of its codecs (slice 1), and its text codecs are now built on them. `corvid-crypto` calls those, so `Bytes.from_hex(text)` and `text.decode_hex()` share one decoder, one strictness rule and one set of messages.
+
 ### Across the tiers
 
 Answered under the project's three-tier rule.
@@ -81,6 +83,18 @@ Answered under the project's three-tier rule.
 
 Hashing, HMAC, signatures and password hashing are commodity features with the papercuts removed (constant-time `==`, encodings made visible, no broken hashes, declared cost). `Secret`, a type the compiler keeps out of traces, prompts, logs, JSON and the client contract, is a Corvid-specific guarantee, so its slice ships with the invention contract: a catalog entry, a `corvid tour` demo and a proof-matrix row.
 
+## As built
+
+Slice 1 (`Bytes` and hashing on the interpreter) differs from the design above in these details:
+
+- **`+` is refused, as is mixing with text.** The design named only the missing ordering. `a + b` on byte strings is a compile error (no slice needs concatenation, and `+` must not quietly join bytes and text), and so is `bytes == "text"` or `"digest: " + bytes`; the hint names `utf8()` and the encodings.
+- **Constant-time everywhere a value compares.** The interpreter's value equality calls `Bytes::constant_time_eq`, so a record or list holding bytes, and `list.contains(bytes)`, compare in constant time too, not only a bare `==`.
+- **Decoder messages.** `Bytes.from_hex`, `from_base64` and `from_base64_url` return the text decoders' messages unchanged. `to_utf8()` says `the bytes are not UTF-8 text (byte N starts an invalid sequence)`.
+- **JSON schema.** OpenAPI and prompt schemas publish `type: string`, `contentEncoding: base64url` (JSON Schema 2020-12's keyword for binary data in a string) and a pattern of the URL-safe alphabet with optional padding.
+- **Table columns.** A `Bytes` column is refused, with the B06 types, until B09 maps its storage; the hint says to store `to_base64_url()` in a `String` column.
+- **Native code.** Any program that mentions `Bytes`, in a declared field, a signature or an expression, runs on the interpreter until the native slice, which must keep `==` constant-time rather than reuse native string equality. Native code's list of text-held scalars leaves `Bytes` out for the same reason.
+- **`Upload.bytes()`** still returns `List<Int>`; moving it to `Bytes` changes existing programs and is a roadmap item.
+
 ## Syntax alternatives considered
 
 Recorded under the syntax simplicity rule.
@@ -88,6 +102,9 @@ Recorded under the syntax simplicity rule.
 - **Constant-time comparison.** `constant_time_equals(a, b)` is the form other libraries offer, and people forget it. Making `==` on `Bytes` and `Secret` constant-time removes the decision.
 - **Hashing text.** `text.sha256()` would hide which encoding is hashed; `text.utf8().sha256()` costs six characters and makes the bytes explicit.
 - **Password cost.** A default cost is the hidden policy the project rule forbids; a cost argument named `owasp_2023()` reads as the policy it is.
+- **Reading encoded bytes (slice 1).** `text.decode_hex_bytes()` would sit next to `text.decode_hex()` and differ by a suffix that is easy to miss; `Bytes.from_hex(text)` names the type it produces, reads like `Instant.from_epoch_milliseconds(n)`, and keeps the `String` methods about text.
+- **Text to bytes (slice 1).** `text.to_bytes()` hides the encoding and `Bytes.from_utf8(text)` is longer for the most common call; `text.utf8()` is short and says which encoding. The reverse is `to_utf8()`, a `Result` because not every byte string is text.
+- **Length (slice 1).** `length()`, as on `String`, `List` and `Map`, rather than `size()` or `len()`: one name for every collection.
 
 ## Slices
 

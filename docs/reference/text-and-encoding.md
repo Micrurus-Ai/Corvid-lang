@@ -44,7 +44,7 @@ The decoders follow these rules:
 
 `encode_url_component` keeps only the RFC 3986 unreserved characters, so its output is safe in a path segment, a query value or a form body. It is Python's `urllib.parse.quote(text, safe="")`. JavaScript's `encodeURIComponent` also leaves `!'()*` unescaped.
 
-Bytes that are not text, such as cryptographic digests, cannot be encoded yet. Byte encoders arrive with B04, which decides how Corvid represents bytes.
+Bytes that are not text, such as cryptographic digests, are a `Bytes` value, with the same encoders and decoders as `bytes.to_hex()` and `Bytes.from_hex(text)`. See [Cryptography](cryptography.md).
 
 ## UUIDs
 

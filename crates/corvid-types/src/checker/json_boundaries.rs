@@ -1,7 +1,7 @@
 //! B06 — refusing the B06 types as table columns until B09 maps them.
 //!
-//! `Decimal`, the time types, `Currency` and `Locale` cross JSON as
-//! their exact text everywhere else (routes, `to_json`, tools, prompts,
+//! `Decimal`, the time types, `Currency`, `Locale` and `Bytes` cross
+//! JSON as their exact text everywhere else (routes, `to_json`, tools, prompts,
 //! stores). A table column is different: how it is stored decides how
 //! `where` and `order_by` compare it (a decimal stored as text sorts
 //! wrong; Postgres timestamps hold microseconds, not nanoseconds), so

@@ -2486,6 +2486,7 @@ impl<'a> Lowerer<'a> {
             Some(Binding::BuiltIn(BuiltIn::ZonedTime)) => Type::ZonedTime,
             Some(Binding::BuiltIn(BuiltIn::Currency)) => Type::Currency,
             Some(Binding::BuiltIn(BuiltIn::Locale)) => Type::Locale,
+            Some(Binding::BuiltIn(BuiltIn::Bytes)) => Type::Bytes,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,

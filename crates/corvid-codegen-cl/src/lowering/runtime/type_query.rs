@@ -102,6 +102,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::ZonedTime => "ZonedTime".into(),
         Type::Currency => "Currency".into(),
         Type::Locale => "Locale".into(),
+        Type::Bytes => "Bytes".into(),
         // Slice 51f — `Upload<Format>` / `Page<Item>` are
         // HTTP-boundary types; stable mangled names keep typeinfo
         // lookups from crashing, but any emission that USES them bails
@@ -584,6 +585,9 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // String holding its canonical text; every operation calls the
         // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
+        // `Bytes` has no native form until the native cryptography
+        // slice, whose equality must stay constant-time.
+        Type::Bytes => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the

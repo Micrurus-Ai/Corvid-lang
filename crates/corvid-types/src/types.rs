@@ -37,6 +37,10 @@ pub enum Type {
     Currency,
     /// B06 — a BCP 47 locale with CLDR data (`corvid_currency::Locale`).
     Locale,
+    /// An immutable byte string (`corvid_crypto::Bytes`): digests, MAC
+    /// tags, keys and binary payloads. `==` is constant-time; there is no
+    /// ordering.
+    Bytes,
     String,
     Bool,
     Nothing,
@@ -233,6 +237,7 @@ impl Type {
             "ZonedTime" => Type::ZonedTime,
             "Currency" => Type::Currency,
             "Locale" => Type::Locale,
+            "Bytes" => Type::Bytes,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -260,6 +265,7 @@ impl Type {
             Type::ZonedTime => "ZonedTime".into(),
             Type::Currency => "Currency".into(),
             Type::Locale => "Locale".into(),
+            Type::Bytes => "Bytes".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),

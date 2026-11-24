@@ -71,6 +71,9 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
+    /// A program that mentions `Bytes` anywhere: a declared field, a
+    /// signature or an expression.
+    BytesNotNative,
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -113,6 +116,9 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
+            Self::BytesNotNative => f.write_str(
+                "program uses `Bytes` - byte strings and hashing run on the interpreter until the native cryptography slice lands; the auto-dispatcher runs the interpreter tier",
+            ),
             Self::TextScalarAtBoundary { name, type_name } => write!(
                 f,
                 "program calls `{name}`: {}",
@@ -188,6 +194,9 @@ fn is_native_value_type(ty: &Type) -> bool {
         // String holding its canonical text; every operation calls the
         // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
+        // `Bytes` runs on the interpreter until the native cryptography
+        // slice; `native_ability` refuses any program that mentions it.
+        Type::Bytes => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.
@@ -237,6 +246,9 @@ struct ScanContext<'a> {
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
     let context = ScanContext { types: &ir.types, has_tools_lib };
+    if mentions_bytes_in_declarations(ir) {
+        return Err(NotNativeReason::BytesNotNative);
+    }
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
         return Err(NotNativeReason::PythonImport { module: module.clone() });
     }
@@ -339,7 +351,44 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
         .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
+/// Whether `ty` is or contains `Bytes`, apart from record fields,
+/// which [`mentions_bytes_in_declarations`] covers.
+fn mentions_bytes(ty: &Type) -> bool {
+    match ty {
+        Type::Bytes => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::Tainted(inner)
+        | Type::Grounded(inner)
+        | Type::Stream(inner)
+        | Type::Partial(inner)
+        | Type::ResumeToken(inner)
+        | Type::Upload(inner)
+        | Type::Page(inner)
+        | Type::Weak(inner, _) => mentions_bytes(inner),
+        Type::Map(a, b) | Type::Result(a, b) => mentions_bytes(a) || mentions_bytes(b),
+        Type::Function { params, ret, .. } => mentions_bytes(ret) || params.iter().any(mentions_bytes),
+        Type::RouteParams(params) => params.iter().any(|(_, param)| mentions_bytes(param)),
+        _ => false,
+    }
+}
+
+/// Whether a declared type, tool, prompt or agent signature holds `Bytes`.
+fn mentions_bytes_in_declarations(ir: &IrFile) -> bool {
+    let fields = ir.types.iter().flat_map(|decl| {
+        decl.fields.iter().chain(decl.variants.iter().flat_map(|variant| &variant.fields)).map(|field| &field.ty)
+    });
+    let tools = ir.tools.iter().flat_map(|tool| tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)));
+    let prompts =
+        ir.prompts.iter().flat_map(|prompt| prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty)));
+    let agents = ir.agents.iter().flat_map(|agent| agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)));
+    fields.chain(tools).chain(prompts).chain(agents).any(mentions_bytes)
+}
+
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
+    if mentions_bytes(&expr.ty) {
+        return Err(NotNativeReason::BytesNotNative);
+    }
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
         scan_expr(receiver, current_return_ty, context)?;
         return scan_expr(key, current_return_ty, context);
@@ -423,6 +472,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         {
             scan_expr(receiver, current_return_ty, context)
         }
+        // `bytes.to_hex()` returns a `String`, so the byte string it
+        // reads shows only in the method.
+        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() => Err(NotNativeReason::BytesNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
@@ -655,6 +707,20 @@ agent main() -> Decimal:
     return total
 "#).expect("valid compound decimal assignment");
         assert!(matches!(native_ability(&ir), Err(NotNativeReason::PlaceAssignmentNotNative)));
+    }
+
+    #[test]
+    fn byte_string_programs_run_on_the_interpreter() {
+        for src in [
+            "agent main() -> String:\n    return \"abc\".utf8().sha256().to_hex()\n",
+            "agent main(a: Bytes, b: Bytes) -> Bool:\n    return a == b\n",
+            "type Signed:\n    body: String\n    signature: Bytes\n\nagent main() -> Int:\n    return 1\n",
+            "tool fetch() -> List<Bytes>\nagent main() -> Int:\n    return 1\n",
+        ] {
+            let ir = crate::compile_to_ir(src).expect("valid bytes program");
+            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BytesNotNative), "{src}");
+        }
+        assert!(NotNativeReason::BytesNotNative.to_string().contains("native cryptography slice"));
     }
 
     #[test]

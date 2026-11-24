@@ -15,6 +15,8 @@ shape, or invariant. Read top-to-bottom rarely.
   encoding, and UUIDs.
 - [Exact decimals](decimal.md) — the `Decimal` type for money and
   other exact quantities.
+- [Cryptography](cryptography.md) — the `Bytes` type, its encodings
+  and SHA-2 hashing.
 
 ## CLI
 

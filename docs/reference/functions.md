@@ -40,6 +40,8 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.replace_regex(pattern: String, replacement: String) -> String`
 - `String.split_regex(pattern: String) -> List<String>`
 
+- `String.utf8() -> Bytes`
+
 The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must be a string literal, which the compiler checks. A `RegexMatch` has the fields `text: String`, `start: Int`, `end: Int` and `groups: List<Option<String>>`. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
@@ -129,6 +131,23 @@ A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19
 A string literal where a `TimeZone` is meant is a zone the compiler checks: `at.in_zone("Europe/Berlin")`. See [Time zones](stdlib/time.md#time-zones).
 
 Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` reads the clock. See [Durations and instants](stdlib/time.md#durations-and-instants).
+
+## Bytes
+
+- `String.utf8() -> Bytes`
+- `Bytes.from_hex(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64_url(text: String) -> Result<Bytes, String>`
+- `Bytes.to_utf8() -> Result<String, String>`
+- `Bytes.length() -> Int`
+- `Bytes.to_hex() -> String`
+- `Bytes.to_base64() -> String`
+- `Bytes.to_base64_url() -> String`
+- `Bytes.sha256() -> Bytes`
+- `Bytes.sha384() -> Bytes`
+- `Bytes.sha512() -> Bytes`
+
+`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
 
 ## Bool
 
