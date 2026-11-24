@@ -37,6 +37,14 @@ pub fn parse_file(tokens: &[Token]) -> (File, Vec<ParseError>) {
     (file, p.errors)
 }
 
+/// Browser callbacks become callable exports when compiling the events module.
+pub fn parse_browser_exports(tokens: &[Token]) -> (File, Vec<ParseError>) {
+    let mut parser = Parser::new(tokens);
+    parser.emit_browser_exports = true;
+    let file = parser.parse_file_inner();
+    (file, parser.errors)
+}
+
 /// Parse a single REPL turn as either a declaration, a statement, or
 /// an expression. Classification uses first-token lookahead so errors
 /// stay local and predictable.
@@ -105,6 +113,8 @@ struct Parser<'a> {
     row_bindings: Vec<String>,
     generated: Vec<Decl>,
     components: Vec<Component>,
+    browser_callbacks: Vec<Span>,
+    emit_browser_exports: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -117,6 +127,8 @@ impl<'a> Parser<'a> {
             row_bindings: Vec::new(),
             generated: Vec::new(),
             components: Vec::new(),
+            browser_callbacks: Vec::new(),
+            emit_browser_exports: false,
         }
     }
 
@@ -378,7 +390,7 @@ fn describe_token(t: &TokKind) -> String {
 }
 
 mod authoring;
-pub use authoring::{components, Component};
+pub use authoring::{browser_declarations, components, Component};
 mod decl;
 mod effect_row;
 mod expr;

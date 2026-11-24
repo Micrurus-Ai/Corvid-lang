@@ -1,4 +1,69 @@
 // This module is loaded by interactive pages, including pages with no Wasm exports.
+if (!customElements.get("corvid-owned-element")) {
+  customElements.define("corvid-owned-element", class extends HTMLElement {
+    #waitingFor;
+    #mount;
+    #release;
+
+    connectedCallback() {
+      queueMicrotask(() => this.mountElement());
+    }
+
+    async mountElement() {
+      if (!this.isConnected || this.#mount) return;
+      const element = this.firstElementChild;
+      const alert = this.lastElementChild;
+      if (!element || !alert) return;
+      if (element.localName.includes("-") && !customElements.get(element.localName)) {
+        if (this.#waitingFor !== element.localName) {
+          this.#waitingFor = element.localName;
+          customElements.whenDefined(element.localName).then(retryElementMount(new WeakRef(this)));
+        }
+        return;
+      }
+      const mount = {};
+      this.#mount = mount;
+      try {
+        if (typeof instantiate !== "function") throw Error("Build the browser lifecycle callbacks in src/events.cor.");
+        // The Wasm loader requests only tool imports declared by the Corvid module.
+        const methods = new Proxy(Object.create(null), {
+          get: (_, name) => (...args) => element[name](...args),
+        });
+        const callbacks = await instantiate({tools: methods});
+        if (this.#mount !== mount) return;
+        const acquire = callbacks[this.dataset.mount];
+        const release = callbacks[this.dataset.release];
+        if (typeof acquire !== "function" || typeof release !== "function") {
+          throw Error("The owned element needs both browser lifecycle callbacks.");
+        }
+        this.#release = release;
+        alert.textContent = "";
+        acquire();
+      } catch (error) {
+        if (this.#mount !== mount) return;
+        this.#dispose();
+        alert.textContent = error.message;
+      }
+    }
+
+    #dispose() {
+      const release = this.#release;
+      this.#release = undefined;
+      try { release?.(); }
+      catch (error) { this.lastElementChild.textContent = error.message; }
+    }
+
+    disconnectedCallback() {
+      this.#mount = undefined;
+      this.#dispose();
+    }
+  });
+}
+
+function retryElementMount(owner) {
+  return () => owner.deref()?.mountElement();
+}
+
 if (!customElements.get("corvid-portal")) {
   customElements.define("corvid-portal", class extends HTMLElement {
     #content;

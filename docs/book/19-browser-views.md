@@ -99,6 +99,45 @@ In the [packing actions example](../../examples/packing_actions/src/main.cor), e
 
 Give the destination a unique HTML ID and render it in the same document or shadow root before the portal mounts. Without scripting or a matching destination, the controls appear with the item.
 
+### Pass a browser callback and release a resource
+
+The packing list also gives each item its own spare count. The caller chooses how a click changes that count. Declare the update in `src/events.cor`:
+
+```corvid
+browser callback add_pair(current: Int) -> Int:
+    return current + 2
+```
+
+Import the callback in the page module and pass its binding through an ordinary typed parameter. Calling `add_pair()` creates the binding during rendering. Clicking the button runs the compiled function in the browser with that item's current count.
+
+```corvid
+import "./events" use add_pair
+import "std:ui" as ui
+
+fn spare_counter(update: ui.IntCallback) -> ui.View:
+    return ui.int_state("Spare bottles", 0, [ui.callback_button("Add spares", update)])
+
+fn packing_controls() -> ui.View:
+    return spare_counter(add_pair())
+```
+
+Use `corvid build src/main.cor --target web` and serve the extracted package. To serve from the source tree, build `src/events.cor` with `--target wasm` first.
+
+To own a resource exposed by an element, define its setup and cleanup in the same events module. A tool called from a lifecycle callback invokes the matching synchronous method on that instance. The packing page uses the native dialog methods:
+
+```corvid
+tool show() -> Nothing
+tool close() -> Nothing
+
+browser lifecycle open_instructions() -> Nothing:
+    show()
+
+browser lifecycle close_instructions() -> Nothing:
+    close()
+```
+
+Import those two bindings and render `ui.owned_element(instructions, open_instructions(), close_instructions())`, where `instructions` is the dialog view. Removing the owner runs the cleanup on that dialog. Reattaching it runs setup again. To own a custom element's subscription, declare its subscribe and unsubscribe methods the same way. Corvid waits for the element's definition before running setup.
+
 ### Pass context across a layout
 
 In the trail guide, the route supplies `GuideContext("/guide")` to the page. The page passes that record to the packing panel, which passes it to the note editor and the suggestions form. Both forms read `context.preview_path` for their GET action. To render the guide for a different destination, supply another record at the page call. The context belongs to that render and follows ordinary typed function arguments.

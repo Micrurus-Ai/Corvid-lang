@@ -1,6 +1,38 @@
 use std::{fs, process::Command};
 
 #[test]
+fn packing_item_requires_a_browser_callback_at_the_call_site() {
+    let project = tempfile::tempdir().unwrap();
+    let src = project.path().join("src");
+    fs::create_dir(&src).unwrap();
+    fs::write(
+        src.join("events.cor"),
+        include_str!("../../../examples/packing_actions/src/events.cor"),
+    )
+    .unwrap();
+    let source = include_str!("../../../examples/packing_actions/src/main.cor");
+    let main = src.join("main.cor");
+    let call = "packing_item(\"Water\", \"packing-actions\", add_pair())";
+    let caller_line = source.lines().position(|line| line.contains(call)).unwrap() + 1;
+    for invalid in ["2", "close_instructions()"] {
+        let bad_call = call.replace("add_pair()", invalid);
+        fs::write(&main, source.replace(call, &bad_call)).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_corvid"))
+            .arg("check")
+            .arg(&main)
+            .output()
+            .unwrap();
+        let diagnostic = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success()
+                && diagnostic.contains("IntCallback")
+                && diagnostic.contains(&format!("main.cor:{caller_line}:")),
+            "{diagnostic}"
+        );
+    }
+}
+
+#[test]
 fn browser_views_escape_content_and_require_typed_children() {
     let project = tempfile::tempdir().unwrap();
     fs::write(

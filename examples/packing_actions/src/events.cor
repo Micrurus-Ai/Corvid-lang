@@ -1,0 +1,14 @@
+tool show() -> Nothing
+tool close() -> Nothing
+
+browser lifecycle open_instructions() -> Nothing:
+    show()
+
+browser lifecycle close_instructions() -> Nothing:
+    close()
+
+browser callback add_spare(current: Int) -> Int:
+    return current + 1
+
+browser callback add_pair(current: Int) -> Int:
+    return current + 2

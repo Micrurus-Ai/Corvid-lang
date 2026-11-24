@@ -10,17 +10,97 @@ pub struct Component {
     pub events: String,
 }
 
-pub fn components(tokens: &[crate::Token]) -> Result<Vec<Component>, Vec<ParseError>> {
+pub fn browser_declarations(
+    tokens: &[crate::Token],
+) -> Result<(Vec<Component>, Vec<Span>), Vec<ParseError>> {
     let mut parser = Parser::new(tokens);
     parser.parse_file_inner();
     if parser.errors.is_empty() {
-        Ok(parser.components)
+        Ok((parser.components, parser.browser_callbacks))
     } else {
         Err(parser.errors)
     }
 }
 
+pub fn components(tokens: &[crate::Token]) -> Result<Vec<Component>, Vec<ParseError>> {
+    browser_declarations(tokens).map(|(components, _)| components)
+}
+
 impl Parser<'_> {
+    pub(super) fn parse_browser_callback(&mut self) -> Result<Decl, ParseError> {
+        use corvid_ast::{TypeRef, Visibility};
+        let start = self.bump().span;
+        let named = |ty: &TypeRef, expected: &str| {
+            matches!(ty, TypeRef::Named { name, .. } if name.name == expected)
+        };
+        let visibility = if self.emit_browser_exports {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
+        let (mut implementation, binding_type) = if self.peek_ident_is("lifecycle") {
+            let mut hook = self.parse_agent_decl(visibility)?;
+            if !hook.params.is_empty() || !named(&hook.return_ty, "Nothing") {
+                return Err(ParseError {
+                    span: hook.name.span,
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "browser lifecycle signature".into(),
+                        expected: "no parameters and a Nothing return type".into(),
+                    },
+                });
+            }
+            // Falling through a lifecycle body completes the synchronous hook.
+            if !matches!(hook.body.stmts.last(), Some(corvid_ast::Stmt::Return { .. })) {
+                hook.body.stmts.push(corvid_ast::Stmt::Return {
+                    value: None,
+                    span: hook.body.span,
+                });
+            }
+            (Decl::Agent(hook), "ElementCallback")
+        } else {
+            let update = self.parse_fn_decl(visibility)?;
+            if update.params.len() != 1
+                || !named(&update.params[0].ty, "Int")
+                || !named(&update.return_ty, "Int")
+            {
+                return Err(ParseError {
+                    span: update.name.span,
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "browser callback signature".into(),
+                        expected: "one Int parameter and an Int return type".into(),
+                    },
+                });
+            }
+            (Decl::Fn(update), "IntCallback")
+        };
+        if self.emit_browser_exports {
+            return Ok(implementation);
+        }
+        let ident = match &mut implementation {
+            Decl::Agent(hook) => &mut hook.name,
+            Decl::Fn(update) => &mut update.name,
+            _ => unreachable!(),
+        };
+        let name = ident.name.clone();
+        self.browser_callbacks.push(start);
+        ident.name = format!("__browser_callback_{name}");
+        self.generated.push(implementation);
+        let ui = format!("__callback_ui_{name}");
+        let factory = format!("import \"std:ui\" as {ui}\npublic fn {name}() -> {ui}.{binding_type}:\n    return {ui}.{binding_type}(\"{name}\")\n");
+        let mut tokens = lex(&factory).expect("valid callback factory");
+        for (index, token) in tokens.iter_mut().enumerate() {
+            token.span = start.expanded(index);
+        }
+        let (file, errors) = super::parse_file(&tokens);
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
+        }
+        let mut declarations = file.decls.into_iter();
+        let import = declarations.next().expect("callback UI import");
+        self.generated.extend(declarations);
+        Ok(import)
+    }
+
     fn expected(&self, expected: &str) -> ParseError {
         ParseError {
             span: self.peek_span(),

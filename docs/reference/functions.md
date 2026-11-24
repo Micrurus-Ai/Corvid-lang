@@ -393,6 +393,8 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn fragment(content: List<View>) -> View` groups siblings into one view for a component slot. It concatenates each child's existing markup in order. Nested fragments add no element or spacing. An empty fragment renders an empty string.
 - `fn portal(target_id: String, content: List<View>) -> View` renders children together at the call site. On an interactive page, mounting the portal moves their container to the matching portal target in the same document or shadow root. Children stay inline if the target is absent or inside the portal. Unmounting returns the container to its owner. Reconnecting the owner looks up the target again.
 - `fn portal_target(target_id: String) -> View` renders a block destination with the supplied HTML ID. Give it a unique, nonempty ID. Multiple portals can append their content here in mount order.
+- `browser lifecycle name() -> Nothing:` declares a public lifecycle callback in `src/events.cor`. Import and call `name()` in a rendering module to get a `ui.ElementCallback`. In the browser, tool calls from its body invoke same-named synchronous methods on its owned element using the existing Wasm host ABI.
+- `fn owned_element(element: View, mount: ElementCallback, release: ElementCallback) -> View` gives one root element a resource lifetime on an interactive page. After connection, module loading and custom-element registration the wrapper invokes `mount`. On disconnection it runs `release` with the same browser module instance and element. Reconnection acquires again. A failed acquisition also attempts release, so release must handle partial acquisition. Errors appear in the wrapper's alert.
 - `fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View` returns the child view on success. On error it calls `render_error` with the message and returns that view in the child's place. Use `ui.text` inside the callback to escape error text.
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.
@@ -455,6 +457,8 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn action(label: String, handler: String) -> View`
 - `fn assistant_action(label: String, handler: String, name: String, description: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`
+- `browser callback name(current: Int) -> Int:` declares a public integer state update in `src/events.cor`. Its indented body uses ordinary Corvid function statements supported by the browser compiler. Import the name into the rendering module and call `name()` to obtain a `ui.IntCallback` binding. Pass that value as an input to a component or button. The web build packages the function under its declared name.
+- `fn callback_button(label: String, update: IntCallback) -> View` creates a button inside an integer state control. A click supplies that control's current integer to the bound browser callback and displays its return value.
 - `fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View`
 - `fn state_output(name: String, label: String) -> View`
 - `fn event_module() -> View`

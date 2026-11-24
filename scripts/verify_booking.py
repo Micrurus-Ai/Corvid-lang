@@ -1,5 +1,6 @@
 """Build both booking screens and exercise their shared form through Chromium WebMCP."""
 import argparse
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import shutil
@@ -17,8 +18,8 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples/booking"
 MODULE = "https://cdn.jsdelivr.net/npm/cally@0.9.2/dist/cally.js"
 
 
-def verify_field_lifecycle(cli, channel):
-    with TemporaryDirectory() as tmp:
+def verify_field_lifecycle(cli, channel, work_dir=None):
+    with nullcontext(work_dir) if work_dir else TemporaryDirectory() as tmp:
         project = Path(tmp) / "booking"
         shutil.copytree(EXAMPLE, project)
         subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
@@ -67,8 +68,9 @@ def verify_field_lifecycle(cli, channel):
     print("Bound field released its listeners and synchronized after remount.")
 
 
-def trial(cli, channel):
-    with TemporaryDirectory() as tmp, sync_playwright() as playwright:
+def trial(cli, channel, work_dir=None):
+    workspace = nullcontext(work_dir) if work_dir else TemporaryDirectory()
+    with workspace as tmp, sync_playwright() as playwright:
         project = Path(tmp) / "booking"
         shutil.copytree(EXAMPLE, project)
         main = project / "src/main.cor"
@@ -139,10 +141,17 @@ def trial(cli, channel):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cli", type=Path)
+    parser.add_argument("cli_path", nargs="?", type=Path)
+    parser.add_argument("--cli", type=Path)
     parser.add_argument("--channel", default="chrome")
     parser.add_argument("--field-lifecycle-only", action="store_true")
+    parser.add_argument("--work-dir", type=Path, help="create and retain the fixtures in this new directory")
     args = parser.parse_args()
-    verify_field_lifecycle(args.cli.resolve(), args.channel)
+    cli = args.cli or args.cli_path
+    if cli is None:
+        parser.error("supply the Corvid executable with --cli")
+    if args.work_dir:
+        args.work_dir.mkdir(parents=True)
+    verify_field_lifecycle(cli.resolve(), args.channel, args.work_dir / "lifecycle" if args.work_dir else None)
     if not args.field_lifecycle_only:
-        trial(args.cli.resolve(), args.channel)
+        trial(cli.resolve(), args.channel, args.work_dir / "pickers" if args.work_dir else None)
